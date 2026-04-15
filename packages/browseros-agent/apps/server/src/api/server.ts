@@ -22,6 +22,7 @@ import { initializeOAuth } from '../lib/clients/oauth'
 import { getDb } from '../lib/db'
 import { logger } from '../lib/logger'
 import { Sentry } from '../lib/sentry'
+import { createAgentBridgeRoutes } from './routes/agent-bridge'
 import { createChatRoutes } from './routes/chat'
 import { createCreditsRoutes } from './routes/credits'
 import { createHealthRoute } from './routes/health'
@@ -124,6 +125,15 @@ export async function createHttpServer(config: HttpServerConfig) {
   const app = new Hono<Env>()
     .use('/*', cors(defaultCorsConfig))
     .route('/health', createHealthRoute({ browser }))
+    .route(
+      '/agent',
+      createAgentBridgeRoutes({
+        browser,
+        registry,
+        browserosId,
+        browserContext: config.browserContext,
+      }),
+    )
     .route(
       '/shutdown',
       createShutdownRoute({

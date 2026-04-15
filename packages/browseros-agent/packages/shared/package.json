@@ -80,6 +80,10 @@
     "./acl/match": {
       "types": "./src/acl/match.ts",
       "default": "./src/acl/match.ts"
+    },
+    "./constants/portable-agent": {
+      "types": "./src/constants/portable-agent.ts",
+      "default": "./src/constants/portable-agent.ts"
     }
   }
 }
