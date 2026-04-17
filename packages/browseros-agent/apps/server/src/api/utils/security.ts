@@ -25,6 +25,14 @@ export function isLocalhostRequest(c: Context<Env>): boolean {
   const request = c.req.raw
 
   // 1. CHECK ACTUAL TCP CONNECTION IP (cannot be spoofed)
+  // In some environments (e.g. Bun test, NullBrowser), server.requestIP may not be available
+  if (!server?.requestIP) {
+    // Fallback: check Host header only (less secure but allows dev mode to work)
+    const host = c.req.header('host')
+    if (!host) return false
+    const hostname = host.split(':')[0]
+    return hostname === '127.0.0.1' || hostname === 'localhost'
+  }
   const socketAddr = server.requestIP(request)
   if (!socketAddr || !LOCALHOST_ADDRESSES.has(socketAddr.address)) {
     return false
