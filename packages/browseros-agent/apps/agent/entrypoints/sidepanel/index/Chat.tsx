@@ -144,6 +144,14 @@ export const Chat = () => {
     const messageText = customMessageText ? customMessageText : input.trim()
     if (!messageText) return
 
+    // [Step 1] User input captured — form submitted with message text
+    console.log('[Step 1] executeMessage: user input captured', {
+      messageText,
+      mode,
+      attachedTabsCount: attachedTabs.length,
+      attachedTabUrls: attachedTabs.map((t) => t.url),
+    })
+
     recordMessageSent()
 
     if (attachedTabs.length) {
@@ -152,8 +160,17 @@ export const Chat = () => {
         message: messageText,
         tabs: attachedTabs,
       })
+      // [Step 2] Sending message with attached tab action
+      console.log('[Step 2] sendMessage: with attached tabs action', {
+        action,
+        mode,
+      })
       sendMessage({ text: messageText, action })
     } else {
+      // [Step 2] Sending message without tabs
+      console.log('[Step 2] sendMessage: plain text (no tabs)', {
+        mode,
+      })
       sendMessage({ text: messageText })
     }
     setInput('')

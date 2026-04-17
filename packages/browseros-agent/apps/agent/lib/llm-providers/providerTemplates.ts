@@ -25,7 +25,11 @@ function enrichTemplate(
     setupGuideUrl?: string
   },
 ): ProviderTemplate {
-  const provider = getModelsDevProvider(providerId)
+  // `models-dev-data.json` stores provider models under key `z-ai`,
+  // while our provider type is `zai`.
+  const modelsDevProviderKey = providerId === 'zai' ? 'z-ai' : providerId
+
+  const provider = getModelsDevProvider(modelsDevProviderKey)
   const model = provider?.models.find((m) => m.id === overrides.defaultModelId)
 
   return {
@@ -140,6 +144,12 @@ export const providerTemplates: ProviderTemplate[] = [
     setupGuideUrl:
       'https://docs.aws.amazon.com/bedrock/latest/userguide/getting-started.html',
   }),
+  enrichTemplate('zai', {
+    defaultModelId: 'z-ai/glm-5.1',
+    apiKeyUrl: 'https://open.bigmodel.cn/usercenter/apikeys',
+    setupGuideUrl:
+      'https://docs.browseros.com/features/bring-your-own-llm#zai',
+  }),
 ]
 
 /**
@@ -151,6 +161,7 @@ export const providerTypeOptions: { value: ProviderType; label: string }[] = [
   { value: 'github-copilot', label: 'GitHub Copilot' },
   { value: 'qwen-code', label: 'Qwen Code' },
   { value: 'moonshot', label: 'Moonshot AI' },
+  { value: 'zai', label: 'z.ai' },
   { value: 'anthropic', label: 'Anthropic' },
   { value: 'openai', label: 'OpenAI' },
   { value: 'openai-compatible', label: 'OpenAI Compatible' },
@@ -182,6 +193,7 @@ export const DEFAULT_BASE_URLS: Record<ProviderType, string> = {
   'github-copilot': 'https://api.githubcopilot.com',
   'qwen-code': 'https://portal.qwen.ai/v1',
   moonshot: 'https://api.moonshot.ai/v1',
+  zai: 'https://api.z.ai/api/anthropic/v1',
   anthropic: 'https://api.anthropic.com/v1',
   openai: 'https://api.openai.com/v1',
   'openai-compatible': '',

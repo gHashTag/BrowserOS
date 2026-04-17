@@ -10,16 +10,20 @@ import type { ToolRegistry } from '../../tools/tool-registry'
 import { ChatService } from '../services/chat-service'
 import { ChatRequestSchema } from '../types'
 import { ConversationIdParamSchema } from '../utils/validation'
+import { DEFAULT_PORTS } from '@browseros/shared/constants/ports'
 
 interface ChatRouteDeps {
   browser: Browser
   registry: ToolRegistry
   browserosId?: string
   aiSdkDevtoolsEnabled?: boolean
+  port?: number
 }
 
 export function createChatRoutes(deps: ChatRouteDeps) {
-  const { browserosId } = deps
+  const { browserosId, port = DEFAULT_PORTS.server } = deps
+
+  logger.info('Chat routes initialized', { port })
 
   const sessionStore = new SessionStore()
   const klavisClient = new KlavisClient()
@@ -60,13 +64,27 @@ export function createChatRoutes(deps: ChatRouteDeps) {
         model: request.model,
       })
 
-      logger.info('Chat request received', {
+      logger.info('[Step 7] Chat request received at server', {
         conversationId: request.conversationId,
         provider: request.provider,
         model: request.model,
+        mode: request.mode,
+        hasMessage: !!request.message,
+        hasBrowserContext: !!request.browserContext,
       })
-
-      return service.processMessage(request, c.req.raw.signal)
+      try {
+        return await service.processMessage(request, c.req.raw.signal)
+      } catch (error) {
+        logger.error('Chat request failed', {
+          conversationId: request.conversationId,
+          provider: request.provider,
+          model: request.model,
+          errorMessage:
+            error instanceof Error ? error.message : String(error),
+          errorStack: error instanceof Error ? error.stack : undefined,
+        })
+        throw error
+      }
     })
     .delete(
       '/:conversationId',

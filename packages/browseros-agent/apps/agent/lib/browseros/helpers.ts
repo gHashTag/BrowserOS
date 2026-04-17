@@ -26,10 +26,14 @@ export async function getAgentServerUrl(): Promise<string> {
   )
   if (supportsUnifiedPort) {
     const port = await getMcpPort()
-    return `http://127.0.0.1:${port}`
+    const url = `http://127.0.0.1:${port}`
+    console.log('[Step 3b] getAgentServerUrl: resolved via MCP port (unified)', { port, url })
+    return url
   }
   const port = await getAgentPort()
-  return `http://127.0.0.1:${port}`
+  const url = `http://127.0.0.1:${port}`
+  console.log('[Step 3b] getAgentServerUrl: resolved via agent port', { port, url })
+  return url
 }
 
 async function getAgentPort(): Promise<number> {
@@ -52,6 +56,11 @@ async function getAgentPort(): Promise<number> {
 }
 
 async function getMcpPort(): Promise<number> {
+  // In dev mode, fall back to env var when browser prefs aren't available
+  if (env.VITE_BROWSEROS_SERVER_PORT) {
+    return env.VITE_BROWSEROS_SERVER_PORT
+  }
+
   try {
     const adapter = getBrowserOSAdapter()
     const pref = await adapter.getPref(BROWSEROS_PREFS.MCP_PORT)

@@ -71,6 +71,13 @@ export class AiSdkAgent {
       config.resolvedConfig.contextWindowSize ??
       AGENT_LIMITS.DEFAULT_CONTEXT_WINDOW
 
+    logger.info('[Step 8b] AiSdkAgent.create: building language model', {
+      conversationId: config.resolvedConfig.conversationId,
+      provider: config.resolvedConfig.provider,
+      model: config.resolvedConfig.model,
+      contextWindow,
+    })
+
     // Build language model with middleware stack
     const rawModel = createLanguageModel(config.resolvedConfig)
     const isV3Model =
@@ -78,6 +85,13 @@ export class AiSdkAgent {
       rawModel !== null &&
       'specificationVersion' in rawModel &&
       rawModel.specificationVersion === 'v3'
+
+    logger.info('[Step 8c] AiSdkAgent.create: model created', {
+      conversationId: config.resolvedConfig.conversationId,
+      isV3Model,
+      provider: config.resolvedConfig.provider,
+      model: config.resolvedConfig.model,
+    })
 
     let model = rawModel
     if (isV3Model) {
@@ -241,14 +255,32 @@ export class AiSdkAgent {
       steps: ReadonlyArray<StepWithUsage>
       model: LanguageModel
       experimental_context: unknown
-    }) =>
-      compactionPrepareStep({
+    }) => {
+      const lastStep = options.steps[options.steps.length - 1] as Record<string, unknown> | undefined
+      if (lastStep) {
+        logger.info('Agent step result', {
+          conversationId: config.resolvedConfig.conversationId,
+          stepNumber: options.steps.length,
+          finishReason: lastStep.finishReason,
+          hasText: !!lastStep.text,
+          textPreview: typeof lastStep.text === 'string' ? String(lastStep.text).substring(0, 200) : '(no text)',
+          toolCallCount: Array.isArray(lastStep.toolCalls) ? lastStep.toolCalls.length : 0,
+          usage: lastStep.usage,
+        })
+      } else {
+        logger.info('Agent first step (no previous steps)', {
+          conversationId: config.resolvedConfig.conversationId,
+          messageCount: options.messages.length,
+        })
+      }
+      return compactionPrepareStep({
         ...options,
         messages: normalizeMessagesForModel(
           options.messages,
           normalizationOptions,
         ),
       })
+    }
 
     // Codex requires store=false — tell the SDK to inline content
     // instead of using item_reference (which fails with store=false)

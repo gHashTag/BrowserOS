@@ -91,6 +91,26 @@ function createBedrockModel(config: ResolvedLLMConfig): LanguageModel {
   })(config.model)
 }
 
+function createZaiModel(config: ResolvedLLMConfig): LanguageModel {
+  if (!config.apiKey) throw new Error('z.ai provider requires apiKey')
+
+  // Strip the "z-ai/" provider prefix — it's used for UI disambiguation
+  // but the Anthropic API expects bare model names (e.g. "glm-5.1").
+  const modelId = config.model.replace(/^z-ai\//, '')
+
+  logger.info('Creating z.ai (zai) model (Anthropic-compatible)', {
+    model: modelId,
+    baseUrl: EXTERNAL_URLS.ZAI_API,
+    hasApiKey: true,
+  })
+
+  // ZAI uses Anthropic-compatible API at api.z.ai/api/anthropic
+  return createAnthropic({
+    baseURL: EXTERNAL_URLS.ZAI_API,
+    apiKey: config.apiKey,
+  })(modelId)
+}
+
 function createBrowserOSModel(config: ResolvedLLMConfig): LanguageModel {
   if (!config.baseUrl) throw new Error('BrowserOS provider requires baseUrl')
   const { baseUrl, apiKey, model, upstreamProvider, browserosId } = config
@@ -192,10 +212,34 @@ const PROVIDER_FACTORIES: Record<string, ProviderFactory> = {
   [LLM_PROVIDERS.CHATGPT_PRO]: createChatGPTProModel,
   [LLM_PROVIDERS.GITHUB_COPILOT]: createGitHubCopilotModel,
   [LLM_PROVIDERS.QWEN_CODE]: createQwenCodeModel,
+  [LLM_PROVIDERS.ZAI]: createZaiModel,
 }
 
 export function createLLMProvider(config: ResolvedLLMConfig): LanguageModel {
   const factory = PROVIDER_FACTORIES[config.provider]
   if (!factory) throw new Error(`Unknown provider: ${config.provider}`)
-  return factory(config)
+
+  logger.info('createLLMProvider: creating model', {
+    provider: config.provider,
+    model: config.model,
+    hasApiKey: !!config.apiKey,
+    baseUrl: config.baseUrl ? String(config.baseUrl) : undefined,
+  })
+
+  try {
+    const model = factory(config)
+    logger.info('createLLMProvider: model created', {
+      provider: config.provider,
+      model: config.model,
+    })
+    return model
+  } catch (error) {
+    logger.error('createLLMProvider: failed to create model', {
+      provider: config.provider,
+      model: config.model,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    })
+    throw error
+  }
 }

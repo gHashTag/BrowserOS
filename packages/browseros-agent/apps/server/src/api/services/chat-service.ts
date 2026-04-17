@@ -5,6 +5,7 @@
  */
 
 import { createAgentUIStreamResponse, type UIMessage } from 'ai'
+import { conversationEvents } from '../../agent/conversation-events'
 import { AiSdkAgent } from '../../agent/ai-sdk-agent'
 import { formatUserMessage } from '../../agent/format-message'
 import {
@@ -37,6 +38,17 @@ export class ChatService {
     abortSignal: AbortSignal,
   ): Promise<Response> {
     const { sessionStore } = this.deps
+    logger.debug('ChatService.processMessage start', {
+      conversationId: request.conversationId,
+      provider: request.provider,
+      model: request.model,
+      mode: request.mode,
+      hasSelectedText: !!request.selectedText,
+      hasApiKey: !!request.apiKey,
+      baseUrl: request.baseUrl ? String(request.baseUrl) : undefined,
+      isScheduledTask: request.isScheduledTask,
+      origin: request.origin,
+    })
 
     const llmConfig = await resolveLLMConfig(request, this.deps.browserosId)
 
@@ -66,6 +78,15 @@ export class ChatService {
       browserosId: this.deps.browserosId,
       toolApprovalConfig: request.toolApprovalConfig,
     }
+
+    logger.debug('ChatService resolved llm config', {
+      conversationId: request.conversationId,
+      provider: llmConfig.provider,
+      model: llmConfig.model,
+      hasApiKey: !!llmConfig.apiKey,
+      baseUrl: llmConfig.baseUrl ? String(llmConfig.baseUrl) : undefined,
+      upstreamProvider: llmConfig.upstreamProvider,
+    })
 
     let session = sessionStore.get(request.conversationId)
     let isNewSession = false
@@ -292,6 +313,20 @@ export class ChatService {
         ? `${contextChanges.map((c) => `[Context: ${c}]`).join('\n')}\n\n`
         : ''
     session.agent.appendUserMessage(contextPrefix + userContent)
+    conversationEvents.emit({
+      type: 'user-message',
+      conversationId: request.conversationId,
+      message: request.message,
+      at: new Date().toISOString(),
+    })
+
+    logger.info('[Step 8] Creating streaming response — calling LLM provider', {
+      conversationId: request.conversationId,
+      provider: request.provider,
+      model: request.model,
+      messageCount: session.agent.messages.length,
+      userMessage: request.message?.substring(0, 100),
+    })
 
     return createAgentUIStreamResponse({
       agent: session.agent.toolLoopAgent,
@@ -299,9 +334,33 @@ export class ChatService {
       abortSignal,
       onFinish: async ({ messages }: { messages: UIMessage[] }) => {
         session.agent.messages = filterValidMessages(messages)
+        const lastMsg = messages[messages.length - 1]
+        const allParts = lastMsg?.parts ?? []
+        const partTypes = allParts.map((p: { type: string }) => p.type)
+        const textParts = allParts.filter(
+          (p: { type: string }) => p.type === 'text',
+        )
+        const toolParts = allParts.filter(
+          (p: { type: string }) => p.type === 'tool-invocation',
+        )
         logger.info('Agent execution complete', {
           conversationId: request.conversationId,
           totalMessages: messages.length,
+          lastMessageRole: lastMsg?.role,
+          allPartTypes: partTypes,
+          textPartCount: textParts.length,
+          toolPartCount: toolParts.length,
+          textPreview:
+            (textParts[0] as { type: 'text'; text: string })?.text?.substring(0, 200) ?? '(no text)',
+        })
+        // Log each message role for full conversation trace
+        logger.info('Full message trace', {
+          conversationId: request.conversationId,
+          messages: messages.map((m: UIMessage, i: number) => ({
+            index: i,
+            role: m.role,
+            partTypes: m.parts?.map((p: { type: string }) => p.type),
+          })),
         })
 
         if (session?.hiddenPageId) {

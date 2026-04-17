@@ -199,6 +199,60 @@ function createChatGPTProFactory(
   }).responses
 }
 
+function createZaiFactory(
+  config: ResolvedAgentConfig,
+): (modelId: string) => unknown {
+  if (!config.apiKey) throw new Error('z.ai provider requires apiKey')
+  logger.info('[Step 9] Creating z.ai factory (Anthropic-compatible)', {
+    baseURL: EXTERNAL_URLS.ZAI_API,
+    hasApiKey: true,
+  })
+
+  // Logging fetch wrapper to debug z.ai API calls
+  const loggingFetch = async (url: RequestInfo | URL, init?: RequestInit) => {
+    const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url
+    logger.info('[Step 10] z.ai API request', {
+      url: urlStr,
+      method: init?.method ?? 'GET',
+      bodyPreview: typeof init?.body === 'string' ? init.body.substring(0, 500) : '(non-string body)',
+    })
+    try {
+      const response = await globalThis.fetch(url, init)
+      const cloned = response.clone()
+      const responseBody = await cloned.text()
+      logger.info('[Step 11] z.ai API response', {
+        url: urlStr,
+        status: response.status,
+        statusText: response.statusText,
+        bodyPreview: responseBody.substring(0, 1000),
+      })
+      return response
+    } catch (error) {
+      logger.error('[Step 11] z.ai API request failed', {
+        url: urlStr,
+        error: error instanceof Error ? error.message : String(error),
+      })
+      throw error
+    }
+  }
+
+  // ZAI uses Anthropic-compatible API at api.z.ai/api/anthropic
+  const anthropicFactory = createAnthropic({
+    baseURL: EXTERNAL_URLS.ZAI_API,
+    apiKey: config.apiKey,
+    fetch: loggingFetch as typeof globalThis.fetch,
+  })
+  // Strip the "z-ai/" provider prefix — Anthropic API expects bare model names.
+  return (modelId: string) => {
+    const strippedId = modelId.replace(/^z-ai\//, '')
+    logger.info('[Step 9b] z.ai factory: creating model instance', {
+      originalModelId: modelId,
+      strippedModelId: strippedId,
+    })
+    return anthropicFactory(strippedId)
+  }
+}
+
 const PROVIDER_FACTORIES: Record<string, ProviderFactory> = {
   [LLM_PROVIDERS.ANTHROPIC]: createAnthropicFactory,
   [LLM_PROVIDERS.OPENAI]: createOpenAIFactory,
@@ -214,6 +268,7 @@ const PROVIDER_FACTORIES: Record<string, ProviderFactory> = {
   [LLM_PROVIDERS.CHATGPT_PRO]: createChatGPTProFactory,
   [LLM_PROVIDERS.GITHUB_COPILOT]: createGitHubCopilotFactory,
   [LLM_PROVIDERS.QWEN_CODE]: createQwenCodeFactory,
+  [LLM_PROVIDERS.ZAI]: createZaiFactory,
 }
 
 export function createLanguageModel(
@@ -222,5 +277,29 @@ export function createLanguageModel(
   const provider = config.provider as string
   const factory = PROVIDER_FACTORIES[provider]
   if (!factory) throw new Error(`Unknown provider: ${provider}`)
-  return factory(config)(config.model) as LanguageModel
+
+  logger.info('[Step 9] Creating language model (agent)', {
+    provider: config.provider,
+    model: config.model,
+    hasApiKey: !!config.apiKey,
+    baseUrl: config.baseUrl ? String(config.baseUrl) : undefined,
+  })
+
+  try {
+    const model = factory(config)(config.model) as LanguageModel
+    logger.info('[Step 9c] Language model created successfully', {
+      provider: config.provider,
+      model: config.model,
+      modelType: typeof model,
+    })
+    return model
+  } catch (error) {
+    logger.error('[Step 9] Failed to create language model', {
+      provider: config.provider,
+      model: config.model,
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+    })
+    throw error
+  }
 }

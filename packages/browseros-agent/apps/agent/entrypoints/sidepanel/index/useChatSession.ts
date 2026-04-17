@@ -346,8 +346,16 @@ export const useChatSession = (options?: ChatSessionOptions) => {
   } = useChat({
     transport: new DefaultChatTransport({
       prepareSendMessagesRequest: async ({ messages }) => {
+        // [Step 3] Transport preparing request — resolving provider and context
         const provider =
           selectedLlmProviderRef.current ?? createDefaultBrowserOSProvider()
+        console.log('[Step 3] prepareSendMessagesRequest: resolved provider', {
+          providerId: provider.id,
+          providerType: provider.type,
+          providerName: provider.name,
+          messageCount: messages.length,
+        })
+
         const activeTabsList = await chrome.tabs.query({
           active: true,
           currentWindow: true,
@@ -366,6 +374,17 @@ export const useChatSession = (options?: ChatSessionOptions) => {
           action,
           enabledMcpServers,
           customMcpServers,
+        })
+
+        // [Step 4] Browser context assembled
+        console.log('[Step 4] prepareSendMessagesRequest: browser context', {
+          activeTabUrl: activeTab?.url,
+          activeTabId: activeTab?.id,
+          mode: currentMode,
+          hasAction: !!action,
+          enabledMcpServers: enabledMcpServers.length,
+          customMcpServers: customMcpServers.length,
+          hasSelection: !!activeTabSelection,
         })
 
         const declinedApps = await declinedAppsStorage.getValue()
@@ -397,6 +416,12 @@ export const useChatSession = (options?: ChatSessionOptions) => {
 
         const approvalResponses = extractApprovalResponses(messages)
         if (approvalResponses) {
+          // [Step 5] Building approval response request
+          console.log('[Step 5] prepareSendMessagesRequest: approval response path', {
+            apiUrl: `${agentUrlRef.current}/chat`,
+            conversationId: conversationIdRef.current,
+            approvalCount: approvalResponses.length,
+          })
           return {
             api: `${agentUrlRef.current}/chat`,
             body: buildChatRequestBody({
@@ -416,6 +441,15 @@ export const useChatSession = (options?: ChatSessionOptions) => {
         }
 
         const message = getLastMessageText(messages)
+
+        // [Step 5] Building chat request body
+        console.log('[Step 5] prepareSendMessagesRequest: building request', {
+          apiUrl: `${agentUrlRef.current}/chat`,
+          conversationId: conversationIdRef.current,
+          messagePreview: message.substring(0, 100),
+          mode: currentMode,
+          providerId: provider.id,
+        })
 
         const result = {
           api: `${agentUrlRef.current}/chat`,
@@ -440,6 +474,15 @@ export const useChatSession = (options?: ChatSessionOptions) => {
             toolApprovalConfig: approvalConfig,
           }),
         }
+
+        // [Step 6] Request ready — about to send HTTP POST to agent server
+        console.log('[Step 6] prepareSendMessagesRequest: request ready', {
+          api: result.api,
+          bodyKeys: Object.keys(result.body),
+          conversationId: (result.body as Record<string, unknown>).conversationId,
+          provider: (result.body as Record<string, unknown>).provider,
+          model: (result.body as Record<string, unknown>).model,
+        })
 
         // Track which tab's selection was sent so we can clear it on success
         pendingSelectionTabKeyRef.current =
