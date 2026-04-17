@@ -417,11 +417,14 @@ export const useChatSession = (options?: ChatSessionOptions) => {
         const approvalResponses = extractApprovalResponses(messages)
         if (approvalResponses) {
           // [Step 5] Building approval response request
-          console.log('[Step 5] prepareSendMessagesRequest: approval response path', {
-            apiUrl: `${agentUrlRef.current}/chat`,
-            conversationId: conversationIdRef.current,
-            approvalCount: approvalResponses.length,
-          })
+          console.log(
+            '[Step 5] prepareSendMessagesRequest: approval response path',
+            {
+              apiUrl: `${agentUrlRef.current}/chat`,
+              conversationId: conversationIdRef.current,
+              approvalCount: approvalResponses.length,
+            },
+          )
           return {
             api: `${agentUrlRef.current}/chat`,
             body: buildChatRequestBody({
@@ -479,7 +482,8 @@ export const useChatSession = (options?: ChatSessionOptions) => {
         console.log('[Step 6] prepareSendMessagesRequest: request ready', {
           api: result.api,
           bodyKeys: Object.keys(result.body),
-          conversationId: (result.body as Record<string, unknown>).conversationId,
+          conversationId: (result.body as Record<string, unknown>)
+            .conversationId,
           provider: (result.body as Record<string, unknown>).provider,
           model: (result.body as Record<string, unknown>).model,
         })

@@ -3,7 +3,7 @@
  * Copyright 2025 BrowserOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   AGENT_CONFIG_FILE,
@@ -11,13 +11,111 @@ import {
   AGENTS_DIR,
   SHARED_DIR,
 } from '@browseros/shared/constants/portable-agent'
-import YAML from 'yaml'
 import { logger } from '../../lib/logger'
+
+// Simple YAML parser for basic config files
+function parseYaml(content: string): unknown {
+  const lines = content.split('\n')
+  const result: Record<string, unknown> = {}
+  const stack: Array<{ obj: Record<string, unknown>; level: number }> = [
+    { obj: result, level: -1 },
+  ]
+
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+
+    const indent = line.search(/\S/)
+    const [key, ...valueParts] = trimmed.split(':')
+    const value = valueParts.join(':').trim()
+
+    // Pop stack to correct level
+    while (stack.length > 1 && stack[stack.length - 1].level >= indent) {
+      stack.pop()
+    }
+
+    const current = stack[stack.length - 1].obj
+
+    if (value === '') {
+      // Object or array
+      current[key] = {}
+      stack.push({ obj: current[key] as Record<string, unknown>, level: indent })
+    } else if (value.startsWith('|')) {
+      // Multiline string - not supported in simple parser
+      current[key] = ''
+    } else if (value.startsWith('>')) {
+      // Folded string - not supported in simple parser
+      current[key] = ''
+    } else if (value === 'true' || value === 'false') {
+      current[key] = value === 'true'
+    } else if (value === 'null' || value === '~') {
+      current[key] = null
+    } else if (/^-?\d+$/.test(value)) {
+      current[key] = Number.parseInt(value, 10)
+    } else if (/^-?\d+\.\d+$/.test(value)) {
+      current[key] = Number.parseFloat(value)
+    } else if (/^["'].*["']$/.test(value)) {
+      current[key] = value.slice(1, -1)
+    } else if (value.startsWith('[') && value.endsWith(']')) {
+      // Simple array
+      const items = value.slice(1, -1).split(',').map((s) => s.trim())
+      current[key] = items
+    } else {
+      current[key] = value
+    }
+  }
+
+  return result
+}
+
+function loadConfigLike(content: string): unknown {
+  const trimmed = content.trim()
+  if (!trimmed) return {}
+
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    return JSON.parse(trimmed) as unknown
+  }
+
+  return parseYaml(trimmed)
+}
+
+function loadEnvLike(content: string): Record<string, string> {
+  const trimmed = content.trim()
+  if (!trimmed) return {}
+
+  const hasEqualsLine = trimmed
+    .split('\n')
+    .some((line) => line.trim() && !line.trim().startsWith('#') && line.includes('='))
+
+  if (hasEqualsLine) {
+    const envLines = trimmed.split('\n')
+    const envVars: Record<string, string> = {}
+
+    for (const line of envLines) {
+      const t = line.trim()
+      if (!t || t.startsWith('#')) continue
+      const [key, ...valueParts] = t.split('=')
+      if (!key || valueParts.length === 0) continue
+      envVars[key.trim()] = valueParts.join('=').trim()
+    }
+
+    return envVars
+  }
+
+  const parsed = loadConfigLike(trimmed)
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {}
+
+  const envVars: Record<string, string> = {}
+  for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+    if (typeof v === 'string') envVars[k] = v
+  }
+  return envVars
+}
 import {
   type PortableAgentConfig,
   PortableAgentConfigSchema,
 } from './config-schema'
-import type { ErrorCode } from './errors'
+import { ErrorCode } from './errors'
 
 const CONFIG_CACHE = new Map<string, PortableAgentConfig>()
 const ENV_CACHE = new Map<string, Record<string, string>>()
@@ -50,7 +148,7 @@ function resolveEnvPlaceholder(value: string): string {
 
   throw new ConfigLoadError(
     `Environment variable '${envVar}' is not set and no default provided`,
-    'ENV_VAR_NOT_FOUND',
+    ErrorCode.ENV_VAR_NOT_FOUND,
   )
 }
 
@@ -87,7 +185,7 @@ function resolveTemplate(
 
   try {
     const templateContent = readFileSync(templatePath, 'utf-8')
-    const templateConfig = YAML.parse(templateContent) as PortableAgentConfig
+    const templateConfig = loadConfigLike(templateContent) as PortableAgentConfig
 
     const merged: PortableAgentConfig = {
       apiVersion: templateConfig.apiVersion || config.apiVersion,
@@ -130,20 +228,20 @@ export class ConfigLoader {
     if (!existsSync(configPath)) {
       throw new ConfigLoadError(
         `Agent config not found at ${configPath}`,
-        'CONFIG_NOT_FOUND',
+        ErrorCode.CONFIG_NOT_FOUND,
         agentName,
       )
     }
 
     try {
       const content = readFileSync(configPath, 'utf-8')
-      const rawConfig = YAML.parse(content)
+      const rawConfig = loadConfigLike(content)
 
       const schemaResult = PortableAgentConfigSchema.safeParse(rawConfig)
       if (!schemaResult.success) {
         throw new ConfigLoadError(
           `Invalid agent configuration: ${schemaResult.error.message}`,
-          'INVALID_CONFIG',
+          ErrorCode.CONFIG_INVALID,
           agentName,
         )
       }
@@ -159,7 +257,7 @@ export class ConfigLoader {
 
       throw new ConfigLoadError(
         `Failed to load agent configuration: ${error instanceof Error ? error.message : String(error)}`,
-        'CONFIG_LOAD_FAILED',
+        ErrorCode.CONFIG_PARSE_ERROR,
         agentName,
       )
     }
@@ -171,7 +269,7 @@ export class ConfigLoader {
     if (!existsSync(AGENTS_DIR)) return configs
 
     const entries = statSync(AGENTS_DIR).isDirectory()
-      ? Object.values(statSync(AGENTS_DIR) ?? {})
+      ? readdirSync(AGENTS_DIR, { withFileTypes: true })
       : []
 
     for (const entry of entries) {
@@ -195,7 +293,7 @@ export class ConfigLoader {
     if (!existsSync(AGENTS_DIR)) return []
 
     const entries = statSync(AGENTS_DIR).isDirectory()
-      ? Object.values(statSync(AGENTS_DIR) ?? {})
+      ? readdirSync(AGENTS_DIR, { withFileTypes: true })
       : []
 
     return entries
@@ -219,18 +317,7 @@ export class ConfigLoader {
 
     try {
       const envFile = readFileSync(envPath, 'utf-8')
-      const envLines = envFile.split('\n')
-      const envVars: Record<string, string> = {}
-
-      for (const line of envLines) {
-        const trimmed = line.trim()
-        if (trimmed && !trimmed.startsWith('#')) {
-          const [key, ...valueParts] = trimmed.split('=')
-          if (key && valueParts.length > 0) {
-            envVars[key.trim()] = valueParts.join('=').trim()
-          }
-        }
-      }
+      const envVars = loadEnvLike(envFile)
 
       ENV_CACHE.set(cacheKey, envVars)
       return envVars
@@ -252,7 +339,7 @@ export class ConfigLoader {
     if (!validPattern.test(name)) {
       throw new ConfigLoadError(
         `Invalid agent name '${name}'. Names must start with a lowercase letter and contain only lowercase letters, numbers, and hyphens.`,
-        'INVALID_AGENT_NAME',
+        ErrorCode.CONFIG_INVALID,
         name,
       )
     }

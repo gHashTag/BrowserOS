@@ -43,4 +43,7 @@ export const DEV_PORTS = {
 // OAuth callback port — must match the redirect_uri registered with OpenAI's Codex client ID
 export const OAUTH_CALLBACK_PORT = 1455
 
+// A2A WebSocket port - separate from main server ports to avoid conflicts
+export const A2A_PORT = 9001
+
 export type Ports = typeof DEFAULT_PORTS

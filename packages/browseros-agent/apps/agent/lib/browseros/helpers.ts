@@ -27,12 +27,18 @@ export async function getAgentServerUrl(): Promise<string> {
   if (supportsUnifiedPort) {
     const port = await getMcpPort()
     const url = `http://127.0.0.1:${port}`
-    console.log('[Step 3b] getAgentServerUrl: resolved via MCP port (unified)', { port, url })
+    console.log(
+      '[Step 3b] getAgentServerUrl: resolved via MCP port (unified)',
+      { port, url },
+    )
     return url
   }
   const port = await getAgentPort()
   const url = `http://127.0.0.1:${port}`
-  console.log('[Step 3b] getAgentServerUrl: resolved via agent port', { port, url })
+  console.log('[Step 3b] getAgentServerUrl: resolved via agent port', {
+    port,
+    url,
+  })
   return url
 }
 

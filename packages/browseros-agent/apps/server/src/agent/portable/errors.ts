@@ -8,7 +8,7 @@ import { HttpAgentError } from '../errors'
 export class PortableAgentError extends HttpAgentError {
   constructor(
     message: string,
-    public code: ErrorCode,
+    public override code: ErrorCode,
     public agentName?: string,
   ) {
     super(message)

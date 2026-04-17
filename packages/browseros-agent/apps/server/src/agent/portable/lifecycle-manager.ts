@@ -9,6 +9,7 @@ import { ConfigLoader } from './config-loader'
 import type { AgentStatus, AgentStatusResponse } from './config-schema'
 import { ErrorCode, PortableAgentError } from './errors'
 import { PortableAgent, type PortableAgentDeps } from './portable-agent'
+import { logger } from '../../lib/logger'
 
 export interface StartAgentOptions {
   force?: boolean

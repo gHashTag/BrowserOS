@@ -5,7 +5,7 @@
  */
 import type { Browser } from '@browseros/shared/schemas/browser'
 import type { ToolSet } from 'ai'
-import type { Hono } from 'hono'
+import { Hono } from 'hono'
 import type {
   AgentLogEntry,
   AgentStatusResponse,
@@ -29,123 +29,90 @@ export interface AgentBridgeRoutesConfig {
 export function createAgentBridgeRoutes(config: AgentBridgeRoutesConfig) {
   const service = new AgentBridgeService(config)
 
-  const routes = {
-    'POST /start': async (c: any) => {
+  return new Hono()
+    .post('/start', async (c) => {
       try {
         const body = await c.req.json()
         const { name, options } = body
-
         if (!name || typeof name !== 'string') {
           return c.json(
-            {
-              error: {
-                message: 'Agent name is required',
-                code: 'INVALID_INPUT',
-              },
-            },
+            { error: { message: 'Agent name is required', code: 'INVALID_INPUT' } },
             400,
           )
         }
-
         const status = await service.startAgent(name, options)
         return c.json(status)
       } catch (error) {
         return handleAgentError(c, error)
       }
-    },
-
-    'POST /stop': async (c: any) => {
+    })
+    .post('/stop', async (c) => {
       try {
         const body = await c.req.json()
         const { name, graceful = true } = body
-
         if (!name || typeof name !== 'string') {
           return c.json(
-            {
-              error: {
-                message: 'Agent name is required',
-                code: 'INVALID_INPUT',
-              },
-            },
+            { error: { message: 'Agent name is required', code: 'INVALID_INPUT' } },
             400,
           )
         }
-
         await service.stopAgent(name, graceful)
         return c.json({ success: true })
       } catch (error) {
         return handleAgentError(c, error)
       }
-    },
-
-    'POST /restart': async (c: any) => {
+    })
+    .post('/restart', async (c) => {
       try {
         const body = await c.req.json()
         const { name } = body
-
         if (!name || typeof name !== 'string') {
           return c.json(
-            {
-              error: {
-                message: 'Agent name is required',
-                code: 'INVALID_INPUT',
-              },
-            },
+            { error: { message: 'Agent name is required', code: 'INVALID_INPUT' } },
             400,
           )
         }
-
         const status = await service.restartAgent(name)
         return c.json(status)
       } catch (error) {
         return handleAgentError(c, error)
       }
-    },
-
-    'GET /status': async (c: any) => {
+    })
+    .get('/status', async (c) => {
       try {
         const statuses = service.getAllAgentsStatus()
         return c.json(Object.fromEntries(statuses))
       } catch (error) {
         return handleAgentError(c, error)
       }
-    },
-
-    'GET /status/:name': async (c: any) => {
+    })
+    .get('/status/:name', async (c) => {
       try {
         const name = c.req.param('name')
         const status = service.getAgentStatus(name)
-
         if (!status) {
           return c.json(
             { error: { message: 'Agent not found', code: 'AGENT_NOT_FOUND' } },
             404,
           )
         }
-
         return c.json(status)
       } catch (error) {
         return handleAgentError(c, error)
       }
-    },
-
-    'POST /:name/task': async (c: any) => {
+    })
+    .post('/:name/task', async (c) => {
       try {
         const name = c.req.param('name')
         const body = await c.req.json()
         const task: AgentTask = { message: body.message, context: body.context }
-
         if (!task.message || typeof task.message !== 'string') {
           return c.json(
-            {
-              error: { message: 'Message is required', code: 'INVALID_INPUT' },
-            },
+            { error: { message: 'Message is required', code: 'INVALID_INPUT' } },
             400,
           )
         }
-
         const stream = await service.sendTask(name, task)
-
         return new Response(stream as ReadableStream, {
           headers: {
             'Content-Type': 'text/event-stream',
@@ -156,36 +123,30 @@ export function createAgentBridgeRoutes(config: AgentBridgeRoutesConfig) {
       } catch (error) {
         return handleAgentError(c, error)
       }
-    },
-
-    'GET /:name/logs': async (c: any) => {
+    })
+    .get('/:name/logs', async (c) => {
       try {
         const name = c.req.param('name')
         const tail = c.req.query('tail')
           ? Number.parseInt(c.req.query('tail')!, 10)
           : undefined
         const since = c.req.query('since')
-
         const logs = service.getAgentLogs(name, { tail, since })
-
         return c.json(logs)
       } catch (error) {
         return handleAgentError(c, error)
       }
-    },
-
-    'GET /:name/logs/stream': async (c: any) => {
+    })
+    .get('/:name/logs/stream', async (c) => {
       try {
         const name = c.req.param('name')
         const stream = service.getAgentLogsStream(name)
-
         if (!stream) {
           return c.json(
             { error: { message: 'Agent not found', code: 'AGENT_NOT_FOUND' } },
             404,
           )
         }
-
         return new Response(stream as ReadableStream, {
           headers: {
             'Content-Type': 'text/event-stream',
@@ -196,41 +157,31 @@ export function createAgentBridgeRoutes(config: AgentBridgeRoutesConfig) {
       } catch (error) {
         return handleAgentError(c, error)
       }
-    },
-
-    'GET /config': async (c: any) => {
+    })
+    .get('/config', async (c) => {
       try {
         const configs = service.listConfigs()
         return c.json(Object.fromEntries(configs))
       } catch (error) {
         return handleAgentError(c, error)
       }
-    },
-
-    'GET /config/:name': async (c: any) => {
+    })
+    .get('/config/:name', async (c) => {
       try {
         const name = c.req.param('name')
-        const config = service.getConfig(name)
-
-        if (!config) {
+        const cfg = service.getConfig(name)
+        if (!cfg) {
           return c.json(
-            {
-              error: {
-                message: 'Agent config not found',
-                code: 'CONFIG_NOT_FOUND',
-              },
-            },
+            { error: { message: 'Agent config not found', code: 'CONFIG_NOT_FOUND' } },
             404,
           )
         }
-
-        return c.json(config)
+        return c.json(cfg)
       } catch (error) {
         return handleAgentError(c, error)
       }
-    },
-
-    'DELETE /config/:name': async (c: any) => {
+    })
+    .delete('/config/:name', async (c) => {
       try {
         const name = c.req.param('name')
         await service.deleteConfig(name)
@@ -238,10 +189,7 @@ export function createAgentBridgeRoutes(config: AgentBridgeRoutesConfig) {
       } catch (error) {
         return handleAgentError(c, error)
       }
-    },
-  } as const
-
-  return routes
+    })
 }
 
 function handleAgentError(c: any, error: unknown) {

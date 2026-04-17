@@ -16,6 +16,7 @@ import { createHttpServer } from './api/server'
 import { getOpenClawService } from './api/services/openclaw/openclaw-service'
 import { CdpBackend } from './browser/backends/cdp'
 import { Browser } from './browser/browser'
+import { NullBrowser } from './browser/null-browser'
 import type { ServerConfig } from './config'
 import { INLINED_ENV } from './env'
 import {
@@ -57,21 +58,35 @@ export class Application {
 
     await this.initCoreServices()
 
+    const allowNoCdp = process.env.BROWSEROS_ALLOW_NO_CDP === '1'
+
+    let browser: Browser | NullBrowser
     if (!this.config.cdpPort) {
-      logger.error('CDP port is required (--cdp-port)')
-      process.exit(EXIT_CODES.GENERAL_ERROR)
-    }
+      if (!allowNoCdp) {
+        logger.error('CDP port is required (--cdp-port)')
+        process.exit(EXIT_CODES.GENERAL_ERROR)
+      }
+      logger.warn('Starting without CDP (BROWSEROS_ALLOW_NO_CDP=1)')
+      browser = new NullBrowser()
+    } else {
+      const cdp = new CdpBackend({ port: this.config.cdpPort })
+      try {
+        logger.debug(`Connecting to CDP on port ${this.config.cdpPort}`)
+        await cdp.connect()
+        logger.info(`Connected to CDP on port ${this.config.cdpPort}`)
+      } catch (error) {
+        if (!allowNoCdp) {
+          return this.handleStartupError('CDP', this.config.cdpPort, error)
+        }
+        logger.warn('CDP unavailable, starting in degraded mode', {
+          port: this.config.cdpPort,
+          error: error instanceof Error ? error.message : String(error),
+        })
+        browser = new NullBrowser()
+      }
 
-    const cdp = new CdpBackend({ port: this.config.cdpPort })
-    try {
-      logger.debug(`Connecting to CDP on port ${this.config.cdpPort}`)
-      await cdp.connect()
-      logger.info(`Connected to CDP on port ${this.config.cdpPort}`)
-    } catch (error) {
-      return this.handleStartupError('CDP', this.config.cdpPort, error)
+      browser = browser ?? new Browser(cdp)
     }
-
-    const browser = new Browser(cdp)
 
     logger.info(`Loaded ${registry.names().length} unified tools`)
 
@@ -225,6 +240,9 @@ export class Application {
   ): never {
     const errorMsg = error instanceof Error ? error.message : String(error)
     logger.error(`Failed to start ${serverName}`, { port, error: errorMsg })
+    if (error instanceof Error && error.stack) {
+      logger.error('Startup error stack', { stack: error.stack })
+    }
     console.error(
       `[FATAL] Failed to start ${serverName} on port ${port}: ${errorMsg}`,
     )

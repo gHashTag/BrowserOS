@@ -1,0 +1,42 @@
+{
+  "sessionId": "reconnect-1776342042914",
+  "timestamp": 1776342053522,
+  "formatVersion": "v1",
+  "config": {
+    "testName": "baseline",
+    "sessions": 5,
+    "messagesPerSession": 2,
+    "simulateReconnectAfter": 2,
+    "maxReconnectAttempts": 3,
+    "a2aPort": 9001,
+    "agentId": "Reconnect-baseline"
+  },
+  "metrics": {
+    "messageLatency": {
+      "min": 0,
+      "max": 0,
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "mean": 0,
+      "samples": 0
+    },
+    "reconnectLatency": {
+      "min": 0,
+      "max": 0,
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "mean": 0,
+      "samples": 0
+    },
+    "reconnectSuccessRate": 1,
+    "connectionStability": {
+      "totalConnections": 1,
+      "disconnects": 0,
+      "sessionsCompleted": 1
+    }
+  },
+  "verdict": "needs-proof",
+  "events": []
+}

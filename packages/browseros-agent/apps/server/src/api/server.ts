@@ -12,7 +12,6 @@
 
 import { OPENCLAW_GATEWAY_CONTAINER_NAME } from '@browseros/shared/constants/openclaw'
 import { Hono } from 'hono'
-import { websocket } from 'hono/bun'
 import { cors } from 'hono/cors'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
 import { HttpAgentError } from '../agent/errors'
@@ -23,6 +22,7 @@ import { getDb } from '../lib/db'
 import { logger } from '../lib/logger'
 import { Sentry } from '../lib/sentry'
 import { createAgentBridgeRoutes } from './routes/agent-bridge'
+import { createA2ARoutes } from './routes/a2a'
 import { createChatRoutes } from './routes/chat'
 import { createCreditsRoutes } from './routes/credits'
 import { createHealthRoute } from './routes/health'
@@ -39,6 +39,7 @@ import { createSkillsRoutes } from './routes/skills'
 import { createSoulRoutes } from './routes/soul'
 import { createStatusRoute } from './routes/status'
 import { createTerminalRoutes } from './routes/terminal'
+import { websocket } from './websocket'
 import {
   connectKlavisProxy,
   type KlavisProxyHandle,
@@ -125,6 +126,7 @@ export async function createHttpServer(config: HttpServerConfig) {
   const app = new Hono<Env>()
     .use('/*', cors(defaultCorsConfig))
     .route('/health', createHealthRoute({ browser }))
+    .route('/a2a', createA2ARoutes({ a2aKey: process.env.BROWSEROS_A2A_KEY }))
     .route(
       '/agent',
       createAgentBridgeRoutes({
@@ -190,6 +192,7 @@ export async function createHttpServer(config: HttpServerConfig) {
         registry,
         browserosId,
         aiSdkDevtoolsEnabled: config.aiSdkDevtoolsEnabled,
+        port,
       }),
     )
     .route(
@@ -245,7 +248,7 @@ export async function createHttpServer(config: HttpServerConfig) {
   app.route('/terminal', terminalRoutes)
 
   const server = Bun.serve({
-    fetch: (request, server) => app.fetch(request, { server }),
+    fetch: app.fetch,
     port,
     hostname: host,
     idleTimeout: 0,

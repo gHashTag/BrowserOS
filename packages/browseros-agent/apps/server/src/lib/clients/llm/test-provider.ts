@@ -9,6 +9,7 @@ import type { LLMConfig } from '@browseros/shared/schemas/llm'
 import { streamText } from 'ai'
 import { resolveLLMConfig } from './config'
 import { createLLMProvider } from './provider'
+import { logger } from '../../logger'
 
 export interface ProviderTestConfig extends LLMConfig {
   model: string
@@ -30,6 +31,13 @@ export async function testProviderConnection(
   const startTime = performance.now()
 
   try {
+    logger.debug('testProviderConnection start', {
+      provider: config.provider,
+      model: config.model,
+      baseUrl: config.baseUrl ? String(config.baseUrl) : undefined,
+      hasApiKey: !!config.apiKey,
+      browserosId: browserosId ?? undefined,
+    })
     const resolvedConfig = await resolveLLMConfig(config, browserosId)
     const model = createLLMProvider(resolvedConfig)
 
@@ -59,6 +67,13 @@ export async function testProviderConnection(
   } catch (error) {
     const responseTime = Math.round(performance.now() - startTime)
     const errorMessage = error instanceof Error ? error.message : String(error)
+    logger.error('testProviderConnection failed', {
+      provider: config.provider,
+      model: config.model,
+      errorMessage,
+      errorStack: error instanceof Error ? error.stack : undefined,
+      responseTimeMs: responseTime,
+    })
 
     return {
       success: false,

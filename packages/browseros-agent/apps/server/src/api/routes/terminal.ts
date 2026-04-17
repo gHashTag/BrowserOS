@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { upgradeWebSocket } from 'hono/bun'
+import { upgradeWebSocket } from '../websocket'
 import { logger } from '../../lib/logger'
 import {
   parseTerminalClientMessage,

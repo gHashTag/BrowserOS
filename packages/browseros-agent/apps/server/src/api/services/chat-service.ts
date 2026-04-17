@@ -5,8 +5,8 @@
  */
 
 import { createAgentUIStreamResponse, type UIMessage } from 'ai'
-import { conversationEvents } from '../../agent/conversation-events'
 import { AiSdkAgent } from '../../agent/ai-sdk-agent'
+import { conversationEvents } from '../../agent/conversation-events'
 import { formatUserMessage } from '../../agent/format-message'
 import {
   filterValidMessages,
@@ -351,7 +351,10 @@ export class ChatService {
           textPartCount: textParts.length,
           toolPartCount: toolParts.length,
           textPreview:
-            (textParts[0] as { type: 'text'; text: string })?.text?.substring(0, 200) ?? '(no text)',
+            (textParts[0] as { type: 'text'; text: string })?.text?.substring(
+              0,
+              200,
+            ) ?? '(no text)',
         })
         // Log each message role for full conversation trace
         logger.info('Full message trace', {

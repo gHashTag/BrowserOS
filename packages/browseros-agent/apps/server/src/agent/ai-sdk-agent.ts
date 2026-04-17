@@ -256,15 +256,22 @@ export class AiSdkAgent {
       model: LanguageModel
       experimental_context: unknown
     }) => {
-      const lastStep = options.steps[options.steps.length - 1] as Record<string, unknown> | undefined
+      const lastStep = options.steps[options.steps.length - 1] as
+        | Record<string, unknown>
+        | undefined
       if (lastStep) {
         logger.info('Agent step result', {
           conversationId: config.resolvedConfig.conversationId,
           stepNumber: options.steps.length,
           finishReason: lastStep.finishReason,
           hasText: !!lastStep.text,
-          textPreview: typeof lastStep.text === 'string' ? String(lastStep.text).substring(0, 200) : '(no text)',
-          toolCallCount: Array.isArray(lastStep.toolCalls) ? lastStep.toolCalls.length : 0,
+          textPreview:
+            typeof lastStep.text === 'string'
+              ? String(lastStep.text).substring(0, 200)
+              : '(no text)',
+          toolCallCount: Array.isArray(lastStep.toolCalls)
+            ? lastStep.toolCalls.length
+            : 0,
           usage: lastStep.usage,
         })
       } else {

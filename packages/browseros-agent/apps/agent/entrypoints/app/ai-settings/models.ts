@@ -44,11 +44,26 @@ function fromModelsDevModel(m: ModelsDevModel): ModelInfo {
   }
 }
 
+const MODELS_DEV_PROVIDER_KEY_BY_PROVIDER_TYPE: Partial<
+  Record<ProviderType, string>
+> = {
+  // `models-dev-data.json` uses `z-ai` provider key while our provider type is `zai`.
+  zai: 'z-ai',
+}
+
+function getModelsDevProviderKey(providerType: ProviderType): string {
+  return (
+    MODELS_DEV_PROVIDER_KEY_BY_PROVIDER_TYPE[providerType] ?? providerType
+  )
+}
+
 export function getModelsForProvider(providerType: ProviderType): ModelInfo[] {
   const custom = CUSTOM_PROVIDER_MODELS[providerType]
   if (custom !== undefined) return custom
 
-  return getModelsDevModels(providerType).map(fromModelsDevModel)
+  return getModelsDevModels(getModelsDevProviderKey(providerType)).map(
+    fromModelsDevModel,
+  )
 }
 
 export function getModelContextLength(

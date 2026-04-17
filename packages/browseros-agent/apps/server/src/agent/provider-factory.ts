@@ -210,11 +210,19 @@ function createZaiFactory(
 
   // Logging fetch wrapper to debug z.ai API calls
   const loggingFetch = async (url: RequestInfo | URL, init?: RequestInit) => {
-    const urlStr = typeof url === 'string' ? url : url instanceof URL ? url.toString() : url.url
+    const urlStr =
+      typeof url === 'string'
+        ? url
+        : url instanceof URL
+          ? url.toString()
+          : url.url
     logger.info('[Step 10] z.ai API request', {
       url: urlStr,
       method: init?.method ?? 'GET',
-      bodyPreview: typeof init?.body === 'string' ? init.body.substring(0, 500) : '(non-string body)',
+      bodyPreview:
+        typeof init?.body === 'string'
+          ? init.body.substring(0, 500)
+          : '(non-string body)',
     })
     try {
       const response = await globalThis.fetch(url, init)

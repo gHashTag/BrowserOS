@@ -1,0 +1,42 @@
+{
+  "sessionId": "multisession-1776342053539",
+  "timestamp": 1776342054041,
+  "formatVersion": "v1",
+  "config": {
+    "testName": "baseline",
+    "sessions": 5,
+    "messagesPerSession": 10,
+    "simulateReconnectAfter": 0,
+    "maxReconnectAttempts": 0,
+    "a2aPort": 9001,
+    "agentId": "Multi-Agents"
+  },
+  "metrics": {
+    "messageLatency": {
+      "min": 0,
+      "max": 0,
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "mean": 0,
+      "samples": 0
+    },
+    "reconnectLatency": {
+      "min": 0,
+      "max": 0,
+      "p50": 0,
+      "p95": 0,
+      "p99": 0,
+      "mean": 0,
+      "samples": 0
+    },
+    "reconnectSuccessRate": 1,
+    "connectionStability": {
+      "totalConnections": 4,
+      "disconnects": 0,
+      "sessionsCompleted": 4
+    }
+  },
+  "verdict": "needs-proof",
+  "events": []
+}

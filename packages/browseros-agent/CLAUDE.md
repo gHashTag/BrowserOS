@@ -1,3 +1,58 @@
+# ⚠️ WORKSPACE BOUNDARY - READ FIRST
+
+## CORRECT WORKING DIRECTORY
+
+For ALL Trinity A2A + relay-observer + experience hooks work:
+
+**YOU MUST BE IN**: `/Users/playra/BrowserOS/packages/browseros-agent`
+
+## FORBIDDEN DIRECTORY
+
+**NEVER work in**: `/Users/playra/BrowserOS` (root)
+
+Root `/Users/playra/BrowserOS` is for:
+- Package-level configuration
+- Dependencies
+- Build scripts
+
+Do NOT edit root files for Trinity A2A work. Stay in `packages/browseros-agent/`.
+
+## PORT SSOT (Single Source of Truth)
+
+All port configurations are defined in:
+- `/Users/playra/BrowserOS/packages/browseros-agent/packages/shared/src/constants/ports.ts`
+
+A2A WebSocket port: **9001** (not 3000, not 9100)
+
+## VIOLATION DETECTION
+
+If you find yourself in `/Users/playra/BrowserOS` (root):
+1. STOP immediately
+2. Switch to `/Users/playra/BrowserOS/packages/browseros-agent`
+3. Re-read the task context
+
+## AGENT COMMANDS — FOLLOW STRICTLY
+
+1. **Work ONLY inside** `packages/browseros-agent/` — never in root
+2. **DO NOT use** `localhost:3000` — this is NOT the A2A port
+3. **DO NOT take ports from**: old logs, old INTEGRATION.md copies, ~/t27 duplicates, or guesses
+4. **ALWAYS read** `packages/shared/src/constants/ports.ts` before ANY run
+5. **Port 3001 is DEPRECATED** — A2A WebSocket is **9001** only
+
+### Pre-Flight Checklist
+Before running any A2A/Trinity task:
+```bash
+# 1. Verify you're in the right directory
+pwd  # Must output: .../BrowserOS/packages/browseros-agent
+
+# 2. Read actual ports
+cat packages/shared/src/constants/ports.ts
+
+# 3. Use ONLY those values — no assumptions
+```
+
+---
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
@@ -43,6 +98,25 @@ export class GeminiAgent { ... }
 ## Project Overview
 
 **BrowserOS Server** - The automation engine inside BrowserOS. This MCP server powers the built-in AI agent and lets external tools like `claude-code` or `gemini-cli` control the browser. Starts automatically when BrowserOS launches.
+
+## Trinity A2A / Relay Observer
+
+This workspace also contains the Trinity A2A (Agent-to-Agent) relay observer and experience hooks.
+
+### Key Components
+
+- `apps/server/src/agent/portable/relay-observer.ts` — WebSocket relay observer implementation
+- `apps/server/src/agent/portable/a2a-types.ts` — Type definitions for A2A communication
+- `apps/server/src/agent/portable/INTEGRATION.md` — Multi-agent A2A scenarios documentation
+
+### Port Configuration
+
+See `packages/shared/src/constants/ports.ts` for the single source of truth.
+
+- **A2A WebSocket**: 9001
+- **CDP**: 9000 / 9005 / 9010
+- **Server**: 9100 / 9105 / 9110
+- **Extension**: 9300 / 9305 / 9310
 
 ## Bun Preferences
 

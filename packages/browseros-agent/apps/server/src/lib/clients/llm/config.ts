@@ -17,6 +17,14 @@ export async function resolveLLMConfig(
   config: LLMConfig,
   browserosId?: string,
 ): Promise<ResolvedLLMConfig> {
+  logger.debug('resolveLLMConfig input', {
+    provider: config.provider,
+    model: config.model,
+    baseUrl: config.baseUrl ? String(config.baseUrl) : undefined,
+    hasApiKey: !!config.apiKey,
+    browserosId: browserosId ?? undefined,
+  })
+
   // OAuth providers: resolve token from server-side storage
   if (config.provider === LLM_PROVIDERS.CHATGPT_PRO) {
     return resolveOAuthConfig(config, browserosId, {
@@ -55,6 +63,14 @@ export async function resolveLLMConfig(
   // All other providers: passthrough with model validation
   if (!config.model) {
     throw new Error(`model is required for ${config.provider} provider`)
+  }
+
+  if (config.provider === LLM_PROVIDERS.ZAI) {
+    logger.info('resolveLLMConfig passthrough (zai)', {
+      model: config.model,
+      hasApiKey: !!config.apiKey,
+      baseUrl: config.baseUrl ? String(config.baseUrl) : undefined,
+    })
   }
   return config as ResolvedLLMConfig
 }

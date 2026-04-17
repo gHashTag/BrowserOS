@@ -1,3 +1,4 @@
+import { DEFAULT_PORTS } from '@browseros/shared/constants/ports'
 import { zValidator } from '@hono/zod-validator'
 import { Hono } from 'hono'
 import { SessionStore } from '../../agent/session-store'
@@ -10,7 +11,6 @@ import type { ToolRegistry } from '../../tools/tool-registry'
 import { ChatService } from '../services/chat-service'
 import { ChatRequestSchema } from '../types'
 import { ConversationIdParamSchema } from '../utils/validation'
-import { DEFAULT_PORTS } from '@browseros/shared/constants/ports'
 
 interface ChatRouteDeps {
   browser: Browser
@@ -79,8 +79,7 @@ export function createChatRoutes(deps: ChatRouteDeps) {
           conversationId: request.conversationId,
           provider: request.provider,
           model: request.model,
-          errorMessage:
-            error instanceof Error ? error.message : String(error),
+          errorMessage: error instanceof Error ? error.message : String(error),
           errorStack: error instanceof Error ? error.stack : undefined,
         })
         throw error

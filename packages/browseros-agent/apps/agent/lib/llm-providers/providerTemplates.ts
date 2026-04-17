@@ -147,8 +147,7 @@ export const providerTemplates: ProviderTemplate[] = [
   enrichTemplate('zai', {
     defaultModelId: 'z-ai/glm-5.1',
     apiKeyUrl: 'https://open.bigmodel.cn/usercenter/apikeys',
-    setupGuideUrl:
-      'https://docs.browseros.com/features/bring-your-own-llm#zai',
+    setupGuideUrl: 'https://docs.browseros.com/features/bring-your-own-llm#zai',
   }),
 ]
 

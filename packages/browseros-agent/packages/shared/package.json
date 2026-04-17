@@ -84,6 +84,10 @@
     "./constants/portable-agent": {
       "types": "./src/constants/portable-agent.ts",
       "default": "./src/constants/portable-agent.ts"
+    },
+    "./types/trinity-benchmark": {
+      "types": "./src/types/trinity-benchmark.ts",
+      "default": "./src/types/trinity-benchmark.ts"
     }
   }
 }

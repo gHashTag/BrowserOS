@@ -36,6 +36,11 @@
     "lint:fix": "bunx biome check --write --unsafe",
     "gen:cdp": "bun scripts/codegen/cdp-protocol.ts",
     "generate:models": "bun scripts/generate-models.ts",
+    "benchmark:a2a": "bun run apps/server/src/agent/portable/benchmark-a2a.ts",
+    "test:benchmark": "bun run apps/server/src/agent/portable/benchmark-a2a.ts baseline",
+    "test:benchmark:baseline": "bun run apps/server/src/agent/portable/benchmark-a2a.ts baseline",
+    "test:benchmark:reconnect": "bun run apps/server/src/agent/portable/benchmark-a2a.ts reconnect",
+    "test:benchmark:multisession": "bun run apps/server/src/agent/portable/benchmark-a2a.ts multisession",
     "clean": "rimraf dist"
   },
   "repository": "browseros-ai/BrowserOS-server",
