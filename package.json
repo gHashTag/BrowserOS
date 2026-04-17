@@ -1,0 +1,12 @@
+{
+  "name": "browseros-root",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "cd packages/browseros-agent && bun run dev:watch",
+    "dev:new": "cd packages/browseros-agent && bun run dev:watch:new",
+    "dev:manual": "cd packages/browseros-agent && bun run dev:manual",
+    "test": "cd packages/browseros-agent && bun run test"
+  }
+}
+
