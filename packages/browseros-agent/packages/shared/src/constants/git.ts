@@ -1,0 +1,15 @@
+/**
+ * @license AGPL-3.0-or-later
+ * Copyright 2025 BrowserOS
+ *
+ * Git-related constants
+ */
+
+export const GIT_CONSTANTS = {
+  MAX_REPO_PATH_LENGTH: 512,
+  MAX_COMMIT_MESSAGE_LENGTH: 2048,
+  GITBUTLER_CLI_PATH: 'gitbutler',
+  GITBUTLER_API_PORT: 43216,
+  DEFAULT_TRANSACTION_TIMEOUT_MS: 30_000,
+  MAX_CONCURRENT_OPERATIONS: 10,
+} as const

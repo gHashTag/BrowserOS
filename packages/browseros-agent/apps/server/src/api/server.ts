@@ -25,6 +25,7 @@ import { createAgentBridgeRoutes } from './routes/agent-bridge'
 import { createA2ARoutes } from './routes/a2a'
 import { createChatRoutes } from './routes/chat'
 import { createCreditsRoutes } from './routes/credits'
+import { createGitRoutes } from './routes/git'
 import { createHealthRoute } from './routes/health'
 import { createKlavisRoutes } from './routes/klavis'
 import { createMcpRoutes } from './routes/mcp'
@@ -45,6 +46,7 @@ import {
   type KlavisProxyHandle,
 } from './services/klavis/strata-proxy'
 import { getPodmanRuntime } from './services/openclaw/podman-runtime'
+import { GitOrchestrator } from '../services/git/git-orchestrator'
 import type { Env, HttpServerConfig } from './types'
 import { defaultCorsConfig } from './utils/cors'
 import { requireTrustedAppOrigin } from './utils/request-auth'
@@ -204,6 +206,13 @@ export async function createHttpServer(config: HttpServerConfig) {
       }),
     )
     .route('/claw', clawRoutes)
+
+  // Initialize Git Orchestrator and routes
+  const gitOrchestrator = await GitOrchestrator.create({
+    workingDir: executionDir,
+  })
+
+  app.route('/api/git', createGitRoutes({ orchestrator: gitOrchestrator }))
 
   // Error handler
   app.onError((err, c) => {

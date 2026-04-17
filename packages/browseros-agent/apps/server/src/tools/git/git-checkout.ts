@@ -1,0 +1,46 @@
+/**
+ * @license AGPL-3.0-or-later
+ * Copyright 2025 BrowserOS
+ *
+ * Git Checkout Tool
+ */
+
+import { defineTool } from '../framework'
+import { z } from 'zod'
+
+export const gitCheckout = defineTool({
+  name: 'git_checkout',
+  description: 'Switch branches or restore files in a git repository',
+  approvalCategory: 'filesystem',
+  input: z.object({
+    path: z.string().describe('Path to the git repository'),
+    target: z.string().describe('Branch name or file path to checkout'),
+    restore: z.boolean().default(false).describe('If true, restore file from HEAD'),
+  }),
+  output: z.object({
+    success: z.boolean(),
+    currentBranch: z.string().optional(),
+    error: z.string().optional(),
+  }),
+  handler: async (args, ctx, response) => {
+    const { path, target, restore } = args
+    const { $ } = await import('bun')
+
+    try {
+      if (restore) {
+        await $`git restore ${target}`.cwd(path).quiet()
+        response.json({ success: true })
+      } else {
+        await $`git checkout ${target}`.cwd(path).quiet()
+
+        const branch = await $`git rev-parse --abbrev-ref HEAD`.cwd(path).quiet()
+        response.json({
+          success: true,
+          currentBranch: branch.stdout.toString().trim(),
+        })
+      }
+    } catch (error) {
+      response.json({ success: false, error: String(error) })
+    }
+  },
+})

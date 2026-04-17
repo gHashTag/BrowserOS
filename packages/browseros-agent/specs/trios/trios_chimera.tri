@@ -1,0 +1,127 @@
+spec trios_chimera {
+
+  module git_integration {
+    version: "1.0.0"
+    ring: "triangular"
+    seal: "pending"
+    description: "Professional multi-project development with Git integration for BrowserOS TRIOS"
+    imports: ["core_trinity", "mcp_registry", "agent_framework"]
+  }
+
+  constants {
+    MAX_REPO_PATH_LENGTH = 512
+    MAX_COMMIT_MESSAGE_LENGTH = 2048
+    GITBUTLER_CLI_PATH = "gitbutler"
+    GITBUTLER_API_PORT = 43216
+    DEFAULT_TRANSACTION_TIMEOUT_MS = 30000
+    MAX_CONCURRENT_OPERATIONS = 10
+  }
+
+  types {
+    RepositoryId: string
+    BranchName: string
+    CommitHash: string
+    FilePath: string
+
+    GitRepository {
+      id: RepositoryId
+      path: string
+      name: string
+      currentBranch: BranchName
+      status: GitStatus
+      lastCommit: CommitInfo?
+      isDirty: bool
+    }
+
+    GitStatus {
+      branch: BranchName
+      ahead: int
+      behind: int
+      staged: FileChange[]
+      unstaged: FileChange[]
+      untracked: string[]
+      conflicted: string[]
+    }
+
+    FileChange {
+      path: FilePath
+      status: "added" | "modified" | "deleted" | "renamed"
+      oldPath?: FilePath
+    }
+
+    CommitInfo {
+      hash: CommitHash
+      message: string
+      author: string
+      timestamp: int64
+    }
+
+    GitOperation {
+      type: "status" | "branch" | "commit" | "checkout" | "merge" | "pull" | "push"
+      repositoryId: RepositoryId
+      status: "pending" | "running" | "success" | "failed"
+      startedAt: int64
+      completedAt?: int64
+      error?: string
+    }
+
+    TransactionResult {
+      success: bool
+      rollbackPerformed: bool
+      operations: string[]
+      error?: string
+    }
+
+    GitButlerMode {
+      type: "cli" | "api" | "filewatch"
+      available: bool
+      fallbackReason?: string
+    }
+  }
+
+  test repository_lifecycle {
+    given "a valid Git repository path"
+    when "GitOrchestrator initializes the repository"
+    then "repository should have valid id, current branch, and status"
+  }
+
+  test transaction_safety {
+    given "a transaction with multiple git operations"
+    when "one operation fails mid-transaction"
+    then "all prior operations should be rolled back"
+    and "repository should return to pre-transaction state"
+  }
+
+  test gitbutler_fallback {
+    given "GitButler CLI is not available"
+    when "initializing GitButler integration"
+    then "should fall back to API layer"
+    and "if API unavailable, should fall back to file watching"
+  }
+
+  test branch_switching {
+    given "repository with multiple branches"
+    when "user switches branches via UI"
+    then "branch should change"
+    and "working directory should update"
+    and "status should refresh"
+  }
+
+  test commit_workflow {
+    given "repository with unstaged changes"
+    when "user stages files and creates commit"
+    then "commit should be created with message"
+    and "repository should show clean status"
+    and "operation should be logged"
+  }
+
+  bench repository_status {
+    measure "time to fetch repository status"
+    target "< 500ms for 100 files, < 2s for 1000 files"
+  }
+
+  bench transaction_rollback {
+    measure "time to rollback failed transaction"
+    target "< 100ms for 5 operations"
+  }
+}

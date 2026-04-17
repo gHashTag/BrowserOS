@@ -10,6 +10,14 @@ import { browseros_info } from './browseros-info'
 import { get_console_logs } from './console'
 import { get_dom, search_dom } from './dom'
 import {
+  gitBranch,
+  gitCheckout,
+  gitCommit,
+  gitPull,
+  gitPush,
+  gitStatus,
+} from './git'
+import {
   delete_history_range,
   delete_history_url,
   get_recent_history,
@@ -153,4 +161,12 @@ export const registry = createRegistry([
   // Nudges (2)
   suggest_schedule,
   suggest_app_connection,
+
+  // Git (6)
+  gitStatus,
+  gitBranch,
+  gitCheckout,
+  gitCommit,
+  gitPull,
+  gitPush,
 ])
