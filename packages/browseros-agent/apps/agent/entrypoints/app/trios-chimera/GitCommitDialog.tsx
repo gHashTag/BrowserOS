@@ -6,21 +6,21 @@
  * Commit message dialog with file staging
  */
 
+import { Check, FileText, GitCommit } from 'lucide-react'
 import type { FC } from 'react'
 import { useState } from 'react'
-import { Check, FileText, GitCommit } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Checkbox } from '@/components/ui/checkbox'
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Badge } from '@/components/ui/badge'
+import { Textarea } from '@/components/ui/textarea'
 
 interface GitCommitDialogProps {
   open: boolean
@@ -50,7 +50,9 @@ export const GitCommitDialog: FC<GitCommitDialogProps> = ({
   onCommit,
 }) => {
   const [message, setMessage] = useState('')
-  const [selectedUnstaged, setSelectedUnstaged] = useState<Set<string>>(new Set())
+  const [selectedUnstaged, setSelectedUnstaged] = useState<Set<string>>(
+    new Set(),
+  )
   const [selectedPrefix, setSelectedPrefix] = useState<string | null>(null)
 
   const handleMessageChange = (value: string) => {
@@ -159,7 +161,10 @@ export const GitCommitDialog: FC<GitCommitDialogProps> = ({
               <ScrollArea className="h-24 border rounded-md p-2">
                 <div className="space-y-1">
                   {stagedFiles.map((file) => (
-                    <div key={file} className="flex items-center gap-2 text-sm text-muted-foreground p-1">
+                    <div
+                      key={file}
+                      className="flex items-center gap-2 text-sm text-muted-foreground p-1"
+                    >
                       <Check className="size-3 text-green-600" />
                       <FileText className="size-3" />
                       <span className="truncate">{file}</span>
@@ -174,10 +179,7 @@ export const GitCommitDialog: FC<GitCommitDialogProps> = ({
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button
-              onClick={handleCommit}
-              disabled={!message.trim()}
-            >
+            <Button onClick={handleCommit} disabled={!message.trim()}>
               <Check className="mr-1 size-4" />
               Commit
             </Button>

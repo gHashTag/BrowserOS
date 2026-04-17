@@ -5,12 +5,13 @@
  * Git Status Tool
  */
 
-import { defineTool } from '../framework'
 import { z } from 'zod'
+import { defineTool } from '../framework'
 
 export const gitStatus = defineTool({
   name: 'git_status',
-  description: 'Get the current git status of a repository including branch, staged/unstaged changes, and untracked files',
+  description:
+    'Get the current git status of a repository including branch, staged/unstaged changes, and untracked files',
   approvalCategory: 'filesystem',
   input: z.object({
     path: z.string().describe('Path to the git repository'),
@@ -19,16 +20,20 @@ export const gitStatus = defineTool({
     branch: z.string(),
     ahead: z.number(),
     behind: z.number(),
-    staged: z.array(z.object({
-      path: z.string(),
-      status: z.enum(['added', 'modified', 'deleted', 'renamed']),
-      oldPath: z.string().optional(),
-    })),
-    unstaged: z.array(z.object({
-      path: z.string(),
-      status: z.enum(['added', 'modified', 'deleted', 'renamed']),
-      oldPath: z.string().optional(),
-    })),
+    staged: z.array(
+      z.object({
+        path: z.string(),
+        status: z.enum(['added', 'modified', 'deleted', 'renamed']),
+        oldPath: z.string().optional(),
+      }),
+    ),
+    unstaged: z.array(
+      z.object({
+        path: z.string(),
+        status: z.enum(['added', 'modified', 'deleted', 'renamed']),
+        oldPath: z.string().optional(),
+      }),
+    ),
     untracked: z.array(z.string()),
     conflicted: z.array(z.string()),
   }),

@@ -5,8 +5,8 @@
  * Git Commit Tool
  */
 
-import { defineTool } from '../framework'
 import { z } from 'zod'
+import { defineTool } from '../framework'
 
 export const gitCommit = defineTool({
   name: 'git_commit',
@@ -15,7 +15,10 @@ export const gitCommit = defineTool({
   input: z.object({
     path: z.string().describe('Path to the git repository'),
     message: z.string().min(1).max(2048).describe('Commit message'),
-    files: z.array(z.string()).optional().describe('Files to stage before committing'),
+    files: z
+      .array(z.string())
+      .optional()
+      .describe('Files to stage before committing'),
   }),
   output: z.object({
     success: z.boolean(),

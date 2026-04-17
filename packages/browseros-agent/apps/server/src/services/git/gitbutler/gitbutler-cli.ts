@@ -6,9 +6,9 @@
  * CLI-first approach for GitButler
  */
 
-import type { GitStatus, CommitInfo, BranchInfo } from '../git-repository'
 import { GIT_CONSTANTS } from '@browseros/shared/constants/git'
 import { $ } from 'bun'
+import type { BranchInfo, CommitInfo, GitStatus } from '../git-repository'
 
 export class GitButlerCLI {
   private cliPath: string
@@ -54,7 +54,7 @@ export class GitButlerCLI {
   async createBranch(
     path: string,
     name: string,
-    baseBranch?: string
+    baseBranch?: string,
   ): Promise<void> {
     const cmd = baseBranch
       ? `${this.cliPath} branch create ${name} --base ${baseBranch} ${path}`
@@ -69,9 +69,10 @@ export class GitButlerCLI {
   async commit(
     path: string,
     message: string,
-    files?: string[]
+    files?: string[],
   ): Promise<CommitInfo> {
-    const result = await $`${this.cliPath} commit --message "${message}" ${path}`.quiet()
+    const result =
+      await $`${this.cliPath} commit --message "${message}" ${path}`.quiet()
     const data = JSON.parse(result.stdout.toString())
     return {
       hash: data.hash,
@@ -118,16 +119,18 @@ export class GitButlerCLI {
       branch: data.branch || '',
       ahead: data.ahead || 0,
       behind: data.behind || 0,
-      staged: data.staged?.map((f: any) => ({
-        path: f.path,
-        status: f.status,
-        oldPath: f.oldPath,
-      })) || [],
-      unstaged: data.unstaged?.map((f: any) => ({
-        path: f.path,
-        status: f.status,
-        oldPath: f.oldPath,
-      })) || [],
+      staged:
+        data.staged?.map((f: any) => ({
+          path: f.path,
+          status: f.status,
+          oldPath: f.oldPath,
+        })) || [],
+      unstaged:
+        data.unstaged?.map((f: any) => ({
+          path: f.path,
+          status: f.status,
+          oldPath: f.oldPath,
+        })) || [],
       untracked: data.untracked || [],
       conflicted: data.conflicted || [],
     }

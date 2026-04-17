@@ -6,40 +6,44 @@
  * Main page for AGENT T tab with Git integration
  */
 
-import type { FC } from 'react'
-import { useState, useEffect } from 'react'
 import {
-  GitRepo,
-  RefreshCw,
-  Loader2,
-  TerminalSquare,
   AlertCircle,
+  GitRepo,
+  Loader2,
+  RefreshCw,
+  TerminalSquare,
 } from 'lucide-react'
+import type { FC } from 'react'
+import { useEffect, useState } from 'react'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Badge } from '@/components/ui/badge'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { useGitRepositories } from './useGit'
-import { type GitRepository } from './git-types'
-import { GitRepositoryPanel } from './GitRepositoryPanel'
-import { GitFileTree } from './GitFileTree'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { GitBranchSelector } from './GitBranchSelector'
 import { GitCommitDialog } from './GitCommitDialog'
+import { GitFileTree } from './GitFileTree'
+import { GitRepositoryPanel } from './GitRepositoryPanel'
+import type { GitRepository } from './git-types'
+import { useGitRepositories } from './useGit'
 
 export const AgentTerminalPage: FC = () => {
   const [selectedRepoId, setSelectedRepoId] = useState<string | null>(null)
-  const [activePanel, setActivePanel] = useState<'status' | 'files' | 'history'>('status')
+  const [activePanel, setActivePanel] = useState<
+    'status' | 'files' | 'history'
+  >('status')
   const [showCommitDialog, setShowCommitDialog] = useState(false)
 
-  const {
-    data: repositories,
-    isLoading,
-    error,
-    refetch,
-  } = useGitRepositories()
+  const { data: repositories, isLoading, error, refetch } = useGitRepositories()
 
-  const selectedRepo = repositories?.find((r) => r.id === selectedRepoId) || null
+  const selectedRepo =
+    repositories?.find((r) => r.id === selectedRepoId) || null
 
   useEffect(() => {
     if (repositories && repositories.length > 0 && !selectedRepoId) {
@@ -91,16 +95,15 @@ export const AgentTerminalPage: FC = () => {
               <TerminalSquare className="size-5" />
               AGENT T
             </h1>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={() => refetch()}
-            >
+            <Button variant="ghost" size="icon" onClick={() => refetch()}>
               <RefreshCw className="size-4" />
             </Button>
           </div>
 
-          <Select value={selectedRepoId || ''} onValueChange={setSelectedRepoId}>
+          <Select
+            value={selectedRepoId || ''}
+            onValueChange={setSelectedRepoId}
+          >
             <SelectTrigger>
               <SelectValue placeholder="Select repository" />
             </SelectTrigger>
@@ -149,13 +152,10 @@ export const AgentTerminalPage: FC = () => {
               {activePanel === 'status' ? (
                 <GitRepositoryPanel
                   repository={selectedRepo}
-                  onBranchChange={(branch) => {
-                  }}
+                  onBranchChange={(branch) => {}}
                   onCommit={() => setShowCommitDialog(true)}
-                  onPull={() => {
-                  }}
-                  onPush={() => {
-                  }}
+                  onPull={() => {}}
+                  onPush={() => {}}
                 />
               ) : (
                 <div className="p-6">

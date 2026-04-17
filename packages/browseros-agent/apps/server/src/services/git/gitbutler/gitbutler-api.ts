@@ -6,8 +6,8 @@
  * API fallback when CLI is unavailable
  */
 
-import type { GitStatus, CommitInfo, BranchInfo } from '../git-repository'
 import { GIT_CONSTANTS } from '@browseros/shared/constants/git'
+import type { BranchInfo, CommitInfo, GitStatus } from '../git-repository'
 
 export class GitButlerAPI {
   private baseUrl: string

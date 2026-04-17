@@ -6,9 +6,20 @@
  * Branch selection UI with create/switch functionality
  */
 
+import { Cloud, GitBranch, Plus, Trash2 } from 'lucide-react'
 import type { FC } from 'react'
 import { useState } from 'react'
-import { Plus, Trash2, GitBranch, Cloud } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import {
   Select,
   SelectContent,
@@ -16,12 +27,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Badge } from '@/components/ui/badge'
-import { type BranchInfo } from './git-types'
+import type { BranchInfo } from './git-types'
 
 interface GitBranchSelectorProps {
   repositoryId: string
@@ -46,7 +52,7 @@ export const GitBranchSelector: FC<GitBranchSelectorProps> = ({
   const [baseBranch, setBaseBranch] = useState(currentBranch)
 
   const filteredBranches = branches.filter((b) =>
-    b.name.toLowerCase().includes(searchQuery.toLowerCase())
+    b.name.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
   const handleCreate = () => {
@@ -136,7 +142,11 @@ export const GitBranchSelector: FC<GitBranchSelectorProps> = ({
                     </SelectContent>
                   </Select>
                 </div>
-                <Button onClick={handleCreate} className="w-full" disabled={!newBranchName.trim()}>
+                <Button
+                  onClick={handleCreate}
+                  className="w-full"
+                  disabled={!newBranchName.trim()}
+                >
                   Create Branch
                 </Button>
               </div>

@@ -5,8 +5,8 @@
  * Git Push Tool
  */
 
-import { defineTool } from '../framework'
 import { z } from 'zod'
+import { defineTool } from '../framework'
 
 export const gitPush = defineTool({
   name: 'git_push',
@@ -15,7 +15,10 @@ export const gitPush = defineTool({
   input: z.object({
     path: z.string().describe('Path to the git repository'),
     branch: z.string().optional().describe('Specific branch to push'),
-    remote: z.string().default('origin').describe('Remote name (default: origin)'),
+    remote: z
+      .string()
+      .default('origin')
+      .describe('Remote name (default: origin)'),
     force: z.boolean().default(false).describe('Force push (use with caution)'),
   }),
   output: z.object({

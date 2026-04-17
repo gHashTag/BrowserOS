@@ -6,23 +6,23 @@
  * Displays repository status and provides quick actions
  */
 
-import type { FC } from 'react'
 import {
+  AlertCircle,
+  ArrowDown,
+  ArrowUp,
+  CheckCircle2,
+  FileDiff,
+  FileX,
   GitBranch,
   GitPull,
   GitPush,
-  CheckCircle2,
-  AlertCircle,
-  ArrowUp,
-  ArrowDown,
-  FileDiff,
-  FileX,
 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import type { FC } from 'react'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { GitBranchSelector } from './GitBranchSelector'
-import { type GitRepository } from './git-types'
+import type { GitRepository } from './git-types'
 
 interface GitRepositoryPanelProps {
   repository: GitRepository
@@ -73,10 +73,8 @@ export const GitRepositoryPanel: FC<GitRepositoryPanelProps> = ({
               currentBranch={repository.currentBranch}
               branches={[]}
               onSwitch={onBranchChange}
-              onCreate={() => {
-              }}
-              onDelete={() => {
-              }}
+              onCreate={() => {}}
+              onDelete={() => {}}
             />
           </div>
 
@@ -116,11 +114,7 @@ export const GitRepositoryPanel: FC<GitRepositoryPanelProps> = ({
               <GitPush className="mr-1 size-4" />
               Push
             </Button>
-            <Button
-              size="sm"
-              onClick={onCommit}
-              disabled={!hasChanges}
-            >
+            <Button size="sm" onClick={onCommit} disabled={!hasChanges}>
               <CheckCircle2 className="mr-1 size-4" />
               Commit
             </Button>
@@ -201,7 +195,9 @@ export const GitRepositoryPanel: FC<GitRepositoryPanelProps> = ({
           <CardContent>
             <ul className="space-y-1 text-sm text-muted-foreground">
               {status.untracked.map((file) => (
-                <li key={file} className="truncate">{file}</li>
+                <li key={file} className="truncate">
+                  {file}
+                </li>
               ))}
             </ul>
           </CardContent>

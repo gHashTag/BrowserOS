@@ -31,7 +31,7 @@ export class GitTransaction {
 
   constructor(
     private workingDir: string,
-    private timeout = GIT_CONSTANTS.DEFAULT_TRANSACTION_TIMEOUT_MS
+    private timeout = GIT_CONSTANTS.DEFAULT_TRANSACTION_TIMEOUT_MS,
   ) {}
 
   addOperation(op: GitOperation): void {
@@ -39,7 +39,7 @@ export class GitTransaction {
   }
 
   async executeTransaction<T>(
-    fn: () => Promise<T>
+    fn: () => Promise<T>,
   ): Promise<TransactionResult<T>> {
     const opNames: string[] = []
 
@@ -133,7 +133,7 @@ export class GitTransaction {
 export function withTransaction<T>(
   workingDir: string,
   operations: GitOperation[],
-  fn: () => Promise<T>
+  fn: () => Promise<T>,
 ): Promise<TransactionResult<T>> {
   const tx = new GitTransaction(workingDir)
   for (const op of operations) {

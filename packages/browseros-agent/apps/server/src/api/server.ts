@@ -21,8 +21,9 @@ import { initializeOAuth } from '../lib/clients/oauth'
 import { getDb } from '../lib/db'
 import { logger } from '../lib/logger'
 import { Sentry } from '../lib/sentry'
-import { createAgentBridgeRoutes } from './routes/agent-bridge'
+import { GitOrchestrator } from '../services/git/git-orchestrator'
 import { createA2ARoutes } from './routes/a2a'
+import { createAgentBridgeRoutes } from './routes/agent-bridge'
 import { createChatRoutes } from './routes/chat'
 import { createCreditsRoutes } from './routes/credits'
 import { createGitRoutes } from './routes/git'
@@ -40,16 +41,15 @@ import { createSkillsRoutes } from './routes/skills'
 import { createSoulRoutes } from './routes/soul'
 import { createStatusRoute } from './routes/status'
 import { createTerminalRoutes } from './routes/terminal'
-import { websocket } from './websocket'
 import {
   connectKlavisProxy,
   type KlavisProxyHandle,
 } from './services/klavis/strata-proxy'
 import { getPodmanRuntime } from './services/openclaw/podman-runtime'
-import { GitOrchestrator } from '../services/git/git-orchestrator'
 import type { Env, HttpServerConfig } from './types'
 import { defaultCorsConfig } from './utils/cors'
 import { requireTrustedAppOrigin } from './utils/request-auth'
+import { websocket } from './websocket'
 
 async function assertPortAvailable(port: number): Promise<void> {
   const net = await import('node:net')

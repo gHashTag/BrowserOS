@@ -6,18 +6,22 @@
  * Core orchestrator with Git operations and transaction safety
  */
 
-import type {
-  GitRepository,
-  GitStatus,
-  CommitInfo,
-  BranchInfo,
-  RepositoryId,
-} from './git-repository'
-import { withTransaction, GitOperation } from './git-transaction'
-import { detectGitButlerMode, createGitButlerClient, type GitButlerMode } from './gitbutler'
+import { existsSync } from 'node:fs'
 import { GIT_CONSTANTS } from '@browseros/shared/constants/git'
 import { $ } from 'bun'
-import { existsSync } from 'node:fs'
+import type {
+  BranchInfo,
+  CommitInfo,
+  GitRepository,
+  GitStatus,
+  RepositoryId,
+} from './git-repository'
+import { type GitOperation, withTransaction } from './git-transaction'
+import {
+  createGitButlerClient,
+  detectGitButlerMode,
+  type GitButlerMode,
+} from './gitbutler'
 
 export interface GitOrchestratorConfig {
   workingDir: string
@@ -104,7 +108,7 @@ export class GitOrchestrator {
   async createCommit(
     repoId: RepositoryId,
     message: string,
-    files: string[]
+    files: string[],
   ): Promise<CommitInfo> {
     const repo = this.repositories.get(repoId)
     if (!repo) {
@@ -181,8 +185,7 @@ export class GitOrchestrator {
       execute: async () => {
         await this.client.push(repo.path, targetBranch)
       },
-      rollback: async () => {
-      },
+      rollback: async () => {},
     }
 
     await withTransaction(repo.path, [op], async () => {
@@ -202,7 +205,7 @@ export class GitOrchestrator {
   async createBranch(
     repoId: RepositoryId,
     name: string,
-    baseBranch?: string
+    baseBranch?: string,
   ): Promise<void> {
     const repo = this.repositories.get(repoId)
     if (!repo) {
@@ -212,7 +215,9 @@ export class GitOrchestrator {
     if ('createBranch' in this.client) {
       await this.client.createBranch(repo.path, name, baseBranch)
     } else {
-      await $`git checkout -b ${name} ${baseBranch || ''}`.cwd(repo.path).quiet()
+      await $`git checkout -b ${name} ${baseBranch || ''}`
+        .cwd(repo.path)
+        .quiet()
     }
   }
 
@@ -274,7 +279,9 @@ export class GitOrchestrator {
     return repos
   }
 
-  private async initializeRepository(path: string): Promise<GitRepository | null> {
+  private async initializeRepository(
+    path: string,
+  ): Promise<GitRepository | null> {
     try {
       const name = path.split('/').pop() || path
       const status = await this.client.getStatus(path)
@@ -300,8 +307,12 @@ export class GitOrchestrator {
 
   private async getLastCommit(path: string): Promise<CommitInfo | null> {
     try {
-      const result = await $`git log -1 --format="%H|%s|%an|%ct"`.cwd(path).quiet()
-      const [hash, message, author, timestamp] = result.stdout.toString().split('|')
+      const result = await $`git log -1 --format="%H|%s|%an|%ct"`
+        .cwd(path)
+        .quiet()
+      const [hash, message, author, timestamp] = result.stdout
+        .toString()
+        .split('|')
       return {
         hash,
         message,

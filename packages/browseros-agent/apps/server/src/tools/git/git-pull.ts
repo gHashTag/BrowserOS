@@ -5,8 +5,8 @@
  * Git Pull Tool
  */
 
-import { defineTool } from '../framework'
 import { z } from 'zod'
+import { defineTool } from '../framework'
 
 export const gitPull = defineTool({
   name: 'git_pull',
@@ -15,7 +15,10 @@ export const gitPull = defineTool({
   input: z.object({
     path: z.string().describe('Path to the git repository'),
     branch: z.string().optional().describe('Specific branch to pull'),
-    remote: z.string().default('origin').describe('Remote name (default: origin)'),
+    remote: z
+      .string()
+      .default('origin')
+      .describe('Remote name (default: origin)'),
   }),
   output: z.object({
     success: z.boolean(),
@@ -42,7 +45,11 @@ export const gitPull = defineTool({
         const status = await $`git status --porcelain`.cwd(path).quiet()
         const lines = status.stdout.toString().split('\n')
         for (const line of lines) {
-          if (line.startsWith('UU') || line.startsWith('AA') || line.startsWith('DD')) {
+          if (
+            line.startsWith('UU') ||
+            line.startsWith('AA') ||
+            line.startsWith('DD')
+          ) {
             conflicts.push(line.slice(3))
           }
         }

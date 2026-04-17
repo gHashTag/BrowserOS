@@ -5,8 +5,8 @@
  * Git Checkout Tool
  */
 
-import { defineTool } from '../framework'
 import { z } from 'zod'
+import { defineTool } from '../framework'
 
 export const gitCheckout = defineTool({
   name: 'git_checkout',
@@ -15,7 +15,10 @@ export const gitCheckout = defineTool({
   input: z.object({
     path: z.string().describe('Path to the git repository'),
     target: z.string().describe('Branch name or file path to checkout'),
-    restore: z.boolean().default(false).describe('If true, restore file from HEAD'),
+    restore: z
+      .boolean()
+      .default(false)
+      .describe('If true, restore file from HEAD'),
   }),
   output: z.object({
     success: z.boolean(),
@@ -33,7 +36,9 @@ export const gitCheckout = defineTool({
       } else {
         await $`git checkout ${target}`.cwd(path).quiet()
 
-        const branch = await $`git rev-parse --abbrev-ref HEAD`.cwd(path).quiet()
+        const branch = await $`git rev-parse --abbrev-ref HEAD`
+          .cwd(path)
+          .quiet()
         response.json({
           success: true,
           currentBranch: branch.stdout.toString().trim(),

@@ -5,26 +5,34 @@
  * Git Branch Tool
  */
 
-import { defineTool } from '../framework'
 import { z } from 'zod'
+import { defineTool } from '../framework'
 
 export const gitBranch = defineTool({
   name: 'git_branch',
-  description: 'List all branches in a git repository or switch to a different branch',
+  description:
+    'List all branches in a git repository or switch to a different branch',
   approvalCategory: 'filesystem',
   input: z.object({
     path: z.string().describe('Path to the git repository'),
     action: z.enum(['list', 'switch', 'create', 'delete']).default('list'),
-    branch: z.string().optional().describe('Branch name for switch/create/delete actions'),
+    branch: z
+      .string()
+      .optional()
+      .describe('Branch name for switch/create/delete actions'),
     baseBranch: z.string().optional().describe('Base branch for create action'),
   }),
   output: z.object({
     success: z.boolean(),
-    branches: z.array(z.object({
-      name: z.string(),
-      isCurrent: z.boolean(),
-      isRemote: z.boolean(),
-    })).optional(),
+    branches: z
+      .array(
+        z.object({
+          name: z.string(),
+          isCurrent: z.boolean(),
+          isRemote: z.boolean(),
+        }),
+      )
+      .optional(),
     currentBranch: z.string().optional(),
     error: z.string().optional(),
   }),
@@ -67,7 +75,10 @@ export const gitBranch = defineTool({
         await $`git branch -D ${branch}`.cwd(path).quiet()
         response.json({ success: true })
       } else {
-        response.json({ success: false, error: 'Invalid action or missing branch name' })
+        response.json({
+          success: false,
+          error: 'Invalid action or missing branch name',
+        })
       }
     } catch (error) {
       response.json({ success: false, error: String(error) })

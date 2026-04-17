@@ -6,9 +6,9 @@
  * Detects available mode and creates appropriate client
  */
 
-import type { GitStatus, CommitInfo, BranchInfo } from '../git-repository'
-import { GitButlerCLI } from './gitbutler-cli'
+import type { BranchInfo, CommitInfo, GitStatus } from '../git-repository'
 import { GitButlerAPI } from './gitbutler-api'
+import { GitButlerCLI } from './gitbutler-cli'
 import { GitButlerFileWatcher } from './gitbutler-fs'
 
 export type GitButlerMode = 'cli' | 'api' | 'filewatch'
@@ -33,7 +33,7 @@ export interface GitButlerClient {
 }
 
 export async function detectGitButlerMode(
-  config: GitButlerConfig = {}
+  config: GitButlerConfig = {},
 ): Promise<{ mode: GitButlerMode; available: boolean }> {
   const cli = new GitButlerCLI(config.cliPath)
   if (await cli.isAvailable()) {
@@ -50,7 +50,7 @@ export async function detectGitButlerMode(
 
 export function createGitButlerClient(
   mode: GitButlerMode,
-  config: GitButlerConfig = {}
+  config: GitButlerConfig = {},
 ): GitButlerClient {
   switch (mode) {
     case 'cli':

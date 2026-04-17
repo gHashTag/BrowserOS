@@ -7,10 +7,10 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type {
-  GitRepository,
-  GitStatus,
   BranchInfo,
   FileChange,
+  GitRepository,
+  GitStatus,
 } from './git-types'
 
 const API_BASE = '/api/git'
@@ -73,7 +73,13 @@ export function useGitSwitchBranch() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ repoId, branch }: { repoId: string; branch: string }) => {
+    mutationFn: async ({
+      repoId,
+      branch,
+    }: {
+      repoId: string
+      branch: string
+    }) => {
       const res = await fetch(`${API_BASE}/checkout`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -83,8 +89,12 @@ export function useGitSwitchBranch() {
       return res.json()
     },
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['git', 'status', variables.repoId] })
-      queryClient.invalidateQueries({ queryKey: ['git', 'branches', variables.repoId] })
+      queryClient.invalidateQueries({
+        queryKey: ['git', 'status', variables.repoId],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ['git', 'branches', variables.repoId],
+      })
     },
   })
 }
@@ -111,7 +121,9 @@ export function useGitCommit() {
       return res.json()
     },
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['git', 'status', variables.repoId] })
+      queryClient.invalidateQueries({
+        queryKey: ['git', 'status', variables.repoId],
+      })
       queryClient.invalidateQueries({ queryKey: ['git', 'repositories'] })
     },
   })
@@ -131,8 +143,12 @@ export function useGitPull() {
       return res.json()
     },
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['git', 'status', variables.repoId] })
-      queryClient.invalidateQueries({ queryKey: ['git', 'branches', variables.repoId] })
+      queryClient.invalidateQueries({
+        queryKey: ['git', 'status', variables.repoId],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ['git', 'branches', variables.repoId],
+      })
     },
   })
 }
@@ -141,7 +157,13 @@ export function useGitPush() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ repoId, branch }: { repoId: string; branch?: string }) => {
+    mutationFn: async ({
+      repoId,
+      branch,
+    }: {
+      repoId: string
+      branch?: string
+    }) => {
       const res = await fetch(`${API_BASE}/push`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -151,8 +173,12 @@ export function useGitPush() {
       return res.json()
     },
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['git', 'status', variables.repoId] })
-      queryClient.invalidateQueries({ queryKey: ['git', 'branches', variables.repoId] })
+      queryClient.invalidateQueries({
+        queryKey: ['git', 'status', variables.repoId],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ['git', 'branches', variables.repoId],
+      })
     },
   })
 }
@@ -179,8 +205,12 @@ export function useGitCreateBranch() {
       return res.json()
     },
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['git', 'branches', variables.repoId] })
-      queryClient.invalidateQueries({ queryKey: ['git', 'status', variables.repoId] })
+      queryClient.invalidateQueries({
+        queryKey: ['git', 'branches', variables.repoId],
+      })
+      queryClient.invalidateQueries({
+        queryKey: ['git', 'status', variables.repoId],
+      })
     },
   })
 }
@@ -189,7 +219,13 @@ export function useGitDeleteBranch() {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async ({ repoId, branch }: { repoId: string; branch: string }) => {
+    mutationFn: async ({
+      repoId,
+      branch,
+    }: {
+      repoId: string
+      branch: string
+    }) => {
       const res = await fetch(`${API_BASE}/branch/delete`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -199,7 +235,9 @@ export function useGitDeleteBranch() {
       return res.json()
     },
     onSuccess: (_, variables) => {
-      queryClient.invalidateQueries({ queryKey: ['git', 'branches', variables.repoId] })
+      queryClient.invalidateQueries({
+        queryKey: ['git', 'branches', variables.repoId],
+      })
     },
   })
 }

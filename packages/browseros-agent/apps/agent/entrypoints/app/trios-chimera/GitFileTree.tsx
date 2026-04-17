@@ -6,20 +6,20 @@
  * File tree browser with Git status indicators
  */
 
-import type { FC } from 'react'
-import { useState } from 'react'
 import {
-  ChevronRight,
+  Check,
   ChevronDown,
+  ChevronRight,
+  Circle,
   File,
   Folder,
   FolderOpen,
-  Check,
-  Circle,
 } from 'lucide-react'
+import type { FC } from 'react'
+import { useState } from 'react'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { type FileNode, type FileStatus } from './git-types'
+import type { FileNode, FileStatus } from './git-types'
 import { useGitFiles } from './useGit'
 
 interface GitFileTreeProps {

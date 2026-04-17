@@ -5,10 +5,10 @@
  * Git REST API Routes
  */
 
-import { Hono } from 'hono'
 import { zValidator } from '@hono/zod-validator'
+import { Hono } from 'hono'
 import { z } from 'zod'
-import { GitOrchestrator } from '../../services/git/git-orchestrator'
+import type { GitOrchestrator } from '../../services/git/git-orchestrator'
 
 interface GitRouteDeps {
   orchestrator: GitOrchestrator
@@ -58,36 +58,48 @@ export function createGitRoutes(deps: GitRouteDeps) {
     }
   })
 
-  app.get('/status/:repoId', zValidator('param', RepositoryIdSchema), async (c) => {
-    const { repoId } = c.req.valid('param')
-    try {
-      const status = await orchestrator.getRepositoryStatus(repoId)
-      return c.json(status)
-    } catch (error) {
-      return c.json({ error: String(error) }, 404)
-    }
-  })
+  app.get(
+    '/status/:repoId',
+    zValidator('param', RepositoryIdSchema),
+    async (c) => {
+      const { repoId } = c.req.valid('param')
+      try {
+        const status = await orchestrator.getRepositoryStatus(repoId)
+        return c.json(status)
+      } catch (error) {
+        return c.json({ error: String(error) }, 404)
+      }
+    },
+  )
 
-  app.get('/branches/:repoId', zValidator('param', RepositoryIdSchema), async (c) => {
-    const { repoId } = c.req.valid('param')
-    try {
-      const branches = await orchestrator.listBranches(repoId)
-      return c.json({ branches })
-    } catch (error) {
-      return c.json({ error: String(error) }, 500)
-    }
-  })
+  app.get(
+    '/branches/:repoId',
+    zValidator('param', RepositoryIdSchema),
+    async (c) => {
+      const { repoId } = c.req.valid('param')
+      try {
+        const branches = await orchestrator.listBranches(repoId)
+        return c.json({ branches })
+      } catch (error) {
+        return c.json({ error: String(error) }, 500)
+      }
+    },
+  )
 
-  app.get('/files/:repoId', zValidator('param', RepositoryIdSchema), async (c) => {
-    const { repoId } = c.req.valid('param')
-    const path = c.req.query('path')
-    try {
-      const files = await orchestrator.getFiles(repoId, path)
-      return c.json({ files })
-    } catch (error) {
-      return c.json({ error: String(error) }, 500)
-    }
-  })
+  app.get(
+    '/files/:repoId',
+    zValidator('param', RepositoryIdSchema),
+    async (c) => {
+      const { repoId } = c.req.valid('param')
+      const path = c.req.query('path')
+      try {
+        const files = await orchestrator.getFiles(repoId, path)
+        return c.json({ files })
+      } catch (error) {
+        return c.json({ error: String(error) }, 500)
+      }
+    },
+  )
 
   app.post('/checkout', zValidator('json', SwitchBranchSchema), async (c) => {
     const { repoId, branch } = c.req.valid('json')
@@ -102,7 +114,11 @@ export function createGitRoutes(deps: GitRouteDeps) {
   app.post('/commit', zValidator('json', CommitSchema), async (c) => {
     const { repoId, message, files } = c.req.valid('json')
     try {
-      const commit = await orchestrator.createCommit(repoId, message, files || [])
+      const commit = await orchestrator.createCommit(
+        repoId,
+        message,
+        files || [],
+      )
       return c.json(commit)
     } catch (error) {
       return c.json({ error: String(error) }, 500)
@@ -129,25 +145,33 @@ export function createGitRoutes(deps: GitRouteDeps) {
     }
   })
 
-  app.post('/branch/create', zValidator('json', CreateBranchSchema), async (c) => {
-    const { repoId, name, baseBranch } = c.req.valid('json')
-    try {
-      await orchestrator.createBranch(repoId, name, baseBranch)
-      return c.json({ success: true })
-    } catch (error) {
-      return c.json({ error: String(error) }, 500)
-    }
-  })
+  app.post(
+    '/branch/create',
+    zValidator('json', CreateBranchSchema),
+    async (c) => {
+      const { repoId, name, baseBranch } = c.req.valid('json')
+      try {
+        await orchestrator.createBranch(repoId, name, baseBranch)
+        return c.json({ success: true })
+      } catch (error) {
+        return c.json({ error: String(error) }, 500)
+      }
+    },
+  )
 
-  app.post('/branch/delete', zValidator('json', DeleteBranchSchema), async (c) => {
-    const { repoId, branch } = c.req.valid('json')
-    try {
-      await orchestrator.deleteBranch(repoId, branch)
-      return c.json({ success: true })
-    } catch (error) {
-      return c.json({ error: String(error) }, 500)
-    }
-  })
+  app.post(
+    '/branch/delete',
+    zValidator('json', DeleteBranchSchema),
+    async (c) => {
+      const { repoId, branch } = c.req.valid('json')
+      try {
+        await orchestrator.deleteBranch(repoId, branch)
+        return c.json({ success: true })
+      } catch (error) {
+        return c.json({ error: String(error) }, 500)
+      }
+    },
+  )
 
   return app
 }

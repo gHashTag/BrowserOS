@@ -6,10 +6,10 @@
  * File watching when both CLI and API are unavailable
  */
 
-import type { GitStatus, CommitInfo, BranchInfo } from '../git-repository'
-import { parseGitPorcelain } from '../git-repository'
-import { $ } from 'bun'
 import { existsSync } from 'node:fs'
+import { $ } from 'bun'
+import type { BranchInfo, CommitInfo, GitStatus } from '../git-repository'
+import { parseGitPorcelain } from '../git-repository'
 
 export class GitButlerFileWatcher {
   private repoPath: string
@@ -24,7 +24,7 @@ export class GitButlerFileWatcher {
 
   async getStatus(): Promise<GitStatus> {
     const result = await $`git status --porcelain`.cwd(this.repoPath).quiet()
-    let status = parseGitPorcelain(result.stdout.toString())
+    const status = parseGitPorcelain(result.stdout.toString())
 
     const branch = await this.getCurrentBranch()
     status.branch = branch
@@ -98,7 +98,9 @@ export class GitButlerFileWatcher {
 
   private async getCurrentBranch(): Promise<string> {
     try {
-      const result = await $`git rev-parse --abbrev-ref HEAD`.cwd(this.repoPath).quiet()
+      const result = await $`git rev-parse --abbrev-ref HEAD`
+        .cwd(this.repoPath)
+        .quiet()
       return result.stdout.toString().trim()
     } catch {
       return ''
@@ -107,8 +109,14 @@ export class GitButlerFileWatcher {
 
   private async getAheadBehind(): Promise<{ ahead: number; behind: number }> {
     try {
-      const result = await $`git rev-list --left-right --count HEAD...@{u}`.cwd(this.repoPath).quiet()
-      const [ahead, behind] = result.stdout.toString().trim().split('\t').map(Number)
+      const result = await $`git rev-list --left-right --count HEAD...@{u}`
+        .cwd(this.repoPath)
+        .quiet()
+      const [ahead, behind] = result.stdout
+        .toString()
+        .trim()
+        .split('\t')
+        .map(Number)
       return { ahead, behind }
     } catch {
       return { ahead: 0, behind: 0 }
@@ -116,8 +124,12 @@ export class GitButlerFileWatcher {
   }
 
   private async getLastCommit(): Promise<CommitInfo> {
-    const result = await $`git log -1 --format="%H|%s|%an|%ct"`.cwd(this.repoPath).quiet()
-    const [hash, message, author, timestamp] = result.stdout.toString().split('|')
+    const result = await $`git log -1 --format="%H|%s|%an|%ct"`
+      .cwd(this.repoPath)
+      .quiet()
+    const [hash, message, author, timestamp] = result.stdout
+      .toString()
+      .split('|')
     return {
       hash,
       message,

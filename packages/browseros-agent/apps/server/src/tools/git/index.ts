@@ -5,9 +5,9 @@
  * Git Tools Registry
  */
 
-export { gitStatus } from './git-status'
 export { gitBranch } from './git-branch'
-export { gitCommit } from './git-commit'
 export { gitCheckout } from './git-checkout'
+export { gitCommit } from './git-commit'
 export { gitPull } from './git-pull'
 export { gitPush } from './git-push'
+export { gitStatus } from './git-status'
