@@ -28,6 +28,7 @@ import { MCPSettingsPage } from './mcp-settings/MCPSettingsPage'
 import { MemoryPage } from './memory/MemoryPage'
 import { ProfilePage } from './profile/ProfilePage'
 import { ScheduledTasksPage } from './scheduled-tasks/ScheduledTasksPage'
+import { AgentTPage } from './agent-t/AgentTPage'
 import { SearchProviderPage } from './search-provider/SearchProviderPage'
 import { SkillsPage } from './skills/SkillsPage'
 import { SoulPage } from './soul/SoulPage'
@@ -99,6 +100,7 @@ export const App: FC = () => {
           <Route path="connect-apps" element={<ConnectMCP />} />
           <Route path="scheduled" element={<ScheduledTasksPage />} />
           <Route path="agents" element={<AgentsPage />} />
+          <Route path="agent-t" element={<AgentTPage />} />
           <Route path="admin" element={<AdminDashboardPage />} />
         </Route>
 

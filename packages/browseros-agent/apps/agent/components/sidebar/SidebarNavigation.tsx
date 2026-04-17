@@ -7,6 +7,7 @@ import {
   Settings,
   Shield,
   Sparkles,
+  TerminalSquare,
   Wand2,
 } from 'lucide-react'
 import type { FC } from 'react'
@@ -42,6 +43,7 @@ const primaryNavItems: NavItem[] = [
   },
   { name: 'Scheduled Tasks', to: '/scheduled', icon: CalendarClock },
   { name: 'Agents', to: '/agents', icon: Cpu },
+  { name: 'AGENT T', to: '/agent-t', icon: TerminalSquare },
   {
     name: 'Skills',
     to: '/home/skills',

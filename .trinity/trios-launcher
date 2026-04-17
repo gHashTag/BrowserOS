@@ -1,6 +1,6 @@
 #!/bin/bash
-# TRIOS Launcher — starts BrowserOS dev environment
-# Double-click TRIOS.app to launch everything automatically
+# TRIOS Launcher — starts BrowserOS production server
+# Double-click TRIOS.app to launch
 
 set -euo pipefail
 
@@ -22,41 +22,33 @@ fi
 # Kill existing processes on our ports
 lsof -ti:9105 | xargs kill -9 2>/dev/null || true
 lsof -ti:9005 | xargs kill -9 2>/dev/null || true
-lsof -ti:9305 | xargs kill -9 2>/dev/null || true
 
 cd "$PROJECT_DIR"
 
-# Export env vars needed for build
+# Export env vars
 export VITE_PUBLIC_BROWSEROS_API=https://api.browseros.com
 export VITE_BROWSEROS_SERVER_PORT=9105
 export BROWSEROS_SERVER_PORT=9105
 export BROWSEROS_CDP_PORT=9005
-export BROWSEROS_EXTENSION_PORT=9305
 export BROWSEROS_ALLOW_NO_CDP=1
-export NODE_ENV=development
+export NODE_ENV=production
 
-echo "[$(date)] Building agent extension..." >> "$LOG_FILE"
-bun run build:agent >> "$LOG_FILE" 2>&1 || {
-    echo "[$(date)] WARNING: Build failed, trying with existing build..." >> "$LOG_FILE"
-}
+# Build production if not already built
+if [ ! -d "dist/prod" ]; then
+    echo "[$(date)] Building production..." >> "$LOG_FILE"
+    bun run build >> "$LOG_FILE" 2>&1 || {
+        echo "[$(date)] Build failed!" >> "$LOG_FILE"
+        osascript -e 'display notification "TRIOS build failed! Check /tmp/trios-launcher.log" with title "TRIOS Error"'
+        exit 1
+    }
+fi
 
-# Determine extension path
-EXTENSION_PATH="$PROJECT_DIR/apps/agent/dist/chrome-mv3-dev"
-if [ ! -d "$EXTENSION_PATH" ]; then
+# Start Chrome with CDP if not already running
+if ! curl -s http://127.0.0.1:9005/json/version > /dev/null 2>&1; then
+    echo "[$(date)] Starting Chrome with CDP..." >> "$LOG_FILE"
     EXTENSION_PATH="$PROJECT_DIR/apps/agent/dist/chrome-mv3"
-fi
-
-# Check if Chrome is already running with CDP
-CDP_READY=false
-if curl -s http://127.0.0.1:9005/json/version > /dev/null 2>&1; then
-    echo "[$(date)] CDP already available on port 9005" >> "$LOG_FILE"
-    CDP_READY=true
-fi
-
-if [ "$CDP_READY" = false ]; then
-    echo "[$(date)] Starting Chrome with CDP on port 9005..." >> "$LOG_FILE"
+    [ ! -d "$EXTENSION_PATH" ] && EXTENSION_PATH="$PROJECT_DIR/apps/agent/dist/chrome-mv3-dev"
     
-    # Start Chrome with remote debugging port
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
         --remote-debugging-port=9005 \
         --load-extension="$EXTENSION_PATH" \
@@ -64,32 +56,22 @@ if [ "$CDP_READY" = false ]; then
         --no-first-run \
         --disable-default-apps \
         >> "$LOG_FILE" 2>&1 &
-    CHROME_PID=$!
-    echo "$CHROME_PID" >> "$PID_FILE"
-
-    # Wait for CDP to be ready
-    echo "[$(date)] Waiting for Chrome CDP on port 9005..." >> "$LOG_FILE"
+    echo $! >> "$PID_FILE"
+    
+    # Wait for CDP
     for i in $(seq 1 30); do
-        if curl -s http://127.0.0.1:9005/json/version > /dev/null 2>&1; then
-            echo "[$(date)] CDP ready!" >> "$LOG_FILE"
-            CDP_READY=true
-            break
-        fi
+        curl -s http://127.0.0.1:9005/json/version > /dev/null 2>&1 && break
         sleep 1
     done
-    
-    if [ "$CDP_READY" = false ]; then
-        echo "[$(date)] WARNING: CDP not available, server will start in degraded mode" >> "$LOG_FILE"
-    fi
 fi
 
-echo "[$(date)] Starting server on port 9105..." >> "$LOG_FILE"
-bun --env-file=apps/server/.env.development apps/server/src/index.ts >> "$LOG_FILE" 2>&1 &
+# Start production server
+echo "[$(date)] Starting production server..." >> "$LOG_FILE"
+bun run start:server >> "$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 echo "$SERVER_PID" >> "$PID_FILE"
 
-# Wait for server to be ready
-echo "[$(date)] Waiting for server..." >> "$LOG_FILE"
+# Wait for server
 for i in $(seq 1 30); do
     if curl -s http://127.0.0.1:9105/health > /dev/null 2>&1; then
         echo "[$(date)] Server ready!" >> "$LOG_FILE"
@@ -98,17 +80,10 @@ for i in $(seq 1 30); do
     sleep 1
 done
 
-echo "[$(date)] TRIOS is running! Server PID: $SERVER_PID" >> "$LOG_FILE"
+osascript -e 'display notification "TRIOS is running!" with title "TRIOS"'
 
-# Show a notification
-osascript -e 'display notification "TRIOS is running! Server on port 9105" with title "TRIOS"'
-
-# Keep the launcher alive — check server health every 5s
-while true; do
-    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
-        echo "[$(date)] Server stopped, exiting." >> "$LOG_FILE"
-        break
-    fi
+# Keep alive
+while kill -0 "$SERVER_PID" 2>/dev/null; do
     sleep 5
 done
 

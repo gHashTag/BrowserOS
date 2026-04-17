@@ -8,7 +8,10 @@
 import { zValidator } from '@hono/zod-validator'
 import { Hono } from 'hono'
 import { z } from 'zod'
+import { $ } from 'bun'
 import type { GitOrchestrator } from '../../services/git/git-orchestrator'
+import { GIT_CONSTANTS } from '@browseros/shared/constants/git'
+import { GitButlerCLI } from '../../services/git/gitbutler/gitbutler-cli'
 
 interface GitRouteDeps {
   orchestrator: GitOrchestrator
@@ -169,6 +172,89 @@ export function createGitRoutes(deps: GitRouteDeps) {
         return c.json({ success: true })
       } catch (error) {
         return c.json({ error: String(error) }, 500)
+      }
+    },
+  )
+
+  app.get(
+    '/history/:repoId',
+    zValidator('param', RepositoryIdSchema),
+    async (c) => {
+      const { repoId } = c.req.valid('param')
+      try {
+        const repos = await orchestrator.listRepositories()
+        const repo = repos.find((r) => r.id === repoId)
+        if (!repo) {
+          return c.json({ error: 'Repository not found' }, 404)
+        }
+
+        const result = await $`git log -20 --format="%H|%s|%an|%ct"`
+          .cwd(repo.path)
+          .quiet()
+
+        const commits = result.stdout
+          .toString()
+          .trim()
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => {
+            const [hash, message, author, timestamp] = line.split('|')
+            return {
+              hash,
+              message,
+              author,
+              timestamp: Number.parseInt(timestamp, 10),
+            }
+          })
+
+        return c.json(commits)
+      } catch (error) {
+        return c.json({ error: String(error) }, 500)
+      }
+    },
+  )
+
+  app.get('/gitbutler/status', async (c) => {
+    try {
+      const cli = new GitButlerCLI(GIT_CONSTANTS.GITBUTLER_CLI_PATH)
+      const isAvailable = await cli.isAvailable()
+      return c.json({
+        available: isAvailable,
+        mode: isAvailable ? 'cli' : 'none',
+        port: GIT_CONSTANTS.GITBUTLER_API_PORT,
+      })
+    } catch {
+      return c.json({ available: false, mode: 'none', port: 0 })
+    }
+  })
+
+  const TerminalExecuteSchema = z.object({
+    command: z.string().min(1),
+    workingDir: z.string().optional(),
+  })
+
+  app.post(
+    '/terminal/execute',
+    zValidator('json', TerminalExecuteSchema),
+    async (c) => {
+      const { command, workingDir } = c.req.valid('json')
+
+      try {
+        const result = await $`${command}`
+          .cwd(workingDir || process.cwd())
+          .quiet()
+
+        return c.json({
+          success: true,
+          output: result.stdout.toString(),
+          error: result.stderr.toString(),
+        })
+      } catch (error) {
+        return c.json({
+          success: false,
+          output: '',
+          error: String(error),
+        })
       }
     },
   )
