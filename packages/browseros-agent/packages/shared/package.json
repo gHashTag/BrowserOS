@@ -45,6 +45,10 @@
       "types": "./src/constants/role-aware-agents.ts",
       "default": "./src/constants/role-aware-agents.ts"
     },
+    "./constants/git": {
+      "types": "./src/constants/git.ts",
+      "default": "./src/constants/git.ts"
+    },
     "./types/logger": {
       "types": "./src/types/logger.ts",
       "default": "./src/types/logger.ts"

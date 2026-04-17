@@ -51,6 +51,8 @@ export enum Feature {
   QWEN_CODE_SUPPORT = 'QWEN_CODE_SUPPORT',
   // Credit-based usage tracking
   CREDITS_SUPPORT = 'CREDITS_SUPPORT',
+  // Git orchestration with AGENT T tab
+  GIT_ORCHESTRATION_SUPPORT = 'GIT_ORCHESTRATION_SUPPORT',
 }
 
 /**
@@ -81,6 +83,7 @@ const FEATURE_CONFIG: { [K in Feature]: FeatureConfig } = {
   [Feature.GITHUB_COPILOT_SUPPORT]: { minServerVersion: '0.0.77' },
   [Feature.QWEN_CODE_SUPPORT]: { minServerVersion: '0.0.77' },
   [Feature.CREDITS_SUPPORT]: { minServerVersion: '0.0.78' },
+  [Feature.GIT_ORCHESTRATION_SUPPORT]: { minServerVersion: '0.0.79' },
 }
 
 function parseVersion(version: string): number[] {
