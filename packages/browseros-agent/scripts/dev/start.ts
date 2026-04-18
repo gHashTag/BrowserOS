@@ -11,7 +11,7 @@ type Ports = { cdp: number; server: number; extension: number }
 type Mode = 'watch' | 'manual'
 
 const MONOREPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '../..')
-const BROWSEROS_BINARY = '/Applications/BrowserOS.app/Contents/MacOS/BrowserOS'
+const TRIOS_BINARY = '/Applications/TRIOS.app/Contents/MacOS/TRIOS'
 const AGENT_EXT_DIR = join(MONOREPO_ROOT, 'apps/agent/dist/chrome-mv3-dev')
 let USER_DATA_DIR = '/tmp/browseros-dev'
 
@@ -204,12 +204,12 @@ function startManualBrowser(ports: Ports): ReturnType<typeof spawn> {
     'chrome://newtab',
   ]
 
-  log('browser', `Launching BrowserOS...`)
+  log('browser', `Launching TRIOS...`)
   log('browser', `  Profile: ${USER_DATA_DIR}`)
   log('browser', `  CDP: http://127.0.0.1:${ports.cdp}`)
 
   return spawn({
-    cmd: [BROWSEROS_BINARY, ...args],
+    cmd: [TRIOS_BINARY, ...args],
     stdout: 'pipe',
     stderr: 'pipe',
   })

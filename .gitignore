@@ -31,3 +31,4 @@ packages/browseros/build/tools/
 # AI SDK DevTools traces
 .devtools/
 .omc/
+packages/browseros-agent/tools/trios-dev/target/

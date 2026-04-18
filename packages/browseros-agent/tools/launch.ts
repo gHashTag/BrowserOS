@@ -7,15 +7,15 @@
 import { spawn } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 
-// Detect BrowserOS app location
+// Detect TRIOS app location
 // Priority order: /Applications → ~/Applications → ~/Desktop
 const PATHS = [
-  '/Applications/BrowserOS.app',
-  `${process.env.HOME}/Applications/BrowserOS.app`,
-  `${process.env.HOME}/Desktop/BrowserOS.app`,
+  '/Applications/TRIOS.app',
+  `${process.env.HOME}/Applications/TRIOS.app`,
+  `${process.env.HOME}/Desktop/TRIOS.app`,
 ]
 
-function findBrowserOSPath(): string {
+function findTriOSPath(): string {
   for (const path of PATHS) {
     if (existsSync(path)) {
       console.log(`✓ Found at: ${path}`)
@@ -24,16 +24,16 @@ function findBrowserOSPath(): string {
   }
 
   // If not found in standard locations, log warning and use fallback
-  console.warn('BrowserOS.app not found in standard locations')
-  return '/Applications/BrowserOS.app'
+  console.warn('TRIOS.app not found in standard locations')
+  return '/Applications/TRIOS.app'
 }
 
 /**
- * Apply black theme to BrowserOS preferences.
+ * Apply black theme to TRIOS preferences.
  * This writes to ALL profile directories.
  */
 async function applyBlackTheme() {
-  const baseDir = `${process.env.HOME}/Library/Application Support/BrowserOS`
+  const baseDir = `${process.env.HOME}/Library/Application Support/TRIOS`
 
   // List all possible profile directories
   const profileDirs = [
@@ -82,14 +82,14 @@ async function applyBlackTheme() {
 }
 
 /**
- * Kill any existing BrowserOS processes to ensure clean launch.
+ * Kill any existing TRIOS processes to ensure clean launch.
  */
-async function killBrowserOS() {
-  console.log('🔪 Checking for existing BrowserOS processes...')
+async function killTriOS() {
+  console.log('🔪 Checking for existing TRIOS processes...')
 
   try {
     await new Promise<void>((resolve) => {
-      const proc = spawn('pkill', ['-9', '-f', 'BrowserOS'], {
+      const proc = spawn('pkill', ['-9', '-f', 'TRIOS'], {
         stdio: 'pipe',
       })
 
@@ -103,14 +103,14 @@ async function killBrowserOS() {
 }
 
 /**
- * Launch BrowserOS desktop app.
+ * Launch TRIOS desktop app.
  */
-async function launchBrowserOS() {
-  const browserOSPath = findBrowserOSPath()
-  console.log(`🚀 Launching ${browserOSPath}...`)
+async function launchTriOS() {
+  const triOSPath = findTriOSPath()
+  console.log(`🚀 Launching ${triOSPath}...`)
 
   await new Promise<void>((resolve, reject) => {
-    const proc = spawn('open', [browserOSPath], {
+    const proc = spawn('open', [triOSPath], {
       stdio: 'inherit',
     })
 
@@ -129,13 +129,13 @@ async function main() {
 
   try {
     // 1. Kill existing processes
-    await killBrowserOS()
+    await killTriOS()
 
     // 2. Apply black theme
     await applyBlackTheme()
 
     // 3. Launch app
-    await launchBrowserOS()
+    await launchTriOS()
 
     console.log('')
     console.log('✅ TRIOS launched with black frame on ALL profiles!')
