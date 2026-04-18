@@ -22,9 +22,6 @@ const GENERATED_DIR = resolve(ROOT, 'chromium_patches/chrome/browser/browseros/g
 
 function hexToSkColor(hex) {
   const h = hex.replace('#', '')
-  const r = parseInt(h.slice(0, 2), 16)
-  const g = parseInt(h.slice(2, 4), 16)
-  const b = parseInt(h.slice(4, 6), 16)
   return `0xFF${h.toUpperCase()}`
 }
 
@@ -49,6 +46,11 @@ const OKLCH_TABLE = {
 
 function hexToOklch(hex) {
   return OKLCH_TABLE[hex.toUpperCase()] || `/* unknown: ${hex} */`
+}
+
+/** camelCase → kebab-case: "cardForeground" → "card-foreground" */
+function camelToKebab(str) {
+  return str.replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase()
 }
 
 // ── Resolve references ───────────────────────────────────
@@ -149,7 +151,9 @@ ${constEntries.join('\n')}
 function generateCss({ darkTokens }) {
   const vars = []
   for (const [key, hex] of Object.entries(darkTokens)) {
-    const prop = '--' + key.split('.').slice(2).join('-')
+    // key = "theme.dark.cardForeground" → last segment → camelToKebab → "card-foreground"
+    const segment = key.split('.').slice(2).join('-')
+    const prop = '--' + camelToKebab(segment)
     const val = hexToOklch(hex)
     vars.push(`  ${prop}: ${val};`)
   }
