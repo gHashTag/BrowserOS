@@ -41,6 +41,22 @@ import {
 import { registry } from "./tools/registry";
 import { VERSION } from "./version";
 
+/**
+ * Check if a port is available before attempting to bind.
+ * Returns true if port is free, false if already in use.
+ */
+async function checkPortAvailable(port: number): Promise<boolean> {
+	return new Promise((resolve) => {
+		const server = Bun.listen({
+			port,
+			hostname: "0.0.0.0",
+			socket: {},
+		});
+		server.stop();
+		resolve(true);
+	}).catch(() => false);
+}
+
 export class Application {
 	private config: ServerConfig;
 	private db: Database | null = null;
@@ -88,6 +104,20 @@ export class Application {
 		}
 
 		logger.info(`Loaded ${registry.names().length} unified tools`);
+
+		// Pre-flight port check: fail fast if port is busy
+		const serverPort = this.config.serverPort;
+		if (!(await checkPortAvailable(serverPort))) {
+			logger.error(`Port ${serverPort} is already in use`, {
+				port: serverPort,
+				kill_command: `lsof -ti:${serverPort} | xargs kill -9`,
+			});
+			console.error(`\n[FATAL] Port ${serverPort} is already in use.`);
+			console.error(
+				`Kill the process with: lsof -ti:${serverPort} | xargs kill -9`,
+			);
+			process.exit(EXIT_CODES.PORT_CONFLICT);
+		}
 
 		try {
 			await createHttpServer({
