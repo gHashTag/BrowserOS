@@ -11,16 +11,22 @@
 		"ignoreUnknown": false,
 		"ignore": [
 			"node_modules",
-			"dist",
+			"**/dist",
+			"**/dist/**",
 			".next",
 			"build",
 			".trinity",
 			"generated",
+			"**/generated/**",
 			"*.min.js",
 			"coverage",
 			".wxt",
 			"**/test-a2a.cjs",
-			"**/a2a-chat-client.cjs"
+			"**/a2a-chat-client.cjs",
+			"**/.wxt/**",
+			"**/wxt.*",
+			"**/*.d.ts",
+			"**/*.d.cts"
 		]
 	},
 	"formatter": {
