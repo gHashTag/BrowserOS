@@ -27,7 +27,6 @@ import * as tabGroups from "./tab-groups";
 export interface PageInfo {
 	pageId: number;
 	targetId: string;
-	tabId: number;
 	url: string;
 	title: string;
 	isActive: boolean;
@@ -35,13 +34,13 @@ export interface PageInfo {
 	loadProgress: number;
 	isPinned: boolean;
 	isHidden: boolean;
-	windowId?: number;
+	windowId?: string;
 	index?: number;
 	groupId?: string;
 }
 
 export interface WindowInfo {
-	windowId: number;
+	windowId: string;
 	windowType:
 		| "normal"
 		| "popup"
@@ -63,7 +62,6 @@ export interface WindowInfo {
 }
 
 interface TabInfo {
-	tabId: number;
 	targetId: string;
 	url: string;
 	title: string;
@@ -182,8 +180,10 @@ export class Browser {
 	// --- Pages ---
 
 	async listPages(): Promise<PageInfo[]> {
-		const result = await this.cdp.Target.getTargets({ includeHidden: true });
-		const tabs = (result.tabs as TabInfo[]).filter(
+		const { targetInfos } = await this.cdp.Target.getTargets({
+			filter: [{ type: "page" }],
+		});
+		const tabs = targetInfos.filter(
 			(t) => !EXCLUDED_URL_PREFIXES.some((prefix) => t.url.startsWith(prefix)),
 		);
 
@@ -197,15 +197,14 @@ export class Browser {
 				if (info.targetId === tab.targetId) {
 					info.url = tab.url;
 					info.title = tab.title;
-					info.tabId = tab.tabId;
-					info.isActive = tab.isActive;
-					info.isLoading = tab.isLoading;
-					info.loadProgress = tab.loadProgress;
-					info.isPinned = tab.isPinned;
-					info.isHidden = tab.isHidden;
-					info.windowId = tab.windowId;
-					info.index = tab.index;
-					info.groupId = tab.groupId;
+					info.isActive = tab.attached;
+					info.isLoading = false;
+					info.loadProgress = 0;
+					info.isPinned = false;
+					info.isHidden = !tab.attached;
+					info.windowId = tab.windowId || 0;
+					info.index = 0;
+					info.groupId = undefined;
 					found = true;
 					break;
 				}
@@ -216,17 +215,17 @@ export class Browser {
 				this.pages.set(pageId, {
 					pageId,
 					targetId: tab.targetId,
-					tabId: tab.tabId,
+					tabId: 0,
 					url: tab.url,
 					title: tab.title,
-					isActive: tab.isActive,
-					isLoading: tab.isLoading,
-					loadProgress: tab.loadProgress,
-					isPinned: tab.isPinned,
-					isHidden: tab.isHidden,
-					windowId: tab.windowId,
-					index: tab.index,
-					groupId: tab.groupId,
+					isActive: tab.attached,
+					isLoading: false,
+					loadProgress: 0,
+					isPinned: false,
+					isHidden: !tab.attached,
+					windowId: tab.windowId || 0,
+					index: 0,
+					groupId: undefined,
 				});
 			}
 		}
@@ -258,22 +257,18 @@ export class Browser {
 		if (!info) return undefined;
 
 		try {
-			const result = await this.cdp.Target.getTargetInfo({ tabId: info.tabId });
-			const tab = result.tab as TabInfo;
+			const result = await this.cdp.Target.getTargetInfo({
+				targetId: info.targetId,
+			});
+			const tab = result.targetInfo;
 			const updated: PageInfo = {
 				...info,
 				targetId: tab.targetId,
-				tabId: tab.tabId,
 				url: tab.url,
 				title: tab.title,
-				isActive: tab.isActive,
-				isLoading: tab.isLoading,
-				loadProgress: tab.loadProgress,
-				isPinned: tab.isPinned,
-				isHidden: tab.isHidden,
-				windowId: tab.windowId,
-				index: tab.index,
-				groupId: tab.groupId,
+				isActive: tab.attached,
+				isHidden: !tab.attached,
+				windowId: tab.windowId ?? info.windowId,
 			};
 			this.pages.set(pageId, updated);
 			return updated;
@@ -525,37 +520,39 @@ export class Browser {
 			url,
 			...(opts?.hidden !== undefined && { hidden: opts.hidden }),
 			...(opts?.background !== undefined && { background: opts.background }),
-			...(opts?.windowId !== undefined && { windowId: opts.windowId }),
 		});
 
-		const tabId = (createResult.tab as TabInfo).tabId;
-		let tabInfo: TabInfo | undefined;
+		const targetId = createResult.targetId;
+		let targetInfo:
+			| Awaited<ReturnType<typeof this.cdp.Target.getTargetInfo>>["targetInfo"]
+			| undefined;
 		for (let i = 0; i < 10; i++) {
 			try {
-				const infoResult = await this.cdp.Target.getTargetInfo({ tabId });
-				tabInfo = infoResult.tab as TabInfo;
+				const infoResult = await this.cdp.Target.getTargetInfo({ targetId });
+				targetInfo = infoResult.targetInfo;
 				break;
 			} catch {
 				await new Promise((r) => setTimeout(r, 100));
 			}
 		}
-		if (!tabInfo) throw new Error(`Tab ${tabId} not found after creation`);
+		if (!targetInfo)
+			throw new Error(`Target ${targetId} not found after creation`);
 
 		const pageId = this.nextPageId++;
 		this.pages.set(pageId, {
 			pageId,
-			targetId: tabInfo.targetId,
-			tabId: tabInfo.tabId,
-			url: tabInfo.url || url,
-			title: tabInfo.title || "",
-			isActive: tabInfo.isActive,
-			isLoading: tabInfo.isLoading,
-			loadProgress: tabInfo.loadProgress,
-			isPinned: tabInfo.isPinned,
-			isHidden: tabInfo.isHidden,
-			windowId: tabInfo.windowId,
-			index: tabInfo.index,
-			groupId: tabInfo.groupId,
+			targetId: targetInfo.targetId,
+			tabId: targetInfo.tabId ?? 0,
+			url: targetInfo.url || url,
+			title: targetInfo.title || "",
+			isActive: targetInfo.attached,
+			isLoading: false,
+			loadProgress: 0,
+			isPinned: false,
+			isHidden: !targetInfo.attached,
+			windowId: targetInfo.windowId ?? 0,
+			index: 0,
+			groupId: undefined,
 		});
 		return pageId;
 	}
@@ -566,7 +563,7 @@ export class Browser {
 			throw new Error(
 				`Unknown page ${page}. Use list_pages to see available pages.`,
 			);
-		await this.cdp.Target.closeTarget({ tabId: info.tabId });
+		await this.cdp.Target.closeTarget({ targetId: info.targetId });
 		this.consoleCollector.detach(page);
 		this.pages.delete(page);
 		this.sessions.delete(info.targetId);
@@ -1421,11 +1418,11 @@ export class Browser {
 		return result.window as WindowInfo;
 	}
 
-	async closeWindow(windowId: number): Promise<void> {
+	async closeWindow(windowId: string): Promise<void> {
 		await this.cdp.Browser.closeWindow({ windowId });
 	}
 
-	async activateWindow(windowId: number): Promise<void> {
+	async activateWindow(windowId: string): Promise<void> {
 		await this.cdp.Browser.activateWindow({ windowId });
 	}
 
