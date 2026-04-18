@@ -31,28 +31,28 @@ export VITE_BROWSEROS_SERVER_PORT=9105
 export BROWSEROS_SERVER_PORT=9105
 export BROWSEROS_CDP_PORT=9005
 export BROWSEROS_ALLOW_NO_CDP=1
-export NODE_ENV=production
+export BROWSEROS_CONFIG_URL=http://localhost:8000
 
-# Build production if not already built
-if [ ! -d "dist/prod" ]; then
-    echo "[$(date)] Building production..." >> "$LOG_FILE"
-    bun run build >> "$LOG_FILE" 2>&1 || {
+# Build production extension if not already built
+if [ ! -d "apps/agent/dist/chrome-mv3" ]; then
+    echo "[$(date)] Building production extension..." >> "$LOG_FILE"
+    cd apps/agent && bun --env-file=.env.development wxt build >> "$LOG_FILE" 2>&1 || {
         echo "[$(date)] Build failed!" >> "$LOG_FILE"
         osascript -e 'display notification "TRIOS build failed! Check /tmp/trios-launcher.log" with title "TRIOS Error"'
         exit 1
     }
+    cd "$PROJECT_DIR"
 fi
 
 # Start Chrome with CDP if not already running
 if ! curl -s http://127.0.0.1:9005/json/version > /dev/null 2>&1; then
     echo "[$(date)] Starting Chrome with CDP..." >> "$LOG_FILE"
     EXTENSION_PATH="$PROJECT_DIR/apps/agent/dist/chrome-mv3"
-    [ ! -d "$EXTENSION_PATH" ] && EXTENSION_PATH="$PROJECT_DIR/apps/agent/dist/chrome-mv3-dev"
     
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
         --remote-debugging-port=9005 \
         --load-extension="$EXTENSION_PATH" \
-        --user-data-dir="/tmp/browseros-dev" \
+        --user-data-dir="/tmp/browseros-trios" \
         --no-first-run \
         --disable-default-apps \
         >> "$LOG_FILE" 2>&1 &
@@ -65,9 +65,10 @@ if ! curl -s http://127.0.0.1:9005/json/version > /dev/null 2>&1; then
     done
 fi
 
-# Start production server
-echo "[$(date)] Starting production server..." >> "$LOG_FILE"
-bun run start:server >> "$LOG_FILE" 2>&1 &
+# Start server
+echo "[$(date)] Starting server..." >> "$LOG_FILE"
+cd "$PROJECT_DIR/apps/server"
+bun --env-file=.env.development src/index.ts >> "$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 echo "$SERVER_PID" >> "$PID_FILE"
 
