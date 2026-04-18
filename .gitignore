@@ -32,3 +32,6 @@ packages/browseros/build/tools/
 .devtools/
 .omc/
 packages/browseros-agent/tools/trios-dev/target/
+
+# VSCode user settings (IDE-specific)
+.vscode/settings.json
