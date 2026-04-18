@@ -1026,7 +1026,7 @@ async function cmdOpenSidepanel(cdp: CDPClient): Promise<void> {
           const tabId = tabs[0]?.id;
           if (!tabId) throw new Error('No active tab found');
           await chrome.sidePanel.setOptions({ enabled: true, tabId, path: 'sidepanel.html' });
-          const result = await chrome.sidePanel.browserosToggle({ tabId });
+          const result = await chrome.sidePanel.triosToggle({ tabId });
           return { tabId, ...result };
         })()`,
         awaitPromise: true,

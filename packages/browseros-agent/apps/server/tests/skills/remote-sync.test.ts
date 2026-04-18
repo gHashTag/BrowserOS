@@ -16,7 +16,7 @@ import type { RemoteSkillCatalog } from '../../src/skills/types'
 let testDir: string
 let builtinDir: string
 
-mock.module('../../src/lib/browseros-dir', () => ({
+mock.module('../../src/lib/trios-dir', () => ({
   getSkillsDir: () => testDir,
   getBuiltinSkillsDir: () => builtinDir,
 }))

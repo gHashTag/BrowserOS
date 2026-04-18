@@ -36,7 +36,7 @@ import {
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { SCHEDULED_TASK_PROMPT_REFINED_EVENT } from '@/lib/constants/analyticsEvents'
-import { BrowserOSIcon, ProviderIcon } from '@/lib/llm-providers/providerIcons'
+import { TRIOSIcon, ProviderIcon } from '@/lib/llm-providers/providerIcons'
 import {
   defaultProviderIdStorage,
   providersStorage,
@@ -355,8 +355,8 @@ export const NewScheduledTaskDialog: FC<NewScheduledTaskDialogProps> = ({
                   >
                     <span className="flex items-center gap-2">
                       <span className="text-muted-foreground">
-                        {resolvedProvider.type === 'browseros' ? (
-                          <BrowserOSIcon size={16} />
+                        {resolvedProvider.type === 'trios' ? (
+                          <TRIOSIcon size={16} />
                         ) : (
                           <ProviderIcon
                             type={resolvedProvider.type as ProviderType}

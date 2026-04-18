@@ -125,7 +125,7 @@ export const download_file = defineCaptureTool({
 		const resolvedDir = resolveWorkingPath(ctx, args.path, args.cwd);
 		const baseDir = ctx.directories.workingDir ?? tmpdir();
 		await mkdir(baseDir, { recursive: true });
-		const tempDir = await mkdtemp(join(baseDir, "browseros-dl-"));
+		const tempDir = await mkdtemp(join(baseDir, "trios-dl-"));
 
 		try {
 			const { filePath, suggestedFilename } =

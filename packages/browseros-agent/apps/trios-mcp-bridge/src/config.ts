@@ -8,8 +8,8 @@
 export interface BridgeConfig {
 	/** Port for the bridge MCP server (default: 9200) */
 	port: number;
-	/** BrowserOS MCP server URL (default: http://127.0.0.1:9105/mcp) */
-	browserosMcpUrl: string;
+	/** TRIOS MCP server URL (default: http://127.0.0.1:9105/mcp) */
+	triosMcpUrl: string;
 	/** GitButler CLI path (default: "but") */
 	gitbutlerCliPath: string;
 	/** Whether to use GitButler internal MCP tools (default: true) */
@@ -24,7 +24,7 @@ export interface BridgeConfig {
 
 const DEFAULT_CONFIG: BridgeConfig = {
 	port: 9200,
-	browserosMcpUrl: "http://127.0.0.1:9105/mcp",
+	triosMcpUrl: "http://127.0.0.1:9105/mcp",
 	gitbutlerCliPath: "but",
 	gitbutlerInternal: true,
 	triCliPath: "tri",
@@ -36,8 +36,8 @@ export function loadConfig(overrides?: Partial<BridgeConfig>): BridgeConfig {
 	return {
 		...DEFAULT_CONFIG,
 		port: Number(process.env.TRIONS_BRIDGE_PORT) || DEFAULT_CONFIG.port,
-		browserosMcpUrl:
-			process.env.TRIONS_BROWSEROS_MCP_URL || DEFAULT_CONFIG.browserosMcpUrl,
+		triosMcpUrl:
+			process.env.TRIONS_BROWSEROS_MCP_URL || DEFAULT_CONFIG.triosMcpUrl,
 		gitbutlerCliPath:
 			process.env.TRIONS_GITBUTLER_CLI || DEFAULT_CONFIG.gitbutlerCliPath,
 		gitbutlerInternal:

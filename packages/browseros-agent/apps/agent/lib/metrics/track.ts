@@ -3,7 +3,7 @@ import { getTRIOSAdapter } from '@/lib/trios/adapter'
 const versions = {
   extension: null as string | null,
   chromium: null as string | null,
-  browseros: null as string | null,
+  trios: null as string | null,
 }
 
 const adapter = getTRIOSAdapter()
@@ -16,7 +16,7 @@ adapter
 adapter
   .getBrowserosVersion()
   .then((v) => {
-    versions.browseros = v
+    versions.trios = v
   })
   .catch(() => {})
 
@@ -33,7 +33,7 @@ export function track(
     .logMetric(eventName, {
       extension_version: versions.extension,
       ...(versions.chromium && { chromium_version: versions.chromium }),
-      ...(versions.browseros && { browseros_version: versions.browseros }),
+      ...(versions.trios && { trios_version: versions.trios }),
       ...properties,
     })
     .catch(() => {})

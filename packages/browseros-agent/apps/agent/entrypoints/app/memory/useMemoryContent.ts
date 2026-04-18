@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useAgentServerUrl } from '@/lib/trios/useBrowserOSProviders'
+import { useAgentServerUrl } from '@/lib/trios/useTRIOSProviders'
 
 async function fetchMemory(baseUrl: string): Promise<string> {
   const response = await fetch(`${baseUrl}/memory`)

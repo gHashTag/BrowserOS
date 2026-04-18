@@ -24,7 +24,7 @@ Config file should include:
   - dataset: Path to dataset JSONL file
   - output_dir: Output directory for results (optional, default: ./results)
   - num_workers: Number of parallel workers
-  - browseros.server_url: BrowserOS server URL
+  - trios.server_url: TRIOS server URL
   - grader_model, grader_api_key_env, grader_base_url: Grader settings (optional)
   - timeout_ms: Task timeout in ms (optional)
 

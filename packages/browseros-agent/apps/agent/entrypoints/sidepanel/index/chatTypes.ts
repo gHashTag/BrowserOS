@@ -29,13 +29,13 @@ export const AGENT_SUGGESTIONS: Suggestion[] = [
   {
     display: 'Read about our vision and upvote',
     prompt:
-      'Go to https://dub.sh/browseros-launch in current tab. Find and click the upvote button',
+      'Go to https://dub.sh/trios-launch in current tab. Find and click the upvote button',
     icon: '❤️',
   },
   {
-    display: 'Support BrowserOS on Github',
+    display: 'Support TRIOS on Github',
     prompt:
-      'Go to http://git.new/browseros in current tab and star the repository',
+      'Go to http://git.new/trios in current tab and star the repository',
     icon: '⭐',
   },
   {

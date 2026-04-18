@@ -2,15 +2,15 @@
  * Upload eval runs to R2.
  *
  * Two modes:
- *   bun scripts/upload-run.ts results/browseros-agent-weekly/2026-03-21-1730
+ *   bun scripts/upload-run.ts results/trios-agent-weekly/2026-03-21-1730
  *       → uploads that specific run
  *
- *   bun scripts/upload-run.ts results/browseros-agent-weekly
+ *   bun scripts/upload-run.ts results/trios-agent-weekly
  *       → finds all timestamped subfolders, uploads any not yet in R2
  *
  * Env vars: EVAL_R2_ACCOUNT_ID, EVAL_R2_ACCESS_KEY_ID, EVAL_R2_SECRET_ACCESS_KEY
- *           EVAL_R2_BUCKET (default: browseros-eval)
- *           EVAL_R2_CDN_BASE_URL (default: https://eval.browseros.com)
+ *           EVAL_R2_BUCKET (default: trios-eval)
+ *           EVAL_R2_CDN_BASE_URL (default: https://eval.trios.com)
  */
 
 import { readdir, readFile, stat } from 'node:fs/promises'
@@ -53,9 +53,9 @@ function loadConfig(): R2Config {
     accountId,
     accessKeyId,
     secretAccessKey,
-    bucket: process.env.EVAL_R2_BUCKET || 'browseros-eval',
+    bucket: process.env.EVAL_R2_BUCKET || 'trios-eval',
     cdnBaseUrl: (
-      process.env.EVAL_R2_CDN_BASE_URL || 'https://eval.browseros.com'
+      process.env.EVAL_R2_CDN_BASE_URL || 'https://eval.trios.com'
     ).replace(/\/+$/, ''),
   }
 }

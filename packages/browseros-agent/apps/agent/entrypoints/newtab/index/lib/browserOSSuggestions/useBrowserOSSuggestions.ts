@@ -1,7 +1,7 @@
 /**
  * @public
  */
-export interface BrowserOSSuggestion {
+export interface TRIOSSuggestion {
   mode: 'chat' | 'agent'
   message: string
 }
@@ -9,11 +9,11 @@ export interface BrowserOSSuggestion {
 /**
  * @public
  */
-export const useBrowserOSSuggestions = ({
+export const useTRIOSSuggestions = ({
   query,
 }: {
   query: string
-}): BrowserOSSuggestion[] => {
+}): TRIOSSuggestion[] => {
   return [
     {
       mode: 'agent',

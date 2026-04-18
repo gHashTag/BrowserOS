@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { TIMEOUTS } from "@trios/shared/constants/timeouts";
 import { EXTERNAL_URLS } from "@trios/shared/constants/urls";
 import { INLINED_ENV } from "../env";
-import { getBuiltinSkillsDir } from "../lib/browseros-dir";
+import { getBuiltinSkillsDir } from "../lib/trios-dir";
 import { logger } from "../lib/logger";
 import { DEFAULT_SKILLS } from "./defaults";
 import { safeBuiltinSkillDir } from "./service";

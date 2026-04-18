@@ -8,7 +8,7 @@ import { ChatHeader } from '@/entrypoints/sidepanel/index/ChatHeader'
 import { ChatMessages } from '@/entrypoints/sidepanel/index/ChatMessages'
 import {
   createAITabAction,
-  createBrowserOSAction,
+  createTRIOSAction,
 } from '@/lib/chat-actions/types'
 import { useChatActions } from '@/lib/chat-actions/useChatActions'
 import {
@@ -108,7 +108,7 @@ export const NewTabChat: FC = () => {
                   description: tabDescription ?? '',
                   tabs: matchedTabs,
                 })
-              : createBrowserOSAction({
+              : createTRIOSAction({
                   mode: (chatMode as 'chat' | 'agent') ?? 'agent',
                   message: query,
                   tabs: matchedTabs,

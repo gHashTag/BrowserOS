@@ -16,7 +16,7 @@ describe('loadServerConfig', () => {
   let originalEnv: NodeJS.ProcessEnv
 
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'browseros-config-test-'))
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'trios-config-test-'))
     originalEnv = { ...process.env }
 
     // Clear relevant env vars
@@ -263,7 +263,7 @@ describe('loadServerConfig', () => {
           instance: {
             client_id: 'user-123',
             install_id: 'install-456',
-            browseros_version: '1.0.0',
+            trios_version: '1.0.0',
             chromium_version: '120.0.0',
           },
         }),
@@ -352,7 +352,7 @@ describe('loadServerConfig', () => {
           ports: { http_mcp: 3000, extension: 3002 },
           instance: {
             client_id: 123, // should be string
-            browseros_version: true, // should be string
+            trios_version: true, // should be string
           },
         }),
       )

@@ -1,16 +1,16 @@
-import { BrowserOSAdapter } from './adapter'
+import { TRIOSAdapter } from './adapter'
 
-const SERVER_VERSION_PREF = 'browseros.server.version'
+const SERVER_VERSION_PREF = 'trios.server.version'
 
 type FeatureConfig = {
-  minBrowserOSVersion?: string
-  maxBrowserOSVersion?: string
+  minTRIOSVersion?: string
+  maxTRIOSVersion?: string
   minServerVersion?: string
   maxServerVersion?: string
 }
 
 /**
- * Features gated by BrowserOS version.
+ * Features gated by TRIOS version.
  * Add new features here with corresponding config in FEATURE_CONFIG.
  *
  * Note: In development mode, all features are enabled regardless of version.
@@ -57,8 +57,8 @@ export enum Feature {
 
 /**
  * Version requirements for each feature.
- * - minBrowserOSVersion: feature enabled when BrowserOS >= this version
- * - maxBrowserOSVersion: feature enabled when BrowserOS < this version (for deprecation)
+ * - minTRIOSVersion: feature enabled when TRIOS >= this version
+ * - maxTRIOSVersion: feature enabled when TRIOS < this version (for deprecation)
  * - minServerVersion: feature enabled when server >= this version
  * - maxServerVersion: feature enabled when server < this version (for deprecation)
  *
@@ -66,19 +66,19 @@ export enum Feature {
  * Note: In development mode, all features are enabled regardless of version.
  */
 const FEATURE_CONFIG: { [K in Feature]: FeatureConfig } = {
-  [Feature.OPENAI_COMPATIBLE_SUPPORT]: { minBrowserOSVersion: '0.33.0.1' },
-  [Feature.MANAGED_MCP_SUPPORT]: { minBrowserOSVersion: '0.34.0.0' },
-  [Feature.PERSONALIZATION_SUPPORT]: { minBrowserOSVersion: '0.36.1.0' },
-  [Feature.UNIFIED_PORT_SUPPORT]: { minBrowserOSVersion: '0.36.1.0' },
-  [Feature.CUSTOMIZATION_SUPPORT]: { minBrowserOSVersion: '0.36.1.0' },
-  [Feature.WORKSPACE_FOLDER_SUPPORT]: { minBrowserOSVersion: '0.36.4.0' },
-  [Feature.PROXY_SUPPORT]: { minBrowserOSVersion: '0.39.0.1' },
+  [Feature.OPENAI_COMPATIBLE_SUPPORT]: { minTRIOSVersion: '0.33.0.1' },
+  [Feature.MANAGED_MCP_SUPPORT]: { minTRIOSVersion: '0.34.0.0' },
+  [Feature.PERSONALIZATION_SUPPORT]: { minTRIOSVersion: '0.36.1.0' },
+  [Feature.UNIFIED_PORT_SUPPORT]: { minTRIOSVersion: '0.36.1.0' },
+  [Feature.CUSTOMIZATION_SUPPORT]: { minTRIOSVersion: '0.36.1.0' },
+  [Feature.WORKSPACE_FOLDER_SUPPORT]: { minTRIOSVersion: '0.36.4.0' },
+  [Feature.PROXY_SUPPORT]: { minTRIOSVersion: '0.39.0.1' },
   [Feature.PREVIOUS_CONVERSATION_ARRAY]: { minServerVersion: '0.0.64' },
   [Feature.SOUL_SUPPORT]: { minServerVersion: '0.0.67' },
-  [Feature.NEWTAB_CHAT_SUPPORT]: { minBrowserOSVersion: '0.40.0.0' },
-  [Feature.VERTICAL_TABS_SUPPORT]: { minBrowserOSVersion: '0.42.0.0' },
+  [Feature.NEWTAB_CHAT_SUPPORT]: { minTRIOSVersion: '0.40.0.0' },
+  [Feature.VERTICAL_TABS_SUPPORT]: { minTRIOSVersion: '0.42.0.0' },
   [Feature.MEMORY_SUPPORT]: { minServerVersion: '0.0.73' },
-  [Feature.SKILLS_SUPPORT]: { minBrowserOSVersion: '0.43.0.0' },
+  [Feature.SKILLS_SUPPORT]: { minTRIOSVersion: '0.43.0.0' },
   [Feature.CHATGPT_PRO_SUPPORT]: { minServerVersion: '0.0.77' },
   [Feature.GITHUB_COPILOT_SUPPORT]: { minServerVersion: '0.0.77' },
   [Feature.QWEN_CODE_SUPPORT]: { minServerVersion: '0.0.77' },
@@ -132,7 +132,7 @@ type CapabilitiesState = {
 let initPromise: Promise<CapabilitiesState> | null = null
 
 async function doInitialize(): Promise<CapabilitiesState> {
-  const adapter = BrowserOSAdapter.getInstance()
+  const adapter = TRIOSAdapter.getInstance()
   const state: CapabilitiesState = {
     browserOSVersion: null,
     serverVersion: null,
@@ -144,7 +144,7 @@ async function doInitialize(): Promise<CapabilitiesState> {
       state.browserOSVersion = parseVersion(versionStr)
     }
   } catch {
-    // BrowserOS version unknown - features requiring it will be disabled
+    // TRIOS version unknown - features requiring it will be disabled
   }
 
   try {
@@ -173,14 +173,14 @@ function checkFeatureSupport(
   const config = FEATURE_CONFIG[feature]
   if (!config) return false
 
-  const hasBrowserOSConstraints =
-    config.minBrowserOSVersion || config.maxBrowserOSVersion
+  const hasTRIOSConstraints =
+    config.minTRIOSVersion || config.maxTRIOSVersion
   if (
-    hasBrowserOSConstraints &&
+    hasTRIOSConstraints &&
     !checkVersionConstraints(
       state.browserOSVersion,
-      config.minBrowserOSVersion,
-      config.maxBrowserOSVersion,
+      config.minTRIOSVersion,
+      config.maxTRIOSVersion,
     )
   ) {
     return false
@@ -218,7 +218,7 @@ export const Capabilities = {
     return checkFeatureSupport(state, feature)
   },
 
-  async getBrowserOSVersion(): Promise<string | null> {
+  async getTRIOSVersion(): Promise<string | null> {
     const state = await ensureInitialized()
     if (!state.browserOSVersion) return null
     return state.browserOSVersion.join('.')

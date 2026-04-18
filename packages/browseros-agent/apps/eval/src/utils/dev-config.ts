@@ -1,6 +1,6 @@
 /**
  * Development configuration utilities
- * Reads ports from config.dev.json to stay in sync with BrowserOS
+ * Reads ports from config.dev.json to stay in sync with TRIOS
  */
 
 import { readFileSync } from 'node:fs'

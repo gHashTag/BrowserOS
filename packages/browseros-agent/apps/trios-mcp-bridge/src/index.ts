@@ -2,7 +2,7 @@ import { StreamableHTTPTransport } from "@hono/mcp";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { createBridgeServer } from "./bridge-server.js";
-import { BrowserOSClient } from "./clients/browseros-client.js";
+import { TRIOSClient } from "./clients/trios-client.js";
 import { GitButlerMcpClient } from "./clients/gitbutler-client.js";
 import { TriClient } from "./clients/tri-client.js";
 import { type BridgeConfig, loadConfig } from "./config.js";
@@ -17,8 +17,8 @@ function parseArgs(): Partial<BridgeConfig> {
 			case "--port":
 				config.port = Number(args[++i]);
 				break;
-			case "--browseros-url":
-				config.browserosMcpUrl = args[++i];
+			case "--trios-url":
+				config.triosMcpUrl = args[++i];
 				break;
 			case "--gitbutler-cli":
 				config.gitbutlerCliPath = args[++i];
@@ -43,7 +43,7 @@ Usage: bun run src/index.ts [options]
 
 Options:
   --port <number>            Bridge server port (default: 9200)
-  --browseros-url <url>      BrowserOS MCP URL (default: http://127.0.0.1:9105/mcp)
+  --trios-url <url>      TRIOS MCP URL (default: http://127.0.0.1:9105/mcp)
   --gitbutler-cli <path>       GitButler CLI path (default: but)
   --tri-cli <path>             t27 CLI path (default: tri)
   --working-dir <path>          Working directory for git (default: cwd)
@@ -52,7 +52,7 @@ Options:
 
 Examples:
   bun run src/index.ts --port 9200
-  bun run src/index.ts --browseros-url http://127.0.0.1:9000/mcp
+  bun run src/index.ts --trios-url http://127.0.0.1:9000/mcp
 `);
 				process.exit(0);
 				break;
@@ -71,7 +71,7 @@ async function _main() {
 	console.log("═".repeat(60));
 
 	// Initialize clients
-	const browseros = new BrowserOSClient(config.browserosMcpUrl);
+	const trios = new TRIOSClient(config.triosMcpUrl);
 	const gitbutler = new GitButlerMcpClient(
 		config.gitbutlerCliPath,
 		config.gitbutlerInternal,
@@ -80,11 +80,11 @@ async function _main() {
 	const tri = new TriClient(config.triCliPath, config.workingDir);
 
 	// Create bridge server with deps
-	const bridgeDeps = { config, browseros, gitbutler, tri };
+	const bridgeDeps = { config, trios, gitbutler, tri };
 	const _server = createBridgeServer(bridgeDeps);
 
 	console.log("  Port:         ${config.port}");
-	console.log(`  BrowserOS:    ${config.browserosMcpUrl}`);
+	console.log(`  TRIOS:    ${config.triosMcpUrl}`);
 	console.log(
 		`  GitButler:    ${config.gitbutlerCliPath} (internal: ${config.gitbutlerInternal})`,
 	);
@@ -103,9 +103,9 @@ async function _main() {
 	});
 
 	// Try initial connections (non-blocking — will retry on first tool call)
-	console.log("\n📡 Connecting to BrowserOS MCP...");
-	await browseros.connect().catch((err) => {
-		console.warn(`⚠️  BrowserOS not available yet: ${err}`);
+	console.log("\n📡 Connecting to TRIOS MCP...");
+	await trios.connect().catch((err) => {
+		console.warn(`⚠️  TRIOS not available yet: ${err}`);
 		console.warn("   Will retry on first tool call.");
 	});
 	console.log("\n📡 Connecting to GitButler MCP...");
@@ -134,12 +134,12 @@ async function _main() {
 			version: "0.2.0",
 			status: "running",
 			connections: {
-				browseros: browseros.isConnected ? "connected" : "disconnected",
+				trios: trios.isConnected ? "connected" : "disconnected",
 				gitbutler: gitbutler.isConnected ? "connected" : "disconnected",
 			},
 			config: {
 				port: config.port,
-				browserosMcpUrl: config.browserosMcpUrl,
+				triosMcpUrl: config.triosMcpUrl,
 				gitbutlerCliPath: config.gitbutlerCliPath,
 				triCliPath: config.triCliPath,
 				workingDir: config.workingDir,
@@ -162,7 +162,7 @@ async function _main() {
 	app.post("/mcp", async (c) => {
 		const mcpServer = createBridgeServer({
 			config,
-			browseros,
+			trios,
 			gitbutler,
 			tri,
 		});

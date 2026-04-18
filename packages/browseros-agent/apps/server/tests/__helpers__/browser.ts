@@ -81,10 +81,10 @@ export async function spawnBrowser(
       ...(config.headless ? ['--headless=new'] : []),
       ...config.extraArgs,
       `--user-data-dir=${config.userDataDir}`,
-      // TODO: replace with --browseros-cdp-port once we fix the browseros bug
+      // TODO: replace with --trios-cdp-port once we fix the trios bug
       `--remote-debugging-port=${config.cdpPort}`,
-      `--browseros-mcp-port=${config.serverPort}`,
-      `--browseros-extension-port=${config.extensionPort}`,
+      `--trios-mcp-port=${config.serverPort}`,
+      `--trios-extension-port=${config.extensionPort}`,
       '--disable-trios-server',
     ],
     {

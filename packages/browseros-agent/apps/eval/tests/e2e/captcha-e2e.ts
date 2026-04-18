@@ -2,7 +2,7 @@
  * End-to-end test for CAPTCHA solver integration.
  *
  * Runs a single eval task against Google's reCAPTCHA demo page:
- *   1. Launches BrowserOS (headed) with NopeCHA extension loaded
+ *   1. Launches TRIOS (headed) with NopeCHA extension loaded
  *   2. Agent navigates to reCAPTCHA demo, fills form
  *   3. CaptchaWaiter polls until NopeCHA solves the CAPTCHA
  *   4. Screenshot is captured AFTER solve
@@ -12,7 +12,7 @@
  *   - NOPECHA_API_KEY env var set
  *   - FIREWORKS_API_KEY env var set (or swap agent config)
  *   - NopeCHA extension at extensions/nopecha/ (run the install step from CI)
- *   - BrowserOS binary available
+ *   - TRIOS binary available
  *
  * Run:
  *   bun --env-file=apps/eval/.env.development apps/eval/tests/e2e/captcha-e2e.ts
@@ -21,7 +21,7 @@
 import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { BrowserOSAppManager } from '../../src/runner/browseros-app-manager'
+import { TRIOSAppManager } from '../../src/runner/trios-app-manager'
 import { createTaskExecutor } from '../../src/runner/task-executor'
 import { EvalConfigSchema } from '../../src/types/config'
 import { TaskSchema } from '../../src/types/task'
@@ -41,7 +41,7 @@ const EVAL_CONFIG = {
   dataset: 'inline',
   num_workers: 1,
   restart_server_per_task: true,
-  browseros: {
+  trios: {
     server_url: 'http://127.0.0.1:9110',
     base_cdp_port: 9010,
     base_server_port: 9110,
@@ -107,27 +107,27 @@ async function main() {
   if (!captcha) fail('captcha config block missing')
   const apiKey = process.env[captcha.api_key_env]
   if (!apiKey) fail(`${captcha.api_key_env} env var is empty`)
-  BrowserOSAppManager.patchNopechaApiKey(apiKey)
+  TRIOSAppManager.patchNopechaApiKey(apiKey)
 
-  const app = new BrowserOSAppManager(
+  const app = new TRIOSAppManager(
     0,
     {
-      cdp: config.browseros.base_cdp_port,
-      server: config.browseros.base_server_port,
-      extension: config.browseros.base_extension_port,
+      cdp: config.trios.base_cdp_port,
+      server: config.trios.base_server_port,
+      extension: config.trios.base_extension_port,
     },
-    config.browseros.load_extensions,
-    config.browseros.headless,
+    config.trios.load_extensions,
+    config.trios.headless,
   )
 
   try {
     log('Starting TRIOS stack (headed + NopeCHA extension)...')
     await app.restart()
-    log(`BrowserOS ready at ${app.getServerUrl()}`)
+    log(`TRIOS ready at ${app.getServerUrl()}`)
 
     const runConfig = {
       ...config,
-      browseros: { ...config.browseros, server_url: app.getServerUrl() },
+      trios: { ...config.trios, server_url: app.getServerUrl() },
     }
 
     const executor = createTaskExecutor(runConfig, OUTPUT_DIR, null)

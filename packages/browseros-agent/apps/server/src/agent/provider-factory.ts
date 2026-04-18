@@ -106,7 +106,7 @@ function createTRIOSFactory(
 ): (modelId: string) => unknown {
 	if (!config.baseUrl) throw new Error("TRIOS provider requires baseUrl");
 	const { baseUrl, apiKey, upstreamProvider, triosId } = config;
-	const browserosFetch = triosId
+	const triosFetch = triosId
 		? createTRIOSFetch(triosId)
 		: createOpenRouterCompatibleFetch();
 
@@ -114,29 +114,29 @@ function createTRIOSFactory(
 		return createOpenRouter({
 			baseURL: baseUrl,
 			...(apiKey && { apiKey }),
-			fetch: browserosFetch,
+			fetch: triosFetch,
 		});
 	}
 	if (upstreamProvider === LLM_PROVIDERS.ANTHROPIC) {
 		return createAnthropic({
 			baseURL: baseUrl,
 			...(apiKey && { apiKey }),
-			fetch: browserosFetch,
+			fetch: triosFetch,
 		});
 	}
 	if (upstreamProvider === LLM_PROVIDERS.AZURE) {
 		return createAzure({
 			baseURL: baseUrl,
 			...(apiKey && { apiKey }),
-			fetch: browserosFetch,
+			fetch: triosFetch,
 		});
 	}
 	logger.debug("Creating OpenAI-compatible provider for TRIOS");
 	return createOpenAICompatible({
-		name: "browseros",
+		name: "trios",
 		baseURL: baseUrl,
 		...(apiKey && { apiKey }),
-		fetch: browserosFetch,
+		fetch: triosFetch,
 	});
 }
 

@@ -36,7 +36,7 @@ import {
   useOAuthProviderFlow,
 } from '@/lib/llm-providers/useOAuthProviderFlow'
 import { track } from '@/lib/metrics/track'
-import { useAgentServerUrl } from '@/lib/trios/useBrowserOSProviders'
+import { useAgentServerUrl } from '@/lib/trios/useTRIOSProviders'
 import { ConfiguredProvidersList } from './ConfiguredProvidersList'
 import { DeviceCodeDialog } from './DeviceCodeDialog'
 import {

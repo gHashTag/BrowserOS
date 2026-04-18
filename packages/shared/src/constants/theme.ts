@@ -1,5 +1,5 @@
 /**
- * Unified Theme Constants for BrowserOS (TRIOS)
+ * Unified Theme Constants for TRIOS (TRIOS)
  * 
  * Single source of truth for all theme-related settings across:
  * - Chromium (C++ level)

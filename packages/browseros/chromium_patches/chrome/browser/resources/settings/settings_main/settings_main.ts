@@ -6,7 +6,7 @@ index bf151d0e0086b..978c05d0618dd 100644
  import '../reset_page/reset_profile_banner.js';
  import '../search_page/search_page_index.js';
  import '../your_saved_info_page/your_saved_info_page_index.js';
-+import '../browseros_prefs_page/browseros_prefs_page.js';
++import '../trios_prefs_page/trios_prefs_page.js';
  // <if expr="not is_chromeos">
  import '../default_browser_page/default_browser_page.js';
  

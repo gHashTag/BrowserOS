@@ -42,7 +42,7 @@ export class SingleAgentEvaluator implements AgentEvaluator {
       ...providerConfig,
       conversationId,
       model: providerConfig.model ?? 'gpt-4o',
-      workingDir: `/tmp/browseros-eval-${conversationId}`,
+      workingDir: `/tmp/trios-eval-${conversationId}`,
       evalMode: true,
       supportsImages,
     }

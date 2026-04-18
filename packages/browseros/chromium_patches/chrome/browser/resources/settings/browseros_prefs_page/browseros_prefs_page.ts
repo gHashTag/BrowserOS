@@ -1,15 +1,15 @@
-diff --git a/chrome/browser/resources/settings/browseros_prefs_page/browseros_prefs_page.ts b/chrome/browser/resources/settings/browseros_prefs_page/browseros_prefs_page.ts
+diff --git a/chrome/browser/resources/settings/trios_prefs_page/trios_prefs_page.ts b/chrome/browser/resources/settings/trios_prefs_page/trios_prefs_page.ts
 new file mode 100644
 index 0000000000000..463bbed53b5b3
 --- /dev/null
-+++ b/chrome/browser/resources/settings/browseros_prefs_page/browseros_prefs_page.ts
++++ b/chrome/browser/resources/settings/trios_prefs_page/trios_prefs_page.ts
 @@ -0,0 +1,249 @@
 +// Copyright 2025 The Chromium Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
 +
 +/**
-+ * @fileoverview 'settings-browseros-prefs-page' contains BrowserOS-specific settings.
++ * @fileoverview 'settings-trios-prefs-page' contains TRIOS-specific settings.
 + */
 +
 +import '../settings_page/settings_section.js';
@@ -24,24 +24,24 @@ index 0000000000000..463bbed53b5b3
 +import {PrefsMixin} from '/shared/settings/prefs/prefs_mixin.js';
 +import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 +
-+import {getTemplate} from './browseros_prefs_page.html.js';
++import {getTemplate} from './trios_prefs_page.html.js';
 +
 +interface CustomProvider {
 +  name: string;
 +  url: string;
 +}
 +
-+export interface SettingsBrowserOSPrefsPageElement {
++export interface SettingsTRIOSPrefsPageElement {
 +  $: {
 +    addProviderDialog: HTMLElement;
 +  };
 +}
 +
-+const SettingsBrowserOSPrefsPageElementBase = PrefsMixin(PolymerElement);
++const SettingsTRIOSPrefsPageElementBase = PrefsMixin(PolymerElement);
 +
-+export class SettingsBrowserOSPrefsPageElement extends SettingsBrowserOSPrefsPageElementBase {
++export class SettingsTRIOSPrefsPageElement extends SettingsTRIOSPrefsPageElementBase {
 +  static get is() {
-+    return 'settings-browseros-prefs-page';
++    return 'settings-trios-prefs-page';
 +  }
 +
 +  static get template() {
@@ -112,7 +112,7 @@ index 0000000000000..463bbed53b5b3
 +   */
 +  private loadCustomProviders_() {
 +    try {
-+      const pref = this.getPref('browseros.custom_providers');
++      const pref = this.getPref('trios.custom_providers');
 +      if (pref && pref.value) {
 +        this.customProviders = JSON.parse(pref.value);
 +      } else {
@@ -130,7 +130,7 @@ index 0000000000000..463bbed53b5b3
 +  private saveCustomProviders_() {
 +    const customProvidersJson = JSON.stringify(this.customProviders);
 +    // @ts-ignore: setPrefValue exists at runtime from PrefsMixin
-+    this.setPrefValue('browseros.custom_providers', customProvidersJson);
++    this.setPrefValue('trios.custom_providers', customProvidersJson);
 +  }
 +  
 +  /**
@@ -247,10 +247,10 @@ index 0000000000000..463bbed53b5b3
 +
 +declare global {
 +  interface HTMLElementTagNameMap {
-+    'settings-browseros-prefs-page': SettingsBrowserOSPrefsPageElement;
++    'settings-trios-prefs-page': SettingsTRIOSPrefsPageElement;
 +  }
 +}
 +
 +customElements.define(
-+    SettingsBrowserOSPrefsPageElement.is, SettingsBrowserOSPrefsPageElement);
++    SettingsTRIOSPrefsPageElement.is, SettingsTRIOSPrefsPageElement);
 \ No newline at end of file

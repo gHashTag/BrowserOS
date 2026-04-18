@@ -7,12 +7,12 @@
  * All port values in the monorepo should reference this file.
  *
  * in sync with:
- *   chromium/src/chrome/browser/browseros/server/browseros_server_prefs.h
+ *   chromium/src/chrome/browser/trios/server/trios_server_prefs.h
  */
 
 /**
  * Production ports (base 9000, offset 100)
- * Matches Chromium defaults in browseros_server_prefs.h
+ * Matches Chromium defaults in trios_server_prefs.h
  */
 export const DEFAULT_PORTS = {
 	cdp: 9000,

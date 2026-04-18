@@ -29,7 +29,7 @@ export async function callMcpTool<T = Record<string, unknown>>(
 	args: Record<string, unknown> = {},
 ): Promise<McpToolResult<T>> {
 	const client = new Client({
-		name: "browseros-sdk-internal",
+		name: "trios-sdk-internal",
 		version: "1.0.0",
 	});
 

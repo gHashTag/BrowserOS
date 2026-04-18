@@ -447,23 +447,23 @@ export class Browser {
 
 			await session.Runtime.callFunctionOn({
 				functionDeclaration: `function(reason){
-          var existing = document.getElementById('__browseros_acl_block_overlay');
+          var existing = document.getElementById('__trios_acl_block_overlay');
           if (existing) existing.remove();
-          var existingStyle = document.getElementById('__browseros_acl_block_style');
+          var existingStyle = document.getElementById('__trios_acl_block_style');
           if (!existingStyle) {
             var style = document.createElement('style');
-            style.id = '__browseros_acl_block_style';
+            style.id = '__trios_acl_block_style';
             style.textContent = [
-              '#__browseros_acl_block_overlay{position:absolute;pointer-events:none;z-index:2147483647;}',
-              '#__browseros_acl_block_overlay .ring{position:absolute;inset:0;border:2px solid rgba(220,38,38,0.95);background:rgba(220,38,38,0.14);border-radius:10px;box-shadow:0 0 0 3px rgba(255,255,255,0.75);}',
-              '#__browseros_acl_block_overlay .badge{position:absolute;top:-10px;right:-10px;background:rgba(153,27,27,0.96);color:white;font:600 11px/1.2 system-ui,sans-serif;padding:6px 8px;border-radius:999px;white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,0.2);}',
+              '#__trios_acl_block_overlay{position:absolute;pointer-events:none;z-index:2147483647;}',
+              '#__trios_acl_block_overlay .ring{position:absolute;inset:0;border:2px solid rgba(220,38,38,0.95);background:rgba(220,38,38,0.14);border-radius:10px;box-shadow:0 0 0 3px rgba(255,255,255,0.75);}',
+              '#__trios_acl_block_overlay .badge{position:absolute;top:-10px;right:-10px;background:rgba(153,27,27,0.96);color:white;font:600 11px/1.2 system-ui,sans-serif;padding:6px 8px;border-radius:999px;white-space:nowrap;box-shadow:0 6px 18px rgba(0,0,0,0.2);}',
             ].join('');
             document.head.appendChild(style);
           }
           var rect = this.getBoundingClientRect();
           if (!rect.width || !rect.height) return;
           var overlay = document.createElement('div');
-          overlay.id = '__browseros_acl_block_overlay';
+          overlay.id = '__trios_acl_block_overlay';
           overlay.style.left = (rect.left + window.scrollX) + 'px';
           overlay.style.top = (rect.top + window.scrollY) + 'px';
           overlay.style.width = rect.width + 'px';
@@ -477,7 +477,7 @@ export class Browser {
           overlay.appendChild(badge);
           document.body.appendChild(overlay);
           window.setTimeout(function(){
-            var current = document.getElementById('__browseros_acl_block_overlay');
+            var current = document.getElementById('__trios_acl_block_overlay');
             if (current) current.remove();
           }, 2500);
         }`,

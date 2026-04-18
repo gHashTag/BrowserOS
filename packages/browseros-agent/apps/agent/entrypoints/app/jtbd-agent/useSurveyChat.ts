@@ -20,7 +20,7 @@ async function getInstallId(): Promise<string> {
       return String(pref.value)
     }
   } catch {
-    // BrowserOS API not available
+    // TRIOS API not available
   }
   return ''
 }

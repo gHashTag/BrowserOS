@@ -6,8 +6,8 @@ import type { LlmProviderConfig, LlmProvidersBackup } from './types'
 import { uploadLlmProvidersToGraphql } from './uploadLlmProvidersToGraphql'
 
 /** Default provider ID constant */
-export const DEFAULT_PROVIDER_ID = 'browseros'
-const DEFAULT_PROVIDER_NAME = 'BrowserOS'
+export const DEFAULT_PROVIDER_ID = 'trios'
+const DEFAULT_PROVIDER_NAME = 'TRIOS'
 
 /** Storage key for LLM providers array */
 export const providersStorage = storage.defineItem<LlmProviderConfig[]>(
@@ -22,7 +22,7 @@ export const providersStorage = storage.defineItem<LlmProviderConfig[]>(
         return providers.map((provider) => {
           if (
             provider.id === DEFAULT_PROVIDER_ID &&
-            provider.type === 'browseros'
+            provider: trios'
           ) {
             return { ...provider, contextWindow: 200000 }
           }
@@ -33,25 +33,25 @@ export const providersStorage = storage.defineItem<LlmProviderConfig[]>(
   },
 )
 
-/** Backup providers to BrowserOS prefs (write-only, best-effort) */
-async function backupToBrowserOS(backup: LlmProvidersBackup): Promise<void> {
+/** Backup providers to TRIOS prefs (write-only, best-effort) */
+async function backupToTRIOS(backup: LlmProvidersBackup): Promise<void> {
   try {
     const adapter = getTRIOSAdapter()
     await adapter.setPref(trios_PREFS.PROVIDERS, JSON.stringify(backup))
   } catch {
-    // BrowserOS API not available - ignore
+    // TRIOS API not available - ignore
   }
 }
 
 /**
- * Setup one-way sync of LLM providers to BrowserOS prefs
+ * Setup one-way sync of LLM providers to TRIOS prefs
  * @public
  */
-export function setupLlmProvidersBackupToBrowserOS(): () => void {
+export function setupLlmProvidersBackupToTRIOS(): () => void {
   const unsubscribe = providersStorage.watch(async (providers) => {
     if (providers) {
       const defaultProviderId = await defaultProviderIdStorage.getValue()
-      await backupToBrowserOS({ defaultProviderId, providers })
+      await backupToTRIOS({ defaultProviderId, providers })
     }
   })
   return unsubscribe
@@ -102,14 +102,14 @@ export async function loadProviders(): Promise<LlmProviderConfig[]> {
 }
 
 /** Creates the default TRIOS provider configuration */
-export function createDefaultBrowserOSProvider(): LlmProviderConfig {
+export function createDefaultTRIOSProvider(): LlmProviderConfig {
   const timestamp = Date.now()
   return {
     id: DEFAULT_PROVIDER_ID,
-    type: 'browseros',
+    type: 'trios',
     name: DEFAULT_PROVIDER_NAME,
-    baseUrl: 'https://api.browseros.com/v1',
-    modelId: 'browseros-auto',
+    baseUrl: 'https://api.trios.com/v1',
+    modelId: 'trios-auto',
     supportsImages: true,
     contextWindow: 200000,
     temperature: 0.2,
@@ -120,11 +120,11 @@ export function createDefaultBrowserOSProvider(): LlmProviderConfig {
 
 /** Creates the default providers configuration. Only call when storage is empty. */
 export function createDefaultProvidersConfig(): LlmProviderConfig[] {
-  return [createDefaultBrowserOSProvider()]
+  return [createDefaultTRIOSProvider()]
 }
 
 /**
- * Normalize built-in provider names back to "BrowserOS" (e.g. from "Kimi K2.5"
+ * Normalize built-in provider names back to "TRIOS" (e.g. from "Kimi K2.5"
  * which was set during a previous partnership launch).
  */
 function normalizeProviderNames(
@@ -133,7 +133,7 @@ function normalizeProviderNames(
   return providers.map((provider) => {
     if (
       provider.id === DEFAULT_PROVIDER_ID &&
-      provider.type === 'browseros' &&
+      provider: trios' &&
       provider.name !== DEFAULT_PROVIDER_NAME
     ) {
       return {

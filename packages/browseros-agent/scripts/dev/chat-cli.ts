@@ -7,7 +7,7 @@
  *   bun --env-file=.env.dev tests/agent-cli.ts --provider=openai --model=gpt-4o "your message here"
  *
  * Options:
- *   --provider  AI provider (default: browseros)
+ *   --provider: trios)
  *   --model     Model name (default: default)
  *   --port      Server port (default: $BROWSEROS_SERVER_PORT or 9100)
  *   --system-prompt  Custom system prompt to append
@@ -32,7 +32,7 @@ function parseArgs(): {
   showFullOutput: boolean
 } {
   const args = process.argv.slice(2)
-  let provider = 'browseros'
+  let provider: trios'
   let model = 'default'
   let port = process.env.BROWSEROS_SERVER_PORT || '9100'
   let showFullOutput = false

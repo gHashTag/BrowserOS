@@ -81,7 +81,7 @@ describe('server build', () => {
     rootDir,
     `dist/prod/server/trios-server-resources-${target.id}.zip`,
   )
-  const tempDir = mkdtempSync(join(tmpdir(), 'browseros-build-test-'))
+  const tempDir = mkdtempSync(join(tmpdir(), 'trios-build-test-'))
   const emptyManifestPath = join(tempDir, 'empty-manifest.json')
   writeFileSync(emptyManifestPath, JSON.stringify({ resources: [] }))
 

@@ -41,7 +41,7 @@ export const TIPS: Tip[] = [
   },
   {
     id: 'claude-code-mcp',
-    text: 'Connect BrowserOS to Claude Code to control tabs, clicks, and pages from your terminal.',
+    text: 'Connect TRIOS to Claude Code to control tabs, clicks, and pages from your terminal.',
   },
   {
     id: 'mcp-servers',
@@ -53,7 +53,7 @@ export const TIPS: Tip[] = [
   },
   {
     id: 'smart-nudges',
-    text: 'If BrowserOS offers to connect an app, saying yes lets it use that app directly next time.',
+    text: 'If TRIOS offers to connect an app, saying yes lets it use that app directly next time.',
   },
   {
     id: 'soul-md',
@@ -69,7 +69,7 @@ export const TIPS: Tip[] = [
   },
   {
     id: 'ad-blocking',
-    text: 'BrowserOS supports uBlock Origin for ad blocking — install it from the Chrome Web Store or GitHub.',
+    text: 'TRIOS supports uBlock Origin for ad blocking — install it from the Chrome Web Store or GitHub.',
   },
   {
     id: 'at-mention-tabs',

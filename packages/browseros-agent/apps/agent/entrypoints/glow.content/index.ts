@@ -1,9 +1,9 @@
 import confetti from 'canvas-confetti'
 import type { GlowMessage } from './GlowMessage'
 
-const GLOW_OVERLAY_ID = 'browseros-glow-overlay'
-const GLOW_STYLES_ID = 'browseros-glow-styles'
-const GLOW_STOP_BTN_ID = 'browseros-glow-stop-btn'
+const GLOW_OVERLAY_ID = 'trios-glow-overlay'
+const GLOW_STYLES_ID = 'trios-glow-styles'
+const GLOW_STOP_BTN_ID = 'trios-glow-stop-btn'
 
 const GLOW_THICKNESS = 1.0
 const GLOW_OPACITY = 0.6
@@ -20,7 +20,7 @@ function injectStyles(): void {
   const style = document.createElement('style')
   style.id = GLOW_STYLES_ID
   style.textContent = `
-    @keyframes browseros-glow-pulse {
+    @keyframes trios-glow-pulse {
       0% {
         box-shadow:
           inset 0 0 ${58 * t}px ${26 * t}px transparent,
@@ -44,12 +44,12 @@ function injectStyles(): void {
       }
     }
 
-    @keyframes browseros-glow-fade-in {
+    @keyframes trios-glow-fade-in {
       from { opacity: 0; }
       to { opacity: ${GLOW_OPACITY}; }
     }
 
-    @keyframes browseros-glow-btn-fade-in {
+    @keyframes trios-glow-btn-fade-in {
       from { opacity: 0; }
       to { opacity: 1; }
     }
@@ -65,8 +65,8 @@ function injectStyles(): void {
       opacity: 0;
       will-change: opacity;
       animation:
-        browseros-glow-pulse 3s ease-in-out infinite,
-        browseros-glow-fade-in 420ms cubic-bezier(0.22, 1, 0.36, 1) forwards !important;
+        trios-glow-pulse 3s ease-in-out infinite,
+        trios-glow-fade-in 420ms cubic-bezier(0.22, 1, 0.36, 1) forwards !important;
     }
 
     #${GLOW_STOP_BTN_ID} {
@@ -90,7 +90,7 @@ function injectStyles(): void {
       padding: 0 !important;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3) !important;
       opacity: 0;
-      animation: browseros-glow-btn-fade-in 420ms cubic-bezier(0.22, 1, 0.36, 1) forwards !important;
+      animation: trios-glow-btn-fade-in 420ms cubic-bezier(0.22, 1, 0.36, 1) forwards !important;
     }
 
     #${GLOW_STOP_BTN_ID}:hover {

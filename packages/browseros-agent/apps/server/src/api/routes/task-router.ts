@@ -29,7 +29,7 @@ export function createTaskRouter(deps: {
 			config: RelayObserverConfig,
 		): Promise<{ success: boolean; message: string }> {
 			const agentConfig: PortableAgentConfig = {
-				apiVersion: "browseros.io/v1alpha1",
+				apiVersion: "trios.io/v1alpha1",
 				kind: "PortableAgent",
 				metadata: {
 					name: "a2a-relay-observer",
@@ -88,7 +88,7 @@ export function createTaskRouter(deps: {
 			config: any,
 		): Promise<{ success: boolean; message: string }> {
 			const agentConfig: PortableAgentConfig = {
-				apiVersion: "browseros.io/v1alpha1",
+				apiVersion: "trios.io/v1alpha1",
 				kind: "PortableAgent",
 				metadata: {
 					name: taskType.toLowerCase().replace(/\s+/g, "-"),

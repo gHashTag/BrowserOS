@@ -62,7 +62,7 @@ const primarySettingsSections: NavSection[] = [
   {
     label: 'Provider Settings',
     items: [
-      { name: 'BrowserOS AI', to: '/settings/ai', icon: Bot },
+      { name: 'TRIOS AI', to: '/settings/ai', icon: Bot },
       {
         name: 'Chat & Council Provider',
         to: '/settings/chat',
@@ -75,13 +75,13 @@ const primarySettingsSections: NavSection[] = [
     label: 'Other',
     items: [
       {
-        name: 'Customize BrowserOS',
+        name: 'Customize TRIOS',
         to: '/settings/customization',
         icon: Palette,
         feature: Feature.CUSTOMIZATION_SUPPORT,
       },
       { name: 'Tool Approvals', to: '/settings/approvals', icon: ShieldCheck },
-      { name: 'BrowserOS as MCP', to: '/settings/mcp', icon: Server },
+      { name: 'TRIOS as MCP', to: '/settings/mcp', icon: Server },
       { name: 'ACL Rules', to: '/settings/acl', icon: ShieldAlert },
       {
         name: 'Usage & Billing',
@@ -94,7 +94,7 @@ const primarySettingsSections: NavSection[] = [
 ]
 
 const helpItems: NavItem[] = [
-  { name: 'Docs', href: 'https://docs.browseros.com/', icon: BookOpen },
+  { name: 'Docs', href: 'https://docs.trios.com/', icon: BookOpen },
   { name: 'Features', to: '/onboarding/features', icon: Compass },
   { name: 'Revisit Onboarding', to: '/onboarding', icon: RotateCcw },
 ]

@@ -14,7 +14,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
-import { BrowserOSIcon, ProviderIcon } from '@/lib/llm-providers/providerIcons'
+import { TRIOSIcon, ProviderIcon } from '@/lib/llm-providers/providerIcons'
 import type { ProviderType } from '@/lib/llm-providers/types'
 import { cn } from '@/lib/utils'
 import type { Provider } from './chatComponentTypes'
@@ -58,8 +58,8 @@ export const ChatProviderSelector: FC<
                     )}
                   >
                     <span className="text-muted-foreground">
-                      {provider.type === 'browseros' ? (
-                        <BrowserOSIcon size={18} />
+                      {provider: trios' ? (
+                        <TRIOSIcon size={18} />
                       ) : (
                         <ProviderIcon
                           type={provider.type as ProviderType}

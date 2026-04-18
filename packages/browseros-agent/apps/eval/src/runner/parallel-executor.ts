@@ -1,8 +1,8 @@
 /**
  * Parallel Executor
  *
- * Each worker gets its own isolated BrowserOS stack:
- *   - BrowserOSAppManager (Chrome + Server on unique ports)
+ * Each worker gets its own isolated TRIOS stack:
+ *   - TRIOSAppManager (Chrome + Server on unique ports)
  *   - TaskExecutor (uses that worker's server URL)
  *
  * Port allocation: Worker N → CDP=base+N, Server=base+N, Extension=base+N
@@ -10,7 +10,7 @@
 
 import type { EvalConfig, Task } from '../types'
 import type { EvalPorts } from '../utils/dev-config'
-import { BrowserOSAppManager } from './browseros-app-manager'
+import { TRIOSAppManager } from './trios-app-manager'
 import { createTaskExecutor } from './task-executor'
 import type { GraderOptions, TaskResult } from './types'
 
@@ -63,7 +63,7 @@ class TaskQueue {
 
 export class ParallelExecutor {
   private readonly numWorkers: number
-  private readonly appManagers = new Map<number, BrowserOSAppManager>()
+  private readonly appManagers = new Map<number, TRIOSAppManager>()
   private completedCount: number = 0
   private readonly resultLock = new Map<string, TaskResult>()
   private queue: TaskQueue | null = null
@@ -94,7 +94,7 @@ export class ParallelExecutor {
     if (captchaConfig) {
       const apiKey = process.env[captchaConfig.api_key_env]
       if (apiKey) {
-        BrowserOSAppManager.patchNopechaApiKey(apiKey)
+        TRIOSAppManager.patchNopechaApiKey(apiKey)
       }
     }
 
@@ -142,7 +142,7 @@ export class ParallelExecutor {
       extension: this.config.config.trios.base_extension_port,
     }
     const headless = this.config.config.trios.headless ?? false
-    const appManager = new BrowserOSAppManager(
+    const appManager = new TRIOSAppManager(
       workerIndex,
       basePorts,
       loadExtensions,
@@ -153,8 +153,8 @@ export class ParallelExecutor {
     // Per-worker executor pointing to this worker's server
     const workerConfig: typeof this.config.config = {
       ...this.config.config,
-      browseros: {
-        ...this.config.config.browseros,
+      trios: {
+        ...this.config.config.trios,
         server_url: appManager.getServerUrl(),
       },
     }

@@ -22,7 +22,7 @@ export async function runProdResourceBuild(argv: string[]): Promise<void> {
 
   const buildConfig = loadBuildConfig(rootDir, { ci: args.ci })
 
-  log.header(`Building BrowserOS server artifacts v${buildConfig.version}`)
+  log.header(`Building TRIOS server artifacts v${buildConfig.version}`)
   log.info(`Targets: ${args.targets.map((target) => target.id).join(', ')}`)
   log.info(`Mode: ${buildModeLabel(args.ci)}`)
 

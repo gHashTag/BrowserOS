@@ -27,16 +27,16 @@ export const SCREENSHOT_SIZES = {
 
 export type ScreenshotSizeKey = keyof typeof SCREENSHOT_SIZES
 
-export class BrowserOSAdapter {
-  private static instance: BrowserOSAdapter | null = null
+export class TRIOSAdapter {
+  private static instance: TRIOSAdapter | null = null
 
   private constructor() {}
 
-  static getInstance(): BrowserOSAdapter {
-    if (!BrowserOSAdapter.instance) {
-      BrowserOSAdapter.instance = new BrowserOSAdapter()
+  static getInstance(): TRIOSAdapter {
+    if (!TRIOSAdapter.instance) {
+      TRIOSAdapter.instance = new TRIOSAdapter()
     }
-    return BrowserOSAdapter.instance
+    return TRIOSAdapter.instance
   }
 
   async getInteractiveSnapshot(
@@ -413,4 +413,4 @@ export class BrowserOSAdapter {
 }
 
 /** @public */
-export const getTRIOSAdapter = () => BrowserOSAdapter.getInstance()
+export const getTRIOSAdapter = () => TRIOSAdapter.getInstance()

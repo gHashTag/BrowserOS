@@ -3,7 +3,7 @@
  * Copyright 2025 TRIOS
  *
  * Integration tests for @trios-ai/agent-sdk
- * Tests the SDK against a real BrowserOS server.
+ * Tests the SDK against a real TRIOS server.
  */
 
 import { afterAll, beforeAll, describe, it } from 'bun:test'

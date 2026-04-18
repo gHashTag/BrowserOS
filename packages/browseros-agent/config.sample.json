@@ -15,7 +15,7 @@
   "instance": {
     "client_id": "test-install-123",
     "install_id": "test-client-456",
-    "browseros_version": "",
+    "trios_version": "",
     "chromium_version": ""
   }
 }

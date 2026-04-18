@@ -4,20 +4,20 @@
  * Usage:
  *   bun apps/eval/scripts/test-clado-api.ts [screenshot-path]
  *
- * If no screenshot provided, captures one from a running BrowserOS server.
+ * If no screenshot provided, captures one from a running TRIOS server.
  */
 
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 const ACTION_URL =
-  'https://clado-ai--clado-browseros-action-actionmodel-generate.modal.run'
+  'https://clado-ai--clado-trios-action-actionmodel-generate.modal.run'
 const ACTION_HEALTH_URL =
-  'https://clado-ai--clado-browseros-action-actionmodel-health.modal.run'
+  'https://clado-ai--clado-trios-action-actionmodel-health.modal.run'
 const GROUNDING_URL =
-  'https://clado-ai--clado-browseros-grounding-groundingmodel-generate.modal.run'
+  'https://clado-ai--clado-trios-grounding-groundingmodel-generate.modal.run'
 const GROUNDING_HEALTH_URL =
-  'https://clado-ai--clado-browseros-grounding-groundingmodel-health.modal.run'
+  'https://clado-ai--clado-trios-grounding-groundingmodel-health.modal.run'
 
 async function checkHealth(name: string, url: string): Promise<boolean> {
   console.log(`\n--- ${name} health check ---`)
@@ -110,7 +110,7 @@ async function loadScreenshot(path?: string): Promise<string> {
     return data.toString('base64')
   }
 
-  // Try to capture from a running BrowserOS server
+  // Try to capture from a running TRIOS server
   const serverUrl = process.env.trios_URL || 'http://127.0.0.1:9110'
   console.log(
     `No screenshot path provided. Trying to capture from ${serverUrl}...`,

@@ -36,7 +36,7 @@ export interface OpenClawProviderInput {
 export interface BootstrapConfigInput {
 	gatewayPort: number;
 	gatewayToken: string;
-	browserosServerPort?: number;
+	triosServerPort?: number;
 	providerType?: string;
 	providerName?: string;
 	baseUrl?: string;
@@ -147,7 +147,7 @@ export function resolveProviderConfig(
 export function buildBootstrapConfig(
 	input: BootstrapConfigInput,
 ): Record<string, unknown> {
-	const serverPort = input.browserosServerPort ?? DEFAULT_PORTS.server;
+	const serverPort = input.triosServerPort ?? DEFAULT_PORTS.server;
 	const provider = resolveProviderConfig(input);
 
 	const defaults: Record<string, unknown> = {
@@ -204,7 +204,7 @@ export function buildBootstrapConfig(
 		},
 		mcp: {
 			servers: {
-				browseros: {
+				trios: {
 					url: `http://host.containers.internal:${serverPort}/mcp`,
 					transport: "streamable-http",
 				},

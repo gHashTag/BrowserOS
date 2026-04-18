@@ -3,7 +3,7 @@ import { APICallError } from "@ai-sdk/provider";
 /**
  * Creates a fetch function that extracts detailed error messages from OpenRouter-style APIs.
  *
- * OpenRouter (and BrowserOS which uses it internally) wraps provider errors in a generic
+ * OpenRouter (and TRIOS which uses it internally) wraps provider errors in a generic
  * "Provider returned error" message, with actual details hidden in metadata.raw.
  * This fetch intercepts HTTP errors and extracts the real error message.
  *

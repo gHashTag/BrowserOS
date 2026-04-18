@@ -46,21 +46,21 @@
 		"test:benchmark:baseline": "bun run apps/server/src/agent/portable/benchmark-a2a.ts baseline",
 		"test:benchmark:reconnect": "bun run apps/server/src/agent/portable/benchmark-a2a.ts reconnect",
 		"test:benchmark:multisession": "bun run apps/server/src/agent/portable/benchmark-a2a.ts multisession",
-		"theme:sync": "cd ../browseros/chromium_patches && python3 tools/theme/generate_css_vars.py > ../../browseros-agent/apps/agent/styles/global.css",
+		"theme:sync": "cd ../trios/chromium_patches && python3 tools/theme/generate_css_vars.py > ../../trios-agent/apps/agent/styles/global.css",
 		"theme:apply": "bun scripts/theme/apply.ts",
 		"clean": "rimraf dist",
-		"tokens:build": "cd packages/browseros/tokens && node build.mjs",
-		"tokens:apply": "python3 packages/browseros/tokens/tools/apply_black_theme.py",
-		"tokens:all": "cd packages/browseros/tokens && node build.mjs && python3 packages/browseros/tokens/tools/apply_black_theme.py",
-		"launch": "node ../browseros/tools/launch.ts"
+		"tokens:build": "cd packages/trios/tokens && node build.mjs",
+		"tokens:apply": "python3 packages/trios/tokens/tools/apply_black_theme.py",
+		"tokens:all": "cd packages/trios/tokens && node build.mjs && python3 packages/trios/tokens/tools/apply_black_theme.py",
+		"launch": "node ../trios/tools/launch.ts"
 	},
-	"repository": "browseros-ai/BrowserOS-server",
+	"repository": "trios-ai/BrowserOS-server",
 	"author": "TRIOS",
 	"license": "AGPL-3.0-or-later",
 	"bugs": {
-		"url": "https://github.com/browseros-ai/BrowserOS/issues"
+		"url": "https://github.com/trios-ai/BrowserOS/issues"
 	},
-	"homepage": "https://github.com/browseros-ai/BrowserOS#readme",
+	"homepage": "https://github.com/trios-ai/BrowserOS#readme",
 	"devDependencies": {
 		"@aws-sdk/client-s3": "^3.933.0",
 		"@biomejs/biome": "2.4.8",

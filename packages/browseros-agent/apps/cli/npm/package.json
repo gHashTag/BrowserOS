@@ -18,11 +18,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/browseros-ai/BrowserOS",
-    "directory": "packages/browseros-agent/apps/cli/npm"
+    "url": "https://github.com/trios-ai/BrowserOS",
+    "directory": "packages/trios-agent/apps/cli/npm"
   },
-  "homepage": "https://browseros.com",
-  "bugs": "https://github.com/browseros-ai/BrowserOS/issues",
+  "homepage": "https://trios.com",
+  "bugs": "https://github.com/trios-ai/BrowserOS/issues",
   "license": "MIT",
   "os": [
     "darwin",

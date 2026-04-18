@@ -126,8 +126,8 @@ async function resolveTRIOSConfig(
 
 	logger.debug("Resolving trios config", { configUrl, triosId });
 
-	const browserosConfig = await fetchTRIOSConfig(configUrl, triosId);
-	const llmConfig = getLLMConfigFromProvider(browserosConfig, "default");
+	const triosConfig = await fetchTRIOSConfig(configUrl, triosId);
+	const llmConfig = getLLMConfigFromProvider(triosConfig, "default");
 
 	return {
 		...config,

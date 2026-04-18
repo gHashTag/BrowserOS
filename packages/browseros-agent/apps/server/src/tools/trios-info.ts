@@ -3,11 +3,11 @@ import { defineToolWithCategory } from "./framework";
 
 const defineAssistantTool = defineToolWithCategory("assistant");
 
-const TRIOS_INFO = `# BrowserOS — The Open-Source AI Browser
+const TRIOS_INFO = `# TRIOS — The Open-Source AI Browser
 
-BrowserOS is an AI-native browser built on Chromium that turns plain English into browser actions. It runs AI agents locally on your machine, keeping your data private. Open source under AGPL-3.0.
+TRIOS is an AI-native browser built on Chromium that turns plain English into browser actions. It runs AI agents locally on your machine, keeping your data private. Open source under AGPL-3.0.
 
-**Docs:** https://docs.browseros.com/
+**Docs:** https://docs.trios.com/
 
 ---
 
@@ -21,32 +21,32 @@ BrowserOS is an AI-native browser built on Chromium that turns plain English int
 ## Core Features
 
 ### Bring Your Own LLM
-Connect your preferred AI provider or run models locally. Supported providers: Gemini (free tier), Claude/Anthropic, OpenAI, OpenRouter (500+ models). Local options: Ollama, LM Studio. Configure at chrome://browseros/settings.
-Learn more: https://docs.browseros.com/features/bring-your-own-llm
+Connect your preferred AI provider: trios/settings.
+Learn more: https://docs.trios.com/features/bring-your-own-llm
 
 ### Scheduled Tasks
-Automate tasks on a schedule — daily, hourly, or every few minutes. Runs in a background window without interrupting your work. Use cases: morning briefings, LinkedIn automation, price monitoring. Requires BrowserOS to be open.
-Learn more: https://docs.browseros.com/features/scheduled-tasks
+Automate tasks on a schedule — daily, hourly, or every few minutes. Runs in a background window without interrupting your work. Use cases: morning briefings, LinkedIn automation, price monitoring. Requires TRIOS to be open.
+Learn more: https://docs.trios.com/features/scheduled-tasks
 
 ### Filesystem Access
 Grant the agent controlled access to a local folder to read files, write reports, and run shell commands. Sandboxed — cannot access parent directories. Combine web research with local file creation in a single task.
-Learn more: https://docs.browseros.com/features/cowork
+Learn more: https://docs.trios.com/features/cowork
 
 ### Connect Apps (MCPs)
 Link external apps so the agent can access them conversationally. Built-in integrations: Gmail, Google Calendar, Google Docs, Google Sheets, Google Drive, Slack, Notion, LinkedIn. Custom MCP servers supported via SSE endpoints. Credentials stored locally.
-Learn more: https://docs.browseros.com/features/connect-mcps
+Learn more: https://docs.trios.com/features/connect-mcps
 
 ### MCP Server for Developer Tools
 Built-in MCP server exposes 31 browser automation tools to Claude Code, Gemini CLI, OpenAI Codex CLI, and Claude Desktop. Enables agentic coding (test web apps, read console errors, fix code), data extraction from authenticated pages, and programmatic browser control.
-Learn more: https://docs.browseros.com/features/use-with-claude-code
+Learn more: https://docs.trios.com/features/use-with-claude-code
 
 ### Chat & LLM Hub
 Chat provides quick AI access across any webpage via the side panel. LLM Hub enables side-by-side comparison of up to 3 models simultaneously. Switch providers instantly with Option+L.
-Learn more: https://docs.browseros.com/features/llm-chat-hub
+Learn more: https://docs.trios.com/features/llm-chat-hub
 
 ### Ad Blocking
 Built-in ad blocking powered by uBlock Origin with full Manifest V2 support. Blocks ~10x more ads than Chrome out of the box (68% vs 7% effectiveness). Faster page loads, less bandwidth, reduced tracking.
-Learn more: https://docs.browseros.com/features/ad-blocking`;
+Learn more: https://docs.trios.com/features/ad-blocking`;
 
 const VALID_TOPICS = [
 	"overview",
@@ -60,7 +60,7 @@ const VALID_TOPICS = [
 ] as const;
 
 const TOPIC_SECTIONS: Record<string, { start: string; end?: string }> = {
-	overview: { start: "# BrowserOS", end: "## Core Features" },
+	overview: { start: "# TRIOS", end: "## Core Features" },
 	"bring-your-own-llm": {
 		start: "### Bring Your Own LLM",
 		end: "### Scheduled Tasks",
@@ -102,7 +102,7 @@ function getTopicContent(topic: string): string {
 export const trios_info = defineAssistantTool({
 	name: "trios_info",
 	description:
-		'Get information about BrowserOS features, capabilities, and documentation links. Use when users ask "What is BrowserOS?", "What can BrowserOS do?", or about specific features.',
+		'Get information about TRIOS features, capabilities, and documentation links. Use when users ask "What is TRIOS?", "What can TRIOS do?", or about specific features.',
 	input: z.object({
 		topic: z
 			.enum(VALID_TOPICS)

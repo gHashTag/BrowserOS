@@ -1,6 +1,6 @@
 /**
  * Fetches models.dev/api.json and generates a compact models data file
- * for BrowserOS. Run: bun scripts/generate-models.ts
+ * for TRIOS. Run: bun scripts/generate-models.ts
  */
 
 const API_URL = 'https://models.dev/api.json'
@@ -59,7 +59,7 @@ interface OutputProvider {
   models: OutputModel[]
 }
 
-// models.dev ID → BrowserOS provider ID
+// models.dev ID → TRIOS provider ID
 const PROVIDER_MAP: Record<string, string> = {
   anthropic: 'anthropic',
   openai: 'openai',
@@ -103,7 +103,7 @@ async function main() {
 
   const output: Record<string, OutputProvider> = {}
 
-  for (const [modelsDevId, browserosId] of Object.entries(PROVIDER_MAP)) {
+  for (const [modelsDevId, triosId] of Object.entries(PROVIDER_MAP)) {
     const provider = data[modelsDevId]
     if (!provider) {
       console.warn(`Provider not found in models.dev: ${modelsDevId}`)
@@ -119,7 +119,7 @@ async function main() {
         return dateB.localeCompare(dateA)
       })
 
-    output[browserosId] = {
+    output[triosId] = {
       name: provider.name,
       ...(provider.api && { api: provider.api }),
       doc: provider.doc,

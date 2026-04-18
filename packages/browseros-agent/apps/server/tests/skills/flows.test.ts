@@ -7,14 +7,14 @@ import { join } from 'node:path'
 let testDir: string
 let builtinDir: string
 
-mock.module('../../src/lib/browseros-dir', () => ({
+mock.module('../../src/lib/trios-dir', () => ({
   getSkillsDir: () => testDir,
   getBuiltinSkillsDir: () => builtinDir,
 }))
 
 mock.module('../../src/env', () => ({
   INLINED_ENV: {
-    SKILLS_CATALOG_URL: 'https://cdn.browseros.com/skills/v1/catalog.json',
+    SKILLS_CATALOG_URL: 'https://cdn.trios.com/skills/v1/catalog.json',
   },
 }))
 

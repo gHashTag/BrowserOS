@@ -3,7 +3,7 @@
  * Run with: bun apps/eval/scripts/test-lifecycle.ts
  *
  * Tests:
- * 1. BrowserOS app detection
+ * 1. TRIOS app detection
  * 2. Server start/stop
  * 3. Browser readiness with verification
  * 4. Window create/close
@@ -17,7 +17,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { type Subprocess, spawn, spawnSync } from 'bun'
 
-// Ports from config.dev.json - must match BrowserOS launch args
+// Ports from config.dev.json - must match TRIOS launch args
 const EVAL_PORTS = {
   cdp: 9005,
   server: 9105, // http_mcp in config.dev.json
@@ -37,45 +37,45 @@ function killPort(port: number): void {
   })
 }
 
-function isBrowserOSAppRunning(): boolean {
+function isTRIOSAppRunning(): boolean {
   const result = spawnSync({
-    cmd: ['sh', '-c', 'pgrep -f "BrowserOS" 2>/dev/null || true'],
+    cmd: ['sh', '-c', 'pgrep -f "TRIOS" 2>/dev/null || true'],
   })
   const output = result.stdout?.toString().trim() ?? ''
   return output.length > 0
 }
 
-async function _killBrowserOSApp(): Promise<void> {
-  console.log('  Killing BrowserOS app...')
+async function _killTRIOSApp(): Promise<void> {
+  console.log('  Killing TRIOS app...')
   spawnSync({
-    cmd: ['sh', '-c', 'pkill -9 -f "BrowserOS" 2>/dev/null || true'],
+    cmd: ['sh', '-c', 'pkill -9 -f "TRIOS" 2>/dev/null || true'],
   })
   killPort(EVAL_PORTS.cdp)
   for (let i = 0; i < 10; i++) {
-    if (!isBrowserOSAppRunning()) return
+    if (!isTRIOSAppRunning()) return
     await new Promise((r) => setTimeout(r, 500))
   }
 }
 
-async function _launchBrowserOSApp(): Promise<boolean> {
+async function _launchTRIOSApp(): Promise<boolean> {
   console.log(
-    `  Launching BrowserOS (server disabled, CDP=${EVAL_PORTS.cdp})...`,
+    `  Launching TRIOS (server disabled, CDP=${EVAL_PORTS.cdp})...`,
   )
   spawnSync({
     cmd: [
       'open',
       '-a',
-      'BrowserOS',
+      'TRIOS',
       '--args',
       '--disable-trios-server',
       `--remote-debugging-port=${EVAL_PORTS.cdp}`,
-      `--browseros-cdp-port=${EVAL_PORTS.cdp}`,
-      `--browseros-mcp-port=${EVAL_PORTS.server}`,
+      `--trios-cdp-port=${EVAL_PORTS.cdp}`,
+      `--trios-mcp-port=${EVAL_PORTS.server}`,
     ],
   })
   for (let i = 0; i < 30; i++) {
     await new Promise((r) => setTimeout(r, 1000))
-    if (isBrowserOSAppRunning()) {
+    if (isTRIOSAppRunning()) {
       await new Promise((r) => setTimeout(r, 8000))
       return true
     }
@@ -222,15 +222,15 @@ async function callMcpTool(
 // Tests
 // ============================================================================
 
-async function testBrowserOSDetection(): Promise<boolean> {
-  console.log('\n=== Test 1: BrowserOS App Detection ===')
-  const running = isBrowserOSAppRunning()
-  console.log(`  BrowserOS running: ${running}`)
+async function testTRIOSDetection(): Promise<boolean> {
+  console.log('\n=== Test 1: TRIOS App Detection ===')
+  const running = isTRIOSAppRunning()
+  console.log(`  TRIOS running: ${running}`)
   if (!running) {
-    console.log('  ❌ BrowserOS app is not running. Please start it.')
+    console.log('  ❌ TRIOS app is not running. Please start it.')
     return false
   }
-  console.log('  ✅ BrowserOS app detected')
+  console.log('  ✅ TRIOS app detected')
   return true
 }
 
@@ -478,13 +478,13 @@ async function main() {
 
   const results: { name: string; passed: boolean }[] = []
 
-  // Test 1: BrowserOS Detection
+  // Test 1: TRIOS Detection
   results.push({
-    name: 'BrowserOS Detection',
-    passed: await testBrowserOSDetection(),
+    name: 'TRIOS Detection',
+    passed: await testTRIOSDetection(),
   })
   if (!results[0].passed) {
-    console.log('\n❌ Cannot continue without BrowserOS app running')
+    console.log('\n❌ Cannot continue without TRIOS app running')
     process.exit(1)
   }
 

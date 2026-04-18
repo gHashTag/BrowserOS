@@ -38,7 +38,7 @@ export const AclSettingsPage: FC = () => {
         <div>
           <h1 className="font-semibold text-xl">ACL Rules</h1>
           <p className="mt-1 text-muted-foreground text-sm">
-            Describe what the agent should avoid on a site and BrowserOS will
+            Describe what the agent should avoid on a site and TRIOS will
             block matching actions.
           </p>
         </div>
@@ -57,7 +57,7 @@ export const AclSettingsPage: FC = () => {
             <p className="font-medium">No ACL rules defined</p>
             <p className="mt-1 text-muted-foreground text-sm">
               Add a plain-English rule like &ldquo;payments and checkout&rdquo;
-              or &ldquo;send email&rdquo; and BrowserOS will apply broad safety
+              or &ldquo;send email&rdquo; and TRIOS will apply broad safety
               blocking on that site.
             </p>
           </div>

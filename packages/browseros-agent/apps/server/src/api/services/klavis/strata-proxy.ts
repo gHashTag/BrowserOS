@@ -60,7 +60,7 @@ export async function connectKlavisProxy(
 
 	// Connect MCP client to Strata endpoint
 	const client = new Client({
-		name: "browseros-klavis-proxy",
+		name: "trios-klavis-proxy",
 		version: "1.0.0",
 	});
 	const transport = new StreamableHTTPClientTransport(

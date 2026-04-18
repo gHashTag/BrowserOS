@@ -15,7 +15,7 @@ export async function writeTempToolOutputFile(args: {
 	extension: string;
 	content: string;
 }): Promise<string> {
-	const outputDir = await mkdtemp(join(tmpdir(), "browseros-tool-output-"));
+	const outputDir = await mkdtemp(join(tmpdir(), "trios-tool-output-"));
 	const toolName = sanitizeSegment(args.toolName);
 	const extension = sanitizeSegment(args.extension) || "txt";
 	const filePath = join(

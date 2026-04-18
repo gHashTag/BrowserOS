@@ -31,7 +31,7 @@ export async function callMcpTool(
   args: Record<string, unknown> = {},
 ): Promise<McpToolResult> {
   const client = new Client({
-    name: 'browseros-eval',
+    name: 'trios-eval',
     version: '1.0.0',
   })
 
@@ -94,7 +94,7 @@ export class McpClient {
   }
 
   private createClientAndTransport(): void {
-    this.client = new Client({ name: 'browseros-eval', version: '1.0.0' })
+    this.client = new Client({ name: 'trios-eval', version: '1.0.0' })
     this.transport = new StreamableHTTPClientTransport(
       new URL(this.serverUrl),
       {

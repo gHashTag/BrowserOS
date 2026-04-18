@@ -21,7 +21,7 @@ const clients: ClientConfig[] = [
     name: 'Claude Code',
     type: 'command',
     getSnippet: (url) =>
-      `claude mcp add --transport http browseros ${url} --scope user`,
+      `claude mcp add --transport http trios ${url} --scope user`,
   },
   {
     id: 'gemini-cli',
@@ -34,7 +34,7 @@ const clients: ClientConfig[] = [
     id: 'codex',
     name: 'Codex',
     type: 'command',
-    getSnippet: (url) => `codex mcp add browseros ${url}`,
+    getSnippet: (url) => `codex mcp add trios ${url}`,
   },
   {
     id: 'claude-desktop',
@@ -64,7 +64,7 @@ const clients: ClientConfig[] = [
       JSON.stringify(
         {
           mcpServers: {
-            browseros: { url },
+            trios: { url },
           },
         },
         null,

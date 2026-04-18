@@ -34,7 +34,7 @@ import { useGetUserMCPIntegrations } from '@/entrypoints/app/connect-mcp/useGetU
 import { useChatSessionContext } from '@/entrypoints/sidepanel/layout/ChatSessionContext'
 import {
   createAITabAction,
-  createBrowserOSAction,
+  createTRIOSAction,
 } from '@/lib/chat-actions/types'
 import {
   NEWTAB_AI_TRIGGERED_EVENT,
@@ -51,7 +51,7 @@ import {
   NEWTAB_VOICE_TRANSCRIPTION_COMPLETED_EVENT,
   NEWTAB_WORKSPACE_OPENED_EVENT,
 } from '@/lib/constants/analyticsEvents'
-import { BrowserOSIcon, ProviderIcon } from '@/lib/llm-providers/providerIcons'
+import { TRIOSIcon, ProviderIcon } from '@/lib/llm-providers/providerIcons'
 import type { ProviderType } from '@/lib/llm-providers/types'
 import { useMcpServers } from '@/lib/mcp/mcpServerStorage'
 import { useSyncRemoteIntegrations } from '@/lib/mcp/useSyncRemoteIntegrations'
@@ -167,7 +167,7 @@ export const NewTab = () => {
     query: inputValue,
     selectedTabs,
   })
-  const searchPlaceholder = `Ask BrowserOS or search ${providerConfig.name}...`
+  const searchPlaceholder = `Ask TRIOS or search ${providerConfig.name}...`
 
   const {
     isOpen,
@@ -378,7 +378,7 @@ export const NewTab = () => {
         }
         break
       }
-      case 'browseros': {
+      case 'trios': {
         track(NEWTAB_AI_TRIGGERED_EVENT, {
           mode: item.mode,
           tabs_count: selectedTabs.length,
@@ -386,7 +386,7 @@ export const NewTab = () => {
         if (supports(Feature.NEWTAB_CHAT_SUPPORT)) {
           startInlineChat(item.message, item.mode)
         } else {
-          const action = createBrowserOSAction({
+          const action = createTRIOSAction({
             mode: item.mode,
             message: item.message,
             tabs: selectedTabs,
@@ -640,8 +640,8 @@ export const NewTab = () => {
                           'data-[state=open]:bg-accent',
                         )}
                       >
-                        {selectedProvider.type === 'browseros' ? (
-                          <BrowserOSIcon size={16} />
+                        {selectedProvider.type === 'trios' ? (
+                          <TRIOSIcon size={16} />
                         ) : (
                           <ProviderIcon
                             type={selectedProvider.type as ProviderType}

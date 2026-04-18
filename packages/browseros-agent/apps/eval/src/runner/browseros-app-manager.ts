@@ -1,7 +1,7 @@
 /**
- * BrowserOS App Manager
+ * TRIOS App Manager
  *
- * Manages BrowserOS lifecycle for eval workers.
+ * Manages TRIOS lifecycle for eval workers.
  * Mirrors scripts/dev/start.ts --manual mode with per-worker isolation:
  *
  *   1. Kill ports
@@ -37,14 +37,14 @@ const MONOREPO_ROOT = join(
 
 const trios_BINARY =
   process.env.trios_BINARY ||
-  '/Applications/BrowserOS.app/Contents/MacOS/BrowserOS'
+  '/Applications/TRIOS.app/Contents/MacOS/TRIOS'
 
 const CAPTCHA_EXT_DIR = join(
   dirname(fileURLToPath(import.meta.url)),
   '../../extensions/nopecha',
 )
 
-export class BrowserOSAppManager {
+export class TRIOSAppManager {
   private ports: EvalPorts
   private chromeProc: Subprocess | null = null
   private serverProc: Subprocess | null = null
@@ -112,8 +112,8 @@ export class BrowserOSAppManager {
    * Chrome flags match startManualBrowser() in scripts/dev/start.ts:
    *   --no-first-run, --no-default-browser-check, --use-mock-keychain
    *   --disable-trios-server  (we run our own server)
-   *   --disable-browseros-extensions  (we load them explicitly if needed)
-   *   --remote-debugging-port, --browseros-mcp-port, --browseros-extension-port
+   *   --disable-trios-extensions  (we load them explicitly if needed)
+   *   --remote-debugging-port, --trios-mcp-port, --trios-extension-port
    *   --user-data-dir (unique per worker)
    *   --load-extension (optional, unpacked helper extensions)
    */
@@ -121,7 +121,7 @@ export class BrowserOSAppManager {
     const { cdp, server, extension } = this.ports
 
     // Unique temp dir per worker per restart
-    this.tempDir = mkdtempSync('/tmp/browseros-eval-')
+    this.tempDir = mkdtempSync('/tmp/trios-eval-')
 
     console.log(
       `  [W${this.workerIndex}] Ports: CDP=${cdp} Server=${server} Extension=${extension}${this.headless ? ' (headless)' : ''}`,
@@ -134,12 +134,12 @@ export class BrowserOSAppManager {
       '--no-default-browser-check',
       '--use-mock-keychain',
       '--disable-trios-server',
-      '--disable-browseros-extensions',
+      '--disable-trios-extensions',
       ...(this.headless ? ['--headless=new'] : []),
       '--window-size=1440,900',
       `--remote-debugging-port=${cdp}`,
-      `--browseros-mcp-port=${server}`,
-      `--browseros-extension-port=${extension}`,
+      `--trios-mcp-port=${server}`,
+      `--trios-extension-port=${extension}`,
       `--user-data-dir=${this.tempDir}`,
     ]
 

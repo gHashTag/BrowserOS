@@ -12,7 +12,7 @@ export type ProviderType =
   | 'ollama'
   | 'lmstudio'
   | 'bedrock'
-  | 'browseros'
+  | 'trios'
   | 'moonshot'
   | 'chatgpt-pro'
   | 'github-copilot'
@@ -67,7 +67,7 @@ export interface LlmProviderConfig {
 }
 
 /**
- * Schema for LLM provider config stored in BrowserOS prefs (browseros.providers)
+ * Schema for LLM provider: trios.providers)
  * @public
  */
 export interface LlmProvidersBackup {

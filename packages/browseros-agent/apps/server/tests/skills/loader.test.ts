@@ -17,7 +17,7 @@ afterEach(async () => {
   await rm(testDir, { recursive: true, force: true })
 })
 
-mock.module('../../src/lib/browseros-dir', () => ({
+mock.module('../../src/lib/trios-dir', () => ({
   getSkillsDir: () => testDir,
   getBuiltinSkillsDir: () => builtinDir,
 }))

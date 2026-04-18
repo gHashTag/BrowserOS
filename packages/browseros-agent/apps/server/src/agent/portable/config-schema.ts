@@ -8,7 +8,7 @@ import type { LLMProvider } from "@trios/shared/schemas/llm";
 import { z } from "zod";
 
 export const PortableAgentConfigSchema = z.object({
-	apiVersion: z.literal("browseros.io/v1alpha1"),
+	apiVersion: z.literal("trios.io/v1alpha1"),
 	kind: z.literal("PortableAgent"),
 	metadata: z.object({
 		name: z.string().regex(/^[a-z][a-z0-9-]*$/),

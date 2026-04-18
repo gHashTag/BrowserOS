@@ -3,17 +3,17 @@
  * Copyright 2026 TRIOS
  *
  * TRIOS MCP Bridge - Take GitButler Screenshot
- * Uses BrowserOS MCP to capture a screenshot of the GitButler UI.
+ * Uses TRIOS MCP to capture a screenshot of the GitButler UI.
  */
 
 import { z } from "zod";
-import type { BrowserOSClient } from "../clients/browseros-client.js";
+import type { TRIOSClient } from "../clients/trios-client.js";
 import { defineTool } from "../framework";
 
 export const take_gitbutler_screenshot = defineTool({
 	name: "take_gitbutler_screenshot",
 	description:
-		"Take a screenshot of the GitButler UI window via BrowserOS MCP and return it as base64 PNG data.",
+		"Take a screenshot of the GitButler UI window via TRIOS MCP and return it as base64 PNG data.",
 	approvalCategory: "automation",
 	input: z.object({}),
 	output: z.object({
@@ -24,10 +24,10 @@ export const take_gitbutler_screenshot = defineTool({
 		response.text("Capturing GitButler screenshot...");
 
 		try {
-			const browserosClient = ctx.clients.browseros as BrowserOSClient;
+			const triosClient = ctx.clients.trios as TRIOSClient;
 
 			// Find GitButler page
-			const page = await browserosClient.findGitButlerPage();
+			const page = await triosClient.findGitButlerPage();
 			if (!page) {
 				response.error(
 					"GitButler tab not found. Please open GitButler in the browser first.",
@@ -36,7 +36,7 @@ export const take_gitbutler_screenshot = defineTool({
 			}
 
 			// Take screenshot
-			const screenshot = await browserosClient.takeScreenshot(page.id);
+			const screenshot = await triosClient.takeScreenshot(page.id);
 
 			if (screenshot.status === "fulfilled") {
 				response.data({

@@ -3,12 +3,12 @@
  * Copyright 2026 TRIOS
  *
  * TRIOS MCP Bridge — MCP Server
- * Exposes high-level vision + git workflow tools that combine BrowserOS and GitButler.
+ * Exposes high-level vision + git workflow tools that combine TRIOS and GitButler.
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import type { BrowserOSClient } from "../clients/browseros-client.js";
+import type { TRIOSClient } from "../clients/trios-client.js";
 import type { GitButlerMcpClient } from "../clients/gitbutler-client.js";
 import type { TriClient } from "../clients/tri-client.js";
 import type { BridgeConfig } from "../config.js";
@@ -22,14 +22,14 @@ import {
 
 export interface BridgeDeps {
 	config: BridgeConfig;
-	browseros: BrowserOSClient;
+	trios: TRIOSClient;
 	gitbutler: GitButlerMcpClient;
 	tri: TriClient;
 }
 
 const BRIDGE_INSTRUCTIONS = `TRIOS MCP Bridge — Vision-enhanced GitButler workflows.
 
-This bridge connects BrowserOS (browser vision/control) with GitButler (virtual branches, stacks, commits).
+This bridge connects TRIOS (browser vision/control) with GitButler (virtual branches, stacks, commits).
 
 ## Workflow Pattern: See → Understand → Act
 
@@ -49,7 +49,7 @@ This bridge connects BrowserOS (browser vision/control) with GitButler (virtual 
 - Always call gitbutler_analyze_ui first to understand the current state.
 - Use gitbutler_workspace_status for detailed file-level information.
 - Combine vision + status for the most accurate understanding.
-- The bridge handles reconnection to both BrowserOS and GitButler automatically.`;
+- The bridge handles reconnection to both TRIOS and GitButler automatically.`;
 
 export function createBridgeServer(deps: BridgeDeps): McpServer {
 	const server = new McpServer(
@@ -82,7 +82,7 @@ export function createBridgeServer(deps: BridgeDeps): McpServer {
 				// Find GitButler page
 				let pageId = args.page_id;
 				if (!pageId) {
-					const page = await deps.browseros.findGitButlerPage();
+					const page = await deps.trios.findGitButlerPage();
 					if (!page) {
 						return {
 							content: [
@@ -108,8 +108,8 @@ export function createBridgeServer(deps: BridgeDeps): McpServer {
 
 				// Take screenshot + snapshot in parallel
 				const [screenshot, snapshot] = await Promise.allSettled([
-					deps.browseros.takeScreenshot(pageId),
-					deps.browseros.takeSnapshot(pageId),
+					deps.trios.takeScreenshot(pageId),
+					deps.trios.takeSnapshot(pageId),
 				]);
 
 				// Get CLI status for ground truth
@@ -664,7 +664,7 @@ export function createBridgeServer(deps: BridgeDeps): McpServer {
 		},
 		async (_args) => {
 			try {
-				const page = await deps.browseros.findGitButlerPage();
+				const page = await deps.trios.findGitButlerPage();
 				if (!page) {
 					return {
 						content: [
@@ -677,7 +677,7 @@ export function createBridgeServer(deps: BridgeDeps): McpServer {
 					};
 				}
 
-				const screenshot = await deps.browseros.takeScreenshot(page.id);
+				const screenshot = await deps.trios.takeScreenshot(page.id);
 				return {
 					content: [
 						{
@@ -710,19 +710,19 @@ export function createBridgeServer(deps: BridgeDeps): McpServer {
 	// ==========================================
 	server.tool(
 		"gitbutler_bridge_health",
-		"Check the health of the TRIOS MCP Bridge and its connections to BrowserOS and GitButler.",
+		"Check the health of the TRIOS MCP Bridge and its connections to TRIOS and GitButler.",
 		{},
 		async () => {
 			const checks: string[] = [];
 
-			// Check BrowserOS
+			// Check TRIOS
 			try {
-				const tools = await deps.browseros.listTools();
+				const tools = await deps.trios.listTools();
 				checks.push(
-					`✅ **BrowserOS MCP**: Connected (${tools.length} tools available)`,
+					`✅ **TRIOS MCP**: Connected (${tools.length} tools available)`,
 				);
 			} catch (err) {
-				checks.push(`❌ **BrowserOS MCP**: Disconnected (${err})`);
+				checks.push(`❌ **TRIOS MCP**: Disconnected (${err})`);
 			}
 
 			// Check GitButler
@@ -772,7 +772,7 @@ export function createBridgeServer(deps: BridgeDeps): McpServer {
 		"tri_run",
 		"Run any `tri` CLI command. Examples: 'test spec.t27', 'verdict', 'status', 'health'. " +
 			"Returns stdout, stderr, and exit code. Use for running t27 spec tests, checking verdicts, " +
-			"and managing the PHI LOOP from within BrowserOS chat.",
+			"and managing the PHI LOOP from within TRIOS chat.",
 		{
 			command: z
 				.string()
@@ -995,11 +995,11 @@ export function createBridgeServer(deps: BridgeDeps): McpServer {
 	server.tool(
 		"list_tab_groups",
 		"List all tab groups in the browser. Returns group IDs, titles, colors, and contained tabs. " +
-			"Requires BrowserOS connection.",
+			"Requires TRIOS connection.",
 		{},
 		async () => {
 			try {
-				const groups = await deps.browseros.listTabGroups();
+				const groups = await deps.trios.listTabGroups();
 				return {
 					content: [
 						{
@@ -1035,7 +1035,7 @@ export function createBridgeServer(deps: BridgeDeps): McpServer {
 	server.tool(
 		"create_tab_group",
 		"Create a tab group from given page/tab IDs. Groups tabs together in the browser. " +
-			"Requires BrowserOS connection.",
+			"Requires TRIOS connection.",
 		{
 			page_ids: z
 				.array(z.number())
@@ -1051,7 +1051,7 @@ export function createBridgeServer(deps: BridgeDeps): McpServer {
 		},
 		async (args) => {
 			try {
-				const result = await deps.browseros.createTabGroup(
+				const result = await deps.trios.createTabGroup(
 					args.page_ids,
 					args.title,
 					args.color,

@@ -56,7 +56,7 @@ export const providerTemplates: ProviderTemplate[] = [
     defaultModelId: 'gpt-5.3-codex',
     supportsImages: true,
     contextWindow: 400000,
-    setupGuideUrl: 'https://docs.browseros.com/features/chatgpt-pro-oauth',
+    setupGuideUrl: 'https://docs.trios.com/features/chatgpt-pro-oauth',
   },
   {
     id: 'github-copilot',
@@ -65,7 +65,7 @@ export const providerTemplates: ProviderTemplate[] = [
     defaultModelId: 'gpt-5-mini',
     supportsImages: true,
     contextWindow: 128000,
-    setupGuideUrl: 'https://docs.browseros.com/features/github-copilot-oauth',
+    setupGuideUrl: 'https://docs.trios.com/features/github-copilot-oauth',
   },
   {
     id: 'qwen-code',
@@ -74,7 +74,7 @@ export const providerTemplates: ProviderTemplate[] = [
     defaultModelId: 'coder-model',
     supportsImages: true,
     contextWindow: 1000000,
-    setupGuideUrl: 'https://docs.browseros.com/features/qwen-code-oauth',
+    setupGuideUrl: 'https://docs.trios.com/features/qwen-code-oauth',
   },
   {
     id: 'moonshot',
@@ -90,7 +90,7 @@ export const providerTemplates: ProviderTemplate[] = [
     defaultModelId: 'gpt-5',
     apiKeyUrl: 'https://platform.openai.com/api-keys',
     setupGuideUrl:
-      'https://docs.browseros.com/features/bring-your-own-llm#openai',
+      'https://docs.trios.com/features/bring-your-own-llm#openai',
   }),
   {
     id: 'openai-compatible',
@@ -104,13 +104,13 @@ export const providerTemplates: ProviderTemplate[] = [
     defaultModelId: 'claude-sonnet-4-6',
     apiKeyUrl: 'https://console.anthropic.com/settings/keys',
     setupGuideUrl:
-      'https://docs.browseros.com/features/bring-your-own-llm#claude',
+      'https://docs.trios.com/features/bring-your-own-llm#claude',
   }),
   enrichTemplate('google', {
     defaultModelId: 'gemini-2.5-flash',
     apiKeyUrl: 'https://aistudio.google.com/app/apikey',
     setupGuideUrl:
-      'https://docs.browseros.com/features/bring-your-own-llm#gemini',
+      'https://docs.trios.com/features/bring-your-own-llm#gemini',
   }),
   {
     id: 'ollama',
@@ -120,19 +120,19 @@ export const providerTemplates: ProviderTemplate[] = [
     supportsImages: false,
     contextWindow: 128000,
     setupGuideUrl:
-      'https://docs.browseros.com/features/bring-your-own-llm#ollama',
+      'https://docs.trios.com/features/bring-your-own-llm#ollama',
   },
   enrichTemplate('openrouter', {
     defaultModelId: 'anthropic/claude-sonnet-4.5',
     apiKeyUrl: 'https://openrouter.ai/keys',
     setupGuideUrl:
-      'https://docs.browseros.com/features/bring-your-own-llm#openrouter',
+      'https://docs.trios.com/features/bring-your-own-llm#openrouter',
   }),
   enrichTemplate('lmstudio', {
     defaultModelId: 'openai/gpt-oss-20b',
     defaultBaseUrl: 'http://localhost:1234/v1',
     setupGuideUrl:
-      'https://docs.browseros.com/features/bring-your-own-llm#lmstudio',
+      'https://docs.trios.com/features/bring-your-own-llm#lmstudio',
   }),
   enrichTemplate('azure', {
     defaultModelId: '',
@@ -147,7 +147,7 @@ export const providerTemplates: ProviderTemplate[] = [
   enrichTemplate('zai', {
     defaultModelId: 'z-ai/glm-5.1',
     apiKeyUrl: 'https://open.bigmodel.cn/usercenter/apikeys',
-    setupGuideUrl: 'https://docs.browseros.com/features/bring-your-own-llm#zai',
+    setupGuideUrl: 'https://docs.trios.com/features/bring-your-own-llm#zai',
   }),
 ]
 
@@ -170,7 +170,7 @@ export const providerTypeOptions: { value: ProviderType; label: string }[] = [
   { value: 'ollama', label: 'Ollama' },
   { value: 'lmstudio', label: 'LM Studio' },
   { value: 'bedrock', label: 'AWS Bedrock' },
-  { value: 'browseros', label: 'BrowserOS' },
+  { value: 'trios', label: 'TRIOS' },
 ]
 
 /**
@@ -202,7 +202,7 @@ export const DEFAULT_BASE_URLS: Record<ProviderType, string> = {
   ollama: 'http://localhost:11434/v1',
   lmstudio: 'http://localhost:1234/v1',
   bedrock: '',
-  browseros: '',
+  trios: '',
 }
 
 /**

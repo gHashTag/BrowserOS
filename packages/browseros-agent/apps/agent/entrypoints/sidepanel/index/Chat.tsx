@@ -1,6 +1,6 @@
 import { Loader2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-import { createBrowserOSAction } from '@/lib/chat-actions/types'
+import { createTRIOSAction } from '@/lib/chat-actions/types'
 import {
   SIDEPANEL_AI_TRIGGERED_EVENT,
   SIDEPANEL_MODE_CHANGED_EVENT,
@@ -155,7 +155,7 @@ export const Chat = () => {
     recordMessageSent()
 
     if (attachedTabs.length) {
-      const action = createBrowserOSAction({
+      const action = createTRIOSAction({
         mode,
         message: messageText,
         tabs: attachedTabs,

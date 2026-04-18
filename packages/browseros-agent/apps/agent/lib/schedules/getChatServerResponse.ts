@@ -1,7 +1,7 @@
 import { createParser, type EventSourceMessage } from 'eventsource-parser'
 import type { ChatMode } from '@/entrypoints/sidepanel/index/chatTypes'
 import {
-  createDefaultBrowserOSProvider,
+  createDefaultTRIOSProvider,
   defaultProviderIdStorage,
   providersStorage,
 } from '@/lib/llm-providers/storage'
@@ -86,7 +86,7 @@ const resolveProvider = async (
     const match = providers?.find((p) => p.id === providerId)
     if (match) return match
   }
-  return (await getDefaultProvider()) ?? createDefaultBrowserOSProvider()
+  return (await getDefaultProvider()) ?? createDefaultTRIOSProvider()
 }
 
 export async function getChatServerResponse(

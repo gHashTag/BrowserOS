@@ -7,7 +7,7 @@ import { CreditBadge } from '@/components/credits/CreditBadge'
 import { ThemeToggle } from '@/components/elements/theme-toggle'
 import { productRepositoryUrl } from '@/lib/constants/productUrls'
 import { useCredits } from '@/lib/credits/useCredits'
-import { BrowserOSIcon, ProviderIcon } from '@/lib/llm-providers/providerIcons'
+import { TRIOSIcon, ProviderIcon } from '@/lib/llm-providers/providerIcons'
 import type { ProviderType } from '@/lib/llm-providers/types'
 import { Feature } from '@/lib/trios/capabilities'
 import { useCapabilities } from '@/lib/trios/useCapabilities'
@@ -64,8 +64,8 @@ export const ChatHeader: FC<ChatHeaderProps> = ({
             className="group relative inline-flex cursor-pointer items-center gap-2 rounded-lg p-2 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground data-[state=open]:bg-accent"
             title="Change AI Provider"
           >
-            {selectedProvider.type === 'browseros' ? (
-              <BrowserOSIcon size={18} />
+            {selectedProvider.type === 'trios' ? (
+              <TRIOSIcon size={18} />
             ) : (
               <ProviderIcon
                 type={selectedProvider.type as ProviderType}
@@ -77,7 +77,7 @@ export const ChatHeader: FC<ChatHeaderProps> = ({
             </span>
           </button>
         </ChatProviderSelector>
-        {selectedProvider.type === 'browseros' && <CreditsBadgeWrapper />}
+        {selectedProvider.type === 'trios' && <CreditsBadgeWrapper />}
       </div>
 
       <div className="flex items-center gap-1">

@@ -1,7 +1,7 @@
 import { sessionStorage } from '@/lib/auth/sessionStorage'
 import { checkAndShowChangelog } from '@/lib/changelog/changelog-notifier'
 import {
-  setupLlmProvidersBackupToBrowserOS,
+  setupLlmProvidersBackupToTRIOS,
   setupLlmProvidersSyncToBackend,
   syncLlmProviders,
 } from '@/lib/llm-providers/storage'
@@ -26,7 +26,7 @@ export default defineBackground(() => {
   chrome.sidePanel.setOptions({ enabled: false })
 
   Capabilities.initialize().catch(() => null)
-  setupLlmProvidersBackupToBrowserOS()
+  setupLlmProvidersBackupToTRIOS()
   setupLlmProvidersSyncToBackend()
   setupScheduledJobsSyncToBackend()
 

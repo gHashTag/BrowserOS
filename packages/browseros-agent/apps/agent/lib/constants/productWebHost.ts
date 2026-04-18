@@ -1,4 +1,4 @@
 /**
  * @public
  */
-export const PRODUCT_WEB_HOST = 'browseros.com'
+export const PRODUCT_WEB_HOST = 'trios.com'

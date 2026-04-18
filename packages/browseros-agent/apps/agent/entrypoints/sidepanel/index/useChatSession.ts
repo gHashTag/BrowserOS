@@ -23,7 +23,7 @@ import { formatConversationHistory } from '@/lib/conversations/formatConversatio
 import { useInvalidateCredits } from '@/lib/credits/useCredits'
 import { declinedAppsStorage } from '@/lib/declined-apps/storage'
 import { useGraphqlQuery } from '@/lib/graphql/useGraphqlQuery'
-import { createDefaultBrowserOSProvider } from '@/lib/llm-providers/storage'
+import { createDefaultTRIOSProvider } from '@/lib/llm-providers/storage'
 import { useLlmProviders } from '@/lib/llm-providers/useLlmProviders'
 import {
   type ApprovalResponseData,
@@ -48,7 +48,7 @@ import {
   toolApprovalConfigStorage,
 } from '@/lib/tool-approvals/storage'
 import { Capabilities, Feature } from '@/lib/trios/capabilities'
-import { useAgentServerUrl } from '@/lib/trios/useBrowserOSProviders'
+import { useAgentServerUrl } from '@/lib/trios/useTRIOSProviders'
 import { selectedWorkspaceStorage } from '@/lib/workspace/workspace-storage'
 import type { ChatMode } from './chatTypes'
 import { GetConversationWithMessagesDocument } from './graphql/chatSessionDocument'
@@ -329,8 +329,8 @@ export const useChatSession = (options?: ChatSessionOptions) => {
         id: selectedLlmProvider.id,
         name: selectedLlmProvider.name,
         type:
-          selectedLlmProvider.id === 'browseros'
-            ? ('browseros' as const)
+          selectedLlmProvider.id === 'trios'
+            ? ('trios' as const)
             : selectedLlmProvider.type,
       }
     : providers[0]
@@ -348,7 +348,7 @@ export const useChatSession = (options?: ChatSessionOptions) => {
       prepareSendMessagesRequest: async ({ messages }) => {
         // [Step 3] Transport preparing request — resolving provider and context
         const provider =
-          selectedLlmProviderRef.current ?? createDefaultBrowserOSProvider()
+          selectedLlmProviderRef.current ?? createDefaultTRIOSProvider()
         console.log('[Step 3] prepareSendMessagesRequest: resolved provider', {
           providerId: provider.id,
           providerType: provider.type,

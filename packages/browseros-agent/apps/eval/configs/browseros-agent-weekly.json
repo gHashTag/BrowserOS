@@ -10,7 +10,7 @@
   "dataset": "../data/webbench-2of4-50.jsonl",
   "num_workers": 10,
   "restart_server_per_task": true,
-  "browseros": {
+  "trios": {
     "server_url": "http://127.0.0.1:9110",
     "base_cdp_port": 9010,
     "base_server_port": 9110,

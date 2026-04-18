@@ -2,11 +2,11 @@ import { useMemo } from 'react'
 import { getProviderConfig } from '@/lib/search-provider/providers'
 import { useSearchProvider } from '@/lib/search-provider/search-provider-storage'
 import { useAITabSuggestions } from '../aiTabSuggestions/useAITabSuggestions'
-import { useBrowserOSSuggestions } from '../browserOSSuggestions/useBrowserOSSuggestions'
+import { useTRIOSSuggestions } from '../browserOSSuggestions/useTRIOSSuggestions'
 import { useSearchSuggestions } from '../searchSuggestions/useSearchSuggestions'
 import type {
   AITabSuggestionItem,
-  BrowserOSSuggestionItem,
+  TRIOSSuggestionItem,
   SearchSuggestionItem,
   SuggestionItem,
   SuggestionSection,
@@ -62,22 +62,22 @@ export const useSuggestions = ({ query, selectedTabs }: UseSuggestionsArgs) => {
   }, [searchResultsFromAPI, query])
 
   const aiTabResults = useAITabSuggestions({ selectedTabs, input: query })
-  const browserOSResults = useBrowserOSSuggestions({ query: trimmedQuery })
+  const browserOSResults = useTRIOSSuggestions({ query: trimmedQuery })
 
   const sections = useMemo(() => {
     const result: SuggestionSection[] = []
 
     if (hasQuery && browserOSResults.length > 0) {
-      const browserOSItems: BrowserOSSuggestionItem[] = browserOSResults.map(
+      const browserOSItems: TRIOSSuggestionItem[] = browserOSResults.map(
         (item, index) => ({
-          id: `browseros-${index}`,
-          type: 'browseros' as const,
+          id: `trios-${index}`,
+          type: 'trios' as const,
           mode: item.mode,
           message: item.message,
         }),
       )
       result.push({
-        id: 'browseros',
+        id: 'trios',
         // Removed title since browserOS result will only have 1 item
         title: '',
         items: browserOSItems,
@@ -143,7 +143,7 @@ export const getSuggestionLabel = (item: SuggestionItem): string => {
       return item.query
     case 'ai-tab':
       return item.name
-    case 'browseros':
+    case 'trios':
       return item.message
   }
 }

@@ -2,15 +2,15 @@
  * @license AGPL-3.0-or-later
  * Copyright 2026 TRIOS
  *
- * BrowserOS MCP Client
- * Connects to BrowserOS MCP server for screenshots, snapshots, and browser control.
+ * TRIOS MCP Client
+ * Connects to TRIOS MCP server for screenshots, snapshots, and browser control.
  */
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { ScreenshotResult, SnapshotResult } from "../types.js";
 
-export class BrowserOSClient {
+export class TRIOSClient {
 	private client: Client | null = null;
 	private serverUrl: string;
 
@@ -29,14 +29,14 @@ export class BrowserOSClient {
 		);
 
 		await this.client.connect(transport);
-		console.log(`[BrowserOS] Connected to ${this.serverUrl}`);
+		console.log(`[TRIOS] Connected to ${this.serverUrl}`);
 	}
 
 	async disconnect(): Promise<void> {
 		if (this.client) {
 			await this.client.close();
 			this.client = null;
-			console.log("[BrowserOS] Disconnected");
+			console.log("[TRIOS] Disconnected");
 		}
 	}
 
@@ -121,7 +121,7 @@ export class BrowserOSClient {
 			};
 		}
 
-		throw new Error("No screenshot data returned from BrowserOS");
+		throw new Error("No screenshot data returned from TRIOS");
 	}
 
 	/** Take an accessibility snapshot of a page */
@@ -167,7 +167,7 @@ export class BrowserOSClient {
 		return this.extractText(result);
 	}
 
-	/** List available tools from BrowserOS MCP */
+	/** List available tools from TRIOS MCP */
 	async listTools(): Promise<string[]> {
 		const client = await this.ensureConnected();
 		const result = await client.listTools();
@@ -229,7 +229,7 @@ export class BrowserOSClient {
 		text: string,
 	): Array<{ id: number; url: string; title: string }> {
 		const pages: Array<{ id: number; url: string; title: string }> = [];
-		// Parse the page list format from BrowserOS
+		// Parse the page list format from TRIOS
 		const lines = text.split("\n");
 		for (const line of lines) {
 			const match = line.match(/\[(\d+)\]\s+(.+?)\s+(https?:\/\/\S+)/);

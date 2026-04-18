@@ -51,7 +51,7 @@ function createBrowserStub(methods: Record<string, unknown>): Browser {
 
 describe('page action tools', () => {
   it('save_pdf resolves relative paths against the working directory by default', async () => {
-    const workingDir = await mkdtemp(join(tmpdir(), 'browseros-page-actions-'))
+    const workingDir = await mkdtemp(join(tmpdir(), 'trios-page-actions-'))
     const browser = createBrowserStub({
       printToPDF: async () => ({
         data: Buffer.from('pdf-data').toString('base64'),
@@ -79,8 +79,8 @@ describe('page action tools', () => {
   })
 
   it('save_screenshot still honors an explicit cwd override', async () => {
-    const workingDir = await mkdtemp(join(tmpdir(), 'browseros-page-actions-'))
-    const overrideDir = await mkdtemp(join(tmpdir(), 'browseros-page-actions-'))
+    const workingDir = await mkdtemp(join(tmpdir(), 'trios-page-actions-'))
+    const overrideDir = await mkdtemp(join(tmpdir(), 'trios-page-actions-'))
     const browser = createBrowserStub({
       screenshot: async () => ({
         data: Buffer.from('image-data').toString('base64'),
@@ -116,7 +116,7 @@ describe('page action tools', () => {
   })
 
   it('download_file resolves relative directories against the working directory by default', async () => {
-    const baseDir = await mkdtemp(join(tmpdir(), 'browseros-page-actions-'))
+    const baseDir = await mkdtemp(join(tmpdir(), 'trios-page-actions-'))
     const workingDir = join(baseDir, 'working')
     let stagingDir: string | undefined
     const browser = createBrowserStub({
@@ -154,7 +154,7 @@ describe('page action tools', () => {
       assert.ok(existsSync(outputPath), 'Download should land in workingDir')
       assert.ok(stagingDir, 'Download should use a staging directory')
       assert.ok(
-        stagingDir.startsWith(join(workingDir, 'browseros-dl-')),
+        stagingDir.startsWith(join(workingDir, 'trios-dl-')),
         'Staging directory should be created inside workingDir',
       )
       assert.ok(
@@ -171,7 +171,7 @@ describe('page action tools', () => {
       const newResult = await execute(new_page, { url: 'https://example.com' })
       const pageId = structuredOf<{ pageId: number }>(newResult).pageId
 
-      const pdfPath = join(tmpdir(), `browseros-test-${Date.now()}.pdf`)
+      const pdfPath = join(tmpdir(), `trios-test-${Date.now()}.pdf`)
 
       try {
         const pdfResult = await execute(save_pdf, {

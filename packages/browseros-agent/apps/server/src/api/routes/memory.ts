@@ -2,7 +2,7 @@ import { mkdir } from "node:fs/promises";
 import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
-import { getCoreMemoryPath, getMemoryDir } from "../../lib/browseros-dir";
+import { getCoreMemoryPath, getMemoryDir } from "../../lib/trios-dir";
 
 const MAX_CONTENT_LENGTH = 50_000;
 

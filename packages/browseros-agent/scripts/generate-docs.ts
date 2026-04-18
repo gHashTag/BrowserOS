@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  */
 import fs from 'node:fs'
 

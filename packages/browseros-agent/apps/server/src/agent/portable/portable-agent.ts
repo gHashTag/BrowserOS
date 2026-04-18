@@ -292,7 +292,7 @@ export async function createPortableAgent(
 	options: CreatePortableAgentOptions,
 ): Promise<PortableAgent> {
 	const config: PortableAgentConfig = {
-		apiVersion: "browseros.io/v1alpha1",
+		apiVersion: "trios.io/v1alpha1",
 		kind: "PortableAgent",
 		metadata: {
 			name: "portable-agent",

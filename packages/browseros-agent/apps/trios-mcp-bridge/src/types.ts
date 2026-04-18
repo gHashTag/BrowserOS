@@ -5,14 +5,14 @@
  * TRIOS MCP Bridge — Shared types
  */
 
-/** Result from BrowserOS screenshot tool */
+/** Result from TRIOS screenshot tool */
 export interface ScreenshotResult {
 	data: string; // base64
 	mimeType: string;
 	devicePixelRatio: number;
 }
 
-/** Result from BrowserOS snapshot tool */
+/** Result from TRIOS snapshot tool */
 export interface SnapshotResult {
 	snapshot: string;
 }
@@ -61,7 +61,7 @@ export interface VisionAnalysis {
 
 /** Tool context passed to all bridge tools */
 export interface BridgeToolContext {
-	browserosClient: import("../src/clients/browseros-client").BrowserOSClient;
+	triosClient: import("../src/clients/trios-client").TRIOSClient;
 	gitbutlerClient: import("../src/clients/gitbutler-client").GitButlerMcpClient;
 	config: import("../src/config").BridgeConfig;
 }

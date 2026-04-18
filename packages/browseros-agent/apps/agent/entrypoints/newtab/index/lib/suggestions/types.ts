@@ -3,7 +3,7 @@ import type { LucideIcon } from 'lucide-react'
 /**
  * @public
  */
-export type SuggestionType = 'search' | 'ai-tab' | 'browseros'
+export type SuggestionType = 'search' | 'ai-tab' | 'trios'
 
 /**
  * @public
@@ -35,8 +35,8 @@ export interface AITabSuggestionItem extends BaseSuggestionItem {
 /**
  * @public
  */
-export interface BrowserOSSuggestionItem extends BaseSuggestionItem {
-  type: 'browseros'
+export interface TRIOSSuggestionItem extends BaseSuggestionItem {
+  type: 'trios'
   mode: 'chat' | 'agent'
   message: string
 }
@@ -47,7 +47,7 @@ export interface BrowserOSSuggestionItem extends BaseSuggestionItem {
 export type SuggestionItem =
   | SearchSuggestionItem
   | AITabSuggestionItem
-  | BrowserOSSuggestionItem
+  | TRIOSSuggestionItem
 
 /**
  * @public

@@ -18,7 +18,7 @@ import type {
 	TRIOSAgentRoleSummary,
 	TRIOSCustomRoleInput,
 } from "@trios/shared/types/role-aware-agents";
-import { getOpenClawDir } from "../../../lib/browseros-dir";
+import { getOpenClawDir } from "../../../lib/trios-dir";
 import { logger } from "../../../lib/logger";
 import { ContainerRuntime } from "./container-runtime";
 import {
@@ -111,17 +111,17 @@ export class OpenClawService {
 	private port = OPENCLAW_GATEWAY_PORT;
 	private token: string;
 	private lastError: string | null = null;
-	private browserosServerPort: number;
+	private triosServerPort: number;
 	private controlPlaneStatus: OpenClawControlPlaneStatus = "disconnected";
 	private lastGatewayError: string | null = null;
 	private lastRecoveryReason: OpenClawGatewayRecoveryReason | null = null;
 	private gatewayReconnectPromise: Promise<void> | null = null;
 
-	constructor(browserosServerPort?: number) {
+	constructor(triosServerPort?: number) {
 		this.openclawDir = getOpenClawDir();
 		this.runtime = new ContainerRuntime(getPodmanRuntime(), this.openclawDir);
 		this.token = crypto.randomUUID();
-		this.browserosServerPort = browserosServerPort ?? DEFAULT_PORTS.server;
+		this.triosServerPort = triosServerPort ?? DEFAULT_PORTS.server;
 	}
 
 	// ── Lifecycle ────────────────────────────────────────────────────────
@@ -159,7 +159,7 @@ export class OpenClawService {
 		const config = buildBootstrapConfig({
 			gatewayPort: this.port,
 			gatewayToken: this.token,
-			browserosServerPort: this.browserosServerPort,
+			triosServerPort: this.triosServerPort,
 			providerType: input.providerType,
 			providerName: input.providerName,
 			baseUrl: input.baseUrl,
@@ -836,7 +836,7 @@ export class OpenClawService {
 	): Promise<TRIOSAgentRoleSummary | undefined> {
 		const roleMetadataPath = join(
 			this.getHostWorkspaceDir(agentName),
-			".browseros-role.json",
+			".trios-role.json",
 		);
 
 		try {
@@ -1031,8 +1031,8 @@ export class OpenClawService {
 let service: OpenClawService | null = null;
 
 export function getOpenClawService(
-	browserosServerPort?: number,
+	triosServerPort?: number,
 ): OpenClawService {
-	if (!service) service = new OpenClawService(browserosServerPort);
+	if (!service) service = new OpenClawService(triosServerPort);
 	return service;
 }

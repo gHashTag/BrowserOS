@@ -24,7 +24,7 @@ import {
 	ensureBrowserosDir,
 	removeServerConfigSync,
 	writeServerConfig,
-} from "./lib/browseros-dir";
+} from "./lib/trios-dir";
 import { initializeDb } from "./lib/db";
 import { identity } from "./lib/identity";
 import { logger } from "./lib/logger";
@@ -189,7 +189,7 @@ export class Application {
 				server_port: this.config.serverPort,
 				url: `http://127.0.0.1:${this.config.serverPort}`,
 				server_version: VERSION,
-				browseros_version: this.config.instanceBrowserosVersion,
+				trios_version: this.config.instanceBrowserosVersion,
 				chromium_version: this.config.instanceChromiumVersion,
 				trios_id: identity.getTRIOSId(),
 			});
@@ -249,7 +249,7 @@ export class Application {
 
 		const dbPath = path.join(
 			this.config.executionDir || this.config.resourcesDir,
-			"browseros.db",
+			"trios.db",
 		);
 		this.db = initializeDb(dbPath);
 
@@ -267,7 +267,7 @@ export class Application {
 		metrics.initialize({
 			client_id: this.config.instanceClientId,
 			install_id: this.config.instanceInstallId,
-			browseros_version: this.config.instanceBrowserosVersion,
+			trios_version: this.config.instanceBrowserosVersion,
 			chromium_version: this.config.instanceChromiumVersion,
 			server_version: VERSION,
 		});
@@ -281,10 +281,10 @@ export class Application {
 		}
 
 		Sentry.setUser({ id: triosId });
-		Sentry.setContext("browseros", {
+		Sentry.setContext("trios", {
 			client_id: this.config.instanceClientId,
 			install_id: this.config.instanceInstallId,
-			browseros_version: this.config.instanceBrowserosVersion,
+			trios_version: this.config.instanceBrowserosVersion,
 			chromium_version: this.config.instanceChromiumVersion,
 			server_version: VERSION,
 		});

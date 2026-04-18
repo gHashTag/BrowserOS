@@ -19,8 +19,8 @@ export async function resolveProviderConfig(
         'trios_CONFIG_URL environment variable is required for TRIOS provider',
       )
     }
-    const browserosConfig = await fetchTRIOSConfig(configUrl)
-    const llmConfig = getLLMConfigFromProvider(browserosConfig, 'default')
+    const triosConfig = await fetchTRIOSConfig(configUrl)
+    const llmConfig = getLLMConfigFromProvider(triosConfig, 'default')
     return {
       provider: LLM_PROVIDERS.trios,
       model: llmConfig.modelName,

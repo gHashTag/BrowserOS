@@ -33,7 +33,7 @@ describe('HTTP Server Integration Tests', () => {
     config = await ensureTRIOS()
 
     mcpClient = new Client({
-      name: 'browseros-integration-test-client',
+      name: 'trios-integration-test-client',
       version: '1.0.0',
     })
 
@@ -167,7 +167,7 @@ describe('HTTP Server Integration Tests', () => {
           body: JSON.stringify({
             conversationId,
             message: 'Open amazon.com in a new tab',
-            provider: 'browseros',
+            provider: trios',
             model: 'claude-sonnet-4-20250514',
           }),
         })
@@ -245,7 +245,7 @@ describe('HTTP Server Integration Tests', () => {
         body: JSON.stringify({
           conversationId: crypto.randomUUID(),
           message: 'Hello',
-          provider: 'browseros',
+          provider: trios',
           model: 'claude-sonnet-4-20250514',
         }),
       })

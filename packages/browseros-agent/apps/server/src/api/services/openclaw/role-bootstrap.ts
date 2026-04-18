@@ -23,7 +23,7 @@ export interface RoleBootstrapFiles {
 	"AGENTS.md": string;
 	"SOUL.md": string;
 	"TOOLS.md": string;
-	".browseros-role.json": string;
+	".trios-role.json": string;
 }
 
 export function resolveRoleTemplate(roleId: TRIOSAgentRoleId): RoleTemplate {
@@ -44,14 +44,14 @@ export function buildRoleBootstrapFiles(input: {
 		"AGENTS.md": normalizedRole.bootstrap.agentsMd,
 		"SOUL.md": normalizedRole.bootstrap.soulMd,
 		"TOOLS.md": normalizedRole.bootstrap.toolsMd,
-		".browseros-role.json": `${JSON.stringify(
+		".trios-role.json": `${JSON.stringify(
 			{
 				version: 1,
 				roleSource: roleId ? "builtin" : "custom",
 				roleId,
 				roleName: normalizedRole.name,
 				shortDescription: normalizedRole.shortDescription,
-				createdBy: "browseros",
+				createdBy: "trios",
 				agentName: input.agentName,
 			},
 			null,

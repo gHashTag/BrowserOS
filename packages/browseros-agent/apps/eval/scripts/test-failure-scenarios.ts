@@ -10,7 +10,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { type Subprocess, spawn, spawnSync } from 'bun'
 
-// Ports from config.dev.json - must match BrowserOS server_config.json
+// Ports from config.dev.json - must match TRIOS server_config.json
 const EVAL_PORTS = {
   cdp: 9005,
   server: 9105, // http_mcp in config.dev.json
@@ -33,22 +33,22 @@ function killPort(port: number): void {
   })
 }
 
-function isBrowserOSAppRunning(): boolean {
+function isTRIOSAppRunning(): boolean {
   const result = spawnSync({
-    cmd: ['sh', '-c', 'pgrep -f "BrowserOS" 2>/dev/null || true'],
+    cmd: ['sh', '-c', 'pgrep -f "TRIOS" 2>/dev/null || true'],
   })
   const output = result.stdout?.toString().trim() ?? ''
   return output.length > 0
 }
 
-async function killBrowserOSApp(): Promise<void> {
-  log('trios', 'Killing BrowserOS application...')
+async function killTRIOSApp(): Promise<void> {
+  log('trios', 'Killing TRIOS application...')
   spawnSync({
-    cmd: ['sh', '-c', 'pkill -9 -f "BrowserOS" 2>/dev/null || true'],
+    cmd: ['sh', '-c', 'pkill -9 -f "TRIOS" 2>/dev/null || true'],
   })
   killPort(EVAL_PORTS.cdp)
   for (let i = 0; i < 10; i++) {
-    if (!isBrowserOSAppRunning()) {
+    if (!isTRIOSAppRunning()) {
       log('trios', 'Application killed')
       return
     }
@@ -57,24 +57,24 @@ async function killBrowserOSApp(): Promise<void> {
   log('trios', 'Warning: Application may not have fully terminated')
 }
 
-async function launchBrowserOSApp(): Promise<boolean> {
+async function launchTRIOSApp(): Promise<boolean> {
   log(
     'trios',
-    `Launching BrowserOS (server disabled, CDP=${EVAL_PORTS.cdp})...`,
+    `Launching TRIOS (server disabled, CDP=${EVAL_PORTS.cdp})...`,
   )
   spawnSync({
     cmd: [
       'open',
       '-a',
-      'BrowserOS',
+      'TRIOS',
       '--args',
       '--disable-trios-server',
-      `--browseros-cdp-port=${EVAL_PORTS.cdp}`,
+      `--trios-cdp-port=${EVAL_PORTS.cdp}`,
     ],
   })
   for (let i = 0; i < 30; i++) {
     await sleep(1000)
-    if (isBrowserOSAppRunning()) {
+    if (isTRIOSAppRunning()) {
       log('trios', 'Application launched, waiting for initialization (8s)...')
       await sleep(8000)
       return true
@@ -209,30 +209,30 @@ async function stopServer(proc: Subprocess): Promise<void> {
 
 async function scenario1_AppNotRunningAtStart(): Promise<void> {
   console.log(`\n${'='.repeat(70)}`)
-  console.log('SCENARIO 1: BrowserOS App Not Running at Start')
+  console.log('SCENARIO 1: TRIOS App Not Running at Start')
   console.log('='.repeat(70))
   console.log(
     'Expected: Detect missing app → Launch app → Wait for init → Continue\n',
   )
 
   // Kill the app first
-  await killBrowserOSApp()
+  await killTRIOSApp()
   await sleep(2000)
 
   // Now check what happens
-  log('CHECK', `Is TRIOS running? ${isBrowserOSAppRunning()}`)
+  log('CHECK', `Is TRIOS running? ${isTRIOSAppRunning()}`)
 
-  if (!isBrowserOSAppRunning()) {
+  if (!isTRIOSAppRunning()) {
     log('FLOW', '→ App not running, attempting to launch...')
-    const launched = await launchBrowserOSApp()
+    const launched = await launchTRIOSApp()
     if (launched) {
       log('FLOW', '→ App launched successfully')
-      log('CHECK', `Is TRIOS running now? ${isBrowserOSAppRunning()}`)
+      log('CHECK', `Is TRIOS running now? ${isTRIOSAppRunning()}`)
     } else {
       log('FLOW', '→ FAILED to launch app')
       log(
         'RESULT',
-        'Task would FAIL with: "BrowserOS application is not running"',
+        'Task would FAIL with: "TRIOS application is not running"',
       )
       return
     }
@@ -250,9 +250,9 @@ async function scenario2_BrowserNotReady(): Promise<void> {
   )
 
   // Make sure app is running first
-  if (!isBrowserOSAppRunning()) {
-    log('SETUP', 'Launching BrowserOS for test...')
-    await launchBrowserOSApp()
+  if (!isTRIOSAppRunning()) {
+    log('SETUP', 'Launching TRIOS for test...')
+    await launchTRIOSApp()
   }
 
   const MAX_RETRIES = 3
@@ -279,17 +279,17 @@ async function scenario2_BrowserNotReady(): Promise<void> {
         await stopServer(proc)
 
         if (!browserOSRestartAttempted) {
-          log('RECOVERY', '→ Restarting BrowserOS application...')
-          await killBrowserOSApp()
+          log('RECOVERY', '→ Restarting TRIOS application...')
+          await killTRIOSApp()
           await sleep(2000)
-          const restarted = await launchBrowserOSApp()
+          const restarted = await launchTRIOSApp()
           browserOSRestartAttempted = true
 
           if (restarted) {
-            log('RECOVERY', '→ BrowserOS restarted, will retry server')
+            log('RECOVERY', '→ TRIOS restarted, will retry server')
             continue
           } else {
-            log('RECOVERY', '→ FAILED to restart BrowserOS')
+            log('RECOVERY', '→ FAILED to restart TRIOS')
           }
         }
 
@@ -319,9 +319,9 @@ async function scenario3_ServerCrashesMidTask(): Promise<void> {
     'Expected: Task fails → Clean up ports → Next task restarts fresh\n',
   )
 
-  if (!isBrowserOSAppRunning()) {
-    log('SETUP', 'Launching BrowserOS for test...')
-    await launchBrowserOSApp()
+  if (!isTRIOSAppRunning()) {
+    log('SETUP', 'Launching TRIOS for test...')
+    await launchTRIOSApp()
   }
 
   const proc = await startServer()
@@ -384,7 +384,7 @@ async function scenario4_ToolTimeout(): Promise<void> {
   log('ERROR', `Received error: "${errorMessage}"`)
 
   const isInfraError =
-    errorMessage.includes('BrowserOS') ||
+    errorMessage.includes('TRIOS') ||
     errorMessage.includes('server') ||
     errorMessage.includes('not connected') ||
     errorMessage.includes('timed out') ||
@@ -412,9 +412,9 @@ async function scenario5_BrowserUnavailableMidTask(): Promise<void> {
     'Expected: Tool call fails → "not connected" error → Kill app → Restart for next task\n',
   )
 
-  if (!isBrowserOSAppRunning()) {
-    log('SETUP', 'Launching BrowserOS for test...')
-    await launchBrowserOSApp()
+  if (!isTRIOSAppRunning()) {
+    log('SETUP', 'Launching TRIOS for test...')
+    await launchTRIOSApp()
   }
 
   const proc = await startServer()
@@ -424,8 +424,8 @@ async function scenario5_BrowserUnavailableMidTask(): Promise<void> {
   await waitForBrowserReady(EVAL_PORTS.server, 60)
   log('READY', 'Server and browser ready')
 
-  log('SIMULATE', 'Simulating BrowserOS crash by killing the app...')
-  await killBrowserOSApp()
+  log('SIMULATE', 'Simulating TRIOS crash by killing the app...')
+  await killTRIOSApp()
   await sleep(2000)
 
   // Check browser status
@@ -447,13 +447,13 @@ async function scenario5_BrowserUnavailableMidTask(): Promise<void> {
       await stopServer(proc)
       killPort(EVAL_PORTS.server)
 
-      log('RECOVERY', '→ Next task would check if BrowserOS is running...')
-      const appRunning = isBrowserOSAppRunning()
-      log('CHECK', `BrowserOS running: ${appRunning}`)
+      log('RECOVERY', '→ Next task would check if TRIOS is running...')
+      const appRunning = isTRIOSAppRunning()
+      log('CHECK', `TRIOS running: ${appRunning}`)
 
       if (!appRunning) {
-        log('RECOVERY', '→ Would launch BrowserOS app')
-        await launchBrowserOSApp()
+        log('RECOVERY', '→ Would launch TRIOS app')
+        await launchTRIOSApp()
       }
 
       log('RESULT', 'Current task FAILS, next task gets fresh environment')
@@ -497,9 +497,9 @@ async function scenario7_ConsecutiveFailures(): Promise<void> {
     log('TASK', `=== Starting ${taskId} ===`)
 
     // Check if app is running
-    log('CHECK', `BrowserOS running: ${isBrowserOSAppRunning()}`)
-    if (!isBrowserOSAppRunning()) {
-      log('FLOW', '→ Would launch BrowserOS')
+    log('CHECK', `TRIOS running: ${isTRIOSAppRunning()}`)
+    if (!isTRIOSAppRunning()) {
+      log('FLOW', '→ Would launch TRIOS')
     }
 
     // Simulate infrastructure check before task
@@ -550,7 +550,7 @@ async function main() {
   const scenarios = [
     {
       num: 1,
-      name: 'BrowserOS App Not Running at Start',
+      name: 'TRIOS App Not Running at Start',
       fn: scenario1_AppNotRunningAtStart,
     },
     {

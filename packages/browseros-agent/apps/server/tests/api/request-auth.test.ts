@@ -9,8 +9,8 @@ describe('request auth', () => {
   it('accepts loopback and extension origins', () => {
     expect(isTrustedAppOrigin('http://127.0.0.1:9105')).toBe(true)
     expect(isTrustedAppOrigin('http://localhost:3000')).toBe(true)
-    expect(isTrustedAppOrigin('chrome-extension://browseros')).toBe(true)
-    expect(isTrustedAppOrigin('moz-extension://browseros')).toBe(true)
+    expect(isTrustedAppOrigin('chrome-extension://trios')).toBe(true)
+    expect(isTrustedAppOrigin('moz-extension://trios')).toBe(true)
   })
 
   it('rejects missing and untrusted origins', () => {
@@ -38,7 +38,7 @@ describe('request auth', () => {
       .get('/claw/status', (c) => c.json({ ok: true }))
 
     const res = await app.request('http://localhost/claw/status', {
-      headers: { Origin: 'chrome-extension://browseros' },
+      headers: { Origin: 'chrome-extension://trios' },
     })
 
     expect(res.status).toBe(200)

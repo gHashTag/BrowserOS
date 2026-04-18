@@ -8,7 +8,7 @@ const STOP_WORDS = new Set([
 	"avoid",
 	"be",
 	"block",
-	"browseros",
+	"trios",
 	"button",
 	"buttons",
 	"can",

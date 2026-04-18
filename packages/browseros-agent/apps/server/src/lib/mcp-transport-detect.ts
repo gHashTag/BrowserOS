@@ -49,7 +49,7 @@ export async function detectMcpTransport(
 				params: {
 					protocolVersion: "2025-03-26",
 					capabilities: {},
-					clientInfo: { name: "browseros-probe", version: "1.0.0" },
+					clientInfo: { name: "trios-probe", version: "1.0.0" },
 				},
 			}),
 			signal: AbortSignal.timeout(TIMEOUTS.MCP_TRANSPORT_PROBE),

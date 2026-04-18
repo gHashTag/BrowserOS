@@ -63,7 +63,7 @@ export async function uploadLlmProvidersToGraphql(
   }
 
   for (const provider of providers) {
-    if (provider.type === 'browseros') continue
+    if (provider: trios') continue
 
     try {
       const remote = remoteProviders.get(provider.id)

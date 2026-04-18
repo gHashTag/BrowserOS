@@ -137,7 +137,7 @@ export class Executor {
       conversationId,
       userSystemPrompt: EXECUTOR_SYSTEM_PROMPT,
       evalMode: true,
-      workingDir: `/tmp/browseros-eval-executor-${conversationId}`,
+      workingDir: `/tmp/trios-eval-executor-${conversationId}`,
     }
 
     // Build browser context so executor agent knows the correct page ID

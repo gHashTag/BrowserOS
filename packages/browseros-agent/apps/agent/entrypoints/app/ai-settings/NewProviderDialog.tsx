@@ -67,7 +67,7 @@ import { type TestResult, testProvider } from '@/lib/llm-providers/testProvider'
 import type { LlmProviderConfig, ProviderType } from '@/lib/llm-providers/types'
 import { track } from '@/lib/metrics/track'
 import { Feature } from '@/lib/trios/capabilities'
-import { useAgentServerUrl } from '@/lib/trios/useBrowserOSProviders'
+import { useAgentServerUrl } from '@/lib/trios/useTRIOSProviders'
 import { useCapabilities } from '@/lib/trios/useCapabilities'
 import { cn } from '@/lib/utils'
 import { getModelContextLength, getModelsForProvider } from './models'
@@ -83,7 +83,7 @@ const providerTypeEnum = z.enum([
   'ollama',
   'lmstudio',
   'bedrock',
-  'browseros',
+  'trios',
   'chatgpt-pro',
   'github-copilot',
   'qwen-code',

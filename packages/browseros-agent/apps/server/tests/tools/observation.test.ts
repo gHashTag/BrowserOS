@@ -208,7 +208,7 @@ describe('observation tools', () => {
         assert.ok(existsSync(savedPath), 'Saved page content file should exist')
         assert.ok(
           dirname(savedPath).startsWith(
-            join(tmpdir(), 'browseros-tool-output-'),
+            join(tmpdir(), 'trios-tool-output-'),
           ),
           'Saved page content should be written to an OS temp directory',
         )

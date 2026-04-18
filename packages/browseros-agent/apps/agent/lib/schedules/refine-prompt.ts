@@ -1,5 +1,5 @@
 import {
-  createDefaultBrowserOSProvider,
+  createDefaultTRIOSProvider,
   defaultProviderIdStorage,
   providersStorage,
 } from '@/lib/llm-providers/storage'
@@ -20,7 +20,7 @@ const resolveProvider = async (
     if (defaultProvider) return defaultProvider
     if (providers[0]) return providers[0]
   }
-  return createDefaultBrowserOSProvider()
+  return createDefaultTRIOSProvider()
 }
 
 interface RefinePromptResponse {

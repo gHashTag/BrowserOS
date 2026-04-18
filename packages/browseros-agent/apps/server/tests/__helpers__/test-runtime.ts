@@ -6,7 +6,7 @@ import { TEST_PORTS } from '@trios/shared/constants/ports'
 
 const DEFAULT_BINARY_PATH =
   process.env.trios_BINARY ??
-  '/Applications/BrowserOS.app/Contents/MacOS/BrowserOS'
+  '/Applications/TRIOS.app/Contents/MacOS/TRIOS'
 const PORT_SCAN_RANGE = 100
 
 export interface RuntimePorts {
@@ -140,7 +140,7 @@ export async function resolveRuntimePorts(): Promise<{
 
 export async function createTestRuntimePlan(): Promise<TestRuntimePlan> {
   const resolvedPorts = await resolveRuntimePorts()
-  const userDataDir = mkdtempSync(join(tmpdir(), 'browseros-test-'))
+  const userDataDir = mkdtempSync(join(tmpdir(), 'trios-test-'))
   const headless = process.env.trios_TEST_HEADLESS === 'true'
   const extraArgs = parseExtraArgs(process.env.trios_TEST_EXTRA_ARGS)
 

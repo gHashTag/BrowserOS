@@ -5,7 +5,7 @@ import { Command } from 'commander'
 import { runCliInstallerUpload, runCliRelease } from './cli/upload'
 
 const program = new Command('cli-upload')
-  .description('Upload BrowserOS CLI artifacts to CDN')
+  .description('Upload TRIOS CLI artifacts to CDN')
   .option(
     '--release',
     'Upload full release (binaries + installers + version.txt)',

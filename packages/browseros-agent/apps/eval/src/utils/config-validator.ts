@@ -49,7 +49,7 @@ export async function validateConfig(
   // Check if API key env vars are set (apiKey field contains env var name)
   const envVarsToCheck: string[] = []
   if (config.agent.type === 'single') {
-    // Skip API key check for browseros provider (uses server's built-in auth)
+    // Skip API key check for trios provider (uses server's built-in auth)
     if (config.agent.provider !== LLM_PROVIDERS.trios && config.agent.apiKey) {
       // If apiKey looks like an env var name, check if it's set
       if (/^[A-Z][A-Z0-9_]*$/.test(config.agent.apiKey)) {

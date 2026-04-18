@@ -20,7 +20,7 @@ export const SPLIT_VIEW_GIF_URL =
  * @public
  */
 export const MCP_SERVER_DEMO_URL =
-  'https://pub-80f8a01e6e8b4239ae53a7652ef85877.r2.dev/resources/browseros-as-mcp-server.mp4'
+  'https://pub-80f8a01e6e8b4239ae53a7652ef85877.r2.dev/resources/trios-as-mcp-server.mp4'
 
 /**
  * @public
@@ -40,7 +40,7 @@ export const COWORK_DEMO_URL =
  * TODO: Replace with actual video URL
  */
 export const WORKFLOWS_DEMO_URL =
-  'https://pub-80f8a01e6e8b4239ae53a7652ef85877.r2.dev/resources/browseros-workflow-demo.mp4'
+  'https://pub-80f8a01e6e8b4239ae53a7652ef85877.r2.dev/resources/trios-workflow-demo.mp4'
 
 /**
  * @public

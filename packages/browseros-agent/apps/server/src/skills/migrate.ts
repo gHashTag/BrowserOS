@@ -1,6 +1,6 @@
 import { readdir, rename, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { getBuiltinSkillsDir, getSkillsDir } from "../lib/browseros-dir";
+import { getBuiltinSkillsDir, getSkillsDir } from "../lib/trios-dir";
 import { logger } from "../lib/logger";
 import { DEFAULT_SKILLS } from "./defaults";
 

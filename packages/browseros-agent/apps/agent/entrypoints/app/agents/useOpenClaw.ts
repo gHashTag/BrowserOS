@@ -4,7 +4,7 @@ import type {
   TRIOSCustomRoleInput,
 } from '@trios/shared/types/role-aware-agents'
 import { getAgentServerUrl } from '@/lib/trios/helpers'
-import { useAgentServerUrl } from '@/lib/trios/useBrowserOSProviders'
+import { useAgentServerUrl } from '@/lib/trios/useTRIOSProviders'
 
 export interface AgentEntry {
   agentId: string

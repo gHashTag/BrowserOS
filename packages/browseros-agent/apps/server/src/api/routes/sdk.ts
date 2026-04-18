@@ -100,7 +100,7 @@ export function createSdkRoutes(deps: SdkDeps) {
 			if (llmConfig.provider !== LLM_PROVIDERS.trios && !llmConfig.model) {
 				return c.json(
 					{
-						error: { message: "model is required for non-browseros providers" },
+						error: { message: "model is required for non-trios providers" },
 					},
 					400,
 				);

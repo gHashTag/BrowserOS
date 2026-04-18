@@ -121,7 +121,7 @@ function resolvePaths(
       : resolve(configDir, config.dataset)
 
   // Resolve output directory: results/{config-name}/{timestamp}/
-  // Config name derived from config filename (e.g., "browseros-agent-weekly.json" → "browseros-agent-weekly")
+  // Config name derived from config filename (e.g., "trios-agent-weekly.json" → "trios-agent-weekly")
   const configName = options.configPath
     ? basename(resolve(options.configPath), '.json')
     : 'eval'

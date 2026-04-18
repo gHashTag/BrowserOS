@@ -55,7 +55,7 @@ export const EvalConfigSchema = z.object({
   output_dir: z.string().optional(),
   num_workers: z.number().int().min(1).max(20).default(1),
   restart_server_per_task: z.boolean().optional().default(false),
-  browseros: z.object({
+  trios: z.object({
     server_url: z.string().url(),
     base_cdp_port: z.number().int().optional().default(9010),
     base_server_port: z.number().int().optional().default(9110),

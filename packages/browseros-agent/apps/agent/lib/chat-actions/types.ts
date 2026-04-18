@@ -19,11 +19,11 @@ export interface AITabAction extends BaseChatAction {
 }
 
 /**
- * Action for BrowserOS chat/agent queries
+ * Action for TRIOS chat/agent queries
  * @public
  */
-export interface BrowserOSAction extends BaseChatAction {
-  type: 'browseros'
+export interface TRIOSAction extends BaseChatAction {
+  type: 'trios'
   mode: 'chat' | 'agent'
   message: string
   tabs?: chrome.tabs.Tab[]
@@ -33,7 +33,7 @@ export interface BrowserOSAction extends BaseChatAction {
  * Union type of all chat actions
  * @public
  */
-export type ChatAction = AITabAction | BrowserOSAction
+export type ChatAction = AITabAction | TRIOSAction
 
 /**
  * Storage format for search actions passed between newtab and sidepanel
@@ -63,16 +63,16 @@ export const createAITabAction = (params: {
 })
 
 /**
- * Helper to create a BrowserOS action
+ * Helper to create a TRIOS action
  * @public
  */
-export const createBrowserOSAction = (params: {
+export const createTRIOSAction = (params: {
   mode: 'chat' | 'agent'
   message: string
   tabs?: chrome.tabs.Tab[]
-}): BrowserOSAction => ({
+}): TRIOSAction => ({
   id: crypto.randomUUID(),
-  type: 'browseros',
+  type: 'trios',
   timestamp: Date.now(),
   mode: params.mode,
   message: params.message,

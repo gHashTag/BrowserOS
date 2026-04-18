@@ -1,5 +1,5 @@
 import useSWR from 'swr'
-import { useAgentServerUrl } from '@/lib/trios/useBrowserOSProviders'
+import { useAgentServerUrl } from '@/lib/trios/useTRIOSProviders'
 
 interface McpServerResponse {
   servers: {

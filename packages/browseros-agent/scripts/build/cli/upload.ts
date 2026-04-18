@@ -8,7 +8,7 @@ import { log } from '../log'
 import { createR2Client, joinObjectKey, uploadFileToObject } from '../server/r2'
 import { type CliUploadConfig, loadCliUploadConfig } from './config'
 
-const CDN_BASE_URL = 'https://cdn.browseros.com'
+const CDN_BASE_URL = 'https://cdn.trios.com'
 const JSON_CONTENT_TYPE = 'application/json; charset=utf-8'
 const CLI_ARCHIVE_PATTERN =
   /^trios-cli_(?<version>[^_]+)_(?<os>darwin|linux|windows)_(?<arch>amd64|arm64)\.(?<ext>tar\.gz|zip)$/
@@ -71,7 +71,7 @@ export async function uploadCliInstallers(rootDir: string): Promise<void> {
   const { r2 } = loadCliUploadConfig(rootDir)
   const client = createR2Client(r2)
 
-  log.header('Uploading BrowserOS CLI installer scripts')
+  log.header('Uploading TRIOS CLI installer scripts')
 
   try {
     for (const installer of INSTALLERS) {
@@ -241,7 +241,7 @@ async function uploadCliRelease(
   const { r2 } = loadCliUploadConfig(rootDir)
   const client = createR2Client(r2)
 
-  log.header(`Uploading BrowserOS CLI v${version} release`)
+  log.header(`Uploading TRIOS CLI v${version} release`)
 
   try {
     for (const filename of archives) {

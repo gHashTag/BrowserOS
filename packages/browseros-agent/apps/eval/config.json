@@ -8,7 +8,7 @@
   "dataset": "data/webvoyager_e2e_test.jsonl",
   "output_dir": "results",
   "num_workers": 5,
-  "browseros": {
+  "trios": {
     "server_url": "http://127.0.0.1:9110"
   },
   "grader_api_key_env": "OPENROUTER_API_KEY",

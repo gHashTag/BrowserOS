@@ -62,7 +62,7 @@ function toResolvedAgentConfig(
     accessKeyId: resolved.accessKeyId,
     secretAccessKey: resolved.secretAccessKey,
     sessionToken: resolved.sessionToken,
-    workingDir: `/tmp/browseros-eval-${sessionPrefix}-${crypto.randomUUID()}`,
+    workingDir: `/tmp/trios-eval-${sessionPrefix}-${crypto.randomUUID()}`,
   }
 }
 
@@ -95,7 +95,7 @@ async function resolveAgentConfig(
       model: executorModel,
       apiKey: resolveEnvValue(config.executor.apiKey),
       baseUrl: config.executor.baseUrl,
-      workingDir: `/tmp/browseros-eval-executor-${crypto.randomUUID()}`,
+      workingDir: `/tmp/trios-eval-executor-${crypto.randomUUID()}`,
     }
   } else {
     const resolvedExecutor = await resolveProviderConfig(

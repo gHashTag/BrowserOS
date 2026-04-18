@@ -2,7 +2,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { PATHS } from "@trios/shared/constants/paths";
 import matter from "gray-matter";
-import { getBuiltinSkillsDir, getSkillsDir } from "../lib/browseros-dir";
+import { getBuiltinSkillsDir, getSkillsDir } from "../lib/trios-dir";
 import { logger } from "../lib/logger";
 import type { SkillFrontmatter, SkillMeta } from "./types";
 

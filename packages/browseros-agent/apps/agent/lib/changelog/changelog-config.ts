@@ -1,4 +1,4 @@
-const CHANGELOG_BASE_URL = 'https://docs.browseros.com/changelog'
+const CHANGELOG_BASE_URL = 'https://docs.trios.com/changelog'
 
 type ChangelogVersionConfig = {
   showChangelog: true

@@ -8,12 +8,12 @@ import { PostHog } from "posthog-node";
 import { INLINED_ENV } from "../env";
 
 const POSTHOG_API_KEY = INLINED_ENV.POSTHOG_API_KEY;
-const EVENT_PREFIX = "browseros.server.";
+const EVENT_PREFIX = "trios.server.";
 
 export interface MetricsConfig {
 	client_id?: string;
 	install_id?: string;
-	browseros_version?: string;
+	trios_version?: string;
 	chromium_version?: string;
 	server_version?: string;
 	[key: string]: string | undefined;
@@ -49,7 +49,7 @@ class MetricsService {
 		const {
 			client_id,
 			install_id,
-			browseros_version,
+			trios_version,
 			chromium_version,
 			server_version,
 			...defaultProperties
@@ -65,7 +65,7 @@ class MetricsService {
 				...properties,
 				...(client_id && { client_id }),
 				...(install_id && { install_id }),
-				...(browseros_version && { browseros_version }),
+				...(trios_version && { trios_version }),
 				...(chromium_version && { chromium_version }),
 				...(server_version && { server_version }),
 				$process_person_profile: false,

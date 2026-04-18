@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Apply TRIOS theme colors directly to BrowserOS preferences
+ * Apply TRIOS theme colors directly to TRIOS preferences
  * Без rebuild — быстрый способ тестирования цветов
  */
 
@@ -14,17 +14,17 @@ const TRIOS_COLORS = {
   // Можно добавить больше цветов по необходимости
 }
 
-// Путь к файлу предпочтений BrowserOS
+// Путь к файлу предпочтений TRIOS
 const PREFS_PATH = join(
   process.env.HOME || '',
-  'Library/Application Support/BrowserOS/Default/Preferences',
+  'Library/Application Support/TRIOS/Default/Preferences',
 )
 
 function main() {
   console.log('🎨 Applying TRIOS theme...')
 
   if (!existsSync(PREFS_PATH)) {
-    console.error('❌ BrowserOS preferences file not found:')
+    console.error('❌ TRIOS preferences file not found:')
     console.error(`   ${PREFS_PATH}`)
     console.error('\n💡 Make sure TRIOS has been launched at least once.')
     process.exit(1)

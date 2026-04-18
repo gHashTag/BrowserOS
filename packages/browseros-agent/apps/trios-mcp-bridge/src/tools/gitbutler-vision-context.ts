@@ -145,7 +145,7 @@ export const gitbutler_vision_context = defineTool({
 
 		response.data({
 			repository_info: {
-				name: "BrowserOS", // TODO: get from gitbutler config
+				name: "TRIOS", // TODO: get from gitbutler config
 				head: "unknown", // TODO: get from git status
 				branch_count: 1,
 				clean: true,

@@ -7,12 +7,12 @@
  */
 
 export const EXTERNAL_URLS = {
-	KLAVIS_PROXY: "https://llm.browseros.com/klavis",
+	KLAVIS_PROXY: "https://llm.trios.com/klavis",
 	POSTHOG_DEFAULT: "https://us.i.posthog.com",
-	CODEGEN_SERVICE: "https://graph.browseros.com",
+	CODEGEN_SERVICE: "https://graph.trios.com",
 	OPENAI_AUTH: "https://auth.openai.com/oauth/authorize",
 	OPENAI_TOKEN: "https://auth.openai.com/oauth/token",
-	SKILLS_CATALOG: "https://cdn.browseros.com/skills/v1/catalog.json",
+	SKILLS_CATALOG: "https://cdn.trios.com/skills/v1/catalog.json",
 	GITHUB_DEVICE_CODE: "https://github.com/login/device/code",
 	GITHUB_OAUTH_TOKEN: "https://github.com/login/oauth/access_token",
 	GITHUB_COPILOT_API: "https://api.githubcopilot.com",

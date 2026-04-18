@@ -63,11 +63,11 @@ const SuggestionItemRenderer: FC<{
         </li>
       )
 
-    case 'browseros':
+    case 'trios':
       return (
         <li className={baseClassName} {...getItemProps({ item, index })}>
           <Sparkles className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <span className="flex-shrink-0 font-semibold">Ask BrowserOS:</span>
+          <span className="flex-shrink-0 font-semibold">Ask TRIOS:</span>
           <span
             className="min-w-0 flex-1 truncate"
             title={item.message || 'Type a message...'}

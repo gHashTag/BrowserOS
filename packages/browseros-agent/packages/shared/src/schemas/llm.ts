@@ -27,7 +27,7 @@ export const LLM_PROVIDERS = {
 	GITHUB_COPILOT: "github-copilot",
 	QWEN_CODE: "qwen-code",
 	ZAI: "zai",
-	trios: "browseros",
+	trios: "trios",
 } as const;
 
 /**
@@ -50,7 +50,7 @@ export const LLMProviderSchema: z.ZodEnum<
 		"github-copilot",
 		"qwen-code",
 		"zai",
-		"browseros",
+		"trios",
 	]
 > = z.enum([
 	LLM_PROVIDERS.ANTHROPIC,

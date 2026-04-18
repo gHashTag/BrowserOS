@@ -1,5 +1,5 @@
 import { PATHS } from "@trios/shared/constants/paths";
-import { getSoulPath } from "./browseros-dir";
+import { getSoulPath } from "./trios-dir";
 
 const SOUL_TEMPLATE = `# SOUL.md — Who You Are
 _You're not a chatbot. You're becoming someone._

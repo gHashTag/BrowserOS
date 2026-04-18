@@ -5,7 +5,7 @@
             "type": "bun",
             "internalConsoleOptions": "openOnSessionStart",
             "request": "launch",
-            "name": "Debug BrowserOS Server",
+            "name": "Debug TRIOS Server",
             "program": "src/index.ts",
             "cwd": "${workspaceFolder}/apps/server",
             "stopOnEntry": false,

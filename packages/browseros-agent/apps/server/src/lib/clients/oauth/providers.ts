@@ -33,7 +33,7 @@ export const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
 		extraAuthParams: {
 			id_token_add_organizations: "true",
 			codex_cli_simplified_flow: "true",
-			originator: "browseros",
+			originator: "trios",
 		},
 		upstreamLLMProvider: "openai",
 	},

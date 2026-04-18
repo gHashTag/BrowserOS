@@ -95,7 +95,7 @@ describe('get_dom', () => {
         assert.ok(textOf(result).includes('Saved DOM'))
         assert.ok(existsSync(domPath), 'Saved DOM file should exist')
         assert.ok(
-          dirname(domPath).startsWith(join(tmpdir(), 'browseros-tool-output-')),
+          dirname(domPath).startsWith(join(tmpdir(), 'trios-tool-output-')),
           'Saved DOM file should be written to an OS temp directory',
         )
         assert.ok(html.includes('<html'), 'Should contain <html> tag')
@@ -250,7 +250,7 @@ describe('get_dom', () => {
 
         assert.ok(textOf(result).includes('Saved DOM'))
         assert.ok(
-          dirname(domPath).startsWith(join(tmpdir(), 'browseros-tool-output-')),
+          dirname(domPath).startsWith(join(tmpdir(), 'trios-tool-output-')),
           'Saved DOM file should be written to an OS temp directory',
         )
         assert.ok(data.totalLength > 100_000, 'Expected a large DOM payload')

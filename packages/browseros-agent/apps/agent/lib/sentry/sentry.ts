@@ -1,5 +1,5 @@
 import * as Sentry from '@sentry/react'
-import { getTRIOSAdapter } from '../browseros/adapter'
+import { getTRIOSAdapter } from '../trios/adapter'
 import { env } from '../env'
 import { sanitizeEvent } from './sanitize'
 

@@ -6,8 +6,8 @@
  *
  * Tests for:
  * 1. discard_file_changes — git checkout -- <path>
- * 2. list_tab_groups — BrowserOS tab groups
- * 3. create_tab_group — BrowserOS tab grouping
+ * 2. list_tab_groups — TRIOS tab groups
+ * 3. create_tab_group — TRIOS tab grouping
  * 4. Error format: {ok: false, reason: "..."}
  */
 
@@ -104,13 +104,13 @@ describe("discard_file_changes", () => {
 	});
 });
 
-// --- Tab Groups (BrowserOS-dependent, mock tests) ---
+// --- Tab Groups (TRIOS-dependent, mock tests) ---
 
 describe("list_tab_groups", () => {
-	test("returns structured result when BrowserOS unavailable", async () => {
-		// BrowserOS is not running in test env, so this tests error handling
-		const { BrowserOSClient } = await import("../clients/browseros-client.js");
-		const client = new BrowserOSClient("http://127.0.0.1:99999/mcp");
+	test("returns structured result when TRIOS unavailable", async () => {
+		// TRIOS is not running in test env, so this tests error handling
+		const { TRIOSClient } = await import("../clients/trios-client.js");
+		const client = new TRIOSClient("http://127.0.0.1:99999/mcp");
 
 		try {
 			const groups = await client.listTabGroups();
@@ -124,9 +124,9 @@ describe("list_tab_groups", () => {
 });
 
 describe("create_tab_group", () => {
-	test("returns structured error when BrowserOS unavailable", async () => {
-		const { BrowserOSClient } = await import("../clients/browseros-client.js");
-		const client = new BrowserOSClient("http://127.0.0.1:99999/mcp");
+	test("returns structured error when TRIOS unavailable", async () => {
+		const { TRIOSClient } = await import("../clients/trios-client.js");
+		const client = new TRIOSClient("http://127.0.0.1:99999/mcp");
 
 		try {
 			const result = await client.createTabGroup([1, 2], "Test Group");

@@ -53,7 +53,7 @@ describe('terminal protocol', () => {
     expect(
       buildTerminalExecCommand(
         'podman',
-        'browseros-openclaw-openclaw-gateway-1',
+        'trios-openclaw-openclaw-gateway-1',
         TERMINAL_HOME_DIR,
       ),
     ).toEqual([
@@ -62,7 +62,7 @@ describe('terminal protocol', () => {
       '-it',
       '-w',
       '/home/node/.openclaw',
-      'browseros-openclaw-openclaw-gateway-1',
+      'trios-openclaw-openclaw-gateway-1',
       '/bin/sh',
     ])
   })

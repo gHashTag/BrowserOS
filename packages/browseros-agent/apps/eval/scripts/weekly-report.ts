@@ -14,7 +14,7 @@
  *
  * Env vars required:
  *   EVAL_R2_ACCOUNT_ID, EVAL_R2_ACCESS_KEY_ID, EVAL_R2_SECRET_ACCESS_KEY
- *   EVAL_R2_BUCKET (default: browseros-eval)
+ *   EVAL_R2_BUCKET (default: trios-eval)
  */
 
 import { writeFile } from 'node:fs/promises'
@@ -77,7 +77,7 @@ function requireEnv(name: string): string {
 const accountId = requireEnv('EVAL_R2_ACCOUNT_ID')
 const accessKeyId = requireEnv('EVAL_R2_ACCESS_KEY_ID')
 const secretAccessKey = requireEnv('EVAL_R2_SECRET_ACCESS_KEY')
-const bucket = process.env.EVAL_R2_BUCKET || 'browseros-eval'
+const bucket = process.env.EVAL_R2_BUCKET || 'trios-eval'
 
 const client = new S3Client({
   region: 'auto',
@@ -195,7 +195,7 @@ function escHtml(s: string): string {
 }
 
 function extractConfigName(runId: string): string {
-  // "browseros-agent-weekly-2026-03-21-1730" → "browseros-agent-weekly"
+  // "trios-agent-weekly-2026-03-21-1730" → "trios-agent-weekly"
   // "ci-weekly" → "ci-weekly" (no timestamp, old format)
   return runId.replace(/-\d{4}-\d{2}-\d{2}-\d{4}$/, '')
 }
@@ -211,7 +211,7 @@ const html = `<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BrowserOS Eval Dashboard</title>
+  <title>TRIOS Eval Dashboard</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif; background: #0d1117; color: #e6edf3; padding: 2rem; max-width: 1400px; margin: 0 auto; }
@@ -273,7 +273,7 @@ const html = `<!DOCTYPE html>
 <body>
 
 <div class="page-header">
-  <h1>BrowserOS <span>Eval Dashboard</span></h1>
+  <h1>TRIOS <span>Eval Dashboard</span></h1>
   <span class="gen-date">Generated ${new Date().toISOString().split('T')[0]}</span>
 </div>
 
@@ -576,7 +576,7 @@ await client.send(
 )
 
 const cdnBaseUrl = (
-  process.env.EVAL_R2_CDN_BASE_URL || 'https://eval.browseros.com'
+  process.env.EVAL_R2_CDN_BASE_URL || 'https://eval.trios.com'
 ).replace(/\/+$/, '')
 
 console.log(`Report uploaded to R2: ${bucket}/report.html`)

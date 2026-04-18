@@ -1,6 +1,6 @@
 import { tool } from "ai";
 import { z } from "zod";
-import { getCoreMemoryPath } from "../../lib/browseros-dir";
+import { getCoreMemoryPath } from "../../lib/trios-dir";
 import { executeWithMetrics, toModelOutput } from "../filesystem/utils";
 
 const TOOL_NAME = "memory_read_core";

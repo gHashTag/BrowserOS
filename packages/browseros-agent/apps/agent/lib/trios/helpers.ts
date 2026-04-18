@@ -55,7 +55,7 @@ async function getAgentPort(): Promise<number> {
       return pref.value
     }
   } catch {
-    // BrowserOS API not available
+    // TRIOS API not available
   }
 
   throw new AgentPortError()
@@ -75,7 +75,7 @@ async function getMcpPort(): Promise<number> {
       return pref.value
     }
   } catch {
-    // BrowserOS API not available
+    // TRIOS API not available
   }
 
   throw new McpPortError()
@@ -110,7 +110,7 @@ async function getProxyPort(): Promise<number> {
       return pref.value
     }
   } catch {
-    // BrowserOS API not available
+    // TRIOS API not available
   }
 
   throw new ProxyPortError()

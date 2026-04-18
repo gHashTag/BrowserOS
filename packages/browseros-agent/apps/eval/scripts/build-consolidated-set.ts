@@ -29,7 +29,7 @@ function task(
 ): EvalTask {
   return {
     query_id: id,
-    dataset: 'browseros-eval',
+    dataset: 'trios-eval',
     query,
     graders: ['webvoyager_grader', 'fara_combined'],
     start_url: startUrl,

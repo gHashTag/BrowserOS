@@ -1,4 +1,4 @@
-const GATEWAY_URL = 'https://llm.browseros.com'
+const GATEWAY_URL = 'https://llm.trios.com'
 
 interface TranscribeResponse {
   text: string

@@ -4,10 +4,10 @@ import type { ToolApprovalConfig } from '@/lib/tool-approvals/types'
 import { buildChatRequestBody } from './buildChatRequestBody'
 
 const provider: LlmProviderConfig = {
-  id: 'browseros',
-  type: 'browseros',
-  name: 'BrowserOS',
-  modelId: 'browseros-auto',
+  id: 'trios',
+  type: 'trios',
+  name: 'TRIOS',
+  modelId: 'trios-auto',
   supportsImages: true,
   contextWindow: 200000,
   temperature: 0,

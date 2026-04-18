@@ -1,38 +1,38 @@
 /**
  * @public
  */
-export const docsUrl = 'https://docs.browseros.com/'
+export const docsUrl = 'https://docs.trios.com/'
 
 /**
  * @public
  */
-export const productWebUrl = 'https://browseros.com'
+export const productWebUrl = 'https://trios.com'
 
 /**
  * @public
  */
-export const productRepositoryUrl = 'https://github.com/browseros-ai/BrowserOS'
+export const productRepositoryUrl = 'https://github.com/trios-ai/TRIOS'
 
 /**
  * @public
  */
-export const githubOrgUrl = 'https://github.com/browseros-ai'
+export const githubOrgUrl = 'https://github.com/trios-ai'
 
 /**
  * @public
  */
-export const privacyPolicyUrl = 'https://browseros.com/privacy'
+export const privacyPolicyUrl = 'https://trios.com/privacy'
 
 /**
  * @public
  */
 export const contributorsUrl =
-  'https://github.com/browseros-ai/BrowserOS/graphs/contributors'
+  'https://github.com/trios-ai/TRIOS/graphs/contributors'
 
 /**
  * @public
  */
-export const discordUrl = 'https://discord.gg/browseros'
+export const discordUrl = 'https://discord.gg/trios'
 
 /**
  * @public
@@ -47,10 +47,10 @@ export const productVideoUrl = 'https://youtu.be/J-lFhTP-7is'
 /**
  * @public
  */
-export const productRepositoryShortUrl = 'https://git.new/browseros'
+export const productRepositoryShortUrl = 'https://git.new/trios'
 
 /**
  * @public
  */
 export const scheduledTasksHelpUrl =
-  'https://docs.browseros.com/features/scheduled-tasks'
+  'https://docs.trios.com/features/scheduled-tasks'

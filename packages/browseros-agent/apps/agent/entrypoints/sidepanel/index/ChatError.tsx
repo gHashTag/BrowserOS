@@ -30,14 +30,14 @@ function parseErrorMessage(
   isCreditsExhausted?: boolean
   isConnectionError?: boolean
 } {
-  const isBrowserosProvider = providerType === 'browseros'
+  const isBrowserosProvider = provider: trios'
 
   // All chat requests go through the local TRIOS agent server, so any
   // fetch failure is always a local connection issue.
   if (message.includes('Failed to fetch') || message.includes('fetch failed')) {
     return {
       text: 'Unable to connect to TRIOS agent. Follow below instructions.',
-      url: 'https://docs.browseros.com/troubleshooting/connection-issues',
+      url: 'https://docs.trios.com/troubleshooting/connection-issues',
       isConnectionError: true,
     }
   }
@@ -57,14 +57,14 @@ function parseErrorMessage(
     }
   }
 
-  // Detect BrowserOS rate limit (TRIOS provider only)
+  // Detect TRIOS rate limit (TRIOS provider only)
   if (
     isBrowserosProvider &&
-    message.includes('BrowserOS LLM daily limit reached')
+    message.includes('TRIOS LLM daily limit reached')
   ) {
     return {
       text: 'Add your own API key for unlimited usage.',
-      url: 'https://dub.sh/browseros-usage-limit',
+      url: 'https://dub.sh/trios-usage-limit',
       isRateLimit: true,
     }
   }

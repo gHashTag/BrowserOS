@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { tool } from "ai";
 import Fuse from "fuse.js";
 import { z } from "zod";
-import { getMemoryDir } from "../../lib/browseros-dir";
+import { getMemoryDir } from "../../lib/trios-dir";
 import { executeWithMetrics, toModelOutput } from "../filesystem/utils";
 
 const TOOL_NAME = "memory_search";

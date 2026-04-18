@@ -31,7 +31,7 @@ const providerIconMap: Record<ProviderType, IconComponent | null> = {
   ollama: Ollama,
   lmstudio: LmStudio,
   bedrock: Bedrock,
-  browseros: null,
+  trios: null,
   moonshot: Kimi,
   'chatgpt-pro': OpenAI,
   'github-copilot': Github,
@@ -67,7 +67,7 @@ export const ProviderIcon: FC<ProviderIconProps> = ({
  * TRIOS branded icon component
  * @public
  */
-export const BrowserOSIcon: FC<{ size?: number; className?: string }> = ({
+export const TRIOSIcon: FC<{ size?: number; className?: string }> = ({
   size = 20,
   className,
 }) => {

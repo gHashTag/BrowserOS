@@ -8,7 +8,7 @@ export interface McpTool {
 }
 
 const MCP_CLIENT_INFO = {
-  name: 'browseros-settings',
+  name: 'trios-settings',
   version: '1.0.0',
 } as const
 

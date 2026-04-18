@@ -31,7 +31,7 @@ export function createCodexFetch(accountId?: string) {
 		if (accountId) {
 			headers.set("ChatGPT-Account-Id", accountId);
 		}
-		headers.set("originator", "browseros");
+		headers.set("originator", "trios");
 		headers.set("OpenAI-Beta", "responses=experimental");
 
 		let body = init?.body;

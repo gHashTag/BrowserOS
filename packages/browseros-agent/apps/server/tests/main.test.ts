@@ -10,8 +10,8 @@ const config = {
   serverPort: 9100,
   agentPort: 9100,
   extensionPort: null,
-  resourcesDir: '/tmp/browseros-resources',
-  executionDir: '/tmp/browseros-execution',
+  resourcesDir: '/tmp/trios-resources',
+  executionDir: '/tmp/trios-execution',
   mcpAllowRemote: false,
   aiSdkDevtoolsEnabled: false,
 }
@@ -46,7 +46,7 @@ describe('Application.start', () => {
         }
       },
     }))
-    mock.module('../src/lib/browseros-dir', () => ({
+    mock.module('../src/lib/trios-dir', () => ({
       cleanOldSessions: mock(async () => {}),
       ensureBrowserosDir: mock(async () => {}),
       removeServerConfigSync: mock(() => {}),
@@ -58,7 +58,7 @@ describe('Application.start', () => {
     mock.module('../src/lib/identity', () => ({
       identity: {
         initialize: mock(() => {}),
-        getTRIOSId: mock(() => 'browseros-id'),
+        getTRIOSId: mock(() => 'trios-id'),
       },
     }))
     mock.module('../src/lib/logger', () => ({

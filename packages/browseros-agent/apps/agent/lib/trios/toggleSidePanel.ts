@@ -4,13 +4,13 @@
 export async function openSidePanel(
   tabId: number,
 ): Promise<{ opened: boolean }> {
-  // @ts-expect-error browserosIsOpen is a BrowserOS-specific API
-  const isAlreadyOpen = await chrome.sidePanel.browserosIsOpen({ tabId })
+  // @ts-expect-error triosIsOpen is a TRIOS-specific API
+  const isAlreadyOpen = await chrome.sidePanel.triosIsOpen({ tabId })
   if (isAlreadyOpen) {
     return { opened: true }
   }
-  // @ts-expect-error browserosToggle is a BrowserOS-specific API
-  return await chrome.sidePanel.browserosToggle({ tabId })
+  // @ts-expect-error triosToggle is a TRIOS-specific API
+  return await chrome.sidePanel.triosToggle({ tabId })
 }
 
 /**
@@ -19,6 +19,6 @@ export async function openSidePanel(
 export async function toggleSidePanel(
   tabId: number,
 ): Promise<{ opened: boolean }> {
-  // @ts-expect-error browserosToggle is a BrowserOS-specific API
-  return await chrome.sidePanel.browserosToggle({ tabId })
+  // @ts-expect-error triosToggle is a TRIOS-specific API
+  return await chrome.sidePanel.triosToggle({ tabId })
 }

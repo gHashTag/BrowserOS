@@ -3,7 +3,7 @@ import type { ChatMode } from '@/entrypoints/sidepanel/index/chatTypes'
 import { useChatSessionContext } from '@/entrypoints/sidepanel/layout/ChatSessionContext'
 import { track } from '@/lib/metrics/track'
 import { useVoiceInput } from '@/lib/voice/useVoiceInput'
-import { createBrowserOSAction } from './types'
+import { createTRIOSAction } from './types'
 
 interface ChatActionsConfig {
   /** Analytics event names scoped to the origin */
@@ -101,7 +101,7 @@ export function useChatActions(config: ChatActionsConfig) {
     if (!messageText) return
 
     if (attachedTabs.length) {
-      const action = createBrowserOSAction({
+      const action = createTRIOSAction({
         mode,
         message: messageText,
         tabs: attachedTabs,

@@ -29,7 +29,7 @@ export interface McpServiceDeps {
 export function createMcpServer(deps: McpServiceDeps): McpServer {
 	const server = new McpServer(
 		{
-			name: "browseros_mcp",
+			name: "trios_mcp",
 			title: "TRIOS MCP server",
 			version: deps.version,
 		},

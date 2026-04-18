@@ -172,7 +172,7 @@ function normalizeToolMessageForModel(
 }
 
 // opencode handles this at message serialization time for providers that do not
-// reliably support media inside tool results. BrowserOS uses the same boundary:
+// reliably support media inside tool results. TRIOS uses the same boundary:
 // normalize model messages before the next step, not inside the screenshot tool.
 export function normalizeMessagesForModel(
 	messages: ModelMessage[],

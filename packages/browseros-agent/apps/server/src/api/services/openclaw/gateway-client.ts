@@ -422,7 +422,7 @@ export class GatewayClient {
 			throw new Error("Gateway WS not connected");
 		}
 
-		const fullSessionKey = `agent:${agentId}:browseros-${sessionKey}`;
+		const fullSessionKey = `agent:${agentId}:trios-${sessionKey}`;
 		const idempotencyKey = globalThis.crypto.randomUUID();
 		const streamClient = new GatewayClient(
 			this.port,

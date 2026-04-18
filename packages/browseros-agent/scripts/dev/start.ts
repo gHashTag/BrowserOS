@@ -13,7 +13,7 @@ type Mode = "watch" | "manual";
 const MONOREPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const TRIOS_BINARY = "/Applications/TRIOS.app/Contents/MacOS/TRIOS";
 const AGENT_EXT_DIR = join(MONOREPO_ROOT, "apps/agent/dist/chrome-mv3-dev");
-let USER_DATA_DIR = "/tmp/browseros-dev";
+let USER_DATA_DIR = "/tmp/trios-dev";
 
 const TAG = {
 	server: pc.cyan,
@@ -194,11 +194,11 @@ function startManualBrowser(ports: Ports): ReturnType<typeof spawn> {
 		"--use-mock-keychain",
 		"--show-component-extension-options",
 		"--disable-trios-server",
-		"--disable-browseros-extensions",
-		// TODO: replace with --browseros-cdp-port once we fix the browseros bug
+		"--disable-trios-extensions",
+		// TODO: replace with --trios-cdp-port once we fix the trios bug
 		`--remote-debugging-port=${ports.cdp}`,
-		`--browseros-mcp-port=${ports.server}`,
-		`--browseros-extension-port=${ports.extension}`,
+		`--trios-mcp-port=${ports.server}`,
+		`--trios-extension-port=${ports.extension}`,
 		`--user-data-dir=${USER_DATA_DIR}`,
 		`--load-extension=${AGENT_EXT_DIR}`,
 		"chrome://newtab",
@@ -243,7 +243,7 @@ async function main() {
 			"info",
 			`Ports: CDP=${ports.cdp} Server=${ports.server} Extension=${ports.extension}`,
 		);
-		USER_DATA_DIR = mkdtempSync(join(tmpdir(), "browseros-dev-"));
+		USER_DATA_DIR = mkdtempSync(join(tmpdir(), "trios-dev-"));
 		log("info", `Created fresh profile: ${USER_DATA_DIR}`);
 	} else {
 		killPorts(ports);

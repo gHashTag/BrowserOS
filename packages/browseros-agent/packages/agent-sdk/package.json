@@ -6,12 +6,12 @@
 	"license": "AGPL-3.0-or-later",
 	"repository": {
 		"type": "git",
-		"url": "https://github.com/browseros-ai/BrowserOS.git",
+		"url": "https://github.com/trios-ai/BrowserOS.git",
 		"directory": "packages/agent-sdk"
 	},
-	"homepage": "https://github.com/browseros-ai/BrowserOS#readme",
+	"homepage": "https://github.com/trios-ai/BrowserOS#readme",
 	"bugs": {
-		"url": "https://github.com/browseros-ai/BrowserOS/issues"
+		"url": "https://github.com/trios-ai/BrowserOS/issues"
 	},
 	"keywords": [
 		"browser-automation",

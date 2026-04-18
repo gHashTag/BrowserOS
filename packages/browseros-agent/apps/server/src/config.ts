@@ -235,8 +235,8 @@ function parseConfigFile(filePath?: string): ConfigResult<PartialConfig> {
 						? cfg.instance.install_id
 						: undefined,
 				instanceBrowserosVersion:
-					typeof cfg.instance?.browseros_version === "string"
-						? cfg.instance.browseros_version
+					typeof cfg.instance?.trios_version === "string"
+						? cfg.instance.trios_version
 						: undefined,
 				instanceChromiumVersion:
 					typeof cfg.instance?.chromium_version === "string"

@@ -1,6 +1,6 @@
 import type { AppType } from '@trios/server'
 import { hc } from 'hono/client'
-import { getAgentServerUrl } from '../browseros/helpers'
+import { getAgentServerUrl } from '../trios/helpers'
 
 export type RpcClient = ReturnType<typeof hc<AppType>>
 

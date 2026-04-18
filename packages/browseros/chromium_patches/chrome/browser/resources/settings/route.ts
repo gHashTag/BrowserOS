@@ -6,7 +6,7 @@ index a116759bfcca4..270945c27b3c4 100644
  
    // Root page.
    r.BASIC = new Route('/');
-+  r.BROWSEROS_PREFS = new Route('/browseros-settings', 'BrowserOS Settings');
++  r.BROWSEROS_PREFS = new Route('/trios-settings', 'TRIOS Settings');
  
    r.ABOUT = r.BASIC.createSection(
        '/help', 'about', loadTimeData.getString('aboutPageTitle'));
