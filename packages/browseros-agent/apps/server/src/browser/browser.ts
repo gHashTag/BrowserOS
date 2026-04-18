@@ -182,7 +182,7 @@ export class Browser {
 	// --- Pages ---
 
 	async listPages(): Promise<PageInfo[]> {
-		const result = await this.cdp.Browser.getTabs({ includeHidden: true });
+		const result = await this.cdp.Target.getTargets({ includeHidden: true });
 		const tabs = (result.tabs as TabInfo[]).filter(
 			(t) => !EXCLUDED_URL_PREFIXES.some((prefix) => t.url.startsWith(prefix)),
 		);
@@ -258,7 +258,7 @@ export class Browser {
 		if (!info) return undefined;
 
 		try {
-			const result = await this.cdp.Browser.getTabInfo({ tabId: info.tabId });
+			const result = await this.cdp.Target.getTargetInfo({ tabId: info.tabId });
 			const tab = result.tab as TabInfo;
 			const updated: PageInfo = {
 				...info,
@@ -521,7 +521,7 @@ export class Browser {
 		url: string,
 		opts?: { hidden?: boolean; background?: boolean; windowId?: number },
 	): Promise<number> {
-		const createResult = await this.cdp.Browser.createTab({
+		const createResult = await this.cdp.Target.createTarget({
 			url,
 			...(opts?.hidden !== undefined && { hidden: opts.hidden }),
 			...(opts?.background !== undefined && { background: opts.background }),
@@ -532,7 +532,7 @@ export class Browser {
 		let tabInfo: TabInfo | undefined;
 		for (let i = 0; i < 10; i++) {
 			try {
-				const infoResult = await this.cdp.Browser.getTabInfo({ tabId });
+				const infoResult = await this.cdp.Target.getTargetInfo({ tabId });
 				tabInfo = infoResult.tab as TabInfo;
 				break;
 			} catch {
@@ -566,7 +566,7 @@ export class Browser {
 			throw new Error(
 				`Unknown page ${page}. Use list_pages to see available pages.`,
 			);
-		await this.cdp.Browser.closeTab({ tabId: info.tabId });
+		await this.cdp.Target.closeTarget({ tabId: info.tabId });
 		this.consoleCollector.detach(page);
 		this.pages.delete(page);
 		this.sessions.delete(info.targetId);
