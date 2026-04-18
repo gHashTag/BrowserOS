@@ -12,7 +12,7 @@ import {
 } from '@lobehub/icons'
 import { Bot, Github } from 'lucide-react'
 import type { FC, SVGProps } from 'react'
-import ProductLogoSvg from '@/assets/product_logo.svg'
+import ProductLogoSvg from '@/assets/trinity-logo-rounded.png'
 import type { ProviderType } from './types'
 
 interface IconProps extends SVGProps<SVGSVGElement> {
@@ -64,7 +64,7 @@ export const ProviderIcon: FC<ProviderIconProps> = ({
 }
 
 /**
- * BrowserOS branded icon component
+ * TRIOS branded icon component
  * @public
  */
 export const BrowserOSIcon: FC<{ size?: number; className?: string }> = ({
@@ -74,7 +74,7 @@ export const BrowserOSIcon: FC<{ size?: number; className?: string }> = ({
   return (
     <img
       src={ProductLogoSvg}
-      alt="BrowserOS"
+      alt="TRIOS"
       width={size}
       height={size}
       className={className}

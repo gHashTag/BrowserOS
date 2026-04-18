@@ -4,4 +4,4 @@ export {
   type ToolApprovalCategory,
   type ToolApprovalCategoryId,
   type ToolApprovalConfig,
-} from '@browseros/shared/constants/tool-approval'
+} from '@trios/shared/constants/tool-approval'

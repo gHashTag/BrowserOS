@@ -1,4 +1,4 @@
-import { TOOL_LIMITS } from '@browseros/shared/constants/limits'
+import { TOOL_LIMITS } from '@trios/shared/constants/limits'
 import { z } from 'zod'
 import { defineToolWithCategory } from './framework'
 import { writeTempToolOutputFile } from './output-file'

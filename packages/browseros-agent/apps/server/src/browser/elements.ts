@@ -1,4 +1,4 @@
-import type { ProtocolApi } from '@browseros/cdp-protocol/protocol-api'
+import type { ProtocolApi } from '@trios/cdp-protocol/protocol-api'
 
 function quadCenter(q: number[]): { x: number; y: number } {
   const x = ((q[0] ?? 0) + (q[2] ?? 0) + (q[4] ?? 0) + (q[6] ?? 0)) / 4

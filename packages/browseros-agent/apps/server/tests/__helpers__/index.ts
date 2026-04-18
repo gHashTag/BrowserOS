@@ -1,6 +1,6 @@
 export {
-  cleanupBrowserOS,
-  ensureBrowserOS,
+  cleanupTRIOS,
+  ensureTRIOS,
   type TestEnvironmentConfig,
 } from './setup'
 export type { McpContentItem, TypedCallToolResult } from './utils'

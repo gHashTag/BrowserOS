@@ -1,6 +1,6 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Git Updates WebSocket
  * Real-time Git status updates

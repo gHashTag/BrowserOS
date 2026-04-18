@@ -18,7 +18,7 @@ export const SoulViewer: FC = () => {
     return (
       <div className="rounded-xl border border-destructive/50 bg-destructive/5 p-6">
         <p className="text-destructive text-sm">
-          Could not load soul file. Make sure BrowserOS server is running.
+          Could not load soul file. Make sure TRIOS server is running.
         </p>
       </div>
     )

@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Consolidated HTTP Server
@@ -10,7 +10,7 @@
  * - MCP HTTP routes (using @hono/mcp transport)
  */
 
-import { OPENCLAW_GATEWAY_CONTAINER_NAME } from '@browseros/shared/constants/openclaw'
+import { OPENCLAW_GATEWAY_CONTAINER_NAME } from '@trios/shared/constants/openclaw'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import type { ContentfulStatusCode } from 'hono/utils/http-status'
@@ -74,11 +74,88 @@ async function assertPortAvailable(port: number): Promise<void> {
   })
 }
 
+/**
+ * Try to start server on a port with retry logic.
+ * If port is busy, wait 2s and retry once before failing.
+ * Prevents race conditions between port check and server startup.
+ */
+async function tryListen(
+  port: number,
+  maxRetries: number = 2,
+  app?: Hono<Env>,
+  host?: string,
+  config?: HttpServerConfig,
+): Promise<{ server: ReturnType<typeof Bun.serve>; didRetry: boolean }> {
+  const net = await import('node:net')
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      logger.info(
+        `Starting server on port ${port} (attempt ${attempt}/${maxRetries})`,
+      )
+
+      // Quick check if port is still free right before binding
+      const portCheck = new Promise<void>((checkResolve, checkReject) => {
+        const probe = net.createServer()
+        probe.once('error', (err) => {
+          if ((err as any).code === 'EADDRINUSE') {
+            checkReject(err)
+          } else {
+            checkResolve()
+          }
+        })
+        probe.listen({ port, host: '127.0.0.1', exclusive: true }, () => {
+          probe.close(() => checkResolve())
+        })
+      })
+
+      await portCheck
+
+      // Port is free, try to start server
+      const server = Bun.serve({
+        fetch: app!.fetch,
+        port,
+        hostname: host ?? '0.0.0.0',
+        idleTimeout: 0,
+        websocket,
+      })
+
+      logger.info('Consolidated HTTP Server started', { port, host })
+
+      if (config?.aiSdkDevtoolsEnabled) {
+        logger.info(
+          'AI SDK DevTools enabled — run `npx @ai-sdk/devtools` to open the viewer',
+        )
+      }
+
+      return { server, didRetry: attempt > 1 }
+    } catch (err: any) {
+      const errObj = err as Error
+
+      if (attempt < maxRetries && errObj.message.includes('already in use')) {
+        logger.warn(
+          `Port ${port} busy, retrying in 2s... (attempt ${attempt + 1}/${maxRetries})`,
+        )
+        await new Promise((r) => setTimeout(r, 2000))
+        continue
+      }
+
+      // Final failure after all retries exhausted
+      logger.error(
+        `Failed to start server after ${maxRetries} attempts: ${errObj.message}`,
+      )
+      throw errObj
+    }
+  }
+
+  throw new Error('Should not reach here - loop completed without return')
+}
+
 export async function createHttpServer(config: HttpServerConfig) {
   const {
     port,
     host = '0.0.0.0',
-    browserosId,
+    triosId,
     executionDir,
     resourcesDir,
     version,
@@ -89,17 +166,15 @@ export async function createHttpServer(config: HttpServerConfig) {
   const { onShutdown } = config
 
   // Initialize OAuth token manager (callback server binds lazily on first PKCE login)
-  const tokenManager = browserosId
-    ? initializeOAuth(getDb(), browserosId)
-    : null
+  const tokenManager = triosId ? initializeOAuth(getDb(), triosId) : null
 
   // Connect Klavis proxy (non-blocking: browser tools still work if this fails)
   let klavisProxy: KlavisProxyHandle | null = null
-  if (browserosId) {
+  if (triosId) {
     try {
       klavisProxy = await connectKlavisProxy({
         klavisClient: new KlavisClient(),
-        browserosId,
+        triosId,
       })
     } catch (error) {
       logger.warn(
@@ -128,14 +203,13 @@ export async function createHttpServer(config: HttpServerConfig) {
   const app = new Hono<Env>()
     .use('/*', cors(defaultCorsConfig))
     .route('/health', createHealthRoute({ browser }))
-    .route('/a2a', createA2ARoutes({ a2aKey: process.env.BROWSEROS_A2A_KEY }))
+    .route('/a2a', createA2ARoutes({ a2aKey: process.env.trios_A2A_KEY }))
     .route(
       '/agent',
       createAgentBridgeRoutes({
         browser,
         registry,
-        browserosId,
-        browserContext: config.browserContext,
+        triosId: triosId ?? '',
       }),
     )
     .route(
@@ -156,8 +230,8 @@ export async function createHttpServer(config: HttpServerConfig) {
     .route('/soul', createSoulRoutes())
     .route('/memory', createMemoryRoutes())
     .route('/skills', createSkillsRoutes())
-    .route('/test-provider', createProviderRoutes({ browserosId }))
-    .route('/refine-prompt', createRefinePromptRoutes({ browserosId }))
+    .route('/test-provider', createProviderRoutes({ triosId }))
+    .route('/refine-prompt', createRefinePromptRoutes({ triosId }))
     .route(
       '/oauth',
       tokenManager
@@ -166,13 +240,13 @@ export async function createHttpServer(config: HttpServerConfig) {
             c.json({ error: 'OAuth not available' }, 503),
           ),
     )
-    .route('/klavis', createKlavisRoutes({ browserosId: browserosId || '' }))
+    .route('/klavis', createKlavisRoutes({ triosId: triosId || '' }))
     .route(
       '/credits',
       createCreditsRoutes({
-        browserosId,
-        gatewayBaseUrl: INLINED_ENV.BROWSEROS_CONFIG_URL
-          ? new URL(INLINED_ENV.BROWSEROS_CONFIG_URL).origin
+        triosId,
+        gatewayBaseUrl: INLINED_ENV.trios_CONFIG_URL
+          ? new URL(INLINED_ENV.trios_CONFIG_URL).origin
           : undefined,
       }),
     )
@@ -192,7 +266,7 @@ export async function createHttpServer(config: HttpServerConfig) {
       createChatRoutes({
         browser,
         registry,
-        browserosId,
+        triosId,
         aiSdkDevtoolsEnabled: config.aiSdkDevtoolsEnabled,
         port,
       }),
@@ -202,7 +276,7 @@ export async function createHttpServer(config: HttpServerConfig) {
       createSdkRoutes({
         port,
         browser,
-        browserosId,
+        triosId,
       }),
     )
     .route('/claw', clawRoutes)
@@ -256,20 +330,10 @@ export async function createHttpServer(config: HttpServerConfig) {
 
   app.route('/terminal', terminalRoutes)
 
-  const server = Bun.serve({
-    fetch: app.fetch,
-    port,
-    hostname: host,
-    idleTimeout: 0,
-    websocket,
-  })
+  const { server, didRetry } = await tryListen(port)
 
-  logger.info('Consolidated HTTP Server started', { port, host })
-
-  if (config.aiSdkDevtoolsEnabled) {
-    logger.info(
-      'AI SDK DevTools enabled — run `npx @ai-sdk/devtools` to open the viewer',
-    )
+  if (didRetry) {
+    logger.info('Server started after port conflict was resolved')
   }
 
   return {

@@ -1,4 +1,4 @@
-import type { ProtocolApi } from '@browseros/cdp-protocol/protocol-api'
+import type { ProtocolApi } from '@trios/cdp-protocol/protocol-api'
 
 export interface CdpBackend extends ProtocolApi {
   connect(): Promise<void>

@@ -32,8 +32,8 @@ function printHelp(): void {
 Usage: bun scripts/dev/start.ts <mode> [options]
 
 Modes:
-  --watch     Hot reload mode — wxt launches BrowserOS with HMR, server starts after CDP is ready
-  --manual    Manual mode — launches BrowserOS directly, builds both extensions, no HMR
+  --watch     Hot reload mode — wxt launches TRIOS with HMR, server starts after CDP is ready
+  --manual    Manual mode — launches TRIOS directly, builds both extensions, no HMR
 
 Options:
   --new       Find available ports instead of killing processes on .env ports
@@ -179,7 +179,7 @@ async function streamOutput(
 function startWatchMode(env: NodeJS.ProcessEnv): ReturnType<typeof spawn> {
   log('agent', 'Starting agent with HMR (wxt)...\n')
   return spawn({
-    cmd: ['bun', 'run', '--filter', '@browseros/agent', 'dev'],
+    cmd: ['bun', 'run', '--filter', '@trios/agent', 'dev'],
     cwd: MONOREPO_ROOT,
     stdout: 'pipe',
     stderr: 'pipe',
@@ -193,7 +193,7 @@ function startManualBrowser(ports: Ports): ReturnType<typeof spawn> {
     '--no-default-browser-check',
     '--use-mock-keychain',
     '--show-component-extension-options',
-    '--disable-browseros-server',
+    '--disable-trios-server',
     '--disable-browseros-extensions',
     // TODO: replace with --browseros-cdp-port once we fix the browseros bug
     `--remote-debugging-port=${ports.cdp}`,
@@ -218,7 +218,7 @@ function startManualBrowser(ports: Ports): ReturnType<typeof spawn> {
 function startServer(env: NodeJS.ProcessEnv): ReturnType<typeof spawn> {
   log('server', 'Starting server...\n')
   return spawn({
-    cmd: ['bun', 'run', '--filter', '@browseros/server', 'start'],
+    cmd: ['bun', 'run', '--filter', '@trios/server', 'start'],
     cwd: MONOREPO_ROOT,
     stdout: 'pipe',
     stderr: 'pipe',

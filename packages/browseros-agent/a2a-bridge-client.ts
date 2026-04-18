@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * A2A Bridge Client - отправляет сообщения из файла в BrowserOS
+ * A2A Bridge Client - отправляет сообщения из файла в TRIOS
  */
 
 // Временное решение для отладки - использовать правильный порт A2A (9001)
@@ -27,15 +27,17 @@ ws.on('open', () => {
   console.log('\n✅ WebSocket подключен')
   isReady = true
 
-  ws.send(JSON.stringify({
-    type: 'chat',
-    request: {
-      message: 'Привет! Я ваш ассистент Claude через A2A мост.',
-      role: 'assistant',
-      agentName: 'ClaudeAssistant',
-      conversationId: CONVERSATION_ID
-    }
-  }))
+  ws.send(
+    JSON.stringify({
+      type: 'chat',
+      request: {
+        message: 'Привет! Я ваш ассистент Claude через A2A мост.',
+        role: 'assistant',
+        agentName: 'ClaudeAssistant',
+        conversationId: CONVERSATION_ID,
+      },
+    }),
+  )
 })
 
 // Получаем сообщения от сервера
@@ -71,19 +73,21 @@ ws.on('close', () => {
 async function sendMessage(text: string) {
   if (!isReady) {
     console.log('⏳ Ожидание готовности WebSocket...')
-    await new Promise(resolve => setTimeout(resolve, 500))
+    await new Promise((resolve) => setTimeout(resolve, 500))
   }
 
   console.log(`\n📤 Отправка: ${text}`)
-  ws.send(JSON.stringify({
-    type: 'chat',
-    request: {
-      message: text,
-      role: 'user',
-      agentName: 'ClaudeAssistant',
-      conversationId: CONVERSATION_ID
-    }
-  }))
+  ws.send(
+    JSON.stringify({
+      type: 'chat',
+      request: {
+        message: text,
+        role: 'user',
+        agentName: 'ClaudeAssistant',
+        conversationId: CONVERSATION_ID,
+      },
+    }),
+  )
 }
 
 // Интерактивный режим: читаем ввод из терминала

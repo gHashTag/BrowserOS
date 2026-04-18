@@ -19,7 +19,7 @@ import type {
 } from './types'
 
 /**
- * Browser automation agent for the BrowserOS platform.
+ * Browser automation agent for the TRIOS platform.
  * Provides high-level methods to navigate, interact, extract data, and verify page state.
  *
  * @remarks
@@ -28,7 +28,7 @@ import type {
  *
  * @example
  * ```typescript
- * import type { Agent } from '@browseros-ai/agent-sdk'
+ * import type { Agent } from '@trios-ai/agent-sdk'
  * import { z } from 'zod'
  *
  * export async function run(agent: Agent) {

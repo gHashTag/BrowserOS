@@ -32,8 +32,6 @@ import {
 import { McpServerIcon } from '@/entrypoints/app/connect-mcp/McpServerIcon'
 import { useGetUserMCPIntegrations } from '@/entrypoints/app/connect-mcp/useGetUserMCPIntegrations'
 import { useChatSessionContext } from '@/entrypoints/sidepanel/layout/ChatSessionContext'
-import { Feature } from '@/lib/browseros/capabilities'
-import { useCapabilities } from '@/lib/browseros/useCapabilities'
 import {
   createAITabAction,
   createBrowserOSAction,
@@ -59,6 +57,8 @@ import { useMcpServers } from '@/lib/mcp/mcpServerStorage'
 import { useSyncRemoteIntegrations } from '@/lib/mcp/useSyncRemoteIntegrations'
 import { openSidePanelWithSearch } from '@/lib/messaging/sidepanel/openSidepanelWithSearch'
 import { track } from '@/lib/metrics/track'
+import { Feature } from '@/lib/trios/capabilities'
+import { useCapabilities } from '@/lib/trios/useCapabilities'
 import { cn } from '@/lib/utils'
 import { useVoiceInput } from '@/lib/voice/useVoiceInput'
 import { useWorkspace } from '@/lib/workspace/use-workspace'

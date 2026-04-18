@@ -1,6 +1,6 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * A2A Relay Observer Agent
  *
@@ -10,24 +10,24 @@
  * Hardened with state machine, sequence validation, and exponential backoff
  */
 
-import type { UIMessageStreamEvent } from '@browseros/shared/schemas/ui-stream'
+import { A2A_PORT } from '@trios/shared/constants/ports'
+import type { UIMessageStreamEvent } from '@trios/shared/schemas/ui-stream'
 import { createParser, type EventSourceMessage } from 'eventsource-parser'
 import { logger } from '../../lib/logger'
 import {
-  A2AMessageType,
-  A2ASseEventType,
   A2AAgentMode,
-  A2ARelayObserverConfig,
-  A2AClientMessage,
-  A2AServerMessage,
-  A2AConnectionState,
   A2AAgentState,
-  A2AStateTransition,
+  type A2AClientMessage,
+  A2AConnectionState,
   A2AErrorType,
-  A2ARecoverableError,
-  A2AHardeningOptions,
+  type A2AHardeningOptions,
+  A2AMessageType,
+  type A2ARecoverableError,
+  type A2ARelayObserverConfig,
+  type A2AServerMessage,
+  A2ASseEventType,
+  type A2AStateTransition,
 } from './a2a-types'
-import { A2A_PORT } from '@browseros/shared/constants/ports'
 
 /**
  * Internal config extending the base config with hardening options
@@ -53,11 +53,37 @@ function safeJsonParse(data: unknown): unknown | null {
 export type TrinityExperienceEvent =
   | { type: 'agent-connection'; agentId: string; timestamp: number }
   | { type: 'agent-disconnect'; agentId: string; timestamp: number }
-  | { type: 'message-sent'; agentId: string; message: string; timestamp: number }
-  | { type: 'message-received'; agentId: string; message: string; timestamp: number }
-  | { type: 'reconnect-attempt'; agentId: string; attempt: number; timestamp: number }
-  | { type: 'reconnect-success'; agentId: string; attempt: number; timestamp: number }
-  | { type: 'reconnect-failure'; agentId: string; attempt: number; maxAttempts: number; timestamp: number }
+  | {
+      type: 'message-sent'
+      agentId: string
+      message: string
+      timestamp: number
+    }
+  | {
+      type: 'message-received'
+      agentId: string
+      message: string
+      timestamp: number
+    }
+  | {
+      type: 'reconnect-attempt'
+      agentId: string
+      attempt: number
+      timestamp: number
+    }
+  | {
+      type: 'reconnect-success'
+      agentId: string
+      attempt: number
+      timestamp: number
+    }
+  | {
+      type: 'reconnect-failure'
+      agentId: string
+      attempt: number
+      maxAttempts: number
+      timestamp: number
+    }
 
 /**
  * Event emitter for Trinity experience hooks
@@ -104,7 +130,9 @@ export class TrinityExperienceEmitter {
   /**
    * Get events by type
    */
-  getEventsByType(type: TrinityExperienceEvent['type']): TrinityExperienceEvent[] {
+  getEventsByType(
+    type: TrinityExperienceEvent['type'],
+  ): TrinityExperienceEvent[] {
     return this.events.filter((e) => e.type === type)
   }
 
@@ -150,9 +178,9 @@ export class TrinityExperienceEmitter {
 function calculateReconnectDelay(
   attempt: number,
   maxDelay: number,
-  jitterPercent: number
+  jitterPercent: number,
 ): number {
-  const baseDelay = Math.min(1000 * Math.pow(2, attempt), maxDelay)
+  const baseDelay = Math.min(1000 * 2 ** attempt, maxDelay)
   const jitter = baseDelay * jitterPercent * (Math.random() * 2 - 1)
   return Math.floor(baseDelay + jitter)
 }
@@ -171,7 +199,7 @@ class StateLogger {
   logTransition(
     from: A2AConnectionState | A2AAgentState,
     to: A2AConnectionState | A2AAgentState,
-    reason?: string
+    reason?: string,
   ): void {
     if (!this.enabled) return
 
@@ -183,7 +211,10 @@ class StateLogger {
     }
 
     this.transitions.push(transition)
-    logger.debug('State transition:', transition as unknown as Record<string, unknown>)
+    logger.debug(
+      'State transition:',
+      transition as unknown as Record<string, unknown>,
+    )
   }
 
   getTransitions(): A2AStateTransition[] {
@@ -220,7 +251,12 @@ export class RelayObserver {
 
   // Agent identification for multi-agent scenarios
   private agentId: string
-  private messageLog: Array<{ sequence: number; type: string; payload: unknown; timestamp: number }> = []
+  private messageLog: Array<{
+    sequence: number
+    type: string
+    payload: unknown
+    timestamp: number
+  }> = []
 
   constructor(config: InternalRelayObserverConfig) {
     this.config = config
@@ -233,14 +269,18 @@ export class RelayObserver {
     // Initialize Trinity experience emitter
     this.trinityEmitter = new TrinityExperienceEmitter(true)
 
-    this.enableSequenceValidation = this.hardening.enableSequenceValidation ?? false
+    this.enableSequenceValidation =
+      this.hardening.enableSequenceValidation ?? false
   }
 
   /**
    * Запуск агента - подключается к A2A WebSocket
    */
   async start(): Promise<void> {
-    this.setConnectionState(A2AConnectionState.connecting, 'Starting connection')
+    this.setConnectionState(
+      A2AConnectionState.connecting,
+      'Starting connection',
+    )
 
     const port = this.config.a2aPort || A2A_PORT
     const wsUrl = `ws://127.0.0.1:${port}/ws`
@@ -323,7 +363,12 @@ export class RelayObserver {
   /**
    * Get message log for testing
    */
-  getMessageLog(): Array<{ sequence: number; type: string; payload: unknown; timestamp: number }> {
+  getMessageLog(): Array<{
+    sequence: number
+    type: string
+    payload: unknown
+    timestamp: number
+  }> {
     return [...this.messageLog]
   }
 
@@ -344,7 +389,9 @@ export class RelayObserver {
   /**
    * Get Trinity experience events by type
    */
-  getTrinityExperienceEventsByType(type: TrinityExperienceEvent['type']): TrinityExperienceEvent[] {
+  getTrinityExperienceEventsByType(
+    type: TrinityExperienceEvent['type'],
+  ): TrinityExperienceEvent[] {
     return this.trinityEmitter.getEventsByType(type)
   }
 
@@ -384,7 +431,8 @@ export class RelayObserver {
   }
 
   private onOpen(): void {
-    const wasReconnecting = this.connectionState === A2AConnectionState.reconnecting
+    const wasReconnecting =
+      this.connectionState === A2AConnectionState.reconnecting
 
     this.setConnectionState(A2AConnectionState.connected, 'WebSocket opened')
 
@@ -406,7 +454,9 @@ export class RelayObserver {
 
     const parsed = safeJsonParse(event.data) as A2AClientMessage | null
     if (!parsed) {
-      logger.warn('RelayObserver: Failed to parse message', { data: event.data })
+      logger.warn('RelayObserver: Failed to parse message', {
+        data: event.data,
+      })
       return
     }
 
@@ -433,12 +483,16 @@ export class RelayObserver {
         break
 
       case A2AMessageType.abort:
-        logger.info('RelayObserver: Received abort signal', { agentId: this.agentId })
+        logger.info('RelayObserver: Received abort signal', {
+          agentId: this.agentId,
+        })
         this.stop()
         break
 
       default:
-        logger.warn('RelayObserver: Unknown message type', { type: parsed.type })
+        logger.warn('RelayObserver: Unknown message type', {
+          type: parsed.type,
+        })
     }
   }
 
@@ -461,7 +515,10 @@ export class RelayObserver {
     this.setAgentState(A2AAgentState.processing, 'Processing message')
 
     const mode = this.config.mode
-    const safeMode: A2AAgentMode = mode === 'echo' || mode === 'observe' || mode === 'ai' ? mode : A2AAgentMode.echo
+    const safeMode: A2AAgentMode =
+      mode === 'echo' || mode === 'observe' || mode === 'ai'
+        ? mode
+        : A2AAgentMode.echo
 
     switch (safeMode) {
       case A2AAgentMode.echo:
@@ -553,11 +610,17 @@ export class RelayObserver {
       },
     }
 
-    logger.error('RelayObserver: Error', recoverableError as unknown as Record<string, unknown>)
+    logger.error(
+      'RelayObserver: Error',
+      recoverableError as unknown as Record<string, unknown>,
+    )
   }
 
   private isRecoverable(type: A2AErrorType): boolean {
-    return type === A2AErrorType.connectionError || type === A2AErrorType.reconnectFailed
+    return (
+      type === A2AErrorType.connectionError ||
+      type === A2AErrorType.reconnectFailed
+    )
   }
 
   private onClose(): void {
@@ -578,9 +641,16 @@ export class RelayObserver {
         timestamp: Date.now(),
       })
 
-      this.setConnectionState(A2AConnectionState.reconnecting, `Reconnecting (attempt ${this.reconnectAttempts})`)
+      this.setConnectionState(
+        A2AConnectionState.reconnecting,
+        `Reconnecting (attempt ${this.reconnectAttempts})`,
+      )
 
-      const delay = calculateReconnectDelay(this.reconnectAttempts, maxDelay, jitterPercent)
+      const delay = calculateReconnectDelay(
+        this.reconnectAttempts,
+        maxDelay,
+        jitterPercent,
+      )
 
       logger.info('RelayObserver: Scheduling reconnect', {
         attempt: this.reconnectAttempts,

@@ -21,7 +21,7 @@ index 0000000000000..73ef5eaf9e8e3
 +#include "services/network/public/cpp/simple_url_loader.h"
 +#include "url/gurl.h"
 +
-+namespace browseros {
++namespace trios {
 +
 +namespace {
 +

@@ -1,10 +1,10 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * Custom fetch for BrowserOS gateway requests.
- * Adds X-BrowserOS-ID header for credit tracking,
+ * Custom fetch for TRIOS gateway requests.
+ * Adds X-TRIOS-ID header for credit tracking,
  * handles CREDITS_EXHAUSTED (429), and extracts OpenRouter-style error details.
  */
 
@@ -38,10 +38,10 @@ function buildErrorMessage(
   return msg
 }
 
-export function createBrowserOSFetch(browserosId: string): typeof fetch {
+export function createTRIOSFetch(triosId: string): typeof fetch {
   return (async (url: RequestInfo | URL, options?: RequestInit) => {
     const headers = new Headers(options?.headers)
-    headers.set('X-BrowserOS-ID', browserosId)
+    headers.set('X-TRIOS-ID', triosId)
 
     const response = await globalThis.fetch(url, { ...options, headers })
 

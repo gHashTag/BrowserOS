@@ -1,6 +1,6 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Trinity A2A Benchmark Harness
  *
@@ -11,10 +11,10 @@
  * - Delta comparison to previous runs
  */
 
+import { A2A_PORT } from '@trios/shared/constants/ports'
+import type { A2ARelayObserverConfig } from './a2a-types'
 import type { TrinityExperienceEvent } from './relay-observer'
 import { RelayObserver } from './relay-observer'
-import { A2A_PORT } from '@browseros/shared/constants/ports'
-import type { A2ARelayObserverConfig } from './a2a-types'
 
 export interface BenchmarkConfig {
   /** Number of controlled sessions to run */
@@ -138,7 +138,7 @@ function calculatePercentiles(values: number[]) {
  */
 function calculateDelta(
   current: { p50: number; p95: number; p99: number; mean: number },
-  previous: { p50: number; p95: number; p99: number; mean: number }
+  previous: { p50: number; p95: number; p99: number; mean: number },
 ) {
   return {
     p50: ((current.p50 - previous.p50) / previous.p50) * 100,
@@ -154,38 +154,62 @@ function calculateDelta(
 function determineVerdict(
   metrics: BenchmarkMetrics,
   thresholds: Thresholds,
-  delta?: { reconnectSuccessRate: number }
+  delta?: { reconnectSuccessRate: number },
 ): 'pass' | 'warning' | 'fail' {
   const fails = []
   const warnings = []
 
   // Check message latency
   if (metrics.messageLatency.p95 > thresholds.maxMessageLatencyP95 * 1.5) {
-    fails.push(`Message latency p95 (${metrics.messageLatency.p95}ms) exceeds threshold (${thresholds.maxMessageLatencyP95 * 1.5}ms)`)
+    fails.push(
+      `Message latency p95 (${metrics.messageLatency.p95}ms) exceeds threshold (${thresholds.maxMessageLatencyP95 * 1.5}ms)`,
+    )
   } else if (metrics.messageLatency.p95 > thresholds.maxMessageLatencyP95) {
-    warnings.push(`Message latency p95 (${metrics.messageLatency.p95}ms) above threshold (${thresholds.maxMessageLatencyP95}ms)`)
+    warnings.push(
+      `Message latency p95 (${metrics.messageLatency.p95}ms) above threshold (${thresholds.maxMessageLatencyP95}ms)`,
+    )
   }
 
   // Check reconnect latency
   if (metrics.reconnectLatency.samples > 0) {
-    if (metrics.reconnectLatency.p95 > thresholds.maxReconnectLatencyP95 * 1.5) {
-      fails.push(`Reconnect latency p95 (${metrics.reconnectLatency.p95}ms) exceeds threshold (${thresholds.maxReconnectLatencyP95 * 1.5}ms)`)
-    } else if (metrics.reconnectLatency.p95 > thresholds.maxReconnectLatencyP95) {
-      warnings.push(`Reconnect latency p95 (${metrics.reconnectLatency.p95}ms) above threshold (${thresholds.maxReconnectLatencyP95}ms)`)
+    if (
+      metrics.reconnectLatency.p95 >
+      thresholds.maxReconnectLatencyP95 * 1.5
+    ) {
+      fails.push(
+        `Reconnect latency p95 (${metrics.reconnectLatency.p95}ms) exceeds threshold (${thresholds.maxReconnectLatencyP95 * 1.5}ms)`,
+      )
+    } else if (
+      metrics.reconnectLatency.p95 > thresholds.maxReconnectLatencyP95
+    ) {
+      warnings.push(
+        `Reconnect latency p95 (${metrics.reconnectLatency.p95}ms) above threshold (${thresholds.maxReconnectLatencyP95}ms)`,
+      )
     }
   }
 
   // Check reconnect success rate
-  if (metrics.reconnectLatency.samples > 0 && metrics.reconnectSuccessRate < thresholds.minReconnectSuccessRate * 0.8) {
-    fails.push(`Reconnect success rate (${(metrics.reconnectSuccessRate * 100).toFixed(1)}%)) below minimum (${thresholds.minReconnectSuccessRate * 0.8 * 100}%)`)
-  } else if (metrics.reconnectSuccessRate < thresholds.minReconnectSuccessRate) {
-    warnings.push(`Reconnect success rate (${(metrics.reconnectSuccessRate * 100).toFixed(1)}%)) below target (${thresholds.minReconnectSuccessRate * 100}%)`)
+  if (
+    metrics.reconnectLatency.samples > 0 &&
+    metrics.reconnectSuccessRate < thresholds.minReconnectSuccessRate * 0.8
+  ) {
+    fails.push(
+      `Reconnect success rate (${(metrics.reconnectSuccessRate * 100).toFixed(1)}%)) below minimum (${thresholds.minReconnectSuccessRate * 0.8 * 100}%)`,
+    )
+  } else if (
+    metrics.reconnectSuccessRate < thresholds.minReconnectSuccessRate
+  ) {
+    warnings.push(
+      `Reconnect success rate (${(metrics.reconnectSuccessRate * 100).toFixed(1)}%)) below target (${thresholds.minReconnectSuccessRate * 100}%)`,
+    )
   }
 
   // Check for regression in delta
   if (delta) {
     if (delta.reconnectSuccessRate < -10) {
-      warnings.push(`Reconnect success rate degraded by ${Math.abs(delta.reconnectSuccessRate).toFixed(1)}%`)
+      warnings.push(
+        `Reconnect success rate degraded by ${Math.abs(delta.reconnectSuccessRate).toFixed(1)}%`,
+      )
     }
   }
 
@@ -202,7 +226,10 @@ export class TrinityBenchmarkHarness {
   private thresholds: Thresholds
   private events: TrinityExperienceEvent[] = []
 
-  constructor(config: Partial<BenchmarkConfig> = {}, thresholds: Partial<Thresholds> = {}) {
+  constructor(
+    config: Partial<BenchmarkConfig> = {},
+    thresholds: Partial<Thresholds> = {},
+  ) {
     this.config = {
       sessions: config.sessions ?? 10,
       messagesPerSession: config.messagesPerSession ?? 5,
@@ -213,9 +240,15 @@ export class TrinityBenchmarkHarness {
     }
 
     this.thresholds = {
-      maxMessageLatencyP95: thresholds.maxMessageLatencyP95 ?? DEFAULT_THRESHOLD.maxMessageLatencyP95,
-      maxReconnectLatencyP95: thresholds.maxReconnectLatencyP95 ?? DEFAULT_THRESHOLD.maxReconnectLatencyP95,
-      minReconnectSuccessRate: thresholds.minReconnectSuccessRate ?? DEFAULT_THRESHOLD.minReconnectSuccessRate,
+      maxMessageLatencyP95:
+        thresholds.maxMessageLatencyP95 ??
+        DEFAULT_THRESHOLD.maxMessageLatencyP95,
+      maxReconnectLatencyP95:
+        thresholds.maxReconnectLatencyP95 ??
+        DEFAULT_THRESHOLD.maxReconnectLatencyP95,
+      minReconnectSuccessRate:
+        thresholds.minReconnectSuccessRate ??
+        DEFAULT_THRESHOLD.minReconnectSuccessRate,
     }
   }
 
@@ -239,14 +272,15 @@ export class TrinityBenchmarkHarness {
       ? {
           messageLatency: calculateDelta(
             metrics.messageLatency,
-            this.config.previousRun.metrics.messageLatency
+            this.config.previousRun.metrics.messageLatency,
           ),
           reconnectLatency: calculateDelta(
             metrics.reconnectLatency,
-            this.config.previousRun.metrics.reconnectLatency
+            this.config.previousRun.metrics.reconnectLatency,
           ),
           reconnectSuccessRate:
-            ((metrics.reconnectSuccessRate - this.config.previousRun.metrics.reconnectSuccessRate) /
+            ((metrics.reconnectSuccessRate -
+              this.config.previousRun.metrics.reconnectSuccessRate) /
               this.config.previousRun.metrics.reconnectSuccessRate) *
             100,
         }
@@ -291,11 +325,17 @@ export class TrinityBenchmarkHarness {
    */
   private extractReconnectLatencies(): number[] {
     const latencies: number[] = []
-    const reconnectAttempts = new Map<number, { timestamp: number; agentId: string }>() // attempt → { timestamp, agentId }
+    const reconnectAttempts = new Map<
+      number,
+      { timestamp: number; agentId: string }
+    >() // attempt → { timestamp, agentId }
 
     for (const event of this.events) {
       if (event.type === 'reconnect-attempt') {
-        reconnectAttempts.set(event.attempt, { timestamp: event.timestamp, agentId: event.agentId })
+        reconnectAttempts.set(event.attempt, {
+          timestamp: event.timestamp,
+          agentId: event.agentId,
+        })
       } else if (event.type === 'reconnect-success') {
         const attempt = reconnectAttempts.get(event.attempt)
         if (attempt && attempt.agentId === event.agentId) {
@@ -375,7 +415,9 @@ export class TrinityBenchmarkHarness {
     lines.push(`  Max: ${ml.max}ms`)
     lines.push(`  Mean: ${ml.mean.toFixed(2)}ms`)
     lines.push(`  P50:  ${ml.p50}ms`)
-    lines.push(`  P95:  ${ml.p95}ms (threshold: ${this.thresholds.maxMessageLatencyP95}ms)`)
+    lines.push(
+      `  P95:  ${ml.p95}ms (threshold: ${this.thresholds.maxMessageLatencyP95}ms)`,
+    )
     lines.push(`  P99:  ${ml.p99}ms`)
     lines.push(`  Samples: ${ml.samples}`)
     lines.push('')
@@ -387,7 +429,9 @@ export class TrinityBenchmarkHarness {
       lines.push(`  Max: ${rl.max}ms`)
       lines.push(`  Mean: ${rl.mean.toFixed(2)}ms`)
       lines.push(`  P50:  ${rl.p50}ms`)
-      lines.push(`  P95:  ${rl.p95}ms (threshold: ${this.thresholds.maxReconnectLatencyP95}ms)`)
+      lines.push(
+        `  P95:  ${rl.p95}ms (threshold: ${this.thresholds.maxReconnectLatencyP95}ms)`,
+      )
       lines.push(`  P99:  ${rl.p99}ms`)
       lines.push(`  Samples: ${rl.samples}`)
     } else {
@@ -396,7 +440,9 @@ export class TrinityBenchmarkHarness {
     lines.push('')
 
     lines.push('## Reconnect Success Rate')
-    lines.push(`  ${(result.metrics.reconnectSuccessRate * 100).toFixed(1)}% (threshold: ${(this.thresholds.minReconnectSuccessRate * 100).toFixed(1)}%)`)
+    lines.push(
+      `  ${(result.metrics.reconnectSuccessRate * 100).toFixed(1)}% (threshold: ${(this.thresholds.minReconnectSuccessRate * 100).toFixed(1)}%)`,
+    )
     lines.push('')
 
     lines.push('## Connection Stability')
@@ -410,17 +456,35 @@ export class TrinityBenchmarkHarness {
       lines.push('## Delta from Previous Run')
       const d = result.delta
       lines.push('### Message Latency Delta')
-      lines.push(`  P50:  ${d.messageLatency.p50 > 0 ? '+' : ''}${d.messageLatency.p50.toFixed(1)}%`)
-      lines.push(`  P95:  ${d.messageLatency.p95 > 0 ? '+' : ''}${d.messageLatency.p95.toFixed(1)}%`)
-      lines.push(`  P99:  ${d.messageLatency.p99 > 0 ? '+' : ''}${d.messageLatency.p99.toFixed(1)}%`)
-      lines.push(`  Mean: ${d.messageLatency.mean > 0 ? '+' : ''}${d.messageLatency.mean.toFixed(1)}%`)
+      lines.push(
+        `  P50:  ${d.messageLatency.p50 > 0 ? '+' : ''}${d.messageLatency.p50.toFixed(1)}%`,
+      )
+      lines.push(
+        `  P95:  ${d.messageLatency.p95 > 0 ? '+' : ''}${d.messageLatency.p95.toFixed(1)}%`,
+      )
+      lines.push(
+        `  P99:  ${d.messageLatency.p99 > 0 ? '+' : ''}${d.messageLatency.p99.toFixed(1)}%`,
+      )
+      lines.push(
+        `  Mean: ${d.messageLatency.mean > 0 ? '+' : ''}${d.messageLatency.mean.toFixed(1)}%`,
+      )
       lines.push('### Reconnect Latency Delta')
-      lines.push(`  P50:  ${d.reconnectLatency.p50 > 0 ? '+' : ''}${d.reconnectLatency.p50.toFixed(1)}%`)
-      lines.push(`  P95:  ${d.reconnectLatency.p95 > 0 ? '+' : ''}${d.reconnectLatency.p95.toFixed(1)}%`)
-      lines.push(`  P99:  ${d.reconnectLatency.p99 > 0 ? '+' : ''}${d.reconnectLatency.p99.toFixed(1)}%`)
-      lines.push(`  Mean: ${d.reconnectLatency.mean > 0 ? '+' : ''}${d.reconnectLatency.mean.toFixed(1)}%`)
+      lines.push(
+        `  P50:  ${d.reconnectLatency.p50 > 0 ? '+' : ''}${d.reconnectLatency.p50.toFixed(1)}%`,
+      )
+      lines.push(
+        `  P95:  ${d.reconnectLatency.p95 > 0 ? '+' : ''}${d.reconnectLatency.p95.toFixed(1)}%`,
+      )
+      lines.push(
+        `  P99:  ${d.reconnectLatency.p99 > 0 ? '+' : ''}${d.reconnectLatency.p99.toFixed(1)}%`,
+      )
+      lines.push(
+        `  Mean: ${d.reconnectLatency.mean > 0 ? '+' : ''}${d.reconnectLatency.mean.toFixed(1)}%`,
+      )
       lines.push(`### Success Rate Delta`)
-      lines.push(`  ${d.reconnectSuccessRate > 0 ? '+' : ''}${d.reconnectSuccessRate.toFixed(1)}%`)
+      lines.push(
+        `  ${d.reconnectSuccessRate > 0 ? '+' : ''}${d.reconnectSuccessRate.toFixed(1)}%`,
+      )
       lines.push('')
     }
 
@@ -450,11 +514,15 @@ export class TrinityBenchmarkHarness {
    * Export events for external analysis
    */
   exportEvents(events: TrinityExperienceEvent[]): string {
-    return JSON.stringify({
-      exportTimestamp: Date.now(),
-      eventCount: events.length,
-      events,
-    }, null, 2)
+    return JSON.stringify(
+      {
+        exportTimestamp: Date.now(),
+        eventCount: events.length,
+        events,
+      },
+      null,
+      2,
+    )
   }
 
   /**

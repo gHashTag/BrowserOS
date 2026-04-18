@@ -1,21 +1,18 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
- * Integration tests for @browseros-ai/agent-sdk
+ * Integration tests for @trios-ai/agent-sdk
  * Tests the SDK against a real BrowserOS server.
  */
 
 import { afterAll, beforeAll, describe, it } from 'bun:test'
 import assert from 'node:assert'
-import { Agent } from '@browseros-ai/agent-sdk'
+import { Agent } from '@trios-ai/agent-sdk'
 
 import { CdpBackend } from '../../src/browser/backends/cdp'
 import { Browser } from '../../src/browser/browser'
-import {
-  ensureBrowserOS,
-  type TestEnvironmentConfig,
-} from '../__helpers__/setup'
+import { ensureTRIOS, type TestEnvironmentConfig } from '../__helpers__/setup'
 
 let config: TestEnvironmentConfig
 let cdp: CdpBackend | null = null
@@ -39,7 +36,7 @@ async function getRuntimeWindow(
 }
 
 beforeAll(async () => {
-  config = await ensureBrowserOS()
+  config = await ensureTRIOS()
   runtimeWindowId = await getRuntimeWindow(config)
 }, 60000)
 

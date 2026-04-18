@@ -1,11 +1,11 @@
 {
-  "name": "@browseros/server",
+  "name": "@trios/server",
   "version": "0.0.83",
-  "description": "BrowserOS server",
+  "description": "TRIOS server",
   "type": "module",
   "main": "./src/index.ts",
   "bin": {
-    "browseros-server": "./src/index.ts"
+    "trios-server": "./src/index.ts"
   },
   "scripts": {
     "start": "bun --watch --env-file=.env.development src/index.ts",
@@ -69,10 +69,10 @@
     "@ai-sdk/openai": "^3.0.30",
     "@ai-sdk/openai-compatible": "^2.0.30",
     "@ai-sdk/provider": "^3.0.8",
-    "@browseros-ai/agent-sdk": "workspace:*",
+    "@trios-ai/agent-sdk": "workspace:*",
     "@huggingface/transformers": "^3.4.0",
-    "@browseros/cdp-protocol": "workspace:*",
-    "@browseros/shared": "workspace:*",
+    "@trios/cdp-protocol": "workspace:*",
+    "@trios/shared": "workspace:*",
     "@google/gemini-cli-core": "^0.16.0",
     "@google/genai": "1.30.0",
     "@hono/mcp": "^0.2.3",

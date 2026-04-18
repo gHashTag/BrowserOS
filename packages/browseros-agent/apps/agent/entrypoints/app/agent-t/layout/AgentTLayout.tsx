@@ -1,13 +1,17 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * AGENT T Layout
  * Three-pane layout with header, sidebar, main content, and actions
  */
 
 import type { FC, ReactNode } from 'react'
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from '@/components/ui/resizable'
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+} from '@/components/ui/resizable'
 
 interface AgentTLayoutProps {
   header: ReactNode
@@ -28,7 +32,7 @@ export const AgentTLayout: FC<AgentTLayoutProps> = ({
         {header}
       </div>
 
-      <ResizablePanelGroup direction="horizontal" className="flex-1">
+      <ResizablePanelGroup className="flex-1" direction="horizontal">
         <ResizablePanel defaultSize={15} minSize={10} maxSize={20}>
           <div className="flex h-full flex-col border-r bg-muted/10 p-2">
             <div className="space-y-1">{sidebar}</div>

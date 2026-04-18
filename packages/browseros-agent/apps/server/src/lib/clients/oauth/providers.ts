@@ -1,10 +1,10 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { EXTERNAL_URLS } from '@browseros/shared/constants/urls'
+import { EXTERNAL_URLS } from '@trios/shared/constants/urls'
 
 export interface OAuthProviderConfig {
   id: string

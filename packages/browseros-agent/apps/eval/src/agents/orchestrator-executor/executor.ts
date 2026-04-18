@@ -8,11 +8,11 @@
  */
 
 import { randomUUID } from 'node:crypto'
-import { AiSdkAgent } from '@browseros/server/agent/tool-loop'
-import type { ResolvedAgentConfig } from '@browseros/server/agent/types'
-import type { Browser } from '@browseros/server/browser'
-import { registry } from '@browseros/server/tools/registry'
-import type { BrowserContext } from '@browseros/shared/schemas/browser-context'
+import { AiSdkAgent } from '@trios/server/agent/tool-loop'
+import type { ResolvedAgentConfig } from '@trios/server/agent/types'
+import type { Browser } from '@trios/server/browser'
+import { registry } from '@trios/server/tools/registry'
+import type { BrowserContext } from '@trios/shared/schemas/browser-context'
 import { CladoActionExecutor } from './clado-action-executor'
 import type { ExecutorResult } from './types'
 

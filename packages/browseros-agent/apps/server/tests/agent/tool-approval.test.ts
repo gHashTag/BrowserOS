@@ -3,7 +3,7 @@ import assert from 'node:assert'
 import {
   TOOL_APPROVAL_CATEGORY_IDS,
   type ToolApprovalConfig,
-} from '@browseros/shared/constants/tool-approval'
+} from '@trios/shared/constants/tool-approval'
 import { getApprovedBrowserToolNames } from '../../src/agent/tool-adapter'
 import { registry } from '../../src/tools/registry'
 

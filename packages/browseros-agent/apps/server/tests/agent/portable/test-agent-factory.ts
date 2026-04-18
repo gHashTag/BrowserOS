@@ -1,6 +1,6 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Test Agent Factory
  *
@@ -8,8 +8,8 @@
  * Used for multi-agent scenario testing
  */
 
-import { RelayObserver } from '../../../src/agent/portable/relay-observer'
 import type { A2ARelayObserverConfig } from '../../../src/agent/portable/a2a-types'
+import { RelayObserver } from '../../../src/agent/portable/relay-observer'
 
 /**
  * Message log entry for testing
@@ -98,8 +98,14 @@ export class TestAgent {
     await this.waitForConnectionState('connected')
 
     const messageLog = this.observer.getMessageLog()
-    if (messageLog.length > 0 && messageLog[messageLog.length - 1].type === 'ready') {
-      console.log(`[${this.agentId}] Sending message (sequence ${sequence}):`, message)
+    if (
+      messageLog.length > 0 &&
+      messageLog[messageLog.length - 1].type === 'ready'
+    ) {
+      console.log(
+        `[${this.agentId}] Sending message (sequence ${sequence}):`,
+        message,
+      )
     }
   }
 

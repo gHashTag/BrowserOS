@@ -1,4 +1,4 @@
-import type { AppType } from '@browseros/server'
+import type { AppType } from '@trios/server'
 import { hc } from 'hono/client'
 import { getAgentServerUrl } from '../browseros/helpers'
 

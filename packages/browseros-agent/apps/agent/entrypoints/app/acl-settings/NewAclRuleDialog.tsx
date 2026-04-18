@@ -1,4 +1,4 @@
-import type { AclRule } from '@browseros/shared/types/acl'
+import type { AclRule } from '@trios/shared/types/acl'
 import { type FC, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import {

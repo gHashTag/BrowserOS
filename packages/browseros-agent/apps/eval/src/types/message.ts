@@ -1,7 +1,7 @@
 import {
   type UIMessageStreamEvent,
   UIMessageStreamEventSchema,
-} from '@browseros/shared/schemas/ui-stream'
+} from '@trios/shared/schemas/ui-stream'
 import { z } from 'zod'
 
 // ============================================================================

@@ -1,13 +1,14 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import type { Browser } from '@browseros/shared/schemas/browser'
-import type { ToolSet } from 'ai'
+import type { Browser } from '../../browser/browser'
+import type { ToolRegistry } from '../../tools/tool-registry'
 import type { AiSdkAgent } from '../ai-sdk-agent'
 import type {
+  AgentLogEntry,
   AgentStatus,
   AgentStatusResponse,
   AgentTask,
@@ -17,7 +18,7 @@ import type {
 import { LogCollector } from './log-collector'
 
 export interface PortableAgentDeps {
-  browserosId: string
+  triosId: string
   browserContext?: Record<string, unknown>
 }
 
@@ -31,7 +32,7 @@ export class PortableAgent {
   constructor(
     public readonly config: PortableAgentConfig,
     private readonly browser: Browser,
-    private readonly registry: ToolSet,
+    private readonly registry: ToolRegistry,
     private readonly deps: PortableAgentDeps,
     private readonly logs = new LogCollector(),
   ) {
@@ -61,7 +62,7 @@ export class PortableAgent {
         registry: this.registry,
         browserContext: this.deps.browserContext,
         klavisClient: undefined,
-        browserosId: this.deps.browserosId,
+        triosId: this.deps.triosId,
       })
 
       this.conversationId = crypto.randomUUID()
@@ -124,65 +125,32 @@ export class PortableAgent {
     }
 
     try {
-      const { createAgentUIStreamResponse } = await import(
-        '../../utils/agent-ui'
-      )
-
-      const stream = createAgentUIStreamResponse({
-        agent: this.agent.toolLoopAgent,
-        uiMessages: this.buildMessages(task),
-        abortSignal: new AbortController().signal,
-      })
+      // Stream task events from the agent's tool loop
+      const agent = this.agent
+      if (!agent?.toolLoopAgent) {
+        throw new Error('Agent tool loop not initialized')
+      }
 
       return new ReadableStream<TaskEvent>({
         start: async (controller) => {
           controller.enqueue({ type: 'start', taskId: crypto.randomUUID() })
-
-          const reader = stream.getReader()
           try {
-            while (true) {
-              const { done, value } = await reader.read()
-              if (done) break
-
-              if (value?.delta) {
-                controller.enqueue({
-                  type: 'text-delta',
-                  text: value.delta,
-                })
-              }
-
-              if (value?.toolCallStart) {
-                controller.enqueue({
-                  type: 'tool-start',
-                  toolName: value.toolCallStart.name,
-                  args: value.toolCallStart.args,
-                })
-              }
-
-              if (value?.toolCallEnd) {
-                controller.enqueue({
-                  type: 'tool-end',
-                  toolName: value.toolCallEnd.name,
-                  result: value.toolCallEnd.result,
-                })
-              }
-
-              if (value?.done) {
-                controller.enqueue({
-                  type: 'done',
-                  result: value.done,
-                })
-                break
-              }
-
-              if (value?.error) {
-                controller.enqueue({
-                  type: 'error',
-                  error: value.error.message || 'Unknown error',
-                })
-                break
-              }
-            }
+            // Send the task message and collect the text response
+            const messages = this.buildMessages(task)
+            const result = await agent.toolLoopAgent.generate({
+              messages,
+              abortSignal: new AbortController().signal,
+            })
+            controller.enqueue({
+              type: 'text-delta',
+              text: result.text ?? '',
+            })
+            controller.enqueue({ type: 'done', result: result.text })
+          } catch (error) {
+            controller.enqueue({
+              type: 'error',
+              error: error instanceof Error ? error.message : 'Unknown error',
+            })
           } finally {
             this.status = 'idle'
             controller.close()
@@ -224,15 +192,15 @@ export class PortableAgent {
     }
   }
 
-  getLogs(): Array<ReturnType<LogCollector['get']>> {
+  getLogs(): AgentLogEntry[] {
     return this.logs.get()
   }
 
-  getLogsStream(): ReadableStream<ReturnType<LogCollector['get']>> {
+  getLogsStream(): ReadableStream<AgentLogEntry> {
     return new ReadableStream({
       start: (controller) => {
         const _unsubscribe = this.logs.onLogEntry((entry) => {
-          controller.enqueue([entry])
+          controller.enqueue(entry)
         })
       },
     })
@@ -254,14 +222,14 @@ export class PortableAgent {
       evalMode: false,
       chatMode: false,
       isScheduledTask: false,
-      origin: 'sidepanel',
-      browserosId: this.deps.browserosId,
+      origin: 'sidepanel' as const,
+      triosId: this.deps.triosId,
       toolApprovalConfig: undefined,
     }
   }
 
   private buildMessages(task: AgentTask) {
-    const messages = [
+    const messages: Array<{ role: 'user' | 'system'; content: string }> = [
       {
         role: 'user',
         content: task.message,
@@ -294,4 +262,61 @@ export class PortableAgent {
     const envVar = match[1]
     return process.env[envVar]
   }
+}
+
+export interface CreatePortableAgentOptions {
+  resolvedConfig: {
+    conversationId: string
+    provider: any
+    model: string
+    apiKey: string | undefined
+    baseUrl: string | undefined
+    userSystemPrompt: string | undefined
+    workingDir: string | undefined
+    supportsImages: boolean
+    evalMode: boolean
+    chatMode: boolean
+    isScheduledTask: boolean
+    origin: 'newtab' | 'sidepanel'
+    triosId: string
+    toolApprovalConfig: unknown
+  }
+  browser: Browser
+  registry: ToolRegistry
+  browserContext?: Record<string, unknown>
+  triosId: string
+  klavisClient?: unknown
+}
+
+export async function createPortableAgent(
+  options: CreatePortableAgentOptions,
+): Promise<PortableAgent> {
+  const config: PortableAgentConfig = {
+    apiVersion: 'browseros.io/v1alpha1',
+    kind: 'PortableAgent',
+    metadata: {
+      name: 'portable-agent',
+      displayName: 'Portable Agent',
+      description: 'Dynamically created portable agent',
+    },
+    spec: {
+      llm: {
+        provider: options.resolvedConfig.provider,
+        model: options.resolvedConfig.model,
+        apiKey: options.resolvedConfig.apiKey,
+        baseUrl: options.resolvedConfig.baseUrl,
+      },
+      systemPrompt: options.resolvedConfig.userSystemPrompt,
+      workspace: {
+        defaultDir: options.resolvedConfig.workingDir,
+      },
+    },
+  }
+
+  const agent = new PortableAgent(config, options.browser, options.registry, {
+    triosId: options.triosId,
+    browserContext: options.browserContext,
+  })
+
+  return agent
 }

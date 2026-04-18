@@ -12,7 +12,6 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useSessionInfo } from '@/lib/auth/sessionStorage'
-import { useAgentServerUrl } from '@/lib/browseros/useBrowserOSProviders'
 import {
   CHATGPT_PRO_OAUTH_COMPLETED_EVENT,
   CHATGPT_PRO_OAUTH_DISCONNECTED_EVENT,
@@ -37,6 +36,7 @@ import {
   useOAuthProviderFlow,
 } from '@/lib/llm-providers/useOAuthProviderFlow'
 import { track } from '@/lib/metrics/track'
+import { useAgentServerUrl } from '@/lib/trios/useBrowserOSProviders'
 import { ConfiguredProvidersList } from './ConfiguredProvidersList'
 import { DeviceCodeDialog } from './DeviceCodeDialog'
 import {

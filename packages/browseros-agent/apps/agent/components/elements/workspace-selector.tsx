@@ -14,7 +14,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
-import { getBrowserOSAdapter } from '@/lib/browseros/adapter'
+import { getTRIOSAdapter } from '@/lib/trios/adapter'
 import { cn } from '@/lib/utils'
 import { useWorkspace } from '@/lib/workspace/use-workspace'
 import type { WorkspaceFolder } from '@/lib/workspace/workspace-storage'
@@ -46,7 +46,7 @@ export const WorkspaceSelector: FC<
 
   const handleChooseFolder = async () => {
     try {
-      const adapter = getBrowserOSAdapter()
+      const adapter = getTRIOSAdapter()
       const result = await adapter.choosePath({ type: 'folder' })
 
       if (!result) {

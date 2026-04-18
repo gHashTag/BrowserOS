@@ -1,15 +1,14 @@
 {
-  "name": "browseros-cli",
+  "name": "trios-cli",
   "version": "0.2.0",
-  "description": "Command-line interface for controlling BrowserOS — launch and automate the browser from the terminal",
+  "description": "Command-line interface for controlling TRIOS — launch and automate the browser from the terminal",
   "bin": {
-    "browseros-cli": "bin/browseros-cli.js"
+    "trios-cli": "bin/trios-cli.js"
   },
   "scripts": {
     "postinstall": "node scripts/postinstall.js"
   },
   "keywords": [
-    "browseros",
     "cli",
     "browser",
     "automation",

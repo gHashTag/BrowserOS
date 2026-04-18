@@ -1,4 +1,4 @@
-import { LLM_PROVIDERS } from '@browseros/shared/schemas/llm'
+import { LLM_PROVIDERS } from '@trios/shared/schemas/llm'
 import { type EvalConfig, EvalConfigSchema } from '../types'
 
 // Re-export for backward compatibility
@@ -50,10 +50,7 @@ export async function validateConfig(
   const envVarsToCheck: string[] = []
   if (config.agent.type === 'single') {
     // Skip API key check for browseros provider (uses server's built-in auth)
-    if (
-      config.agent.provider !== LLM_PROVIDERS.BROWSEROS &&
-      config.agent.apiKey
-    ) {
+    if (config.agent.provider !== LLM_PROVIDERS.trios && config.agent.apiKey) {
       // If apiKey looks like an env var name, check if it's set
       if (/^[A-Z][A-Z0-9_]*$/.test(config.agent.apiKey)) {
         envVarsToCheck.push(config.agent.apiKey)

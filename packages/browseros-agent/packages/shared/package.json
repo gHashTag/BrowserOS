@@ -1,5 +1,5 @@
 {
-  "name": "@browseros/shared",
+  "name": "@trios/shared",
   "version": "0.0.1",
   "type": "module",
   "scripts": {
@@ -73,6 +73,10 @@
       "types": "./src/schemas/browser-context.ts",
       "default": "./src/schemas/browser-context.ts"
     },
+    "./schemas/browser": {
+      "types": "./src/schemas/browser-context.ts",
+      "default": "./src/schemas/browser-context.ts"
+    },
     "./sentry/sanitize": {
       "types": "./src/sentry/sanitize.ts",
       "default": "./src/sentry/sanitize.ts"
@@ -92,6 +96,10 @@
     "./types/trinity-benchmark": {
       "types": "./src/types/trinity-benchmark.ts",
       "default": "./src/types/trinity-benchmark.ts"
+    },
+    "./constants/theme": {
+      "types": "./src/constants/theme.ts",
+      "default": "./src/constants/theme.ts"
     }
   }
 }

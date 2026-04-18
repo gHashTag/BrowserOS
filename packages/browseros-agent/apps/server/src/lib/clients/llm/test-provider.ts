@@ -1,15 +1,15 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { TIMEOUTS } from '@browseros/shared/constants/timeouts'
-import type { LLMConfig } from '@browseros/shared/schemas/llm'
+import { TIMEOUTS } from '@trios/shared/constants/timeouts'
+import type { LLMConfig } from '@trios/shared/schemas/llm'
 import { streamText } from 'ai'
+import { logger } from '../../logger'
 import { resolveLLMConfig } from './config'
 import { createLLMProvider } from './provider'
-import { logger } from '../../logger'
 
 export interface ProviderTestConfig extends LLMConfig {
   model: string
@@ -26,7 +26,7 @@ const TEST_PROMPT = "Respond with exactly: 'ok'"
 
 export async function testProviderConnection(
   config: ProviderTestConfig,
-  browserosId?: string,
+  triosId?: string,
 ): Promise<ProviderTestResult> {
   const startTime = performance.now()
 
@@ -36,9 +36,9 @@ export async function testProviderConnection(
       model: config.model,
       baseUrl: config.baseUrl ? String(config.baseUrl) : undefined,
       hasApiKey: !!config.apiKey,
-      browserosId: browserosId ?? undefined,
+      triosId: triosId ?? undefined,
     })
-    const resolvedConfig = await resolveLLMConfig(config, browserosId)
+    const resolvedConfig = await resolveLLMConfig(config, triosId)
     const model = createLLMProvider(resolvedConfig)
 
     // streamText works for all providers including Codex (which requires streaming)

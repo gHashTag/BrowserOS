@@ -1,14 +1,14 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Terminal Pane
  * Embedded terminal with xterm.js for Git operations
  */
 
 import { Loader2, Terminal } from 'lucide-react'
-import type { FC, useEffect, useRef } from 'react'
-import { useState } from 'react'
+import type { FC } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'

@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Pure functions for building OpenClaw bootstrap configuration.
@@ -10,8 +10,8 @@
 import {
   OPENCLAW_CONTAINER_HOME,
   OPENCLAW_GATEWAY_PORT,
-} from '@browseros/shared/constants/openclaw'
-import { DEFAULT_PORTS } from '@browseros/shared/constants/ports'
+} from '@trios/shared/constants/openclaw'
+import { DEFAULT_PORTS } from '@trios/shared/constants/ports'
 
 const OPENCLAW_IMAGE = 'ghcr.io/openclaw/openclaw:latest'
 

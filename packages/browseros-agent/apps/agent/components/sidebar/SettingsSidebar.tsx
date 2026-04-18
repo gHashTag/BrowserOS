@@ -15,8 +15,8 @@ import {
 import type { FC } from 'react'
 import { NavLink } from 'react-router'
 import { ThemeToggle } from '@/components/elements/theme-toggle'
-import { Feature } from '@/lib/browseros/capabilities'
-import { useCapabilities } from '@/lib/browseros/useCapabilities'
+import { Feature } from '@/lib/trios/capabilities'
+import { useCapabilities } from '@/lib/trios/useCapabilities'
 import { cn } from '@/lib/utils'
 
 type BaseNavItem = {

@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  */
 
 import { afterEach, describe, expect, it, mock } from 'bun:test'
@@ -58,7 +58,7 @@ describe('Application.start', () => {
     mock.module('../src/lib/identity', () => ({
       identity: {
         initialize: mock(() => {}),
-        getBrowserOSId: mock(() => 'browseros-id'),
+        getTRIOSId: mock(() => 'browseros-id'),
       },
     }))
     mock.module('../src/lib/logger', () => ({

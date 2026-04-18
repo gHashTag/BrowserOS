@@ -12,7 +12,7 @@ index 0000000000000..3e0c69cdf6442
 +
 +#include "base/strings/stringprintf.h"
 +
-+namespace browseros {
++namespace trios {
 +
 +bool ServerPorts::IsValid() const {
 +  return cdp > 0 && server > 0 && extension > 0 && proxy > 0;

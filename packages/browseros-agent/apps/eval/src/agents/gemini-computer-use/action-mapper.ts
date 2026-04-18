@@ -137,7 +137,7 @@ export class ActionMapper {
       new URL(this.ctx.mcpUrl),
       {
         requestInit: {
-          headers: { 'X-BrowserOS-Source': 'gemini-computer-use' },
+          headers: { 'X-TRIOS-Source': 'gemini-computer-use' },
         },
       },
     )

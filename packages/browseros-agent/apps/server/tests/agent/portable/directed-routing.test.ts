@@ -1,6 +1,6 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Directed Routing Tests
  *
@@ -10,9 +10,9 @@
  * - Route with agent in error state
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
-import { MessageRouter, RoutedMessage } from './message-router.test'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import type { A2AClientMessage } from '../../../src/agent/portable/a2a-types'
+import { MessageRouter, type RoutedMessage } from './message-router.test'
 
 describe('Directed Routing Multi-Agent Scenarios', () => {
   let router: MessageRouter
@@ -195,41 +195,43 @@ describe('Directed Routing Multi-Agent Scenarios', () => {
     })
   })
 })
+})
+
+  describe('Routing Log', () =>
+{
+  it('should clear agent routing', () => {
+    const router = new MessageRouter()
+
+    router.registerAgent('Agent1', () => {})
+    router.registerAgent('Agent2', () => {})
+    router.registerAgent('default', () => {})
+
+    const message1: RoutedMessage = {
+      type: 'chat',
+      request: { message: 'Message 1' },
+      sourceAgentId: 'Agent1',
+      targetAgentId: 'Agent2',
+    }
+
+    const message2: RoutedMessage = {
+      type: 'chat',
+      request: { message: 'Message 2' },
+      sourceAgentId: 'Agent2',
+      targetAgentId: 'Agent1',
+    }
+
+    router.routeMessage(message1)
+    router.routeMessage(message2)
+
+    // Clear Agent2 routing
+    router.clearAgent('Agent2')
+
+    // Verify only Agent1 routing remains
+    const log = router.getRoutingLog()
+
+    expect(log.length).toBe(1)
+    expect(log[0].from).toBe('Agent1')
+    expect(log[0].to).toBe('Agent1')
   })
-
-  describe('Routing Log', () => {
-    it('should clear agent routing', () => {
-      const router = new MessageRouter()
-
-      router.registerAgent('Agent1', () => {})
-      router.registerAgent('Agent2', () => {})
-      router.registerAgent('default', () => {})
-
-      const message1: RoutedMessage = {
-        type: 'chat',
-        request: { message: 'Message 1' },
-        sourceAgentId: 'Agent1',
-        targetAgentId: 'Agent2',
-      }
-
-      const message2: RoutedMessage = {
-        type: 'chat',
-        request: { message: 'Message 2' },
-        sourceAgentId: 'Agent2',
-        targetAgentId: 'Agent1',
-      }
-
-      router.routeMessage(message1)
-      router.routeMessage(message2)
-
-      // Clear Agent2 routing
-      router.clearAgent('Agent2')
-
-      // Verify only Agent1 routing remains
-      const log = router.getRoutingLog()
-
-      expect(log.length).toBe(1)
-      expect(log[0].from).toBe('Agent1')
-      expect(log[0].to).toBe('Agent1')
-    })
-  })
+}
+)

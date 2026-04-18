@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
@@ -35,7 +35,7 @@ export function createMcpRoutes(deps: McpRouteDeps) {
   )
 
   app.post('/', async (c) => {
-    const scopeId = c.req.header('X-BrowserOS-Scope-Id') || 'ephemeral'
+    const scopeId = c.req.header('X-TRIOS-Scope-Id') || 'ephemeral'
     metrics.log('mcp.request', { scopeId })
 
     // Per-request server + transport: no shared state, no race conditions,

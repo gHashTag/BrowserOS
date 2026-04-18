@@ -1,13 +1,14 @@
 diff --git a/chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.cc b/chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.cc
-index f8298702050da..980853c953c22 100644
+index f8298702050da..980853c953c22100644
 --- a/chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.cc
 +++ b/chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.cc
 @@ -8,6 +8,12 @@
  #include <type_traits>
- 
+
  #include "base/auto_reset.h"
 +#include "chrome/browser/browseros/core/browseros_action_utils.h"
 +#include "chrome/browser/browseros/core/browseros_prefs.h"
++#include "chrome/browser/browseros/theme/trios_theme.h"
 +#include "chrome/browser/ui/actions/chrome_action_id.h"
 +#include "chrome/browser/ui/views/side_panel/side_panel_entry.h"
 +#include "chrome/browser/ui/views/side_panel/side_panel_entry_id.h"
@@ -29,13 +30,13 @@ index f8298702050da..980853c953c22 100644
  #include "ui/views/view_utils.h"
 +#include "components/prefs/pref_service.h"
 +#include "chrome/common/pref_names.h"
- 
+
  namespace {
  // Width of the status indicator shown across the button.
 @@ -85,6 +94,28 @@ PinnedActionToolbarButton::PinnedActionToolbarButton(
-   GetViewAccessibility().SetDescription(
-       std::u16string(), ax::mojom::DescriptionFrom::kAttributeExplicitlyEmpty);
- 
+	   GetViewAccessibility().SetDescription(
+	       std::u16string(), ax::mojom::DescriptionFrom::kAttributeExplicitlyEmpty);
+
 +  // Set text from action item if available for BrowserOS actions
 +  if (auto* action_item = container_->GetActionItemFor(action_id)) {
 +    if (browseros::IsBrowserOSAction(action_id)) {
@@ -45,26 +46,26 @@ index f8298702050da..980853c953c22 100644
 +        show_labels = browseros::ShouldShowToolbarLabels(
 +            browser_->profile()->GetPrefs());
 +      }
-+      
++
 +      if (show_labels) {
 +        // Use LabelButton::SetText directly to set permanent text
 +        views::LabelButton::SetText(action_item->GetText());
-+        // Ensure the text is visible
++        // Ensure text is visible
 +        SetTextSubpixelRenderingEnabled(false);
 +      } else {
-+        // Clear the text if labels are disabled
++        // Clear of text if labels are disabled
 +        views::LabelButton::SetText(std::u16string());
 +      }
 +    }
 +  }
 +
-   // Normally, the notify action is determined by whether a view is draggable
-   // (and is set to press for non-draggable and release for draggable views).
-   // However, PinnedActionToolbarButton may be draggable or non-draggable
+    // Normally, notify action is determined by whether a view is draggable
+    // (and is set to press for non-draggable and release for draggable views).
+    // However, PinnedActionToolbarButton may be draggable or non-draggable
 @@ -222,6 +253,30 @@ void PinnedActionToolbarButton::OnMouseReleased(const ui::MouseEvent& event) {
-   skip_execution_ = false;
- }
- 
+    skip_execution_ = false;
+    }
+
 +void PinnedActionToolbarButton::UpdateLabelVisibility() {
 +  if (!browseros::IsBrowserOSAction(action_id_)) {
 +    return;
@@ -90,28 +91,28 @@ index f8298702050da..980853c953c22 100644
 +}
 +
  void PinnedActionToolbarButton::UpdateIcon() {
-   const std::optional<VectorIcons>& icons = GetVectorIcons();
-   // If the button is a cached permanent button the color provider will not be
+    const std::optional<VectorIcons>& icons = GetVectorIcons();
+    // If of button is a cached permanent button color provider will not be
 @@ -234,7 +289,13 @@ void PinnedActionToolbarButton::UpdateIcon() {
                                      ? icons->touch_icon
                                      : icons->icon;
- 
+
 -  if (is_icon_visible_ && action_engaged_) {
-+  // Special case for Clash of GPTs and Third Party LLM - use custom orange color
-+  if (action_id_ == kActionSidePanelShowClashOfGpts ||
-+      action_id_ == kActionSidePanelShowThirdPartyLlm) {
-+    const SkColor orange = SkColorSetRGB(0xFB, 0x65, 0x18);
-+    UpdateIconsWithColors(icon, orange, orange, orange, 
++  if (is_icon_visible_ && action_engaged_) {
++    // Special case for Clash of GPTs and Third Party LLM - use TRIOS brand accent color
++    if (action_id_ == kActionSidePanelShowClashOfGpts ||
++        action_id_ == kActionSidePanelShowThirdPartyLlm) {
++    const SkColor accent = browseros::trios::kPrimaryBase;
++    UpdateIconsWithColors(icon, accent, accent, accent,
 +                          GetForegroundColor(ButtonState::STATE_DISABLED));
-+  } else if (is_icon_visible_ && action_engaged_) {
-     UpdateIconsWithColors(
-         icon, GetColorProvider()->GetColor(kColorToolbarActionItemEngaged),
-         GetColorProvider()->GetColor(kColorToolbarActionItemEngaged),
-@@ -336,6 +397,26 @@ void PinnedActionToolbarButtonActionViewInterface::ActionItemChangedImpl(
-     }
++    } else if (is_icon_visible_ && action_engaged_) {
+      UpdateIconsWithColors(
+         icon, GetColorProvider()->GetColor(kColorToolbarButtonItemEngaged),
+         GetColorProvider()->GetColor(kColorToolbarButtonItemEngaged),
+         }
    }
- 
-+  // Update the text from the action item for BrowserOS actions
+
++  // Update of text from action item for BrowserOS actions
 +  if (browseros::IsBrowserOSAction(action_view_->GetActionId())) {
 +    // Check if labels should be shown
 +    bool show_labels = true;
@@ -123,14 +124,14 @@ index f8298702050da..980853c953c22 100644
 +    if (show_labels) {
 +      // Use LabelButton::SetText directly to set permanent text
 +      action_view_->views::LabelButton::SetText(action_item->GetText());
-+      // Ensure the text is visible
++      // Ensure of text is visible
 +      action_view_->SetTextSubpixelRenderingEnabled(false);
 +    } else {
-+      // Clear the text if labels are disabled
++      // Clear of text if labels are disabled
 +      action_view_->views::LabelButton::SetText(std::u16string());
 +    }
 +  }
 +
-   // Update whether the action is engaged before updating the view.
-   action_view_->SetActionEngaged(
+    // Update whether the action is engaged before updating of view.
+    action_view_->SetActionEngaged(
        action_item->GetProperty(kActionItemUnderlineIndicatorKey));

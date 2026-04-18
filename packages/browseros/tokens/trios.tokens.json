@@ -1,0 +1,58 @@
+{
+  "$description": "TRIOS Design Tokens — Single Source of Truth. Edit ONLY this file.",
+
+  "color": {
+    "black": {
+      "0":    { "$value": "#000000", "$type": "color" },
+      "40":   { "$value": "#0A0A0A", "$type": "color" },
+      "80":   { "$value": "#141414", "$type": "color" },
+      "120":  { "$value": "#1F1F1F", "$type": "color" },
+      "160":  { "$value": "#2A2A2A", "$type": "color" },
+      "200":  { "$value": "#353535", "$type": "color" },
+      "400":  { "$value": "#6A6A6A", "$type": "color" },
+      "600":  { "$value": "#9A9A9A", "$type": "color" },
+      "800":  { "$value": "#E5E5E5", "$type": "color" },
+      "1000": { "$value": "#FFFFFF", "$type": "color" }
+    },
+    "gold": {
+      "base":   { "$value": "#D1AD72", "$type": "color" },
+      "bright": { "$value": "#E6C491", "$type": "color" },
+      "dim":    { "$value": "#B8955A", "$type": "color" }
+    },
+    "status": {
+      "error":   { "$value": "#E74C3C", "$type": "color" },
+      "success": { "$value": "#27AE60", "$type": "color" },
+      "warning": { "$value": "#F39C12", "$type": "color" }
+    }
+  },
+
+  "theme": {
+    "dark": {
+      "background":  { "$value": "{color.black.0}",    "$type": "color" },
+      "card":        { "$value": "{color.black.40}",   "$type": "color" },
+      "muted":       { "$value": "{color.black.80}",   "$type": "color" },
+      "accent":      { "$value": "{color.black.80}",   "$type": "color" },
+      "border":      { "$value": "{color.black.120}",  "$type": "color" },
+      "input":       { "$value": "{color.black.120}",  "$type": "color" },
+      "foreground":  { "$value": "{color.black.800}",  "$type": "color" },
+      "primary":     { "$value": "{color.gold.base}",  "$type": "color" },
+      "primaryForeground": { "$value": "{color.black.80}", "$type": "color" },
+      "secondary":        { "$value": "{color.black.80}",   "$type": "color" },
+      "secondaryForeground": { "$value": "{color.black.800}", "$type": "color" },
+      "mutedForeground": { "$value": "{color.black.600}", "$type": "color" },
+      "popover":         { "$value": "{color.black.40}",  "$type": "color" },
+      "popoverForeground": { "$value": "{color.black.800}", "$type": "color" },
+      "ring":            { "$value": "{color.gold.base}",  "$type": "color" },
+      "sidebar":         { "$value": "{color.black.0}",   "$type": "color" },
+      "sidebarForeground": { "$value": "{color.black.800}", "$type": "color" },
+      "sidebarPrimary":  { "$value": "{color.gold.base}",  "$type": "color" },
+      "sidebarBorder":   { "$value": "{color.black.120}",  "$type": "color" },
+      "destructive":     { "$value": "{color.status.error}", "$type": "color" }
+    },
+    "chromium": {
+      "colorScheme":    { "$value": "dark",     "$type": "string" },
+      "colorVariant":   { "$value": "neutral",  "$type": "string" },
+      "frameColorHex":  { "$value": "#000000",  "$type": "color" }
+    }
+  }
+}

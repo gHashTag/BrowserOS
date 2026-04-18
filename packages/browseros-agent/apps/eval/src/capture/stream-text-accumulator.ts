@@ -1,7 +1,7 @@
 import {
   type UIMessageStreamEvent,
   UIMessageStreamEventSchema,
-} from '@browseros/shared/schemas/ui-stream'
+} from '@trios/shared/schemas/ui-stream'
 
 /**
  * Parse SSE data lines into validated UIMessageStreamEvents.

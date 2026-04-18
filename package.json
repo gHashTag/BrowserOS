@@ -1,12 +1,19 @@
 {
-  "name": "browseros-root",
+  "name": "TRIOS-root",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "cd packages/browseros-agent && bun run dev:watch",
     "dev:new": "cd packages/browseros-agent && bun run dev:watch:new",
     "dev:manual": "cd packages/browseros-agent && bun run dev:manual",
-    "test": "cd packages/browseros-agent && bun run test"
+    "test": "cd packages/browseros-agent && bun run test",
+    "theme:sync": "cd packages/browseros/chromium_patches && python3 tools/theme/generate_css_vars.py > ../../browseros-agent/apps/agent/styles/global.css",
+    "theme:apply": "cd packages/browseros-agent && bun run theme:apply",
+    "tokens:build": "node packages/browseros/tokens/build.mjs",
+    "tokens:apply": "python3 packages/browseros/tools/set_dark_theme.py",
+    "tokens:all": "bun run tokens:build && bun run tokens:apply",
+    "tokens:check": "python3 packages/browseros/tools/check_no_hardcoded_colors.py",
+    "launch": "bun packages/browseros-agent/tools/launch.ts"
   }
 }
 

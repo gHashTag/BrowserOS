@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  */
 
 import { logger } from '../logger'
@@ -23,7 +23,7 @@ export interface CreditsInfo {
   lastResetAt?: string
 }
 
-export interface BrowserOSConfig {
+export interface TRIOSConfig {
   providers: Provider[]
 }
 
@@ -35,18 +35,18 @@ export interface LLMConfig {
   providerType?: string
 }
 
-export async function fetchBrowserOSConfig(
+export async function fetchTRIOSConfig(
   configUrl: string,
-  browserosId?: string,
-): Promise<BrowserOSConfig> {
-  logger.debug('Fetching BrowserOS config', { configUrl, browserosId })
+  triosId?: string,
+): Promise<TRIOSConfig> {
+  logger.debug('Fetching TRIOS config', { configUrl, triosId })
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   }
 
-  if (browserosId) {
-    headers['X-BrowserOS-ID'] = browserosId
+  if (triosId) {
+    headers['X-TRIOS-ID'] = triosId
   }
 
   try {
@@ -62,7 +62,7 @@ export async function fetchBrowserOSConfig(
       )
     }
 
-    const config = (await response.json()) as BrowserOSConfig
+    const config = (await response.json()) as TRIOSConfig
 
     if (!Array.isArray(config.providers) || config.providers.length === 0) {
       throw new Error(
@@ -77,14 +77,14 @@ export async function fetchBrowserOSConfig(
     }
 
     const defaultProvider = config.providers.find((p) => p.name === 'default')
-    logger.info('✅ BrowserOS config fetched', {
+    logger.info('✅ TRIOS config fetched', {
       providerCount: config.providers.length,
       dailyRateLimit: defaultProvider?.dailyRateLimit,
     })
 
     return config
   } catch (error) {
-    logger.error('❌ Failed to fetch BrowserOS config', {
+    logger.error('❌ Failed to fetch TRIOS config', {
       configUrl,
       error: error instanceof Error ? error.message : String(error),
     })
@@ -93,13 +93,13 @@ export async function fetchBrowserOSConfig(
 }
 
 /**
- * Get LLM config from a provider in the BrowserOS config
- * @param config - BrowserOS config containing providers
+ * Get LLM config from a provider in the TRIOS config
+ * @param config - TRIOS config containing providers
  * @param providerName - Name of the provider to use (defaults to 'default')
  * @returns LLM config with modelName, baseUrl, apiKey, and provider
  */
 export function getLLMConfigFromProvider(
-  config: BrowserOSConfig,
+  config: TRIOSConfig,
   providerName = 'default',
 ): LLMConfig {
   const provider = config.providers.find((p) => p.name === providerName)
@@ -121,9 +121,9 @@ export function getLLMConfigFromProvider(
 
 export async function fetchCredits(
   gatewayBaseUrl: string,
-  browserosId: string,
+  triosId: string,
 ): Promise<CreditsInfo> {
-  const url = new URL(`/credits/${browserosId}`, gatewayBaseUrl).href
+  const url = new URL(`/credits/${triosId}`, gatewayBaseUrl).href
   const response = await fetch(url)
   if (!response.ok) {
     const errorText = await response.text()

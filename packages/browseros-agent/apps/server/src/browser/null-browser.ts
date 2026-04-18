@@ -1,10 +1,10 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import type { BrowserContext } from '@browseros/shared/schemas/browser-context'
+import type { BrowserContext } from '@trios/shared/schemas/browser-context'
 
 /**
  * Fallback browser implementation when CDP is unavailable.
@@ -36,4 +36,3 @@ export class NullBrowser {
     return ctx
   }
 }
-

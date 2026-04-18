@@ -1,5 +1,5 @@
 {
-  "name": "@browseros/agent",
+  "name": "@trios/agent",
   "description": "manifest.json description",
   "private": true,
   "version": "0.0.99",
@@ -19,8 +19,8 @@
   },
   "dependencies": {
     "@ai-sdk/react": "^3.0.96",
-    "@browseros/server": "workspace:*",
-    "@browseros/shared": "workspace:*",
+    "@trios/server": "workspace:*",
+    "@trios/shared": "workspace:*",
     "@hookform/resolvers": "^5.2.2",
     "@lobehub/icons": "^2.44.0",
     "@mdxeditor/editor": "^3.52.4",

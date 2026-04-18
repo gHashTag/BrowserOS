@@ -1,4 +1,4 @@
-import type { Node as CdpNode } from '@browseros/cdp-protocol/domains/dom'
+import type { Node as CdpNode } from '@trios/cdp-protocol/domains/dom'
 
 export interface DomSearchResult {
   tag: string

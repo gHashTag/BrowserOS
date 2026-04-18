@@ -36,7 +36,7 @@ export class GeminiComputerUseEvaluator implements AgentEvaluator {
       screenSize: agentConfig.screenSize ?? DEFAULTS.screenSize,
       tabId,
       windowId,
-      mcpUrl: `${config.browseros.server_url}/mcp`,
+      mcpUrl: `${config.trios.server_url}/mcp`,
     })
 
     agent.setActionHook(async (_action, _result) => {

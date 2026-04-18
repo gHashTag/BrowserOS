@@ -1,18 +1,18 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * HTTP routes for OpenClaw agent management.
  * Thin layer delegating to OpenClawService.
  */
 
-import { OPENCLAW_GATEWAY_PORT } from '@browseros/shared/constants/openclaw'
-import { BROWSEROS_ROLE_TEMPLATES } from '@browseros/shared/constants/role-aware-agents'
+import { OPENCLAW_GATEWAY_PORT } from '@trios/shared/constants/openclaw'
+import { TRIOS_ROLE_TEMPLATES } from '@trios/shared/constants/role-aware-agents'
 import type {
-  BrowserOSAgentRoleId,
-  BrowserOSCustomRoleInput,
-} from '@browseros/shared/types/role-aware-agents'
+  TRIOSAgentRoleId,
+  TRIOSCustomRoleInput,
+} from '@trios/shared/types/role-aware-agents'
 import { Hono } from 'hono'
 import { stream } from 'hono/streaming'
 import {
@@ -25,7 +25,7 @@ import { getOpenClawService } from '../services/openclaw/openclaw-service'
 
 function isValidBoundaryMode(
   value: unknown,
-): value is BrowserOSCustomRoleInput['boundaries'][number]['defaultMode'] {
+): value is TRIOSCustomRoleInput['boundaries'][number]['defaultMode'] {
   return value === 'allow' || value === 'ask' || value === 'block'
 }
 
@@ -135,7 +135,7 @@ export function createOpenClawRoutes() {
 
     .get('/roles', async (c) => {
       return c.json({
-        roles: BROWSEROS_ROLE_TEMPLATES.map((role) => ({
+        roles: TRIOS_ROLE_TEMPLATES.map((role) => ({
           id: role.id,
           name: role.name,
           shortDescription: role.shortDescription,
@@ -150,8 +150,8 @@ export function createOpenClawRoutes() {
     .post('/agents', async (c) => {
       const body = await c.req.json<{
         name: string
-        roleId?: BrowserOSAgentRoleId
-        customRole?: BrowserOSCustomRoleInput
+        roleId?: TRIOSAgentRoleId
+        customRole?: TRIOSCustomRoleInput
         providerType?: string
         providerName?: string
         baseUrl?: string

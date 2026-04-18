@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
@@ -26,7 +26,7 @@ export interface ChatServiceDeps {
   klavisClient: KlavisClient
   browser: Browser
   registry: ToolRegistry
-  browserosId?: string
+  triosId?: string
   aiSdkDevtoolsEnabled?: boolean
 }
 
@@ -50,7 +50,7 @@ export class ChatService {
       origin: request.origin,
     })
 
-    const llmConfig = await resolveLLMConfig(request, this.deps.browserosId)
+    const llmConfig = await resolveLLMConfig(request, this.deps.triosId)
 
     const agentConfig: ResolvedAgentConfig = {
       conversationId: request.conversationId,
@@ -75,7 +75,7 @@ export class ChatService {
       isScheduledTask: request.isScheduledTask,
       origin: request.origin,
       declinedApps: request.declinedApps,
-      browserosId: this.deps.browserosId,
+      triosId: this.deps.triosId,
       toolApprovalConfig: request.toolApprovalConfig,
     }
 
@@ -239,7 +239,7 @@ export class ChatService {
         registry: this.deps.registry,
         browserContext,
         klavisClient: this.deps.klavisClient,
-        browserosId: this.deps.browserosId,
+        triosId: this.deps.triosId,
         aiSdkDevtoolsEnabled: this.deps.aiSdkDevtoolsEnabled,
         aclRules: request.aclRules,
       })
@@ -460,7 +460,7 @@ export class ChatService {
       registry: this.deps.registry,
       browserContext,
       klavisClient: this.deps.klavisClient,
-      browserosId: this.deps.browserosId,
+      triosId: this.deps.triosId,
       aiSdkDevtoolsEnabled: this.deps.aiSdkDevtoolsEnabled,
       aclRules: request.aclRules,
     })

@@ -1,16 +1,16 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   AGENT_CONFIG_FILE,
   AGENT_ENV_FILE,
   AGENTS_DIR,
   SHARED_DIR,
-} from '@browseros/shared/constants/portable-agent'
+} from '@trios/shared/constants/portable-agent'
 import { logger } from '../../lib/logger'
 
 // Simple YAML parser for basic config files
@@ -39,7 +39,10 @@ function parseYaml(content: string): unknown {
     if (value === '') {
       // Object or array
       current[key] = {}
-      stack.push({ obj: current[key] as Record<string, unknown>, level: indent })
+      stack.push({
+        obj: current[key] as Record<string, unknown>,
+        level: indent,
+      })
     } else if (value.startsWith('|')) {
       // Multiline string - not supported in simple parser
       current[key] = ''
@@ -58,7 +61,10 @@ function parseYaml(content: string): unknown {
       current[key] = value.slice(1, -1)
     } else if (value.startsWith('[') && value.endsWith(']')) {
       // Simple array
-      const items = value.slice(1, -1).split(',').map((s) => s.trim())
+      const items = value
+        .slice(1, -1)
+        .split(',')
+        .map((s) => s.trim())
       current[key] = items
     } else {
       current[key] = value
@@ -85,7 +91,10 @@ function loadEnvLike(content: string): Record<string, string> {
 
   const hasEqualsLine = trimmed
     .split('\n')
-    .some((line) => line.trim() && !line.trim().startsWith('#') && line.includes('='))
+    .some(
+      (line) =>
+        line.trim() && !line.trim().startsWith('#') && line.includes('='),
+    )
 
   if (hasEqualsLine) {
     const envLines = trimmed.split('\n')
@@ -103,7 +112,8 @@ function loadEnvLike(content: string): Record<string, string> {
   }
 
   const parsed = loadConfigLike(trimmed)
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {}
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed))
+    return {}
 
   const envVars: Record<string, string> = {}
   for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
@@ -111,6 +121,7 @@ function loadEnvLike(content: string): Record<string, string> {
   }
   return envVars
 }
+
 import {
   type PortableAgentConfig,
   PortableAgentConfigSchema,
@@ -185,7 +196,9 @@ function resolveTemplate(
 
   try {
     const templateContent = readFileSync(templatePath, 'utf-8')
-    const templateConfig = loadConfigLike(templateContent) as PortableAgentConfig
+    const templateConfig = loadConfigLike(
+      templateContent,
+    ) as PortableAgentConfig
 
     const merged: PortableAgentConfig = {
       apiVersion: templateConfig.apiVersion || config.apiVersion,

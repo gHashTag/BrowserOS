@@ -4,7 +4,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import { Mutex } from 'async-mutex'
 
-import { ensureBrowserOS } from './setup'
+import { ensureTRIOS } from './setup'
 
 // =============================================================================
 // Port Management
@@ -54,7 +54,7 @@ export async function withMcpServer(
   cb: (client: Client) => Promise<void>,
 ): Promise<void> {
   return await envMutex.runExclusive(async () => {
-    const config = await ensureBrowserOS()
+    const config = await ensureTRIOS()
 
     const client = new Client({
       name: 'browseros-test-client',

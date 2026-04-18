@@ -1,7 +1,4 @@
-import {
-  LLMConfigSchema,
-  LLMProviderSchema,
-} from '@browseros/shared/schemas/llm'
+import { LLMConfigSchema, LLMProviderSchema } from '@trios/shared/schemas/llm'
 import { z } from 'zod'
 
 export const SingleAgentConfigSchema = LLMConfigSchema.extend({
@@ -59,6 +56,14 @@ export const EvalConfigSchema = z.object({
   num_workers: z.number().int().min(1).max(20).default(1),
   restart_server_per_task: z.boolean().optional().default(false),
   browseros: z.object({
+    server_url: z.string().url(),
+    base_cdp_port: z.number().int().optional().default(9010),
+    base_server_port: z.number().int().optional().default(9110),
+    base_extension_port: z.number().int().optional().default(9310),
+    load_extensions: z.boolean().optional().default(false),
+    headless: z.boolean().optional().default(false),
+  }),
+  trios: z.object({
     server_url: z.string().url(),
     base_cdp_port: z.number().int().optional().default(9010),
     base_server_port: z.number().int().optional().default(9110),

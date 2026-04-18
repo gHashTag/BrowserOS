@@ -1,6 +1,6 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * A2A Types
  *
@@ -8,7 +8,7 @@
  * Ensures protocol compliance across TypeScript implementations
  */
 
-import type { UIMessageStreamEvent } from '@browseros/shared/schemas/ui-stream'
+import type { UIMessageStreamEvent } from '@trios/shared/schemas/ui-stream'
 
 // ============================================================================
 // Message Types
@@ -19,11 +19,11 @@ import type { UIMessageStreamEvent } from '@browseros/shared/schemas/ui-stream'
  * Corresponds to MessageType enum from relay_observer.t27
  */
 export enum A2AMessageType {
-  ready = "ready",
-  chat = "chat",
-  abort = "abort",
-  sse = "sse",
-  error = "error",
+  ready = 'ready',
+  chat = 'chat',
+  abort = 'abort',
+  sse = 'sse',
+  error = 'error',
 }
 
 /**
@@ -31,11 +31,11 @@ export enum A2AMessageType {
  * Corresponds to SseEvent struct from relay_observer.t27
  */
 export enum A2ASseEventType {
-  textDelta = "text-delta",
-  done = "done",
-  toolStart = "tool-start",
-  toolEnd = "tool-end",
-  error = "error",
+  textDelta = 'text-delta',
+  done = 'done',
+  toolStart = 'tool-start',
+  toolEnd = 'tool-end',
+  error = 'error',
 }
 
 /**
@@ -43,9 +43,9 @@ export enum A2ASseEventType {
  * Corresponds to AgentMode enum from relay_observer.t27
  */
 export enum A2AAgentMode {
-  echo = "echo",
-  observe = "observe",
-  ai = "ai",
+  echo = 'echo',
+  observe = 'observe',
+  ai = 'ai',
 }
 
 // ============================================================================
@@ -83,6 +83,9 @@ export interface A2ARelayObserverConfig {
 
   /** Reconnect delay multiplier (doubles each attempt) */
   reconnectDelayMultiplier?: number
+
+  /** Hardening options for security and resilience */
+  hardening?: A2AHardeningOptions
 }
 
 // ============================================================================
@@ -151,21 +154,21 @@ export type A2ARoutedMessage = A2AClientMessage & A2ARoutingTarget
  * WebSocket connection states
  */
 export enum A2AConnectionState {
-  disconnected = "disconnected",
-  connecting = "connecting",
-  connected = "connected",
-  reconnecting = "reconnecting",
-  closed = "closed",
+  disconnected = 'disconnected',
+  connecting = 'connecting',
+  connected = 'connected',
+  reconnecting = 'reconnecting',
+  closed = 'closed',
 }
 
 /**
  * Agent operational states
  */
 export enum A2AAgentState {
-  idle = "idle",
-  processing = "processing",
-  error = "error",
-  stopped = "stopped",
+  idle = 'idle',
+  processing = 'processing',
+  error = 'error',
+  stopped = 'stopped',
 }
 
 /**
@@ -186,12 +189,12 @@ export interface A2AStateTransition {
  * A2A error categories
  */
 export enum A2AErrorType {
-  connectionError = "connection_error",
-  parseError = "parse_error",
-  sendError = "send_error",
-  reconnectFailed = "reconnect_failed",
-  sequenceError = "sequence_error",
-  routingError = "routing_error",
+  connectionError = 'connection_error',
+  parseError = 'parse_error',
+  sendError = 'send_error',
+  reconnectFailed = 'reconnect_failed',
+  sequenceError = 'sequence_error',
+  routingError = 'routing_error',
 }
 
 /**

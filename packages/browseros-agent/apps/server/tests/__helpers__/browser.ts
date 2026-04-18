@@ -1,9 +1,9 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
- * Low-level BrowserOS process management.
- * Use setup.ts:ensureBrowserOS() for the full test environment.
+ * Low-level TRIOS process management.
+ * Use setup.ts:ensureTRIOS() for the full test environment.
  */
 import type { ChildProcess } from 'node:child_process'
 import { spawn } from 'node:child_process'
@@ -28,9 +28,7 @@ interface BrowserState {
 let browserState: BrowserState | null = null
 
 function shouldLogBrowserOutput(): boolean {
-  return (
-    process.env.CI === 'true' || process.env.BROWSEROS_TEST_DEBUG === 'true'
-  )
+  return process.env.CI === 'true' || process.env.trios_TEST_DEBUG === 'true'
 }
 
 export async function isBrowserRunning(cdpPort: number): Promise<boolean> {
@@ -73,7 +71,7 @@ export async function spawnBrowser(
     await killBrowser()
   }
 
-  console.log(`Starting BrowserOS on CDP port ${config.cdpPort}...`)
+  console.log(`Starting TRIOS on CDP port ${config.cdpPort}...`)
   const browserProcess = spawn(
     config.binaryPath,
     [
@@ -87,7 +85,7 @@ export async function spawnBrowser(
       `--remote-debugging-port=${config.cdpPort}`,
       `--browseros-mcp-port=${config.serverPort}`,
       `--browseros-extension-port=${config.extensionPort}`,
-      '--disable-browseros-server',
+      '--disable-trios-server',
     ],
     {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -109,7 +107,7 @@ export async function spawnBrowser(
   })
 
   browserProcess.on('error', (error) => {
-    console.error('Failed to start BrowserOS:', error)
+    console.error('Failed to start TRIOS:', error)
   })
 
   console.log('Waiting for CDP to be ready...')
@@ -129,7 +127,7 @@ export async function killBrowser(): Promise<void> {
     return
   }
 
-  console.log('Shutting down BrowserOS...')
+  console.log('Shutting down TRIOS...')
   browserState.process.kill('SIGTERM')
 
   await new Promise<void>((resolve) => {
@@ -144,7 +142,7 @@ export async function killBrowser(): Promise<void> {
     })
   })
 
-  console.log('BrowserOS stopped')
+  console.log('TRIOS stopped')
 
   if (browserState.userDataDir) {
     console.log(`Cleaning up temp profile: ${browserState.userDataDir}`)

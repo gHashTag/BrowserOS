@@ -42,24 +42,24 @@ function isBrowserOSAppRunning(): boolean {
 }
 
 async function killBrowserOSApp(): Promise<void> {
-  log('BROWSEROS', 'Killing BrowserOS application...')
+  log('trios', 'Killing BrowserOS application...')
   spawnSync({
     cmd: ['sh', '-c', 'pkill -9 -f "BrowserOS" 2>/dev/null || true'],
   })
   killPort(EVAL_PORTS.cdp)
   for (let i = 0; i < 10; i++) {
     if (!isBrowserOSAppRunning()) {
-      log('BROWSEROS', 'Application killed')
+      log('trios', 'Application killed')
       return
     }
     await sleep(500)
   }
-  log('BROWSEROS', 'Warning: Application may not have fully terminated')
+  log('trios', 'Warning: Application may not have fully terminated')
 }
 
 async function launchBrowserOSApp(): Promise<boolean> {
   log(
-    'BROWSEROS',
+    'trios',
     `Launching BrowserOS (server disabled, CDP=${EVAL_PORTS.cdp})...`,
   )
   spawnSync({
@@ -68,22 +68,19 @@ async function launchBrowserOSApp(): Promise<boolean> {
       '-a',
       'BrowserOS',
       '--args',
-      '--disable-browseros-server',
+      '--disable-trios-server',
       `--browseros-cdp-port=${EVAL_PORTS.cdp}`,
     ],
   })
   for (let i = 0; i < 30; i++) {
     await sleep(1000)
     if (isBrowserOSAppRunning()) {
-      log(
-        'BROWSEROS',
-        'Application launched, waiting for initialization (8s)...',
-      )
+      log('trios', 'Application launched, waiting for initialization (8s)...')
       await sleep(8000)
       return true
     }
   }
-  log('BROWSEROS', 'Failed to launch application')
+  log('trios', 'Failed to launch application')
   return false
 }
 
@@ -223,14 +220,14 @@ async function scenario1_AppNotRunningAtStart(): Promise<void> {
   await sleep(2000)
 
   // Now check what happens
-  log('CHECK', `Is BrowserOS running? ${isBrowserOSAppRunning()}`)
+  log('CHECK', `Is TRIOS running? ${isBrowserOSAppRunning()}`)
 
   if (!isBrowserOSAppRunning()) {
     log('FLOW', '→ App not running, attempting to launch...')
     const launched = await launchBrowserOSApp()
     if (launched) {
       log('FLOW', '→ App launched successfully')
-      log('CHECK', `Is BrowserOS running now? ${isBrowserOSAppRunning()}`)
+      log('CHECK', `Is TRIOS running now? ${isBrowserOSAppRunning()}`)
     } else {
       log('FLOW', '→ FAILED to launch app')
       log(
@@ -249,7 +246,7 @@ async function scenario2_BrowserNotReady(): Promise<void> {
   console.log('SCENARIO 2: Browser Does Not Become Ready Within 30 Seconds')
   console.log('='.repeat(70))
   console.log(
-    'Expected: Wait 30s → Restart BrowserOS app → Retry → Success or fail after 3 attempts\n',
+    'Expected: Wait 30s → Restart TRIOS app → Retry → Success or fail after 3 attempts\n',
   )
 
   // Make sure app is running first
@@ -439,7 +436,7 @@ async function scenario5_BrowserUnavailableMidTask(): Promise<void> {
   if (!stillConnected) {
     log('DETECTED', '→ Browser became unavailable!')
 
-    const errorMessage = 'BrowserOS helper service not connected'
+    const errorMessage = 'TRIOS helper service not connected'
     log('ERROR', `Tool call would fail with: "${errorMessage}"`)
 
     const isInfraError = errorMessage.includes('not connected')
@@ -516,7 +513,7 @@ async function scenario7_ConsecutiveFailures(): Promise<void> {
         ? 'Browser did not become ready'
         : taskId === 'task-2'
           ? 'Tool timed out after 65000ms'
-          : 'BrowserOS helper service not connected'
+          : 'TRIOS helper service not connected'
 
     log('ERROR', `Task failed: ${failureReason}`)
 

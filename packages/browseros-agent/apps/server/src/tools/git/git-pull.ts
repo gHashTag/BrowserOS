@@ -1,6 +1,6 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Git Pull Tool
  */
@@ -11,7 +11,7 @@ import { defineTool } from '../framework'
 export const gitPull = defineTool({
   name: 'git_pull',
   description: 'Pull changes from remote repository',
-  approvalCategory: 'filesystem',
+  approvalCategory: 'data-modification',
   input: z.object({
     path: z.string().describe('Path to the git repository'),
     branch: z.string().optional().describe('Specific branch to pull'),
@@ -36,7 +36,7 @@ export const gitPull = defineTool({
         await $`git pull`.cwd(path).quiet()
       }
 
-      response.json({ success: true })
+      response.text(JSON.stringify({ success: true }))
     } catch (error) {
       const errStr = String(error)
       const conflicts: string[] = []
@@ -55,11 +55,13 @@ export const gitPull = defineTool({
         }
       }
 
-      response.json({
-        success: false,
-        error: errStr,
-        conflicts: conflicts.length > 0 ? conflicts : undefined,
-      })
+      response.text(
+        JSON.stringify({
+          success: false,
+          error: errStr,
+          conflicts: conflicts.length > 0 ? conflicts : undefined,
+        }),
+      )
     }
   },
 })

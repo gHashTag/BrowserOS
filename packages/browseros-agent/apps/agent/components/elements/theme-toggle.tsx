@@ -14,9 +14,9 @@ import type { Theme } from '@/lib/theme/theme-storage'
 import { cn } from '@/lib/utils'
 
 const themes: { value: Theme; icon: typeof Monitor; label: string }[] = [
-  { value: 'system', icon: Monitor, label: 'System' },
-  { value: 'light', icon: Sun, label: 'Light' },
-  { value: 'dark', icon: Moon, label: 'Dark' },
+  { value: 'system' as Theme, icon: Monitor, label: 'System' },
+  { value: 'light' as Theme, icon: Sun, label: 'Light' },
+  { value: 'dark' as Theme, icon: Moon, label: 'Dark' },
 ]
 
 interface ThemeToggleProps {

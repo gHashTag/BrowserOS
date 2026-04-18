@@ -1,12 +1,12 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Git Transaction Safety
  * Provides transaction-like behavior for Git operations with rollback
  */
 
-import { GIT_CONSTANTS } from '@browseros/shared/constants/git'
+import { GIT_CONSTANTS } from '@trios/shared/constants/git'
 import { $ } from 'bun'
 
 export interface GitOperation {

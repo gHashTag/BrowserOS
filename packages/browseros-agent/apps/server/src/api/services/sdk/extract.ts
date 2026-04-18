@@ -1,12 +1,12 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Extract Service - Structured data extraction via remote service
  */
 
-import { EXTERNAL_URLS } from '@browseros/shared/constants/urls'
+import { EXTERNAL_URLS } from '@trios/shared/constants/urls'
 import { SdkError } from './types'
 
 export interface ExtractOptions {

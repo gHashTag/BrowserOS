@@ -1,18 +1,17 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * GitButler Embed
  * Embed GitButler application in an iframe or webview
  */
 
-import { ExternalLink, X } from 'lucide-react'
+import { AlertCircle, ExternalLink, X } from 'lucide-react'
 import type { FC } from 'react'
 import { useEffect, useRef, useState } from 'react'
+import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { Alert, AlertDescription } from '@/components/ui/alert'
-import { AlertCircle } from 'lucide-react'
 
 interface GitButlerEmbedProps {
   repositoryPath: string
@@ -61,7 +60,9 @@ export const GitButlerEmbed: FC<GitButlerEmbedProps> = ({
   if (isAvailable === null) {
     return (
       <Card className="h-full flex items-center justify-center">
-        <p className="text-muted-foreground">Checking GitButler availability...</p>
+        <p className="text-muted-foreground">
+          Checking GitButler availability...
+        </p>
       </Card>
     )
   }

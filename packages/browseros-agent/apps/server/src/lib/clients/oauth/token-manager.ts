@@ -1,11 +1,11 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { OAUTH_CALLBACK_PORT } from '@browseros/shared/constants/ports'
-import { TIMEOUTS } from '@browseros/shared/constants/timeouts'
+import { OAUTH_CALLBACK_PORT } from '@trios/shared/constants/ports'
+import { TIMEOUTS } from '@trios/shared/constants/timeouts'
 import { logger } from '../../logger'
 import type { OAuthCallbackServer } from './callback-server'
 import { getOAuthProvider, type OAuthProviderConfig } from './providers'
@@ -58,7 +58,7 @@ export class OAuthTokenManager {
 
   constructor(
     private readonly store: OAuthTokenStore,
-    private readonly browserosId: string,
+    private readonly triosId: string,
     private readonly callbackServer: OAuthCallbackServer,
   ) {}
 
@@ -157,7 +157,7 @@ export class OAuthTokenManager {
       accountId,
     }
 
-    this.store.upsertTokens(this.browserosId, flow.provider, tokens)
+    this.store.upsertTokens(this.triosId, flow.provider, tokens)
     this.pendingFlows.delete(state)
     this.stopCallbackIfIdle()
 
@@ -306,7 +306,7 @@ export class OAuthTokenManager {
             email: undefined,
             accountId: undefined,
           }
-          this.store.upsertTokens(this.browserosId, providerId, tokens)
+          this.store.upsertTokens(this.triosId, providerId, tokens)
           logger.info('Device code OAuth successful', { provider: providerId })
           return
         }
@@ -345,7 +345,7 @@ export class OAuthTokenManager {
   // --- Token refresh ---
 
   async refreshIfExpired(provider: string): Promise<StoredOAuthTokens | null> {
-    const tokens = this.store.getTokens(this.browserosId, provider)
+    const tokens = this.store.getTokens(this.triosId, provider)
     if (!tokens) return null
 
     // GitHub Copilot tokens never expire (expiresAt = 0)
@@ -373,7 +373,7 @@ export class OAuthTokenManager {
     tokens: StoredOAuthTokens,
   ): Promise<StoredOAuthTokens> {
     if (!tokens.refreshToken) {
-      this.store.deleteTokens(this.browserosId, provider)
+      this.store.deleteTokens(this.triosId, provider)
       throw new Error(
         `${provider} session expired (no refresh token). Please re-login.`,
       )
@@ -401,7 +401,7 @@ export class OAuthTokenManager {
         provider,
         status: response.status,
       })
-      this.store.deleteTokens(this.browserosId, provider)
+      this.store.deleteTokens(this.triosId, provider)
       const providerName = providerConfig.name
       throw new Error(`${providerName} session expired. Please re-login.`)
     }
@@ -417,7 +417,7 @@ export class OAuthTokenManager {
       accountId: accountId ?? tokens.accountId,
     }
 
-    this.store.upsertTokens(this.browserosId, provider, refreshed)
+    this.store.upsertTokens(this.triosId, provider, refreshed)
     return refreshed
   }
 
@@ -435,19 +435,19 @@ export class OAuthTokenManager {
       email: undefined,
       accountId: undefined,
     }
-    this.store.upsertTokens(this.browserosId, provider, tokens)
+    this.store.upsertTokens(this.triosId, provider, tokens)
   }
 
   getTokens(provider: string): StoredOAuthTokens | null {
-    return this.store.getTokens(this.browserosId, provider)
+    return this.store.getTokens(this.triosId, provider)
   }
 
   getStatus(provider: string) {
-    return this.store.getStatus(this.browserosId, provider)
+    return this.store.getStatus(this.triosId, provider)
   }
 
   deleteTokens(provider: string): void {
-    this.store.deleteTokens(this.browserosId, provider)
+    this.store.deleteTokens(this.triosId, provider)
   }
 
   stopCallbackServer(): void {

@@ -1,6 +1,6 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Late Join Tests
  *
@@ -10,9 +10,9 @@
  * - Late agent with different mode (observe)
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
-import { createAgentPair, TestAgent } from './test-agent-factory'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import type { A2ARelayObserverConfig } from '../../../src/agent/portable/a2a-types'
+import { createAgentPair, type TestAgent } from './test-agent-factory'
 
 describe('Late Join Multi-Agent Scenarios', () => {
   let agents: { agent1: TestAgent; agent2: TestAgent } | null = null
@@ -202,7 +202,7 @@ describe('Late Join Multi-Agent Scenarios', () => {
       expect(observerLog.length).toBeGreaterThan(0)
 
       // Verify it's a log entry (not a chat message)
-      const logContent = observerLog[0]?.payload as string || ''
+      const logContent = (observerLog[0]?.payload as string) || ''
       expect(logContent).toContain('[observe]')
     })
 
@@ -221,10 +221,16 @@ describe('Late Join Multi-Agent Scenarios', () => {
       const agent2Log = agent2.getMessages()
 
       // Agent1 should NOT have echo of Agent2's message
-      expect(agent1Log.filter((m) => m.payload === 'A2->A1: ping').length).toBe(0)
+      expect(agent1Log.filter((m) => m.payload === 'A2->A1: ping').length).toBe(
+        0,
+      )
 
       // Agent2 in observe mode should only log
-      const observeLogs = agent2Log.filter((m) => typeof m.payload === 'string' && (m.payload as string).includes('[observe]'))
+      const observeLogs = agent2Log.filter(
+        (m) =>
+          typeof m.payload === 'string' &&
+          (m.payload as string).includes('[observe]'),
+      )
 
       expect(observeLogs.length).toBeGreaterThan(0)
     })
@@ -253,7 +259,9 @@ describe('Late Join Multi-Agent Scenarios', () => {
       const agent1Messages = agents!.agent1.getMessages()
 
       expect(agent1Messages.length).toBe(2)
-      expect(agent1Messages[agent1Messages.length - 1]?.payload).toBe('Message during connect')
+      expect(agent1Messages[agent1Messages.length - 1]?.payload).toBe(
+        'Message during connect',
+      )
 
       // Agent2 should be in connecting state
       const agent2State = agent2.getObserver().getConnectionState()

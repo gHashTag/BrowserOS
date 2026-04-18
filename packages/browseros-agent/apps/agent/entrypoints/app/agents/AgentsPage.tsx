@@ -1,7 +1,7 @@
 import type {
-  BrowserOSCustomRoleInput,
-  BrowserOSRoleBoundary,
-} from '@browseros/shared/types/role-aware-agents'
+  TRIOSCustomRoleInput,
+  TRIOSRoleBoundary,
+} from '@trios/shared/types/role-aware-agents'
 import {
   AlertCircle,
   Cpu,
@@ -54,7 +54,7 @@ const CUSTOM_ROLE_VALUE = '__custom__'
 const PLAIN_AGENT_VALUE = '__plain__'
 type AgentCreationMode = 'builtin' | 'custom' | 'plain'
 
-function createDefaultCustomRoleBoundaries(): BrowserOSRoleBoundary[] {
+function createDefaultCustomRoleBoundaries(): TRIOSRoleBoundary[] {
   return [
     {
       key: 'draft-external-comms',
@@ -260,8 +260,8 @@ const ProviderSelector: FC<ProviderSelectorProps> = ({
         </SelectContent>
       </Select>
       <p className="text-muted-foreground text-xs">
-        Uses your existing API key from BrowserOS settings. The key is passed to
-        the container and never leaves your machine.
+        Uses your existing API key from TRIOS settings. The key is passed to the
+        container and never leaves your machine.
       </p>
     </div>
   )
@@ -308,7 +308,7 @@ export const AgentsPage: FC = () => {
   >('chief-of-staff')
   const [newName, setNewName] = useState('')
   const [createProviderId, setCreateProviderId] = useState('')
-  const [customRole, setCustomRole] = useState<BrowserOSCustomRoleInput>({
+  const [customRole, setCustomRole] = useState<TRIOSCustomRoleInput>({
     name: '',
     shortDescription: '',
     longDescription: '',
@@ -1085,7 +1085,7 @@ export const AgentsPage: FC = () => {
                                   ? {
                                       ...item,
                                       defaultMode:
-                                        value as BrowserOSRoleBoundary['defaultMode'],
+                                        value as TRIOSRoleBoundary['defaultMode'],
                                     }
                                   : item,
                               ),

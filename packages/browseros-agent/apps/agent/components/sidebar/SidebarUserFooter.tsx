@@ -31,7 +31,7 @@ export const SidebarUserFooter: FC<SidebarUserFooterProps> = ({
   //         expanded ? 'opacity-100' : 'opacity-0',
   //       )}
   //     >
-  //       Sign in to BrowserOS
+  //       Sign in to TRIOS
   //     </span>
   //   </Button>
   // )

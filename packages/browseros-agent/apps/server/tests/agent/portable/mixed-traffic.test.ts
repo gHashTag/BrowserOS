@@ -1,6 +1,6 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Mixed Traffic Tests
  *
@@ -10,8 +10,11 @@
  * - Error message does not interrupt stream
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
-import type { A2AClientMessage, A2AServerMessage } from '../../../src/agent/portable/a2a-types'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import type {
+  A2AClientMessage,
+  A2AServerMessage,
+} from '../../../src/agent/portable/a2a-types'
 import { A2AMessageType } from '../../../src/agent/portable/a2a-types'
 
 describe('Mixed Traffic Multi-Agent Scenarios', () => {
@@ -159,15 +162,35 @@ describe('Mixed Traffic Multi-Agent Scenarios', () => {
       const streamEvents: StreamEvent[] = []
 
       // Normal data flow
-      streamEvents.push({ type: 'text-delta', timestamp: Date.now(), interrupted: false })
-      streamEvents.push({ type: 'text-delta', timestamp: Date.now(), interrupted: false })
+      streamEvents.push({
+        type: 'text-delta',
+        timestamp: Date.now(),
+        interrupted: false,
+      })
+      streamEvents.push({
+        type: 'text-delta',
+        timestamp: Date.now(),
+        interrupted: false,
+      })
 
       // Error occurs (logged but doesn't stop stream)
-      streamEvents.push({ type: 'error', timestamp: Date.now(), interrupted: false })
+      streamEvents.push({
+        type: 'error',
+        timestamp: Date.now(),
+        interrupted: false,
+      })
 
       // Stream continues after error
-      streamEvents.push({ type: 'text-delta', timestamp: Date.now(), interrupted: false })
-      streamEvents.push({ type: 'done', timestamp: Date.now(), interrupted: false })
+      streamEvents.push({
+        type: 'text-delta',
+        timestamp: Date.now(),
+        interrupted: false,
+      })
+      streamEvents.push({
+        type: 'done',
+        timestamp: Date.now(),
+        interrupted: false,
+      })
 
       // Verify stream continued
       expect(streamEvents.length).toBe(5)
@@ -220,11 +243,15 @@ describe('Mixed Traffic Multi-Agent Scenarios', () => {
 
   describe('Message type classification', () => {
     it('should correctly classify message types', () => {
-      const isControlMessage = (msg: A2AClientMessage | A2AServerMessage): boolean => {
+      const isControlMessage = (
+        msg: A2AClientMessage | A2AServerMessage,
+      ): boolean => {
         return ['ready', 'abort', 'error'].includes(msg.type)
       }
 
-      const isDataMessage = (msg: A2AClientMessage | A2AServerMessage): boolean => {
+      const isDataMessage = (
+        msg: A2AClientMessage | A2AServerMessage,
+      ): boolean => {
         return msg.type === 'chat'
       }
 

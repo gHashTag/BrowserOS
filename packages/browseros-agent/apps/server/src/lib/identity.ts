@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 import type { Database } from 'bun:sqlite'
@@ -11,42 +11,41 @@ export interface IdentityConfig {
 }
 
 class IdentityService {
-  private browserOSId: string | null = null // Unique identifier for the BrowserOS instance
+  private triosId: string | null = null // Unique identifier for the TRIOS instance
 
   initialize(config: IdentityConfig): void {
     const { installId, db } = config
 
     // Priority: DB > config > generate new
-    this.browserOSId =
-      this.loadFromDb(db) || installId || this.generateAndSave(db)
+    this.triosId = this.loadFromDb(db) || installId || this.generateAndSave(db)
   }
 
-  getBrowserOSId(): string {
-    if (!this.browserOSId) {
+  getTRIOSId(): string {
+    if (!this.triosId) {
       throw new Error(
         'IdentityService not initialized. Call initialize() first.',
       )
     }
-    return this.browserOSId
+    return this.triosId
   }
 
   isInitialized(): boolean {
-    return this.browserOSId !== null
+    return this.triosId !== null
   }
 
   private loadFromDb(db: Database): string | null {
-    const stmt = db.prepare('SELECT browseros_id FROM identity WHERE id = 1')
-    const row = stmt.get() as { browseros_id: string } | null
-    return row?.browseros_id ?? null
+    const stmt = db.prepare('SELECT trios_id FROM identity WHERE id = 1')
+    const row = stmt.get() as { trios_id: string } | null
+    return row?.trios_id ?? null
   }
 
   private generateAndSave(db: Database): string {
-    const browserosId = crypto.randomUUID()
+    const triosId = crypto.randomUUID()
     const stmt = db.prepare(
-      'INSERT OR REPLACE INTO identity (id, browseros_id) VALUES (1, ?)',
+      'INSERT OR REPLACE INTO identity (id, trios_id) VALUES (1, ?)',
     )
-    stmt.run(browserosId)
-    return browserosId
+    stmt.run(triosId)
+    return triosId
   }
 }
 

@@ -1,6 +1,6 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Event Fanout Tests
  *
@@ -10,7 +10,7 @@
  * - Subscriber disconnect does not affect others
  */
 
-import { describe, it, expect, beforeEach, afterEach, jest } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it, jest } from 'bun:test'
 
 describe('Event Fanout Multi-Agent Scenarios', () => {
   let harness: SSEFanoutHarness
@@ -314,7 +314,10 @@ describe('Event Fanout Multi-Agent Scenarios', () => {
       expect(correct).toBe(true)
 
       // Verify incorrect count
-      const incorrect = harness.verifySubscriberReceivedEvents('subscriber-0', 2)
+      const incorrect = harness.verifySubscriberReceivedEvents(
+        'subscriber-0',
+        2,
+      )
       expect(incorrect).toBe(false)
     })
   })

@@ -138,7 +138,7 @@ export function useLlmProviders(): UseLlmProvidersReturn {
   }
 
   const deleteProvider = async (providerId: string) => {
-    // Prevent deletion of built-in BrowserOS provider
+    // Prevent deletion of built-in TRIOS provider
     if (providerId === DEFAULT_PROVIDER_ID) {
       return
     }

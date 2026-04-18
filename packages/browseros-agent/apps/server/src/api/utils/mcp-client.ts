@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Internal MCP client for SDK routes.
@@ -35,7 +35,7 @@ export async function callMcpTool<T = Record<string, unknown>>(
 
   const transport = new StreamableHTTPClientTransport(new URL(serverUrl), {
     requestInit: {
-      headers: { 'X-BrowserOS-Source': 'sdk-internal' },
+      headers: { 'X-TRIOS-Source': 'sdk-internal' },
     },
   })
 

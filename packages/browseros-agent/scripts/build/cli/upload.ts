@@ -11,7 +11,7 @@ import { type CliUploadConfig, loadCliUploadConfig } from './config'
 const CDN_BASE_URL = 'https://cdn.browseros.com'
 const JSON_CONTENT_TYPE = 'application/json; charset=utf-8'
 const CLI_ARCHIVE_PATTERN =
-  /^browseros-cli_(?<version>[^_]+)_(?<os>darwin|linux|windows)_(?<arch>amd64|arm64)\.(?<ext>tar\.gz|zip)$/
+  /^trios-cli_(?<version>[^_]+)_(?<os>darwin|linux|windows)_(?<arch>amd64|arm64)\.(?<ext>tar\.gz|zip)$/
 
 const INSTALLERS = [
   {
@@ -170,7 +170,7 @@ export function buildCliReleaseManifest(options: {
   return {
     version: options.version,
     published_at: options.published_at ?? new Date().toISOString(),
-    tag: `browseros-cli-v${options.version}`,
+    tag: `trios-cli-v${options.version}`,
     assets,
   }
 }
@@ -194,7 +194,7 @@ async function uploadCliManifest(
     checksumsContent: readFileSync(checksumsPath, 'utf-8'),
     uploadPrefix,
   })
-  const manifestPath = join(tmpdir(), `browseros-cli-manifest-${version}.json`)
+  const manifestPath = join(tmpdir(), `trios-cli-manifest-${version}.json`)
   await writeFile(
     manifestPath,
     `${JSON.stringify(manifest, null, 2)}\n`,
@@ -269,7 +269,7 @@ async function uploadCliRelease(
       r2,
     )
 
-    const versionTxtPath = join(tmpdir(), 'browseros-cli-version.txt')
+    const versionTxtPath = join(tmpdir(), 'trios-cli-version.txt')
     await writeFile(versionTxtPath, version, 'utf-8')
     const versionKey = joinObjectKey(r2.uploadPrefix, 'latest', 'version.txt')
     await uploadFileToObject(client, r2, versionKey, versionTxtPath, {

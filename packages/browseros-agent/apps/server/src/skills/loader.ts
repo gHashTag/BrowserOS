@@ -1,6 +1,6 @@
 import { readdir, readFile, stat } from 'node:fs/promises'
 import { join } from 'node:path'
-import { PATHS } from '@browseros/shared/constants/paths'
+import { PATHS } from '@trios/shared/constants/paths'
 import matter from 'gray-matter'
 import { getBuiltinSkillsDir, getSkillsDir } from '../lib/browseros-dir'
 import { logger } from '../lib/logger'

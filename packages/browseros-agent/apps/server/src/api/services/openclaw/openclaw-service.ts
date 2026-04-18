@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Main orchestrator for OpenClaw integration.
@@ -11,13 +11,13 @@
 import { existsSync } from 'node:fs'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { OPENCLAW_GATEWAY_PORT } from '@browseros/shared/constants/openclaw'
-import { DEFAULT_PORTS } from '@browseros/shared/constants/ports'
+import { OPENCLAW_GATEWAY_PORT } from '@trios/shared/constants/openclaw'
+import { DEFAULT_PORTS } from '@trios/shared/constants/ports'
 import type {
-  BrowserOSAgentRoleId,
-  BrowserOSAgentRoleSummary,
-  BrowserOSCustomRoleInput,
-} from '@browseros/shared/types/role-aware-agents'
+  TRIOSAgentRoleId,
+  TRIOSAgentRoleSummary,
+  TRIOSCustomRoleInput,
+} from '@trios/shared/types/role-aware-agents'
 import { getOpenClawDir } from '../../../lib/browseros-dir'
 import { logger } from '../../../lib/logger'
 import { ContainerRuntime } from './container-runtime'
@@ -93,7 +93,7 @@ export interface OpenClawStatusResponse {
 }
 
 export interface OpenClawAgentEntry extends GatewayAgentEntry {
-  role?: BrowserOSAgentRoleSummary
+  role?: TRIOSAgentRoleSummary
 }
 
 export interface SetupInput {
@@ -366,8 +366,8 @@ export class OpenClawService {
 
   async createAgent(input: {
     name: string
-    roleId?: BrowserOSAgentRoleId
-    customRole?: BrowserOSCustomRoleInput
+    roleId?: TRIOSAgentRoleId
+    customRole?: TRIOSCustomRoleInput
     providerType?: string
     providerName?: string
     baseUrl?: string
@@ -515,7 +515,7 @@ export class OpenClawService {
     return this.runtime.composeLogs(tail)
   }
 
-  // ── Auto-start on BrowserOS boot ────────────────────────────────────
+  // ── Auto-start on TRIOS boot ────────────────────────────────────
 
   async tryAutoStart(): Promise<void> {
     const isSetUp = existsSync(join(this.openclawDir, OPENCLAW_CONFIG_FILE))
@@ -806,7 +806,7 @@ export class OpenClawService {
 
   private async writeRoleBootstrapFiles(
     agentName: string,
-    role: ReturnType<typeof resolveRoleTemplate> | BrowserOSCustomRoleInput,
+    role: ReturnType<typeof resolveRoleTemplate> | TRIOSCustomRoleInput,
   ): Promise<void> {
     const workspaceDir = this.getHostWorkspaceDir(agentName)
     const files = buildRoleBootstrapFiles({ role, agentName })
@@ -818,7 +818,7 @@ export class OpenClawService {
       ),
     )
 
-    logger.info('Wrote BrowserOS role bootstrap files', {
+    logger.info('Wrote TRIOS role bootstrap files', {
       agentName,
       roleSource: 'id' in role ? 'builtin' : 'custom',
       roleId: 'id' in role ? role.id : undefined,
@@ -828,7 +828,7 @@ export class OpenClawService {
 
   private async readRoleSummary(
     agentName: string,
-  ): Promise<BrowserOSAgentRoleSummary | undefined> {
+  ): Promise<TRIOSAgentRoleSummary | undefined> {
     const roleMetadataPath = join(
       this.getHostWorkspaceDir(agentName),
       '.browseros-role.json',
@@ -838,7 +838,7 @@ export class OpenClawService {
       const content = await readFile(roleMetadataPath, 'utf-8')
       const json = JSON.parse(content) as {
         roleSource?: 'builtin' | 'custom'
-        roleId?: BrowserOSAgentRoleId
+        roleId?: TRIOSAgentRoleId
         roleName?: string
         shortDescription?: string
       }

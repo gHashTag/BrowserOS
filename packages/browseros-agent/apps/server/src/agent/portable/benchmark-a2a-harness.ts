@@ -1,6 +1,6 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Real A2A Benchmark Harness
  *
@@ -8,12 +8,16 @@
  * Publishes results to .trinity/experience/ with actual toxic verdict
  */
 
-import { RelayObserver, TrinityExperienceEmitter } from './relay-observer'
-import type { TrinityBenchmarkSession } from '@browseros/shared/types/trinity-benchmark'
-import { A2A_PORT } from '@browseros/shared/constants/ports'
-import type { A2ARelayObserverConfig } from './a2a-types'
+import { A2A_PORT } from '@trios/shared/constants/ports'
+import type {
+  TrinityBenchmarkSession,
+  TrinityExperienceEvent,
+} from '@trios/shared/types/trinity-benchmark'
 import * as fs from 'fs/promises'
 import * as path from 'path'
+import type { A2ARelayObserverConfig } from './a2a-types'
+import { A2AAgentMode } from './a2a-types'
+import { RelayObserver, TrinityExperienceEmitter } from './relay-observer'
 
 const EXPERIENCE_DIR = path.join(process.cwd(), '.trinity/experience')
 
@@ -64,7 +68,9 @@ function printMetricsTable(session: TrinityBenchmarkSession): void {
     console.log(`  samples: ${rl.samples}`)
   }
 
-  console.log(`\nReconnect Success Rate: ${(session.metrics.reconnectSuccessRate * 100).toFixed(1)}%`)
+  console.log(
+    `\nReconnect Success Rate: ${(session.metrics.reconnectSuccessRate * 100).toFixed(1)}%`,
+  )
 
   if (session.verdictDetails) {
     console.log(`\nVerdict Details:`)
@@ -73,8 +79,12 @@ function printMetricsTable(session: TrinityBenchmarkSession): void {
 
   if (session.delta) {
     console.log(`\nDelta from Previous Run:`)
-    console.log(`  messageLatency: p50=${session.delta.messageLatency.p50.toFixed(1)}% p95=${session.delta.messageLatency.p95.toFixed(1)}%`)
-    console.log(`  reconnectSuccessRate: ${session.delta.reconnectSuccessRate.toFixed(1)}%`)
+    console.log(
+      `  messageLatency: p50=${session.delta.messageLatency.p50.toFixed(1)}% p95=${session.delta.messageLatency.p95.toFixed(1)}%`,
+    )
+    console.log(
+      `  reconnectSuccessRate: ${session.delta.reconnectSuccessRate.toFixed(1)}%`,
+    )
   }
 
   console.log(`\nDuration: ${session.durationMs}ms`)
@@ -82,11 +92,14 @@ function printMetricsTable(session: TrinityBenchmarkSession): void {
   console.log(`Events: ${session.events.length}`)
 }
 
-export async function runBaselineScenario(scenario: BenchmarkScenario): Promise<void> {
+export async function runBaselineScenario(
+  scenario: BenchmarkScenario,
+): Promise<void> {
   const sessionId = `baseline-${Date.now()}`
   const config: A2ARelayObserverConfig = {
     agentName: `Baseline-${scenario.name}`,
-    mode: 'echo',
+    mode: A2AAgentMode.echo,
+    a2aPort: A2A_PORT,
     hardening: {
       enableSequenceValidation: false,
     },
@@ -121,12 +134,32 @@ export async function runBaselineScenario(scenario: BenchmarkScenario): Promise<
           agentId: config.agentName || 'unknown',
         },
         metrics: {
-          messageLatency: { min: 0, max: 0, p50: 0, p95: 0, p99: 0, mean: 0, samples: 0 },
-          reconnectLatency: { min: 0, max: 0, p50: 0, p95: 0, p99: 0, mean: 0, samples: 0 },
+          messageLatency: {
+            min: 0,
+            max: 0,
+            p50: 0,
+            p95: 0,
+            p99: 0,
+            mean: 0,
+            samples: 0,
+          },
+          reconnectLatency: {
+            min: 0,
+            max: 0,
+            p50: 0,
+            p95: 0,
+            p99: 0,
+            mean: 0,
+            samples: 0,
+          },
           reconnectSuccessRate: 1,
-          connectionStability: { totalConnections: 1, disconnects: 0, sessionsCompleted: 1 },
+          connectionStability: {
+            totalConnections: 1,
+            disconnects: 0,
+            sessionsCompleted: 1,
+          },
         },
-        verdict: 'needs-proof',
+        verdict: 'needs-improvement',
         events,
       }
       await saveSession(session)
@@ -137,14 +170,16 @@ export async function runBaselineScenario(scenario: BenchmarkScenario): Promise<
   emitter.clear()
 }
 
-export async function runReconnectScenario(scenario: BenchmarkScenario): Promise<void> {
+export async function runReconnectScenario(
+  scenario: BenchmarkScenario,
+): Promise<void> {
   const sessionId = `reconnect-${Date.now()}`
-  const config: A2ARelayObserverConfig = {
+  const config = {
     agentName: `Reconnect-${scenario.name}`,
-    mode: 'echo',
+    mode: A2AAgentMode.echo,
+    a2aPort: A2A_PORT,
     hardening: {
       enableSequenceValidation: false,
-      maxReconnectAttempts: scenario.maxReconnectAttempts || 3,
     },
   }
 
@@ -182,12 +217,32 @@ export async function runReconnectScenario(scenario: BenchmarkScenario): Promise
         agentId: config.agentName || 'unknown',
       },
       metrics: {
-        messageLatency: { min: 0, max: 0, p50: 0, p95: 0, p99: 0, mean: 0, samples: 0 },
-        reconnectLatency: { min: 0, max: 0, p50: 0, p95: 0, p99: 0, mean: 0, samples: 0 },
+        messageLatency: {
+          min: 0,
+          max: 0,
+          p50: 0,
+          p95: 0,
+          p99: 0,
+          mean: 0,
+          samples: 0,
+        },
+        reconnectLatency: {
+          min: 0,
+          max: 0,
+          p50: 0,
+          p95: 0,
+          p99: 0,
+          mean: 0,
+          samples: 0,
+        },
         reconnectSuccessRate: 1,
-        connectionStability: { totalConnections: 1, disconnects: 0, sessionsCompleted: 1 },
+        connectionStability: {
+          totalConnections: 1,
+          disconnects: 0,
+          sessionsCompleted: 1,
+        },
       },
-      verdict: 'needs-proof',
+      verdict: 'needs-improvement',
       events,
     }
     await saveSession(session)
@@ -199,14 +254,17 @@ export async function runReconnectScenario(scenario: BenchmarkScenario): Promise
   emitter.clear()
 }
 
-export async function runMultiSessionScenario(scenario: BenchmarkScenario): Promise<void> {
+export async function runMultiSessionScenario(
+  scenario: BenchmarkScenario,
+): Promise<void> {
   const sessionId = `multisession-${Date.now()}`
   const agentConfigs: A2ARelayObserverConfig[] = []
 
   for (let i = 0; i < 4; i++) {
     agentConfigs.push({
       agentName: `Multi-${scenario.name}-${i}`,
-      mode: 'echo',
+      mode: A2AAgentMode.echo,
+      a2aPort: A2A_PORT,
       hardening: {
         enableSequenceValidation: false,
       },
@@ -252,12 +310,32 @@ export async function runMultiSessionScenario(scenario: BenchmarkScenario): Prom
       agentId: 'Multi-Agents',
     },
     metrics: {
-      messageLatency: { min: 0, max: 0, p50: 0, p95: 0, p99: 0, mean: 0, samples: 0 },
-      reconnectLatency: { min: 0, max: 0, p50: 0, p95: 0, p99: 0, mean: 0, samples: 0 },
+      messageLatency: {
+        min: 0,
+        max: 0,
+        p50: 0,
+        p95: 0,
+        p99: 0,
+        mean: 0,
+        samples: 0,
+      },
+      reconnectLatency: {
+        min: 0,
+        max: 0,
+        p50: 0,
+        p95: 0,
+        p99: 0,
+        mean: 0,
+        samples: 0,
+      },
       reconnectSuccessRate: 1,
-      connectionStability: { totalConnections: 4, disconnects: 0, sessionsCompleted: 4 },
+      connectionStability: {
+        totalConnections: 4,
+        disconnects: 0,
+        sessionsCompleted: 4,
+      },
     },
-    verdict: 'needs-proof',
+    verdict: 'needs-improvement',
     events: allEvents,
   }
   await saveSession(session)
@@ -308,7 +386,9 @@ export async function runAllScenarios(): Promise<void> {
   }
 
   console.log('\n========================================')
-  console.log('\n\u2705 All scenarios complete. Results saved to .trinity/experience/')
+  console.log(
+    '\n\u2705 All scenarios complete. Results saved to .trinity/experience/',
+  )
   console.log('Run: bun run benchmark:a2a to review individual sessions')
 }
 

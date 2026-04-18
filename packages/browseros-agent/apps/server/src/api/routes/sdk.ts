@@ -1,14 +1,14 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * SDK Routes - REST API for @browseros-ai/agent-sdk
+ * SDK Routes - REST API for @trios-ai/agent-sdk
  */
 
-import { TIMEOUTS } from '@browseros/shared/constants/timeouts'
-import { LLM_PROVIDERS } from '@browseros/shared/schemas/llm'
 import { zValidator } from '@hono/zod-validator'
+import { TIMEOUTS } from '@trios/shared/constants/timeouts'
+import { LLM_PROVIDERS } from '@trios/shared/schemas/llm'
 import { Hono } from 'hono'
 import { stream } from 'hono/streaming'
 import { logger } from '../../lib/logger'
@@ -49,7 +49,7 @@ async function waitForPageLoad(
 }
 
 export function createSdkRoutes(deps: SdkDeps) {
-  const { port, browser, browserosId } = deps
+  const { port, browser, triosId } = deps
 
   const browserService = new BrowserService(browser)
   const chatService = new ChatService(port)
@@ -95,9 +95,9 @@ export function createSdkRoutes(deps: SdkDeps) {
         hasSessionId: !!sessionId,
       })
 
-      const llmConfig = llm ?? { provider: LLM_PROVIDERS.BROWSEROS }
+      const llmConfig = llm ?? { provider: LLM_PROVIDERS.trios }
 
-      if (llmConfig.provider !== LLM_PROVIDERS.BROWSEROS && !llmConfig.model) {
+      if (llmConfig.provider !== LLM_PROVIDERS.trios && !llmConfig.model) {
         return c.json(
           {
             error: { message: 'model is required for non-browseros providers' },
@@ -229,7 +229,7 @@ export function createSdkRoutes(deps: SdkDeps) {
         tabId: requestTabId,
       })
 
-      const llmConfig = llm ?? { provider: LLM_PROVIDERS.BROWSEROS }
+      const llmConfig = llm ?? { provider: LLM_PROVIDERS.trios }
 
       try {
         // Use provided tabId, or get active tab (from window if specified)
@@ -246,7 +246,7 @@ export function createSdkRoutes(deps: SdkDeps) {
           interactiveElements: interactiveElements.content,
           context,
           llmConfig,
-          browserosId,
+          triosId,
         })
 
         return c.json(result)

@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Build smoke test — compiles the server binary and verifies --version output.
  * Catches compile failures, broken imports, and version injection bugs.
@@ -30,7 +30,7 @@ function getNativeTarget(): { id: string; ext: string } {
 }
 
 const REQUIRED_INLINE_ENV_KEYS = [
-  'BROWSEROS_CONFIG_URL',
+  'trios_CONFIG_URL',
   'CODEGEN_SERVICE_URL',
   'POSTHOG_API_KEY',
   'SENTRY_DSN',
@@ -46,7 +46,7 @@ const R2_ENV_KEYS = [
 const PROD_SECRET_KEYS = [...REQUIRED_INLINE_ENV_KEYS, ...R2_ENV_KEYS]
 
 const INLINE_ENV_STUBS: Record<string, string> = {
-  BROWSEROS_CONFIG_URL: 'https://stub.test/config',
+  trios_CONFIG_URL: 'https://stub.test/config',
   CODEGEN_SERVICE_URL: 'https://stub.test/codegen',
   POSTHOG_API_KEY: 'phc_test_stub',
   SENTRY_DSN: 'https://stub@sentry.test/0',
@@ -75,11 +75,11 @@ describe('server build', () => {
   const target = getNativeTarget()
   const binaryPath = resolve(
     rootDir,
-    `dist/prod/server/.tmp/binaries/browseros-server-${target.id}${target.ext}`,
+    `dist/prod/server/.tmp/binaries/trios-server-${target.id}${target.ext}`,
   )
   const zipPath = resolve(
     rootDir,
-    `dist/prod/server/browseros-server-resources-${target.id}.zip`,
+    `dist/prod/server/trios-server-resources-${target.id}.zip`,
   )
   const tempDir = mkdtempSync(join(tmpdir(), 'browseros-build-test-'))
   const emptyManifestPath = join(tempDir, 'empty-manifest.json')

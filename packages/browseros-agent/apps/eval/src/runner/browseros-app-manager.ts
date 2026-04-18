@@ -35,8 +35,8 @@ const MONOREPO_ROOT = join(
   '../../../..',
 )
 
-const BROWSEROS_BINARY =
-  process.env.BROWSEROS_BINARY ||
+const trios_BINARY =
+  process.env.trios_BINARY ||
   '/Applications/BrowserOS.app/Contents/MacOS/BrowserOS'
 
 const CAPTCHA_EXT_DIR = join(
@@ -102,7 +102,7 @@ export class BrowserOSAppManager {
     }
 
     throw new Error(
-      `Failed to start BrowserOS after ${MAX_RESTART_ATTEMPTS} attempts`,
+      `Failed to start TRIOS after ${MAX_RESTART_ATTEMPTS} attempts`,
     )
   }
 
@@ -111,7 +111,7 @@ export class BrowserOSAppManager {
    *
    * Chrome flags match startManualBrowser() in scripts/dev/start.ts:
    *   --no-first-run, --no-default-browser-check, --use-mock-keychain
-   *   --disable-browseros-server  (we run our own server)
+   *   --disable-trios-server  (we run our own server)
    *   --disable-browseros-extensions  (we load them explicitly if needed)
    *   --remote-debugging-port, --browseros-mcp-port, --browseros-extension-port
    *   --user-data-dir (unique per worker)
@@ -133,7 +133,7 @@ export class BrowserOSAppManager {
       '--no-first-run',
       '--no-default-browser-check',
       '--use-mock-keychain',
-      '--disable-browseros-server',
+      '--disable-trios-server',
       '--disable-browseros-extensions',
       ...(this.headless ? ['--headless=new'] : []),
       '--window-size=1440,900',
@@ -154,7 +154,7 @@ export class BrowserOSAppManager {
     chromeArgs.push('about:blank')
 
     this.chromeProc = spawn({
-      cmd: [BROWSEROS_BINARY, ...chromeArgs],
+      cmd: [trios_BINARY, ...chromeArgs],
       stdout: 'ignore',
       stderr: 'ignore',
     })
@@ -172,14 +172,14 @@ export class BrowserOSAppManager {
     const serverEnv = {
       ...process.env,
       NODE_ENV: 'development',
-      BROWSEROS_CDP_PORT: String(cdp),
-      BROWSEROS_SERVER_PORT: String(server),
-      BROWSEROS_EXTENSION_PORT: String(extension),
-      VITE_BROWSEROS_SERVER_PORT: String(server),
+      trios_CDP_PORT: String(cdp),
+      trios_SERVER_PORT: String(server),
+      trios_EXTENSION_PORT: String(extension),
+      VITE_trios_SERVER_PORT: String(server),
     }
 
     this.serverProc = spawn({
-      cmd: ['bun', 'run', '--filter', '@browseros/server', 'start'],
+      cmd: ['bun', 'run', '--filter', '@trios/server', 'start'],
       cwd: MONOREPO_ROOT,
       stdout: 'ignore',
       stderr: 'ignore',
@@ -309,14 +309,12 @@ export class BrowserOSAppManager {
   static patchNopechaApiKey(apiKey: string): void {
     const manifestPath = join(CAPTCHA_EXT_DIR, 'manifest.json')
     if (!existsSync(manifestPath)) {
-      console.log(
-        '[BROWSEROS] NopeCHA extension not found, skipping API key patch',
-      )
+      console.log('[trios] NopeCHA extension not found, skipping API key patch')
       return
     }
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'))
     manifest.nopecha = { ...manifest.nopecha, key: apiKey }
     writeFileSync(manifestPath, JSON.stringify(manifest, null, 2))
-    console.log('[BROWSEROS] NopeCHA API key patched')
+    console.log('[trios] NopeCHA API key patched')
   }
 }

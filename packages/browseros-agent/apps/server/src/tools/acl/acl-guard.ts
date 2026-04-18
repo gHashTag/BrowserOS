@@ -1,5 +1,5 @@
-import { matchesSitePattern } from '@browseros/shared/acl/match'
-import type { AclRule } from '@browseros/shared/types/acl'
+import { matchesSitePattern } from '@trios/shared/acl/match'
+import type { AclRule } from '@trios/shared/types/acl'
 import type { Browser } from '../../browser/browser'
 import { logger } from '../../lib/logger'
 import { scoreFixture } from './acl-scorer'

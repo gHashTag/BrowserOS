@@ -1,10 +1,9 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
-import type { Browser } from '@browseros/shared/schemas/browser'
-import type { ToolSet } from 'ai'
+
 import { Hono } from 'hono'
 import type {
   AgentLogEntry,
@@ -16,13 +15,15 @@ import {
   getStatusCodeForError,
   PortableAgentError,
 } from '../../agent/portable/errors'
+import type { Browser } from '../../browser/browser'
 import { logger } from '../../lib/logger'
+import type { ToolRegistry } from '../../tools/tool-registry'
 import { AgentBridgeService } from '../services/agent-bridge/agent-bridge-service'
 
 export interface AgentBridgeRoutesConfig {
   browser: Browser
-  registry: ToolSet
-  browserosId: string
+  registry: ToolRegistry
+  triosId: string
   browserContext?: Record<string, unknown>
 }
 
@@ -36,7 +37,12 @@ export function createAgentBridgeRoutes(config: AgentBridgeRoutesConfig) {
         const { name, options } = body
         if (!name || typeof name !== 'string') {
           return c.json(
-            { error: { message: 'Agent name is required', code: 'INVALID_INPUT' } },
+            {
+              error: {
+                message: 'Agent name is required',
+                code: 'INVALID_INPUT',
+              },
+            },
             400,
           )
         }
@@ -52,7 +58,12 @@ export function createAgentBridgeRoutes(config: AgentBridgeRoutesConfig) {
         const { name, graceful = true } = body
         if (!name || typeof name !== 'string') {
           return c.json(
-            { error: { message: 'Agent name is required', code: 'INVALID_INPUT' } },
+            {
+              error: {
+                message: 'Agent name is required',
+                code: 'INVALID_INPUT',
+              },
+            },
             400,
           )
         }
@@ -68,7 +79,12 @@ export function createAgentBridgeRoutes(config: AgentBridgeRoutesConfig) {
         const { name } = body
         if (!name || typeof name !== 'string') {
           return c.json(
-            { error: { message: 'Agent name is required', code: 'INVALID_INPUT' } },
+            {
+              error: {
+                message: 'Agent name is required',
+                code: 'INVALID_INPUT',
+              },
+            },
             400,
           )
         }
@@ -108,7 +124,9 @@ export function createAgentBridgeRoutes(config: AgentBridgeRoutesConfig) {
         const task: AgentTask = { message: body.message, context: body.context }
         if (!task.message || typeof task.message !== 'string') {
           return c.json(
-            { error: { message: 'Message is required', code: 'INVALID_INPUT' } },
+            {
+              error: { message: 'Message is required', code: 'INVALID_INPUT' },
+            },
             400,
           )
         }
@@ -172,7 +190,12 @@ export function createAgentBridgeRoutes(config: AgentBridgeRoutesConfig) {
         const cfg = service.getConfig(name)
         if (!cfg) {
           return c.json(
-            { error: { message: 'Agent config not found', code: 'CONFIG_NOT_FOUND' } },
+            {
+              error: {
+                message: 'Agent config not found',
+                code: 'CONFIG_NOT_FOUND',
+              },
+            },
             404,
           )
         }

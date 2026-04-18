@@ -1,12 +1,12 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Verify Service - Page verification via LLM
  */
 
-import type { LLMConfig } from '@browseros/shared/schemas/llm'
+import type { LLMConfig } from '@trios/shared/schemas/llm'
 import type { ModelMessage } from 'ai'
 import { LLMClient } from '../../../lib/clients/llm/client'
 import type { Screenshot } from './types'
@@ -18,7 +18,7 @@ export interface VerifyOptions {
   interactiveElements?: string
   context?: Record<string, unknown>
   llmConfig: LLMConfig
-  browserosId?: string
+  triosId?: string
 }
 
 export interface VerifyResult {
@@ -35,10 +35,10 @@ export class VerifyService {
       interactiveElements,
       context,
       llmConfig,
-      browserosId,
+      triosId,
     } = options
 
-    const client = await LLMClient.create(llmConfig, browserosId)
+    const client = await LLMClient.create(llmConfig, triosId)
 
     let textPrompt = `Verify this expectation about the current page:
 

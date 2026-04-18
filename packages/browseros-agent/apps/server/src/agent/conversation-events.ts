@@ -1,13 +1,17 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
 import { EventEmitter } from 'node:events'
 
-export type ConversationEvent =
-  | { type: 'user-message'; conversationId: string; message: string; at: string }
+export type ConversationEvent = {
+  type: 'user-message'
+  conversationId: string
+  message: string
+  at: string
+}
 
 class ConversationEventBus {
   private emitter = new EventEmitter()
@@ -27,4 +31,3 @@ class ConversationEventBus {
 }
 
 export const conversationEvents = new ConversationEventBus()
-

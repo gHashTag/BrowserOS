@@ -32,17 +32,17 @@ function parseErrorMessage(
 } {
   const isBrowserosProvider = providerType === 'browseros'
 
-  // All chat requests go through the local BrowserOS agent server, so any
+  // All chat requests go through the local TRIOS agent server, so any
   // fetch failure is always a local connection issue.
   if (message.includes('Failed to fetch') || message.includes('fetch failed')) {
     return {
-      text: 'Unable to connect to BrowserOS agent. Follow below instructions.',
+      text: 'Unable to connect to TRIOS agent. Follow below instructions.',
       url: 'https://docs.browseros.com/troubleshooting/connection-issues',
       isConnectionError: true,
     }
   }
 
-  // Detect credit exhaustion from gateway (BrowserOS provider only)
+  // Detect credit exhaustion from gateway (TRIOS provider only)
   if (
     isBrowserosProvider &&
     (message.includes('CREDITS_EXHAUSTED') ||
@@ -57,7 +57,7 @@ function parseErrorMessage(
     }
   }
 
-  // Detect BrowserOS rate limit (BrowserOS provider only)
+  // Detect BrowserOS rate limit (TRIOS provider only)
   if (
     isBrowserosProvider &&
     message.includes('BrowserOS LLM daily limit reached')

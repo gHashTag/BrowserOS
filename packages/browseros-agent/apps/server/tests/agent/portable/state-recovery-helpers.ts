@@ -1,6 +1,6 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * State Recovery Helpers
  *
@@ -10,7 +10,11 @@
  * - Measure reconnect latency
  */
 
-import type { A2AConnectionState, A2AAgentState, A2AStateTransition } from '../../../src/agent/portable/a2a-types'
+import type {
+  A2AAgentState,
+  A2AConnectionState,
+  A2AStateTransition,
+} from '../../../src/agent/portable/a2a-types'
 
 /**
  * Expected state transition for validation
@@ -151,7 +155,7 @@ export function verifyExponentialBackoff(
 
   for (let i = 0; i < delays.length; i++) {
     const actual = delays[i]
-    const expected = Math.min(baseDelay * Math.pow(2, i), maxDelay)
+    const expected = Math.min(baseDelay * 2 ** i, maxDelay)
     const tolerance = expected * (tolerancePercent / 100)
     const minExpected = expected - tolerance
     const maxExpected = expected + tolerance
@@ -192,7 +196,11 @@ export function detectStateGaps(
     }
 
     // Detect invalid transitions (from closed to connected without connecting)
-    if (prev.to === 'closed' && curr.to === 'connected' && curr.to !== 'connecting') {
+    if (
+      prev.to === 'closed' &&
+      curr.to === 'connected' &&
+      curr.to !== 'connecting'
+    ) {
       result.errors.push(
         `Invalid state transition: from ${prev.to} to ${curr.to} without intermediate connecting state`,
       )

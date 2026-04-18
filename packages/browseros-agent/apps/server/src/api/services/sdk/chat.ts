@@ -1,14 +1,14 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Chat Service - Executes actions via /chat endpoint
  */
 
-import type { BrowserContext } from '@browseros/shared/schemas/browser-context'
-import type { LLMConfig } from '@browseros/shared/schemas/llm'
-import type { UIMessageStreamEvent } from '@browseros/shared/schemas/ui-stream'
+import type { BrowserContext } from '@trios/shared/schemas/browser-context'
+import type { LLMConfig } from '@trios/shared/schemas/llm'
+import type { UIMessageStreamEvent } from '@trios/shared/schemas/ui-stream'
 import { createParser, type EventSourceMessage } from 'eventsource-parser'
 import { SdkError } from './types'
 

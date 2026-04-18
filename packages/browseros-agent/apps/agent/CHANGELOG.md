@@ -1,4 +1,4 @@
-# BrowserOS Agent Extension
+# TRIOS Agent Extension
 
 ## v0.0.99 (2026-04-08)
 

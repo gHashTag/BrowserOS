@@ -3,7 +3,7 @@ import { defineToolWithCategory } from './framework'
 
 const defineAssistantTool = defineToolWithCategory('assistant')
 
-const BROWSEROS_INFO = `# BrowserOS — The Open-Source AI Browser
+const TRIOS_INFO = `# BrowserOS — The Open-Source AI Browser
 
 BrowserOS is an AI-native browser built on Chromium that turns plain English into browser actions. It runs AI agents locally on your machine, keeping your data private. Open source under AGPL-3.0.
 
@@ -87,20 +87,20 @@ const TOPIC_SECTIONS: Record<string, { start: string; end?: string }> = {
 
 function getTopicContent(topic: string): string {
   const section = TOPIC_SECTIONS[topic]
-  if (!section) return BROWSEROS_INFO
+  if (!section) return TRIOS_INFO
 
-  const startIdx = BROWSEROS_INFO.indexOf(section.start)
-  if (startIdx === -1) return BROWSEROS_INFO
+  const startIdx = TRIOS_INFO.indexOf(section.start)
+  if (startIdx === -1) return TRIOS_INFO
 
-  const endIdx = section.end ? BROWSEROS_INFO.indexOf(section.end) : undefined
+  const endIdx = section.end ? TRIOS_INFO.indexOf(section.end) : undefined
 
   return endIdx !== undefined && endIdx !== -1
-    ? BROWSEROS_INFO.slice(startIdx, endIdx).trim()
-    : BROWSEROS_INFO.slice(startIdx).trim()
+    ? TRIOS_INFO.slice(startIdx, endIdx).trim()
+    : TRIOS_INFO.slice(startIdx).trim()
 }
 
-export const browseros_info = defineAssistantTool({
-  name: 'browseros_info',
+export const trios_info = defineAssistantTool({
+  name: 'trios_info',
   description:
     'Get information about BrowserOS features, capabilities, and documentation links. Use when users ask "What is BrowserOS?", "What can BrowserOS do?", or about specific features.',
   input: z.object({
@@ -117,7 +117,7 @@ export const browseros_info = defineAssistantTool({
     content: z.string(),
   }),
   handler: async (args, _ctx, response) => {
-    const content = args.topic ? getTopicContent(args.topic) : BROWSEROS_INFO
+    const content = args.topic ? getTopicContent(args.topic) : TRIOS_INFO
     response.text(content)
     response.data({ topic: args.topic, content })
   },

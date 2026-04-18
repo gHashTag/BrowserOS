@@ -1,7 +1,7 @@
 import {
   OPENCLAW_CONTAINER_HOME,
   OPENCLAW_TERMINAL_SHELL,
-} from '@browseros/shared/constants/openclaw'
+} from '@trios/shared/constants/openclaw'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import { Terminal } from '@xterm/xterm'
@@ -9,7 +9,7 @@ import { ArrowLeft } from 'lucide-react'
 import { type FC, useEffect, useRef } from 'react'
 import '@xterm/xterm/css/xterm.css'
 import { Button } from '@/components/ui/button'
-import { getAgentServerUrl } from '@/lib/browseros/helpers'
+import { getAgentServerUrl } from '@/lib/trios/helpers'
 
 interface AgentTerminalProps {
   onBack: () => void

@@ -10,15 +10,15 @@ describe('parseCliChecksums', () => {
   test('parses checksum lines into a filename map', () => {
     const checksums = parseCliChecksums(
       [
-        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  browseros-cli_1.2.3_darwin_arm64.tar.gz',
-        'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB *browseros-cli_1.2.3_windows_amd64.zip',
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  trios-cli_1.2.3_darwin_arm64.tar.gz',
+        'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB *trios-cli_1.2.3_windows_amd64.zip',
       ].join('\n'),
     )
 
-    expect(checksums.get('browseros-cli_1.2.3_darwin_arm64.tar.gz')).toBe(
+    expect(checksums.get('trios-cli_1.2.3_darwin_arm64.tar.gz')).toBe(
       'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
     )
-    expect(checksums.get('browseros-cli_1.2.3_windows_amd64.zip')).toBe(
+    expect(checksums.get('trios-cli_1.2.3_windows_amd64.zip')).toBe(
       'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
     )
   })
@@ -33,9 +33,9 @@ describe('parseCliChecksums', () => {
 describe('parseCliArchiveFilename', () => {
   test('parses tar.gz archives', () => {
     expect(
-      parseCliArchiveFilename('browseros-cli_1.2.3_darwin_arm64.tar.gz'),
+      parseCliArchiveFilename('trios-cli_1.2.3_darwin_arm64.tar.gz'),
     ).toEqual({
-      filename: 'browseros-cli_1.2.3_darwin_arm64.tar.gz',
+      filename: 'trios-cli_1.2.3_darwin_arm64.tar.gz',
       version: '1.2.3',
       os: 'darwin',
       arch: 'arm64',
@@ -53,12 +53,12 @@ describe('buildCliReleaseManifest', () => {
     const manifest = buildCliReleaseManifest({
       version: '1.2.3',
       filenames: [
-        'browseros-cli_1.2.3_windows_arm64.zip',
-        'browseros-cli_1.2.3_darwin_arm64.tar.gz',
+        'trios-cli_1.2.3_windows_arm64.zip',
+        'trios-cli_1.2.3_darwin_arm64.tar.gz',
       ],
       checksumsContent: [
-        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  browseros-cli_1.2.3_darwin_arm64.tar.gz',
-        'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  browseros-cli_1.2.3_windows_arm64.zip',
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa  trios-cli_1.2.3_darwin_arm64.tar.gz',
+        'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  trios-cli_1.2.3_windows_arm64.zip',
       ].join('\n'),
       published_at: '2026-03-27T19:00:00Z',
       cdnBaseURL: 'https://cdn.example.com',
@@ -68,18 +68,18 @@ describe('buildCliReleaseManifest', () => {
     expect(manifest).toEqual({
       version: '1.2.3',
       published_at: '2026-03-27T19:00:00Z',
-      tag: 'browseros-cli-v1.2.3',
+      tag: 'trios-cli-v1.2.3',
       assets: {
         'darwin/arm64': {
-          filename: 'browseros-cli_1.2.3_darwin_arm64.tar.gz',
-          url: 'https://cdn.example.com/cli/v1.2.3/browseros-cli_1.2.3_darwin_arm64.tar.gz',
+          filename: 'trios-cli_1.2.3_darwin_arm64.tar.gz',
+          url: 'https://cdn.example.com/cli/v1.2.3/trios-cli_1.2.3_darwin_arm64.tar.gz',
           archive_format: 'tar.gz',
           sha256:
             'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
         },
         'windows/arm64': {
-          filename: 'browseros-cli_1.2.3_windows_arm64.zip',
-          url: 'https://cdn.example.com/cli/v1.2.3/browseros-cli_1.2.3_windows_arm64.zip',
+          filename: 'trios-cli_1.2.3_windows_arm64.zip',
+          url: 'https://cdn.example.com/cli/v1.2.3/trios-cli_1.2.3_windows_arm64.zip',
           archive_format: 'zip',
           sha256:
             'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
@@ -92,7 +92,7 @@ describe('buildCliReleaseManifest', () => {
     expect(() =>
       buildCliReleaseManifest({
         version: '1.2.3',
-        filenames: ['browseros-cli_1.2.3_linux_amd64.tar.gz'],
+        filenames: ['trios-cli_1.2.3_linux_amd64.tar.gz'],
         checksumsContent: '',
       }),
     ).toThrow('Missing checksum')

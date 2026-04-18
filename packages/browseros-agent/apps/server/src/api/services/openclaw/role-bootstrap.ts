@@ -1,22 +1,22 @@
 import {
-  type BROWSEROS_ROLE_TEMPLATES,
-  getBrowserOSRoleTemplate,
-} from '@browseros/shared/constants/role-aware-agents'
+  getTRIOSRoleTemplate,
+  type TRIOS_ROLE_TEMPLATES,
+} from '@trios/shared/constants/role-aware-agents'
 import type {
-  BrowserOSAgentRoleId,
-  BrowserOSAgentRoleSummary,
-  BrowserOSCustomRoleInput,
-  BrowserOSRoleTemplate,
-} from '@browseros/shared/types/role-aware-agents'
+  TRIOSAgentRoleId,
+  TRIOSAgentRoleSummary,
+  TRIOSCustomRoleInput,
+  TRIOSRoleTemplate,
+} from '@trios/shared/types/role-aware-agents'
 
-type RoleTemplate = (typeof BROWSEROS_ROLE_TEMPLATES)[number]
+type RoleTemplate = (typeof TRIOS_ROLE_TEMPLATES)[number]
 interface BootstrapRenderableRole {
   name: string
   shortDescription: string
   longDescription: string
   recommendedApps: string[]
-  boundaries: BrowserOSRoleTemplate['boundaries']
-  bootstrap: BrowserOSRoleTemplate['bootstrap']
+  boundaries: TRIOSRoleTemplate['boundaries']
+  bootstrap: TRIOSRoleTemplate['bootstrap']
 }
 
 export interface RoleBootstrapFiles {
@@ -26,18 +26,16 @@ export interface RoleBootstrapFiles {
   '.browseros-role.json': string
 }
 
-export function resolveRoleTemplate(
-  roleId: BrowserOSAgentRoleId,
-): RoleTemplate {
-  const role = getBrowserOSRoleTemplate(roleId)
+export function resolveRoleTemplate(roleId: TRIOSAgentRoleId): RoleTemplate {
+  const role = getTRIOSRoleTemplate(roleId)
   if (!role) {
-    throw new Error(`Unknown BrowserOS role: ${roleId}`)
+    throw new Error(`Unknown TRIOS role: ${roleId}`)
   }
   return role
 }
 
 export function buildRoleBootstrapFiles(input: {
-  role: BrowserOSRoleTemplate | BrowserOSCustomRoleInput
+  role: TRIOSRoleTemplate | TRIOSCustomRoleInput
   agentName: string
 }): RoleBootstrapFiles {
   const normalizedRole = normalizeRoleForBootstrap(input.role)
@@ -63,8 +61,8 @@ export function buildRoleBootstrapFiles(input: {
 }
 
 export function toRoleSummary(
-  role: BrowserOSRoleTemplate | BrowserOSCustomRoleInput,
-): BrowserOSAgentRoleSummary {
+  role: TRIOSRoleTemplate | TRIOSCustomRoleInput,
+): TRIOSAgentRoleSummary {
   const normalizedRole = normalizeRoleForBootstrap(role)
   return {
     roleSource: 'id' in role ? 'builtin' : 'custom',
@@ -75,7 +73,7 @@ export function toRoleSummary(
 }
 
 export function normalizeCustomRole(
-  role: BrowserOSCustomRoleInput,
+  role: TRIOSCustomRoleInput,
 ): BootstrapRenderableRole {
   const recommendedApps = Array.isArray(role.recommendedApps)
     ? role.recommendedApps.filter(
@@ -116,7 +114,7 @@ export function normalizeCustomRole(
 }
 
 function normalizeRoleForBootstrap(
-  role: BrowserOSRoleTemplate | BrowserOSCustomRoleInput,
+  role: TRIOSRoleTemplate | TRIOSCustomRoleInput,
 ): BootstrapRenderableRole {
   return 'id' in role ? role : normalizeCustomRole(role)
 }
@@ -124,7 +122,7 @@ function normalizeRoleForBootstrap(
 function buildAgentsMd(input: {
   name: string
   longDescription: string
-  boundaries: BrowserOSRoleTemplate['boundaries']
+  boundaries: TRIOSRoleTemplate['boundaries']
 }): string {
   const boundaryLines = input.boundaries
     .map(
@@ -173,7 +171,7 @@ ${input.longDescription}
 }
 
 function buildToolsMd(input: {
-  boundaries: BrowserOSRoleTemplate['boundaries']
+  boundaries: TRIOSRoleTemplate['boundaries']
   recommendedApps: string[]
 }): string {
   const boundaryLines = input.boundaries
@@ -187,7 +185,7 @@ function buildToolsMd(input: {
 
   return `# Tooling Guidelines
 
-- Use BrowserOS MCP for browser and connected SaaS tasks.
+- Use TRIOS MCP for browser and connected SaaS tasks.
 - Prefer read, summarize, and draft flows.
 - Keep outputs in the workspace when possible so work remains inspectable.
 

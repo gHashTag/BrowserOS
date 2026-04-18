@@ -178,7 +178,7 @@ export class ActionMapper {
       new URL(this.ctx.mcpUrl),
       {
         requestInit: {
-          headers: { 'X-BrowserOS-Source': 'yutori-navigator' },
+          headers: { 'X-TRIOS-Source': 'yutori-navigator' },
         },
       },
     )

@@ -86,7 +86,7 @@ async function writePackageJson(
   }
 
   const pkg = {
-    name: '@browseros/cdp-protocol',
+    name: '@trios/cdp-protocol',
     version: '0.0.1',
     type: 'module',
     scripts: {

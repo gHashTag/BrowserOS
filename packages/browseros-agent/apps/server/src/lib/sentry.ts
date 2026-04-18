@@ -1,10 +1,10 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  */
 
-import { sanitizeEvent } from '@browseros/shared/sentry/sanitize'
 import * as Sentry from '@sentry/bun'
+import { sanitizeEvent } from '@trios/shared/sentry/sanitize'
 
 import { INLINED_ENV } from '../env'
 import { VERSION } from '../version'

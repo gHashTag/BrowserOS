@@ -73,7 +73,7 @@ export class TaskExecutor {
 
   async execute(task: Task): Promise<TaskResult> {
     const startTime = Date.now()
-    const mcpUrl = `${this.config.browseros.server_url}/mcp`
+    const mcpUrl = `${this.config.trios.server_url}/mcp`
 
     // Check if task already has grader results (resume capability)
     const existing = await hasExistingGraderResults(
@@ -175,7 +175,7 @@ export class TaskExecutor {
   private async executeAgent(task: Task, pageId: number): Promise<AgentResult> {
     try {
       const { capture, taskOutputDir } = await CaptureContext.create({
-        serverUrl: this.config.browseros.server_url,
+        serverUrl: this.config.trios.server_url,
         outputDir: this.outputDir,
         taskId: task.query_id,
         initialPageId: pageId,

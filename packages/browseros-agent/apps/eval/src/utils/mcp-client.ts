@@ -37,7 +37,7 @@ export async function callMcpTool(
 
   const transport = new StreamableHTTPClientTransport(new URL(serverUrl), {
     requestInit: {
-      headers: { 'X-BrowserOS-Source': 'sdk-internal' },
+      headers: { 'X-TRIOS-Source': 'sdk-internal' },
     },
   })
 
@@ -99,7 +99,7 @@ export class McpClient {
       new URL(this.serverUrl),
       {
         requestInit: {
-          headers: { 'X-BrowserOS-Source': 'sdk-internal' },
+          headers: { 'X-TRIOS-Source': 'sdk-internal' },
         },
       },
     )

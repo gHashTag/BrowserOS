@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * LLM provider creation - creates Vercel AI SDK language models.
@@ -12,13 +12,13 @@ import { createAzure } from '@ai-sdk/azure'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import { EXTERNAL_URLS } from '@browseros/shared/constants/urls'
-import { LLM_PROVIDERS } from '@browseros/shared/schemas/llm'
 import { createOpenRouter } from '@openrouter/ai-sdk-provider'
+import { EXTERNAL_URLS } from '@trios/shared/constants/urls'
+import { LLM_PROVIDERS } from '@trios/shared/schemas/llm'
 import type { LanguageModel } from 'ai'
-import { createBrowserOSFetch } from '../../browseros-fetch'
 import { logger } from '../../logger'
 import { createOpenRouterCompatibleFetch } from '../../openrouter-fetch'
+import { createTRIOSFetch } from '../../trios-fetch'
 import { createCodexFetch } from '../oauth/codex-fetch'
 import { createCopilotFetch } from '../oauth/copilot-fetch'
 import type { ResolvedLLMConfig } from './types'
@@ -111,11 +111,11 @@ function createZaiModel(config: ResolvedLLMConfig): LanguageModel {
   })(modelId)
 }
 
-function createBrowserOSModel(config: ResolvedLLMConfig): LanguageModel {
-  if (!config.baseUrl) throw new Error('BrowserOS provider requires baseUrl')
-  const { baseUrl, apiKey, model, upstreamProvider, browserosId } = config
-  const browserosFetch = browserosId
-    ? createBrowserOSFetch(browserosId)
+function createTRIOSModel(config: ResolvedLLMConfig): LanguageModel {
+  if (!config.baseUrl) throw new Error('TRIOS provider requires baseUrl')
+  const { baseUrl, apiKey, model, upstreamProvider, triosId } = config
+  const browserosFetch = triosId
+    ? createTRIOSFetch(triosId)
     : createOpenRouterCompatibleFetch()
 
   if (upstreamProvider === LLM_PROVIDERS.OPENROUTER) {
@@ -139,7 +139,7 @@ function createBrowserOSModel(config: ResolvedLLMConfig): LanguageModel {
       fetch: browserosFetch,
     })(model)
   }
-  logger.debug('Creating OpenAI-compatible provider for BrowserOS')
+  logger.debug('Creating OpenAI-compatible provider for TRIOS')
   return createOpenAICompatible({
     name: 'browseros',
     baseURL: baseUrl,
@@ -206,7 +206,7 @@ const PROVIDER_FACTORIES: Record<string, ProviderFactory> = {
   [LLM_PROVIDERS.OLLAMA]: createOllamaModel,
   [LLM_PROVIDERS.LMSTUDIO]: createLMStudioModel,
   [LLM_PROVIDERS.BEDROCK]: createBedrockModel,
-  [LLM_PROVIDERS.BROWSEROS]: createBrowserOSModel,
+  [LLM_PROVIDERS.trios]: createTRIOSModel,
   [LLM_PROVIDERS.OPENAI_COMPATIBLE]: createOpenAICompatibleModel,
   [LLM_PROVIDERS.MOONSHOT]: createMoonshotModel,
   [LLM_PROVIDERS.CHATGPT_PRO]: createChatGPTProModel,

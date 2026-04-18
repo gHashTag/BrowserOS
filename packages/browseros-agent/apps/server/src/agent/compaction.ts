@@ -1,4 +1,4 @@
-import { AGENT_LIMITS } from '@browseros/shared/constants/limits'
+import { AGENT_LIMITS } from '@trios/shared/constants/limits'
 import {
   type LanguageModel,
   type ModelMessage,

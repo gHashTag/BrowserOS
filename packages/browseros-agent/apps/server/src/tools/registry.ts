@@ -6,7 +6,6 @@ import {
   search_bookmarks,
   update_bookmark,
 } from './bookmarks'
-import { browseros_info } from './browseros-info'
 import { get_console_logs } from './console'
 import { get_dom, search_dom } from './dom'
 import {
@@ -72,6 +71,7 @@ import {
   update_tab_group,
 } from './tab-groups'
 import { createRegistry } from './tool-registry'
+import { trios_info } from './trios-info'
 import {
   activate_window,
   close_window,
@@ -156,7 +156,7 @@ export const registry = createRegistry([
   close_tab_group,
 
   // Info (1)
-  browseros_info,
+  trios_info,
 
   // Nudges (2)
   suggest_schedule,

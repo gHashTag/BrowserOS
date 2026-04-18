@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
@@ -28,7 +28,7 @@ export function createMcpServer(deps: McpServiceDeps): McpServer {
   const server = new McpServer(
     {
       name: 'browseros_mcp',
-      title: 'BrowserOS MCP server',
+      title: 'TRIOS MCP server',
       version: deps.version,
     },
     { capabilities: { logging: {} }, instructions: MCP_INSTRUCTIONS },

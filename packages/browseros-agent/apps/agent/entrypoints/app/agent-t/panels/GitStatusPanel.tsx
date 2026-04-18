@@ -1,6 +1,6 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Git Status Panel
  * Displays repository status with file changes
@@ -22,8 +22,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import type { GitRepository } from '../types'
 import { useGitBranches } from '../hooks/useGitOrchestrator'
+import type { GitRepository } from '../types'
 
 interface GitStatusPanelProps {
   repository: GitRepository
@@ -66,22 +66,23 @@ export const GitStatusPanel: FC<GitStatusPanelProps> = ({ repository }) => {
               <Badge variant="outline">{repository.currentBranch}</Badge>
             </div>
 
-            {currentBranch && (currentBranch.ahead > 0 || currentBranch.behind > 0) && (
-              <div className="flex items-center gap-4 text-sm">
-                {currentBranch.ahead > 0 && (
-                  <div className="flex items-center gap-1 text-green-600">
-                    <ArrowUp className="size-4" />
-                    <span>{currentBranch.ahead} ahead</span>
-                  </div>
-                )}
-                {currentBranch.behind > 0 && (
-                  <div className="flex items-center gap-1 text-blue-600">
-                    <ArrowDown className="size-4" />
-                    <span>{currentBranch.behind} behind</span>
-                  </div>
-                )}
-              </div>
-            )}
+            {currentBranch &&
+              (currentBranch.ahead > 0 || currentBranch.behind > 0) && (
+                <div className="flex items-center gap-4 text-sm">
+                  {currentBranch.ahead > 0 && (
+                    <div className="flex items-center gap-1 text-green-600">
+                      <ArrowUp className="size-4" />
+                      <span>{currentBranch.ahead} ahead</span>
+                    </div>
+                  )}
+                  {currentBranch.behind > 0 && (
+                    <div className="flex items-center gap-1 text-blue-600">
+                      <ArrowDown className="size-4" />
+                      <span>{currentBranch.behind} behind</span>
+                    </div>
+                  )}
+                </div>
+              )}
 
             {status && (
               <div className="grid grid-cols-3 gap-2 text-center text-sm">
@@ -134,10 +135,7 @@ export const GitStatusPanel: FC<GitStatusPanelProps> = ({ repository }) => {
             <CardContent className="py-2">
               <ul className="space-y-1 text-sm">
                 {status.staged.map((file) => (
-                  <li
-                    key={file.path}
-                    className="flex items-center gap-2 py-1"
-                  >
+                  <li key={file.path} className="flex items-center gap-2 py-1">
                     <Checkbox checked disabled />
                     <Badge variant="outline" className="text-xs">
                       {file.status}
@@ -161,10 +159,7 @@ export const GitStatusPanel: FC<GitStatusPanelProps> = ({ repository }) => {
             <CardContent className="py-2">
               <ul className="space-y-1 text-sm">
                 {status.unstaged.map((file) => (
-                  <li
-                    key={file.path}
-                    className="flex items-center gap-2 py-1"
-                  >
+                  <li key={file.path} className="flex items-center gap-2 py-1">
                     <Checkbox />
                     <Badge variant="outline" className="text-xs">
                       {file.status}

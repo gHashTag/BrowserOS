@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { getAgentServerUrl } from '@/lib/browseros/helpers'
+import { getAgentServerUrl } from '@/lib/trios/helpers'
 
 export interface CreditsInfo {
   credits: number

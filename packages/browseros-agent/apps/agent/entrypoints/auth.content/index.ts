@@ -1,7 +1,7 @@
 import { env } from '@/lib/env'
 
 export default defineContentScript({
-  matches: [`${env.VITE_PUBLIC_BROWSEROS_API}/home`],
+  matches: [`${env.VITE_PUBLIC_trios_API}/home`],
   runAt: 'document_start',
   main() {
     window.addEventListener('message', (event) => {

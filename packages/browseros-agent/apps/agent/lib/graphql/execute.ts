@@ -9,7 +9,7 @@ export async function execute<TResult, TVariables = undefined>(
   headers.set('Content-Type', 'application/json')
   headers.set('Accept', 'application/graphql-response+json')
 
-  const response = await fetch(`${env.VITE_PUBLIC_BROWSEROS_API}/graphql`, {
+  const response = await fetch(`${env.VITE_PUBLIC_trios_API}/graphql`, {
     method: 'POST',
     headers,
     body: JSON.stringify({

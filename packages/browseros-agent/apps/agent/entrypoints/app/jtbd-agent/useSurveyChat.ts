@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
-import { getBrowserOSAdapter } from '@/lib/browseros/adapter'
-import { BROWSEROS_PREFS } from '@/lib/browseros/prefs'
+import { getTRIOSAdapter } from '@/lib/trios/adapter'
+import { trios_PREFS } from '@/lib/trios/prefs'
 
 const JTBD_API_URL = 'https://jtbd-agent.fly.dev'
 // const LOCAL_JTBD_API_URL = 'http://localhost:3001'
@@ -14,8 +14,8 @@ export interface SurveyChatOptions {
 
 async function getInstallId(): Promise<string> {
   try {
-    const adapter = getBrowserOSAdapter()
-    const pref = await adapter.getPref(BROWSEROS_PREFS.INSTALL_ID)
+    const adapter = getTRIOSAdapter()
+    const pref = await adapter.getPref(trios_PREFS.INSTALL_ID)
     if (pref?.value) {
       return String(pref.value)
     }

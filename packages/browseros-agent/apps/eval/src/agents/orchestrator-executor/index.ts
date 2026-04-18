@@ -8,9 +8,9 @@
  * and wires everything to OrchestratorAgent.
  */
 
-import type { ResolvedAgentConfig } from '@browseros/server/agent/types'
-import { Browser } from '@browseros/server/browser'
-import { CdpBackend } from '@browseros/server/browser/backends/cdp'
+import type { ResolvedAgentConfig } from '@trios/server/agent/types'
+import { Browser } from '@trios/server/browser'
+import { CdpBackend } from '@trios/server/browser/backends/cdp'
 import { CaptchaWaiter } from '../../capture/captcha-waiter'
 import { DEFAULT_TIMEOUT_MS } from '../../constants'
 import type {
@@ -31,12 +31,12 @@ import { OrchestratorAgent } from './orchestrator-agent'
 import type { ExecutorFactory, ExecutorResult } from './types'
 
 function extractCdpPort(config: EvalConfig): number {
-  const serverUrl = config.browseros.server_url
+  const serverUrl = config.trios.server_url
   const match = serverUrl.match(/:(\d+)$/)
-  if (!match) return config.browseros.base_cdp_port
+  if (!match) return config.trios.base_cdp_port
   const serverPort = Number.parseInt(match[1], 10)
-  const workerOffset = serverPort - config.browseros.base_server_port
-  return config.browseros.base_cdp_port + workerOffset
+  const workerOffset = serverPort - config.trios.base_server_port
+  return config.trios.base_cdp_port + workerOffset
 }
 
 interface ResolvedConfigs {
@@ -248,7 +248,7 @@ export class OrchestratorExecutorEvaluator implements AgentEvaluator {
         const executor = new Executor(
           executorConfig,
           browser,
-          config.browseros.server_url,
+          config.trios.server_url,
           { isCladoAction, callbacks },
         )
         let result: ExecutorResult

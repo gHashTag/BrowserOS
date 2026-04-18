@@ -1,14 +1,14 @@
-export type BrowserOSAgentRoleId = 'chief-of-staff'
+export type TRIOSAgentRoleId = 'chief-of-staff'
 
-export interface BrowserOSRoleBoundary {
+export interface TRIOSRoleBoundary {
   key: string
   label: string
   description: string
   defaultMode: 'allow' | 'ask' | 'block'
 }
 
-export interface BrowserOSRoleTemplate {
-  id: BrowserOSAgentRoleId
+export interface TRIOSRoleTemplate {
+  id: TRIOSAgentRoleId
   name: string
   shortDescription: string
   longDescription: string
@@ -19,15 +19,15 @@ export interface BrowserOSRoleTemplate {
     soulMd: string
     toolsMd: string
   }
-  boundaries: BrowserOSRoleBoundary[]
+  boundaries: TRIOSRoleBoundary[]
 }
 
-export interface BrowserOSCustomRoleInput {
+export interface TRIOSCustomRoleInput {
   name: string
   shortDescription: string
   longDescription: string
   recommendedApps: string[]
-  boundaries: BrowserOSRoleBoundary[]
+  boundaries: TRIOSRoleBoundary[]
   bootstrap?: {
     agentsMd?: string
     soulMd?: string
@@ -37,8 +37,8 @@ export interface BrowserOSCustomRoleInput {
 
 export interface RoleAwareCreateAgentInput {
   name: string
-  roleId?: BrowserOSAgentRoleId
-  customRole?: BrowserOSCustomRoleInput
+  roleId?: TRIOSAgentRoleId
+  customRole?: TRIOSCustomRoleInput
   providerType?: string
   providerName?: string
   baseUrl?: string
@@ -46,9 +46,9 @@ export interface RoleAwareCreateAgentInput {
   modelId?: string
 }
 
-export interface BrowserOSAgentRoleSummary {
+export interface TRIOSAgentRoleSummary {
   roleSource: 'builtin' | 'custom'
-  roleId?: BrowserOSAgentRoleId
+  roleId?: TRIOSAgentRoleId
   roleName: string
   shortDescription: string
 }

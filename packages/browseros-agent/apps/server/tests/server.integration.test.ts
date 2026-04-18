@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Integration tests for the consolidated HTTP server.
  * Uses the unified test environment setup.
@@ -13,8 +13,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 
 import {
-  cleanupBrowserOS,
-  ensureBrowserOS,
+  cleanupTRIOS,
+  ensureTRIOS,
   type TestEnvironmentConfig,
 } from './__helpers__/index'
 
@@ -30,7 +30,7 @@ function getBaseUrl(): string {
 
 describe('HTTP Server Integration Tests', () => {
   beforeAll(async () => {
-    config = await ensureBrowserOS()
+    config = await ensureTRIOS()
 
     mcpClient = new Client({
       name: 'browseros-integration-test-client',
@@ -54,7 +54,7 @@ describe('HTTP Server Integration Tests', () => {
     }
 
     if (!process.env.KEEP_BROWSER) {
-      await cleanupBrowserOS()
+      await cleanupTRIOS()
     }
   })
 
@@ -155,7 +155,7 @@ describe('HTTP Server Integration Tests', () => {
 
   describe('Chat endpoint', () => {
     it(
-      'streams a chat response with BrowserOS provider',
+      'streams a chat response with TRIOS provider',
       async () => {
         const conversationId = crypto.randomUUID()
 

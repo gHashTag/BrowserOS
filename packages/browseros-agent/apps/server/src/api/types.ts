@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
@@ -11,8 +11,8 @@ import {
   CustomMcpServerSchema,
   type Tab,
   TabSchema,
-} from '@browseros/shared/schemas/browser-context'
-import { LLMConfigSchema } from '@browseros/shared/schemas/llm'
+} from '@trios/shared/schemas/browser-context'
+import { LLMConfigSchema } from '@trios/shared/schemas/llm'
 import { z } from 'zod'
 import type { Browser } from '../browser/browser'
 import type { ToolRegistry } from '../tools/tool-registry'
@@ -120,7 +120,7 @@ export interface HttpServerConfig {
   browser: Browser
   registry: ToolRegistry
 
-  browserosId?: string
+  triosId?: string
   executionDir: string
   resourcesDir: string
   codegenServiceUrl?: string

@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Abstraction over the Podman CLI for container lifecycle management.
@@ -163,7 +163,7 @@ export class PodmanRuntime {
   }
 
   /**
-   * Lists running container names. Used to check whether non-BrowserOS
+   * Lists running container names. Used to check whether non-TRIOS
    * containers are running before stopping the Podman machine.
    */
   async listRunningContainers(): Promise<string[]> {

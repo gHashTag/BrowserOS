@@ -1,10 +1,9 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * Shared Browser Context Zod schemas - single source of truth.
- * Use z.infer<> for TypeScript types.
+ * Shared Browser Context Zod schemas - single source of truth
  */
 
 import { z } from 'zod'
@@ -60,3 +59,8 @@ export const BrowserContextSchema: z.ZodObject<{
 })
 
 export type BrowserContext = z.infer<typeof BrowserContextSchema>
+
+/**
+ * Browser type alias for backward compatibility
+ */
+export type Browser = BrowserContext

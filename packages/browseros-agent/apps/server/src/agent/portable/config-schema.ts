@@ -1,10 +1,10 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import type { LLMProvider } from '@browseros/shared/schemas/llm'
+import type { LLMProvider } from '@trios/shared/schemas/llm'
 import { z } from 'zod'
 
 export const PortableAgentConfigSchema = z.object({
@@ -104,3 +104,13 @@ export type TaskEvent =
   | { type: 'tool-end'; toolName: string; result: unknown }
   | { type: 'done'; result: unknown }
   | { type: 'error'; error: string }
+
+/**
+ * Relay Observer configuration for A2A (Agent-to-Agent) communication
+ */
+export const RelayObserverConfigSchema = z.object({
+  browserContext: z.record(z.unknown()).optional(),
+  workingDir: z.string().optional(),
+})
+
+export type RelayObserverConfig = z.infer<typeof RelayObserverConfigSchema>

@@ -1,6 +1,6 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Git Checkout Tool
  */
@@ -11,7 +11,7 @@ import { defineTool } from '../framework'
 export const gitCheckout = defineTool({
   name: 'git_checkout',
   description: 'Switch branches or restore files in a git repository',
-  approvalCategory: 'filesystem',
+  approvalCategory: 'data-modification',
   input: z.object({
     path: z.string().describe('Path to the git repository'),
     target: z.string().describe('Branch name or file path to checkout'),
@@ -32,20 +32,22 @@ export const gitCheckout = defineTool({
     try {
       if (restore) {
         await $`git restore ${target}`.cwd(path).quiet()
-        response.json({ success: true })
+        response.text(JSON.stringify({ success: true }))
       } else {
         await $`git checkout ${target}`.cwd(path).quiet()
 
         const branch = await $`git rev-parse --abbrev-ref HEAD`
           .cwd(path)
           .quiet()
-        response.json({
-          success: true,
-          currentBranch: branch.stdout.toString().trim(),
-        })
+        response.text(
+          JSON.stringify({
+            success: true,
+            currentBranch: branch.stdout.toString().trim(),
+          }),
+        )
       }
     } catch (error) {
-      response.json({ success: false, error: String(error) })
+      response.text(JSON.stringify({ success: false, error: String(error) }))
     }
   },
 })

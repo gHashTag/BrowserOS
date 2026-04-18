@@ -2,9 +2,9 @@ import { type FC, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { getBrowserOSAdapter } from '@/lib/browseros/adapter'
-import { Capabilities, Feature } from '@/lib/browseros/capabilities'
-import { BROWSEROS_PREFS } from '@/lib/browseros/prefs'
+import { getTRIOSAdapter } from '@/lib/trios/adapter'
+import { Capabilities, Feature } from '@/lib/trios/capabilities'
+import { trios_PREFS } from '@/lib/trios/prefs'
 
 export const ToolbarSettingsCard: FC = () => {
   const [showLlmChat, setShowLlmChat] = useState(true)
@@ -17,11 +17,11 @@ export const ToolbarSettingsCard: FC = () => {
   useEffect(() => {
     const loadPrefs = async () => {
       try {
-        const adapter = getBrowserOSAdapter()
+        const adapter = getTRIOSAdapter()
         const [chatPref, hubPref, labelsPref] = await Promise.all([
-          adapter.getPref(BROWSEROS_PREFS.SHOW_LLM_CHAT),
-          adapter.getPref(BROWSEROS_PREFS.SHOW_LLM_HUB),
-          adapter.getPref(BROWSEROS_PREFS.SHOW_TOOLBAR_LABELS),
+          adapter.getPref(trios_PREFS.SHOW_LLM_CHAT),
+          adapter.getPref(trios_PREFS.SHOW_LLM_HUB),
+          adapter.getPref(trios_PREFS.SHOW_TOOLBAR_LABELS),
         ])
         setShowLlmChat(chatPref?.value !== false)
         setShowLlmHub(hubPref?.value !== false)
@@ -34,7 +34,7 @@ export const ToolbarSettingsCard: FC = () => {
 
         if (hasVerticalTabsSupport) {
           const verticalTabsPref = await adapter.getPref(
-            BROWSEROS_PREFS.VERTICAL_TABS_ENABLED,
+            trios_PREFS.VERTICAL_TABS_ENABLED,
           )
           setVerticalTabsEnabled(verticalTabsPref?.value !== false)
         }
@@ -54,7 +54,7 @@ export const ToolbarSettingsCard: FC = () => {
     setter: (v: boolean) => void,
   ) => {
     try {
-      const adapter = getBrowserOSAdapter()
+      const adapter = getTRIOSAdapter()
       const success = await adapter.setPref(prefKey, value)
       if (!success) {
         throw new Error('Failed to update setting')
@@ -83,11 +83,7 @@ export const ToolbarSettingsCard: FC = () => {
             id="show-llm-chat"
             checked={showLlmChat}
             onCheckedChange={(checked) =>
-              handleToggle(
-                BROWSEROS_PREFS.SHOW_LLM_CHAT,
-                checked,
-                setShowLlmChat,
-              )
+              handleToggle(trios_PREFS.SHOW_LLM_CHAT, checked, setShowLlmChat)
             }
             disabled={isLoading}
           />
@@ -106,7 +102,7 @@ export const ToolbarSettingsCard: FC = () => {
             id="show-llm-hub"
             checked={showLlmHub}
             onCheckedChange={(checked) =>
-              handleToggle(BROWSEROS_PREFS.SHOW_LLM_HUB, checked, setShowLlmHub)
+              handleToggle(trios_PREFS.SHOW_LLM_HUB, checked, setShowLlmHub)
             }
             disabled={isLoading}
           />
@@ -129,7 +125,7 @@ export const ToolbarSettingsCard: FC = () => {
             checked={showToolbarLabels}
             onCheckedChange={(checked) =>
               handleToggle(
-                BROWSEROS_PREFS.SHOW_TOOLBAR_LABELS,
+                trios_PREFS.SHOW_TOOLBAR_LABELS,
                 checked,
                 setShowToolbarLabels,
               )
@@ -156,7 +152,7 @@ export const ToolbarSettingsCard: FC = () => {
               checked={verticalTabsEnabled}
               onCheckedChange={(checked) =>
                 handleToggle(
-                  BROWSEROS_PREFS.VERTICAL_TABS_ENABLED,
+                  trios_PREFS.VERTICAL_TABS_ENABLED,
                   checked,
                   setVerticalTabsEnabled,
                 )

@@ -1,6 +1,6 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * SSE Fanout Harness
  *
@@ -55,7 +55,9 @@ export class SSEFanoutHarness {
     }
 
     this.subscribers.set(clientId, subscriber)
-    console.log(`[SSEFanout] Subscriber ${clientId} joined. Total: ${this.subscribers.size}`)
+    console.log(
+      `[SSEFanout] Subscriber ${clientId} joined. Total: ${this.subscribers.size}`,
+    )
 
     return subscriber
   }
@@ -67,7 +69,9 @@ export class SSEFanoutHarness {
     const existed = this.subscribers.delete(clientId)
 
     if (existed) {
-      console.log(`[SSEFanout] Subscriber ${clientId} left. Total: ${this.subscribers.size}`)
+      console.log(
+        `[SSEFanout] Subscriber ${clientId} left. Total: ${this.subscribers.size}`,
+      )
     }
 
     return existed
@@ -131,7 +135,9 @@ export class SSEFanoutHarness {
 
     this.subscribers.set(clientId, subscriber)
 
-    console.log(`[SSEFanout] Late subscriber ${clientId} joined after ${afterEventCount} events`)
+    console.log(
+      `[SSEFanout] Late subscriber ${clientId} joined after ${afterEventCount} events`,
+    )
 
     return subscriber
   }
@@ -142,7 +148,9 @@ export class SSEFanoutHarness {
   simulateSubscriberDrop(clientId: string): boolean {
     const existed = this.unsubscribe(clientId)
 
-    console.log(`[SSEFanout] Simulated drop of subscriber ${clientId}. Existed: ${existed}`)
+    console.log(
+      `[SSEFanout] Simulated drop of subscriber ${clientId}. Existed: ${existed}`,
+    )
 
     return existed
   }
@@ -188,7 +196,10 @@ export class SSEFanoutHarness {
   /**
    * Verify subscriber received specific event count
    */
-  verifySubscriberReceivedEvents(clientId: string, expectedCount: number): boolean {
+  verifySubscriberReceivedEvents(
+    clientId: string,
+    expectedCount: number,
+  ): boolean {
     const subscriber = this.subscribers.get(clientId)
 
     if (!subscriber) {
@@ -199,11 +210,15 @@ export class SSEFanoutHarness {
     const actualCount = subscriber.events.length
 
     if (actualCount === expectedCount) {
-      console.log(`[SSEFanout] Subscriber ${clientId} received expected ${expectedCount} events`)
+      console.log(
+        `[SSEFanout] Subscriber ${clientId} received expected ${expectedCount} events`,
+      )
       return true
     }
 
-    console.log(`[SSEFanout] Subscriber ${clientId} event count mismatch. Expected: ${expectedCount}, Actual: ${actualCount}`)
+    console.log(
+      `[SSEFanout] Subscriber ${clientId} event count mismatch. Expected: ${expectedCount}, Actual: ${actualCount}`,
+    )
     return false
   }
 }

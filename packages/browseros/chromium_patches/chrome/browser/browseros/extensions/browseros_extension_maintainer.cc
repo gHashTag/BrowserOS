@@ -37,7 +37,7 @@ index 0000000000000..5804d54696e8f
 +#include "services/network/public/cpp/resource_request.h"
 +#include "services/network/public/cpp/simple_url_loader.h"
 +
-+namespace browseros {
++namespace trios {
 +
 +namespace {
 +

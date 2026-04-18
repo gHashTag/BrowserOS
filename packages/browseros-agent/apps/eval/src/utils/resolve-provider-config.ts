@@ -1,8 +1,8 @@
 import {
-  fetchBrowserOSConfig,
+  fetchTRIOSConfig,
   getLLMConfigFromProvider,
-} from '@browseros/server/lib/clients/gateway'
-import { LLM_PROVIDERS, type LLMConfig } from '@browseros/shared/schemas/llm'
+} from '@trios/server/lib/clients/gateway'
+import { LLM_PROVIDERS, type LLMConfig } from '@trios/shared/schemas/llm'
 import { resolveEnvValue } from './resolve-env'
 
 export interface ResolvedProviderConfig extends LLMConfig {
@@ -12,17 +12,17 @@ export interface ResolvedProviderConfig extends LLMConfig {
 export async function resolveProviderConfig(
   agent: LLMConfig,
 ): Promise<ResolvedProviderConfig> {
-  if (agent.provider === LLM_PROVIDERS.BROWSEROS) {
-    const configUrl = process.env.BROWSEROS_CONFIG_URL
+  if (agent.provider === LLM_PROVIDERS.trios) {
+    const configUrl = process.env.trios_CONFIG_URL
     if (!configUrl) {
       throw new Error(
-        'BROWSEROS_CONFIG_URL environment variable is required for BrowserOS provider',
+        'trios_CONFIG_URL environment variable is required for TRIOS provider',
       )
     }
-    const browserosConfig = await fetchBrowserOSConfig(configUrl)
+    const browserosConfig = await fetchTRIOSConfig(configUrl)
     const llmConfig = getLLMConfigFromProvider(browserosConfig, 'default')
     return {
-      provider: LLM_PROVIDERS.BROWSEROS,
+      provider: LLM_PROVIDERS.trios,
       model: llmConfig.modelName,
       apiKey: llmConfig.apiKey,
       baseUrl: llmConfig.baseUrl,

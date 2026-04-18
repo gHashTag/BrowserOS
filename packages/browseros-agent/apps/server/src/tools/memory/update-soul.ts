@@ -1,4 +1,4 @@
-import { PATHS } from '@browseros/shared/constants/paths'
+import { PATHS } from '@trios/shared/constants/paths'
 import { tool } from 'ai'
 import { z } from 'zod'
 import { writeSoul } from '../../lib/soul'

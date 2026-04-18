@@ -1,10 +1,9 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * Shared LLM configuration Zod schemas - single source of truth.
- * Use z.infer<> for TypeScript types.
+ * Shared LLM configuration Zod schemas - single source of truth
  */
 
 import { z } from 'zod'
@@ -21,13 +20,14 @@ export const LLM_PROVIDERS = {
   OLLAMA: 'ollama',
   LMSTUDIO: 'lmstudio',
   BEDROCK: 'bedrock',
-  BROWSEROS: 'browseros',
+  TRIOS: 'trios',
   OPENAI_COMPATIBLE: 'openai-compatible',
   MOONSHOT: 'moonshot',
   CHATGPT_PRO: 'chatgpt-pro',
   GITHUB_COPILOT: 'github-copilot',
   QWEN_CODE: 'qwen-code',
   ZAI: 'zai',
+  trios: 'browseros',
 } as const
 
 /**
@@ -43,13 +43,14 @@ export const LLMProviderSchema: z.ZodEnum<
     'ollama',
     'lmstudio',
     'bedrock',
-    'browseros',
+    'trios',
     'openai-compatible',
     'moonshot',
     'chatgpt-pro',
     'github-copilot',
     'qwen-code',
     'zai',
+    'browseros',
   ]
 > = z.enum([
   LLM_PROVIDERS.ANTHROPIC,
@@ -60,13 +61,14 @@ export const LLMProviderSchema: z.ZodEnum<
   LLM_PROVIDERS.OLLAMA,
   LLM_PROVIDERS.LMSTUDIO,
   LLM_PROVIDERS.BEDROCK,
-  LLM_PROVIDERS.BROWSEROS,
+  LLM_PROVIDERS.TRIOS,
   LLM_PROVIDERS.OPENAI_COMPATIBLE,
   LLM_PROVIDERS.MOONSHOT,
   LLM_PROVIDERS.CHATGPT_PRO,
   LLM_PROVIDERS.GITHUB_COPILOT,
   LLM_PROVIDERS.QWEN_CODE,
   LLM_PROVIDERS.ZAI,
+  LLM_PROVIDERS.trios,
 ])
 
 export type LLMProvider = z.infer<typeof LLMProviderSchema>

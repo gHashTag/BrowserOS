@@ -2,10 +2,10 @@ import { mkdtempSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { TEST_PORTS } from '@browseros/shared/constants/ports'
+import { TEST_PORTS } from '@trios/shared/constants/ports'
 
 const DEFAULT_BINARY_PATH =
-  process.env.BROWSEROS_BINARY ??
+  process.env.trios_BINARY ??
   '/Applications/BrowserOS.app/Contents/MacOS/BrowserOS'
 const PORT_SCAN_RANGE = 100
 
@@ -78,19 +78,16 @@ async function findAvailablePort(
 
 function resolveFixedPort(
   testEnvName:
-    | 'BROWSEROS_TEST_CDP_PORT'
-    | 'BROWSEROS_TEST_SERVER_PORT'
-    | 'BROWSEROS_TEST_EXTENSION_PORT',
-  baseEnvName:
-    | 'BROWSEROS_CDP_PORT'
-    | 'BROWSEROS_SERVER_PORT'
-    | 'BROWSEROS_EXTENSION_PORT',
+    | 'trios_TEST_CDP_PORT'
+    | 'trios_TEST_SERVER_PORT'
+    | 'trios_TEST_EXTENSION_PORT',
+  baseEnvName: 'trios_CDP_PORT' | 'trios_SERVER_PORT' | 'trios_EXTENSION_PORT',
 ): number | undefined {
   const testPort = parsePort(process.env[testEnvName], testEnvName)
   if (testPort !== undefined) {
     return testPort
   }
-  if (process.env.BROWSEROS_TEST_USE_ENV_PORTS === 'true') {
+  if (process.env.trios_TEST_USE_ENV_PORTS === 'true') {
     return parsePort(process.env[baseEnvName], baseEnvName)
   }
   return undefined
@@ -109,17 +106,14 @@ export async function resolveRuntimePorts(): Promise<{
   ports: RuntimePorts
   usesFixedPorts: boolean
 }> {
-  const cdpOverride = resolveFixedPort(
-    'BROWSEROS_TEST_CDP_PORT',
-    'BROWSEROS_CDP_PORT',
-  )
+  const cdpOverride = resolveFixedPort('trios_TEST_CDP_PORT', 'trios_CDP_PORT')
   const serverOverride = resolveFixedPort(
-    'BROWSEROS_TEST_SERVER_PORT',
-    'BROWSEROS_SERVER_PORT',
+    'trios_TEST_SERVER_PORT',
+    'trios_SERVER_PORT',
   )
   const extensionOverride = resolveFixedPort(
-    'BROWSEROS_TEST_EXTENSION_PORT',
-    'BROWSEROS_EXTENSION_PORT',
+    'trios_TEST_EXTENSION_PORT',
+    'trios_EXTENSION_PORT',
   )
 
   const reserved = new Set<number>()
@@ -147,8 +141,8 @@ export async function resolveRuntimePorts(): Promise<{
 export async function createTestRuntimePlan(): Promise<TestRuntimePlan> {
   const resolvedPorts = await resolveRuntimePorts()
   const userDataDir = mkdtempSync(join(tmpdir(), 'browseros-test-'))
-  const headless = process.env.BROWSEROS_TEST_HEADLESS === 'true'
-  const extraArgs = parseExtraArgs(process.env.BROWSEROS_TEST_EXTRA_ARGS)
+  const headless = process.env.trios_TEST_HEADLESS === 'true'
+  const extraArgs = parseExtraArgs(process.env.trios_TEST_EXTRA_ARGS)
 
   return {
     ports: resolvedPorts.ports,

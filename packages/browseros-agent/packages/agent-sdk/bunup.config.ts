@@ -8,5 +8,5 @@ export default defineConfig({
     resolve: true,
   },
   clean: true,
-  noExternal: ['@browseros/shared'],
+  noExternal: ['@trios/shared'],
 })

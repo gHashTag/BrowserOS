@@ -1,4 +1,4 @@
-import { LLM_PROVIDERS } from '@browseros/shared/schemas/llm'
+import { LLM_PROVIDERS } from '@trios/shared/schemas/llm'
 import type {
   FilePart,
   ImagePart,
@@ -39,7 +39,7 @@ function supportsToolResultMediaTransport(
       const modelId = config.model.toLowerCase()
       return modelId.includes('gemini-3') && !modelId.includes('gemini-2')
     }
-    case LLM_PROVIDERS.BROWSEROS:
+    case LLM_PROVIDERS.trios:
       return (
         config.upstreamProvider === LLM_PROVIDERS.ANTHROPIC ||
         config.upstreamProvider === LLM_PROVIDERS.AZURE

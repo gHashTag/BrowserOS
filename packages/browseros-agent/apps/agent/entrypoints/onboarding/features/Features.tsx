@@ -42,7 +42,7 @@ const features: Feature[] = [
     description:
       'Describe any task and watch BrowserOS execute it—clicking, typing, and navigating for you.',
     detailedDescription:
-      'The BrowserOS Agent turns your words into browser actions. Describe what you need in plain English—fill out this form, extract data from that page, navigate through these steps—and the agent handles the rest. It clicks buttons, types text, navigates between pages, and completes multi-step browser tasks automatically. Everything runs locally on your machine with your own API keys, so your data stays private.',
+      'The TRIOS Agent turns your words into browser actions. Describe what you need in plain English—fill out this form, extract data from that page, navigate through these steps—and the agent handles the rest. It clicks buttons, types text, navigates between pages, and completes multi-step browser tasks automatically. Everything runs locally on your machine with your own API keys, so your data stays private.',
     highlights: [
       'Multi-tab execution — run agents in multiple tabs simultaneously',
       'Smart navigation — automatically finds and interacts with page elements',
@@ -205,7 +205,7 @@ export const FeaturesPage: FC = () => {
               <video
                 className="h-full w-full"
                 src={BROWSER_OS_INTRO_VIDEO_URL}
-                title="BrowserOS MCP Server Demonstration"
+                title="TRIOS MCP Server Demonstration"
                 autoPlay
                 muted
                 loop

@@ -1,6 +1,6 @@
 import { appendFile, readdir, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
-import { PATHS } from '@browseros/shared/constants/paths'
+import { PATHS } from '@trios/shared/constants/paths'
 import { tool } from 'ai'
 import { z } from 'zod'
 import { getMemoryDir } from '../../lib/browseros-dir'

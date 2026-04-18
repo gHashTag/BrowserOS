@@ -1,17 +1,12 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Git Orchestrator Hooks
  */
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type {
-  BranchInfo,
-  FileChange,
-  GitRepository,
-  GitStatus,
-} from '../types'
+import type { BranchInfo, FileChange, GitRepository, GitStatus } from '../types'
 
 const API_BASE = '/api/git'
 

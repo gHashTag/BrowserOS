@@ -145,7 +145,7 @@ export const ProfilePage: FC = () => {
 
     try {
       const res = await fetch(
-        `${env.VITE_PUBLIC_BROWSEROS_API}/upload/presigned-url`,
+        `${env.VITE_PUBLIC_trios_API}/upload/presigned-url`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

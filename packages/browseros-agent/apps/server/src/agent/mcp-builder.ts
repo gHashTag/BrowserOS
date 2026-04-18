@@ -1,6 +1,6 @@
 import { createMCPClient } from '@ai-sdk/mcp'
-import { TIMEOUTS } from '@browseros/shared/constants/timeouts'
-import type { BrowserContext } from '@browseros/shared/schemas/browser-context'
+import { TIMEOUTS } from '@trios/shared/constants/timeouts'
+import type { BrowserContext } from '@trios/shared/schemas/browser-context'
 import type { ToolSet } from 'ai'
 import { klavisStrataCache } from '../api/services/klavis/strata-cache'
 import type { KlavisClient } from '../lib/clients/klavis/klavis-client'
@@ -20,7 +20,7 @@ export interface McpServerSpec {
 export interface McpServerSpecDeps {
   browserContext?: BrowserContext
   klavisClient?: KlavisClient
-  browserosId?: string
+  triosId?: string
 }
 
 export interface McpClientBundle {
@@ -36,14 +36,14 @@ export async function buildMcpServerSpecs(
 
   // Klavis Strata MCP servers
   if (
-    deps.browserosId &&
+    deps.triosId &&
     deps.klavisClient &&
     deps.browserContext?.enabledMcpServers?.length
   ) {
     try {
       const result = await klavisStrataCache.getOrFetch(
         deps.klavisClient,
-        deps.browserosId,
+        deps.triosId,
         deps.browserContext.enabledMcpServers,
       )
       specs.push({
@@ -52,7 +52,7 @@ export async function buildMcpServerSpecs(
         transport: 'streamable-http',
       })
       logger.info('Added Klavis Strata MCP server', {
-        browserosId: deps.browserosId.slice(0, 12),
+        triosId: deps.triosId.slice(0, 12),
         servers: deps.browserContext.enabledMcpServers,
       })
     } catch (error) {

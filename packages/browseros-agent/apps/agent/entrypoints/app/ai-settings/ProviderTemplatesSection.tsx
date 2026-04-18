@@ -5,12 +5,12 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
-import { Feature } from '@/lib/browseros/capabilities'
-import { useCapabilities } from '@/lib/browseros/useCapabilities'
 import {
   type ProviderTemplate,
   providerTemplates,
 } from '@/lib/llm-providers/providerTemplates'
+import { Feature } from '@/lib/trios/capabilities'
+import { useCapabilities } from '@/lib/trios/useCapabilities'
 import { cn } from '@/lib/utils'
 import { ProviderTemplateCard } from './ProviderTemplateCard'
 

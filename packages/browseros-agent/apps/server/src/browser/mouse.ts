@@ -1,4 +1,4 @@
-import type { ProtocolApi } from '@browseros/cdp-protocol/protocol-api'
+import type { ProtocolApi } from '@trios/cdp-protocol/protocol-api'
 
 export async function dispatchClick(
   session: ProtocolApi,

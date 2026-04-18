@@ -3,10 +3,10 @@ import type {
   LanguageModelV3,
   LanguageModelV3Middleware,
 } from '@ai-sdk/provider'
-import { AGENT_LIMITS } from '@browseros/shared/constants/limits'
-import type { BrowserContext } from '@browseros/shared/schemas/browser-context'
-import { LLM_PROVIDERS } from '@browseros/shared/schemas/llm'
-import type { AclRule } from '@browseros/shared/types/acl'
+import { AGENT_LIMITS } from '@trios/shared/constants/limits'
+import type { BrowserContext } from '@trios/shared/schemas/browser-context'
+import { LLM_PROVIDERS } from '@trios/shared/schemas/llm'
+import type { AclRule } from '@trios/shared/types/acl'
 import {
   type LanguageModel,
   type ModelMessage,
@@ -46,7 +46,7 @@ export interface AiSdkAgentConfig {
   registry: ToolRegistry
   browserContext?: BrowserContext
   klavisClient?: KlavisClient
-  browserosId?: string
+  triosId?: string
   aiSdkDevtoolsEnabled?: boolean
   aclRules?: AclRule[]
 }
@@ -148,7 +148,7 @@ export class AiSdkAgent {
     const specs = await buildMcpServerSpecs({
       browserContext: config.browserContext,
       klavisClient: config.klavisClient,
-      browserosId: config.browserosId,
+      triosId: config.triosId,
     })
     const { clients, tools: rawExternalMcpTools } =
       await createMcpClients(specs)

@@ -1,6 +1,6 @@
-import type { BrowserContext } from '@browseros/shared/schemas/browser-context'
-import type { LLMConfig, LLMProvider } from '@browseros/shared/schemas/llm'
-import type { UIMessageStreamEvent } from '@browseros/shared/schemas/ui-stream'
+import type { BrowserContext } from '@trios/shared/schemas/browser-context'
+import type { LLMConfig, LLMProvider } from '@trios/shared/schemas/llm'
+import type { UIMessageStreamEvent } from '@trios/shared/schemas/ui-stream'
 import type { ZodSchema } from 'zod'
 
 // Re-export shared types for consumers (bundled at build time)

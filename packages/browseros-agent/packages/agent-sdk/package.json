@@ -1,7 +1,7 @@
 {
-  "name": "@browseros-ai/agent-sdk",
+  "name": "@trios-ai/agent-sdk",
   "version": "0.0.7",
-  "description": "Browser automation SDK for BrowserOS - navigate, interact, extract data with natural language",
+  "description": "Browser automation SDK for TRIOS - navigate, interact, extract data with natural language",
   "type": "module",
   "license": "AGPL-3.0-or-later",
   "repository": {
@@ -14,7 +14,6 @@
     "url": "https://github.com/browseros-ai/BrowserOS/issues"
   },
   "keywords": [
-    "browseros",
     "browser-automation",
     "web-scraping",
     "ai-agent",
@@ -58,7 +57,7 @@
     "zod": "^3.x"
   },
   "devDependencies": {
-    "@browseros/shared": "workspace:*",
+    "@trios/shared": "workspace:*",
     "bunup": "^0.16.17",
     "typedoc": "^0.28.15"
   }

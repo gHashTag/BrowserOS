@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Unified test environment orchestrator.
  * Ensures server + browser + extension are all ready.
@@ -35,13 +35,13 @@ function configsMatch(
 }
 
 /**
- * Ensures the full BrowserOS test environment is ready:
+ * Ensures the full TRIOS test environment is ready:
  * 1. Server running and healthy
  * 2. Browser running with CDP available
  *
  * Reuses existing processes if already running with same config.
  */
-export async function ensureBrowserOS(
+export async function ensureTRIOS(
   options?: Partial<TestEnvironmentConfig>,
 ): Promise<TestEnvironmentConfig> {
   if (!runtimePlan) {
@@ -68,7 +68,7 @@ export async function ensureBrowserOS(
   }
 
   // Config changed or not running: full setup
-  console.log('\n=== Setting up BrowserOS test environment ===')
+  console.log('\n=== Setting up TRIOS test environment ===')
 
   // 1. Kill conflicting processes on ports
   await killProcessOnPort(config.serverPort)
@@ -93,10 +93,10 @@ export async function ensureBrowserOS(
 }
 
 /**
- * Cleans up the full BrowserOS test environment.
+ * Cleans up the full TRIOS test environment.
  */
-export async function cleanupBrowserOS(): Promise<void> {
-  console.log('\n=== Cleaning up BrowserOS test environment ===')
+export async function cleanupTRIOS(): Promise<void> {
+  console.log('\n=== Cleaning up TRIOS test environment ===')
   await killBrowser()
   await killServer()
   runtimePlan = null

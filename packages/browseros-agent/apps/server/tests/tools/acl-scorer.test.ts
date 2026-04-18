@@ -4,7 +4,7 @@ setDefaultTimeout(30_000)
 
 import assert from 'node:assert'
 import { resolve } from 'node:path'
-import type { AclRule, ElementProperties } from '@browseros/shared/types/acl'
+import type { AclRule, ElementProperties } from '@trios/shared/types/acl'
 import { editDistanceRatio } from '../../src/tools/acl/acl-edit-distance'
 import { scoreFixture } from '../../src/tools/acl/acl-scorer'
 

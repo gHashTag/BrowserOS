@@ -1,20 +1,24 @@
-import type { RelayObserverConfig } from '../../agent/portable/config-schema'
- * Copyright 2025 BrowserOS
- * SPDX-License-Identifier: AGPL-3.0-or-later
- *
- * Task Router
- * Routes portable agent tasks to appropriate handlers
- */
+// Copyright 2025 TRIOS
+// SPDX-License-Identifier: AGPL-3.0-or-later
+//
+// Task Router
+// Routes portable agent tasks to appropriate handlers
 
-import { logger } from '../../lib/logger'
-import type { Env, HttpServerConfig } from './types'
+import type {
+  PortableAgentConfig,
+  RelayObserverConfig,
+} from '../../agent/portable/config-schema'
 import { createPortableAgent } from '../../agent/portable/portable-agent'
-import { PortableAgentConfig } from '../../agent/portable/config-schema'
-import { RelayObserverConfig } from '../../agent/portable/config-schema'
+import type { Browser } from '../../browser/browser'
+import { logger } from '../../lib/logger'
+import type { ToolRegistry } from '../../tools/tool-registry'
 
 export function createTaskRouter(deps: {
-  port: number,
-  browserosId: string,
+  port: number
+  triosId: string
+  browser: Browser
+  registry: ToolRegistry
+  browserContext?: Record<string, unknown>
 }) {
   return {
     /**
@@ -24,32 +28,47 @@ export function createTaskRouter(deps: {
       conversationId: string,
       config: RelayObserverConfig,
     ): Promise<{ success: boolean; message: string }> {
-      const agentConfig: PortableAgentConfig<Env> = {
+      const agentConfig: PortableAgentConfig = {
+        apiVersion: 'browseros.io/v1alpha1',
+        kind: 'PortableAgent',
+        metadata: {
+          name: 'a2a-relay-observer',
+          displayName: 'A2A Relay Observer',
+          description: 'Relays A2A WebSocket messages to TRIOS chat',
+        },
         spec: {
           llm: {
             provider: 'anthropic',
             model: 'claude-sonnet-4-20250514',
             apiKey: process.env.ANTHROPIC_API_KEY || '',
           },
-          metadata: {
-            displayName: 'A2A Relay Observer',
-            description: 'Relays A2A WebSocket messages to BrowserOS chat',
+          workspace: {
+            defaultDir: config.workingDir,
           },
-          browserContext: config.browserContext,
-          origin: 'sidepanel',
-          workingDir: config.workingDir,
-          isScheduledTask: false,
-          chatMode: false,
         },
       }
 
       const agent = await createPortableAgent({
-        resolvedConfig: agentConfig,
+        resolvedConfig: {
+          conversationId,
+          provider: 'anthropic',
+          model: 'claude-sonnet-4-20250514',
+          apiKey: process.env.ANTHROPIC_API_KEY || '',
+          baseUrl: 'https://api.anthropic.com',
+          userSystemPrompt: undefined,
+          workingDir: config.workingDir,
+          supportsImages: true,
+          evalMode: false,
+          chatMode: false,
+          isScheduledTask: false,
+          origin: 'sidepanel',
+          triosId: deps.triosId,
+          toolApprovalConfig: undefined,
+        },
         browser: deps.browser,
         registry: deps.registry,
-        browserContext: deps.browserContext,
-        browserosId: deps.browserosId,
-        klavisClient: undefined,
+        browserContext: config.browserContext || deps.browserContext,
+        triosId: deps.triosId,
       })
 
       await agent.start()
@@ -68,7 +87,14 @@ export function createTaskRouter(deps: {
       conversationId: string,
       config: any,
     ): Promise<{ success: boolean; message: string }> {
-      const agentConfig: PortableAgentConfig<Env> = {
+      const agentConfig: PortableAgentConfig = {
+        apiVersion: 'browseros.io/v1alpha1',
+        kind: 'PortableAgent',
+        metadata: {
+          name: taskType.toLowerCase().replace(/\s+/g, '-'),
+          displayName: taskType,
+          description: `Portable agent task: ${taskType}`,
+        },
         spec: {
           llm: {
             provider: config.provider || 'anthropic',
@@ -76,25 +102,33 @@ export function createTaskRouter(deps: {
             apiKey: config.apiKey || process.env.ANTHROPIC_API_KEY || '',
             baseUrl: config.baseUrl || 'https://api.anthropic.com',
           },
-          metadata: {
-            displayName: taskType,
-            description: `Portable agent task: ${taskType}`,
+          workspace: {
+            defaultDir: config.workingDir,
           },
-          browserContext: config.browserContext,
-          origin: 'sidepanel',
-          workingDir: config.workingDir,
-          isScheduledTask: false,
-          chatMode: false,
         },
       }
 
       const agent = await createPortableAgent({
-        resolvedConfig: agentConfig,
+        resolvedConfig: {
+          conversationId,
+          provider: config.provider || 'anthropic',
+          model: config.model || 'claude-sonnet-4-20250514',
+          apiKey: config.apiKey || process.env.ANTHROPIC_API_KEY || '',
+          baseUrl: config.baseUrl || 'https://api.anthropic.com',
+          userSystemPrompt: undefined,
+          workingDir: config.workingDir,
+          supportsImages: true,
+          evalMode: false,
+          chatMode: false,
+          isScheduledTask: false,
+          origin: 'sidepanel',
+          triosId: deps.triosId,
+          toolApprovalConfig: undefined,
+        },
         browser: deps.browser,
         registry: deps.registry,
-        browserContext: deps.browserContext,
-        browserosId: deps.browserosId,
-        klavisClient: undefined,
+        browserContext: config.browserContext || deps.browserContext,
+        triosId: deps.triosId,
       })
 
       await agent.start()

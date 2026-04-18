@@ -2,12 +2,12 @@ import { unlinkSync } from 'node:fs'
 import { mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { PATHS } from '@browseros/shared/constants/paths'
-import type { ServerDiscoveryConfig } from '@browseros/shared/types/server-config'
+import { PATHS } from '@trios/shared/constants/paths'
+import type { ServerDiscoveryConfig } from '@trios/shared/types/server-config'
 import { logger } from './logger'
 
 export function getBrowserosDir(): string {
-  return join(homedir(), PATHS.BROWSEROS_DIR_NAME)
+  return join(homedir(), PATHS.trios_DIR_NAME)
 }
 
 export function getMemoryDir(): string {

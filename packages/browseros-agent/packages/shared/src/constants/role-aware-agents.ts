@@ -1,4 +1,4 @@
-import type { BrowserOSRoleTemplate } from '../types/role-aware-agents'
+import type { TRIOSRoleTemplate } from '../types/role-aware-agents'
 
 const CHIEF_OF_STAFF_AGENTS_MD = `# Chief of Staff
 
@@ -38,13 +38,13 @@ You should interrupt only when a real decision, approval, or escalation is neede
 
 const CHIEF_OF_STAFF_TOOLS_MD = `# Tooling Guidelines
 
-- Use BrowserOS MCP for browser and connected SaaS tasks.
+- Use TRIOS MCP for browser and connected SaaS tasks.
 - Prefer read, summarize, and draft flows.
-- Before high-impact mutations, stop and request approval through BrowserOS.
+- Before high-impact mutations, stop and request approval through TRIOS.
 - Keep outputs in the workspace when possible so work remains inspectable.
 `
 
-export const BROWSEROS_ROLE_TEMPLATES: BrowserOSRoleTemplate[] = [
+export const TRIOS_ROLE_TEMPLATES: TRIOSRoleTemplate[] = [
   {
     id: 'chief-of-staff',
     name: 'Chief of Staff',
@@ -82,6 +82,6 @@ export const BROWSEROS_ROLE_TEMPLATES: BrowserOSRoleTemplate[] = [
   },
 ]
 
-export function getBrowserOSRoleTemplate(id: string) {
-  return BROWSEROS_ROLE_TEMPLATES.find((role) => role.id === id)
+export function getTRIOSRoleTemplate(id: string) {
+  return TRIOS_ROLE_TEMPLATES.find((role) => role.id === id)
 }

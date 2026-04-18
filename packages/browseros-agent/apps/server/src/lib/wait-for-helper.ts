@@ -1,8 +1,8 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  */
-import { TIMEOUTS } from '@browseros/shared/constants/timeouts'
+import { TIMEOUTS } from '@trios/shared/constants/timeouts'
 import type { Page, Protocol } from 'puppeteer-core'
 import type { CdpPage } from 'puppeteer-core/internal/cdp/Page.js'
 

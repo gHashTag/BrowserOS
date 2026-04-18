@@ -2,11 +2,11 @@ import {
   createProtocolApi,
   type RawOn,
   type RawSend,
-} from '@browseros/cdp-protocol/create-api'
-import type { ProtocolApi } from '@browseros/cdp-protocol/protocol-api'
-import { EXIT_CODES } from '@browseros/shared/constants/exit-codes'
-import { CDP_LIMITS } from '@browseros/shared/constants/limits'
-import { TIMEOUTS } from '@browseros/shared/constants/timeouts'
+} from '@trios/cdp-protocol/create-api'
+import type { ProtocolApi } from '@trios/cdp-protocol/protocol-api'
+import { EXIT_CODES } from '@trios/shared/constants/exit-codes'
+import { CDP_LIMITS } from '@trios/shared/constants/limits'
+import { TIMEOUTS } from '@trios/shared/constants/timeouts'
 import { logger } from '../../lib/logger'
 import type { CdpTarget, CdpBackend as ICdpBackend } from './types'
 

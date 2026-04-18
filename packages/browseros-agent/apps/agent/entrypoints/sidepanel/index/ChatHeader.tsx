@@ -5,12 +5,12 @@ import { ChatProviderSelector } from '@/components/chat/ChatProviderSelector'
 import type { Provider } from '@/components/chat/chatComponentTypes'
 import { CreditBadge } from '@/components/credits/CreditBadge'
 import { ThemeToggle } from '@/components/elements/theme-toggle'
-import { Feature } from '@/lib/browseros/capabilities'
-import { useCapabilities } from '@/lib/browseros/useCapabilities'
 import { productRepositoryUrl } from '@/lib/constants/productUrls'
 import { useCredits } from '@/lib/credits/useCredits'
 import { BrowserOSIcon, ProviderIcon } from '@/lib/llm-providers/providerIcons'
 import type { ProviderType } from '@/lib/llm-providers/types'
+import { Feature } from '@/lib/trios/capabilities'
+import { useCapabilities } from '@/lib/trios/useCapabilities'
 
 const CreditsBadgeWrapper: FC = () => {
   const { supports } = useCapabilities()

@@ -1,5 +1,5 @@
-import { TIMEOUTS } from '@browseros/shared/constants/timeouts'
-import type { LLMConfig } from '@browseros/shared/schemas/llm'
+import { TIMEOUTS } from '@trios/shared/constants/timeouts'
+import type { LLMConfig } from '@trios/shared/schemas/llm'
 import { streamText } from 'ai'
 import { resolveLLMConfig } from './config'
 import { createLLMProvider } from './provider'
@@ -38,10 +38,10 @@ Write it as a natural instruction — like telling a capable assistant what to d
 export async function refinePrompt(
   llmConfig: RefinePromptConfig,
   request: RefinePromptRequest,
-  browserosId?: string,
+  triosId?: string,
 ): Promise<RefinePromptResult> {
   try {
-    const resolvedConfig = await resolveLLMConfig(llmConfig, browserosId)
+    const resolvedConfig = await resolveLLMConfig(llmConfig, triosId)
     const model = createLLMProvider(resolvedConfig)
 
     // streamText works for all providers including Codex (which requires streaming)

@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * WebSocket client for the OpenClaw Gateway protocol.
@@ -12,7 +12,7 @@
 import crypto from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { OPENCLAW_CONTAINER_HOME } from '@browseros/shared/constants/openclaw'
+import { OPENCLAW_CONTAINER_HOME } from '@trios/shared/constants/openclaw'
 import { logger } from '../../../lib/logger'
 
 const RPC_TIMEOUT_MS = 15_000
@@ -165,7 +165,7 @@ function seedPairedDevice(openclawDir: string, identity: DeviceIdentity): void {
     roles: ['operator'],
     scopes: SCOPES,
     pairedAt: Date.now(),
-    label: 'browseros-server',
+    label: 'trios-server',
   }
 
   writeFileSync(pairedPath, JSON.stringify(paired, null, 2), { mode: 0o600 })
@@ -245,7 +245,7 @@ export class GatewayClient {
               permissions: {},
               auth: { token: this.token },
               locale: 'en-US',
-              userAgent: `browseros-server/${this.version}`,
+              userAgent: `trios-server/${this.version}`,
             }
 
             if (this.device && nonce) {

@@ -1,6 +1,6 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Git Branch Tool
  */
@@ -12,7 +12,7 @@ export const gitBranch = defineTool({
   name: 'git_branch',
   description:
     'List all branches in a git repository or switch to a different branch',
-  approvalCategory: 'filesystem',
+  approvalCategory: 'data-modification',
   input: z.object({
     path: z.string().describe('Path to the git repository'),
     action: z.enum(['list', 'switch', 'create', 'delete']).default('list'),
@@ -59,29 +59,33 @@ export const gitBranch = defineTool({
 
         const current = branches.find((b) => b.isCurrent)?.name || ''
 
-        response.json({
-          success: true,
-          branches,
-          currentBranch: current,
-        })
+        response.text(
+          JSON.stringify({
+            success: true,
+            branches,
+            currentBranch: current,
+          }),
+        )
       } else if (action === 'switch' && branch) {
         await $`git checkout ${branch}`.cwd(path).quiet()
-        response.json({ success: true, currentBranch: branch })
+        response.text(JSON.stringify({ success: true, currentBranch: branch }))
       } else if (action === 'create' && branch) {
         const base = baseBranch || ''
         await $`git checkout -b ${branch} ${base}`.cwd(path).quiet()
-        response.json({ success: true, currentBranch: branch })
+        response.text(JSON.stringify({ success: true, currentBranch: branch }))
       } else if (action === 'delete' && branch) {
         await $`git branch -D ${branch}`.cwd(path).quiet()
-        response.json({ success: true })
+        response.text(JSON.stringify({ success: true }))
       } else {
-        response.json({
-          success: false,
-          error: 'Invalid action or missing branch name',
-        })
+        response.text(
+          JSON.stringify({
+            success: false,
+            error: 'Invalid action or missing branch name',
+          }),
+        )
       }
     } catch (error) {
-      response.json({ success: false, error: String(error) })
+      response.text(JSON.stringify({ success: false, error: String(error) }))
     }
   },
 })

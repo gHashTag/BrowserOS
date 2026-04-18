@@ -1,12 +1,12 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * GitButler CLI Integration
  * CLI-first approach for GitButler
  */
 
-import { GIT_CONSTANTS } from '@browseros/shared/constants/git'
+import { GIT_CONSTANTS } from '@trios/shared/constants/git'
 import { $ } from 'bun'
 import type { BranchInfo, CommitInfo, GitStatus } from '../git-repository'
 
@@ -14,7 +14,7 @@ export class GitButlerCLI {
   private cliPath: string
   private available: boolean | null = null
 
-  constructor(cliPath = GIT_CONSTANTS.GITBUTLER_CLI_PATH) {
+  constructor(cliPath: string = GIT_CONSTANTS.GITBUTLER_CLI_PATH) {
     this.cliPath = cliPath
   }
 

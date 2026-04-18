@@ -1,17 +1,20 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * A2A Relay Stream Endpoint
  * Handles SSE streaming from A2A server to WebSocket client
  */
 
+import { A2A_PORT } from '@trios/shared/constants/ports'
 import { Hono } from 'hono'
-import { logger } from '../../lib/logger'
-import { A2A_PORT } from '@browseros/shared/constants/ports'
+import type {
+  A2AAgentMode,
+  A2ARelayObserverConfig,
+} from '../../agent/portable/a2a-types'
 import { RelayObserver } from '../../agent/portable/relay-observer'
-import type { A2ARelayObserverConfig, A2AAgentMode } from '../../agent/portable/a2a-types'
+import { logger } from '../../lib/logger'
 import type { Env } from '../types'
 
 export interface A2ARoutesConfig {
@@ -77,7 +80,7 @@ export function createA2ARoutes(config: A2ARoutesConfig) {
         headers: {
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-cache',
-          'Connection': 'keep-alive',
+          Connection: 'keep-alive',
         },
       })
     })

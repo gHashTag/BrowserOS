@@ -56,10 +56,10 @@ export const MCPServerHeader: FC<MCPServerHeaderProps> = ({
   const handleRestart = async () => {
     setIsRestarting(true)
     try {
-      const { getBrowserOSAdapter } = await import('@/lib/browseros/adapter')
-      const { BROWSEROS_PREFS } = await import('@/lib/browseros/prefs')
-      const adapter = getBrowserOSAdapter()
-      await adapter.setPref(BROWSEROS_PREFS.RESTART_SERVER, true)
+      const { getTRIOSAdapter } = await import('@/lib/trios/adapter')
+      const { trios_PREFS } = await import('@/lib/trios/prefs')
+      const adapter = getTRIOSAdapter()
+      await adapter.setPref(trios_PREFS.RESTART_SERVER, true)
 
       const startTime = Date.now()
       const waitForHealth = (): Promise<boolean> =>
@@ -103,7 +103,7 @@ export const MCPServerHeader: FC<MCPServerHeaderProps> = ({
         </div>
         <div className="flex-1">
           <div className="mb-1 flex items-center justify-between">
-            <h2 className="font-semibold text-xl">BrowserOS MCP Server</h2>
+            <h2 className="font-semibold text-xl">TRIOS MCP Server</h2>
             <a
               href={DOCS_URL}
               target="_blank"

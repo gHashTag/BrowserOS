@@ -1,13 +1,13 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
 import { OAUTH_MCP_SERVERS } from '../lib/clients/klavis/oauth-mcp-servers'
 
 /**
- * BrowserOS Agent System Prompt v6
+ * TRIOS Agent System Prompt v6
  *
  * Changes from v5:
  * - Expanded role to cover full capability surface
@@ -164,7 +164,7 @@ You control a Chromium browser. Key tool categories:
 
 **Page Actions**: \`save_pdf\`, \`save_screenshot\`, \`download_file\`
 
-**Info**: \`browseros_info\` → BrowserOS features and documentation
+**Info**: \`trios_info\` → BrowserOS features and documentation
 
 ### External App Integrations (Strata)
 For connected apps, you can read and write data via direct API access (faster and more reliable than browser automation). See the External Integrations section for the full protocol.`

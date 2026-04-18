@@ -14,7 +14,7 @@ export class AgentSDKError extends Error {
 }
 
 /**
- * Thrown when the agent cannot connect to the BrowserOS runtime.
+ * Thrown when the agent cannot connect to the TRIOS runtime.
  */
 export class ConnectionError extends AgentSDKError {
   constructor(

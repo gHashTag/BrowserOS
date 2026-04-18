@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Compose-level abstraction over PodmanRuntime.
@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import {
   OPENCLAW_COMPOSE_PROJECT_NAME,
   OPENCLAW_GATEWAY_CONTAINER_NAME,
-} from '@browseros/shared/constants/openclaw'
+} from '@trios/shared/constants/openclaw'
 import { logger } from '../../../lib/logger'
 import type { LogFn, PodmanRuntime } from './podman-runtime'
 
@@ -111,7 +111,7 @@ export class ContainerRuntime {
   }
 
   /**
-   * Stops the Podman machine only if no non-BrowserOS containers are running.
+   * Stops the Podman machine only if no non-TRIOS containers are running.
    * Prevents killing the user's own Podman workloads.
    */
   async stopMachineIfSafe(): Promise<void> {

@@ -1,10 +1,10 @@
-import { getAgentServerUrl } from '@/lib/browseros/helpers'
 import {
   createDefaultBrowserOSProvider,
   defaultProviderIdStorage,
   providersStorage,
 } from '@/lib/llm-providers/storage'
 import type { LlmProviderConfig } from '@/lib/llm-providers/types'
+import { getAgentServerUrl } from '@/lib/trios/helpers'
 
 const resolveProvider = async (
   providerId?: string,

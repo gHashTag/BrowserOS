@@ -1,4 +1,4 @@
-import type { Browser } from '@browseros/server/browser'
+import type { Browser } from '@trios/server/browser'
 
 export interface CaptchaWaitResult {
   detected: boolean

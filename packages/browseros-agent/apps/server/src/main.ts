@@ -1,9 +1,9 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * BrowserOS Server Application
+ * TRIOS Server Application
  *
  * Manages server lifecycle: initialization, startup, and shutdown.
  */
@@ -11,7 +11,7 @@
 import type { Database } from 'bun:sqlite'
 import fs from 'node:fs'
 import path from 'node:path'
-import { EXIT_CODES } from '@browseros/shared/constants/exit-codes'
+import { EXIT_CODES } from '@trios/shared/constants/exit-codes'
 import { createHttpServer } from './api/server'
 import { getOpenClawService } from './api/services/openclaw/openclaw-service'
 import { CdpBackend } from './browser/backends/cdp'
@@ -50,7 +50,7 @@ export class Application {
   }
 
   async start(): Promise<void> {
-    logger.info(`Starting BrowserOS Server v${VERSION}`)
+    logger.info(`Starting TRIOS Server v${VERSION}`)
     logger.debug('Directory config', {
       executionDir: path.resolve(this.config.executionDir),
       resourcesDir: path.resolve(this.config.resourcesDir),
@@ -58,7 +58,7 @@ export class Application {
 
     await this.initCoreServices()
 
-    const allowNoCdp = process.env.BROWSEROS_ALLOW_NO_CDP === '1'
+    const allowNoCdp = process.env.trios_ALLOW_NO_CDP === '1'
 
     let browser: Browser | NullBrowser
     if (!this.config.cdpPort) {
@@ -66,7 +66,7 @@ export class Application {
         logger.error('CDP port is required (--cdp-port)')
         process.exit(EXIT_CODES.GENERAL_ERROR)
       }
-      logger.warn('Starting without CDP (BROWSEROS_ALLOW_NO_CDP=1)')
+      logger.warn('Starting without CDP (trios_ALLOW_NO_CDP=1)')
       browser = new NullBrowser()
     } else {
       const cdp = new CdpBackend({ port: this.config.cdpPort })
@@ -74,6 +74,7 @@ export class Application {
         logger.debug(`Connecting to CDP on port ${this.config.cdpPort}`)
         await cdp.connect()
         logger.info(`Connected to CDP on port ${this.config.cdpPort}`)
+        browser = new Browser(cdp)
       } catch (error) {
         if (!allowNoCdp) {
           return this.handleStartupError('CDP', this.config.cdpPort, error)
@@ -84,8 +85,6 @@ export class Application {
         })
         browser = new NullBrowser()
       }
-
-      browser = browser ?? new Browser(cdp)
     }
 
     logger.info(`Loaded ${registry.names().length} unified tools`)
@@ -95,9 +94,9 @@ export class Application {
         port: this.config.serverPort,
         host: '0.0.0.0',
         version: VERSION,
-        browser,
+        browser: browser as Browser,
         registry,
-        browserosId: identity.getBrowserOSId(),
+        triosId: identity.getTRIOSId(),
         executionDir: this.config.executionDir,
         resourcesDir: this.config.resourcesDir,
         codegenServiceUrl: this.config.codegenServiceUrl,
@@ -116,7 +115,7 @@ export class Application {
         server_version: VERSION,
         browseros_version: this.config.instanceBrowserosVersion,
         chromium_version: this.config.instanceChromiumVersion,
-        browseros_id: identity.getBrowserOSId(),
+        trios_id: identity.getTRIOSId(),
       })
     } catch (error) {
       logger.warn('Failed to write server config for auto-discovery', {
@@ -183,9 +182,9 @@ export class Application {
       db: this.db,
     })
 
-    const browserosId = identity.getBrowserOSId()
-    logger.info('BrowserOS ID initialized', {
-      browserosId: browserosId.slice(0, 12),
+    const triosId = identity.getTRIOSId()
+    logger.info('TRIOS ID initialized', {
+      triosId: triosId.slice(0, 12),
       fromConfig: !!this.config.instanceInstallId,
     })
 
@@ -205,7 +204,7 @@ export class Application {
       logger.debug('Sentry disabled: missing SENTRY_DSN')
     }
 
-    Sentry.setUser({ id: browserosId })
+    Sentry.setUser({ id: triosId })
     Sentry.setContext('browseros', {
       client_id: this.config.instanceClientId,
       install_id: this.config.instanceInstallId,

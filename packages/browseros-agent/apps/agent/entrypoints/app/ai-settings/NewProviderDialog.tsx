@@ -51,9 +51,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { Feature } from '@/lib/browseros/capabilities'
-import { useAgentServerUrl } from '@/lib/browseros/useBrowserOSProviders'
-import { useCapabilities } from '@/lib/browseros/useCapabilities'
 import {
   AI_PROVIDER_ADDED_EVENT,
   AI_PROVIDER_UPDATED_EVENT,
@@ -69,6 +66,9 @@ import {
 import { type TestResult, testProvider } from '@/lib/llm-providers/testProvider'
 import type { LlmProviderConfig, ProviderType } from '@/lib/llm-providers/types'
 import { track } from '@/lib/metrics/track'
+import { Feature } from '@/lib/trios/capabilities'
+import { useAgentServerUrl } from '@/lib/trios/useBrowserOSProviders'
+import { useCapabilities } from '@/lib/trios/useCapabilities'
 import { cn } from '@/lib/utils'
 import { getModelContextLength, getModelsForProvider } from './models'
 

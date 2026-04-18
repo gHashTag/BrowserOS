@@ -1,4 +1,4 @@
-import type { BrowserContext } from '@browseros/shared/schemas/browser-context'
+import type { BrowserContext } from '@trios/shared/schemas/browser-context'
 import { logger } from '../lib/logger'
 import type { AiSdkAgent } from './ai-sdk-agent'
 

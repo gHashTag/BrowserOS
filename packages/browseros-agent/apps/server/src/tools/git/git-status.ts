@@ -1,6 +1,6 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Git Status Tool
  */
@@ -12,7 +12,7 @@ export const gitStatus = defineTool({
   name: 'git_status',
   description:
     'Get the current git status of a repository including branch, staged/unstaged changes, and untracked files',
-  approvalCategory: 'filesystem',
+  approvalCategory: 'data-modification',
   input: z.object({
     path: z.string().describe('Path to the git repository'),
   }),
@@ -73,15 +73,17 @@ export const gitStatus = defineTool({
         }
       }
 
-      response.json({
-        branch: branch.stdout.toString().trim(),
-        ahead: 0,
-        behind: 0,
-        staged,
-        unstaged,
-        untracked,
-        conflicted,
-      })
+      response.text(
+        JSON.stringify({
+          branch: branch.stdout.toString().trim(),
+          ahead: 0,
+          behind: 0,
+          staged,
+          unstaged,
+          untracked,
+          conflicted,
+        }),
+      )
     } catch (error) {
       response.error(String(error))
     }

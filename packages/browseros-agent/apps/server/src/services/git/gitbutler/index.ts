@@ -1,6 +1,6 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * GitButler Integration Entry Point
  * Detects available mode and creates appropriate client
@@ -58,6 +58,8 @@ export function createGitButlerClient(
     case 'api':
       return new GitButlerAPI(config.apiPort)
     case 'filewatch':
-      return new GitButlerFileWatcher(config.repoPath || '.') as GitButlerClient
+      return new GitButlerFileWatcher(
+        config.repoPath || '.',
+      ) as unknown as GitButlerClient
   }
 }

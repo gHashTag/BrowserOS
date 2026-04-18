@@ -4,15 +4,15 @@ import { createAzure } from '@ai-sdk/azure'
 import { createGoogleGenerativeAI } from '@ai-sdk/google'
 import { createOpenAI } from '@ai-sdk/openai'
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import { EXTERNAL_URLS } from '@browseros/shared/constants/urls'
-import { LLM_PROVIDERS } from '@browseros/shared/schemas/llm'
 import { createOpenRouter } from '@openrouter/ai-sdk-provider'
+import { EXTERNAL_URLS } from '@trios/shared/constants/urls'
+import { LLM_PROVIDERS } from '@trios/shared/schemas/llm'
 import type { LanguageModel } from 'ai'
-import { createBrowserOSFetch } from '../lib/browseros-fetch'
 import { createCodexFetch } from '../lib/clients/oauth/codex-fetch'
 import { createCopilotFetch } from '../lib/clients/oauth/copilot-fetch'
 import { logger } from '../lib/logger'
 import { createOpenRouterCompatibleFetch } from '../lib/openrouter-fetch'
+import { createTRIOSFetch } from '../lib/trios-fetch'
 import type { ResolvedAgentConfig } from './types'
 
 type ProviderFactory = (
@@ -101,13 +101,13 @@ function createBedrockFactory(
   })
 }
 
-function createBrowserOSFactory(
+function createTRIOSFactory(
   config: ResolvedAgentConfig,
 ): (modelId: string) => unknown {
-  if (!config.baseUrl) throw new Error('BrowserOS provider requires baseUrl')
-  const { baseUrl, apiKey, upstreamProvider, browserosId } = config
-  const browserosFetch = browserosId
-    ? createBrowserOSFetch(browserosId)
+  if (!config.baseUrl) throw new Error('TRIOS provider requires baseUrl')
+  const { baseUrl, apiKey, upstreamProvider, triosId } = config
+  const browserosFetch = triosId
+    ? createTRIOSFetch(triosId)
     : createOpenRouterCompatibleFetch()
 
   if (upstreamProvider === LLM_PROVIDERS.OPENROUTER) {
@@ -131,7 +131,7 @@ function createBrowserOSFactory(
       fetch: browserosFetch,
     })
   }
-  logger.debug('Creating OpenAI-compatible provider for BrowserOS')
+  logger.debug('Creating OpenAI-compatible provider for TRIOS')
   return createOpenAICompatible({
     name: 'browseros',
     baseURL: baseUrl,
@@ -270,7 +270,7 @@ const PROVIDER_FACTORIES: Record<string, ProviderFactory> = {
   [LLM_PROVIDERS.LMSTUDIO]: createLMStudioFactory,
   [LLM_PROVIDERS.OLLAMA]: createOllamaFactory,
   [LLM_PROVIDERS.BEDROCK]: createBedrockFactory,
-  [LLM_PROVIDERS.BROWSEROS]: createBrowserOSFactory,
+  [LLM_PROVIDERS.trios]: createTRIOSFactory,
   [LLM_PROVIDERS.OPENAI_COMPATIBLE]: createOpenAICompatibleFactory,
   [LLM_PROVIDERS.MOONSHOT]: createMoonshotFactory,
   [LLM_PROVIDERS.CHATGPT_PRO]: createChatGPTProFactory,

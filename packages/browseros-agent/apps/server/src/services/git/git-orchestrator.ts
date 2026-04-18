@@ -1,13 +1,13 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Git Orchestrator
  * Core orchestrator with Git operations and transaction safety
  */
 
 import { existsSync } from 'node:fs'
-import { GIT_CONSTANTS } from '@browseros/shared/constants/git'
+import { GIT_CONSTANTS } from '@trios/shared/constants/git'
 import { $ } from 'bun'
 import type {
   BranchInfo,
@@ -242,7 +242,7 @@ export class GitOrchestrator {
 
     const allFiles = await this.client.getFiles(repo.path)
     if (path) {
-      return allFiles.filter((f) => f.startsWith(path))
+      return allFiles.filter((f: string) => f.startsWith(path))
     }
     return allFiles
   }

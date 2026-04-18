@@ -1,4 +1,4 @@
-import type { BrowserContext } from '@browseros/shared/schemas/browser-context'
+import type { BrowserContext } from '@trios/shared/schemas/browser-context'
 
 export function formatBrowserContext(browserContext?: BrowserContext): string {
   if (!browserContext?.activeTab && !browserContext?.selectedTabs?.length) {

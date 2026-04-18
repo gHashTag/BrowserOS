@@ -144,7 +144,7 @@ index 0000000000000..9cd8a510e86ec
 +
 +}  // namespace
 +
-+namespace browseros {
++namespace trios {
 +
 +// static
 +BrowserOSServerManager* BrowserOSServerManager::GetInstance() {

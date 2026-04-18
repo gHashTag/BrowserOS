@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Server configuration loading with multiple sources.
  * Precedence: CLI > Config File > Environment > Defaults
@@ -98,8 +98,8 @@ function parseCliArgs(argv: string[]): ConfigResult<ParsedCliArgs> {
 
   try {
     program
-      .name('browseros-server')
-      .description('BrowserOS Unified Server - MCP + Agent')
+      .name('trios-server')
+      .description('TRIOS Unified Server - MCP + Agent')
       .version(VERSION)
       .option('--config <path>', 'Path to JSON configuration file')
       .option(
@@ -253,25 +253,25 @@ function parseConfigFile(filePath?: string): ConfigResult<PartialConfig> {
 function parseRuntimeEnv(): PartialConfig {
   const cwd = process.cwd()
   return omitUndefined({
-    cdpPort: process.env.BROWSEROS_CDP_PORT
-      ? safeParseInt(process.env.BROWSEROS_CDP_PORT)
+    cdpPort: process.env.trios_CDP_PORT
+      ? safeParseInt(process.env.trios_CDP_PORT)
       : undefined,
-    serverPort: process.env.BROWSEROS_SERVER_PORT
-      ? safeParseInt(process.env.BROWSEROS_SERVER_PORT)
+    serverPort: process.env.trios_SERVER_PORT
+      ? safeParseInt(process.env.trios_SERVER_PORT)
       : undefined,
-    extensionPort: process.env.BROWSEROS_EXTENSION_PORT
-      ? safeParseInt(process.env.BROWSEROS_EXTENSION_PORT)
+    extensionPort: process.env.trios_EXTENSION_PORT
+      ? safeParseInt(process.env.trios_EXTENSION_PORT)
       : undefined,
-    resourcesDir: process.env.BROWSEROS_RESOURCES_DIR
-      ? toAbsolutePath(process.env.BROWSEROS_RESOURCES_DIR, cwd)
+    resourcesDir: process.env.trios_RESOURCES_DIR
+      ? toAbsolutePath(process.env.trios_RESOURCES_DIR, cwd)
       : undefined,
-    executionDir: process.env.BROWSEROS_EXECUTION_DIR
-      ? toAbsolutePath(process.env.BROWSEROS_EXECUTION_DIR, cwd)
+    executionDir: process.env.trios_EXECUTION_DIR
+      ? toAbsolutePath(process.env.trios_EXECUTION_DIR, cwd)
       : undefined,
-    instanceInstallId: process.env.BROWSEROS_INSTALL_ID,
-    instanceClientId: process.env.BROWSEROS_CLIENT_ID,
+    instanceInstallId: process.env.trios_INSTALL_ID,
+    instanceClientId: process.env.trios_CLIENT_ID,
     aiSdkDevtoolsEnabled:
-      process.env.BROWSEROS_AI_SDK_DEVTOOLS === 'true' ? true : undefined,
+      process.env.trios_AI_SDK_DEVTOOLS === 'true' ? true : undefined,
   })
 }
 

@@ -1,0 +1,70 @@
+diff --git a/chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.cc b/chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.cc
+index f8298702050da..980853c953f0f9a100644
+--- a/chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.cc
++++ b/chrome/browser/ui/views/toolbar/pinned_action_toolbar_button.cc
+@@ -8,6 +8,12 @@
+ #include <type_traits>
+ 
+ #include "base/auto_reset.h"
++#include "chrome/browser/browseros/core/browseros_action_utils.h"
++#include "chrome/browser/browseros/core/browseros_prefs.h"
++#include "chrome/browser/browseros/theme/trios_theme.h"
+ #include "base/strings/strcat.h"
+ 
+ #include "chrome/browser/ui/views/side_panel/side_panel_entry.h"
+ #include "chrome/browser/ui/views/side_panel/side_panel_entry_id.h"
+ #include "chrome/common/extensions/extension_constants.h"
+ #include "base/metrics/user_metrics.h"
+ #include "base/strings/strcat.h"
+ #include "chrome/app/vector_icons/vector_icons.h"
+ 
+ #include "ui/actions/action_id.h"
+ #include "ui/actions/action_utils.h"
+ #include "ui/actions/actions.h"
+ 
+ #include "third_party/skia/include/core/SkColor.h"
+ 
+ namespace {
+ 
+ PinnedActionToolbarButton::PinnedActionToolbarButton(
+ 		   GetViewAccessibility().SetDescription(
+ 		       std::u16string(), ax::mojom::DescriptionFrom::kAttributeExplicitlyEmpty));
+ 
++	// Set text from action item if available for BrowserOS actions
++	if (auto* action_item = container_->GetActionItemFor(action_id)) {
++		// Check if labels should be shown
++		bool show_labels = true;
++		if (browser_ && browser_->profile()) {
++			show_labels = browseros::ShouldShowToolbarLabels(
++				browser_->profile()->GetPrefs());
++		}
++	}
++
++	// Use TRIOS gold colors instead of hardcoded orange
++	const SkColor gold = trios::kColorGoldBase;
++	const SkColor gold_bright = trios::kColorGoldBright;
++	const SkColor orange = trios::kColorGoldDim;
++
+ 	PinnedActionToolbarButton::UpdateIconsWithColors(icon, gold, orange, orange);
++
++	return;  // Return early if BrowserOS action
++
+ 	std::optional<VectorIcons>& icons = GetVectorIcons();
+ 
+ 	if (icons->touch_icon && icons->touch_icon.is_empty()) {
+ 		icons->touch_icon = gold;
+ 		icons->touch_icon_hot = gold_bright;
+ 	} else if (icons->touch_icon && icons->touch_icon.is_empty()) {
+ 		icons->touch_icon = trios::kColorGoldBase;  // TRIOS gold
+ 		icons->touch_icon_hot = trios::kColorGoldBright;
+ 	}
+ 
+ 	if (icons->touch_icon && icons->touch_icon.is_empty()) {
+ 		icons->touch_icon_hot = orange;  // TRIOS orange
+ 	} else {
+ 		icons->touch_icon = trios::kColorGoldDim;
+ 		icons->touch_icon_hot = orange;
+ 	}
+ 
+ 	return;
+ }

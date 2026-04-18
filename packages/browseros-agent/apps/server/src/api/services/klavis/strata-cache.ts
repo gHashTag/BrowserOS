@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * In-process cache for Klavis Strata `createStrata` responses.
@@ -9,7 +9,7 @@
  * `klavisClient.createStrata` round-trip every time the user had any
  * managed Klavis app connected. This cache stores the (immutable) JSON
  * metadata returned by `createStrata` so that subsequent chats with the
- * same `(browserosId, enabled-server-set)` skip the round-trip entirely.
+ * same `(triosId, enabled-server-set)` skip the round-trip entirely.
  *
  * It does NOT cache live MCP client connections — only URL/id metadata.
  * Per-session MCP clients continue to be opened and closed by
@@ -37,12 +37,12 @@ function normalizeServers(servers: readonly string[]): string {
   return [...new Set(servers)].sort().join(',')
 }
 
-function keyOf(browserosId: string, normalized: string): string {
+function keyOf(triosId: string, normalized: string): string {
   // xxhash64 → 16 hex chars, fixed width. Birthday-bound collision risk
   // for our scale (<10k entries) is ~5e-15; we additionally verify
   // serverKey on read so collisions cannot affect correctness.
   const hash = Bun.hash(normalized).toString(16).padStart(16, '0')
-  return `${browserosId}|${hash}`
+  return `${triosId}|${hash}`
 }
 
 export class KlavisStrataCache {
@@ -52,11 +52,11 @@ export class KlavisStrataCache {
 
   async getOrFetch(
     client: KlavisClient,
-    browserosId: string,
+    triosId: string,
     servers: readonly string[],
   ): Promise<StrataCreateResponse> {
     const normalized = normalizeServers(servers)
-    const key = keyOf(browserosId, normalized)
+    const key = keyOf(triosId, normalized)
     const existing = this.entries.get(key)
 
     if (existing) {
@@ -80,7 +80,7 @@ export class KlavisStrataCache {
       key,
       serverCount: servers.length,
     })
-    const inflight = this.fetch(client, browserosId, servers, normalized)
+    const inflight = this.fetch(client, triosId, servers, normalized)
     this.entries.set(key, inflight)
 
     try {
@@ -96,8 +96,8 @@ export class KlavisStrataCache {
     }
   }
 
-  invalidate(browserosId: string): void {
-    const prefix = `${browserosId}|`
+  invalidate(triosId: string): void {
+    const prefix = `${triosId}|`
     let dropped = 0
     for (const key of this.entries.keys()) {
       if (key.startsWith(prefix)) {
@@ -107,7 +107,7 @@ export class KlavisStrataCache {
     }
     if (dropped > 0) {
       logger.debug('Klavis strata cache invalidated', {
-        browserosId: browserosId.slice(0, 12),
+        triosId: triosId.slice(0, 12),
         dropped,
       })
     }
@@ -119,11 +119,11 @@ export class KlavisStrataCache {
 
   private async fetch(
     client: KlavisClient,
-    browserosId: string,
+    triosId: string,
     servers: readonly string[],
     normalized: string,
   ): Promise<CacheEntry> {
-    const result = await client.createStrata(browserosId, [...servers])
+    const result = await client.createStrata(triosId, [...servers])
     return {
       strataServerUrl: result.strataServerUrl,
       strataId: result.strataId,

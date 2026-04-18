@@ -1,14 +1,14 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { TIMEOUTS } from '@browseros/shared/constants/timeouts'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js'
+import { TIMEOUTS } from '@trios/shared/constants/timeouts'
 import { z } from 'zod'
 import { jsonSchemaObjectToZodRawShape } from 'zod-from-json-schema'
 import { KlavisClient } from '../../../lib/clients/klavis/klavis-client'
@@ -29,7 +29,7 @@ function withTimeout<T>(promise: Promise<T>, label: string): Promise<T> {
 }
 
 export interface KlavisProxyHandle {
-  browserosId: string
+  triosId: string
   tools: Tool[]
   inputSchemas: Map<string, Record<string, never>>
   callTool: (
@@ -41,7 +41,7 @@ export interface KlavisProxyHandle {
 
 interface ConnectDeps {
   klavisClient: KlavisClient
-  browserosId: string
+  triosId: string
 }
 
 // One-time async setup: connect to Klavis Strata and discover tools
@@ -54,7 +54,7 @@ export async function connectKlavisProxy(
 
   const strata = await klavisStrataCache.getOrFetch(
     deps.klavisClient,
-    deps.browserosId,
+    deps.triosId,
     allServers,
   )
 
@@ -87,7 +87,7 @@ export async function connectKlavisProxy(
   })
 
   return {
-    browserosId: deps.browserosId,
+    triosId: deps.triosId,
     tools,
     inputSchemas,
     callTool: (name, args) =>
@@ -133,7 +133,7 @@ export function registerKlavisTools(
       try {
         const klavisClient = new KlavisClient()
         const integrations = await klavisClient.getUserIntegrations(
-          handle.browserosId,
+          handle.triosId,
         )
 
         const integration = integrations.find((i) => i.name === server_name)
@@ -161,7 +161,7 @@ export function registerKlavisTools(
         }
 
         // Not connected — get auth URL
-        const strata = await klavisClient.createStrata(handle.browserosId, [
+        const strata = await klavisClient.createStrata(handle.triosId, [
           server_name,
         ])
         const authUrl =

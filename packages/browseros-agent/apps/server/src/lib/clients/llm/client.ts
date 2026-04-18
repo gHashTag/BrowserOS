@@ -1,13 +1,13 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Lightweight LLM client for text generation.
  * Used by SDK verify endpoint.
  */
 
-import type { LLMConfig } from '@browseros/shared/schemas/llm'
+import type { LLMConfig } from '@trios/shared/schemas/llm'
 import type { LanguageModel, ModelMessage } from 'ai'
 import { generateText } from 'ai'
 import { resolveLLMConfig } from './config'
@@ -16,11 +16,8 @@ import { createLLMProvider } from './provider'
 export class LLMClient {
   private constructor(private model: LanguageModel) {}
 
-  static async create(
-    config: LLMConfig,
-    browserosId?: string,
-  ): Promise<LLMClient> {
-    const resolved = await resolveLLMConfig(config, browserosId)
+  static async create(config: LLMConfig, triosId?: string): Promise<LLMClient> {
+    const resolved = await resolveLLMConfig(config, triosId)
     const model = createLLMProvider(resolved)
     return new LLMClient(model)
   }

@@ -1,5 +1,5 @@
 import type { LanguageModelV2ToolResultOutput } from '@ai-sdk/provider'
-import type { ToolApprovalConfig } from '@browseros/shared/constants/tool-approval'
+import type { ToolApprovalConfig } from '@trios/shared/constants/tool-approval'
 import { type ToolSet, tool } from 'ai'
 import { logger } from '../lib/logger'
 import { metrics } from '../lib/metrics'

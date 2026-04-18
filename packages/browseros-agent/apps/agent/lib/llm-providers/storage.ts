@@ -1,7 +1,7 @@
 import { storage } from '@wxt-dev/storage'
 import { sessionStorage } from '@/lib/auth/sessionStorage'
-import { getBrowserOSAdapter } from '@/lib/browseros/adapter'
-import { BROWSEROS_PREFS } from '@/lib/browseros/prefs'
+import { getTRIOSAdapter } from '@/lib/trios/adapter'
+import { trios_PREFS } from '@/lib/trios/prefs'
 import type { LlmProviderConfig, LlmProvidersBackup } from './types'
 import { uploadLlmProvidersToGraphql } from './uploadLlmProvidersToGraphql'
 
@@ -36,8 +36,8 @@ export const providersStorage = storage.defineItem<LlmProviderConfig[]>(
 /** Backup providers to BrowserOS prefs (write-only, best-effort) */
 async function backupToBrowserOS(backup: LlmProvidersBackup): Promise<void> {
   try {
-    const adapter = getBrowserOSAdapter()
-    await adapter.setPref(BROWSEROS_PREFS.PROVIDERS, JSON.stringify(backup))
+    const adapter = getTRIOSAdapter()
+    await adapter.setPref(trios_PREFS.PROVIDERS, JSON.stringify(backup))
   } catch {
     // BrowserOS API not available - ignore
   }
@@ -101,7 +101,7 @@ export async function loadProviders(): Promise<LlmProviderConfig[]> {
   return normalizedProviders
 }
 
-/** Creates the default BrowserOS provider configuration */
+/** Creates the default TRIOS provider configuration */
 export function createDefaultBrowserOSProvider(): LlmProviderConfig {
   const timestamp = Date.now()
   return {

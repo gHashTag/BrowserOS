@@ -1,10 +1,9 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
-import type { Browser } from '@browseros/shared/schemas/browser'
-import type { ToolSet } from 'ai'
+
 import { ConfigLoader } from '../../../agent/portable/config-loader'
 import type {
   AgentLogEntry,
@@ -16,12 +15,14 @@ import {
   LifecycleManager,
   type StartAgentOptions,
 } from '../../../agent/portable/lifecycle-manager'
+import type { Browser } from '../../../browser/browser'
 import { logger } from '../../../lib/logger'
+import type { ToolRegistry } from '../../../tools/tool-registry'
 
 export interface AgentBridgeServiceConfig {
   browser: Browser
-  registry: ToolSet
-  browserosId: string
+  registry: ToolRegistry
+  triosId: string
   browserContext?: Record<string, unknown>
 }
 
@@ -33,7 +34,7 @@ export class AgentBridgeService {
       config.browser,
       config.registry,
       {
-        browserosId: config.browserosId,
+        triosId: config.triosId,
         browserContext: config.browserContext,
       },
     )
@@ -177,7 +178,7 @@ export class AgentBridgeService {
     const {
       AGENTS_DIR,
       AGENT_CONFIG_FILE,
-    } = require('@browseros/shared/constants/portable-agent')
+    } = require('@trios/shared/constants/portable-agent')
 
     const agentDir = join(AGENTS_DIR, name)
     mkdirSync(agentDir, { recursive: true })
@@ -192,7 +193,7 @@ export class AgentBridgeService {
   async deleteConfig(name: string): Promise<void> {
     const { rmSync, existsSync } = require('node:fs')
     const { join } = require('node:path')
-    const { AGENTS_DIR } = require('@browseros/shared/constants/portable-agent')
+    const { AGENTS_DIR } = require('@trios/shared/constants/portable-agent')
 
     const configPath = join(AGENTS_DIR, name)
     if (!existsSync(configPath)) {

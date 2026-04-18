@@ -1,10 +1,10 @@
-import type { EntryAddedEvent } from '@browseros/cdp-protocol/domains/log'
+import type { EntryAddedEvent } from '@trios/cdp-protocol/domains/log'
 import type {
   ConsoleAPICalledEvent,
   ExceptionThrownEvent,
   RemoteObject,
-} from '@browseros/cdp-protocol/domains/runtime'
-import { CONTENT_LIMITS } from '@browseros/shared/constants/limits'
+} from '@trios/cdp-protocol/domains/runtime'
+import { CONTENT_LIMITS } from '@trios/shared/constants/limits'
 import type { CdpBackend } from './backends/types'
 
 export type ConsoleLevel = 'error' | 'warning' | 'info' | 'debug'

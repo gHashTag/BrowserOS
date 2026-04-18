@@ -1,13 +1,13 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * SDK Types - Type definitions and request schemas for SDK services
  */
 
-import { BrowserContextSchema } from '@browseros/shared/schemas/browser-context'
-import { LLMConfigSchema } from '@browseros/shared/schemas/llm'
+import { BrowserContextSchema } from '@trios/shared/schemas/browser-context'
+import { LLMConfigSchema } from '@trios/shared/schemas/llm'
 import { z } from 'zod'
 import type { Browser } from '../../../browser/browser'
 
@@ -55,7 +55,7 @@ export type VerifyRequest = z.infer<typeof VerifyRequestSchema>
 export interface SdkDeps {
   port: number
   browser: Browser
-  browserosId?: string
+  triosId?: string
 }
 
 export interface ActiveTab {

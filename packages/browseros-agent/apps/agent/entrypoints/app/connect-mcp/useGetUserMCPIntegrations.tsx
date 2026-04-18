@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { useAgentServerUrl } from '@/lib/browseros/useBrowserOSProviders'
+import { useAgentServerUrl } from '@/lib/trios/useBrowserOSProviders'
 
 interface UserMCPIntegrationsList {
   integrations: {

@@ -1,6 +1,6 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Reconnect Correctness Tests
  *
@@ -11,9 +11,12 @@
  * - Preserves state across reconnect
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import type {
+  A2AAgentState,
+  A2AConnectionState,
+} from '../../../src/agent/portable/a2a-types'
 import { calculateReconnectDelay } from './state-recovery-helpers'
-import type { A2AConnectionState, A2AAgentState } from '../../../src/agent/portable/a2a-types'
 
 describe('Reconnect Correctness Multi-Agent Scenarios', () => {
   const baseDelay = 1000
@@ -23,7 +26,7 @@ describe('Reconnect Correctness Multi-Agent Scenarios', () => {
   describe('Exponential backoff with jitter', () => {
     it('should calculate correct delays with jitter', () => {
       const delays = [0, 1, 2, 3, 4].map((attempt) =>
-        calculateReconnectDelay(attempt, baseDelay, maxDelay, jitterPercent)
+        calculateReconnectDelay(attempt, baseDelay, maxDelay, jitterPercent),
       )
 
       // Verify exponential pattern: 1000, 2000, 4000, 8000, 16000
@@ -46,9 +49,16 @@ describe('Reconnect Correctness Multi-Agent Scenarios', () => {
 
     it('should add jitter within expected range', () => {
       for (let attempt = 0; attempt < 10; attempt++) {
-        const delay = calculateReconnectDelay(attempt, baseDelay, maxDelay, jitterPercent)
-        const minExpected = Math.min(baseDelay * Math.pow(2, attempt), maxDelay) * (1 - jitterPercent)
-        const maxExpected = Math.min(baseDelay * Math.pow(2, attempt), maxDelay) * (1 + jitterPercent)
+        const delay = calculateReconnectDelay(
+          attempt,
+          baseDelay,
+          maxDelay,
+          jitterPercent,
+        )
+        const minExpected =
+          Math.min(baseDelay * 2 ** attempt, maxDelay) * (1 - jitterPercent)
+        const maxExpected =
+          Math.min(baseDelay * 2 ** attempt, maxDelay) * (1 + jitterPercent)
 
         expect(delay).toBeGreaterThanOrEqual(minExpected)
         expect(delay).toBeLessThanOrEqual(maxExpected)
@@ -57,7 +67,7 @@ describe('Reconnect Correctness Multi-Agent Scenarios', () => {
 
     it('should cap at maxDelay', () => {
       const delays = [5, 6, 7, 8, 9].map((attempt) =>
-        calculateReconnectDelay(attempt, baseDelay, maxDelay, jitterPercent)
+        calculateReconnectDelay(attempt, baseDelay, maxDelay, jitterPercent),
       )
 
       // All should be capped at maxDelay (30000)
@@ -196,8 +206,18 @@ describe('Reconnect Correctness Multi-Agent Scenarios', () => {
       }
 
       // Should be detected as invalid
-      const validFrom = ['disconnected', 'connecting', 'connected', 'reconnecting']
-      const validTo = ['disconnected', 'connecting', 'connected', 'reconnecting']
+      const validFrom = [
+        'disconnected',
+        'connecting',
+        'connected',
+        'reconnecting',
+      ]
+      const validTo = [
+        'disconnected',
+        'connecting',
+        'connected',
+        'reconnecting',
+      ]
 
       const fromValid = validFrom.includes(invalidTransition.from)
       const toValid = validTo.includes(invalidTransition.to)
@@ -213,7 +233,12 @@ describe('Reconnect Correctness Multi-Agent Scenarios', () => {
       ]
 
       transitions.forEach((transition) => {
-        const validStates: ['disconnected', 'connecting', 'connected', 'reconnecting']
+        const validStates: [
+          'disconnected',
+          'connecting',
+          'connected',
+          'reconnecting',
+        ]
         expect(validStates).toContain(transition.from)
         expect(validStates).toContain(transition.to)
       })
@@ -303,7 +328,7 @@ describe('Reconnect Correctness Multi-Agent Scenarios', () => {
 
       expect(config.a2aPort).toBe(3001)
       // Should NOT be magic number 3001 in relay-observer.ts
-      // The implementation should import from @browseros/shared/constants/ports
+      // The implementation should import from @trios/shared/constants/ports
     })
   })
 })

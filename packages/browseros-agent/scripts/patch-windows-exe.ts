@@ -35,11 +35,11 @@ if (!fs.existsSync(rceditPath)) {
 }
 
 const metadata = {
-  ProductName: 'BrowserOS Agent',
-  FileDescription: 'BrowserOS Agent',
-  CompanyName: 'BrowserOS',
-  LegalCopyright: 'Copyright (C) 2025 BrowserOS',
-  InternalName: 'browseros-server',
+  ProductName: "TRIOS" Agent',
+  FileDescription: "TRIOS Agent" Agent',
+  CompanyName: "TRIOS"',
+  LegalCopyright: "Copyright (C) 2025 TRIOS"',
+  InternalName: 'trios-server',
   OriginalFilename: path.basename(exePath),
 }
 

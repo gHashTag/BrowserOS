@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Lazy OAuth callback server on port 1455.
@@ -15,7 +15,7 @@
  * - Releases the port after the callback arrives and no flows are pending
  */
 
-import { OAUTH_CALLBACK_PORT } from '@browseros/shared/constants/ports'
+import { OAUTH_CALLBACK_PORT } from '@trios/shared/constants/ports'
 import { logger } from '../../logger'
 import type { OAuthTokenManager } from './token-manager'
 
@@ -66,7 +66,7 @@ export class OAuthCallbackServer {
 
     throw new Error(
       `OAuth callback port ${OAUTH_CALLBACK_PORT} is in use by another process. ` +
-        'Close other BrowserOS instances or CLI tools and try again.',
+        'Close other TRIOS instances or CLI tools and try again.',
     )
   }
 

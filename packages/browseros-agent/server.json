@@ -3,7 +3,7 @@
   "name": "BrowserOS MCP Server",
   "description": "Model Context Protocol server exposing Chromium browser automation capabilities through BrowserOS",
   "repository": {
-    "url": "https://github.com/browseros/browseros-server",
+    "url": "https://github.com/browseros/trios-server",
     "source": "github"
   },
   "version": "0.0.1",

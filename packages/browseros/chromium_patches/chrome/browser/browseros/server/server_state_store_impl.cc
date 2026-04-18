@@ -10,7 +10,7 @@ index 0000000000000..76805b00dee0d
 +
 +#include "chrome/browser/browseros/server/server_state_store_impl.h"
 +
-+namespace browseros {
++namespace trios {
 +
 +ServerStateStoreImpl::ServerStateStoreImpl() = default;
 +

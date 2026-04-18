@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Pino-based logger with:
@@ -12,12 +12,12 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { CONTENT_LIMITS } from '@browseros/shared/constants/limits'
-import type { LoggerInterface, LogLevel } from '@browseros/shared/types/logger'
+import { CONTENT_LIMITS } from '@trios/shared/constants/limits'
+import type { LoggerInterface, LogLevel } from '@trios/shared/types/logger'
 import pino from 'pino'
 
 const isDev = process.env.NODE_ENV === 'development'
-const LOG_FILE_NAME = 'browseros-server.log'
+const LOG_FILE_NAME = 'trios-server.log'
 const LOG_FILE_MAX_AGE_MS = 24 * 60 * 60 * 1000 // 1 day
 
 /**

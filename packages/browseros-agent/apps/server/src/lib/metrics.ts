@@ -1,8 +1,8 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  */
-import { EXTERNAL_URLS } from '@browseros/shared/constants/urls'
+import { EXTERNAL_URLS } from '@trios/shared/constants/urls'
 import { PostHog } from 'posthog-node'
 
 import { INLINED_ENV } from '../env'

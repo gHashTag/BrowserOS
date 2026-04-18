@@ -25,7 +25,7 @@ index 0000000000000..a398856f672fd
 +#include <signal.h>
 +#endif
 +
-+namespace browseros {
++namespace trios {
 +
 +namespace {
 +

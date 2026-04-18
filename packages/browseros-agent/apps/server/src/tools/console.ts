@@ -1,4 +1,4 @@
-import { CONTENT_LIMITS } from '@browseros/shared/constants/limits'
+import { CONTENT_LIMITS } from '@trios/shared/constants/limits'
 import { z } from 'zod'
 import type { ConsoleLevel } from '../browser/console-collector'
 import { defineToolWithCategory } from './framework'

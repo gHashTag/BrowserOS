@@ -25,7 +25,7 @@ async function callMcpTool(
 ): Promise<McpToolResult> {
   const client = new Client({ name: 'validate-computer-use', version: '1.0.0' })
   const transport = new StreamableHTTPClientTransport(new URL(serverUrl), {
-    requestInit: { headers: { 'X-BrowserOS-Source': 'validation' } },
+    requestInit: { headers: { 'X-TRIOS-Source': 'validation' } },
   })
 
   try {

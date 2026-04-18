@@ -8,8 +8,8 @@ import type {
   LanguageModelV3StreamResult,
   LanguageModelV3Usage,
 } from '@ai-sdk/provider'
-import { AGENT_LIMITS } from '@browseros/shared/constants/limits'
-import { LLM_PROVIDERS } from '@browseros/shared/schemas/llm'
+import { AGENT_LIMITS } from '@trios/shared/constants/limits'
+import { LLM_PROVIDERS } from '@trios/shared/schemas/llm'
 import type { ModelMessage, ToolResultPart } from 'ai'
 import {
   computeConfig,
@@ -595,7 +595,7 @@ describe('getMessageNormalizationOptions', () => {
     expect(
       getMessageNormalizationOptions(
         agentConfig({
-          provider: LLM_PROVIDERS.BROWSEROS,
+          provider: LLM_PROVIDERS.trios,
           upstreamProvider: LLM_PROVIDERS.OPENAI,
         }),
       ).supportsMediaInToolResults,

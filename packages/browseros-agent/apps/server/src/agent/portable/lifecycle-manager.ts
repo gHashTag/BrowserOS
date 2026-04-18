@@ -1,15 +1,15 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
-import type { Browser } from '@browseros/shared/schemas/browser'
-import type { ToolSet } from 'ai'
+import type { Browser } from '../../browser/browser'
+import { logger } from '../../lib/logger'
+import type { ToolRegistry } from '../../tools/tool-registry'
 import { ConfigLoader } from './config-loader'
 import type { AgentStatus, AgentStatusResponse } from './config-schema'
 import { ErrorCode, PortableAgentError } from './errors'
 import { PortableAgent, type PortableAgentDeps } from './portable-agent'
-import { logger } from '../../lib/logger'
 
 export interface StartAgentOptions {
   force?: boolean
@@ -20,7 +20,7 @@ export class LifecycleManager {
 
   constructor(
     private readonly browser: Browser,
-    private readonly registry: ToolSet,
+    private readonly registry: ToolRegistry,
     private readonly deps: PortableAgentDeps,
   ) {}
 

@@ -111,7 +111,7 @@ async function loadScreenshot(path?: string): Promise<string> {
   }
 
   // Try to capture from a running BrowserOS server
-  const serverUrl = process.env.BROWSEROS_URL || 'http://127.0.0.1:9110'
+  const serverUrl = process.env.trios_URL || 'http://127.0.0.1:9110'
   console.log(
     `No screenshot path provided. Trying to capture from ${serverUrl}...`,
   )
@@ -124,7 +124,7 @@ async function loadScreenshot(path?: string): Promise<string> {
   const client = new Client({ name: 'clado-test', version: '1.0.0' })
   const transport = new StreamableHTTPClientTransport(
     new URL(`${serverUrl}/mcp`),
-    { requestInit: { headers: { 'X-BrowserOS-Source': 'sdk-internal' } } },
+    { requestInit: { headers: { 'X-TRIOS-Source': 'sdk-internal' } } },
   )
 
   try {

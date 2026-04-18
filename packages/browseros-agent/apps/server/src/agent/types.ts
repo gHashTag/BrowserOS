@@ -1,10 +1,10 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
-import type { ToolApprovalConfig } from '@browseros/shared/constants/tool-approval'
-import type { LLMProvider } from '@browseros/shared/schemas/llm'
+import type { ToolApprovalConfig } from '@trios/shared/constants/tool-approval'
+import type { LLMProvider } from '@trios/shared/schemas/llm'
 
 export interface ProviderConfig {
   provider: LLMProvider
@@ -49,8 +49,8 @@ export interface ResolvedAgentConfig {
   declinedApps?: string[]
   /** Where the chat session originates from — determines navigation behavior. */
   origin?: 'sidepanel' | 'newtab'
-  /** BrowserOS installation ID for credit-based tracking. */
-  browserosId?: string
+  /** TRIOS installation ID for credit-based tracking. */
+  triosId?: string
   /** Tool approval configuration — which categories require human approval. */
   toolApprovalConfig?: ToolApprovalConfig
 }

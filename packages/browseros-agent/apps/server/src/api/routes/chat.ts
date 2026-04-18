@@ -1,5 +1,5 @@
-import { DEFAULT_PORTS } from '@browseros/shared/constants/ports'
 import { zValidator } from '@hono/zod-validator'
+import { DEFAULT_PORTS } from '@trios/shared/constants/ports'
 import { Hono } from 'hono'
 import { SessionStore } from '../../agent/session-store'
 import type { Browser } from '../../browser/browser'
@@ -15,13 +15,13 @@ import { ConversationIdParamSchema } from '../utils/validation'
 interface ChatRouteDeps {
   browser: Browser
   registry: ToolRegistry
-  browserosId?: string
+  triosId?: string
   aiSdkDevtoolsEnabled?: boolean
   port?: number
 }
 
 export function createChatRoutes(deps: ChatRouteDeps) {
-  const { browserosId, port = DEFAULT_PORTS.server } = deps
+  const { triosId, port = DEFAULT_PORTS.server } = deps
 
   logger.info('Chat routes initialized', { port })
 
@@ -32,7 +32,7 @@ export function createChatRoutes(deps: ChatRouteDeps) {
     klavisClient,
     browser: deps.browser,
     registry: deps.registry,
-    browserosId,
+    triosId,
     aiSdkDevtoolsEnabled: deps.aiSdkDevtoolsEnabled,
   })
 

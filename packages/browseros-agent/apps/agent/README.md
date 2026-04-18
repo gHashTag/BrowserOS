@@ -1,15 +1,15 @@
-# BrowserOS Agent Extension
+# TRIOS Agent Extension
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](../../../../LICENSE)
 
-The built-in browser extension that powers BrowserOS's AI interface — new tab with unified search, side panel chat, onboarding, and settings. Built with [WXT](https://wxt.dev) and React.
+The built-in browser extension that powers TRIOS's AI interface — new tab with unified search, side panel chat, onboarding, and settings. Built with [WXT](https://wxt.dev) and React.
 
 > For user-facing feature documentation, see [docs.browseros.com](https://docs.browseros.com).
 
 ## Features
 
 - **AI-Powered New Tab**: Custom new tab page with unified search across Google and AI assistants
-- **Side Panel Chat**: Full-featured chat interface for interacting with BrowserOS
+- **Side Panel Chat**: Full-featured chat interface for interacting with TRIOS
 - **Multi-Provider Support**: Connect to various LLM providers (OpenAI, Anthropic, Azure, Bedrock, and more)
 - **MCP Integration**: Model Context Protocol support for extending AI capabilities
 - **Visual Feedback**: Animated glow effect on tabs during AI agent operations
@@ -17,7 +17,7 @@ The built-in browser extension that powers BrowserOS's AI interface — new tab 
 
 ## How It Connects
 
-The extension communicates with the [BrowserOS Server](../../apps/server/) running locally. The server handles the AI agent loop, MCP tools, and CDP connections — the extension provides the UI layer.
+The extension communicates with the [TRIOS Server](../../apps/server/) running locally. The server handles the AI agent loop, MCP tools, and CDP connections — the extension provides the UI layer.
 
 ## Project Structure
 
@@ -43,7 +43,7 @@ lib/                       # Shared utilities and hooks
 
 The service worker that manages:
 - Side panel toggling via browser action
-- BrowserOS Core health checks
+- TRIOS Core health checks
 - MCP tools fetching
 - LLM provider configuration backup
 - Extension installation triggers (opens onboarding)
@@ -54,13 +54,13 @@ Custom new tab replacement featuring:
 - **Unified Search Bar**: Search Google or ask AI directly
 - **Tab Context**: Attach open tabs to provide context for AI queries
 - **Search Suggestions**: Real-time suggestions from multiple providers (Google, Bing, DuckDuckGo, Yahoo, Yandex)
-- **AI Suggestions**: Context-aware BrowserOS action suggestions
+- **AI Suggestions**: Context-aware TRIOS action suggestions
 - **Top Sites**: Quick access to frequently visited sites
 - **Theme Toggle**: Light/dark mode support
 
 ### Side Panel (`sidepanel/`)
 
-The main chat interface for BrowserOS:
+The main chat interface for TRIOS:
 - **Chat Modes**: Switch between chat and agent modes
 - **Provider Selector**: Choose from configured LLM providers
 - **Tab Attachment**: Include browser tab content as context
@@ -94,7 +94,7 @@ Content script that creates a visual indicator (pulsing orange glow) around the 
 
 - [Bun](https://bun.sh) installed
 - Chrome or Chromium-based browser
-- BrowserOS Server running locally (for full functionality)
+- TRIOS Server running locally (for full functionality)
 
 ### Setup
 

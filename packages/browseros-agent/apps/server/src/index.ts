@@ -1,9 +1,9 @@
 #!/usr/bin/env bun
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
- * BrowserOS Server - Entry Point
+ * TRIOS Server - Entry Point
  */
 
 // Runtime check for Bun
@@ -17,7 +17,7 @@ if (typeof Bun === 'undefined') {
 
 // Import polyfills first
 import './lib/polyfill'
-import { EXIT_CODES } from '@browseros/shared/constants/exit-codes'
+import { EXIT_CODES } from '@trios/shared/constants/exit-codes'
 import { CommanderError } from 'commander'
 import { loadServerConfig } from './config'
 import { isPortInUseError } from './lib/port-binding'

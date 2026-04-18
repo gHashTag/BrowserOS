@@ -33,7 +33,7 @@ index 0000000000000..8f97e0b97467f
 +using ::testing::Return;
 +using ::testing::StrictMock;
 +
-+namespace browseros {
++namespace trios {
 +namespace {
 +
 +class BrowserOSServerManagerTest : public testing::Test {

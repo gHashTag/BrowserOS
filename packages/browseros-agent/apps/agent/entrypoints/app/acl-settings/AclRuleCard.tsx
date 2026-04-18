@@ -1,4 +1,4 @@
-import type { AclRule } from '@browseros/shared/types/acl'
+import type { AclRule } from '@trios/shared/types/acl'
 import { Globe, Trash2 } from 'lucide-react'
 import type { FC } from 'react'
 import { Badge } from '@/components/ui/badge'

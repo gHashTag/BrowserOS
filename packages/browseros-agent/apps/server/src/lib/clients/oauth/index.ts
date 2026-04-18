@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
@@ -13,11 +13,11 @@ let tokenManager: OAuthTokenManager | null = null
 
 export function initializeOAuth(
   db: Database,
-  browserosId: string,
+  triosId: string,
 ): OAuthTokenManager {
   const store = new OAuthTokenStore(db)
   const callbackServer = new OAuthCallbackServer()
-  tokenManager = new OAuthTokenManager(store, browserosId, callbackServer)
+  tokenManager = new OAuthTokenManager(store, triosId, callbackServer)
   callbackServer.setTokenManager(tokenManager)
   return tokenManager
 }

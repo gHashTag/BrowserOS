@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-// Matches DEV_PORTS.cdp from @browseros/shared/constants/ports
+// Matches DEV_PORTS.cdp from @trios/shared/constants/ports
 const DEFAULT_CDP_PORT = 9010
 const REQUEST_TIMEOUT_MS = 30_000
 const EXTENSION_ID =
@@ -43,7 +43,7 @@ class CDPClient {
       resp = await fetch(versionUrl)
     } catch {
       throw new Error(
-        `Cannot reach CDP at ${versionUrl}. Is BrowserOS running with --cdp-port=${port}?`,
+        `Cannot reach CDP at ${versionUrl}. Is TRIOS running with --cdp-port=${port}?`,
       )
     }
     const info = (await resp.json()) as { webSocketDebuggerUrl: string }
@@ -1011,7 +1011,7 @@ async function cmdOpenSidepanel(cdp: CDPClient): Promise<void> {
   if (!sw) {
     throw new Error(
       `No service worker found for extension ${EXTENSION_ID}. ` +
-        'Is the BrowserOS agent extension installed and active?',
+        'Is the TRIOS agent extension installed and active?',
     )
   }
 
@@ -1067,7 +1067,7 @@ Commands:
   select_option <target> <id> <value>  Select dropdown option by value or text
   wait_for <target> text|selector <v>  Wait for text or CSS selector (timeout: 10s)
   eval <target> <expression>           Evaluate JS in target context
-  open-sidepanel                       Open the BrowserOS agent side panel
+  open-sidepanel                       Open the TRIOS agent side panel
 
 Target resolution:
   <target> can be a numeric index from 'targets' output, or a URL/title substring.

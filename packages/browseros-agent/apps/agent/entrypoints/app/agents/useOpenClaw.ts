@@ -1,10 +1,10 @@
-import type {
-  BrowserOSAgentRoleId,
-  BrowserOSCustomRoleInput,
-} from '@browseros/shared/types/role-aware-agents'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { getAgentServerUrl } from '@/lib/browseros/helpers'
-import { useAgentServerUrl } from '@/lib/browseros/useBrowserOSProviders'
+import type {
+  TRIOSAgentRoleId,
+  TRIOSCustomRoleInput,
+} from '@trios/shared/types/role-aware-agents'
+import { getAgentServerUrl } from '@/lib/trios/helpers'
+import { useAgentServerUrl } from '@/lib/trios/useBrowserOSProviders'
 
 export interface AgentEntry {
   agentId: string
@@ -13,14 +13,14 @@ export interface AgentEntry {
   model?: unknown
   role?: {
     roleSource: 'builtin' | 'custom'
-    roleId?: BrowserOSAgentRoleId
+    roleId?: TRIOSAgentRoleId
     roleName: string
     shortDescription: string
   }
 }
 
 export interface RoleTemplateSummary {
-  id: BrowserOSAgentRoleId
+  id: TRIOSAgentRoleId
   name: string
   shortDescription: string
   longDescription: string
@@ -61,8 +61,8 @@ export interface OpenClawStatus {
 
 export interface OpenClawAgentMutationInput {
   name: string
-  roleId?: BrowserOSAgentRoleId
-  customRole?: BrowserOSCustomRoleInput
+  roleId?: TRIOSAgentRoleId
+  customRole?: TRIOSCustomRoleInput
   providerType?: string
   providerName?: string
   baseUrl?: string
@@ -207,7 +207,7 @@ export function useOpenClawMutations() {
 
   const ensureBaseUrl = () => {
     if (!baseUrl || urlLoading) {
-      throw new Error('BrowserOS agent server URL is not ready')
+      throw new Error('TRIOS agent server URL is not ready')
     }
     return baseUrl
   }

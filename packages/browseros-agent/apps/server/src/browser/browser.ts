@@ -1,5 +1,5 @@
-import type { ProtocolApi } from '@browseros/cdp-protocol/protocol-api'
-import type { ElementProperties } from '@browseros/shared/types/acl'
+import type { ProtocolApi } from '@trios/cdp-protocol/protocol-api'
+import type { ElementProperties } from '@trios/shared/types/acl'
 import { logger } from '../lib/logger'
 import type { CdpBackend } from './backends/types'
 import type { BookmarkNode } from './bookmarks'

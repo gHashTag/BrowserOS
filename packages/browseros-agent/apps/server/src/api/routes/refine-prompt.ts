@@ -11,7 +11,7 @@ const RefinePromptRequestSchema = AgentLLMConfigSchema.extend({
 })
 
 interface RefinePromptRouteDeps {
-  browserosId?: string
+  triosId?: string
 }
 
 export function createRefinePromptRoutes(deps: RefinePromptRouteDeps = {}) {
@@ -30,7 +30,7 @@ export function createRefinePromptRoutes(deps: RefinePromptRouteDeps = {}) {
       const result = await refinePrompt(
         llmConfig,
         { prompt, name },
-        deps.browserosId,
+        deps.triosId,
       )
 
       logger.info('Refine prompt result', {

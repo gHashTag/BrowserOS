@@ -59,7 +59,7 @@ export const MemoryViewer: FC = () => {
     return (
       <div className="rounded-xl border border-destructive/50 bg-destructive/5 p-6">
         <p className="text-destructive text-sm">
-          Could not load memory. Make sure BrowserOS server is running.
+          Could not load memory. Make sure TRIOS server is running.
         </p>
       </div>
     )

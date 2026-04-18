@@ -15,7 +15,7 @@ const BINARIES_DIR = join(TMP_ROOT, 'binaries')
 function compiledBinaryPath(target: BuildTarget): string {
   return join(
     BINARIES_DIR,
-    `browseros-server-${target.id}${target.os === 'windows' ? '.exe' : ''}`,
+    `trios-server-${target.id}${target.os === 'windows' ? '.exe' : ''}`,
   )
 }
 

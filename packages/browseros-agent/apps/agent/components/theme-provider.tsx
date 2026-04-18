@@ -30,7 +30,12 @@ export function ThemeProvider({
 
   useEffect(() => {
     themeStorage.getValue().then((savedTheme) => {
-      setThemeState(savedTheme ?? 'system')
+      setThemeState(savedTheme ?? 'dark')
+      // Immediately apply default dark theme if not set
+      if (!savedTheme) {
+        const root = window.document.documentElement
+        root.classList.add('dark')
+      }
     })
 
     const unwatch = themeStorage.watch((newTheme) => {

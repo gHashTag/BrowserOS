@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Shape of ~/.browseros/server.json written by the server on startup.
@@ -13,5 +13,5 @@ export interface ServerDiscoveryConfig {
   server_version: string
   browseros_version?: string
   chromium_version?: string
-  browseros_id?: string
+  trios_id?: string
 }

@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  */
 
 import { afterEach, beforeEach, describe, it } from 'bun:test'
@@ -25,7 +25,7 @@ describe('createKlavisRoutes', () => {
         integrations: ['Google Docs', 'Slack'],
       })) as typeof fetch
 
-    const route = createKlavisRoutes({ browserosId: 'user-123' })
+    const route = createKlavisRoutes({ triosId: 'user-123' })
     const response = await route.request('/user-integrations')
     const body = await response.json()
 
@@ -48,7 +48,7 @@ describe('createKlavisRoutes', () => {
         ],
       })) as typeof fetch
 
-    const route = createKlavisRoutes({ browserosId: 'user-123' })
+    const route = createKlavisRoutes({ triosId: 'user-123' })
     const response = await route.request('/user-integrations')
     const body = await response.json()
 
@@ -74,7 +74,7 @@ describe('createKlavisRoutes', () => {
         },
       })) as typeof fetch
 
-    const route = createKlavisRoutes({ browserosId: 'user-123' })
+    const route = createKlavisRoutes({ triosId: 'user-123' })
     const response = await route.request('/servers/add', {
       method: 'POST',
       headers: {

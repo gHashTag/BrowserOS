@@ -1,9 +1,9 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Low-level MCP server process management.
- * Use setup.ts:ensureBrowserOS() for the full test environment.
+ * Use setup.ts:ensureTRIOS() for the full test environment.
  */
 import { type ChildProcess, spawn } from 'node:child_process'
 import { dirname, resolve } from 'node:path'
@@ -67,7 +67,7 @@ export async function spawnServer(config: ServerConfig): Promise<ServerState> {
     await killServer()
   }
 
-  console.log(`Starting BrowserOS Server on port ${config.serverPort}...`)
+  console.log(`Starting TRIOS Server on port ${config.serverPort}...`)
   const process = spawn(
     'bun',
     [

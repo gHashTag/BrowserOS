@@ -27,7 +27,7 @@ const (
 	randomPortMax = 9999
 )
 
-var defaultLocalPorts = Ports{CDP: 9005, Server: 9105, Extension: 9305}
+var defaultLocalPorts = Ports{CDP: 9000, Server: 9105, Extension: 9305}
 
 func DefaultLocalPorts() Ports {
 	return defaultLocalPorts
@@ -139,6 +139,9 @@ func BuildEnv(p Ports, nodeEnv string) []string {
 		fmt.Sprintf("BROWSEROS_CDP_PORT=%d", p.CDP),
 		fmt.Sprintf("BROWSEROS_SERVER_PORT=%d", p.Server),
 		fmt.Sprintf("BROWSEROS_EXTENSION_PORT=%d", p.Extension),
+		fmt.Sprintf("trios_CDP_PORT=%d", p.CDP),
+		fmt.Sprintf("trios_SERVER_PORT=%d", p.Server),
+		fmt.Sprintf("trios_EXTENSION_PORT=%d", p.Extension),
 		fmt.Sprintf("VITE_BROWSEROS_SERVER_PORT=%d", p.Server),
 		fmt.Sprintf("NODE_ENV=%s", nodeEnv),
 	)

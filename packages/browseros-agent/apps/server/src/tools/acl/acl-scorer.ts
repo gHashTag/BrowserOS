@@ -1,5 +1,5 @@
-import { matchesSitePattern } from '@browseros/shared/acl/match'
-import type { AclRule, ElementProperties } from '@browseros/shared/types/acl'
+import { matchesSitePattern } from '@trios/shared/acl/match'
+import type { AclRule, ElementProperties } from '@trios/shared/types/acl'
 import { logger } from '../../lib/logger'
 import { editDistanceRatio } from './acl-edit-distance'
 import { computeSemanticSimilarity } from './acl-embeddings'

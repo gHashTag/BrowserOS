@@ -1,33 +1,33 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * LLM config resolution - handles BROWSEROS provider lookup.
+ * LLM config resolution - handles trios provider lookup.
  */
 
-import { LLM_PROVIDERS, type LLMConfig } from '@browseros/shared/schemas/llm'
+import { LLM_PROVIDERS, type LLMConfig } from '@trios/shared/schemas/llm'
 import { INLINED_ENV } from '../../../env'
 import { logger } from '../../logger'
-import { fetchBrowserOSConfig, getLLMConfigFromProvider } from '../gateway'
+import { fetchTRIOSConfig, getLLMConfigFromProvider } from '../gateway'
 import { getOAuthTokenManager } from '../oauth'
 import type { ResolvedLLMConfig } from './types'
 
 export async function resolveLLMConfig(
   config: LLMConfig,
-  browserosId?: string,
+  triosId?: string,
 ): Promise<ResolvedLLMConfig> {
   logger.debug('resolveLLMConfig input', {
     provider: config.provider,
     model: config.model,
     baseUrl: config.baseUrl ? String(config.baseUrl) : undefined,
     hasApiKey: !!config.apiKey,
-    browserosId: browserosId ?? undefined,
+    triosId: triosId ?? undefined,
   })
 
   // OAuth providers: resolve token from server-side storage
   if (config.provider === LLM_PROVIDERS.CHATGPT_PRO) {
-    return resolveOAuthConfig(config, browserosId, {
+    return resolveOAuthConfig(config, triosId, {
       providerId: 'chatgpt-pro',
       displayName: 'ChatGPT Plus/Pro',
       defaultModel: 'gpt-5.3-codex',
@@ -39,7 +39,7 @@ export async function resolveLLMConfig(
     })
   }
   if (config.provider === LLM_PROVIDERS.GITHUB_COPILOT) {
-    return resolveOAuthConfig(config, browserosId, {
+    return resolveOAuthConfig(config, triosId, {
       providerId: 'github-copilot',
       displayName: 'GitHub Copilot',
       defaultModel: 'gpt-5-mini',
@@ -47,7 +47,7 @@ export async function resolveLLMConfig(
     })
   }
   if (config.provider === LLM_PROVIDERS.QWEN_CODE) {
-    return resolveOAuthConfig(config, browserosId, {
+    return resolveOAuthConfig(config, triosId, {
       providerId: 'qwen-code',
       displayName: 'Qwen Code',
       defaultModel: 'coder-model',
@@ -55,9 +55,9 @@ export async function resolveLLMConfig(
     })
   }
 
-  // BrowserOS gateway: fetch config from remote service
-  if (config.provider === LLM_PROVIDERS.BROWSEROS) {
-    return resolveBrowserOSConfig(config, browserosId)
+  // TRIOS gateway: fetch config from remote service
+  if (config.provider === LLM_PROVIDERS.trios) {
+    return resolveTRIOSConfig(config, triosId)
   }
 
   // All other providers: passthrough with model validation
@@ -85,11 +85,11 @@ interface OAuthResolveOptions {
 
 async function resolveOAuthConfig(
   config: LLMConfig,
-  browserosId: string | undefined,
+  triosId: string | undefined,
   opts: OAuthResolveOptions,
 ): Promise<ResolvedLLMConfig> {
   const tokenManager = getOAuthTokenManager()
-  if (!tokenManager || !browserosId) {
+  if (!tokenManager || !triosId) {
     throw new Error(
       `Not authenticated with ${opts.displayName}. Please login first.`,
     )
@@ -113,20 +113,20 @@ async function resolveOAuthConfig(
   }
 }
 
-async function resolveBrowserOSConfig(
+async function resolveTRIOSConfig(
   config: LLMConfig,
-  browserosId?: string,
+  triosId?: string,
 ): Promise<ResolvedLLMConfig> {
-  const configUrl = INLINED_ENV.BROWSEROS_CONFIG_URL
+  const configUrl = INLINED_ENV.trios_CONFIG_URL
   if (!configUrl) {
     throw new Error(
-      'BROWSEROS_CONFIG_URL environment variable is required for BrowserOS provider',
+      'trios_CONFIG_URL environment variable is required for TRIOS provider',
     )
   }
 
-  logger.debug('Resolving BROWSEROS config', { configUrl, browserosId })
+  logger.debug('Resolving trios config', { configUrl, triosId })
 
-  const browserosConfig = await fetchBrowserOSConfig(configUrl, browserosId)
+  const browserosConfig = await fetchTRIOSConfig(configUrl, triosId)
   const llmConfig = getLLMConfigFromProvider(browserosConfig, 'default')
 
   return {
@@ -135,6 +135,6 @@ async function resolveBrowserOSConfig(
     apiKey: llmConfig.apiKey,
     baseUrl: llmConfig.baseUrl,
     upstreamProvider: llmConfig.providerType,
-    browserosId,
+    triosId,
   }
 }

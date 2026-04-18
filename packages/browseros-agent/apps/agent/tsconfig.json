@@ -6,7 +6,7 @@
     "jsx": "react-jsx",
     "paths": {
       "@/*": ["./*"],
-      "@browseros/shared/*": ["../../packages/shared/src/*"]
+      "@trios/shared/*": ["../../packages/shared/src/*"]
     },
     "plugins": [
       {

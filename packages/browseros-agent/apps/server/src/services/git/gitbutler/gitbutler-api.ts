@@ -1,19 +1,21 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * GitButler API Integration
  * API fallback when CLI is unavailable
  */
 
-import { GIT_CONSTANTS } from '@browseros/shared/constants/git'
+import { GIT_CONSTANTS } from '@trios/shared/constants/git'
 import type { BranchInfo, CommitInfo, GitStatus } from '../git-repository'
 
 export class GitButlerAPI {
   private baseUrl: string
   private available: boolean | null = null
 
-  constructor(private port: number = GIT_CONSTANTS.GITBUTLER_API_PORT) {
+  constructor(
+    private port: number = GIT_CONSTANTS.GITBUTLER_API_PORT as number,
+  ) {
     this.baseUrl = `http://localhost:${this.port}`
   }
 

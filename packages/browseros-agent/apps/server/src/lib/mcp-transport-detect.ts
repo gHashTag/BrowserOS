@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Detects MCP transport type by probing the server endpoint.
@@ -11,7 +11,7 @@
  * @see https://modelcontextprotocol.io/specification/2025-03-26/basic/transports
  */
 
-import { TIMEOUTS } from '@browseros/shared/constants/timeouts'
+import { TIMEOUTS } from '@trios/shared/constants/timeouts'
 import { logger } from './logger'
 
 export type McpTransportType = 'streamable-http' | 'sse'

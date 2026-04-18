@@ -1,5 +1,5 @@
-import { getBrowserOSAdapter } from '@/lib/browseros/adapter'
-import { BROWSEROS_PREFS } from '@/lib/browseros/prefs'
+import { getTRIOSAdapter } from '@/lib/trios/adapter'
+import { trios_PREFS } from '@/lib/trios/prefs'
 
 /** @public */
 export interface LlmHubProvider {
@@ -9,9 +9,9 @@ export interface LlmHubProvider {
 
 export async function loadProviders(): Promise<LlmHubProvider[]> {
   try {
-    const adapter = getBrowserOSAdapter()
+    const adapter = getTRIOSAdapter()
     const providersPref = await adapter.getPref(
-      BROWSEROS_PREFS.THIRD_PARTY_LLM_PROVIDERS,
+      trios_PREFS.THIRD_PARTY_LLM_PROVIDERS,
     )
     return (providersPref?.value as LlmHubProvider[]) || []
   } catch {
@@ -23,9 +23,9 @@ export async function saveProviders(
   providers: LlmHubProvider[],
 ): Promise<boolean> {
   try {
-    const adapter = getBrowserOSAdapter()
+    const adapter = getTRIOSAdapter()
     return await adapter.setPref(
-      BROWSEROS_PREFS.THIRD_PARTY_LLM_PROVIDERS,
+      trios_PREFS.THIRD_PARTY_LLM_PROVIDERS,
       providers,
     )
   } catch {

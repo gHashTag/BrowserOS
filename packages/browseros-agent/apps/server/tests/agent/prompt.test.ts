@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * System Prompt v6 — Test Suite
  *
@@ -546,11 +546,11 @@ describe('capability coverage', () => {
     expect(prompt).toContain('download_file')
   })
 
-  it('documents browseros_info tool', () => {
+  it('documents trios_info tool', () => {
     // Why: self-documentation tool — the agent can look up its own
     // features. Never referenced in v5.
     const prompt = buildRegular()
-    expect(prompt).toContain('browseros_info')
+    expect(prompt).toContain('trios_info')
   })
 })
 

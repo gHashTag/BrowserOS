@@ -13,7 +13,7 @@ index 0000000000000..3bef12ccf6617
 +#include "chrome/browser/browseros/server/test/mock_server_state_store.h"
 +#include "chrome/browser/browseros/server/test/mock_server_updater.h"
 +
-+namespace browseros {
++namespace trios {
 +
 +MockHealthChecker::MockHealthChecker() = default;
 +MockHealthChecker::~MockHealthChecker() = default;

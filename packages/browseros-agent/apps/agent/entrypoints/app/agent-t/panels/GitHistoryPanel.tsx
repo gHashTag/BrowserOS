@@ -1,18 +1,18 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Git History Panel
  * Displays commit history
  */
 
+import { useQuery } from '@tanstack/react-query'
 import { GitCommit, Loader2 } from 'lucide-react'
 import type { FC } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { useQuery } from '@tanstack/react-query'
 
 interface GitHistoryPanelProps {
   repositoryId: string
@@ -27,7 +27,11 @@ interface CommitHistoryItem {
 }
 
 export const GitHistoryPanel: FC<GitHistoryPanelProps> = ({ repositoryId }) => {
-  const { data: commits, isLoading, error } = useQuery({
+  const {
+    data: commits,
+    isLoading,
+    error,
+  } = useQuery({
     queryKey: ['git', 'history', repositoryId],
     queryFn: async (): Promise<CommitHistoryItem[]> => {
       const res = await fetch(`/api/git/history/${repositoryId}`)

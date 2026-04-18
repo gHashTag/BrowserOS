@@ -29,7 +29,7 @@ index 0000000000000..fdb6be443f25b
 +#include "extensions/common/mojom/manifest.mojom-shared.h"
 +#include "extensions/common/verifier_formats.h"
 +
-+namespace browseros {
++namespace trios {
 +
 +namespace {
 +

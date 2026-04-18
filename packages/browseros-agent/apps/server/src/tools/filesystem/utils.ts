@@ -1,7 +1,7 @@
 import type { Dirent } from 'node:fs'
 import { readdir } from 'node:fs/promises'
 import { join, relative } from 'node:path'
-import { TOOL_LIMITS } from '@browseros/shared/constants/limits'
+import { TOOL_LIMITS } from '@trios/shared/constants/limits'
 import { logger } from '../../lib/logger'
 import { metrics } from '../../lib/metrics'
 

@@ -10,7 +10,7 @@ import type { R2Config, StagedArtifact, UploadResult } from './types'
 function zipPathForArtifact(artifact: StagedArtifact): string {
   return join(
     dirname(artifact.rootDir),
-    `browseros-server-resources-${artifact.target.id}.zip`,
+    `trios-server-resources-${artifact.target.id}.zip`,
   )
 }
 

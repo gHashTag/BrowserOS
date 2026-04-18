@@ -1,13 +1,19 @@
 import { storage } from '@wxt-dev/storage'
+import type { Theme } from '@/shared/constants/theme'
 
 /**
  * @public
  */
-export type Theme = 'light' | 'dark' | 'system'
+export type ThemeStorage = Theme
+
+/**
+ * @public
+ */
+export type { Theme }
 
 /**
  * @public
  */
 export const themeStorage = storage.defineItem<Theme>('local:theme', {
-  fallback: 'system',
+  fallback: 'dark' as Theme,
 })

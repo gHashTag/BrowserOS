@@ -1,4 +1,4 @@
-import type { AclRule } from '@browseros/shared/types/acl'
+import type { AclRule } from '@trios/shared/types/acl'
 import { Plus, ShieldAlert } from 'lucide-react'
 import { type FC, useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'

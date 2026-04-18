@@ -87,7 +87,7 @@ export class ParallelExecutor {
 
     const cleanup = this.setupSignalHandlers()
 
-    const loadExtensions = this.config.config.browseros.load_extensions ?? false
+    const loadExtensions = this.config.config.trios.load_extensions ?? false
 
     // Patch NopeCHA API key before launching any workers
     const captchaConfig = this.config.config.captcha
@@ -137,11 +137,11 @@ export class ParallelExecutor {
   ): Promise<void> {
     // Per-worker isolated ports
     const basePorts: EvalPorts = {
-      cdp: this.config.config.browseros.base_cdp_port,
-      server: this.config.config.browseros.base_server_port,
-      extension: this.config.config.browseros.base_extension_port,
+      cdp: this.config.config.trios.base_cdp_port,
+      server: this.config.config.trios.base_server_port,
+      extension: this.config.config.trios.base_extension_port,
     }
-    const headless = this.config.config.browseros.headless ?? false
+    const headless = this.config.config.trios.headless ?? false
     const appManager = new BrowserOSAppManager(
       workerIndex,
       basePorts,
@@ -167,7 +167,7 @@ export class ParallelExecutor {
 
     try {
       // Always start Chrome+Server once for this worker
-      console.log(`\n  Worker ${workerIndex}: Starting BrowserOS stack...`)
+      console.log(`\n  Worker ${workerIndex}: Starting TRIOS stack...`)
       await appManager.restart()
 
       while (true) {

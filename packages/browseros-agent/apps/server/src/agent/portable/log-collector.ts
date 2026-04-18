@@ -1,9 +1,9 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
-import { MAX_LOG_ENTRIES } from '@browseros/shared/constants/portable-agent'
+import { MAX_LOG_ENTRIES } from '@trios/shared/constants/portable-agent'
 import type { AgentLogEntry } from './config-schema'
 
 export class LogCollector {

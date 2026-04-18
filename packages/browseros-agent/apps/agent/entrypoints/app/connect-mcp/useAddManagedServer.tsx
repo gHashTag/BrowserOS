@@ -1,5 +1,5 @@
 import useSWRMutation from 'swr/mutation'
-import { useAgentServerUrl } from '@/lib/browseros/useBrowserOSProviders'
+import { useAgentServerUrl } from '@/lib/trios/useBrowserOSProviders'
 
 interface AddServerResponse {
   success: boolean

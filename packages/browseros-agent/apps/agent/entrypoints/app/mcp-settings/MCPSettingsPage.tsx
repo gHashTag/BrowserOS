@@ -1,7 +1,7 @@
 import { type FC, useCallback, useEffect, useState } from 'react'
-import { getMcpServerUrl } from '@/lib/browseros/helpers'
 import type { McpTool } from '@/lib/mcp/client'
 import { sendServerMessage } from '@/lib/messaging/server/serverMessages'
+import { getMcpServerUrl } from '@/lib/trios/helpers'
 import { MCPServerHeader } from './MCPServerHeader'
 import { MCPToolsSection } from './MCPToolsSection'
 import { QuickSetupSection } from './QuickSetupSection'

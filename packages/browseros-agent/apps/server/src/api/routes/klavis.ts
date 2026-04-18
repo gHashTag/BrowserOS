@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
@@ -17,7 +17,7 @@ const ServerNameSchema = z.object({
 })
 
 interface KlavisRouteDeps {
-  browserosId: string
+  triosId: string
 }
 
 const normalizeServerKey = (value: string): string =>
@@ -44,7 +44,7 @@ const getAuthUrlForServer = (
 }
 
 export function createKlavisRoutes(deps: KlavisRouteDeps) {
-  const { browserosId } = deps
+  const { triosId } = deps
   const klavisClient = new KlavisClient()
 
   // Chain route definitions for proper Hono RPC type inference
@@ -56,19 +56,16 @@ export function createKlavisRoutes(deps: KlavisRouteDeps) {
       })
     })
     .get('/oauth-urls', async (c) => {
-      if (!browserosId) {
-        return c.json({ error: 'browserosId not configured' }, 500)
+      if (!triosId) {
+        return c.json({ error: 'triosId not configured' }, 500)
       }
 
       try {
         const serverNames = OAUTH_MCP_SERVERS.map((s) => s.name)
-        const response = await klavisClient.createStrata(
-          browserosId,
-          serverNames,
-        )
+        const response = await klavisClient.createStrata(triosId, serverNames)
 
         logger.info('Generated OAuth URLs', {
-          browserosId: browserosId.slice(0, 12),
+          triosId: triosId.slice(0, 12),
           serverCount: serverNames.length,
         })
 
@@ -78,25 +75,25 @@ export function createKlavisRoutes(deps: KlavisRouteDeps) {
         })
       } catch (error) {
         logger.error('Error getting OAuth URLs', {
-          browserosId: browserosId?.slice(0, 12),
+          triosId: triosId?.slice(0, 12),
           error: error instanceof Error ? error.message : String(error),
         })
         return c.json({ error: 'Failed to get OAuth URLs' }, 500)
       }
     })
     .get('/user-integrations', async (c) => {
-      if (!browserosId) {
-        return c.json({ error: 'browserosId not configured' }, 500)
+      if (!triosId) {
+        return c.json({ error: 'triosId not configured' }, 500)
       }
 
       try {
-        const integrations = await klavisClient.getUserIntegrations(browserosId)
+        const integrations = await klavisClient.getUserIntegrations(triosId)
         const normalizedIntegrations = integrations.map((integration) => ({
           name: integration.name,
           is_authenticated: integration.isAuthenticated,
         }))
         logger.info('Fetched user integrations', {
-          browserosId: browserosId.slice(0, 12),
+          triosId: triosId.slice(0, 12),
           count: normalizedIntegrations.length,
         })
         return c.json({
@@ -105,15 +102,15 @@ export function createKlavisRoutes(deps: KlavisRouteDeps) {
         })
       } catch (error) {
         logger.error('Error fetching user integrations', {
-          browserosId: browserosId?.slice(0, 12),
+          triosId: triosId?.slice(0, 12),
           error: error instanceof Error ? error.message : String(error),
         })
         return c.json({ error: 'Failed to fetch user integrations' }, 500)
       }
     })
     .post('/servers/add', zValidator('json', ServerNameSchema), async (c) => {
-      if (!browserosId) {
-        return c.json({ error: 'browserosId not configured' }, 500)
+      if (!triosId) {
+        return c.json({ error: 'triosId not configured' }, 500)
       }
 
       const { serverName } = c.req.valid('json')
@@ -125,8 +122,8 @@ export function createKlavisRoutes(deps: KlavisRouteDeps) {
 
       logger.info('Adding server to strata', { serverName })
 
-      const result = await klavisClient.createStrata(browserosId, [serverName])
-      klavisStrataCache.invalidate(browserosId)
+      const result = await klavisClient.createStrata(triosId, [serverName])
+      klavisStrataCache.invalidate(triosId)
 
       return c.json({
         success: true,
@@ -148,8 +145,8 @@ export function createKlavisRoutes(deps: KlavisRouteDeps) {
         }),
       ),
       async (c) => {
-        if (!browserosId) {
-          return c.json({ error: 'browserosId not configured' }, 500)
+        if (!triosId) {
+          return c.json({ error: 'triosId not configured' }, 500)
         }
 
         const { serverName, apiKey, apiKeyUrl } = c.req.valid('json')
@@ -173,8 +170,8 @@ export function createKlavisRoutes(deps: KlavisRouteDeps) {
       '/servers/remove',
       zValidator('json', ServerNameSchema),
       async (c) => {
-        if (!browserosId) {
-          return c.json({ error: 'browserosId not configured' }, 500)
+        if (!triosId) {
+          return c.json({ error: 'triosId not configured' }, 500)
         }
 
         const { serverName } = c.req.valid('json')
@@ -190,13 +187,11 @@ export function createKlavisRoutes(deps: KlavisRouteDeps) {
         // so a single-server lookup here would always miss and immediately
         // be cleared by invalidate() below — call createStrata directly
         // to recover the strataId, mirroring the original removeServer flow.
-        const strata = await klavisClient.createStrata(browserosId, [
-          serverName,
-        ])
+        const strata = await klavisClient.createStrata(triosId, [serverName])
         await klavisClient.deleteServersFromStrata(strata.strataId, [
           serverName,
         ])
-        klavisStrataCache.invalidate(browserosId)
+        klavisStrataCache.invalidate(triosId)
 
         return c.json({
           success: true,

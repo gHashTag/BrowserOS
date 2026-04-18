@@ -1,4 +1,4 @@
-import { PATHS } from '@browseros/shared/constants/paths'
+import { PATHS } from '@trios/shared/constants/paths'
 import { getSoulPath } from './browseros-dir'
 
 const SOUL_TEMPLATE = `# SOUL.md — Who You Are

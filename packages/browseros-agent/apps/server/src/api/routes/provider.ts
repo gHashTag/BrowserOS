@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
@@ -11,7 +11,7 @@ import { logger } from '../../lib/logger'
 import { AgentLLMConfigSchema } from '../types'
 
 interface ProviderRouteDeps {
-  browserosId?: string
+  triosId?: string
 }
 
 export function createProviderRoutes(deps: ProviderRouteDeps = {}) {
@@ -26,7 +26,7 @@ export function createProviderRoutes(deps: ProviderRouteDeps = {}) {
         model: config.model,
       })
 
-      const result = await testProviderConnection(config, deps.browserosId)
+      const result = await testProviderConnection(config, deps.triosId)
 
       logger.info('Provider test result', {
         provider: config.provider,

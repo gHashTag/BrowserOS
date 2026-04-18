@@ -67,7 +67,7 @@ async function _launchBrowserOSApp(): Promise<boolean> {
       '-a',
       'BrowserOS',
       '--args',
-      '--disable-browseros-server',
+      '--disable-trios-server',
       `--remote-debugging-port=${EVAL_PORTS.cdp}`,
       `--browseros-cdp-port=${EVAL_PORTS.cdp}`,
       `--browseros-mcp-port=${EVAL_PORTS.server}`,

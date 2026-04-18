@@ -1,16 +1,16 @@
 /**
  * @license AGPL-3.0-or-later
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  *
  * Git REST API Routes
  */
 
 import { zValidator } from '@hono/zod-validator'
+import { GIT_CONSTANTS } from '@trios/shared/constants/git'
+import { $ } from 'bun'
 import { Hono } from 'hono'
 import { z } from 'zod'
-import { $ } from 'bun'
 import type { GitOrchestrator } from '../../services/git/git-orchestrator'
-import { GIT_CONSTANTS } from '@browseros/shared/constants/git'
 import { GitButlerCLI } from '../../services/git/gitbutler/gitbutler-cli'
 
 interface GitRouteDeps {

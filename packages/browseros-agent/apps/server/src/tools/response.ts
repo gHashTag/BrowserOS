@@ -1,4 +1,4 @@
-import { TIMEOUTS } from '@browseros/shared/constants/timeouts'
+import { TIMEOUTS } from '@trios/shared/constants/timeouts'
 import type { Browser } from '../browser/browser'
 
 export type ContentItem =

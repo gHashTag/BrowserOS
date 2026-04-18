@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { getAgentServerUrl } from '@/lib/browseros/helpers'
+import { getAgentServerUrl } from '@/lib/trios/helpers'
 
 interface OAuthStatus {
   authenticated: boolean

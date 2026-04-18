@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  */
 
 import { afterEach, beforeEach, describe, it } from 'bun:test'
@@ -20,14 +20,14 @@ describe('loadServerConfig', () => {
     originalEnv = { ...process.env }
 
     // Clear relevant env vars
-    delete process.env.BROWSEROS_CDP_PORT
-    delete process.env.BROWSEROS_SERVER_PORT
-    delete process.env.BROWSEROS_EXTENSION_PORT
-    delete process.env.BROWSEROS_RESOURCES_DIR
-    delete process.env.BROWSEROS_EXECUTION_DIR
-    delete process.env.BROWSEROS_INSTALL_ID
-    delete process.env.BROWSEROS_CLIENT_ID
-    delete process.env.BROWSEROS_AI_SDK_DEVTOOLS
+    delete process.env.trios_CDP_PORT
+    delete process.env.trios_SERVER_PORT
+    delete process.env.trios_EXTENSION_PORT
+    delete process.env.trios_RESOURCES_DIR
+    delete process.env.trios_EXECUTION_DIR
+    delete process.env.trios_INSTALL_ID
+    delete process.env.trios_CLIENT_ID
+    delete process.env.trios_AI_SDK_DEVTOOLS
   })
 
   afterEach(() => {
@@ -108,9 +108,9 @@ describe('loadServerConfig', () => {
 
   describe('environment variables', () => {
     it('reads from env when CLI not provided', () => {
-      process.env.BROWSEROS_CDP_PORT = '9222'
-      process.env.BROWSEROS_SERVER_PORT = '9223'
-      process.env.BROWSEROS_EXTENSION_PORT = '9224'
+      process.env.trios_CDP_PORT = '9222'
+      process.env.trios_SERVER_PORT = '9223'
+      process.env.trios_EXTENSION_PORT = '9224'
 
       const result = loadServerConfig(['bun', 'src/index.ts'])
 
@@ -124,8 +124,8 @@ describe('loadServerConfig', () => {
     })
 
     it('CLI takes precedence over env', () => {
-      process.env.BROWSEROS_SERVER_PORT = '9999'
-      process.env.BROWSEROS_EXTENSION_PORT = '9999'
+      process.env.trios_SERVER_PORT = '9999'
+      process.env.trios_EXTENSION_PORT = '9999'
 
       const result = loadServerConfig([
         'bun',
@@ -214,7 +214,7 @@ describe('loadServerConfig', () => {
         }),
       )
 
-      process.env.BROWSEROS_SERVER_PORT = '9999'
+      process.env.trios_SERVER_PORT = '9999'
 
       const result = loadServerConfig([
         'bun',
@@ -447,8 +447,8 @@ describe('loadServerConfig', () => {
   })
 
   describe('AI SDK DevTools', () => {
-    it('enables devtools via BROWSEROS_AI_SDK_DEVTOOLS env var', () => {
-      process.env.BROWSEROS_AI_SDK_DEVTOOLS = 'true'
+    it('enables devtools via trios_AI_SDK_DEVTOOLS env var', () => {
+      process.env.trios_AI_SDK_DEVTOOLS = 'true'
 
       const result = loadServerConfig([
         'bun',

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sync"
 	"syscall"
+	"time"
 
 	"browseros-dev/browser"
 	"browseros-dev/proc"
@@ -64,6 +65,11 @@ func runWatch(cmd *cobra.Command, args []string) error {
 		proc.LogMsg(proc.TagInfo, "Killing processes on preferred ports...")
 		proc.KillPorts(defaultPorts)
 		proc.LogMsg(proc.TagInfo, "Ports cleared")
+
+		// Wait for ports to be fully released
+		// This prevents race condition where old process exits
+		// but port is still held by OS for a brief moment
+		time.Sleep(2 * time.Second)
 
 		p, reservations, err = proc.ResolveWatchPorts(false)
 		if err != nil {

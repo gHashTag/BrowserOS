@@ -1,9 +1,9 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * Exit codes for BrowserOS server process.
+ * Exit codes for TRIOS server process.
  * These codes communicate startup status to the Chromium manager.
  */
 

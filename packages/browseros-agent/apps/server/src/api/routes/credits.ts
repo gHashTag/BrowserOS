@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
@@ -9,14 +9,14 @@ import { fetchCredits } from '../../lib/clients/gateway'
 import { logger } from '../../lib/logger'
 
 interface CreditsDeps {
-  browserosId?: string
+  triosId?: string
   gatewayBaseUrl?: string
 }
 
 export function createCreditsRoutes(deps: CreditsDeps) {
-  const { browserosId, gatewayBaseUrl } = deps
+  const { triosId, gatewayBaseUrl } = deps
 
-  if (!browserosId || !gatewayBaseUrl) {
+  if (!triosId || !gatewayBaseUrl) {
     return new Hono().all('/*', (c) =>
       c.json({ error: 'Credits not configured' }, 503),
     )
@@ -24,7 +24,7 @@ export function createCreditsRoutes(deps: CreditsDeps) {
 
   return new Hono().get('/', async (c) => {
     try {
-      const credits = await fetchCredits(gatewayBaseUrl, browserosId)
+      const credits = await fetchCredits(gatewayBaseUrl, triosId)
       return c.json(credits)
     } catch (error) {
       logger.error('Failed to fetch credits', {

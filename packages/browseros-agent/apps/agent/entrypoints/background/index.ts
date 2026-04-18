@@ -1,7 +1,4 @@
 import { sessionStorage } from '@/lib/auth/sessionStorage'
-import { Capabilities } from '@/lib/browseros/capabilities'
-import { getHealthCheckUrl, getMcpServerUrl } from '@/lib/browseros/helpers'
-import { openSidePanel, toggleSidePanel } from '@/lib/browseros/toggleSidePanel'
 import { checkAndShowChangelog } from '@/lib/changelog/changelog-notifier'
 import {
   setupLlmProvidersBackupToBrowserOS,
@@ -20,6 +17,9 @@ import {
 import { searchActionsStorage } from '@/lib/search-actions/searchActionsStorage'
 import { selectedTextStorage } from '@/lib/selected-text/selectedTextStorage'
 import { stopAgentStorage } from '@/lib/stop-agent/stop-agent-storage'
+import { Capabilities } from '@/lib/trios/capabilities'
+import { getHealthCheckUrl, getMcpServerUrl } from '@/lib/trios/helpers'
+import { openSidePanel, toggleSidePanel } from '@/lib/trios/toggleSidePanel'
 import { scheduledJobRuns } from './scheduledJobRuns'
 
 export default defineBackground(() => {

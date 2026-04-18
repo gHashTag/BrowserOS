@@ -15,8 +15,6 @@ import {
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { getBrowserOSAdapter } from '@/lib/browseros/adapter'
-import { BROWSEROS_PREFS } from '@/lib/browseros/prefs'
 import {
   MCP_EXTERNAL_ACCESS_DISABLED_EVENT,
   MCP_EXTERNAL_ACCESS_ENABLED_EVENT,
@@ -24,6 +22,8 @@ import {
 } from '@/lib/constants/analyticsEvents'
 import { sendServerMessage } from '@/lib/messaging/server/serverMessages'
 import { track } from '@/lib/metrics/track'
+import { getTRIOSAdapter } from '@/lib/trios/adapter'
+import { trios_PREFS } from '@/lib/trios/prefs'
 
 const HEALTH_CHECK_TIMEOUT_MS = 60_000
 const HEALTH_CHECK_INTERVAL_MS = 2_000
@@ -50,8 +50,8 @@ export const ServerSettingsCard: FC<ServerSettingsCardProps> = ({
   useEffect(() => {
     const loadCurrentPref = async () => {
       try {
-        const adapter = getBrowserOSAdapter()
-        const pref = await adapter.getPref(BROWSEROS_PREFS.ALLOW_REMOTE_MCP)
+        const adapter = getTRIOSAdapter()
+        const pref = await adapter.getPref(trios_PREFS.ALLOW_REMOTE_MCP)
         const isRemote = pref?.value === true
         setAllowRemote(isRemote)
         onRemoteAccessChange?.(isRemote)
@@ -118,9 +118,9 @@ export const ServerSettingsCard: FC<ServerSettingsCardProps> = ({
     setServerError(null)
 
     try {
-      const adapter = getBrowserOSAdapter()
+      const adapter = getTRIOSAdapter()
       const success = await adapter.setPref(
-        BROWSEROS_PREFS.ALLOW_REMOTE_MCP,
+        trios_PREFS.ALLOW_REMOTE_MCP,
         newValue,
       )
 
@@ -169,8 +169,8 @@ export const ServerSettingsCard: FC<ServerSettingsCardProps> = ({
     setServerError(null)
 
     try {
-      const adapter = getBrowserOSAdapter()
-      await adapter.setPref(BROWSEROS_PREFS.RESTART_SERVER, true)
+      const adapter = getTRIOSAdapter()
+      await adapter.setPref(trios_PREFS.RESTART_SERVER, true)
 
       const serverRestarted = await waitForServerRestart()
 

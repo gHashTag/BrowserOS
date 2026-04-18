@@ -1,10 +1,10 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import type { UIMessageStreamEvent } from '@browseros/shared/schemas/ui-stream'
+import type { UIMessageStreamEvent } from '@trios/shared/schemas/ui-stream'
 import { createParser, type EventSourceMessage } from 'eventsource-parser'
 import { logger } from '../../../lib/logger'
 
@@ -27,10 +27,15 @@ export interface A2ARelayConfig {
 function isTextDeltaEvent(
   ev: UIMessageStreamEvent,
 ): ev is UIMessageStreamEvent & { type: 'text-delta'; textDelta: string } {
-  return (ev as any)?.type === 'text-delta' && typeof (ev as any)?.textDelta === 'string'
+  return (
+    (ev as any)?.type === 'text-delta' &&
+    typeof (ev as any)?.textDelta === 'string'
+  )
 }
 
-function extractLastUserTextFromRequest(request: Record<string, unknown>): string | null {
+function extractLastUserTextFromRequest(
+  request: Record<string, unknown>,
+): string | null {
   const msg = request.message
   return typeof msg === 'string' ? msg : null
 }
@@ -110,7 +115,9 @@ export class A2ARelay {
    * Call this from whatever event source you choose (e.g. WS /a2a client, DB trigger, etc).
    * It will optionally post an assistant reply back into the same conversation.
    */
-  async handleIncomingUserRequest(request: Record<string, unknown>): Promise<void> {
+  async handleIncomingUserRequest(
+    request: Record<string, unknown>,
+  ): Promise<void> {
     const conversationId = this.cfg.conversationId
     const userText = extractLastUserTextFromRequest(request)
     if (!userText) return
@@ -126,9 +133,14 @@ export class A2ARelay {
     }
 
     let assistantText = ''
-    await forwardChatSSE(this.chatUrl, assistantRequest, this.abortController.signal, (ev) => {
-      if (isTextDeltaEvent(ev)) assistantText += ev.textDelta
-    })
+    await forwardChatSSE(
+      this.chatUrl,
+      assistantRequest,
+      this.abortController.signal,
+      (ev) => {
+        if (isTextDeltaEvent(ev)) assistantText += ev.textDelta
+      },
+    )
 
     logger.info('A2A relay posted assistant reply', {
       conversationId,
@@ -137,4 +149,3 @@ export class A2ARelay {
     })
   }
 }
-

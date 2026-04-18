@@ -121,7 +121,7 @@ async function main() {
   )
 
   try {
-    log('Starting BrowserOS stack (headed + NopeCHA extension)...')
+    log('Starting TRIOS stack (headed + NopeCHA extension)...')
     await app.restart()
     log(`BrowserOS ready at ${app.getServerUrl()}`)
 
@@ -161,7 +161,7 @@ async function main() {
       `${screenshots.length} screenshots, ${metadata.total_steps} steps, ${metadata.total_duration_ms}ms`,
     )
   } finally {
-    log('Shutting down BrowserOS...')
+    log('Shutting down TRIOS...')
     await app.killApp()
   }
 }

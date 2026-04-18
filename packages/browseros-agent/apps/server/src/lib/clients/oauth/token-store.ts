@@ -1,6 +1,6 @@
 /**
  * @license
- * Copyright 2025 BrowserOS
+ * Copyright 2025 TRIOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * SQLite storage for OAuth tokens.
@@ -26,14 +26,14 @@ export class OAuthTokenStore {
   constructor(private readonly db: Database) {}
 
   upsertTokens(
-    browserosId: string,
+    triosId: string,
     provider: string,
     tokens: StoredOAuthTokens,
   ): void {
     const stmt = this.db.prepare(`
-      INSERT INTO oauth_tokens (browseros_id, provider, access_token, refresh_token, expires_at, email, account_id, updated_at)
+      INSERT INTO oauth_tokens (trios_id, provider, access_token, refresh_token, expires_at, email, account_id, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))
-      ON CONFLICT (browseros_id, provider) DO UPDATE SET
+      ON CONFLICT (trios_id, provider) DO UPDATE SET
         access_token = excluded.access_token,
         refresh_token = excluded.refresh_token,
         expires_at = excluded.expires_at,
@@ -42,7 +42,7 @@ export class OAuthTokenStore {
         updated_at = datetime('now')
     `)
     stmt.run(
-      browserosId,
+      triosId,
       provider,
       tokens.accessToken,
       tokens.refreshToken,
@@ -52,12 +52,12 @@ export class OAuthTokenStore {
     )
   }
 
-  getTokens(browserosId: string, provider: string): StoredOAuthTokens | null {
+  getTokens(triosId: string, provider: string): StoredOAuthTokens | null {
     const row = this.db
       .prepare(
-        'SELECT access_token, refresh_token, expires_at, email, account_id FROM oauth_tokens WHERE browseros_id = ? AND provider = ?',
+        'SELECT access_token, refresh_token, expires_at, email, account_id FROM oauth_tokens WHERE trios_id = ? AND provider = ?',
       )
-      .get(browserosId, provider) as {
+      .get(triosId, provider) as {
       access_token: string
       refresh_token: string
       expires_at: number
@@ -75,20 +75,18 @@ export class OAuthTokenStore {
     }
   }
 
-  deleteTokens(browserosId: string, provider: string): void {
+  deleteTokens(triosId: string, provider: string): void {
     this.db
-      .prepare(
-        'DELETE FROM oauth_tokens WHERE browseros_id = ? AND provider = ?',
-      )
-      .run(browserosId, provider)
+      .prepare('DELETE FROM oauth_tokens WHERE trios_id = ? AND provider = ?')
+      .run(triosId, provider)
   }
 
-  getStatus(browserosId: string, provider: string): OAuthStatus {
+  getStatus(triosId: string, provider: string): OAuthStatus {
     const row = this.db
       .prepare(
-        'SELECT email FROM oauth_tokens WHERE browseros_id = ? AND provider = ?',
+        'SELECT email FROM oauth_tokens WHERE trios_id = ? AND provider = ?',
       )
-      .get(browserosId, provider) as { email: string | null } | null
+      .get(triosId, provider) as { email: string | null } | null
 
     return {
       authenticated: row !== null,
