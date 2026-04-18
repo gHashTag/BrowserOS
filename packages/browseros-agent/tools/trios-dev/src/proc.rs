@@ -131,13 +131,13 @@ pub fn find_monorepo_root() -> Result<String> {
 /// Build environment variables for child processes.
 /// config.ts reads lowercase prefix: trios_CDP_PORT, trios_SERVER_PORT, trios_EXTENSION_PORT
 /// wxt.config.ts requires VITE_PUBLIC_trios_API (non-null assertion — crashes if missing)
-pub fn build_env(cdp: u16, server: u16, ext: u16, node_env: &str) -> Vec<(String, String)> {
+pub fn build_env(cdp: u16, server: u16, ext: u16, node_env: &str, allow_no_cdp: bool) -> Vec<(String, String)> {
     vec![
         // === Server config (config.ts reads these) ===
         ("trios_CDP_PORT".into(),            cdp.to_string()),
         ("trios_SERVER_PORT".into(),         server.to_string()),
         ("trios_EXTENSION_PORT".into(),      ext.to_string()),
-        ("trios_ALLOW_NO_CDP".into(),        "0".into()),
+        ("trios_ALLOW_NO_CDP".into(),        if allow_no_cdp { "1" } else { "0" }.into()),
 
         // === Agent build (wxt.config.ts requires these) ===
         // VITE_PUBLIC_trios_API: required, non-null assertion in wxt.config.ts
@@ -163,7 +163,7 @@ mod tests {
 
     #[test]
     fn test_build_env_lowercase() {
-        let env = build_env(9000, 9105, 9305, "development");
+        let env = build_env(9000, 9105, 9305, "development", false);
 
         // Server config (lowercase, used by config.ts)
         assert_eq!(
@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_build_env_legacy_compat() {
-        let env = build_env(9000, 9105, 9305, "development");
+        let env = build_env(9000, 9105, 9305, "development", false);
 
         // Legacy uppercase (Go tool compat)
         assert!(env.iter().any(|(k, _)| k == "TRIOS_CDP_PORT"));
@@ -201,7 +201,7 @@ mod tests {
 
     #[test]
     fn test_build_env_vite_config() {
-        let env = build_env(9000, 9105, 9305, "development");
+        let env = build_env(9000, 9105, 9305, "development", false);
 
         // VITE_PUBLIC_trios_API is required by wxt.config.ts
         assert!(env.iter().any(|(k, v)| {
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn test_build_env_node_env() {
-        let env = build_env(1234, 5678, 9012, "test");
+        let env = build_env(1234, 5678, 9012, "test", false);
         assert_eq!(env.iter().find(|(k, _)| k == "NODE_ENV").unwrap().1, "test");
     }
 }

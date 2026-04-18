@@ -40,7 +40,7 @@ pub async fn run_watch(use_random: bool, manual: bool) -> Result<()> {
     log::info("info", "Press Ctrl+C to stop");
     println!();
 
-    let env = proc::build_env(ports.cdp, ports.server, ports.extension, "development");
+    let env = proc::build_env(ports.cdp, ports.server, ports.extension, "development", !manual);
     let agent_dir = format!("{}/apps/agent", root);
     let server_dir = format!("{}/apps/server", root);
     let user_data_dir = "/tmp/trios-dev".to_string();
@@ -109,7 +109,7 @@ pub async fn run_test(keep: bool, headless: bool, extra_args: Vec<String>) -> Re
     let p = DEFAULT_PORTS;
     drop(l1); drop(l2); drop(l3);
 
-    let env = proc::build_env(p.cdp, p.server, p.extension, "test");
+    let env = proc::build_env(p.cdp, p.server, p.extension, "test", false);
     let server_dir = format!("{}/apps/server", root);
     let server_cmd = vec![
         "bun".to_string(),
