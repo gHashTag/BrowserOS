@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use std::net::TcpListener;
 use std::process::Command;
 use std::thread;
@@ -29,10 +29,8 @@ pub fn reserve_fixed(port: u16) -> Result<TcpListener> {
 
 pub fn reserve_all_fixed() -> Result<(TcpListener, TcpListener, TcpListener)> {
     let p = DEFAULT_PORTS;
-    let cdp = reserve_fixed(p.cdp)
-        .with_context(|| format!("CDP port {}", p.cdp))?;
-    let server = reserve_fixed(p.server)
-        .with_context(|| format!("Server port {}", p.server))?;
+    let cdp = reserve_fixed(p.cdp).with_context(|| format!("CDP port {}", p.cdp))?;
+    let server = reserve_fixed(p.server).with_context(|| format!("Server port {}", p.server))?;
     let ext = reserve_fixed(p.extension)
         .with_context(|| format!("Extension port {}", p.extension))?;
     Ok((cdp, server, ext))
@@ -46,7 +44,6 @@ pub fn kill_defaults() {
 }
 
 pub fn kill_port(port: u16) {
-    // lsof -ti:<port> | xargs kill -9
     let pids_out = Command::new("lsof")
         .args(["-ti", &format!(":{}", port)])
         .output();
@@ -62,11 +59,14 @@ pub fn kill_port(port: u16) {
     }
 }
 
+/// Check if a port is free without reserving it.
+/// Used by check subcommand and diagnostics.
+#[allow(dead_code)]
 pub fn is_port_free(port: u16) -> bool {
     TcpListener::bind(format!("127.0.0.1:{}", port)).is_ok()
 }
 
-/// Random ports for --new mode (parallel test runs)
+/// Random ports for --new mode (parallel test runs).
 pub fn reserve_random() -> Result<(Ports, TcpListener, TcpListener, TcpListener)> {
     for _ in 0..100 {
         let cdp = random_port_in_range(9200, 9900)?;
@@ -80,10 +80,7 @@ pub fn reserve_random() -> Result<(Ports, TcpListener, TcpListener, TcpListener)
             TcpListener::bind(format!("127.0.0.1:{}", server)),
             TcpListener::bind(format!("127.0.0.1:{}", ext)),
         ) {
-            return Ok((
-                Ports { cdp, server, extension: ext },
-                l1, l2, l3,
-            ));
+            return Ok((Ports { cdp, server, extension: ext }, l1, l2, l3));
         }
     }
     bail!("Could not find 3 free random ports after 100 attempts")
