@@ -46,15 +46,63 @@ import { VERSION } from "./version";
  * Returns true if port is free, false if already in use.
  */
 async function checkPortAvailable(port: number): Promise<boolean> {
-	return new Promise((resolve) => {
-		const server = Bun.listen({
-			port,
-			hostname: "0.0.0.0",
-			socket: {},
+	const net = await import("node:net");
+	return new Promise<boolean>((resolve) => {
+		const probe = net.createServer();
+		probe.once("error", () => resolve(false));
+		probe.listen({ port, host: "127.0.0.1", exclusive: true }, () => {
+			probe.close(() => resolve(true));
 		});
-		server.stop();
-		resolve(true);
-	}).catch(() => false);
+	});
+}
+
+/**
+ * Ensure a port is free by actively killing stale processes.
+ * Uses lsof to find PIDs occupying the port and sends SIGKILL.
+ * Retries up to `maxAttempts` times with a short delay between attempts.
+ * Returns true if the port is free (either was free or successfully freed).
+ */
+async function ensurePortFree(port: number, maxAttempts = 3): Promise<boolean> {
+	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+		const available = await checkPortAvailable(port);
+		if (available) {
+			if (attempt > 1) {
+				logger.info(`Port ${port} freed after ${attempt - 1} kill attempt(s)`);
+			}
+			return true;
+		}
+
+		logger.warn(
+			`Port ${port} is occupied (attempt ${attempt}/${maxAttempts}), killing stale process...`,
+		);
+
+		// Use lsof to find PIDs on the port and kill them
+		const result = Bun.spawnSync([
+			"sh",
+			"-c",
+			`lsof -ti:${port} 2>/dev/null | xargs kill -9 2>/dev/null`,
+		]);
+
+		if (result.stderr && result.stderr.length > 0) {
+			logger.debug(`lsof/kill stderr: ${result.stderr.toString().trim()}`);
+		}
+
+		// Wait for the OS to release the socket
+		await new Promise((resolve) => setTimeout(resolve, 500));
+	}
+
+	// Final check
+	const finalCheck = await checkPortAvailable(port);
+	if (!finalCheck) {
+		logger.error(
+			`Port ${port} still occupied after ${maxAttempts} kill attempts`,
+			{
+				port,
+				kill_command: `lsof -ti:${port} | xargs kill -9`,
+			},
+		);
+	}
+	return finalCheck;
 }
 
 export class Application {
@@ -105,16 +153,14 @@ export class Application {
 
 		logger.info(`Loaded ${registry.names().length} unified tools`);
 
-		// Pre-flight port check: fail fast if port is busy
+		// Pre-flight: ensure port is free — kill stale processes from previous runs
 		const serverPort = this.config.serverPort;
-		if (!(await checkPortAvailable(serverPort))) {
-			logger.error(`Port ${serverPort} is already in use`, {
-				port: serverPort,
-				kill_command: `lsof -ti:${serverPort} | xargs kill -9`,
-			});
-			console.error(`\n[FATAL] Port ${serverPort} is already in use.`);
+		if (!(await ensurePortFree(serverPort))) {
 			console.error(
-				`Kill the process with: lsof -ti:${serverPort} | xargs kill -9`,
+				`\n[FATAL] Port ${serverPort} is still occupied after kill attempts.`,
+			);
+			console.error(
+				`Kill manually with: lsof -ti:${serverPort} | xargs kill -9`,
 			);
 			process.exit(EXIT_CODES.PORT_CONFLICT);
 		}

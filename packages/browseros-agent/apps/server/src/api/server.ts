@@ -85,35 +85,16 @@ async function assertPortAvailable(port: number): Promise<void> {
  */
 async function tryListen(
 	port: number,
-	maxRetries: number = 3,
+	maxRetries: number = 5,
 	app: Hono<Env>,
 	host?: string,
 	config?: HttpServerConfig,
 ): Promise<{ server: ReturnType<typeof Bun.serve>; didRetry: boolean }> {
-	const net = await import("node:net");
-
 	for (let attempt = 1; attempt <= maxRetries; attempt++) {
 		try {
 			logger.info(
 				`Starting server on port ${port} (attempt ${attempt}/${maxRetries})`,
 			);
-
-			// Quick check if port is still free right before binding
-			const portCheck = new Promise<void>((checkResolve, checkReject) => {
-				const probe = net.createServer();
-				probe.once("error", (err) => {
-					if ((err as any).code === "EADDRINUSE") {
-						checkReject(err);
-					} else {
-						checkResolve();
-					}
-				});
-				probe.listen({ port, host: "127.0.0.1", exclusive: true }, () => {
-					probe.close(() => checkResolve());
-				});
-			});
-
-			await portCheck;
 
 			// Port is free, try to start server
 			const server = Bun.serve({
@@ -137,10 +118,12 @@ async function tryListen(
 			const errObj = err as Error;
 
 			if (attempt < maxRetries && errObj.message.includes("already in use")) {
+				// Exponential backoff: 1s, 2s, 4s, 8s
+				const delayMs = 1000 * 2 ** (attempt - 1);
 				logger.warn(
-					`Port ${port} busy, retrying in 2s... (attempt ${attempt + 1}/${maxRetries})`,
+					`Port ${port} busy, retrying in ${delayMs}ms... (attempt ${attempt + 1}/${maxRetries})`,
 				);
-				await new Promise((r) => setTimeout(r, 2000));
+				await new Promise((r) => setTimeout(r, delayMs));
 				continue;
 			}
 
