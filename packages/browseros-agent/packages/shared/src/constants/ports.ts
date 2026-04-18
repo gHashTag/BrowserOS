@@ -21,11 +21,11 @@ export const DEFAULT_PORTS = {
 } as const;
 
 /**
- * Test ports (base 9005, offset 100)
- * Uses 05 suffix to avoid conflicts with dev server
+ * Test ports (base 9015, offset 100)
+ * Uses 15 suffix to avoid conflicts with trios-server (port 9005)
  */
 export const TEST_PORTS = {
-	cdp: 9005,
+	cdp: 9015,
 	server: 9105,
 	extension: 9305,
 } as const;

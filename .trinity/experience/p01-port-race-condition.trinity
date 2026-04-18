@@ -1,0 +1,33 @@
+[2026-04-18T15:11:00Z] P0.1 — Port 9105 Race Condition Fix (Issue #505)
+Status: COMPLETE ✅
+
+Root Cause:
+- `assertPortAvailable(port)` in server.ts:329 was a redundant pre-check
+- If port was busy, it threw immediately → main.ts caught → handleStartupError → FATAL exit
+- The retry logic in `tryListen()` (server.ts:82) was never reached because assertPortAvailable
+  short-circuited the flow before tryListen could retry
+
+Fix (2 files):
+
+1. server.ts — Removed `assertPortAvailable(port)` call (line 329)
+   - tryListen() already has its own port probe + retry logic
+   - Increased maxRetries from 2 to 3 (default and call site)
+   - Each retry waits 2s between attempts → up to 6s total wait
+
+2. package.json — Added `kill-ports` script
+   - `lsof -ti:9105,9001,3000,9200 | xargs kill -9 2>/dev/null; true`
+   - `dev` script now runs `kill-ports` before starting trios-dev watch
+   - Kills stale processes on all service ports before startup
+
+Flow after fix:
+  bun dev → kill-ports (kill stale) → trios-dev watch → server starts
+  → tryListen attempt 1 → if EADDRINUSE → wait 2s → attempt 2 → wait 2s → attempt 3
+  → Only FATAL after 3 failed attempts (6s total)
+
+Test Results: 76/76 pass, 0 fail
+
+Files Modified:
+- packages/browseros-agent/apps/server/src/api/server.ts
+- packages/browseros-agent/package.json
+
+Closes #505

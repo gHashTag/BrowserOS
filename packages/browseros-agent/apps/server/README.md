@@ -69,6 +69,106 @@ MCP server and AI agent loop powering BrowserOS browser automation. This is the 
 | **Console** | `get_console_messages` |
 | **Other** | `browseros_info`, `handle_dialog`, `wait_for`, `download`, `export_pdf`, `output_file`, `nudges` |
 
+## TRIOS Integration
+
+The server connects to TRIOS (local Rust server) for git orchestration tools.
+
+### Connection
+
+- **URL:** `http://localhost:9005/mcp` (configurable via `TRIOS_MCP_URL` env var)
+- **Authentication:** None (local only)
+- **Transport:** MCP SDK via `@modelcontextprotocol/sdk`
+- **Degraded mode:** If TRIOS server is unavailable, browser tools continue to work
+
+### TRIOS Git Tools
+
+TRIOS server provides 7 git orchestration tools that are exposed through the MCP interface:
+
+| Tool Name | Description |
+|-----------|-------------|
+| `git_status` | List changed files in a repository |
+| `git_stage_files` | Stage files for commit |
+| `git_commit` | Commit staged changes with message |
+| `git_create_branch` | Create new git branch |
+| `gb_list_branches` | List GitButler virtual branches |
+| `gb_push_stack` | Push GitButler stack/branch |
+
+### TRIOS Proxy Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                   BrowserOS Server (Bun)                             │
+│                                                                      │
+│   ┌─────────────────────────────────────────────────────────────┐   │
+│   │  MCP Server (@hono/mcp)                            │   │
+│   │  ├── Browser tools (53+)                               │   │
+│   │  ├── Klavis proxy tools (40+ OAuth servers)              │   │
+│   │  └── TRIOS proxy (7 git tools) ◄──────────────────┤   │
+│   │                                                        │   │
+│   │  ┌─────────────────────────────────────────────────────┐   │   │
+│   │  │  TRIOS Server (Rust, port 9005)            │   │   │
+│   │  │  └── git2-rs + gitbutler-cli           │   │   │
+│   │  └─────────────────────────────────────────────────────┘   │   │
+│   └─────────────────────────────────────────────────────────────┘   │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### Health Check
+
+The `/health` endpoint returns TRIOS connection status:
+
+```json
+{
+  "status": "ok",
+  "trios": {
+    "connected": true,
+    "toolCount": 7
+  },
+  "cdpConnected": true
+}
+```
+
+If TRIOS is not connected:
+```json
+{
+  "status": "ok",
+  "trios": {
+    "connected": false,
+    "toolCount": 0
+  }
+}
+```
+
+### Development
+
+To start TRIOS server alongside BrowserOS:
+
+```bash
+# Terminal 1: Start TRIOS server (Rust)
+cd /Users/playra/trios
+cargo run -p trios-server
+
+# Terminal 2: Start BrowserOS server (Bun)
+cd /Users/playra/BrowserOS/packages/browseros-agent/apps/server
+bun run start
+```
+
+### Testing
+
+TRIOS integration tests:
+
+```bash
+cd /Users/playra/BrowserOS/packages/browseros-agent/apps/server
+bun run test
+```
+
+Tests verify:
+- Connection to TRIOS server on port 9005
+- Tool discovery (7 tools minimum)
+- Tool execution (git_status, git_commit, etc.)
+- Input schema validation
+
 ## Agent Loop
 
 The agent loop uses the [Vercel AI SDK](https://sdk.vercel.ai) to orchestrate multi-step browser automation:

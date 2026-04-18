@@ -35,7 +35,10 @@ export async function callMcpTool<T = Record<string, unknown>>(
 
 	const transport = new StreamableHTTPClientTransport(new URL(serverUrl), {
 		requestInit: {
-			headers: { "X-TRIOS-Source": "sdk-internal" },
+			headers: {
+				Accept: "application/json, text/event-stream",
+				"X-TRIOS-Source": "sdk-internal",
+			},
 		},
 	});
 

@@ -1,0 +1,25 @@
+[2026-04-18T13:47:00Z] TRIOS MCP Bridge v1.0 — COMPLETE
+Phase 0+1: Scaffold + dual MCP clients + 11 tools ✅
+Phase 2: Vision analysis — 25/25 tests, 0 null fields ✅
+Phase 3: E2E actions — 34/34 tests, full chain 4/4 ✅
+Phase 4: BrowserOS integration + registration + demo guide ✅
+
+Architecture: Dual-MCP + Vision Bridge
+- BrowserOS MCP (port 9105) → screenshots, snapshots, DOM control
+- GitButler MCP (`but mcp --internal`) → virtual branches, stacks, absorb
+- trios-mcp-bridge (port 9200) → 11 high-level tools combining both
+
+Tools: gitbutler_analyze_ui, gitbutler_screenshot, gitbutler_workspace_status,
+       gitbutler_bridge_health, gitbutler_commit_visible, gitbutler_create_branch,
+       gitbutler_push_stack, gitbutler_stage, gitbutler_absorb, gitbutler_pull,
+       gitbutler_undo_last_commit
+
+Test Results: 34 pass, 0 fail, 90 expect() calls
+Demo: "Create branch 'feature-login' and commit what's visible in GitButler"
+      → analyze_ui → create_branch → commit_visible → GitButler UI updates
+
+Files: apps/trios-mcp-bridge/src/{index,config,types,bridge-server}.ts
+       apps/trios-mcp-bridge/src/clients/{browseros-client,gitbutler-client}.ts
+       apps/trios-mcp-bridge/src/vision/gitbutler-analyzer.ts
+       apps/trios-mcp-bridge/src/__tests__/{analyze-ui,e2e-actions}.test.ts
+Closes #5

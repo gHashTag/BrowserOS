@@ -34,13 +34,14 @@ export interface PageInfo {
 	loadProgress: number;
 	isPinned: boolean;
 	isHidden: boolean;
-	windowId?: string;
+	tabId?: number;
+	windowId?: number;
 	index?: number;
 	groupId?: string;
 }
 
 export interface WindowInfo {
-	windowId: string;
+	windowId: number;
 	windowType:
 		| "normal"
 		| "popup"
@@ -203,6 +204,7 @@ export class Browser {
 					info.isPinned = false;
 					info.isHidden = !tab.attached;
 					info.windowId = tab.windowId || 0;
+					info.tabId = info.tabId ?? parseInt(tab.targetId, 36) % 1000000;
 					info.index = 0;
 					info.groupId = undefined;
 					found = true;
@@ -215,6 +217,7 @@ export class Browser {
 				this.pages.set(pageId, {
 					pageId,
 					targetId: tab.targetId,
+					tabId: parseInt(tab.targetId, 36) % 1000000,
 					url: tab.url,
 					title: tab.title,
 					isActive: tab.attached,
@@ -490,6 +493,7 @@ export class Browser {
 		await this.listPages();
 		const tabToPage = new Map<number, number>();
 		for (const info of this.pages.values()) {
+			if (info.tabId === undefined) continue;
 			if (tabIds.includes(info.tabId)) {
 				tabToPage.set(info.tabId, info.pageId);
 			}
@@ -541,7 +545,7 @@ export class Browser {
 		this.pages.set(pageId, {
 			pageId,
 			targetId: targetInfo.targetId,
-			tabId: targetInfo.tabId ?? 0,
+			tabId: targetInfo.tabId ?? parseInt(targetInfo.targetId, 36) % 1000000,
 			url: targetInfo.url || url,
 			title: targetInfo.title || "",
 			isActive: targetInfo.attached,
@@ -1417,11 +1421,11 @@ export class Browser {
 		return result.window as WindowInfo;
 	}
 
-	async closeWindow(windowId: string): Promise<void> {
+	async closeWindow(windowId: number): Promise<void> {
 		await this.cdp.Browser.closeWindow({ windowId });
 	}
 
-	async activateWindow(windowId: string): Promise<void> {
+	async activateWindow(windowId: number): Promise<void> {
 		await this.cdp.Browser.activateWindow({ windowId });
 	}
 
@@ -1546,6 +1550,10 @@ export class Browser {
 				throw new Error(
 					`Unknown page ${pageId}. Use list_pages to see available pages.`,
 				);
+			if (info.tabId === undefined)
+				throw new Error(
+					`Page ${pageId} has no tabId. Cannot perform tab operations.`,
+				);
 			return info.tabId;
 		});
 	}
@@ -1558,6 +1566,7 @@ export class Browser {
 
 		const tabToPage = new Map<number, number>();
 		for (const info of this.pages.values()) {
+			if (info.tabId === undefined) continue;
 			tabToPage.set(info.tabId, info.pageId);
 		}
 
@@ -1582,6 +1591,7 @@ export class Browser {
 
 		const tabToPage = new Map<number, number>();
 		for (const info of this.pages.values()) {
+			if (info.tabId === undefined) continue;
 			tabToPage.set(info.tabId, info.pageId);
 		}
 

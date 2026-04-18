@@ -90,10 +90,10 @@ export class BrowserService {
 	async getActiveTab(windowId?: number): Promise<ActiveTab> {
 		const page = await this.resolveExistingPage(windowId);
 		return {
-			tabId: page.tabId,
+			tabId: page.tabId ?? 0,
 			url: page.url,
 			title: page.title,
-			windowId: page.windowId ?? 0,
+			windowId: page.windowId ?? (0 as number),
 		};
 	}
 
@@ -126,14 +126,14 @@ export class BrowserService {
 				throw new SdkError(`Tab ${tabId} not found`, 404);
 			}
 			await this.browser.goto(page.pageId, url);
-			return { tabId, windowId: page.windowId ?? 0 };
+			return { tabId, windowId: page.windowId ?? (0 as number) };
 		}
 
 		const activePage = await this.resolveNavigationPage(windowId);
 		await this.browser.goto(activePage.pageId, url);
 		return {
-			tabId: activePage.tabId,
-			windowId: activePage.windowId ?? 0,
+			tabId: activePage.tabId ?? 0,
+			windowId: activePage.windowId ?? (0 as number),
 		};
 	}
 
@@ -144,7 +144,7 @@ export class BrowserService {
 			throw new SdkError("Tab not found", 404);
 		}
 		return {
-			tabId: page.tabId,
+			tabId: page.tabId ?? 0,
 			isDOMContentLoaded: !page.isLoading,
 			isResourcesLoading: page.isLoading,
 			isPageComplete: !page.isLoading,

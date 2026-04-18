@@ -62,6 +62,14 @@ export async function buildMcpServerSpecs(
 		}
 	}
 
+	// Built-in TRIOS MCP Bridge (GitButler + tri CLI tools)
+	const triosPort = process.env.TRIONS_BRIDGE_PORT || "9200";
+	specs.push({
+		name: "trios-mcp-bridge",
+		url: `http://localhost:${triosPort}/mcp`,
+		transport: "streamable-http",
+	});
+
 	// User-provided custom MCP servers
 	if (deps.browserContext?.customMcpServers?.length) {
 		const servers = deps.browserContext.customMcpServers;

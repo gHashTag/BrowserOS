@@ -222,7 +222,7 @@ export async function createHttpServer(config: HttpServerConfig) {
 
 	const app = new Hono<Env>()
 		.use("/*", cors(defaultCorsConfig))
-		.route("/health", createHealthRoute({ browser }))
+		.route("/health", createHealthRoute({ browser, triosProxy }))
 		.route("/a2a", createA2ARoutes({ a2aKey: process.env.trios_A2A_KEY }))
 		.route(
 			"/agent",

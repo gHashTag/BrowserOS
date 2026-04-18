@@ -1,0 +1,31 @@
+[2026-04-18T15:02:00Z] Phase 4 — BrowserOS Integration (Issue #15)
+Status: COMPLETE ✅
+
+Changes:
+1. mcp-builder.ts — Added trios-mcp-bridge as built-in MCP server spec
+   - URL: http://localhost:${TRIONS_BRIDGE_PORT}/mcp (default 9200)
+   - Transport: streamable-http
+   - Registered alongside Klavis Strata + custom servers
+
+2. .env.development — Added TRIONS_BRIDGE_PORT=9200
+
+3. dev:trios script — Already exists in package.json (line 22)
+
+Architecture:
+- BrowserOS agent calls buildMcpServerSpecs() → gets trios-mcp-bridge spec
+- connectMcpClient() connects to bridge at http://localhost:9200/mcp
+- All 17 bridge tools become available in agent chat:
+  gitbutler_analyze_ui, gitbutler_screenshot, gitbutler_workspace_status,
+  gitbutler_commit_visible, gitbutler_create_branch, gitbutler_push_stack,
+  gitbutler_stage, gitbutler_absorb, gitbutler_absorb_smart,
+  gitbutler_undo_last_commit, gitbutler_pull,
+  tri_run, tri_spec_edit, tri_experience_read,
+  discard_file_changes, list_tab_groups, create_tab_group
+
+Test Results: 76/76 pass, 0 fail, 261 expect() calls
+
+Files Modified:
+- packages/browseros-agent/apps/server/src/agent/mcp-builder.ts (lines 65-71)
+- packages/browseros-agent/apps/server/.env.development (added TRIONS_BRIDGE_PORT)
+
+Closes #15
