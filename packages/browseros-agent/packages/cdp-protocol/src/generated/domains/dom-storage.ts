@@ -2,61 +2,61 @@
 
 // ══ Types ══
 
-export type SerializedStorageKey = string
+export type SerializedStorageKey = string;
 
 export interface StorageId {
-  securityOrigin?: string
-  storageKey?: SerializedStorageKey
-  isLocalStorage: boolean
+	securityOrigin?: string;
+	storageKey?: SerializedStorageKey;
+	isLocalStorage: boolean;
 }
 
-export type Item = string[]
+export type Item = string[];
 
 // ══ Commands ══
 
 export interface ClearParams {
-  storageId: StorageId
+	storageId: StorageId;
 }
 
 export interface GetDOMStorageItemsParams {
-  storageId: StorageId
+	storageId: StorageId;
 }
 
 export interface GetDOMStorageItemsResult {
-  entries: Item[]
+	entries: Item[];
 }
 
 export interface RemoveDOMStorageItemParams {
-  storageId: StorageId
-  key: string
+	storageId: StorageId;
+	key: string;
 }
 
 export interface SetDOMStorageItemParams {
-  storageId: StorageId
-  key: string
-  value: string
+	storageId: StorageId;
+	key: string;
+	value: string;
 }
 
 // ══ Events ══
 
 export interface DomStorageItemAddedEvent {
-  storageId: StorageId
-  key: string
-  newValue: string
+	storageId: StorageId;
+	key: string;
+	newValue: string;
 }
 
 export interface DomStorageItemRemovedEvent {
-  storageId: StorageId
-  key: string
+	storageId: StorageId;
+	key: string;
 }
 
 export interface DomStorageItemUpdatedEvent {
-  storageId: StorageId
-  key: string
-  oldValue: string
-  newValue: string
+	storageId: StorageId;
+	key: string;
+	oldValue: string;
+	newValue: string;
 }
 
 export interface DomStorageItemsClearedEvent {
-  storageId: StorageId
+	storageId: StorageId;
 }

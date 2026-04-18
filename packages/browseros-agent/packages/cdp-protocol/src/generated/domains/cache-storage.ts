@@ -1,86 +1,86 @@
 // ── AUTO-GENERATED from CDP protocol. DO NOT EDIT. ──
 
-import type { StorageBucket } from './storage'
+import type { StorageBucket } from "./storage";
 
 // ══ Types ══
 
-export type CacheId = string
+export type CacheId = string;
 
 export type CachedResponseType =
-  | 'basic'
-  | 'cors'
-  | 'default'
-  | 'error'
-  | 'opaqueResponse'
-  | 'opaqueRedirect'
+	| "basic"
+	| "cors"
+	| "default"
+	| "error"
+	| "opaqueResponse"
+	| "opaqueRedirect";
 
 export interface DataEntry {
-  requestURL: string
-  requestMethod: string
-  requestHeaders: Header[]
-  responseTime: number
-  responseStatus: number
-  responseStatusText: string
-  responseType: CachedResponseType
-  responseHeaders: Header[]
+	requestURL: string;
+	requestMethod: string;
+	requestHeaders: Header[];
+	responseTime: number;
+	responseStatus: number;
+	responseStatusText: string;
+	responseType: CachedResponseType;
+	responseHeaders: Header[];
 }
 
 export interface Cache {
-  cacheId: CacheId
-  securityOrigin: string
-  storageKey: string
-  storageBucket?: StorageBucket
-  cacheName: string
+	cacheId: CacheId;
+	securityOrigin: string;
+	storageKey: string;
+	storageBucket?: StorageBucket;
+	cacheName: string;
 }
 
 export interface Header {
-  name: string
-  value: string
+	name: string;
+	value: string;
 }
 
 export interface CachedResponse {
-  body: string
+	body: string;
 }
 
 // ══ Commands ══
 
 export interface DeleteCacheParams {
-  cacheId: CacheId
+	cacheId: CacheId;
 }
 
 export interface DeleteEntryParams {
-  cacheId: CacheId
-  request: string
+	cacheId: CacheId;
+	request: string;
 }
 
 export interface RequestCacheNamesParams {
-  securityOrigin?: string
-  storageKey?: string
-  storageBucket?: StorageBucket
+	securityOrigin?: string;
+	storageKey?: string;
+	storageBucket?: StorageBucket;
 }
 
 export interface RequestCacheNamesResult {
-  caches: Cache[]
+	caches: Cache[];
 }
 
 export interface RequestCachedResponseParams {
-  cacheId: CacheId
-  requestURL: string
-  requestHeaders: Header[]
+	cacheId: CacheId;
+	requestURL: string;
+	requestHeaders: Header[];
 }
 
 export interface RequestCachedResponseResult {
-  response: CachedResponse
+	response: CachedResponse;
 }
 
 export interface RequestEntriesParams {
-  cacheId: CacheId
-  skipCount?: number
-  pageSize?: number
-  pathFilter?: string
+	cacheId: CacheId;
+	skipCount?: number;
+	pageSize?: number;
+	pathFilter?: string;
 }
 
 export interface RequestEntriesResult {
-  cacheDataEntries: DataEntry[]
-  returnCount: number
+	cacheDataEntries: DataEntry[];
+	returnCount: number;
 }

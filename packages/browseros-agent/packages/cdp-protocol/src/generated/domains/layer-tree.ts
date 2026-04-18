@@ -1,120 +1,120 @@
 // ── AUTO-GENERATED from CDP protocol. DO NOT EDIT. ──
 
-import type { BackendNodeId, Rect } from './dom'
+import type { BackendNodeId, Rect } from "./dom";
 
 // ══ Types ══
 
-export type LayerId = string
+export type LayerId = string;
 
-export type SnapshotId = string
+export type SnapshotId = string;
 
 export interface ScrollRect {
-  rect: Rect
-  type: 'RepaintsOnScroll' | 'TouchEventHandler' | 'WheelEventHandler'
+	rect: Rect;
+	type: "RepaintsOnScroll" | "TouchEventHandler" | "WheelEventHandler";
 }
 
 export interface StickyPositionConstraint {
-  stickyBoxRect: Rect
-  containingBlockRect: Rect
-  nearestLayerShiftingStickyBox?: LayerId
-  nearestLayerShiftingContainingBlock?: LayerId
+	stickyBoxRect: Rect;
+	containingBlockRect: Rect;
+	nearestLayerShiftingStickyBox?: LayerId;
+	nearestLayerShiftingContainingBlock?: LayerId;
 }
 
 export interface PictureTile {
-  x: number
-  y: number
-  picture: string
+	x: number;
+	y: number;
+	picture: string;
 }
 
 export interface Layer {
-  layerId: LayerId
-  parentLayerId?: LayerId
-  backendNodeId?: BackendNodeId
-  offsetX: number
-  offsetY: number
-  width: number
-  height: number
-  transform?: number[]
-  anchorX?: number
-  anchorY?: number
-  anchorZ?: number
-  paintCount: number
-  drawsContent: boolean
-  invisible?: boolean
-  scrollRects?: ScrollRect[]
-  stickyPositionConstraint?: StickyPositionConstraint
+	layerId: LayerId;
+	parentLayerId?: LayerId;
+	backendNodeId?: BackendNodeId;
+	offsetX: number;
+	offsetY: number;
+	width: number;
+	height: number;
+	transform?: number[];
+	anchorX?: number;
+	anchorY?: number;
+	anchorZ?: number;
+	paintCount: number;
+	drawsContent: boolean;
+	invisible?: boolean;
+	scrollRects?: ScrollRect[];
+	stickyPositionConstraint?: StickyPositionConstraint;
 }
 
-export type PaintProfile = number[]
+export type PaintProfile = number[];
 
 // ══ Commands ══
 
 export interface CompositingReasonsParams {
-  layerId: LayerId
+	layerId: LayerId;
 }
 
 export interface CompositingReasonsResult {
-  compositingReasons: string[]
-  compositingReasonIds: string[]
+	compositingReasons: string[];
+	compositingReasonIds: string[];
 }
 
 export interface LoadSnapshotParams {
-  tiles: PictureTile[]
+	tiles: PictureTile[];
 }
 
 export interface LoadSnapshotResult {
-  snapshotId: SnapshotId
+	snapshotId: SnapshotId;
 }
 
 export interface MakeSnapshotParams {
-  layerId: LayerId
+	layerId: LayerId;
 }
 
 export interface MakeSnapshotResult {
-  snapshotId: SnapshotId
+	snapshotId: SnapshotId;
 }
 
 export interface ProfileSnapshotParams {
-  snapshotId: SnapshotId
-  minRepeatCount?: number
-  minDuration?: number
-  clipRect?: Rect
+	snapshotId: SnapshotId;
+	minRepeatCount?: number;
+	minDuration?: number;
+	clipRect?: Rect;
 }
 
 export interface ProfileSnapshotResult {
-  timings: PaintProfile[]
+	timings: PaintProfile[];
 }
 
 export interface ReleaseSnapshotParams {
-  snapshotId: SnapshotId
+	snapshotId: SnapshotId;
 }
 
 export interface ReplaySnapshotParams {
-  snapshotId: SnapshotId
-  fromStep?: number
-  toStep?: number
-  scale?: number
+	snapshotId: SnapshotId;
+	fromStep?: number;
+	toStep?: number;
+	scale?: number;
 }
 
 export interface ReplaySnapshotResult {
-  dataURL: string
+	dataURL: string;
 }
 
 export interface SnapshotCommandLogParams {
-  snapshotId: SnapshotId
+	snapshotId: SnapshotId;
 }
 
 export interface SnapshotCommandLogResult {
-  commandLog: Record<string, unknown>[]
+	commandLog: Record<string, unknown>[];
 }
 
 // ══ Events ══
 
 export interface LayerPaintedEvent {
-  layerId: LayerId
-  clip: Rect
+	layerId: LayerId;
+	clip: Rect;
 }
 
 export interface LayerTreeDidChangeEvent {
-  layers?: Layer[]
+	layers?: Layer[];
 }

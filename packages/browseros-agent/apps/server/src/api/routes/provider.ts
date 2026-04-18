@@ -4,38 +4,38 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { zValidator } from '@hono/zod-validator'
-import { Hono } from 'hono'
-import { testProviderConnection } from '../../lib/clients/llm/test-provider'
-import { logger } from '../../lib/logger'
-import { AgentLLMConfigSchema } from '../types'
+import { zValidator } from "@hono/zod-validator";
+import { Hono } from "hono";
+import { testProviderConnection } from "../../lib/clients/llm/test-provider";
+import { logger } from "../../lib/logger";
+import { AgentLLMConfigSchema } from "../types";
 
 interface ProviderRouteDeps {
-  triosId?: string
+	triosId?: string;
 }
 
 export function createProviderRoutes(deps: ProviderRouteDeps = {}) {
-  return new Hono().post(
-    '/',
-    zValidator('json', AgentLLMConfigSchema),
-    async (c) => {
-      const config = c.req.valid('json')
+	return new Hono().post(
+		"/",
+		zValidator("json", AgentLLMConfigSchema),
+		async (c) => {
+			const config = c.req.valid("json");
 
-      logger.info('Testing provider connection', {
-        provider: config.provider,
-        model: config.model,
-      })
+			logger.info("Testing provider connection", {
+				provider: config.provider,
+				model: config.model,
+			});
 
-      const result = await testProviderConnection(config, deps.triosId)
+			const result = await testProviderConnection(config, deps.triosId);
 
-      logger.info('Provider test result', {
-        provider: config.provider,
-        model: config.model,
-        success: result.success,
-        responseTime: result.responseTime,
-      })
+			logger.info("Provider test result", {
+				provider: config.provider,
+				model: config.model,
+				success: result.success,
+				responseTime: result.responseTime,
+			});
 
-      return c.json(result, result.success ? 200 : 400)
-    },
-  )
+			return c.json(result, result.success ? 200 : 400);
+		},
+	);
 }

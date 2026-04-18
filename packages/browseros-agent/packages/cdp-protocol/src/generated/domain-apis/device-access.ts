@@ -1,23 +1,23 @@
 // ── AUTO-GENERATED from CDP protocol. DO NOT EDIT. ──
 
 import type {
-  CancelPromptParams,
-  DeviceRequestPromptedEvent,
-  SelectPromptParams,
-} from '../domains/device-access'
+	CancelPromptParams,
+	DeviceRequestPromptedEvent,
+	SelectPromptParams,
+} from "../domains/device-access";
 
 export interface DeviceAccessApi {
-  // ── Commands ──
+	// ── Commands ──
 
-  enable(): Promise<void>
-  disable(): Promise<void>
-  selectPrompt(params: SelectPromptParams): Promise<void>
-  cancelPrompt(params: CancelPromptParams): Promise<void>
+	enable(): Promise<void>;
+	disable(): Promise<void>;
+	selectPrompt(params: SelectPromptParams): Promise<void>;
+	cancelPrompt(params: CancelPromptParams): Promise<void>;
 
-  // ── Events ──
+	// ── Events ──
 
-  on(
-    event: 'deviceRequestPrompted',
-    handler: (params: DeviceRequestPromptedEvent) => void,
-  ): () => void
+	on(
+		event: "deviceRequestPrompted",
+		handler: (params: DeviceRequestPromptedEvent) => void,
+	): () => void;
 }

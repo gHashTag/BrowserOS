@@ -1,482 +1,482 @@
 // ── AUTO-GENERATED from CDP protocol. DO NOT EDIT. ──
 
-import type { FrameId } from './page'
-import type { TargetID } from './target'
+import type { FrameId } from "./page";
+import type { TargetID } from "./target";
 
 // ══ Types ══
 
-export type BrowserContextID = string
+export type BrowserContextID = string;
 
-export type WindowID = number
+export type WindowID = number;
 
-export type TabID = number
+export type TabID = number;
 
 export type WindowType =
-  | 'normal'
-  | 'popup'
-  | 'app'
-  | 'devtools'
-  | 'app_popup'
-  | 'picture_in_picture'
+	| "normal"
+	| "popup"
+	| "app"
+	| "devtools"
+	| "app_popup"
+	| "picture_in_picture";
 
-export type WindowState = 'normal' | 'minimized' | 'maximized' | 'fullscreen'
+export type WindowState = "normal" | "minimized" | "maximized" | "fullscreen";
 
 export interface Bounds {
-  left?: number
-  top?: number
-  width?: number
-  height?: number
-  windowState?: WindowState
+	left?: number;
+	top?: number;
+	width?: number;
+	height?: number;
+	windowState?: WindowState;
 }
 
 export interface WindowInfo {
-  windowId: WindowID
-  windowType: WindowType
-  bounds: Bounds
-  isActive: boolean
-  isVisible: boolean
-  tabCount: number
-  activeTabId?: TabID
-  browserContextId?: BrowserContextID
+	windowId: WindowID;
+	windowType: WindowType;
+	bounds: Bounds;
+	isActive: boolean;
+	isVisible: boolean;
+	tabCount: number;
+	activeTabId?: TabID;
+	browserContextId?: BrowserContextID;
 }
 
 export interface TabInfo {
-  tabId: TabID
-  targetId: TargetID
-  url: string
-  title: string
-  isActive: boolean
-  isLoading: boolean
-  loadProgress: number
-  isPinned: boolean
-  isHidden: boolean
-  windowId?: WindowID
-  index?: number
-  browserContextId?: BrowserContextID
-  groupId?: TabGroupID
+	tabId: TabID;
+	targetId: TargetID;
+	url: string;
+	title: string;
+	isActive: boolean;
+	isLoading: boolean;
+	loadProgress: number;
+	isPinned: boolean;
+	isHidden: boolean;
+	windowId?: WindowID;
+	index?: number;
+	browserContextId?: BrowserContextID;
+	groupId?: TabGroupID;
 }
 
-export type TabGroupID = string
+export type TabGroupID = string;
 
 export interface TabGroupInfo {
-  groupId: TabGroupID
-  windowId: WindowID
-  title: string
-  color: string
-  collapsed: boolean
-  tabIds: TabID[]
+	groupId: TabGroupID;
+	windowId: WindowID;
+	title: string;
+	color: string;
+	collapsed: boolean;
+	tabIds: TabID[];
 }
 
 export type PermissionType =
-  | 'ar'
-  | 'audioCapture'
-  | 'automaticFullscreen'
-  | 'backgroundFetch'
-  | 'backgroundSync'
-  | 'cameraPanTiltZoom'
-  | 'capturedSurfaceControl'
-  | 'clipboardReadWrite'
-  | 'clipboardSanitizedWrite'
-  | 'displayCapture'
-  | 'durableStorage'
-  | 'geolocation'
-  | 'handTracking'
-  | 'idleDetection'
-  | 'keyboardLock'
-  | 'localFonts'
-  | 'localNetwork'
-  | 'localNetworkAccess'
-  | 'loopbackNetwork'
-  | 'midi'
-  | 'midiSysex'
-  | 'nfc'
-  | 'notifications'
-  | 'paymentHandler'
-  | 'periodicBackgroundSync'
-  | 'pointerLock'
-  | 'protectedMediaIdentifier'
-  | 'sensors'
-  | 'smartCard'
-  | 'speakerSelection'
-  | 'storageAccess'
-  | 'topLevelStorageAccess'
-  | 'videoCapture'
-  | 'vr'
-  | 'wakeLockScreen'
-  | 'wakeLockSystem'
-  | 'webAppInstallation'
-  | 'webPrinting'
-  | 'windowManagement'
+	| "ar"
+	| "audioCapture"
+	| "automaticFullscreen"
+	| "backgroundFetch"
+	| "backgroundSync"
+	| "cameraPanTiltZoom"
+	| "capturedSurfaceControl"
+	| "clipboardReadWrite"
+	| "clipboardSanitizedWrite"
+	| "displayCapture"
+	| "durableStorage"
+	| "geolocation"
+	| "handTracking"
+	| "idleDetection"
+	| "keyboardLock"
+	| "localFonts"
+	| "localNetwork"
+	| "localNetworkAccess"
+	| "loopbackNetwork"
+	| "midi"
+	| "midiSysex"
+	| "nfc"
+	| "notifications"
+	| "paymentHandler"
+	| "periodicBackgroundSync"
+	| "pointerLock"
+	| "protectedMediaIdentifier"
+	| "sensors"
+	| "smartCard"
+	| "speakerSelection"
+	| "storageAccess"
+	| "topLevelStorageAccess"
+	| "videoCapture"
+	| "vr"
+	| "wakeLockScreen"
+	| "wakeLockSystem"
+	| "webAppInstallation"
+	| "webPrinting"
+	| "windowManagement";
 
-export type PermissionSetting = 'granted' | 'denied' | 'prompt'
+export type PermissionSetting = "granted" | "denied" | "prompt";
 
 export interface PermissionDescriptor {
-  name: string
-  sysex?: boolean
-  userVisibleOnly?: boolean
-  allowWithoutSanitization?: boolean
-  allowWithoutGesture?: boolean
-  panTiltZoom?: boolean
+	name: string;
+	sysex?: boolean;
+	userVisibleOnly?: boolean;
+	allowWithoutSanitization?: boolean;
+	allowWithoutGesture?: boolean;
+	panTiltZoom?: boolean;
 }
 
-export type BrowserCommandId = 'openTabSearch' | 'closeTabSearch' | 'openGlic'
+export type BrowserCommandId = "openTabSearch" | "closeTabSearch" | "openGlic";
 
 export interface Bucket {
-  low: number
-  high: number
-  count: number
+	low: number;
+	high: number;
+	count: number;
 }
 
 export interface Histogram {
-  name: string
-  sum: number
-  count: number
-  buckets: Bucket[]
+	name: string;
+	sum: number;
+	count: number;
+	buckets: Bucket[];
 }
 
-export type PrivacySandboxAPI = 'BiddingAndAuctionServices' | 'TrustedKeyValue'
+export type PrivacySandboxAPI = "BiddingAndAuctionServices" | "TrustedKeyValue";
 
 // ══ Commands ══
 
 export interface GetWindowsResult {
-  windows: WindowInfo[]
+	windows: WindowInfo[];
 }
 
 export interface GetActiveWindowResult {
-  window?: WindowInfo
+	window?: WindowInfo;
 }
 
 export interface CreateWindowParams {
-  url?: string
-  bounds?: Bounds
-  windowType?: WindowType
-  hidden?: boolean
-  browserContextId?: BrowserContextID
+	url?: string;
+	bounds?: Bounds;
+	windowType?: WindowType;
+	hidden?: boolean;
+	browserContextId?: BrowserContextID;
 }
 
 export interface CreateWindowResult {
-  window: WindowInfo
+	window: WindowInfo;
 }
 
 export interface CloseWindowParams {
-  windowId: WindowID
+	windowId: WindowID;
 }
 
 export interface ActivateWindowParams {
-  windowId: WindowID
+	windowId: WindowID;
 }
 
 export interface ShowWindowParams {
-  windowId: WindowID
+	windowId: WindowID;
 }
 
 export interface HideWindowParams {
-  windowId: WindowID
+	windowId: WindowID;
 }
 
 export interface GetTabsParams {
-  windowId?: WindowID
-  includeHidden?: boolean
+	windowId?: WindowID;
+	includeHidden?: boolean;
 }
 
 export interface GetTabsResult {
-  tabs: TabInfo[]
+	tabs: TabInfo[];
 }
 
 export interface GetActiveTabParams {
-  windowId?: WindowID
+	windowId?: WindowID;
 }
 
 export interface GetActiveTabResult {
-  tab?: TabInfo
+	tab?: TabInfo;
 }
 
 export interface GetTabInfoParams {
-  targetId?: TargetID
-  tabId?: TabID
+	targetId?: TargetID;
+	tabId?: TabID;
 }
 
 export interface GetTabInfoResult {
-  tab: TabInfo
+	tab: TabInfo;
 }
 
 export interface CreateTabParams {
-  url?: string
-  windowId?: WindowID
-  index?: number
-  background?: boolean
-  pinned?: boolean
-  hidden?: boolean
-  browserContextId?: BrowserContextID
+	url?: string;
+	windowId?: WindowID;
+	index?: number;
+	background?: boolean;
+	pinned?: boolean;
+	hidden?: boolean;
+	browserContextId?: BrowserContextID;
 }
 
 export interface CreateTabResult {
-  tab: TabInfo
+	tab: TabInfo;
 }
 
 export interface CloseTabParams {
-  targetId?: TargetID
-  tabId?: TabID
+	targetId?: TargetID;
+	tabId?: TabID;
 }
 
 export interface ActivateTabParams {
-  targetId?: TargetID
-  tabId?: TabID
+	targetId?: TargetID;
+	tabId?: TabID;
 }
 
 export interface MoveTabParams {
-  targetId?: TargetID
-  tabId?: TabID
-  windowId?: WindowID
-  index?: number
+	targetId?: TargetID;
+	tabId?: TabID;
+	windowId?: WindowID;
+	index?: number;
 }
 
 export interface MoveTabResult {
-  tab: TabInfo
+	tab: TabInfo;
 }
 
 export interface DuplicateTabParams {
-  targetId?: TargetID
-  tabId?: TabID
+	targetId?: TargetID;
+	tabId?: TabID;
 }
 
 export interface DuplicateTabResult {
-  tab: TabInfo
+	tab: TabInfo;
 }
 
 export interface PinTabParams {
-  targetId?: TargetID
-  tabId?: TabID
+	targetId?: TargetID;
+	tabId?: TabID;
 }
 
 export interface PinTabResult {
-  tab: TabInfo
+	tab: TabInfo;
 }
 
 export interface UnpinTabParams {
-  targetId?: TargetID
-  tabId?: TabID
+	targetId?: TargetID;
+	tabId?: TabID;
 }
 
 export interface UnpinTabResult {
-  tab: TabInfo
+	tab: TabInfo;
 }
 
 export interface ShowTabParams {
-  targetId?: TargetID
-  tabId?: TabID
-  windowId?: WindowID
-  index?: number
-  activate?: boolean
+	targetId?: TargetID;
+	tabId?: TabID;
+	windowId?: WindowID;
+	index?: number;
+	activate?: boolean;
 }
 
 export interface ShowTabResult {
-  tab: TabInfo
+	tab: TabInfo;
 }
 
 export interface HideTabParams {
-  targetId?: TargetID
-  tabId?: TabID
+	targetId?: TargetID;
+	tabId?: TabID;
 }
 
 export interface HideTabResult {
-  tab: TabInfo
+	tab: TabInfo;
 }
 
 export interface GetTabGroupsParams {
-  windowId?: WindowID
+	windowId?: WindowID;
 }
 
 export interface GetTabGroupsResult {
-  groups: TabGroupInfo[]
+	groups: TabGroupInfo[];
 }
 
 export interface CreateTabGroupParams {
-  tabIds: TabID[]
-  title?: string
+	tabIds: TabID[];
+	title?: string;
 }
 
 export interface CreateTabGroupResult {
-  group: TabGroupInfo
+	group: TabGroupInfo;
 }
 
 export interface UpdateTabGroupParams {
-  groupId: TabGroupID
-  title?: string
-  color?: string
-  collapsed?: boolean
+	groupId: TabGroupID;
+	title?: string;
+	color?: string;
+	collapsed?: boolean;
 }
 
 export interface UpdateTabGroupResult {
-  group: TabGroupInfo
+	group: TabGroupInfo;
 }
 
 export interface CloseTabGroupParams {
-  groupId: TabGroupID
+	groupId: TabGroupID;
 }
 
 export interface AddTabsToGroupParams {
-  groupId: TabGroupID
-  tabIds: TabID[]
+	groupId: TabGroupID;
+	tabIds: TabID[];
 }
 
 export interface AddTabsToGroupResult {
-  group: TabGroupInfo
+	group: TabGroupInfo;
 }
 
 export interface RemoveTabsFromGroupParams {
-  tabIds: TabID[]
+	tabIds: TabID[];
 }
 
 export interface MoveTabGroupParams {
-  groupId: TabGroupID
-  windowId?: WindowID
-  index?: number
+	groupId: TabGroupID;
+	windowId?: WindowID;
+	index?: number;
 }
 
 export interface MoveTabGroupResult {
-  group: TabGroupInfo
+	group: TabGroupInfo;
 }
 
 export interface SetPermissionParams {
-  permission: PermissionDescriptor
-  setting: PermissionSetting
-  origin?: string
-  embeddedOrigin?: string
-  browserContextId?: BrowserContextID
+	permission: PermissionDescriptor;
+	setting: PermissionSetting;
+	origin?: string;
+	embeddedOrigin?: string;
+	browserContextId?: BrowserContextID;
 }
 
 export interface GrantPermissionsParams {
-  permissions: PermissionType[]
-  origin?: string
-  browserContextId?: BrowserContextID
+	permissions: PermissionType[];
+	origin?: string;
+	browserContextId?: BrowserContextID;
 }
 
 export interface ResetPermissionsParams {
-  browserContextId?: BrowserContextID
+	browserContextId?: BrowserContextID;
 }
 
 export interface SetDownloadBehaviorParams {
-  behavior: 'deny' | 'allow' | 'allowAndName' | 'default'
-  browserContextId?: BrowserContextID
-  downloadPath?: string
-  eventsEnabled?: boolean
+	behavior: "deny" | "allow" | "allowAndName" | "default";
+	browserContextId?: BrowserContextID;
+	downloadPath?: string;
+	eventsEnabled?: boolean;
 }
 
 export interface CancelDownloadParams {
-  guid: string
-  browserContextId?: BrowserContextID
+	guid: string;
+	browserContextId?: BrowserContextID;
 }
 
 export interface GetVersionResult {
-  protocolVersion: string
-  product: string
-  revision: string
-  userAgent: string
-  jsVersion: string
+	protocolVersion: string;
+	product: string;
+	revision: string;
+	userAgent: string;
+	jsVersion: string;
 }
 
 export interface GetBrowserCommandLineResult {
-  arguments: string[]
+	arguments: string[];
 }
 
 export interface GetHistogramsParams {
-  query?: string
-  delta?: boolean
+	query?: string;
+	delta?: boolean;
 }
 
 export interface GetHistogramsResult {
-  histograms: Histogram[]
+	histograms: Histogram[];
 }
 
 export interface GetHistogramParams {
-  name: string
-  delta?: boolean
+	name: string;
+	delta?: boolean;
 }
 
 export interface GetHistogramResult {
-  histogram: Histogram
+	histogram: Histogram;
 }
 
 export interface GetWindowBoundsParams {
-  windowId: WindowID
+	windowId: WindowID;
 }
 
 export interface GetWindowBoundsResult {
-  bounds: Bounds
+	bounds: Bounds;
 }
 
 export interface GetWindowForTargetParams {
-  targetId?: TargetID
+	targetId?: TargetID;
 }
 
 export interface GetWindowForTargetResult {
-  windowId: WindowID
-  bounds: Bounds
+	windowId: WindowID;
+	bounds: Bounds;
 }
 
 export interface GetTabForTargetParams {
-  targetId?: TargetID
+	targetId?: TargetID;
 }
 
 export interface GetTabForTargetResult {
-  tabId: TabID
-  windowId: WindowID
+	tabId: TabID;
+	windowId: WindowID;
 }
 
 export interface GetTargetForTabParams {
-  tabId: TabID
+	tabId: TabID;
 }
 
 export interface GetTargetForTabResult {
-  targetId: TargetID
-  windowId: WindowID
+	targetId: TargetID;
+	windowId: WindowID;
 }
 
 export interface SetWindowBoundsParams {
-  windowId: WindowID
-  bounds: Bounds
+	windowId: WindowID;
+	bounds: Bounds;
 }
 
 export interface SetContentsSizeParams {
-  windowId: WindowID
-  width?: number
-  height?: number
+	windowId: WindowID;
+	width?: number;
+	height?: number;
 }
 
 export interface SetDockTileParams {
-  badgeLabel?: string
-  image?: string
+	badgeLabel?: string;
+	image?: string;
 }
 
 export interface ExecuteBrowserCommandParams {
-  commandId: BrowserCommandId
+	commandId: BrowserCommandId;
 }
 
 export interface AddPrivacySandboxEnrollmentOverrideParams {
-  url: string
+	url: string;
 }
 
 export interface AddPrivacySandboxCoordinatorKeyConfigParams {
-  api: PrivacySandboxAPI
-  coordinatorOrigin: string
-  keyConfig: string
-  browserContextId?: BrowserContextID
+	api: PrivacySandboxAPI;
+	coordinatorOrigin: string;
+	keyConfig: string;
+	browserContextId?: BrowserContextID;
 }
 
 // ══ Events ══
 
 export interface DownloadWillBeginEvent {
-  frameId: FrameId
-  guid: string
-  url: string
-  suggestedFilename: string
+	frameId: FrameId;
+	guid: string;
+	url: string;
+	suggestedFilename: string;
 }
 
 export interface DownloadProgressEvent {
-  guid: string
-  totalBytes: number
-  receivedBytes: number
-  state: 'inProgress' | 'completed' | 'canceled'
-  filePath?: string
+	guid: string;
+	totalBytes: number;
+	receivedBytes: number;
+	state: "inProgress" | "completed" | "canceled";
+	filePath?: string;
 }

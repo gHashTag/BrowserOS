@@ -1,182 +1,182 @@
-import type { ProtocolApi } from '@trios/cdp-protocol/protocol-api'
+import type { ProtocolApi } from "@trios/cdp-protocol/protocol-api";
 
 interface AXValue {
-  type: string
-  value?: string | number | boolean
+	type: string;
+	value?: string | number | boolean;
 }
 
 interface AXProperty {
-  name: string
-  value: AXValue
+	name: string;
+	value: AXValue;
 }
 
 export interface AXNode {
-  nodeId: string
-  ignored?: boolean
-  role?: AXValue
-  name?: AXValue
-  description?: AXValue
-  value?: AXValue
-  properties?: AXProperty[]
-  childIds?: string[]
-  backendDOMNodeId?: number
+	nodeId: string;
+	ignored?: boolean;
+	role?: AXValue;
+	name?: AXValue;
+	description?: AXValue;
+	value?: AXValue;
+	properties?: AXProperty[];
+	childIds?: string[];
+	backendDOMNodeId?: number;
 }
 
 const INTERACTIVE_ROLES = new Set([
-  'button',
-  'link',
-  'textbox',
-  'searchbox',
-  'textarea',
-  'checkbox',
-  'radio',
-  'combobox',
-  'menuitem',
-  'menuitemcheckbox',
-  'menuitemradio',
-  'tab',
-  'switch',
-  'slider',
-  'spinbutton',
-  'option',
-  'treeitem',
-  'listbox',
-  'DisclosureTriangle',
-])
+	"button",
+	"link",
+	"textbox",
+	"searchbox",
+	"textarea",
+	"checkbox",
+	"radio",
+	"combobox",
+	"menuitem",
+	"menuitemcheckbox",
+	"menuitemradio",
+	"tab",
+	"switch",
+	"slider",
+	"spinbutton",
+	"option",
+	"treeitem",
+	"listbox",
+	"DisclosureTriangle",
+]);
 
 const NAMED_CONTENT_ROLES = new Set([
-  'heading',
-  'img',
-  'cell',
-  'columnheader',
-  'rowheader',
-  'dialog',
-  'alertdialog',
-])
+	"heading",
+	"img",
+	"cell",
+	"columnheader",
+	"rowheader",
+	"dialog",
+	"alertdialog",
+]);
 
 const SKIP_ROLES = new Set([
-  'none',
-  'presentation',
-  'LineBreak',
-  'InlineTextBox',
-])
+	"none",
+	"presentation",
+	"LineBreak",
+	"InlineTextBox",
+]);
 
 export function buildInteractiveTree(nodes: AXNode[]): string[] {
-  const nodeMap = new Map<string, AXNode>()
-  for (const node of nodes) nodeMap.set(node.nodeId, node)
+	const nodeMap = new Map<string, AXNode>();
+	for (const node of nodes) nodeMap.set(node.nodeId, node);
 
-  const lines: string[] = []
+	const lines: string[] = [];
 
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: tree-walking with multiple node types is inherently complex
-  function walk(nodeId: string): void {
-    const node = nodeMap.get(nodeId)
-    if (!node) return
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: tree-walking with multiple node types is inherently complex
+	function walk(nodeId: string): void {
+		const node = nodeMap.get(nodeId);
+		if (!node) return;
 
-    const role = node.ignored
-      ? undefined
-      : (node.role?.value as string | undefined)
-    if (!role || SKIP_ROLES.has(role)) {
-      if (node.childIds) for (const childId of node.childIds) walk(childId)
-      return
-    }
+		const role = node.ignored
+			? undefined
+			: (node.role?.value as string | undefined);
+		if (!role || SKIP_ROLES.has(role)) {
+			if (node.childIds) for (const childId of node.childIds) walk(childId);
+			return;
+		}
 
-    if (INTERACTIVE_ROLES.has(role) && node.backendDOMNodeId !== undefined) {
-      const name = typeof node.name?.value === 'string' ? node.name.value : ''
-      const value =
-        typeof node.value?.value === 'string' ? node.value.value : ''
+		if (INTERACTIVE_ROLES.has(role) && node.backendDOMNodeId !== undefined) {
+			const name = typeof node.name?.value === "string" ? node.name.value : "";
+			const value =
+				typeof node.value?.value === "string" ? node.value.value : "";
 
-      let line = `[${node.backendDOMNodeId}] ${role}`
-      if (name) line += ` "${name}"`
-      if (
-        value &&
-        (role === 'textbox' || role === 'searchbox' || role === 'textarea')
-      )
-        line += ` value="${value}"`
-      const props = extractProps(node)
-      if (props) line += ` ${props}`
-      lines.push(line)
-    }
+			let line = `[${node.backendDOMNodeId}] ${role}`;
+			if (name) line += ` "${name}"`;
+			if (
+				value &&
+				(role === "textbox" || role === "searchbox" || role === "textarea")
+			)
+				line += ` value="${value}"`;
+			const props = extractProps(node);
+			if (props) line += ` ${props}`;
+			lines.push(line);
+		}
 
-    if (node.childIds) for (const childId of node.childIds) walk(childId)
-  }
+		if (node.childIds) for (const childId of node.childIds) walk(childId);
+	}
 
-  const roots = nodes.filter(
-    (n) => n.role?.value === 'RootWebArea' || n.role?.value === 'WebArea',
-  )
-  if (roots.length === 0 && nodes[0]?.childIds) {
-    for (const childId of nodes[0].childIds) walk(childId)
-  } else {
-    for (const root of roots) {
-      if (root.childIds) for (const childId of root.childIds) walk(childId)
-    }
-  }
+	const roots = nodes.filter(
+		(n) => n.role?.value === "RootWebArea" || n.role?.value === "WebArea",
+	);
+	if (roots.length === 0 && nodes[0]?.childIds) {
+		for (const childId of nodes[0].childIds) walk(childId);
+	} else {
+		for (const root of roots) {
+			if (root.childIds) for (const childId of root.childIds) walk(childId);
+		}
+	}
 
-  return lines
+	return lines;
 }
 
 export function buildEnhancedTree(nodes: AXNode[]): string[] {
-  const nodeMap = new Map<string, AXNode>()
-  for (const node of nodes) nodeMap.set(node.nodeId, node)
+	const nodeMap = new Map<string, AXNode>();
+	for (const node of nodes) nodeMap.set(node.nodeId, node);
 
-  const lines: string[] = []
+	const lines: string[] = [];
 
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: tree-walking with multiple node types is inherently complex
-  function walk(nodeId: string, depth: number): void {
-    const node = nodeMap.get(nodeId)
-    if (!node) return
+	// biome-ignore lint/complexity/noExcessiveCognitiveComplexity: tree-walking with multiple node types is inherently complex
+	function walk(nodeId: string, depth: number): void {
+		const node = nodeMap.get(nodeId);
+		if (!node) return;
 
-    const role = node.ignored
-      ? undefined
-      : (node.role?.value as string | undefined)
-    if (!role || SKIP_ROLES.has(role)) {
-      if (node.childIds)
-        for (const childId of node.childIds) walk(childId, depth)
-      return
-    }
+		const role = node.ignored
+			? undefined
+			: (node.role?.value as string | undefined);
+		if (!role || SKIP_ROLES.has(role)) {
+			if (node.childIds)
+				for (const childId of node.childIds) walk(childId, depth);
+			return;
+		}
 
-    const name = typeof node.name?.value === 'string' ? node.name.value : ''
-    const value = typeof node.value?.value === 'string' ? node.value.value : ''
-    const isInteractive = INTERACTIVE_ROLES.has(role)
-    const isNamedContent = NAMED_CONTENT_ROLES.has(role) && name.length > 0
-    const hasId =
-      (isInteractive || isNamedContent) && node.backendDOMNodeId !== undefined
+		const name = typeof node.name?.value === "string" ? node.name.value : "";
+		const value = typeof node.value?.value === "string" ? node.value.value : "";
+		const isInteractive = INTERACTIVE_ROLES.has(role);
+		const isNamedContent = NAMED_CONTENT_ROLES.has(role) && name.length > 0;
+		const hasId =
+			(isInteractive || isNamedContent) && node.backendDOMNodeId !== undefined;
 
-    const indent = '  '.repeat(depth)
-    let line: string
+		const indent = "  ".repeat(depth);
+		let line: string;
 
-    if (hasId) {
-      line = `${indent}[${node.backendDOMNodeId}] ${role}`
-    } else {
-      line = `${indent}- ${role}`
-    }
+		if (hasId) {
+			line = `${indent}[${node.backendDOMNodeId}] ${role}`;
+		} else {
+			line = `${indent}- ${role}`;
+		}
 
-    if (name) line += ` "${name}"`
-    if (
-      value &&
-      (role === 'textbox' || role === 'searchbox' || role === 'textarea')
-    )
-      line += ` value="${value}"`
-    const props = extractProps(node)
-    if (props) line += ` ${props}`
+		if (name) line += ` "${name}"`;
+		if (
+			value &&
+			(role === "textbox" || role === "searchbox" || role === "textarea")
+		)
+			line += ` value="${value}"`;
+		const props = extractProps(node);
+		if (props) line += ` ${props}`;
 
-    lines.push(line)
+		lines.push(line);
 
-    if (node.childIds)
-      for (const childId of node.childIds) walk(childId, depth + 1)
-  }
+		if (node.childIds)
+			for (const childId of node.childIds) walk(childId, depth + 1);
+	}
 
-  const roots = nodes.filter(
-    (n) => n.role?.value === 'RootWebArea' || n.role?.value === 'WebArea',
-  )
-  if (roots.length === 0 && nodes[0]?.childIds) {
-    for (const childId of nodes[0].childIds) walk(childId, 0)
-  } else {
-    for (const root of roots) {
-      if (root.childIds) for (const childId of root.childIds) walk(childId, 0)
-    }
-  }
+	const roots = nodes.filter(
+		(n) => n.role?.value === "RootWebArea" || n.role?.value === "WebArea",
+	);
+	if (roots.length === 0 && nodes[0]?.childIds) {
+		for (const childId of nodes[0].childIds) walk(childId, 0);
+	} else {
+		for (const root of roots) {
+			if (root.childIds) for (const childId of root.childIds) walk(childId, 0);
+		}
+	}
 
-  return lines
+	return lines;
 }
 
 const CURSOR_INTERACTIVE_JS = `(function() {
@@ -219,124 +219,124 @@ const CURSOR_INTERACTIVE_JS = `(function() {
 		results.push({ marker: String(i), text: text, reasons: reasons });
 	}
 	return results;
-})()`
+})()`;
 
 export interface CursorInteractiveElement {
-  backendNodeId: number
-  text: string
-  reasons: string[]
+	backendNodeId: number;
+	text: string;
+	reasons: string[];
 }
 
 export async function findCursorInteractiveElements(
-  session: ProtocolApi,
+	session: ProtocolApi,
 ): Promise<CursorInteractiveElement[]> {
-  const findResult = await session.Runtime.evaluate({
-    expression: CURSOR_INTERACTIVE_JS,
-    returnByValue: true,
-  })
+	const findResult = await session.Runtime.evaluate({
+		expression: CURSOR_INTERACTIVE_JS,
+		returnByValue: true,
+	});
 
-  const found = findResult.result?.value as
-    | Array<{ marker: string; text: string; reasons: string[] }>
-    | undefined
-  if (!found?.length) return []
+	const found = findResult.result?.value as
+		| Array<{ marker: string; text: string; reasons: string[] }>
+		| undefined;
+	if (!found?.length) return [];
 
-  const results: CursorInteractiveElement[] = []
+	const results: CursorInteractiveElement[] = [];
 
-  for (const el of found) {
-    try {
-      const queryResult = await session.Runtime.evaluate({
-        expression: `document.querySelector('[data-__cid="${el.marker}"]')`,
-        returnByValue: false,
-      })
+	for (const el of found) {
+		try {
+			const queryResult = await session.Runtime.evaluate({
+				expression: `document.querySelector('[data-__cid="${el.marker}"]')`,
+				returnByValue: false,
+			});
 
-      if (!queryResult.result?.objectId) continue
+			if (!queryResult.result?.objectId) continue;
 
-      const desc = await session.DOM.describeNode({
-        objectId: queryResult.result.objectId,
-      })
+			const desc = await session.DOM.describeNode({
+				objectId: queryResult.result.objectId,
+			});
 
-      if (desc.node?.backendNodeId) {
-        results.push({
-          backendNodeId: desc.node.backendNodeId,
-          text: el.text,
-          reasons: el.reasons,
-        })
-      }
-    } catch {
-      // skip unresolvable elements
-    }
-  }
+			if (desc.node?.backendNodeId) {
+				results.push({
+					backendNodeId: desc.node.backendNodeId,
+					text: el.text,
+					reasons: el.reasons,
+				});
+			}
+		} catch {
+			// skip unresolvable elements
+		}
+	}
 
-  await session.Runtime.evaluate({
-    expression: `document.querySelectorAll('[data-__cid]').forEach(function(el){el.removeAttribute('data-__cid')})`,
-    returnByValue: true,
-  })
+	await session.Runtime.evaluate({
+		expression: `document.querySelectorAll('[data-__cid]').forEach(function(el){el.removeAttribute('data-__cid')})`,
+		returnByValue: true,
+	});
 
-  return results
+	return results;
 }
 
 export interface LinkNode {
-  backendDOMNodeId: number
-  text: string
+	backendDOMNodeId: number;
+	text: string;
 }
 
 export function extractLinkNodes(nodes: AXNode[]): LinkNode[] {
-  const nodeMap = new Map<string, AXNode>()
-  for (const node of nodes) nodeMap.set(node.nodeId, node)
+	const nodeMap = new Map<string, AXNode>();
+	for (const node of nodes) nodeMap.set(node.nodeId, node);
 
-  const links: LinkNode[] = []
+	const links: LinkNode[] = [];
 
-  function walk(nodeId: string): void {
-    const node = nodeMap.get(nodeId)
-    if (!node) return
+	function walk(nodeId: string): void {
+		const node = nodeMap.get(nodeId);
+		if (!node) return;
 
-    const role = node.ignored
-      ? undefined
-      : (node.role?.value as string | undefined)
+		const role = node.ignored
+			? undefined
+			: (node.role?.value as string | undefined);
 
-    if (role === 'link' && node.backendDOMNodeId !== undefined) {
-      const text = typeof node.name?.value === 'string' ? node.name.value : ''
-      links.push({ backendDOMNodeId: node.backendDOMNodeId, text })
-    }
+		if (role === "link" && node.backendDOMNodeId !== undefined) {
+			const text = typeof node.name?.value === "string" ? node.name.value : "";
+			links.push({ backendDOMNodeId: node.backendDOMNodeId, text });
+		}
 
-    if (node.childIds) for (const childId of node.childIds) walk(childId)
-  }
+		if (node.childIds) for (const childId of node.childIds) walk(childId);
+	}
 
-  const roots = nodes.filter(
-    (n) => n.role?.value === 'RootWebArea' || n.role?.value === 'WebArea',
-  )
-  if (roots.length === 0 && nodes[0]?.childIds) {
-    for (const childId of nodes[0].childIds) walk(childId)
-  } else {
-    for (const root of roots) {
-      if (root.childIds) for (const childId of root.childIds) walk(childId)
-    }
-  }
+	const roots = nodes.filter(
+		(n) => n.role?.value === "RootWebArea" || n.role?.value === "WebArea",
+	);
+	if (roots.length === 0 && nodes[0]?.childIds) {
+		for (const childId of nodes[0].childIds) walk(childId);
+	} else {
+		for (const root of roots) {
+			if (root.childIds) for (const childId of root.childIds) walk(childId);
+		}
+	}
 
-  return links
+	return links;
 }
 
 function extractProps(node: AXNode): string {
-  const parts: string[] = []
-  if (!node.properties) return ''
+	const parts: string[] = [];
+	if (!node.properties) return "";
 
-  for (const prop of node.properties) {
-    if (prop.name === 'checked' && prop.value.value === true)
-      parts.push('checked')
-    if (prop.name === 'checked' && prop.value.value === 'mixed')
-      parts.push('indeterminate')
-    if (prop.name === 'disabled' && prop.value.value === true)
-      parts.push('disabled')
-    if (prop.name === 'expanded' && prop.value.value === true)
-      parts.push('expanded')
-    if (prop.name === 'expanded' && prop.value.value === false)
-      parts.push('collapsed')
-    if (prop.name === 'required' && prop.value.value === true)
-      parts.push('required')
-    if (prop.name === 'selected' && prop.value.value === true)
-      parts.push('selected')
-    if (prop.name === 'level') parts.push(`level=${prop.value.value}`)
-  }
+	for (const prop of node.properties) {
+		if (prop.name === "checked" && prop.value.value === true)
+			parts.push("checked");
+		if (prop.name === "checked" && prop.value.value === "mixed")
+			parts.push("indeterminate");
+		if (prop.name === "disabled" && prop.value.value === true)
+			parts.push("disabled");
+		if (prop.name === "expanded" && prop.value.value === true)
+			parts.push("expanded");
+		if (prop.name === "expanded" && prop.value.value === false)
+			parts.push("collapsed");
+		if (prop.name === "required" && prop.value.value === true)
+			parts.push("required");
+		if (prop.name === "selected" && prop.value.value === true)
+			parts.push("selected");
+		if (prop.name === "level") parts.push(`level=${prop.value.value}`);
+	}
 
-  return parts.length > 0 ? `(${parts.join(', ')})` : ''
+	return parts.length > 0 ? `(${parts.join(", ")})` : "";
 }

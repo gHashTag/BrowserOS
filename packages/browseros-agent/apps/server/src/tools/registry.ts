@@ -1,172 +1,172 @@
 import {
-  create_bookmark,
-  get_bookmarks,
-  move_bookmark,
-  remove_bookmark,
-  search_bookmarks,
-  update_bookmark,
-} from './bookmarks'
-import { get_console_logs } from './console'
-import { get_dom, search_dom } from './dom'
+	create_bookmark,
+	get_bookmarks,
+	move_bookmark,
+	remove_bookmark,
+	search_bookmarks,
+	update_bookmark,
+} from "./bookmarks";
+import { get_console_logs } from "./console";
+import { get_dom, search_dom } from "./dom";
 import {
-  gitBranch,
-  gitCheckout,
-  gitCommit,
-  gitPull,
-  gitPush,
-  gitStatus,
-} from './git'
+	gitBranch,
+	gitCheckout,
+	gitCommit,
+	gitPull,
+	gitPush,
+	gitStatus,
+} from "./git";
 import {
-  delete_history_range,
-  delete_history_url,
-  get_recent_history,
-  search_history,
-} from './history'
+	delete_history_range,
+	delete_history_url,
+	get_recent_history,
+	search_history,
+} from "./history";
 import {
-  check,
-  clear,
-  click,
-  click_at,
-  drag,
-  drag_at,
-  fill,
-  focus,
-  handle_dialog,
-  hover,
-  hover_at,
-  press_key,
-  scroll,
-  select_option,
-  type_at,
-  uncheck,
-  upload_file,
-} from './input'
+	check,
+	clear,
+	click,
+	click_at,
+	drag,
+	drag_at,
+	fill,
+	focus,
+	handle_dialog,
+	hover,
+	hover_at,
+	press_key,
+	scroll,
+	select_option,
+	type_at,
+	uncheck,
+	upload_file,
+} from "./input";
 import {
-  close_page,
-  get_active_page,
-  list_pages,
-  move_page,
-  navigate_page,
-  new_hidden_page,
-  new_page,
-  show_page,
-  // biome-ignore lint/correctness/noUnusedImports: temporarily disabled
-  wait_for,
-} from './navigation'
-import { suggest_app_connection, suggest_schedule } from './nudges'
-import { download_file, save_pdf, save_screenshot } from './page-actions'
+	close_page,
+	get_active_page,
+	list_pages,
+	move_page,
+	navigate_page,
+	new_hidden_page,
+	new_page,
+	show_page,
+	// biome-ignore lint/correctness/noUnusedImports: temporarily disabled
+	wait_for,
+} from "./navigation";
+import { suggest_app_connection, suggest_schedule } from "./nudges";
+import { download_file, save_pdf, save_screenshot } from "./page-actions";
 import {
-  evaluate_script,
-  get_page_content,
-  get_page_links,
-  take_enhanced_snapshot,
-  take_screenshot,
-  take_snapshot,
-} from './snapshot'
+	evaluate_script,
+	get_page_content,
+	get_page_links,
+	take_enhanced_snapshot,
+	take_screenshot,
+	take_snapshot,
+} from "./snapshot";
 import {
-  close_tab_group,
-  group_tabs,
-  list_tab_groups,
-  ungroup_tabs,
-  update_tab_group,
-} from './tab-groups'
-import { createRegistry } from './tool-registry'
-import { trios_info } from './trios-info'
+	close_tab_group,
+	group_tabs,
+	list_tab_groups,
+	ungroup_tabs,
+	update_tab_group,
+} from "./tab-groups";
+import { createRegistry } from "./tool-registry";
+import { trios_info } from "./trios-info";
 import {
-  activate_window,
-  close_window,
-  create_hidden_window,
-  create_window,
-  list_windows,
-} from './windows'
+	activate_window,
+	close_window,
+	create_hidden_window,
+	create_window,
+	list_windows,
+} from "./windows";
 
 export const registry = createRegistry([
-  // Navigation (8)
-  get_active_page,
-  list_pages,
-  navigate_page,
-  new_page,
-  new_hidden_page,
-  show_page,
-  move_page,
-  close_page,
-  // wait_for, // temporarily disabled
+	// Navigation (8)
+	get_active_page,
+	list_pages,
+	navigate_page,
+	new_page,
+	new_hidden_page,
+	show_page,
+	move_page,
+	close_page,
+	// wait_for, // temporarily disabled
 
-  // Observation (9)
-  take_snapshot,
-  take_enhanced_snapshot,
-  get_page_content,
-  get_page_links,
-  get_dom,
-  search_dom,
-  take_screenshot,
-  evaluate_script,
-  get_console_logs,
+	// Observation (9)
+	take_snapshot,
+	take_enhanced_snapshot,
+	get_page_content,
+	get_page_links,
+	get_dom,
+	search_dom,
+	take_screenshot,
+	evaluate_script,
+	get_console_logs,
 
-  // Input (17)
-  click,
-  click_at,
-  hover,
-  hover_at,
-  type_at,
-  drag_at,
-  focus,
-  clear,
-  fill,
-  check,
-  uncheck,
-  upload_file,
-  press_key,
-  drag,
-  scroll,
-  handle_dialog,
-  select_option,
+	// Input (17)
+	click,
+	click_at,
+	hover,
+	hover_at,
+	type_at,
+	drag_at,
+	focus,
+	clear,
+	fill,
+	check,
+	uncheck,
+	upload_file,
+	press_key,
+	drag,
+	scroll,
+	handle_dialog,
+	select_option,
 
-  // Page Actions (3)
-  save_pdf,
-  save_screenshot,
-  download_file,
+	// Page Actions (3)
+	save_pdf,
+	save_screenshot,
+	download_file,
 
-  // Windows (5)
-  list_windows,
-  create_window,
-  create_hidden_window,
-  close_window,
-  activate_window,
+	// Windows (5)
+	list_windows,
+	create_window,
+	create_hidden_window,
+	close_window,
+	activate_window,
 
-  // Bookmarks (6)
-  get_bookmarks,
-  create_bookmark,
-  remove_bookmark,
-  update_bookmark,
-  move_bookmark,
-  search_bookmarks,
+	// Bookmarks (6)
+	get_bookmarks,
+	create_bookmark,
+	remove_bookmark,
+	update_bookmark,
+	move_bookmark,
+	search_bookmarks,
 
-  // History (4)
-  search_history,
-  get_recent_history,
-  delete_history_url,
-  delete_history_range,
+	// History (4)
+	search_history,
+	get_recent_history,
+	delete_history_url,
+	delete_history_range,
 
-  // Tab Groups (5)
-  list_tab_groups,
-  group_tabs,
-  update_tab_group,
-  ungroup_tabs,
-  close_tab_group,
+	// Tab Groups (5)
+	list_tab_groups,
+	group_tabs,
+	update_tab_group,
+	ungroup_tabs,
+	close_tab_group,
 
-  // Info (1)
-  trios_info,
+	// Info (1)
+	trios_info,
 
-  // Nudges (2)
-  suggest_schedule,
-  suggest_app_connection,
+	// Nudges (2)
+	suggest_schedule,
+	suggest_app_connection,
 
-  // Git (6)
-  gitStatus,
-  gitBranch,
-  gitCheckout,
-  gitCommit,
-  gitPull,
-  gitPush,
-])
+	// Git (6)
+	gitStatus,
+	gitBranch,
+	gitCheckout,
+	gitCommit,
+	gitPull,
+	gitPush,
+]);

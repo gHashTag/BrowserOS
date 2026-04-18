@@ -2,64 +2,64 @@
 
 // ══ Types ══
 
-export type PressureLevel = 'moderate' | 'critical'
+export type PressureLevel = "moderate" | "critical";
 
 export interface SamplingProfileNode {
-  size: number
-  total: number
-  stack: string[]
+	size: number;
+	total: number;
+	stack: string[];
 }
 
 export interface SamplingProfile {
-  samples: SamplingProfileNode[]
-  modules: Module[]
+	samples: SamplingProfileNode[];
+	modules: Module[];
 }
 
 export interface Module {
-  name: string
-  uuid: string
-  baseAddress: string
-  size: number
+	name: string;
+	uuid: string;
+	baseAddress: string;
+	size: number;
 }
 
 export interface DOMCounter {
-  name: string
-  count: number
+	name: string;
+	count: number;
 }
 
 // ══ Commands ══
 
 export interface GetDOMCountersResult {
-  documents: number
-  nodes: number
-  jsEventListeners: number
+	documents: number;
+	nodes: number;
+	jsEventListeners: number;
 }
 
 export interface GetDOMCountersForLeakDetectionResult {
-  counters: DOMCounter[]
+	counters: DOMCounter[];
 }
 
 export interface SetPressureNotificationsSuppressedParams {
-  suppressed: boolean
+	suppressed: boolean;
 }
 
 export interface SimulatePressureNotificationParams {
-  level: PressureLevel
+	level: PressureLevel;
 }
 
 export interface StartSamplingParams {
-  samplingInterval?: number
-  suppressRandomness?: boolean
+	samplingInterval?: number;
+	suppressRandomness?: boolean;
 }
 
 export interface GetAllTimeSamplingProfileResult {
-  profile: SamplingProfile
+	profile: SamplingProfile;
 }
 
 export interface GetBrowserSamplingProfileResult {
-  profile: SamplingProfile
+	profile: SamplingProfile;
 }
 
 export interface GetSamplingProfileResult {
-  profile: SamplingProfile
+	profile: SamplingProfile;
 }

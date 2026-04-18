@@ -1,19 +1,19 @@
 // ── AUTO-GENERATED from CDP protocol. DO NOT EDIT. ──
 
 import type {
-  EnableParams,
-  TimelineEventAddedEvent,
-} from '../domains/performance-timeline'
+	EnableParams,
+	TimelineEventAddedEvent,
+} from "../domains/performance-timeline";
 
 export interface PerformanceTimelineApi {
-  // ── Commands ──
+	// ── Commands ──
 
-  enable(params: EnableParams): Promise<void>
+	enable(params: EnableParams): Promise<void>;
 
-  // ── Events ──
+	// ── Events ──
 
-  on(
-    event: 'timelineEventAdded',
-    handler: (params: TimelineEventAddedEvent) => void,
-  ): () => void
+	on(
+		event: "timelineEventAdded",
+		handler: (params: TimelineEventAddedEvent) => void,
+	): () => void;
 }

@@ -2,29 +2,29 @@
 
 // ══ Types ══
 
-export type RequestId = string
+export type RequestId = string;
 
-export type DeviceId = string
+export type DeviceId = string;
 
 export interface PromptDevice {
-  id: DeviceId
-  name: string
+	id: DeviceId;
+	name: string;
 }
 
 // ══ Commands ══
 
 export interface SelectPromptParams {
-  id: RequestId
-  deviceId: DeviceId
+	id: RequestId;
+	deviceId: DeviceId;
 }
 
 export interface CancelPromptParams {
-  id: RequestId
+	id: RequestId;
 }
 
 // ══ Events ══
 
 export interface DeviceRequestPromptedEvent {
-  id: RequestId
-  devices: PromptDevice[]
+	id: RequestId;
+	devices: PromptDevice[];
 }

@@ -1,33 +1,33 @@
 // ── AUTO-GENERATED from CDP protocol. DO NOT EDIT. ──
 
-import type { RemoteObjectId } from './runtime'
+import type { RemoteObjectId } from "./runtime";
 
 // ══ Types ══
 
-export type StreamHandle = string
+export type StreamHandle = string;
 
 // ══ Commands ══
 
 export interface CloseParams {
-  handle: StreamHandle
+	handle: StreamHandle;
 }
 
 export interface ReadParams {
-  handle: StreamHandle
-  offset?: number
-  size?: number
+	handle: StreamHandle;
+	offset?: number;
+	size?: number;
 }
 
 export interface ReadResult {
-  base64Encoded?: boolean
-  data: string
-  eof: boolean
+	base64Encoded?: boolean;
+	data: string;
+	eof: boolean;
 }
 
 export interface ResolveBlobParams {
-  objectId: RemoteObjectId
+	objectId: RemoteObjectId;
 }
 
 export interface ResolveBlobResult {
-  uuid: string
+	uuid: string;
 }

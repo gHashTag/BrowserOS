@@ -2,43 +2,43 @@
 
 // ══ Types ══
 
-export type HistoryEntryID = string
+export type HistoryEntryID = string;
 
 export interface HistoryEntry {
-  id: HistoryEntryID
-  url: string
-  title: string
-  lastVisitTime: number
-  visitCount: number
-  typedCount: number
+	id: HistoryEntryID;
+	url: string;
+	title: string;
+	lastVisitTime: number;
+	visitCount: number;
+	typedCount: number;
 }
 
 // ══ Commands ══
 
 export interface SearchParams {
-  query: string
-  maxResults?: number
-  startTime?: number
-  endTime?: number
+	query: string;
+	maxResults?: number;
+	startTime?: number;
+	endTime?: number;
 }
 
 export interface SearchResult {
-  entries: HistoryEntry[]
+	entries: HistoryEntry[];
 }
 
 export interface GetRecentParams {
-  maxResults?: number
+	maxResults?: number;
 }
 
 export interface GetRecentResult {
-  entries: HistoryEntry[]
+	entries: HistoryEntry[];
 }
 
 export interface DeleteUrlParams {
-  url: string
+	url: string;
 }
 
 export interface DeleteRangeParams {
-  startTime: number
-  endTime: number
+	startTime: number;
+	endTime: number;
 }

@@ -7,27 +7,27 @@
  * Used by SDK verify endpoint.
  */
 
-import type { LLMConfig } from '@trios/shared/schemas/llm'
-import type { LanguageModel, ModelMessage } from 'ai'
-import { generateText } from 'ai'
-import { resolveLLMConfig } from './config'
-import { createLLMProvider } from './provider'
+import type { LLMConfig } from "@trios/shared/schemas/llm";
+import type { LanguageModel, ModelMessage } from "ai";
+import { generateText } from "ai";
+import { resolveLLMConfig } from "./config";
+import { createLLMProvider } from "./provider";
 
 export class LLMClient {
-  private constructor(private model: LanguageModel) {}
+	private constructor(private model: LanguageModel) {}
 
-  static async create(config: LLMConfig, triosId?: string): Promise<LLMClient> {
-    const resolved = await resolveLLMConfig(config, triosId)
-    const model = createLLMProvider(resolved)
-    return new LLMClient(model)
-  }
+	static async create(config: LLMConfig, triosId?: string): Promise<LLMClient> {
+		const resolved = await resolveLLMConfig(config, triosId);
+		const model = createLLMProvider(resolved);
+		return new LLMClient(model);
+	}
 
-  async generateText(messages: ModelMessage[]): Promise<string> {
-    const result = await generateText({
-      model: this.model,
-      messages,
-    })
+	async generateText(messages: ModelMessage[]): Promise<string> {
+		const result = await generateText({
+			model: this.model,
+			messages,
+		});
 
-    return result.text
-  }
+		return result.text;
+	}
 }

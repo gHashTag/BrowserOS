@@ -1,28 +1,28 @@
 // ── AUTO-GENERATED from CDP protocol. DO NOT EDIT. ──
 
 import type {
-  CheckContrastParams,
-  CheckFormsIssuesResult,
-  GetEncodedResponseParams,
-  GetEncodedResponseResult,
-  IssueAddedEvent,
-} from '../domains/audits'
+	CheckContrastParams,
+	CheckFormsIssuesResult,
+	GetEncodedResponseParams,
+	GetEncodedResponseResult,
+	IssueAddedEvent,
+} from "../domains/audits";
 
 export interface AuditsApi {
-  // ── Commands ──
+	// ── Commands ──
 
-  getEncodedResponse(
-    params: GetEncodedResponseParams,
-  ): Promise<GetEncodedResponseResult>
-  disable(): Promise<void>
-  enable(): Promise<void>
-  checkContrast(params?: CheckContrastParams): Promise<void>
-  checkFormsIssues(): Promise<CheckFormsIssuesResult>
+	getEncodedResponse(
+		params: GetEncodedResponseParams,
+	): Promise<GetEncodedResponseResult>;
+	disable(): Promise<void>;
+	enable(): Promise<void>;
+	checkContrast(params?: CheckContrastParams): Promise<void>;
+	checkFormsIssues(): Promise<CheckFormsIssuesResult>;
 
-  // ── Events ──
+	// ── Events ──
 
-  on(
-    event: 'issueAdded',
-    handler: (params: IssueAddedEvent) => void,
-  ): () => void
+	on(
+		event: "issueAdded",
+		handler: (params: IssueAddedEvent) => void,
+	): () => void;
 }

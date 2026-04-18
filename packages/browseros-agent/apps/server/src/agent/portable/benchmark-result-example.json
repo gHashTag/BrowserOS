@@ -1,44 +1,44 @@
 {
-  "sessionId": "baseline-simulated",
-  "timestamp": 1713200000000,
-  "formatVersion": "v1",
-  "config": {
-    "testName": "baseline-test",
-    "sessions": 1,
-    "messagesPerSession": 5,
-    "mode": "echo",
-    "simulateReconnectAfter": 0,
-    "maxReconnectAttempts": 0
-  },
-  "metrics": {
-    "messageLatency": {
-      "min": 100,
-      "max": 200,
-      "p50": 150,
-      "p95": 180,
-      "p99": 190,
-      "mean": 150,
-      "samples": 3
-    },
-    "reconnectLatency": {
-      "min": 0,
-      "max": 0,
-      "p50": 0,
-      "p95": 0,
-      "p99": 0,
-      "mean": 0,
-      "samples": 0
-    },
-    "reconnectSuccessRate": 1,
-    "connectionStability": {
-      "totalConnections": 1,
-      "disconnects": 1,
-      "sessionsCompleted": 1
-    }
-  },
-  "verdict": "production-ready",
-  "verdictDetails": [],
-  "events": [],
-  "eventsHash": "abc123",
-  "durationMs": 1000
+	"sessionId": "baseline-simulated",
+	"timestamp": 1713200000000,
+	"formatVersion": "v1",
+	"config": {
+		"testName": "baseline-test",
+		"sessions": 1,
+		"messagesPerSession": 5,
+		"mode": "echo",
+		"simulateReconnectAfter": 0,
+		"maxReconnectAttempts": 0
+	},
+	"metrics": {
+		"messageLatency": {
+			"min": 100,
+			"max": 200,
+			"p50": 150,
+			"p95": 180,
+			"p99": 190,
+			"mean": 150,
+			"samples": 3
+		},
+		"reconnectLatency": {
+			"min": 0,
+			"max": 0,
+			"p50": 0,
+			"p95": 0,
+			"p99": 0,
+			"mean": 0,
+			"samples": 0
+		},
+		"reconnectSuccessRate": 1,
+		"connectionStability": {
+			"totalConnections": 1,
+			"disconnects": 1,
+			"sessionsCompleted": 1
+		}
+	},
+	"verdict": "production-ready",
+	"verdictDetails": [],
+	"events": [],
+	"eventsHash": "abc123",
+	"durationMs": 1000
 }

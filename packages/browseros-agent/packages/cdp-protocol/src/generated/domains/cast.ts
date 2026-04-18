@@ -3,39 +3,39 @@
 // ══ Types ══
 
 export interface Sink {
-  name: string
-  id: string
-  session?: string
+	name: string;
+	id: string;
+	session?: string;
 }
 
 // ══ Commands ══
 
 export interface EnableParams {
-  presentationUrl?: string
+	presentationUrl?: string;
 }
 
 export interface SetSinkToUseParams {
-  sinkName: string
+	sinkName: string;
 }
 
 export interface StartDesktopMirroringParams {
-  sinkName: string
+	sinkName: string;
 }
 
 export interface StartTabMirroringParams {
-  sinkName: string
+	sinkName: string;
 }
 
 export interface StopCastingParams {
-  sinkName: string
+	sinkName: string;
 }
 
 // ══ Events ══
 
 export interface SinksUpdatedEvent {
-  sinks: Sink[]
+	sinks: Sink[];
 }
 
 export interface IssueUpdatedEvent {
-  issueMessage: string
+	issueMessage: string;
 }

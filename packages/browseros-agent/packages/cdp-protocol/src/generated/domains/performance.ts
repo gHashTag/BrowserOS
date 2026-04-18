@@ -3,27 +3,27 @@
 // ══ Types ══
 
 export interface Metric {
-  name: string
-  value: number
+	name: string;
+	value: number;
 }
 
 // ══ Commands ══
 
 export interface EnableParams {
-  timeDomain?: 'timeTicks' | 'threadTicks'
+	timeDomain?: "timeTicks" | "threadTicks";
 }
 
 export interface SetTimeDomainParams {
-  timeDomain: 'timeTicks' | 'threadTicks'
+	timeDomain: "timeTicks" | "threadTicks";
 }
 
 export interface GetMetricsResult {
-  metrics: Metric[]
+	metrics: Metric[];
 }
 
 // ══ Events ══
 
 export interface MetricsEvent {
-  metrics: Metric[]
-  title: string
+	metrics: Metric[];
+	title: string;
 }

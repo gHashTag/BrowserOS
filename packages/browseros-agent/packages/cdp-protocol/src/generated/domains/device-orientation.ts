@@ -3,7 +3,7 @@
 // ══ Commands ══
 
 export interface SetDeviceOrientationOverrideParams {
-  alpha: number
-  beta: number
-  gamma: number
+	alpha: number;
+	beta: number;
+	gamma: number;
 }

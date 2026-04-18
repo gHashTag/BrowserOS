@@ -18,128 +18,128 @@
  */
 
 import type {
-  KlavisClient,
-  StrataCreateResponse,
-} from '../../../lib/clients/klavis/klavis-client'
-import { logger } from '../../../lib/logger'
+	KlavisClient,
+	StrataCreateResponse,
+} from "../../../lib/clients/klavis/klavis-client";
+import { logger } from "../../../lib/logger";
 
-const DEFAULT_TTL_MS = 60 * 60 * 1000
+const DEFAULT_TTL_MS = 60 * 60 * 1000;
 
 interface CacheEntry {
-  strataServerUrl: string
-  strataId: string
-  addedServers: string[]
-  serverKey: string
-  expiresAt: number
+	strataServerUrl: string;
+	strataId: string;
+	addedServers: string[];
+	serverKey: string;
+	expiresAt: number;
 }
 
 function normalizeServers(servers: readonly string[]): string {
-  return [...new Set(servers)].sort().join(',')
+	return [...new Set(servers)].sort().join(",");
 }
 
 function keyOf(triosId: string, normalized: string): string {
-  // xxhash64 → 16 hex chars, fixed width. Birthday-bound collision risk
-  // for our scale (<10k entries) is ~5e-15; we additionally verify
-  // serverKey on read so collisions cannot affect correctness.
-  const hash = Bun.hash(normalized).toString(16).padStart(16, '0')
-  return `${triosId}|${hash}`
+	// xxhash64 → 16 hex chars, fixed width. Birthday-bound collision risk
+	// for our scale (<10k entries) is ~5e-15; we additionally verify
+	// serverKey on read so collisions cannot affect correctness.
+	const hash = Bun.hash(normalized).toString(16).padStart(16, "0");
+	return `${triosId}|${hash}`;
 }
 
 export class KlavisStrataCache {
-  private entries = new Map<string, Promise<CacheEntry>>()
+	private entries = new Map<string, Promise<CacheEntry>>();
 
-  constructor(private ttlMs: number = DEFAULT_TTL_MS) {}
+	constructor(private ttlMs: number = DEFAULT_TTL_MS) {}
 
-  async getOrFetch(
-    client: KlavisClient,
-    triosId: string,
-    servers: readonly string[],
-  ): Promise<StrataCreateResponse> {
-    const normalized = normalizeServers(servers)
-    const key = keyOf(triosId, normalized)
-    const existing = this.entries.get(key)
+	async getOrFetch(
+		client: KlavisClient,
+		triosId: string,
+		servers: readonly string[],
+	): Promise<StrataCreateResponse> {
+		const normalized = normalizeServers(servers);
+		const key = keyOf(triosId, normalized);
+		const existing = this.entries.get(key);
 
-    if (existing) {
-      const resolved = await existing.catch(() => null)
-      if (
-        resolved &&
-        resolved.serverKey === normalized &&
-        Date.now() < resolved.expiresAt
-      ) {
-        logger.debug('Klavis strata cache hit', { key })
-        return this.toResponse(resolved)
-      }
-      // Stale/collision/rejected — evict, but only if we're the rightful
-      // evictor (a racing caller may have already replaced this slot).
-      if (this.entries.get(key) === existing) {
-        this.entries.delete(key)
-      }
-    }
+		if (existing) {
+			const resolved = await existing.catch(() => null);
+			if (
+				resolved &&
+				resolved.serverKey === normalized &&
+				Date.now() < resolved.expiresAt
+			) {
+				logger.debug("Klavis strata cache hit", { key });
+				return this.toResponse(resolved);
+			}
+			// Stale/collision/rejected — evict, but only if we're the rightful
+			// evictor (a racing caller may have already replaced this slot).
+			if (this.entries.get(key) === existing) {
+				this.entries.delete(key);
+			}
+		}
 
-    logger.debug('Klavis strata cache miss', {
-      key,
-      serverCount: servers.length,
-    })
-    const inflight = this.fetch(client, triosId, servers, normalized)
-    this.entries.set(key, inflight)
+		logger.debug("Klavis strata cache miss", {
+			key,
+			serverCount: servers.length,
+		});
+		const inflight = this.fetch(client, triosId, servers, normalized);
+		this.entries.set(key, inflight);
 
-    try {
-      return this.toResponse(await inflight)
-    } catch (err) {
-      // Identity-check: only drop OUR entry. A racing invalidate() may have
-      // already removed it, or a racing miss may have inserted a new one
-      // that we must not clobber.
-      if (this.entries.get(key) === inflight) {
-        this.entries.delete(key)
-      }
-      throw err
-    }
-  }
+		try {
+			return this.toResponse(await inflight);
+		} catch (err) {
+			// Identity-check: only drop OUR entry. A racing invalidate() may have
+			// already removed it, or a racing miss may have inserted a new one
+			// that we must not clobber.
+			if (this.entries.get(key) === inflight) {
+				this.entries.delete(key);
+			}
+			throw err;
+		}
+	}
 
-  invalidate(triosId: string): void {
-    const prefix = `${triosId}|`
-    let dropped = 0
-    for (const key of this.entries.keys()) {
-      if (key.startsWith(prefix)) {
-        this.entries.delete(key)
-        dropped++
-      }
-    }
-    if (dropped > 0) {
-      logger.debug('Klavis strata cache invalidated', {
-        triosId: triosId.slice(0, 12),
-        dropped,
-      })
-    }
-  }
+	invalidate(triosId: string): void {
+		const prefix = `${triosId}|`;
+		let dropped = 0;
+		for (const key of this.entries.keys()) {
+			if (key.startsWith(prefix)) {
+				this.entries.delete(key);
+				dropped++;
+			}
+		}
+		if (dropped > 0) {
+			logger.debug("Klavis strata cache invalidated", {
+				triosId: triosId.slice(0, 12),
+				dropped,
+			});
+		}
+	}
 
-  clear(): void {
-    this.entries.clear()
-  }
+	clear(): void {
+		this.entries.clear();
+	}
 
-  private async fetch(
-    client: KlavisClient,
-    triosId: string,
-    servers: readonly string[],
-    normalized: string,
-  ): Promise<CacheEntry> {
-    const result = await client.createStrata(triosId, [...servers])
-    return {
-      strataServerUrl: result.strataServerUrl,
-      strataId: result.strataId,
-      addedServers: result.addedServers,
-      serverKey: normalized,
-      expiresAt: Date.now() + this.ttlMs,
-    }
-  }
+	private async fetch(
+		client: KlavisClient,
+		triosId: string,
+		servers: readonly string[],
+		normalized: string,
+	): Promise<CacheEntry> {
+		const result = await client.createStrata(triosId, [...servers]);
+		return {
+			strataServerUrl: result.strataServerUrl,
+			strataId: result.strataId,
+			addedServers: result.addedServers,
+			serverKey: normalized,
+			expiresAt: Date.now() + this.ttlMs,
+		};
+	}
 
-  private toResponse(entry: CacheEntry): StrataCreateResponse {
-    return {
-      strataServerUrl: entry.strataServerUrl,
-      strataId: entry.strataId,
-      addedServers: entry.addedServers,
-    }
-  }
+	private toResponse(entry: CacheEntry): StrataCreateResponse {
+		return {
+			strataServerUrl: entry.strataServerUrl,
+			strataId: entry.strataId,
+			addedServers: entry.addedServers,
+		};
+	}
 }
 
-export const klavisStrataCache = new KlavisStrataCache()
+export const klavisStrataCache = new KlavisStrataCache();

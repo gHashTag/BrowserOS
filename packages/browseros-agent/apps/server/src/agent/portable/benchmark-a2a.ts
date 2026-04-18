@@ -5,6 +5,6 @@
  * A2A Benchmark CLI Entry Point
  */
 
-export {}
+export {};
 
-await import('./benchmark-a2a-harness')
+await import("./benchmark-a2a-harness");

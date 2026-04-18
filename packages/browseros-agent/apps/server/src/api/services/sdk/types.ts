@@ -6,92 +6,92 @@
  * SDK Types - Type definitions and request schemas for SDK services
  */
 
-import { BrowserContextSchema } from '@trios/shared/schemas/browser-context'
-import { LLMConfigSchema } from '@trios/shared/schemas/llm'
-import { z } from 'zod'
-import type { Browser } from '../../../browser/browser'
+import { BrowserContextSchema } from "@trios/shared/schemas/browser-context";
+import { LLMConfigSchema } from "@trios/shared/schemas/llm";
+import { z } from "zod";
+import type { Browser } from "../../../browser/browser";
 
 // Request validation schemas
 
 export const NavRequestSchema = z.object({
-  url: z.string().url(),
-  tabId: z.number().optional(),
-  windowId: z.number().optional(),
-})
+	url: z.string().url(),
+	tabId: z.number().optional(),
+	windowId: z.number().optional(),
+});
 
 export const ActRequestSchema = z.object({
-  instruction: z.string().min(1),
-  context: z.record(z.unknown()).optional(),
-  maxSteps: z.number().optional(),
-  browserContext: BrowserContextSchema.optional(),
-  llm: LLMConfigSchema.optional(),
-  /** Session ID for state persistence. If provided, reuses existing session. */
-  sessionId: z.string().uuid().optional(),
-})
+	instruction: z.string().min(1),
+	context: z.record(z.unknown()).optional(),
+	maxSteps: z.number().optional(),
+	browserContext: BrowserContextSchema.optional(),
+	llm: LLMConfigSchema.optional(),
+	/** Session ID for state persistence. If provided, reuses existing session. */
+	sessionId: z.string().uuid().optional(),
+});
 
 export const ExtractRequestSchema = z.object({
-  instruction: z.string().min(1),
-  schema: z.record(z.unknown()),
-  context: z.record(z.unknown()).optional(),
-  windowId: z.number().optional(),
-  tabId: z.number().optional(),
-})
+	instruction: z.string().min(1),
+	schema: z.record(z.unknown()),
+	context: z.record(z.unknown()).optional(),
+	windowId: z.number().optional(),
+	tabId: z.number().optional(),
+});
 
 export const VerifyRequestSchema = z.object({
-  expectation: z.string().min(1),
-  context: z.record(z.unknown()).optional(),
-  windowId: z.number().optional(),
-  tabId: z.number().optional(),
-  llm: LLMConfigSchema.optional(),
-})
+	expectation: z.string().min(1),
+	context: z.record(z.unknown()).optional(),
+	windowId: z.number().optional(),
+	tabId: z.number().optional(),
+	llm: LLMConfigSchema.optional(),
+});
 
-export type NavRequest = z.infer<typeof NavRequestSchema>
-export type ActRequest = z.infer<typeof ActRequestSchema>
-export type ExtractRequest = z.infer<typeof ExtractRequestSchema>
-export type VerifyRequest = z.infer<typeof VerifyRequestSchema>
+export type NavRequest = z.infer<typeof NavRequestSchema>;
+export type ActRequest = z.infer<typeof ActRequestSchema>;
+export type ExtractRequest = z.infer<typeof ExtractRequestSchema>;
+export type VerifyRequest = z.infer<typeof VerifyRequestSchema>;
 
 // Shared types
 
 export interface SdkDeps {
-  port: number
-  browser: Browser
-  triosId?: string
+	port: number;
+	browser: Browser;
+	triosId?: string;
 }
 
 export interface ActiveTab {
-  tabId: number
-  url: string
-  title: string
-  windowId: number
+	tabId: number;
+	url: string;
+	title: string;
+	windowId: number;
 }
 
 export interface Screenshot {
-  data: string
-  mimeType: string
+	data: string;
+	mimeType: string;
 }
 
 export interface InteractiveElements {
-  content: string
+	content: string;
 }
 
 export interface NavigateResult {
-  tabId: number
-  windowId: number
+	tabId: number;
+	windowId: number;
 }
 
 export interface PageLoadStatus {
-  tabId: number
-  isDOMContentLoaded: boolean
-  isResourcesLoading: boolean
-  isPageComplete: boolean
+	tabId: number;
+	isDOMContentLoaded: boolean;
+	isResourcesLoading: boolean;
+	isPageComplete: boolean;
 }
 
 export class SdkError extends Error {
-  constructor(
-    message: string,
-    public statusCode: number = 500,
-  ) {
-    super(message)
-    this.name = 'SdkError'
-  }
+	constructor(
+		message: string,
+		public statusCode: number = 500,
+	) {
+		super(message);
+		this.name = "SdkError";
+	}
 }

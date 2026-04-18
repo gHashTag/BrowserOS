@@ -3,16 +3,16 @@
 // ══ Commands ══
 
 export interface BindParams {
-  port: number
+	port: number;
 }
 
 export interface UnbindParams {
-  port: number
+	port: number;
 }
 
 // ══ Events ══
 
 export interface AcceptedEvent {
-  port: number
-  connectionId: string
+	port: number;
+	connectionId: string;
 }

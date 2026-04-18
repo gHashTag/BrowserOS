@@ -5,7 +5,7 @@
  */
 
 // Replaced at build time via `define` in scripts/build/server.ts
-declare const __trios_VERSION__: string
+declare const __trios_VERSION__: string;
 
 export const VERSION: string =
-  typeof __trios_VERSION__ !== 'undefined' ? __trios_VERSION__ : '0.0.0-dev'
+	typeof __trios_VERSION__ !== "undefined" ? __trios_VERSION__ : "0.0.0-dev";

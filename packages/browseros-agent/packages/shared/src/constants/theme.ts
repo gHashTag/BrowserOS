@@ -10,18 +10,18 @@
  * Theme mode values
  */
 export const THEME_MODE = {
-  SYSTEM: 'system',
-  LIGHT: 'light',
-  DARK: 'dark',
-} as const
+	SYSTEM: "system",
+	LIGHT: "light",
+	DARK: "dark",
+} as const;
 
 /**
  * Theme values for selection UI
  */
 export const THEME_VALUES = [
-  { value: THEME_MODE.SYSTEM, label: 'System' },
-  { value: THEME_MODE.LIGHT, label: 'Light' },
-  { value: THEME_MODE.DARK, label: 'Dark' },
-] as const
+	{ value: THEME_MODE.SYSTEM, label: "System" },
+	{ value: THEME_MODE.LIGHT, label: "Light" },
+	{ value: THEME_MODE.DARK, label: "Dark" },
+] as const;
 
-export type ThemeMode = (typeof THEME_VALUES)[number]['value']
+export type ThemeMode = (typeof THEME_VALUES)[number]["value"];

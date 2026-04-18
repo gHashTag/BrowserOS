@@ -4,20 +4,20 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { Hono } from 'hono'
-import type { Browser } from '../../browser/browser'
+import { Hono } from "hono";
+import type { Browser } from "../../browser/browser";
 
 interface StatusDeps {
-  browser?: Browser
+	browser?: Browser;
 }
 
 export function createStatusRoute(deps: StatusDeps = {}) {
-  return new Hono().get('/', (c) => {
-    const cdpConnected = deps.browser?.isCdpConnected()
-    return c.json(
-      cdpConnected === undefined
-        ? { status: 'ok' }
-        : { status: 'ok', cdpConnected },
-    )
-  })
+	return new Hono().get("/", (c) => {
+		const cdpConnected = deps.browser?.isCdpConnected();
+		return c.json(
+			cdpConnected === undefined
+				? { status: "ok" }
+				: { status: "ok", cdpConnected },
+		);
+	});
 }

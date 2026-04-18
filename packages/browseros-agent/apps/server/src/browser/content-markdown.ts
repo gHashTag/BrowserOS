@@ -1,19 +1,19 @@
 export interface ContentMarkdownOptions {
-  selector?: string
-  viewportOnly?: boolean
-  includeLinks?: boolean
-  includeImages?: boolean
+	selector?: string;
+	viewportOnly?: boolean;
+	includeLinks?: boolean;
+	includeImages?: boolean;
 }
 
 export function buildContentMarkdownExpression(
-  opts: ContentMarkdownOptions,
+	opts: ContentMarkdownOptions,
 ): string {
-  return `${DOM_WALKER_SCRIPT}(${JSON.stringify({
-    selector: opts.selector,
-    viewport: opts.viewportOnly ?? false,
-    links: opts.includeLinks ?? true,
-    images: opts.includeImages ?? false,
-  })})`
+	return `${DOM_WALKER_SCRIPT}(${JSON.stringify({
+		selector: opts.selector,
+		viewport: opts.viewportOnly ?? false,
+		links: opts.includeLinks ?? true,
+		images: opts.includeImages ?? false,
+	})})`;
 }
 
 // Injected into page via Runtime.evaluate.
@@ -235,4 +235,4 @@ function walk(node, ctx) {
 
 var md = walk(root, {pre: false, ld: 0, lt: 'ul', td: 0});
 return md.replace(/\\n{3,}/g, '\\n\\n').trim();
-})`
+})`;

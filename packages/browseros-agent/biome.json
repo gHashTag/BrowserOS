@@ -1,168 +1,168 @@
 {
-  "$schema": "https://biomejs.dev/schemas/2.4.8/schema.json",
-  "root": false,
-  "extends": "//",
-  "vcs": {
-    "enabled": true,
-    "clientKind": "git",
-    "useIgnoreFile": true
-  },
-  "files": {
-    "ignoreUnknown": false,
-    "ignore": [
-      "node_modules",
-      "dist",
-      ".next",
-      "build",
-      ".trinity",
-      "generated",
-      "*.min.js",
-      "coverage",
-      ".wxt",
-      "**/test-a2a.cjs",
-      "**/a2a-chat-client.cjs"
-    ]
-  },
-  "formatter": {
-    "enabled": true,
-    "formatWithErrors": true,
-    "indentStyle": "space",
-    "indentWidth": 2,
-    "lineWidth": 100,
-    "lineEnding": "lf"
-  },
-  "linter": {
-    "enabled": true,
-    "rules": {
-      "recommended": true,
-      "correctness": {
-        "noUnusedImports": "error",
-        "noUnusedVariables": "error",
-        "noPrivateImports": {
-          "level": "error",
-          "options": {
-            "defaultVisibility": "package"
-          }
-        },
-        "useExhaustiveDependencies": "warn",
-        "noUnusedFunctionParameters": "warn"
-      },
-      "suspicious": {
-        "noConsole": {
-          "level": "warn",
-          "options": {
-            "allow": ["warn", "error", "info", "debug"]
-          }
-        },
-        "noExplicitAny": "warn",
-        "noImplicitAnyLet": "warn"
-      },
-      "style": {
-        "noProcessEnv": "warn",
-        "useImportType": "error"
-      },
-      "complexity": {
-        "noExcessiveCognitiveComplexity": {
-          "level": "warn",
-          "options": {
-            "maxAllowedComplexity": 40
-          }
-        },
-        "useLiteralKeys": "error",
-        "noForEach": "off"
-      },
-      "nursery": {
-        "useSortedClasses": "error"
-      },
-      "performance": {
-        "noDelete": "warn"
-      },
-      "a11y": {
-        "useKeyWithClickEvents": "warn",
-        "noStaticElementInteractions": "warn"
-      }
-    }
-  },
-  "javascript": {
-    "formatter": {
-      "quoteStyle": "single",
-      "semicolons": "asNeeded",
-      "trailingCommas": "es5",
-      "quoteProperties": "asNeeded"
-    },
-    "globals": [
-      "Bun",
-      "console",
-      "process",
-      "Buffer",
-      "globalThis",
-      "setInterval",
-      "setTimeout",
-      "clearInterval",
-      "clearTimeout",
-      "fetch",
-      "Request",
-      "Response",
-      "Headers",
-      "AbortController",
-      "AbortSignal"
-    ]
-  },
-  "json": {
-    "formatter": {
-      "enabled": true,
-      "indentStyle": "space",
-      "indentWidth": 2
-    }
-  },
-  "overrides": [
-    {
-      "include": ["*.test.ts", "*.spec.ts", "*.test.tsx", "*.spec.tsx"],
-      "linter": {
-        "rules": {
-          "suspicious": {
-            "noExplicitAny": "off"
-          }
-        }
-      }
-    },
-    {
-      "include": ["scripts", "tools"],
-      "linter": {
-        "rules": {
-          "suspicious": {
-            "noConsole": "off"
-          },
-          "style": {
-            "noProcessEnv": "off"
-          }
-        }
-      }
-    },
-    {
-      "include": ["apps/agent"],
-      "linter": {
-        "rules": {
-          "complexity": {
-            "noExcessiveCognitiveComplexity": {
-              "level": "warn",
-              "options": {
-                "maxAllowedComplexity": 50
-              }
-            }
-          }
-        }
-      }
-    }
-  ],
-  "assist": {
-    "enabled": true,
-    "actions": {
-      "source": {
-        "organizeImports": {
-          "enabled": true
-        }
-      }
-    }
-  }
+	"$schema": "https://biomejs.dev/schemas/2.4.8/schema.json",
+	"root": false,
+	"extends": "//",
+	"vcs": {
+		"enabled": true,
+		"clientKind": "git",
+		"useIgnoreFile": true
+	},
+	"files": {
+		"ignoreUnknown": false,
+		"ignore": [
+			"node_modules",
+			"dist",
+			".next",
+			"build",
+			".trinity",
+			"generated",
+			"*.min.js",
+			"coverage",
+			".wxt",
+			"**/test-a2a.cjs",
+			"**/a2a-chat-client.cjs"
+		]
+	},
+	"formatter": {
+		"enabled": true,
+		"formatWithErrors": true,
+		"indentStyle": "space",
+		"indentWidth": 2,
+		"lineWidth": 100,
+		"lineEnding": "lf"
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"recommended": true,
+			"correctness": {
+				"noUnusedImports": "error",
+				"noUnusedVariables": "error",
+				"noPrivateImports": {
+					"level": "error",
+					"options": {
+						"defaultVisibility": "package"
+					}
+				},
+				"useExhaustiveDependencies": "warn",
+				"noUnusedFunctionParameters": "warn"
+			},
+			"suspicious": {
+				"noConsole": {
+					"level": "warn",
+					"options": {
+						"allow": ["warn", "error", "info", "debug"]
+					}
+				},
+				"noExplicitAny": "warn",
+				"noImplicitAnyLet": "warn"
+			},
+			"style": {
+				"noProcessEnv": "warn",
+				"useImportType": "error"
+			},
+			"complexity": {
+				"noExcessiveCognitiveComplexity": {
+					"level": "warn",
+					"options": {
+						"maxAllowedComplexity": 40
+					}
+				},
+				"useLiteralKeys": "error",
+				"noForEach": "off"
+			},
+			"nursery": {
+				"useSortedClasses": "error"
+			},
+			"performance": {
+				"noDelete": "warn"
+			},
+			"a11y": {
+				"useKeyWithClickEvents": "warn",
+				"noStaticElementInteractions": "warn"
+			}
+		}
+	},
+	"javascript": {
+		"formatter": {
+			"quoteStyle": "single",
+			"semicolons": "asNeeded",
+			"trailingCommas": "es5",
+			"quoteProperties": "asNeeded"
+		},
+		"globals": [
+			"Bun",
+			"console",
+			"process",
+			"Buffer",
+			"globalThis",
+			"setInterval",
+			"setTimeout",
+			"clearInterval",
+			"clearTimeout",
+			"fetch",
+			"Request",
+			"Response",
+			"Headers",
+			"AbortController",
+			"AbortSignal"
+		]
+	},
+	"json": {
+		"formatter": {
+			"enabled": true,
+			"indentStyle": "space",
+			"indentWidth": 2
+		}
+	},
+	"overrides": [
+		{
+			"include": ["*.test.ts", "*.spec.ts", "*.test.tsx", "*.spec.tsx"],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noExplicitAny": "off"
+					}
+				}
+			}
+		},
+		{
+			"include": ["scripts", "tools"],
+			"linter": {
+				"rules": {
+					"suspicious": {
+						"noConsole": "off"
+					},
+					"style": {
+						"noProcessEnv": "off"
+					}
+				}
+			}
+		},
+		{
+			"include": ["apps/agent"],
+			"linter": {
+				"rules": {
+					"complexity": {
+						"noExcessiveCognitiveComplexity": {
+							"level": "warn",
+							"options": {
+								"maxAllowedComplexity": 50
+							}
+						}
+					}
+				}
+			}
+		}
+	],
+	"assist": {
+		"enabled": true,
+		"actions": {
+			"source": {
+				"organizeImports": {
+					"enabled": true
+				}
+			}
+		}
+	}
 }

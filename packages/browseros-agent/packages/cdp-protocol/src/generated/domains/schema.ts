@@ -3,12 +3,12 @@
 // ══ Types ══
 
 export interface Domain {
-  name: string
-  version: string
+	name: string;
+	version: string;
 }
 
 // ══ Commands ══
 
 export interface GetDomainsResult {
-  domains: Domain[]
+	domains: Domain[];
 }

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import type { UIMessage } from 'ai'
+import type { UIMessage } from "ai";
 
 /**
  * Checks whether a UIMessage has meaningful content that can be sent
@@ -23,18 +23,18 @@ import type { UIMessage } from 'ai'
  * messages before passing them to `createAgentUIStreamResponse`.
  */
 export function hasMessageContent(message: UIMessage): boolean {
-  if (message.parts.length === 0) return false
+	if (message.parts.length === 0) return false;
 
-  // A message that contains any non-text part (tool invocation, reasoning,
-  // file, step-start, etc.) is always considered valid — those part types
-  // carry meaning regardless of text content.
-  const hasNonTextPart = message.parts.some((p) => p.type !== 'text')
-  if (hasNonTextPart) return true
+	// A message that contains any non-text part (tool invocation, reasoning,
+	// file, step-start, etc.) is always considered valid — those part types
+	// carry meaning regardless of text content.
+	const hasNonTextPart = message.parts.some((p) => p.type !== "text");
+	if (hasNonTextPart) return true;
 
-  // All parts are text — at least one must have non-whitespace content.
-  return message.parts.some(
-    (p) => p.type === 'text' && p.text.trim().length > 0,
-  )
+	// All parts are text — at least one must have non-whitespace content.
+	return message.parts.some(
+		(p) => p.type === "text" && p.text.trim().length > 0,
+	);
 }
 
 /**
@@ -42,7 +42,7 @@ export function hasMessageContent(message: UIMessage): boolean {
  * SDK validation or provider-level content checks.
  */
 export function filterValidMessages(messages: UIMessage[]): UIMessage[] {
-  return messages.filter(hasMessageContent)
+	return messages.filter(hasMessageContent);
 }
 
 /**
@@ -59,22 +59,22 @@ export function filterValidMessages(messages: UIMessage[]): UIMessage[] {
  * parts whose tool name is not in the provided set.
  */
 export function sanitizeMessagesForToolset(
-  messages: UIMessage[],
-  toolNames: Set<string>,
+	messages: UIMessage[],
+	toolNames: Set<string>,
 ): UIMessage[] {
-  return messages
-    .map((msg) => {
-      const filteredParts = msg.parts.filter((part) => {
-        // Static tool parts have type `tool-${toolName}`
-        if (typeof part.type === 'string' && part.type.startsWith('tool-')) {
-          const toolName = part.type.slice(5)
-          if (!toolNames.has(toolName)) return false
-        }
-        return true
-      })
+	return messages
+		.map((msg) => {
+			const filteredParts = msg.parts.filter((part) => {
+				// Static tool parts have type `tool-${toolName}`
+				if (typeof part.type === "string" && part.type.startsWith("tool-")) {
+					const toolName = part.type.slice(5);
+					if (!toolNames.has(toolName)) return false;
+				}
+				return true;
+			});
 
-      if (filteredParts.length === msg.parts.length) return msg
-      return { ...msg, parts: filteredParts }
-    })
-    .filter(hasMessageContent)
+			if (filteredParts.length === msg.parts.length) return msg;
+			return { ...msg, parts: filteredParts };
+		})
+		.filter(hasMessageContent);
 }

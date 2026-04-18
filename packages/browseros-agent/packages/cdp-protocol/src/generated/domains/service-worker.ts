@@ -1,108 +1,108 @@
 // ── AUTO-GENERATED from CDP protocol. DO NOT EDIT. ──
 
-import type { TargetID } from './target'
+import type { TargetID } from "./target";
 
 // ══ Types ══
 
-export type RegistrationID = string
+export type RegistrationID = string;
 
 export interface ServiceWorkerRegistration {
-  registrationId: RegistrationID
-  scopeURL: string
-  isDeleted: boolean
+	registrationId: RegistrationID;
+	scopeURL: string;
+	isDeleted: boolean;
 }
 
 export type ServiceWorkerVersionRunningStatus =
-  | 'stopped'
-  | 'starting'
-  | 'running'
-  | 'stopping'
+	| "stopped"
+	| "starting"
+	| "running"
+	| "stopping";
 
 export type ServiceWorkerVersionStatus =
-  | 'new'
-  | 'installing'
-  | 'installed'
-  | 'activating'
-  | 'activated'
-  | 'redundant'
+	| "new"
+	| "installing"
+	| "installed"
+	| "activating"
+	| "activated"
+	| "redundant";
 
 export interface ServiceWorkerVersion {
-  versionId: string
-  registrationId: RegistrationID
-  scriptURL: string
-  runningStatus: ServiceWorkerVersionRunningStatus
-  status: ServiceWorkerVersionStatus
-  scriptLastModified?: number
-  scriptResponseTime?: number
-  controlledClients?: TargetID[]
-  targetId?: TargetID
-  routerRules?: string
+	versionId: string;
+	registrationId: RegistrationID;
+	scriptURL: string;
+	runningStatus: ServiceWorkerVersionRunningStatus;
+	status: ServiceWorkerVersionStatus;
+	scriptLastModified?: number;
+	scriptResponseTime?: number;
+	controlledClients?: TargetID[];
+	targetId?: TargetID;
+	routerRules?: string;
 }
 
 export interface ServiceWorkerErrorMessage {
-  errorMessage: string
-  registrationId: RegistrationID
-  versionId: string
-  sourceURL: string
-  lineNumber: number
-  columnNumber: number
+	errorMessage: string;
+	registrationId: RegistrationID;
+	versionId: string;
+	sourceURL: string;
+	lineNumber: number;
+	columnNumber: number;
 }
 
 // ══ Commands ══
 
 export interface DeliverPushMessageParams {
-  origin: string
-  registrationId: RegistrationID
-  data: string
+	origin: string;
+	registrationId: RegistrationID;
+	data: string;
 }
 
 export interface DispatchSyncEventParams {
-  origin: string
-  registrationId: RegistrationID
-  tag: string
-  lastChance: boolean
+	origin: string;
+	registrationId: RegistrationID;
+	tag: string;
+	lastChance: boolean;
 }
 
 export interface DispatchPeriodicSyncEventParams {
-  origin: string
-  registrationId: RegistrationID
-  tag: string
+	origin: string;
+	registrationId: RegistrationID;
+	tag: string;
 }
 
 export interface SetForceUpdateOnPageLoadParams {
-  forceUpdateOnPageLoad: boolean
+	forceUpdateOnPageLoad: boolean;
 }
 
 export interface SkipWaitingParams {
-  scopeURL: string
+	scopeURL: string;
 }
 
 export interface StartWorkerParams {
-  scopeURL: string
+	scopeURL: string;
 }
 
 export interface StopWorkerParams {
-  versionId: string
+	versionId: string;
 }
 
 export interface UnregisterParams {
-  scopeURL: string
+	scopeURL: string;
 }
 
 export interface UpdateRegistrationParams {
-  scopeURL: string
+	scopeURL: string;
 }
 
 // ══ Events ══
 
 export interface WorkerErrorReportedEvent {
-  errorMessage: ServiceWorkerErrorMessage
+	errorMessage: ServiceWorkerErrorMessage;
 }
 
 export interface WorkerRegistrationUpdatedEvent {
-  registrations: ServiceWorkerRegistration[]
+	registrations: ServiceWorkerRegistration[];
 }
 
 export interface WorkerVersionUpdatedEvent {
-  versions: ServiceWorkerVersion[]
+	versions: ServiceWorkerVersion[];
 }

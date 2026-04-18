@@ -3,23 +3,23 @@
 // ══ Types ══
 
 export interface ConsoleMessage {
-  source:
-    | 'xml'
-    | 'javascript'
-    | 'network'
-    | 'console-api'
-    | 'storage'
-    | 'appcache'
-    | 'rendering'
-    | 'security'
-    | 'other'
-    | 'deprecation'
-    | 'worker'
-  level: 'log' | 'warning' | 'error' | 'debug' | 'info'
-  text: string
-  url?: string
-  line?: number
-  column?: number
+	source:
+		| "xml"
+		| "javascript"
+		| "network"
+		| "console-api"
+		| "storage"
+		| "appcache"
+		| "rendering"
+		| "security"
+		| "other"
+		| "deprecation"
+		| "worker";
+	level: "log" | "warning" | "error" | "debug" | "info";
+	text: string;
+	url?: string;
+	line?: number;
+	column?: number;
 }
 
 // ══ Commands ══
@@ -27,5 +27,5 @@ export interface ConsoleMessage {
 // ══ Events ══
 
 export interface MessageAddedEvent {
-  message: ConsoleMessage
+	message: ConsoleMessage;
 }

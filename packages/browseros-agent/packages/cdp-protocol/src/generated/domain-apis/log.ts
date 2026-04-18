@@ -1,23 +1,23 @@
 // ── AUTO-GENERATED from CDP protocol. DO NOT EDIT. ──
 
 import type {
-  EntryAddedEvent,
-  StartViolationsReportParams,
-} from '../domains/log'
+	EntryAddedEvent,
+	StartViolationsReportParams,
+} from "../domains/log";
 
 export interface LogApi {
-  // ── Commands ──
+	// ── Commands ──
 
-  clear(): Promise<void>
-  disable(): Promise<void>
-  enable(): Promise<void>
-  startViolationsReport(params: StartViolationsReportParams): Promise<void>
-  stopViolationsReport(): Promise<void>
+	clear(): Promise<void>;
+	disable(): Promise<void>;
+	enable(): Promise<void>;
+	startViolationsReport(params: StartViolationsReportParams): Promise<void>;
+	stopViolationsReport(): Promise<void>;
 
-  // ── Events ──
+	// ── Events ──
 
-  on(
-    event: 'entryAdded',
-    handler: (params: EntryAddedEvent) => void,
-  ): () => void
+	on(
+		event: "entryAdded",
+		handler: (params: EntryAddedEvent) => void,
+	): () => void;
 }

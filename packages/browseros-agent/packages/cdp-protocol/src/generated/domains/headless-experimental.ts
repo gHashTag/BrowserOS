@@ -3,21 +3,21 @@
 // ══ Types ══
 
 export interface ScreenshotParams {
-  format?: 'jpeg' | 'png' | 'webp'
-  quality?: number
-  optimizeForSpeed?: boolean
+	format?: "jpeg" | "png" | "webp";
+	quality?: number;
+	optimizeForSpeed?: boolean;
 }
 
 // ══ Commands ══
 
 export interface BeginFrameParams {
-  frameTimeTicks?: number
-  interval?: number
-  noDisplayUpdates?: boolean
-  screenshot?: ScreenshotParams
+	frameTimeTicks?: number;
+	interval?: number;
+	noDisplayUpdates?: boolean;
+	screenshot?: ScreenshotParams;
 }
 
 export interface BeginFrameResult {
-  hasDamage: boolean
-  screenshotData?: string
+	hasDamage: boolean;
+	screenshotData?: string;
 }

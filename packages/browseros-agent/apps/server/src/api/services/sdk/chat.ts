@@ -6,163 +6,163 @@
  * Chat Service - Executes actions via /chat endpoint
  */
 
-import type { BrowserContext } from '@trios/shared/schemas/browser-context'
-import type { LLMConfig } from '@trios/shared/schemas/llm'
-import type { UIMessageStreamEvent } from '@trios/shared/schemas/ui-stream'
-import { createParser, type EventSourceMessage } from 'eventsource-parser'
-import { SdkError } from './types'
+import type { BrowserContext } from "@trios/shared/schemas/browser-context";
+import type { LLMConfig } from "@trios/shared/schemas/llm";
+import type { UIMessageStreamEvent } from "@trios/shared/schemas/ui-stream";
+import { createParser, type EventSourceMessage } from "eventsource-parser";
+import { SdkError } from "./types";
 
 export interface ExecuteActionOptions {
-  instruction: string
-  context?: Record<string, unknown>
-  browserContext?: BrowserContext
-  llmConfig: LLMConfig
-  signal?: AbortSignal
-  onSSEEvent?: (event: UIMessageStreamEvent) => Promise<void>
-  /** If provided, reuses existing session. Caller is responsible for cleanup. */
-  sessionId?: string
+	instruction: string;
+	context?: Record<string, unknown>;
+	browserContext?: BrowserContext;
+	llmConfig: LLMConfig;
+	signal?: AbortSignal;
+	onSSEEvent?: (event: UIMessageStreamEvent) => Promise<void>;
+	/** If provided, reuses existing session. Caller is responsible for cleanup. */
+	sessionId?: string;
 }
 
 export class ChatService {
-  private readonly chatUrl: string
+	private readonly chatUrl: string;
 
-  constructor(port: number) {
-    this.chatUrl = `http://127.0.0.1:${port}/chat`
-  }
+	constructor(port: number) {
+		this.chatUrl = `http://127.0.0.1:${port}/chat`;
+	}
 
-  async executeAction(options: ExecuteActionOptions): Promise<void> {
-    const {
-      instruction,
-      context,
-      browserContext,
-      llmConfig,
-      signal,
-      onSSEEvent,
-      sessionId: providedSessionId,
-    } = options
+	async executeAction(options: ExecuteActionOptions): Promise<void> {
+		const {
+			instruction,
+			context,
+			browserContext,
+			llmConfig,
+			signal,
+			onSSEEvent,
+			sessionId: providedSessionId,
+		} = options;
 
-    if (signal?.aborted) {
-      throw new SdkError('Operation aborted', 400)
-    }
+		if (signal?.aborted) {
+			throw new SdkError("Operation aborted", 400);
+		}
 
-    let message = instruction
-    if (context) {
-      message = `${instruction}\n\nContext:\n${JSON.stringify(context, null, 2)}`
-    }
+		let message = instruction;
+		if (context) {
+			message = `${instruction}\n\nContext:\n${JSON.stringify(context, null, 2)}`;
+		}
 
-    // Use provided sessionId or generate ephemeral one
-    const isEphemeral = !providedSessionId
-    const conversationId = providedSessionId ?? crypto.randomUUID()
+		// Use provided sessionId or generate ephemeral one
+		const isEphemeral = !providedSessionId;
+		const conversationId = providedSessionId ?? crypto.randomUUID();
 
-    const response = await fetch(this.chatUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        conversationId,
-        message,
-        provider: llmConfig.provider,
-        model: llmConfig.model ?? 'default',
-        apiKey: llmConfig.apiKey,
-        baseUrl: llmConfig.baseUrl,
-        resourceName: llmConfig.resourceName,
-        region: llmConfig.region,
-        accessKeyId: llmConfig.accessKeyId,
-        secretAccessKey: llmConfig.secretAccessKey,
-        sessionToken: llmConfig.sessionToken,
-        browserContext,
-      }),
-      signal,
-    })
+		const response = await fetch(this.chatUrl, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({
+				conversationId,
+				message,
+				provider: llmConfig.provider,
+				model: llmConfig.model ?? "default",
+				apiKey: llmConfig.apiKey,
+				baseUrl: llmConfig.baseUrl,
+				resourceName: llmConfig.resourceName,
+				region: llmConfig.region,
+				accessKeyId: llmConfig.accessKeyId,
+				secretAccessKey: llmConfig.secretAccessKey,
+				sessionToken: llmConfig.sessionToken,
+				browserContext,
+			}),
+			signal,
+		});
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new SdkError(
-        errorText || 'Chat request failed',
-        response.status >= 400 && response.status < 600 ? response.status : 500,
-      )
-    }
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new SdkError(
+				errorText || "Chat request failed",
+				response.status >= 400 && response.status < 600 ? response.status : 500,
+			);
+		}
 
-    const reader = response.body?.getReader()
-    if (reader) {
-      try {
-        if (onSSEEvent) {
-          await this.parseAndForwardSSE(reader, signal, onSSEEvent)
-        } else {
-          await this.drainStream(reader, signal)
-        }
-      } finally {
-        reader.releaseLock()
-      }
-    }
+		const reader = response.body?.getReader();
+		if (reader) {
+			try {
+				if (onSSEEvent) {
+					await this.parseAndForwardSSE(reader, signal, onSSEEvent);
+				} else {
+					await this.drainStream(reader, signal);
+				}
+			} finally {
+				reader.releaseLock();
+			}
+		}
 
-    // Clean up ephemeral sessions only (persistent sessions are managed by caller)
-    if (isEphemeral) {
-      await fetch(`${this.chatUrl}/${conversationId}`, {
-        method: 'DELETE',
-      }).catch(() => {})
-    }
-  }
+		// Clean up ephemeral sessions only (persistent sessions are managed by caller)
+		if (isEphemeral) {
+			await fetch(`${this.chatUrl}/${conversationId}`, {
+				method: "DELETE",
+			}).catch(() => {});
+		}
+	}
 
-  private async parseAndForwardSSE(
-    reader: ReadableStreamDefaultReader<Uint8Array>,
-    signal: AbortSignal | undefined,
-    onSSEEvent: (event: UIMessageStreamEvent) => Promise<void>,
-  ): Promise<void> {
-    const decoder = new TextDecoder()
-    const pendingEvents: UIMessageStreamEvent[] = []
+	private async parseAndForwardSSE(
+		reader: ReadableStreamDefaultReader<Uint8Array>,
+		signal: AbortSignal | undefined,
+		onSSEEvent: (event: UIMessageStreamEvent) => Promise<void>,
+	): Promise<void> {
+		const decoder = new TextDecoder();
+		const pendingEvents: UIMessageStreamEvent[] = [];
 
-    const parser = createParser({
-      onEvent: (msg: EventSourceMessage) => {
-        if (msg.data === '[DONE]') return
+		const parser = createParser({
+			onEvent: (msg: EventSourceMessage) => {
+				if (msg.data === "[DONE]") return;
 
-        try {
-          const event = JSON.parse(msg.data) as UIMessageStreamEvent
-          pendingEvents.push(event)
-        } catch {
-          // Invalid JSON, skip
-        }
-      },
-    })
+				try {
+					const event = JSON.parse(msg.data) as UIMessageStreamEvent;
+					pendingEvents.push(event);
+				} catch {
+					// Invalid JSON, skip
+				}
+			},
+		});
 
-    while (true) {
-      if (signal?.aborted) {
-        await reader.cancel()
-        throw new SdkError('Operation aborted', 400)
-      }
+		while (true) {
+			if (signal?.aborted) {
+				await reader.cancel();
+				throw new SdkError("Operation aborted", 400);
+			}
 
-      const { done, value } = await reader.read()
-      if (done) break
+			const { done, value } = await reader.read();
+			if (done) break;
 
-      const text = decoder.decode(value, { stream: true })
-      parser.feed(text)
+			const text = decoder.decode(value, { stream: true });
+			parser.feed(text);
 
-      // Process any events that were parsed
-      let event = pendingEvents.shift()
-      while (event) {
-        await onSSEEvent(event)
-        event = pendingEvents.shift()
-      }
-    }
+			// Process any events that were parsed
+			let event = pendingEvents.shift();
+			while (event) {
+				await onSSEEvent(event);
+				event = pendingEvents.shift();
+			}
+		}
 
-    // Process any remaining events
-    let remaining = pendingEvents.shift()
-    while (remaining) {
-      await onSSEEvent(remaining)
-      remaining = pendingEvents.shift()
-    }
-  }
+		// Process any remaining events
+		let remaining = pendingEvents.shift();
+		while (remaining) {
+			await onSSEEvent(remaining);
+			remaining = pendingEvents.shift();
+		}
+	}
 
-  private async drainStream(
-    reader: ReadableStreamDefaultReader<Uint8Array>,
-    signal: AbortSignal | undefined,
-  ): Promise<void> {
-    while (true) {
-      if (signal?.aborted) {
-        await reader.cancel()
-        throw new SdkError('Operation aborted', 400)
-      }
-      const { done } = await reader.read()
-      if (done) break
-    }
-  }
+	private async drainStream(
+		reader: ReadableStreamDefaultReader<Uint8Array>,
+		signal: AbortSignal | undefined,
+	): Promise<void> {
+		while (true) {
+			if (signal?.aborted) {
+				await reader.cancel();
+				throw new SdkError("Operation aborted", 400);
+			}
+			const { done } = await reader.read();
+			if (done) break;
+		}
+	}
 }

@@ -1,22 +1,22 @@
-import type { ProtocolApi } from '@trios/cdp-protocol/protocol-api'
+import type { ProtocolApi } from "@trios/cdp-protocol/protocol-api";
 
 export interface CdpBackend extends ProtocolApi {
-  connect(): Promise<void>
-  disconnect(): Promise<void>
-  isConnected(): boolean
-  getTargets(): Promise<CdpTarget[]>
-  session(sessionId: string): ProtocolApi
-  onSessionEvent(
-    event: string,
-    handler: (params: unknown, sessionId: string) => void,
-  ): () => void
+	connect(): Promise<void>;
+	disconnect(): Promise<void>;
+	isConnected(): boolean;
+	getTargets(): Promise<CdpTarget[]>;
+	session(sessionId: string): ProtocolApi;
+	onSessionEvent(
+		event: string,
+		handler: (params: unknown, sessionId: string) => void,
+	): () => void;
 }
 
 export interface CdpTarget {
-  id: string
-  type: string
-  title: string
-  url: string
-  tabId?: number
-  windowId?: number
+	id: string;
+	type: string;
+	title: string;
+	url: string;
+	tabId?: number;
+	windowId?: number;
 }

@@ -5,5 +5,5 @@
 // ══ Events ══
 
 export interface DetachedEvent {
-  reason: string
+	reason: string;
 }

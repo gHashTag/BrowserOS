@@ -1,9 +1,9 @@
 // ── AUTO-GENERATED from CDP protocol. DO NOT EDIT. ──
 
-import type { GetDomainsResult } from '../domains/schema'
+import type { GetDomainsResult } from "../domains/schema";
 
 export interface SchemaApi {
-  // ── Commands ──
+	// ── Commands ──
 
-  getDomains(): Promise<GetDomainsResult>
+	getDomains(): Promise<GetDomainsResult>;
 }

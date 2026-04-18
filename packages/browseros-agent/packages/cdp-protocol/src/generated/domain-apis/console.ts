@@ -1,18 +1,18 @@
 // ── AUTO-GENERATED from CDP protocol. DO NOT EDIT. ──
 
-import type { MessageAddedEvent } from '../domains/console'
+import type { MessageAddedEvent } from "../domains/console";
 
 export interface ConsoleApi {
-  // ── Commands ──
+	// ── Commands ──
 
-  clearMessages(): Promise<void>
-  disable(): Promise<void>
-  enable(): Promise<void>
+	clearMessages(): Promise<void>;
+	disable(): Promise<void>;
+	enable(): Promise<void>;
 
-  // ── Events ──
+	// ── Events ──
 
-  on(
-    event: 'messageAdded',
-    handler: (params: MessageAddedEvent) => void,
-  ): () => void
+	on(
+		event: "messageAdded",
+		handler: (params: MessageAddedEvent) => void,
+	): () => void;
 }

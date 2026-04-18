@@ -5,15 +5,15 @@
  */
 
 export function serializeError(error: unknown): Record<string, unknown> {
-  if (!(error instanceof Error)) {
-    return { message: String(error) }
-  }
-  const result: Record<string, unknown> = {
-    message: error.message,
-    stack: error.stack,
-  }
-  if (error.cause) {
-    result.cause = serializeError(error.cause)
-  }
-  return result
+	if (!(error instanceof Error)) {
+		return { message: String(error) };
+	}
+	const result: Record<string, unknown> = {
+		message: error.message,
+		stack: error.stack,
+	};
+	if (error.cause) {
+		result.cause = serializeError(error.cause);
+	}
+	return result;
 }

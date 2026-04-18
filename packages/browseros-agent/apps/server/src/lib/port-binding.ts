@@ -5,9 +5,9 @@
  */
 
 export function isPortInUseError(error: unknown): boolean {
-  if (error instanceof Error) {
-    const err = error as NodeJS.ErrnoException
-    return err.code === 'EADDRINUSE'
-  }
-  return false
+	if (error instanceof Error) {
+		const err = error as NodeJS.ErrnoException;
+		return err.code === "EADDRINUSE";
+	}
+	return false;
 }

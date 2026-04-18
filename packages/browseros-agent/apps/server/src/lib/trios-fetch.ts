@@ -8,75 +8,75 @@
  * handles CREDITS_EXHAUSTED (429), and extracts OpenRouter-style error details.
  */
 
-import { APICallError } from '@ai-sdk/provider'
-import { logger } from './logger'
+import { APICallError } from "@ai-sdk/provider";
+import { logger } from "./logger";
 
 function resolveUrl(url: RequestInfo | URL): string {
-  return typeof url === 'string' ? url : url.toString()
+	return typeof url === "string" ? url : url.toString();
 }
 
 function parseErrorBody(
-  body: string,
+	body: string,
 ): { message?: string; code?: string; metadata?: { raw?: unknown } } | null {
-  try {
-    const parsed = JSON.parse(body)
-    return parsed.error ?? null
-  } catch {
-    return null
-  }
+	try {
+		const parsed = JSON.parse(body);
+		return parsed.error ?? null;
+	} catch {
+		return null;
+	}
 }
 
 function buildErrorMessage(
-  statusCode: number,
-  statusText: string,
-  error: NonNullable<ReturnType<typeof parseErrorBody>>,
+	statusCode: number,
+	statusText: string,
+	error: NonNullable<ReturnType<typeof parseErrorBody>>,
 ): string {
-  if (!error.message) return `HTTP ${statusCode}: ${statusText}`
-  let msg = error.message
-  if (error.code) msg = `[${error.code}] ${msg}`
-  if (error.metadata?.raw) msg += ` (${JSON.stringify(error.metadata.raw)})`
-  return msg
+	if (!error.message) return `HTTP ${statusCode}: ${statusText}`;
+	let msg = error.message;
+	if (error.code) msg = `[${error.code}] ${msg}`;
+	if (error.metadata?.raw) msg += ` (${JSON.stringify(error.metadata.raw)})`;
+	return msg;
 }
 
 export function createTRIOSFetch(triosId: string): typeof fetch {
-  return (async (url: RequestInfo | URL, options?: RequestInit) => {
-    const headers = new Headers(options?.headers)
-    headers.set('X-TRIOS-ID', triosId)
+	return (async (url: RequestInfo | URL, options?: RequestInit) => {
+		const headers = new Headers(options?.headers);
+		headers.set("X-TRIOS-ID", triosId);
 
-    const response = await globalThis.fetch(url, { ...options, headers })
+		const response = await globalThis.fetch(url, { ...options, headers });
 
-    const creditsRemaining = response.headers.get('X-Credits-Remaining')
-    if (creditsRemaining !== null) {
-      logger.debug('Credits remaining', { creditsRemaining })
-    }
+		const creditsRemaining = response.headers.get("X-Credits-Remaining");
+		if (creditsRemaining !== null) {
+			logger.debug("Credits remaining", { creditsRemaining });
+		}
 
-    if (!response.ok) {
-      const statusCode = response.status
-      const responseBody = await response.text()
-      const error = parseErrorBody(responseBody)
+		if (!response.ok) {
+			const statusCode = response.status;
+			const responseBody = await response.text();
+			const error = parseErrorBody(responseBody);
 
-      if (statusCode === 429 && error?.code === 'CREDITS_EXHAUSTED') {
-        throw new APICallError({
-          message: error.message ?? 'Daily credits exhausted',
-          url: resolveUrl(url),
-          requestBodyValues: {},
-          statusCode,
-          responseBody,
-          isRetryable: false,
-        })
-      }
+			if (statusCode === 429 && error?.code === "CREDITS_EXHAUSTED") {
+				throw new APICallError({
+					message: error.message ?? "Daily credits exhausted",
+					url: resolveUrl(url),
+					requestBodyValues: {},
+					statusCode,
+					responseBody,
+					isRetryable: false,
+				});
+			}
 
-      throw new APICallError({
-        message: error
-          ? buildErrorMessage(statusCode, response.statusText, error)
-          : `HTTP ${statusCode}: ${response.statusText}`,
-        url: resolveUrl(url),
-        requestBodyValues: {},
-        statusCode,
-        responseBody,
-      })
-    }
+			throw new APICallError({
+				message: error
+					? buildErrorMessage(statusCode, response.statusText, error)
+					: `HTTP ${statusCode}: ${response.statusText}`,
+				url: resolveUrl(url),
+				requestBodyValues: {},
+				statusCode,
+				responseBody,
+			});
+		}
 
-    return response
-  }) as typeof fetch
+		return response;
+	}) as typeof fetch;
 }

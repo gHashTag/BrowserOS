@@ -4,533 +4,533 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { createAgentUIStreamResponse, type UIMessage } from 'ai'
-import { AiSdkAgent } from '../../agent/ai-sdk-agent'
-import { conversationEvents } from '../../agent/conversation-events'
-import { formatUserMessage } from '../../agent/format-message'
+import { createAgentUIStreamResponse, type UIMessage } from "ai";
+import { AiSdkAgent } from "../../agent/ai-sdk-agent";
+import { conversationEvents } from "../../agent/conversation-events";
+import { formatUserMessage } from "../../agent/format-message";
 import {
-  filterValidMessages,
-  sanitizeMessagesForToolset,
-} from '../../agent/message-validation'
-import type { AgentSession, SessionStore } from '../../agent/session-store'
-import type { ResolvedAgentConfig } from '../../agent/types'
-import type { Browser } from '../../browser/browser'
-import type { KlavisClient } from '../../lib/clients/klavis/klavis-client'
-import { resolveLLMConfig } from '../../lib/clients/llm/config'
-import { logger } from '../../lib/logger'
-import type { ToolRegistry } from '../../tools/tool-registry'
-import type { BrowserContext, ChatRequest } from '../types'
+	filterValidMessages,
+	sanitizeMessagesForToolset,
+} from "../../agent/message-validation";
+import type { AgentSession, SessionStore } from "../../agent/session-store";
+import type { ResolvedAgentConfig } from "../../agent/types";
+import type { Browser } from "../../browser/browser";
+import type { KlavisClient } from "../../lib/clients/klavis/klavis-client";
+import { resolveLLMConfig } from "../../lib/clients/llm/config";
+import { logger } from "../../lib/logger";
+import type { ToolRegistry } from "../../tools/tool-registry";
+import type { BrowserContext, ChatRequest } from "../types";
 
 export interface ChatServiceDeps {
-  sessionStore: SessionStore
-  klavisClient: KlavisClient
-  browser: Browser
-  registry: ToolRegistry
-  triosId?: string
-  aiSdkDevtoolsEnabled?: boolean
+	sessionStore: SessionStore;
+	klavisClient: KlavisClient;
+	browser: Browser;
+	registry: ToolRegistry;
+	triosId?: string;
+	aiSdkDevtoolsEnabled?: boolean;
 }
 
 export class ChatService {
-  constructor(private deps: ChatServiceDeps) {}
+	constructor(private deps: ChatServiceDeps) {}
 
-  async processMessage(
-    request: ChatRequest,
-    abortSignal: AbortSignal,
-  ): Promise<Response> {
-    const { sessionStore } = this.deps
-    logger.debug('ChatService.processMessage start', {
-      conversationId: request.conversationId,
-      provider: request.provider,
-      model: request.model,
-      mode: request.mode,
-      hasSelectedText: !!request.selectedText,
-      hasApiKey: !!request.apiKey,
-      baseUrl: request.baseUrl ? String(request.baseUrl) : undefined,
-      isScheduledTask: request.isScheduledTask,
-      origin: request.origin,
-    })
+	async processMessage(
+		request: ChatRequest,
+		abortSignal: AbortSignal,
+	): Promise<Response> {
+		const { sessionStore } = this.deps;
+		logger.debug("ChatService.processMessage start", {
+			conversationId: request.conversationId,
+			provider: request.provider,
+			model: request.model,
+			mode: request.mode,
+			hasSelectedText: !!request.selectedText,
+			hasApiKey: !!request.apiKey,
+			baseUrl: request.baseUrl ? String(request.baseUrl) : undefined,
+			isScheduledTask: request.isScheduledTask,
+			origin: request.origin,
+		});
 
-    const llmConfig = await resolveLLMConfig(request, this.deps.triosId)
+		const llmConfig = await resolveLLMConfig(request, this.deps.triosId);
 
-    const agentConfig: ResolvedAgentConfig = {
-      conversationId: request.conversationId,
-      provider: llmConfig.provider,
-      model: llmConfig.model,
-      apiKey: llmConfig.apiKey,
-      baseUrl: llmConfig.baseUrl,
-      upstreamProvider: llmConfig.upstreamProvider,
-      resourceName: llmConfig.resourceName,
-      region: llmConfig.region,
-      accessKeyId: llmConfig.accessKeyId,
-      secretAccessKey: llmConfig.secretAccessKey,
-      sessionToken: llmConfig.sessionToken,
-      accountId: llmConfig.accountId,
-      reasoningEffort: request.reasoningEffort,
-      reasoningSummary: request.reasoningSummary,
-      contextWindowSize: request.contextWindowSize,
-      userSystemPrompt: request.userSystemPrompt,
-      workingDir: request.userWorkingDir,
-      supportsImages: request.supportsImages,
-      chatMode: request.mode === 'chat',
-      isScheduledTask: request.isScheduledTask,
-      origin: request.origin,
-      declinedApps: request.declinedApps,
-      triosId: this.deps.triosId,
-      toolApprovalConfig: request.toolApprovalConfig,
-    }
+		const agentConfig: ResolvedAgentConfig = {
+			conversationId: request.conversationId,
+			provider: llmConfig.provider,
+			model: llmConfig.model,
+			apiKey: llmConfig.apiKey,
+			baseUrl: llmConfig.baseUrl,
+			upstreamProvider: llmConfig.upstreamProvider,
+			resourceName: llmConfig.resourceName,
+			region: llmConfig.region,
+			accessKeyId: llmConfig.accessKeyId,
+			secretAccessKey: llmConfig.secretAccessKey,
+			sessionToken: llmConfig.sessionToken,
+			accountId: llmConfig.accountId,
+			reasoningEffort: request.reasoningEffort,
+			reasoningSummary: request.reasoningSummary,
+			contextWindowSize: request.contextWindowSize,
+			userSystemPrompt: request.userSystemPrompt,
+			workingDir: request.userWorkingDir,
+			supportsImages: request.supportsImages,
+			chatMode: request.mode === "chat",
+			isScheduledTask: request.isScheduledTask,
+			origin: request.origin,
+			declinedApps: request.declinedApps,
+			triosId: this.deps.triosId,
+			toolApprovalConfig: request.toolApprovalConfig,
+		};
 
-    logger.debug('ChatService resolved llm config', {
-      conversationId: request.conversationId,
-      provider: llmConfig.provider,
-      model: llmConfig.model,
-      hasApiKey: !!llmConfig.apiKey,
-      baseUrl: llmConfig.baseUrl ? String(llmConfig.baseUrl) : undefined,
-      upstreamProvider: llmConfig.upstreamProvider,
-    })
+		logger.debug("ChatService resolved llm config", {
+			conversationId: request.conversationId,
+			provider: llmConfig.provider,
+			model: llmConfig.model,
+			hasApiKey: !!llmConfig.apiKey,
+			baseUrl: llmConfig.baseUrl ? String(llmConfig.baseUrl) : undefined,
+			upstreamProvider: llmConfig.upstreamProvider,
+		});
 
-    let session = sessionStore.get(request.conversationId)
-    let isNewSession = false
-    const contextChanges: string[] = []
+		let session = sessionStore.get(request.conversationId);
+		let isNewSession = false;
+		const contextChanges: string[] = [];
 
-    // Build stable keys for change detection
-    const mcpServerKey = this.buildMcpServerKey(request.browserContext)
-    const approvalConfigKey = this.buildApprovalConfigKey(
-      request.toolApprovalConfig,
-    )
+		// Build stable keys for change detection
+		const mcpServerKey = this.buildMcpServerKey(request.browserContext);
+		const approvalConfigKey = this.buildApprovalConfigKey(
+			request.toolApprovalConfig,
+		);
 
-    // Detect MCP config change mid-conversation → rebuild session
-    if (session && session.mcpServerKey !== mcpServerKey) {
-      logger.info('MCP servers changed mid-conversation, rebuilding session', {
-        conversationId: request.conversationId,
-        previous: session.mcpServerKey,
-        current: mcpServerKey,
-      })
-      const previousMcpKey = session.mcpServerKey
-      session = await this.rebuildSession(
-        session,
-        request,
-        agentConfig,
-        mcpServerKey,
-      )
+		// Detect MCP config change mid-conversation → rebuild session
+		if (session && session.mcpServerKey !== mcpServerKey) {
+			logger.info("MCP servers changed mid-conversation, rebuilding session", {
+				conversationId: request.conversationId,
+				previous: session.mcpServerKey,
+				current: mcpServerKey,
+			});
+			const previousMcpKey = session.mcpServerKey;
+			session = await this.rebuildSession(
+				session,
+				request,
+				agentConfig,
+				mcpServerKey,
+			);
 
-      const oldServers = new Set(
-        (previousMcpKey ?? '').split(',').filter(Boolean),
-      )
-      const newServers = new Set(mcpServerKey.split(',').filter(Boolean))
-      const added = [...newServers].filter((s) => !oldServers.has(s))
-      const removed = [...oldServers].filter((s) => !newServers.has(s))
+			const oldServers = new Set(
+				(previousMcpKey ?? "").split(",").filter(Boolean),
+			);
+			const newServers = new Set(mcpServerKey.split(",").filter(Boolean));
+			const added = [...newServers].filter((s) => !oldServers.has(s));
+			const removed = [...oldServers].filter((s) => !newServers.has(s));
 
-      const parts: string[] = []
-      if (removed.length > 0) {
-        parts.push(
-          `The following app integrations were disconnected: ${removed.join(', ')}. Their tools are no longer available.`,
-        )
-      }
-      if (added.length > 0) {
-        parts.push(
-          `The following app integrations were connected: ${added.join(', ')}. Their tools are now available.`,
-        )
-      }
-      if (parts.length === 0) {
-        parts.push(
-          'Connected app integrations changed during this conversation. Use only tools that are currently registered.',
-        )
-      }
-      contextChanges.push(parts.join(' '))
-    }
+			const parts: string[] = [];
+			if (removed.length > 0) {
+				parts.push(
+					`The following app integrations were disconnected: ${removed.join(", ")}. Their tools are no longer available.`,
+				);
+			}
+			if (added.length > 0) {
+				parts.push(
+					`The following app integrations were connected: ${added.join(", ")}. Their tools are now available.`,
+				);
+			}
+			if (parts.length === 0) {
+				parts.push(
+					"Connected app integrations changed during this conversation. Use only tools that are currently registered.",
+				);
+			}
+			contextChanges.push(parts.join(" "));
+		}
 
-    // Detect workspace change mid-conversation → rebuild session
-    if (session && session.workingDir !== request.userWorkingDir) {
-      logger.info('Workspace changed mid-conversation, rebuilding session', {
-        conversationId: request.conversationId,
-        previous: session.workingDir ?? '(none)',
-        current: request.userWorkingDir ?? '(none)',
-      })
-      const previousWorkingDir = session.workingDir
-      session = await this.rebuildSession(
-        session,
-        request,
-        agentConfig,
-        mcpServerKey,
-      )
+		// Detect workspace change mid-conversation → rebuild session
+		if (session && session.workingDir !== request.userWorkingDir) {
+			logger.info("Workspace changed mid-conversation, rebuilding session", {
+				conversationId: request.conversationId,
+				previous: session.workingDir ?? "(none)",
+				current: request.userWorkingDir ?? "(none)",
+			});
+			const previousWorkingDir = session.workingDir;
+			session = await this.rebuildSession(
+				session,
+				request,
+				agentConfig,
+				mcpServerKey,
+			);
 
-      if (!request.userWorkingDir) {
-        contextChanges.push(
-          'The user disconnected the workspace during this conversation. Filesystem tools (filesystem_read, filesystem_write, filesystem_edit, filesystem_bash, filesystem_grep, filesystem_find, filesystem_ls) are no longer available. Return all output directly in chat. If the user asks for file operations, suggest they select a working directory from the chat toolbar.',
-        )
-      } else if (!previousWorkingDir) {
-        contextChanges.push(
-          `The user connected a workspace during this conversation. Filesystem tools are now available. Working directory: ${request.userWorkingDir}`,
-        )
-      } else {
-        contextChanges.push(
-          `The user switched workspace during this conversation. Filesystem tools now use the new working directory: ${request.userWorkingDir}`,
-        )
-      }
-    }
+			if (!request.userWorkingDir) {
+				contextChanges.push(
+					"The user disconnected the workspace during this conversation. Filesystem tools (filesystem_read, filesystem_write, filesystem_edit, filesystem_bash, filesystem_grep, filesystem_find, filesystem_ls) are no longer available. Return all output directly in chat. If the user asks for file operations, suggest they select a working directory from the chat toolbar.",
+				);
+			} else if (!previousWorkingDir) {
+				contextChanges.push(
+					`The user connected a workspace during this conversation. Filesystem tools are now available. Working directory: ${request.userWorkingDir}`,
+				);
+			} else {
+				contextChanges.push(
+					`The user switched workspace during this conversation. Filesystem tools now use the new working directory: ${request.userWorkingDir}`,
+				);
+			}
+		}
 
-    // Detect approval config change mid-conversation → rebuild session
-    if (session && session.approvalConfigKey !== approvalConfigKey) {
-      logger.info(
-        'Approval config changed mid-conversation, rebuilding session',
-        { conversationId: request.conversationId },
-      )
-      session = await this.rebuildSession(
-        session,
-        request,
-        agentConfig,
-        mcpServerKey,
-      )
-    }
+		// Detect approval config change mid-conversation → rebuild session
+		if (session && session.approvalConfigKey !== approvalConfigKey) {
+			logger.info(
+				"Approval config changed mid-conversation, rebuilding session",
+				{ conversationId: request.conversationId },
+			);
+			session = await this.rebuildSession(
+				session,
+				request,
+				agentConfig,
+				mcpServerKey,
+			);
+		}
 
-    if (!session) {
-      isNewSession = true
-      let hiddenPageId: number | undefined
-      let browserContext = await this.resolvePageIds(request.browserContext)
-      if (request.isScheduledTask) {
-        try {
-          hiddenPageId = await this.deps.browser.newPage('about:blank', {
-            hidden: true,
-            background: true,
-          })
-          let hiddenWindowId: number | undefined
-          try {
-            const hiddenPage = (await this.deps.browser.listPages()).find(
-              (page) => page.pageId === hiddenPageId,
-            )
-            hiddenWindowId = hiddenPage?.windowId
-          } catch (error) {
-            logger.warn('Failed to look up hidden page metadata', {
-              conversationId: request.conversationId,
-              pageId: hiddenPageId,
-              error: error instanceof Error ? error.message : String(error),
-            })
-          }
-          browserContext = {
-            ...browserContext,
-            windowId: hiddenWindowId,
-            selectedTabs: undefined,
-            tabs: undefined,
-            activeTab: {
-              id: hiddenPageId,
-              pageId: hiddenPageId,
-              url: 'about:blank',
-              title: 'Scheduled Task',
-            },
-          }
-          logger.info('Created hidden page for scheduled task', {
-            conversationId: request.conversationId,
-            pageId: hiddenPageId,
-            windowId: hiddenWindowId,
-          })
-        } catch (error) {
-          logger.warn(
-            'Failed to create hidden page, using default browser context',
-            {
-              error: error instanceof Error ? error.message : String(error),
-            },
-          )
-        }
-      }
+		if (!session) {
+			isNewSession = true;
+			let hiddenPageId: number | undefined;
+			let browserContext = await this.resolvePageIds(request.browserContext);
+			if (request.isScheduledTask) {
+				try {
+					hiddenPageId = await this.deps.browser.newPage("about:blank", {
+						hidden: true,
+						background: true,
+					});
+					let hiddenWindowId: number | undefined;
+					try {
+						const hiddenPage = (await this.deps.browser.listPages()).find(
+							(page) => page.pageId === hiddenPageId,
+						);
+						hiddenWindowId = hiddenPage?.windowId;
+					} catch (error) {
+						logger.warn("Failed to look up hidden page metadata", {
+							conversationId: request.conversationId,
+							pageId: hiddenPageId,
+							error: error instanceof Error ? error.message : String(error),
+						});
+					}
+					browserContext = {
+						...browserContext,
+						windowId: hiddenWindowId,
+						selectedTabs: undefined,
+						tabs: undefined,
+						activeTab: {
+							id: hiddenPageId,
+							pageId: hiddenPageId,
+							url: "about:blank",
+							title: "Scheduled Task",
+						},
+					};
+					logger.info("Created hidden page for scheduled task", {
+						conversationId: request.conversationId,
+						pageId: hiddenPageId,
+						windowId: hiddenWindowId,
+					});
+				} catch (error) {
+					logger.warn(
+						"Failed to create hidden page, using default browser context",
+						{
+							error: error instanceof Error ? error.message : String(error),
+						},
+					);
+				}
+			}
 
-      const agent = await AiSdkAgent.create({
-        resolvedConfig: agentConfig,
-        browser: this.deps.browser,
-        registry: this.deps.registry,
-        browserContext,
-        klavisClient: this.deps.klavisClient,
-        triosId: this.deps.triosId,
-        aiSdkDevtoolsEnabled: this.deps.aiSdkDevtoolsEnabled,
-        aclRules: request.aclRules,
-      })
-      session = {
-        agent,
-        hiddenPageId,
-        browserContext,
-        mcpServerKey,
-        workingDir: request.userWorkingDir,
-        approvalConfigKey,
-      }
-      sessionStore.set(request.conversationId, session)
-    }
+			const agent = await AiSdkAgent.create({
+				resolvedConfig: agentConfig,
+				browser: this.deps.browser,
+				registry: this.deps.registry,
+				browserContext,
+				klavisClient: this.deps.klavisClient,
+				triosId: this.deps.triosId,
+				aiSdkDevtoolsEnabled: this.deps.aiSdkDevtoolsEnabled,
+				aclRules: request.aclRules,
+			});
+			session = {
+				agent,
+				hiddenPageId,
+				browserContext,
+				mcpServerKey,
+				workingDir: request.userWorkingDir,
+				approvalConfigKey,
+			};
+			sessionStore.set(request.conversationId, session);
+		}
 
-    session.agent.updateAclRules(request.aclRules)
+		session.agent.updateAclRules(request.aclRules);
 
-    if (isNewSession && request.previousConversation?.length) {
-      for (const msg of request.previousConversation) {
-        if (!msg.content.trim()) continue
-        session.agent.messages.push({
-          id: crypto.randomUUID(),
-          role: msg.role === 'assistant' ? 'assistant' : 'user',
-          parts: [{ type: 'text', text: msg.content }],
-        })
-      }
-      logger.info('Injected previous conversation history', {
-        conversationId: request.conversationId,
-        messageCount: request.previousConversation.length,
-      })
-    }
+		if (isNewSession && request.previousConversation?.length) {
+			for (const msg of request.previousConversation) {
+				if (!msg.content.trim()) continue;
+				session.agent.messages.push({
+					id: crypto.randomUUID(),
+					role: msg.role === "assistant" ? "assistant" : "user",
+					parts: [{ type: "text", text: msg.content }],
+				});
+			}
+			logger.info("Injected previous conversation history", {
+				conversationId: request.conversationId,
+				messageCount: request.previousConversation.length,
+			});
+		}
 
-    // Handle tool approval responses: patch the agent's messages and re-run
-    if (request.toolApprovalResponses?.length) {
-      this.applyToolApprovalResponses(
-        session.agent.messages,
-        request.toolApprovalResponses,
-      )
-      logger.info('Applied tool approval responses', {
-        conversationId: request.conversationId,
-        count: request.toolApprovalResponses.length,
-      })
-      return createAgentUIStreamResponse({
-        agent: session.agent.toolLoopAgent,
-        uiMessages: filterValidMessages(session.agent.messages),
-        abortSignal,
-        onFinish: async ({ messages }: { messages: UIMessage[] }) => {
-          session.agent.messages = filterValidMessages(messages)
-        },
-      })
-    }
+		// Handle tool approval responses: patch the agent's messages and re-run
+		if (request.toolApprovalResponses?.length) {
+			this.applyToolApprovalResponses(
+				session.agent.messages,
+				request.toolApprovalResponses,
+			);
+			logger.info("Applied tool approval responses", {
+				conversationId: request.conversationId,
+				count: request.toolApprovalResponses.length,
+			});
+			return createAgentUIStreamResponse({
+				agent: session.agent.toolLoopAgent,
+				uiMessages: filterValidMessages(session.agent.messages),
+				abortSignal,
+				onFinish: async ({ messages }: { messages: UIMessage[] }) => {
+					session.agent.messages = filterValidMessages(messages);
+				},
+			});
+		}
 
-    const messageContext = request.isScheduledTask
-      ? (session.browserContext ?? request.browserContext)
-      : request.browserContext
-    // Scheduled tasks already have correct internal pageIds from browser.newPage();
-    // calling resolvePageIds would pass those to resolveTabIds (which expects Chrome
-    // tab IDs), corrupting them back to undefined.
-    const resolvedMessageContext = request.isScheduledTask
-      ? messageContext
-      : await this.resolvePageIds(messageContext)
-    const userContent = formatUserMessage(
-      request.message,
-      resolvedMessageContext,
-      request.selectedText,
-      request.selectedTextSource,
-    )
+		const messageContext = request.isScheduledTask
+			? (session.browserContext ?? request.browserContext)
+			: request.browserContext;
+		// Scheduled tasks already have correct internal pageIds from browser.newPage();
+		// calling resolvePageIds would pass those to resolveTabIds (which expects Chrome
+		// tab IDs), corrupting them back to undefined.
+		const resolvedMessageContext = request.isScheduledTask
+			? messageContext
+			: await this.resolvePageIds(messageContext);
+		const userContent = formatUserMessage(
+			request.message,
+			resolvedMessageContext,
+			request.selectedText,
+			request.selectedTextSource,
+		);
 
-    // Prepend tool-change context when session was rebuilt mid-conversation
-    const contextPrefix =
-      contextChanges.length > 0
-        ? `${contextChanges.map((c) => `[Context: ${c}]`).join('\n')}\n\n`
-        : ''
-    session.agent.appendUserMessage(contextPrefix + userContent)
-    conversationEvents.emit({
-      type: 'user-message',
-      conversationId: request.conversationId,
-      message: request.message,
-      at: new Date().toISOString(),
-    })
+		// Prepend tool-change context when session was rebuilt mid-conversation
+		const contextPrefix =
+			contextChanges.length > 0
+				? `${contextChanges.map((c) => `[Context: ${c}]`).join("\n")}\n\n`
+				: "";
+		session.agent.appendUserMessage(contextPrefix + userContent);
+		conversationEvents.emit({
+			type: "user-message",
+			conversationId: request.conversationId,
+			message: request.message,
+			at: new Date().toISOString(),
+		});
 
-    logger.info('[Step 8] Creating streaming response — calling LLM provider', {
-      conversationId: request.conversationId,
-      provider: request.provider,
-      model: request.model,
-      messageCount: session.agent.messages.length,
-      userMessage: request.message?.substring(0, 100),
-    })
+		logger.info("[Step 8] Creating streaming response — calling LLM provider", {
+			conversationId: request.conversationId,
+			provider: request.provider,
+			model: request.model,
+			messageCount: session.agent.messages.length,
+			userMessage: request.message?.substring(0, 100),
+		});
 
-    return createAgentUIStreamResponse({
-      agent: session.agent.toolLoopAgent,
-      uiMessages: filterValidMessages(session.agent.messages),
-      abortSignal,
-      onFinish: async ({ messages }: { messages: UIMessage[] }) => {
-        session.agent.messages = filterValidMessages(messages)
-        const lastMsg = messages[messages.length - 1]
-        const allParts = lastMsg?.parts ?? []
-        const partTypes = allParts.map((p: { type: string }) => p.type)
-        const textParts = allParts.filter(
-          (p: { type: string }) => p.type === 'text',
-        )
-        const toolParts = allParts.filter(
-          (p: { type: string }) => p.type === 'tool-invocation',
-        )
-        logger.info('Agent execution complete', {
-          conversationId: request.conversationId,
-          totalMessages: messages.length,
-          lastMessageRole: lastMsg?.role,
-          allPartTypes: partTypes,
-          textPartCount: textParts.length,
-          toolPartCount: toolParts.length,
-          textPreview:
-            (textParts[0] as { type: 'text'; text: string })?.text?.substring(
-              0,
-              200,
-            ) ?? '(no text)',
-        })
-        // Log each message role for full conversation trace
-        logger.info('Full message trace', {
-          conversationId: request.conversationId,
-          messages: messages.map((m: UIMessage, i: number) => ({
-            index: i,
-            role: m.role,
-            partTypes: m.parts?.map((p: { type: string }) => p.type),
-          })),
-        })
+		return createAgentUIStreamResponse({
+			agent: session.agent.toolLoopAgent,
+			uiMessages: filterValidMessages(session.agent.messages),
+			abortSignal,
+			onFinish: async ({ messages }: { messages: UIMessage[] }) => {
+				session.agent.messages = filterValidMessages(messages);
+				const lastMsg = messages[messages.length - 1];
+				const allParts = lastMsg?.parts ?? [];
+				const partTypes = allParts.map((p: { type: string }) => p.type);
+				const textParts = allParts.filter(
+					(p: { type: string }) => p.type === "text",
+				);
+				const toolParts = allParts.filter(
+					(p: { type: string }) => p.type === "tool-invocation",
+				);
+				logger.info("Agent execution complete", {
+					conversationId: request.conversationId,
+					totalMessages: messages.length,
+					lastMessageRole: lastMsg?.role,
+					allPartTypes: partTypes,
+					textPartCount: textParts.length,
+					toolPartCount: toolParts.length,
+					textPreview:
+						(textParts[0] as { type: "text"; text: string })?.text?.substring(
+							0,
+							200,
+						) ?? "(no text)",
+				});
+				// Log each message role for full conversation trace
+				logger.info("Full message trace", {
+					conversationId: request.conversationId,
+					messages: messages.map((m: UIMessage, i: number) => ({
+						index: i,
+						role: m.role,
+						partTypes: m.parts?.map((p: { type: string }) => p.type),
+					})),
+				});
 
-        if (session?.hiddenPageId) {
-          const pageId = session.hiddenPageId
-          session.hiddenPageId = undefined
-          this.closeHiddenPage(pageId, request.conversationId)
-        }
-      },
-    })
-  }
+				if (session?.hiddenPageId) {
+					const pageId = session.hiddenPageId;
+					session.hiddenPageId = undefined;
+					this.closeHiddenPage(pageId, request.conversationId);
+				}
+			},
+		});
+	}
 
-  async deleteSession(
-    conversationId: string,
-  ): Promise<{ deleted: boolean; sessionCount: number }> {
-    const session = this.deps.sessionStore.get(conversationId)
-    if (session?.hiddenPageId) {
-      const pageId = session.hiddenPageId
-      session.hiddenPageId = undefined
-      this.closeHiddenPage(pageId, conversationId)
-    }
-    const deleted = await this.deps.sessionStore.delete(conversationId)
-    return { deleted, sessionCount: this.deps.sessionStore.count() }
-  }
+	async deleteSession(
+		conversationId: string,
+	): Promise<{ deleted: boolean; sessionCount: number }> {
+		const session = this.deps.sessionStore.get(conversationId);
+		if (session?.hiddenPageId) {
+			const pageId = session.hiddenPageId;
+			session.hiddenPageId = undefined;
+			this.closeHiddenPage(pageId, conversationId);
+		}
+		const deleted = await this.deps.sessionStore.delete(conversationId);
+		return { deleted, sessionCount: this.deps.sessionStore.count() };
+	}
 
-  // Browser context arrives with Chrome tab IDs, but tools expect internal page IDs.
-  // Resolve the mapping upfront so the agent's first navigation doesn't fail.
-  private async resolvePageIds(
-    browserContext?: BrowserContext,
-  ): Promise<BrowserContext | undefined> {
-    if (!browserContext) return undefined
+	// Browser context arrives with Chrome tab IDs, but tools expect internal page IDs.
+	// Resolve the mapping upfront so the agent's first navigation doesn't fail.
+	private async resolvePageIds(
+		browserContext?: BrowserContext,
+	): Promise<BrowserContext | undefined> {
+		if (!browserContext) return undefined;
 
-    const tabIdSet = new Set<number>()
-    if (browserContext.activeTab) tabIdSet.add(browserContext.activeTab.id)
-    if (browserContext.selectedTabs) {
-      for (const tab of browserContext.selectedTabs) tabIdSet.add(tab.id)
-    }
-    if (browserContext.tabs) {
-      for (const tab of browserContext.tabs) tabIdSet.add(tab.id)
-    }
+		const tabIdSet = new Set<number>();
+		if (browserContext.activeTab) tabIdSet.add(browserContext.activeTab.id);
+		if (browserContext.selectedTabs) {
+			for (const tab of browserContext.selectedTabs) tabIdSet.add(tab.id);
+		}
+		if (browserContext.tabs) {
+			for (const tab of browserContext.tabs) tabIdSet.add(tab.id);
+		}
 
-    if (tabIdSet.size === 0) return browserContext
+		if (tabIdSet.size === 0) return browserContext;
 
-    const tabToPage = await this.deps.browser.resolveTabIds([...tabIdSet])
+		const tabToPage = await this.deps.browser.resolveTabIds([...tabIdSet]);
 
-    const addPageId = (tab: { id: number; url?: string; title?: string }) => {
-      const pageId = tabToPage.get(tab.id)
-      if (pageId === undefined) {
-        logger.warn('Could not resolve page ID for tab', { tabId: tab.id })
-      }
-      return { ...tab, pageId }
-    }
+		const addPageId = (tab: { id: number; url?: string; title?: string }) => {
+			const pageId = tabToPage.get(tab.id);
+			if (pageId === undefined) {
+				logger.warn("Could not resolve page ID for tab", { tabId: tab.id });
+			}
+			return { ...tab, pageId };
+		};
 
-    logger.debug('Resolved tab IDs to page IDs', {
-      mapping: Object.fromEntries(tabToPage),
-    })
+		logger.debug("Resolved tab IDs to page IDs", {
+			mapping: Object.fromEntries(tabToPage),
+		});
 
-    return {
-      ...browserContext,
-      activeTab: browserContext.activeTab
-        ? addPageId(browserContext.activeTab)
-        : undefined,
-      selectedTabs: browserContext.selectedTabs?.map(addPageId),
-      tabs: browserContext.tabs?.map(addPageId),
-    }
-  }
+		return {
+			...browserContext,
+			activeTab: browserContext.activeTab
+				? addPageId(browserContext.activeTab)
+				: undefined,
+			selectedTabs: browserContext.selectedTabs?.map(addPageId),
+			tabs: browserContext.tabs?.map(addPageId),
+		};
+	}
 
-  private closeHiddenPage(pageId: number, conversationId: string): void {
-    this.deps.browser.closePage(pageId).catch((error) => {
-      logger.warn('Failed to close hidden page', {
-        pageId,
-        conversationId,
-        error: error instanceof Error ? error.message : String(error),
-      })
-    })
-  }
+	private closeHiddenPage(pageId: number, conversationId: string): void {
+		this.deps.browser.closePage(pageId).catch((error) => {
+			logger.warn("Failed to close hidden page", {
+				pageId,
+				conversationId,
+				error: error instanceof Error ? error.message : String(error),
+			});
+		});
+	}
 
-  private async rebuildSession(
-    session: AgentSession,
-    request: ChatRequest,
-    agentConfig: ResolvedAgentConfig,
-    mcpServerKey: string,
-  ): Promise<AgentSession> {
-    const previousMessages = session.agent.messages
-    await session.agent.dispose()
-    this.deps.sessionStore.remove(request.conversationId)
+	private async rebuildSession(
+		session: AgentSession,
+		request: ChatRequest,
+		agentConfig: ResolvedAgentConfig,
+		mcpServerKey: string,
+	): Promise<AgentSession> {
+		const previousMessages = session.agent.messages;
+		await session.agent.dispose();
+		this.deps.sessionStore.remove(request.conversationId);
 
-    const browserContext = agentConfig.isScheduledTask
-      ? (session.browserContext ??
-        (await this.resolvePageIds(request.browserContext)))
-      : await this.resolvePageIds(request.browserContext)
-    const agent = await AiSdkAgent.create({
-      resolvedConfig: agentConfig,
-      browser: this.deps.browser,
-      registry: this.deps.registry,
-      browserContext,
-      klavisClient: this.deps.klavisClient,
-      triosId: this.deps.triosId,
-      aiSdkDevtoolsEnabled: this.deps.aiSdkDevtoolsEnabled,
-      aclRules: request.aclRules,
-    })
-    const newSession: AgentSession = {
-      agent,
-      hiddenPageId: session.hiddenPageId,
-      browserContext,
-      mcpServerKey,
-      workingDir: request.userWorkingDir,
-      approvalConfigKey: this.buildApprovalConfigKey(
-        request.toolApprovalConfig,
-      ),
-    }
-    newSession.agent.messages = sanitizeMessagesForToolset(
-      previousMessages,
-      agent.toolNames,
-    )
-    this.deps.sessionStore.set(request.conversationId, newSession)
-    return newSession
-  }
+		const browserContext = agentConfig.isScheduledTask
+			? (session.browserContext ??
+				(await this.resolvePageIds(request.browserContext)))
+			: await this.resolvePageIds(request.browserContext);
+		const agent = await AiSdkAgent.create({
+			resolvedConfig: agentConfig,
+			browser: this.deps.browser,
+			registry: this.deps.registry,
+			browserContext,
+			klavisClient: this.deps.klavisClient,
+			triosId: this.deps.triosId,
+			aiSdkDevtoolsEnabled: this.deps.aiSdkDevtoolsEnabled,
+			aclRules: request.aclRules,
+		});
+		const newSession: AgentSession = {
+			agent,
+			hiddenPageId: session.hiddenPageId,
+			browserContext,
+			mcpServerKey,
+			workingDir: request.userWorkingDir,
+			approvalConfigKey: this.buildApprovalConfigKey(
+				request.toolApprovalConfig,
+			),
+		};
+		newSession.agent.messages = sanitizeMessagesForToolset(
+			previousMessages,
+			agent.toolNames,
+		);
+		this.deps.sessionStore.set(request.conversationId, newSession);
+		return newSession;
+	}
 
-  private applyToolApprovalResponses(
-    messages: UIMessage[],
-    responses: Array<{
-      approvalId: string
-      approved: boolean
-      reason?: string
-    }>,
-  ): void {
-    const responseMap = new Map(responses.map((r) => [r.approvalId, r]))
-    for (const msg of messages) {
-      if (msg.role !== 'assistant') continue
-      for (const part of msg.parts) {
-        const toolPart = part as {
-          state?: string
-          approval?: { id: string; approved?: boolean; reason?: string }
-        }
-        if (
-          toolPart.state === 'approval-requested' &&
-          toolPart.approval?.id &&
-          responseMap.has(toolPart.approval.id)
-        ) {
-          const resp = responseMap.get(toolPart.approval.id)
-          if (!resp) continue
-          toolPart.state = 'approval-responded'
-          toolPart.approval = {
-            ...toolPart.approval,
-            approved: resp.approved,
-            reason: resp.reason,
-          }
-        }
-      }
-    }
-  }
+	private applyToolApprovalResponses(
+		messages: UIMessage[],
+		responses: Array<{
+			approvalId: string;
+			approved: boolean;
+			reason?: string;
+		}>,
+	): void {
+		const responseMap = new Map(responses.map((r) => [r.approvalId, r]));
+		for (const msg of messages) {
+			if (msg.role !== "assistant") continue;
+			for (const part of msg.parts) {
+				const toolPart = part as {
+					state?: string;
+					approval?: { id: string; approved?: boolean; reason?: string };
+				};
+				if (
+					toolPart.state === "approval-requested" &&
+					toolPart.approval?.id &&
+					responseMap.has(toolPart.approval.id)
+				) {
+					const resp = responseMap.get(toolPart.approval.id);
+					if (!resp) continue;
+					toolPart.state = "approval-responded";
+					toolPart.approval = {
+						...toolPart.approval,
+						approved: resp.approved,
+						reason: resp.reason,
+					};
+				}
+			}
+		}
+	}
 
-  private buildApprovalConfigKey(config?: {
-    categories: Record<string, boolean>
-  }): string {
-    if (!config) return ''
-    return Object.entries(config.categories)
-      .filter(([, v]) => v)
-      .map(([k]) => k)
-      .sort()
-      .join(',')
-  }
+	private buildApprovalConfigKey(config?: {
+		categories: Record<string, boolean>;
+	}): string {
+		if (!config) return "";
+		return Object.entries(config.categories)
+			.filter(([, v]) => v)
+			.map(([k]) => k)
+			.sort()
+			.join(",");
+	}
 
-  private buildMcpServerKey(browserContext?: BrowserContext): string {
-    const managed = browserContext?.enabledMcpServers?.slice().sort() ?? []
-    const custom =
-      browserContext?.customMcpServers?.map((s) => s.url).sort() ?? []
-    return [...managed, ...custom].join(',')
-  }
+	private buildMcpServerKey(browserContext?: BrowserContext): string {
+		const managed = browserContext?.enabledMcpServers?.slice().sort() ?? [];
+		const custom =
+			browserContext?.customMcpServers?.map((s) => s.url).sort() ?? [];
+		return [...managed, ...custom].join(",");
+	}
 }

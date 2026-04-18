@@ -1,7 +1,7 @@
-import { z } from 'zod'
-import { defineToolWithCategory } from './framework'
+import { z } from "zod";
+import { defineToolWithCategory } from "./framework";
 
-const defineAssistantTool = defineToolWithCategory('assistant')
+const defineAssistantTool = defineToolWithCategory("assistant");
 
 const TRIOS_INFO = `# BrowserOS — The Open-Source AI Browser
 
@@ -46,79 +46,79 @@ Learn more: https://docs.browseros.com/features/llm-chat-hub
 
 ### Ad Blocking
 Built-in ad blocking powered by uBlock Origin with full Manifest V2 support. Blocks ~10x more ads than Chrome out of the box (68% vs 7% effectiveness). Faster page loads, less bandwidth, reduced tracking.
-Learn more: https://docs.browseros.com/features/ad-blocking`
+Learn more: https://docs.browseros.com/features/ad-blocking`;
 
 const VALID_TOPICS = [
-  'overview',
-  'bring-your-own-llm',
-  'scheduled-tasks',
-  'filesystem-access',
-  'connect-apps',
-  'mcp-server',
-  'chat-hub',
-  'ad-blocking',
-] as const
+	"overview",
+	"bring-your-own-llm",
+	"scheduled-tasks",
+	"filesystem-access",
+	"connect-apps",
+	"mcp-server",
+	"chat-hub",
+	"ad-blocking",
+] as const;
 
 const TOPIC_SECTIONS: Record<string, { start: string; end?: string }> = {
-  overview: { start: '# BrowserOS', end: '## Core Features' },
-  'bring-your-own-llm': {
-    start: '### Bring Your Own LLM',
-    end: '### Scheduled Tasks',
-  },
-  'scheduled-tasks': {
-    start: '### Scheduled Tasks',
-    end: '### Filesystem Access',
-  },
-  'filesystem-access': {
-    start: '### Filesystem Access',
-    end: '### Connect Apps',
-  },
-  'connect-apps': {
-    start: '### Connect Apps',
-    end: '### MCP Server for Developer Tools',
-  },
-  'mcp-server': {
-    start: '### MCP Server for Developer Tools',
-    end: '### Chat & LLM Hub',
-  },
-  'chat-hub': { start: '### Chat & LLM Hub', end: '### Ad Blocking' },
-  'ad-blocking': { start: '### Ad Blocking' },
-}
+	overview: { start: "# BrowserOS", end: "## Core Features" },
+	"bring-your-own-llm": {
+		start: "### Bring Your Own LLM",
+		end: "### Scheduled Tasks",
+	},
+	"scheduled-tasks": {
+		start: "### Scheduled Tasks",
+		end: "### Filesystem Access",
+	},
+	"filesystem-access": {
+		start: "### Filesystem Access",
+		end: "### Connect Apps",
+	},
+	"connect-apps": {
+		start: "### Connect Apps",
+		end: "### MCP Server for Developer Tools",
+	},
+	"mcp-server": {
+		start: "### MCP Server for Developer Tools",
+		end: "### Chat & LLM Hub",
+	},
+	"chat-hub": { start: "### Chat & LLM Hub", end: "### Ad Blocking" },
+	"ad-blocking": { start: "### Ad Blocking" },
+};
 
 function getTopicContent(topic: string): string {
-  const section = TOPIC_SECTIONS[topic]
-  if (!section) return TRIOS_INFO
+	const section = TOPIC_SECTIONS[topic];
+	if (!section) return TRIOS_INFO;
 
-  const startIdx = TRIOS_INFO.indexOf(section.start)
-  if (startIdx === -1) return TRIOS_INFO
+	const startIdx = TRIOS_INFO.indexOf(section.start);
+	if (startIdx === -1) return TRIOS_INFO;
 
-  const endIdx = section.end ? TRIOS_INFO.indexOf(section.end) : undefined
+	const endIdx = section.end ? TRIOS_INFO.indexOf(section.end) : undefined;
 
-  return endIdx !== undefined && endIdx !== -1
-    ? TRIOS_INFO.slice(startIdx, endIdx).trim()
-    : TRIOS_INFO.slice(startIdx).trim()
+	return endIdx !== undefined && endIdx !== -1
+		? TRIOS_INFO.slice(startIdx, endIdx).trim()
+		: TRIOS_INFO.slice(startIdx).trim();
 }
 
 export const trios_info = defineAssistantTool({
-  name: 'trios_info',
-  description:
-    'Get information about BrowserOS features, capabilities, and documentation links. Use when users ask "What is BrowserOS?", "What can BrowserOS do?", or about specific features.',
-  input: z.object({
-    topic: z
-      .enum(VALID_TOPICS)
-      .optional()
-      .default('overview')
-      .describe(
-        'Specific topic to get info about. Use "overview" for general questions.',
-      ),
-  }),
-  output: z.object({
-    topic: z.enum(VALID_TOPICS),
-    content: z.string(),
-  }),
-  handler: async (args, _ctx, response) => {
-    const content = args.topic ? getTopicContent(args.topic) : TRIOS_INFO
-    response.text(content)
-    response.data({ topic: args.topic, content })
-  },
-})
+	name: "trios_info",
+	description:
+		'Get information about BrowserOS features, capabilities, and documentation links. Use when users ask "What is BrowserOS?", "What can BrowserOS do?", or about specific features.',
+	input: z.object({
+		topic: z
+			.enum(VALID_TOPICS)
+			.optional()
+			.default("overview")
+			.describe(
+				'Specific topic to get info about. Use "overview" for general questions.',
+			),
+	}),
+	output: z.object({
+		topic: z.enum(VALID_TOPICS),
+		content: z.string(),
+	}),
+	handler: async (args, _ctx, response) => {
+		const content = args.topic ? getTopicContent(args.topic) : TRIOS_INFO;
+		response.text(content);
+		response.data({ topic: args.topic, content });
+	},
+});

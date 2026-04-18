@@ -3,9 +3,9 @@
 // ══ Commands ══
 
 export interface SetInstrumentationBreakpointParams {
-  eventName: string
+	eventName: string;
 }
 
 export interface RemoveInstrumentationBreakpointParams {
-  eventName: string
+	eventName: string;
 }

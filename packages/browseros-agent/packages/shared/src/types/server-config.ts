@@ -8,10 +8,10 @@
  */
 
 export interface ServerDiscoveryConfig {
-  server_port: number
-  url: string
-  server_version: string
-  browseros_version?: string
-  chromium_version?: string
-  trios_id?: string
+	server_port: number;
+	url: string;
+	server_version: string;
+	browseros_version?: string;
+	chromium_version?: string;
+	trios_id?: string;
 }

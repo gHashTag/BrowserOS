@@ -6,41 +6,41 @@
  * Verify Service - Page verification via LLM
  */
 
-import type { LLMConfig } from '@trios/shared/schemas/llm'
-import type { ModelMessage } from 'ai'
-import { LLMClient } from '../../../lib/clients/llm/client'
-import type { Screenshot } from './types'
+import type { LLMConfig } from "@trios/shared/schemas/llm";
+import type { ModelMessage } from "ai";
+import { LLMClient } from "../../../lib/clients/llm/client";
+import type { Screenshot } from "./types";
 
 export interface VerifyOptions {
-  expectation: string
-  screenshot: Screenshot
-  pageContent?: string
-  interactiveElements?: string
-  context?: Record<string, unknown>
-  llmConfig: LLMConfig
-  triosId?: string
+	expectation: string;
+	screenshot: Screenshot;
+	pageContent?: string;
+	interactiveElements?: string;
+	context?: Record<string, unknown>;
+	llmConfig: LLMConfig;
+	triosId?: string;
 }
 
 export interface VerifyResult {
-  success: boolean
-  reason: string
+	success: boolean;
+	reason: string;
 }
 
 export class VerifyService {
-  async verify(options: VerifyOptions): Promise<VerifyResult> {
-    const {
-      expectation,
-      screenshot,
-      pageContent,
-      interactiveElements,
-      context,
-      llmConfig,
-      triosId,
-    } = options
+	async verify(options: VerifyOptions): Promise<VerifyResult> {
+		const {
+			expectation,
+			screenshot,
+			pageContent,
+			interactiveElements,
+			context,
+			llmConfig,
+			triosId,
+		} = options;
 
-    const client = await LLMClient.create(llmConfig, triosId)
+		const client = await LLMClient.create(llmConfig, triosId);
 
-    let textPrompt = `Verify this expectation about the current page:
+		let textPrompt = `Verify this expectation about the current page:
 
 ${expectation}
 
@@ -50,36 +50,36 @@ Your response MUST start with exactly one of these words:
 - SUCCESS - if the expectation is met
 - FAILURE - if the expectation is NOT met
 
-Then explain your reasoning.`
+Then explain your reasoning.`;
 
-    if (context) {
-      textPrompt += `\n\nAdditional context:\n${JSON.stringify(context, null, 2)}`
-    }
-    if (pageContent) {
-      textPrompt += `\n\nPage text content:\n${pageContent}`
-    }
-    if (interactiveElements) {
-      textPrompt += `\n\nInteractive elements:\n${interactiveElements}`
-    }
+		if (context) {
+			textPrompt += `\n\nAdditional context:\n${JSON.stringify(context, null, 2)}`;
+		}
+		if (pageContent) {
+			textPrompt += `\n\nPage text content:\n${pageContent}`;
+		}
+		if (interactiveElements) {
+			textPrompt += `\n\nInteractive elements:\n${interactiveElements}`;
+		}
 
-    const imageUrl = `data:${screenshot.mimeType};base64,${screenshot.data}`
+		const imageUrl = `data:${screenshot.mimeType};base64,${screenshot.data}`;
 
-    const messages: ModelMessage[] = [
-      {
-        role: 'user',
-        content: [
-          { type: 'image', image: imageUrl },
-          { type: 'text', text: textPrompt },
-        ],
-      },
-    ]
+		const messages: ModelMessage[] = [
+			{
+				role: "user",
+				content: [
+					{ type: "image", image: imageUrl },
+					{ type: "text", text: textPrompt },
+				],
+			},
+		];
 
-    const response = await client.generateText(messages)
+		const response = await client.generateText(messages);
 
-    const trimmed = response.trim()
-    const success = /^SUCCESS\b/i.test(trimmed)
-    const reason = trimmed.replace(/^(SUCCESS|FAILURE)\s*/i, '').trim()
+		const trimmed = response.trim();
+		const success = /^SUCCESS\b/i.test(trimmed);
+		const reason = trimmed.replace(/^(SUCCESS|FAILURE)\s*/i, "").trim();
 
-    return { success, reason }
-  }
+		return { success, reason };
+	}
 }

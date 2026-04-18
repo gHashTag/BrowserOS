@@ -3,24 +3,24 @@
  * sensitive patterns. Used in `beforeSend` hooks on both agent and server.
  */
 
-const REDACTED = '[REDACTED]'
+const REDACTED = "[REDACTED]";
 
 const SENSITIVE_KEY_PATTERNS = [
-  'apikey',
-  'api_key',
-  'accesskeyid',
-  'secretaccesskey',
-  'sessiontoken',
-  'authorization',
-  'token',
-  'password',
-  'secret',
-  'credential',
-]
+	"apikey",
+	"api_key",
+	"accesskeyid",
+	"secretaccesskey",
+	"sessiontoken",
+	"authorization",
+	"token",
+	"password",
+	"secret",
+	"credential",
+];
 
 function isSensitiveKey(key: string): boolean {
-  const lower = key.toLowerCase()
-  return SENSITIVE_KEY_PATTERNS.some((p) => lower.includes(p))
+	const lower = key.toLowerCase();
+	return SENSITIVE_KEY_PATTERNS.some((p) => lower.includes(p));
 }
 
 /**
@@ -28,25 +28,25 @@ function isSensitiveKey(key: string): boolean {
  * `[REDACTED]`. Returns a new object — the input is never mutated.
  */
 export function sanitize<T>(obj: T): T {
-  if (obj === null || obj === undefined) return obj
-  if (
-    typeof obj === 'string' ||
-    typeof obj === 'number' ||
-    typeof obj === 'boolean'
-  ) {
-    return obj
-  }
-  if (Array.isArray(obj)) {
-    return obj.map(sanitize) as T
-  }
-  if (typeof obj === 'object') {
-    const result: Record<string, unknown> = {}
-    for (const [key, value] of Object.entries(obj)) {
-      result[key] = isSensitiveKey(key) ? REDACTED : sanitize(value)
-    }
-    return result as T
-  }
-  return obj
+	if (obj === null || obj === undefined) return obj;
+	if (
+		typeof obj === "string" ||
+		typeof obj === "number" ||
+		typeof obj === "boolean"
+	) {
+		return obj;
+	}
+	if (Array.isArray(obj)) {
+		return obj.map(sanitize) as T;
+	}
+	if (typeof obj === "object") {
+		const result: Record<string, unknown> = {};
+		for (const [key, value] of Object.entries(obj)) {
+			result[key] = isSensitiveKey(key) ? REDACTED : sanitize(value);
+		}
+		return result as T;
+	}
+	return obj;
 }
 
 /**
@@ -58,30 +58,30 @@ export function sanitize<T>(obj: T): T {
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Sentry event type varies by SDK
 export function sanitizeEvent<E>(event: E): E {
-  const e = event as Record<string, any>
+	const e = event as Record<string, any>;
 
-  if (Array.isArray(e.breadcrumbs)) {
-    e.breadcrumbs = e.breadcrumbs.map((b: Record<string, unknown>) => ({
-      ...b,
-      data: b.data ? sanitize(b.data) : b.data,
-    }))
-  }
+	if (Array.isArray(e.breadcrumbs)) {
+		e.breadcrumbs = e.breadcrumbs.map((b: Record<string, unknown>) => ({
+			...b,
+			data: b.data ? sanitize(b.data) : b.data,
+		}));
+	}
 
-  if (e.contexts) {
-    e.contexts = sanitize(e.contexts)
-  }
+	if (e.contexts) {
+		e.contexts = sanitize(e.contexts);
+	}
 
-  if (e.extra) {
-    e.extra = sanitize(e.extra)
-  }
+	if (e.extra) {
+		e.extra = sanitize(e.extra);
+	}
 
-  for (const value of e.exception?.values ?? []) {
-    for (const frame of value.stacktrace?.frames ?? []) {
-      if (frame.vars) {
-        frame.vars = sanitize(frame.vars)
-      }
-    }
-  }
+	for (const value of e.exception?.values ?? []) {
+		for (const frame of value.stacktrace?.frames ?? []) {
+			if (frame.vars) {
+				frame.vars = sanitize(frame.vars);
+			}
+		}
+	}
 
-  return event
+	return event;
 }

@@ -15,35 +15,35 @@
  * Matches Chromium defaults in browseros_server_prefs.h
  */
 export const DEFAULT_PORTS = {
-  cdp: 9000,
-  server: 9100,
-  extension: 9300,
-} as const
+	cdp: 9000,
+	server: 9100,
+	extension: 9300,
+} as const;
 
 /**
  * Test ports (base 9005, offset 100)
  * Uses 05 suffix to avoid conflicts with dev server
  */
 export const TEST_PORTS = {
-  cdp: 9005,
-  server: 9105,
-  extension: 9305,
-} as const
+	cdp: 9005,
+	server: 9105,
+	extension: 9305,
+} as const;
 
 /**
  * Development ports (base 9010, offset 100)
  * Offset by 10 from default to avoid conflicts with production
  */
 export const DEV_PORTS = {
-  cdp: 9010,
-  server: 9110,
-  extension: 9310,
-} as const
+	cdp: 9010,
+	server: 9110,
+	extension: 9310,
+} as const;
 
 // OAuth callback port — must match the redirect_uri registered with OpenAI's Codex client ID
-export const OAUTH_CALLBACK_PORT = 1455
+export const OAUTH_CALLBACK_PORT = 1455;
 
 // A2A WebSocket port - separate from main server ports to avoid conflicts
-export const A2A_PORT = 9001
+export const A2A_PORT = 9001;
 
-export type Ports = typeof DEFAULT_PORTS
+export type Ports = typeof DEFAULT_PORTS;

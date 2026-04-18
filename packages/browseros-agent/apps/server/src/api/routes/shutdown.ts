@@ -4,15 +4,15 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { Hono } from 'hono'
+import { Hono } from "hono";
 
 interface ShutdownRouteConfig {
-  onShutdown: () => void
+	onShutdown: () => void;
 }
 
 export function createShutdownRoute(config: ShutdownRouteConfig) {
-  return new Hono().post('/', (c) => {
-    setImmediate(config.onShutdown)
-    return c.json({ status: 'ok' })
-  })
+	return new Hono().post("/", (c) => {
+		setImmediate(config.onShutdown);
+		return c.json({ status: "ok" });
+	});
 }

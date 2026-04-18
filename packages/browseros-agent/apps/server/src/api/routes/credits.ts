@@ -4,33 +4,33 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { Hono } from 'hono'
-import { fetchCredits } from '../../lib/clients/gateway'
-import { logger } from '../../lib/logger'
+import { Hono } from "hono";
+import { fetchCredits } from "../../lib/clients/gateway";
+import { logger } from "../../lib/logger";
 
 interface CreditsDeps {
-  triosId?: string
-  gatewayBaseUrl?: string
+	triosId?: string;
+	gatewayBaseUrl?: string;
 }
 
 export function createCreditsRoutes(deps: CreditsDeps) {
-  const { triosId, gatewayBaseUrl } = deps
+	const { triosId, gatewayBaseUrl } = deps;
 
-  if (!triosId || !gatewayBaseUrl) {
-    return new Hono().all('/*', (c) =>
-      c.json({ error: 'Credits not configured' }, 503),
-    )
-  }
+	if (!triosId || !gatewayBaseUrl) {
+		return new Hono().all("/*", (c) =>
+			c.json({ error: "Credits not configured" }, 503),
+		);
+	}
 
-  return new Hono().get('/', async (c) => {
-    try {
-      const credits = await fetchCredits(gatewayBaseUrl, triosId)
-      return c.json(credits)
-    } catch (error) {
-      logger.error('Failed to fetch credits', {
-        error: error instanceof Error ? error.message : String(error),
-      })
-      return c.json({ error: 'Failed to fetch credits' }, 502)
-    }
-  })
+	return new Hono().get("/", async (c) => {
+		try {
+			const credits = await fetchCredits(gatewayBaseUrl, triosId);
+			return c.json(credits);
+		} catch (error) {
+			logger.error("Failed to fetch credits", {
+				error: error instanceof Error ? error.message : String(error),
+			});
+			return c.json({ error: "Failed to fetch credits" }, 502);
+		}
+	});
 }
