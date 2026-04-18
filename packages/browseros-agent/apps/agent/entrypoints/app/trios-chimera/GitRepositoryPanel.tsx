@@ -9,13 +9,13 @@
 import {
   AlertCircle,
   ArrowDown,
+  ArrowDownToLine,
   ArrowUp,
+  ArrowUpFromLine,
   CheckCircle2,
   FileDiff,
   FileX,
   GitBranch,
-  GitPull,
-  GitPush,
 } from 'lucide-react'
 import type { FC } from 'react'
 import { Badge } from '@/components/ui/badge'
@@ -52,7 +52,7 @@ export const GitRepositoryPanel: FC<GitRepositoryPanelProps> = ({
   const hasUnpulled = status && status.behind > 0
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="space-y-6 p-6">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
@@ -64,7 +64,7 @@ export const GitRepositoryPanel: FC<GitRepositoryPanelProps> = ({
         </CardHeader>
         <CardContent className="space-y-4">
           <div>
-            <div className="flex items-center gap-2 text-sm font-medium mb-2">
+            <div className="mb-2 flex items-center gap-2 font-medium text-sm">
               <GitBranch className="size-4" />
               Branch
             </div>
@@ -102,7 +102,7 @@ export const GitRepositoryPanel: FC<GitRepositoryPanelProps> = ({
               onClick={onPull}
               disabled={!hasUnpulled}
             >
-              <GitPull className="mr-1 size-4" />
+              <ArrowDownToLine className="mr-1 size-4" />
               Pull
             </Button>
             <Button
@@ -111,7 +111,7 @@ export const GitRepositoryPanel: FC<GitRepositoryPanelProps> = ({
               onClick={onPush}
               disabled={!hasUnpushed}
             >
-              <GitPush className="mr-1 size-4" />
+              <ArrowUpFromLine className="mr-1 size-4" />
               Push
             </Button>
             <Button size="sm" onClick={onCommit} disabled={!hasChanges}>
@@ -146,7 +146,7 @@ export const GitRepositoryPanel: FC<GitRepositoryPanelProps> = ({
       {status && status.staged.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <CardTitle className="flex items-center gap-2 font-medium text-sm">
               <FileDiff className="size-4 text-green-600" />
               Staged ({status.staged.length})
             </CardTitle>
@@ -167,7 +167,7 @@ export const GitRepositoryPanel: FC<GitRepositoryPanelProps> = ({
       {status && status.unstaged.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
+            <CardTitle className="flex items-center gap-2 font-medium text-sm">
               <FileDiff className="size-4 text-yellow-600" />
               Unstaged ({status.unstaged.length})
             </CardTitle>
@@ -188,12 +188,12 @@ export const GitRepositoryPanel: FC<GitRepositoryPanelProps> = ({
       {status && status.untracked.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-sm font-medium">
+            <CardTitle className="font-medium text-sm">
               Untracked ({status.untracked.length})
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ul className="space-y-1 text-sm text-muted-foreground">
+            <ul className="space-y-1 text-muted-foreground text-sm">
               {status.untracked.map((file) => (
                 <li key={file} className="truncate">
                   {file}

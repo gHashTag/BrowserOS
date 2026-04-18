@@ -8,7 +8,7 @@
 
 import {
   AlertCircle,
-  GitRepo,
+  FolderGit,
   Loader2,
   RefreshCw,
   TerminalSquare,
@@ -26,21 +26,20 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { AgentTLayout } from './layout/AgentTLayout'
-import { GitStatusPanel } from './panels/GitStatusPanel'
-import { GitActionsPanel } from './panels/GitActionsPanel'
-import { GitHistoryPanel } from './panels/GitHistoryPanel'
-import { TerminalPane } from './layout/TerminalPane'
-import { GitButlerEmbed } from './panels/GitButlerEmbed'
-import type { GitRepository } from './types'
 import { useGitRepositories } from './hooks/useGitOrchestrator'
+import { AgentTLayout } from './layout/AgentTLayout'
+import { TerminalPane } from './layout/TerminalPane'
+import { GitActionsPanel } from './panels/GitActionsPanel'
+import { GitButlerEmbed } from './panels/GitButlerEmbed'
+import { GitHistoryPanel } from './panels/GitHistoryPanel'
+import { GitStatusPanel } from './panels/GitStatusPanel'
 
 type ActivePanel = 'status' | 'history' | 'terminal' | 'gitbutler'
 
 export const AgentTPage: FC = () => {
   const [selectedRepoId, setSelectedRepoId] = useState<string | null>(null)
   const [activePanel, setActivePanel] = useState<ActivePanel>('status')
-  const [showGitButler, setShowGitButler] = useState(false)
+  const [_showGitButler, setShowGitButler] = useState(false)
 
   const { data: repositories, isLoading, error, refetch } = useGitRepositories()
 
@@ -83,7 +82,7 @@ export const AgentTPage: FC = () => {
     return (
       <Card className="m-8">
         <CardContent className="flex flex-col items-center gap-4 py-12">
-          <GitRepo className="size-12 text-muted-foreground" />
+          <FolderGit className="size-12 text-muted-foreground" />
           <div className="text-center">
             <h3 className="font-semibold text-lg">No Git repositories found</h3>
             <p className="text-muted-foreground text-sm">
@@ -99,7 +98,7 @@ export const AgentTPage: FC = () => {
     <AgentTLayout
       header={
         <div className="flex items-center gap-4">
-          <h1 className="font-bold text-lg flex items-center gap-2">
+          <h1 className="flex items-center gap-2 font-bold text-lg">
             <TerminalSquare className="size-5" />
             AGENT T
           </h1>
@@ -114,7 +113,7 @@ export const AgentTPage: FC = () => {
               {repositories.map((repo) => (
                 <SelectItem key={repo.id} value={repo.id}>
                   <div className="flex items-center gap-2">
-                    <GitRepo className="size-4" />
+                    <FolderGit className="size-4" />
                     <span className="truncate">{repo.name}</span>
                     {repo.isDirty && (
                       <Badge variant="secondary" className="text-xs">

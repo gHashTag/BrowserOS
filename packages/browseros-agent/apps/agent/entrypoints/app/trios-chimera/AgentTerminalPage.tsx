@@ -8,7 +8,7 @@
 
 import {
   AlertCircle,
-  GitRepo,
+  FolderGit,
   Loader2,
   RefreshCw,
   TerminalSquare,
@@ -18,7 +18,7 @@ import { useEffect, useState } from 'react'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import {
   Select,
   SelectContent,
@@ -26,11 +26,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { GitBranchSelector } from './GitBranchSelector'
 import { GitCommitDialog } from './GitCommitDialog'
 import { GitFileTree } from './GitFileTree'
 import { GitRepositoryPanel } from './GitRepositoryPanel'
-import type { GitRepository } from './git-types'
 import { useGitRepositories } from './useGit'
 
 export const AgentTerminalPage: FC = () => {
@@ -74,7 +72,7 @@ export const AgentTerminalPage: FC = () => {
     return (
       <Card>
         <CardContent className="flex flex-col items-center gap-4 py-12">
-          <GitRepo className="size-12 text-muted-foreground" />
+          <FolderGit className="size-12 text-muted-foreground" />
           <div className="text-center">
             <h3 className="font-semibold text-lg">No Git repositories found</h3>
             <p className="text-muted-foreground text-sm">
@@ -88,10 +86,10 @@ export const AgentTerminalPage: FC = () => {
 
   return (
     <div className="flex h-full">
-      <div className="w-80 border-r bg-muted/10 flex flex-col">
-        <div className="p-4 border-b space-y-4">
+      <div className="flex w-80 flex-col border-r bg-muted/10">
+        <div className="space-y-4 border-b p-4">
           <div className="flex items-center justify-between">
-            <h1 className="font-bold text-lg flex items-center gap-2">
+            <h1 className="flex items-center gap-2 font-bold text-lg">
               <TerminalSquare className="size-5" />
               AGENT T
             </h1>
@@ -111,7 +109,7 @@ export const AgentTerminalPage: FC = () => {
               {repositories.map((repo) => (
                 <SelectItem key={repo.id} value={repo.id}>
                   <div className="flex items-center gap-2">
-                    <GitRepo className="size-4" />
+                    <FolderGit className="size-4" />
                     <span className="truncate">{repo.name}</span>
                     {repo.isDirty && <Badge variant="secondary">dirty</Badge>}
                   </div>
@@ -122,7 +120,7 @@ export const AgentTerminalPage: FC = () => {
         </div>
 
         {selectedRepo && (
-          <div className="p-4 space-y-2">
+          <div className="space-y-2 p-4">
             <div className="flex gap-1">
               <Button
                 variant={activePanel === 'status' ? 'default' : 'ghost'}
@@ -145,31 +143,29 @@ export const AgentTerminalPage: FC = () => {
         )}
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex flex-1 overflow-hidden">
         {selectedRepo && (
-          <>
-            <div className="flex-1 overflow-auto">
-              {activePanel === 'status' ? (
-                <GitRepositoryPanel
-                  repository={selectedRepo}
-                  onBranchChange={(branch) => {}}
-                  onCommit={() => setShowCommitDialog(true)}
-                  onPull={() => {}}
-                  onPush={() => {}}
+          <div className="flex-1 overflow-auto">
+            {activePanel === 'status' ? (
+              <GitRepositoryPanel
+                repository={selectedRepo}
+                onBranchChange={(_branch) => {}}
+                onCommit={() => setShowCommitDialog(true)}
+                onPull={() => {}}
+                onPush={() => {}}
+              />
+            ) : (
+              <div className="p-6">
+                <h2 className="mb-4 font-semibold text-lg">Files</h2>
+                <GitFileTree
+                  repositoryId={selectedRepo.id}
+                  rootPath={selectedRepo.path}
+                  onFileSelect={(_path) => {}}
+                  onStageToggle={(_path) => {}}
                 />
-              ) : (
-                <div className="p-6">
-                  <h2 className="font-semibold text-lg mb-4">Files</h2>
-                  <GitFileTree
-                    repositoryId={selectedRepo.id}
-                    rootPath={selectedRepo.path}
-                    onFileSelect={(path) => console.log('Selected:', path)}
-                    onStageToggle={(path) => console.log('Toggle stage:', path)}
-                  />
-                </div>
-              )}
-            </div>
-          </>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -180,8 +176,7 @@ export const AgentTerminalPage: FC = () => {
           repositoryId={selectedRepo.id}
           stagedFiles={selectedRepo.status?.staged.map((f) => f.path) || []}
           unstagedFiles={selectedRepo.status?.unstaged.map((f) => f.path) || []}
-          onCommit={async (message, files) => {
-            console.log('Commit:', message, files)
+          onCommit={async (_message, _files) => {
             setShowCommitDialog(false)
           }}
         />
