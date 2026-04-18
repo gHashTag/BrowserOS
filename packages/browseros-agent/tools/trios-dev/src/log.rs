@@ -12,6 +12,7 @@ pub fn server(msg: &str) {
     tag_line("server", |s| s.cyan(), msg);
 }
 
+#[allow(dead_code)]
 pub fn agent(msg: &str) {
     tag_line("agent", |s| s.magenta(), msg);
 }

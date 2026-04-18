@@ -30,8 +30,10 @@
     "dark": {
       "background":  { "$value": "{color.black.0}",    "$type": "color" },
       "card":        { "$value": "{color.black.40}",   "$type": "color" },
+      "cardForeground": { "$value": "{color.black.800}", "$type": "color" },
       "muted":       { "$value": "{color.black.80}",   "$type": "color" },
       "accent":      { "$value": "{color.black.80}",   "$type": "color" },
+      "accentForeground": { "$value": "{color.black.800}", "$type": "color" },
       "border":      { "$value": "{color.black.120}",  "$type": "color" },
       "input":       { "$value": "{color.black.120}",  "$type": "color" },
       "foreground":  { "$value": "{color.black.800}",  "$type": "color" },
@@ -46,8 +48,13 @@
       "sidebar":         { "$value": "{color.black.0}",   "$type": "color" },
       "sidebarForeground": { "$value": "{color.black.800}", "$type": "color" },
       "sidebarPrimary":  { "$value": "{color.gold.base}",  "$type": "color" },
-      "sidebarBorder":   { "$value": "{color.black.120}",  "$type": "color" },
-      "destructive":     { "$value": "{color.status.error}", "$type": "color" }
+      "sidebarPrimaryForeground": { "$value": "{color.black.80}", "$type": "color" },
+      "sidebarAccent":   { "$value": "{color.black.80}",  "$type": "color" },
+      "sidebarAccentForeground": { "$value": "{color.black.800}", "$type": "color" },
+      "sidebarBorder":   { "$value": "{color.black.120}", "$type": "color" },
+      "sidebarRing":     { "$value": "{color.gold.base}",  "$type": "color" },
+      "destructive":     { "$value": "{color.status.error}", "$type": "color" },
+      "destructiveForeground": { "$value": "{color.black.0}", "$type": "color" }
     },
     "chromium": {
       "colorScheme":    { "$value": "dark",     "$type": "string" },

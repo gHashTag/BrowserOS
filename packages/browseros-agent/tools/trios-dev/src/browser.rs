@@ -1,6 +1,6 @@
 use std::path::Path;
-use std::time::{Duration, Instant};
-use std::thread;
+
+use crate::infrastructure::http::HttpClient;
 
 /// App candidates in probe order.
 /// find_binary() checks /Applications then ~/Applications for each.
@@ -96,21 +96,10 @@ pub fn build_args(cfg: &BrowserArgs) -> anyhow::Result<Vec<String>> {
     Ok(args)
 }
 
-/// Block until CDP /json/version responds or timeout_secs elapses.
-pub fn wait_for_cdp(cdp_port: u16, timeout_secs: u64) -> bool {
+/// Async version: Block until CDP /json/version responds or timeout_secs elapses.
+pub async fn wait_for_cdp(http: &HttpClient, cdp_port: u16, timeout_secs: u64) -> bool {
     let url = format!("http://127.0.0.1:{}/json/version", cdp_port);
-    let deadline = Instant::now() + Duration::from_secs(timeout_secs);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(2))
-        .build()
-        .unwrap_or_default();
-    while Instant::now() < deadline {
-        if client.get(&url).send().is_ok() {
-            return true;
-        }
-        thread::sleep(Duration::from_millis(500));
-    }
-    false
+    http.wait_for_url(&url, timeout_secs).await
 }
 
 /// Verify no hardcoded app paths remain in source (excluding this file).
@@ -171,5 +160,65 @@ fn walk_recursive(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_args_full_mode() {
+        let args = build_args(&BrowserArgs {
+            root: "/tmp/test".into(),
+            cdp_port: 9000,
+            server_port: 9105,
+            extension_port: 9305,
+            user_data_dir: "/tmp/test-data".into(),
+            headless: false,
+            load_dev_extensions: true,
+        })
+        .unwrap();
+
+        // Check CDP port
+        assert!(args.iter().any(|a| a.contains("--remote-debugging-port=9000")));
+        // Check MCP ports
+        assert!(args.iter().any(|a| a.contains("--browseros-mcp-port=9105")));
+        assert!(args.iter().any(|a| a.contains("--browseros-extension-port=9305")));
+        // Check user data dir
+        assert!(args.iter().any(|a| a.contains("--user-data-dir=/tmp/test-data")));
+        // Check dev extension is loaded
+        assert!(args.iter().any(|a| a.contains("--load-extension=/tmp/test/apps/agent/dist/chrome-mv3-dev")));
+    }
+
+    #[test]
+    fn test_build_args_headless() {
+        let args = build_args(&BrowserArgs {
+            root: "/tmp/test".into(),
+            cdp_port: 9000,
+            server_port: 9105,
+            extension_port: 9305,
+            user_data_dir: "/tmp/test-data".into(),
+            headless: true,
+            load_dev_extensions: false,
+        })
+        .unwrap();
+
+        assert!(args.iter().any(|a| a.contains("--headless=new")));
+        // In non-dev mode, logging is enabled instead of extension
+        assert!(args.iter().any(|a| a.contains("--enable-logging=stderr")));
+        assert!(!args.iter().any(|a| a.contains("--load-extension=")));
+    }
+
+    #[test]
+    fn test_candidate_path() {
+        assert_eq!(
+            candidate_path("/Applications", "TRIOS.app", "TRIOS"),
+            "/Applications/TRIOS.app/Contents/MacOS/TRIOS"
+        );
+        assert_eq!(
+            candidate_path("~/Applications", "BrowserOS.app", "BrowserOS"),
+            "~/Applications/BrowserOS.app/Contents/MacOS/BrowserOS"
+        );
     }
 }

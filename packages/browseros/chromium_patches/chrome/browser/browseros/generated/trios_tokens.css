@@ -6,8 +6,10 @@
 .dark {
   --background: oklch(0 0 0);
   --card: oklch(0.04 0 0);
+  --cardForeground: oklch(0.91 0 0);
   --muted: oklch(0.08 0 0);
   --accent: oklch(0.08 0 0);
+  --accentForeground: oklch(0.91 0 0);
   --border: oklch(0.12 0 0);
   --input: oklch(0.12 0 0);
   --foreground: oklch(0.91 0 0);
@@ -22,6 +24,11 @@
   --sidebar: oklch(0 0 0);
   --sidebarForeground: oklch(0.91 0 0);
   --sidebarPrimary: oklch(0.766 0.087 79.2);
+  --sidebarPrimaryForeground: oklch(0.08 0 0);
+  --sidebarAccent: oklch(0.08 0 0);
+  --sidebarAccentForeground: oklch(0.91 0 0);
   --sidebarBorder: oklch(0.12 0 0);
+  --sidebarRing: oklch(0.766 0.087 79.2);
   --destructive: oklch(0.577 0.245 27.3);
+  --destructiveForeground: oklch(0 0 0);
 }

@@ -1,5 +1,6 @@
 mod browser;
 mod cleanup;
+mod infrastructure;
 mod log;
 mod ports;
 mod proc;
@@ -48,12 +49,13 @@ enum Commands {
     Check,
 }
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Watch { new, manual } => watch::run(new, manual),
-        Commands::Test { keep, headless, args } => watch::run_test(keep, headless, args),
-        Commands::Cleanup => cleanup::run(),
+        Commands::Watch { new, manual } => watch::run_watch(new, manual).await,
+        Commands::Test { keep, headless, args } => watch::run_test(keep, headless, args).await,
+        Commands::Cleanup => Ok(cleanup::run()?),
         Commands::Check => {
             let root = proc::find_monorepo_root()?;
             let issues = browser::check_rename(&root);

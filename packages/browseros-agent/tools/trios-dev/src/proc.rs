@@ -1,13 +1,18 @@
 use anyhow::{bail, Context, Result};
-use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
-use std::sync::{Arc, Mutex};
-use std::thread;
+use std::process::Stdio;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command as TokioCommand;
+use tokio::sync::Mutex;
+use tokio::time::sleep;
 
 pub struct ManagedProc {
+    #[allow(dead_code)]
     pub tag: String,
-    child: Arc<Mutex<Option<Child>>>,
+    child: Arc<Mutex<Option<tokio::process::Child>>>,
+    #[allow(dead_code)]
     restart: bool,
 }
 
@@ -18,18 +23,22 @@ impl ManagedProc {
         let dir = dir.to_string();
         let cmd = cmd.to_vec();
         let env_vec = env.to_vec();
-        let child_arc: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
+        let child_arc: Arc<Mutex<Option<tokio::process::Child>>> = Arc::new(Mutex::new(None));
         let child_arc2 = child_arc.clone();
         let tag2 = tag.clone();
 
-        thread::spawn(move || {
+        tokio::spawn(async move {
             loop {
                 crate::log::info(&tag2, &format!("Starting: {}", cmd.join(" ")));
-                match spawn_proc(&tag2, &dir, &cmd, &env_vec) {
+                match spawn_proc_async(&tag2, &dir, &cmd, &env_vec).await {
                     Ok(child) => {
-                        *child_arc2.lock().unwrap() = Some(child);
-                        if let Some(ref mut c) = *child_arc2.lock().unwrap() {
-                            let _ = c.wait();
+                        // Store the child
+                        *child_arc2.lock().await = Some(child);
+
+                        // Wait for child to exit - take it out first to avoid holding lock across await
+                        let child_opt = child_arc2.lock().await.take();
+                        if let Some(mut child) = child_opt {
+                            let _ = child.wait().await;
                         }
                         crate::log::info(&tag2, "Process exited");
                     }
@@ -41,27 +50,33 @@ impl ManagedProc {
                     break;
                 }
                 crate::log::warn(&tag2, "Restarting in 1s...");
-                thread::sleep(std::time::Duration::from_secs(1));
+                sleep(Duration::from_secs(1)).await;
             }
         });
 
         Self { tag, child: child_arc, restart }
     }
 
+    /// Kill the managed process
     pub fn kill(&self) {
-        if let Some(ref mut child) = *self.child.lock().unwrap() {
-            let _ = child.kill();
-        }
+        let handle = tokio::runtime::Handle::try_current()
+            .expect("no tokio runtime running; kill() must be called from within a tokio runtime");
+        handle.block_on(async {
+            if let Some(mut child) = self.child.lock().await.take() {
+                let _ = child.kill().await;
+            }
+        });
     }
 }
 
-fn spawn_proc(
+/// Async version of spawn_proc
+async fn spawn_proc_async(
     tag: &str,
     dir: &str,
     cmd: &[String],
     env: &[(String, String)],
-) -> Result<Child> {
-    let mut c = Command::new(&cmd[0]);
+) -> Result<tokio::process::Child> {
+    let mut c = TokioCommand::new(&cmd[0]);
     if cmd.len() > 1 {
         c.args(&cmd[1..]);
     }
@@ -76,15 +91,19 @@ fn spawn_proc(
     let tag_err = tag.to_string();
 
     if let Some(stdout) = child.stdout.take() {
-        thread::spawn(move || {
-            for line in BufReader::new(stdout).lines().flatten() {
+        tokio::spawn(async move {
+            let reader = BufReader::new(stdout);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
                 crate::log::info(&tag_out, &line);
             }
         });
     }
     if let Some(stderr) = child.stderr.take() {
-        thread::spawn(move || {
-            for line in BufReader::new(stderr).lines().flatten() {
+        tokio::spawn(async move {
+            let reader = BufReader::new(stderr);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
                 crate::log::info(&tag_err, &line);
             }
         });
@@ -136,4 +155,67 @@ pub fn build_env(cdp: u16, server: u16, ext: u16, node_env: &str) -> Vec<(String
 
         ("NODE_ENV".into(),                  node_env.to_string()),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_env_lowercase() {
+        let env = build_env(9000, 9105, 9305, "development");
+
+        // Server config (lowercase, used by config.ts)
+        assert_eq!(
+            env.iter().find(|(k, _)| k == "trios_CDP_PORT").unwrap().1,
+            "9000"
+        );
+        assert_eq!(
+            env.iter().find(|(k, _)| k == "trios_SERVER_PORT").unwrap().1,
+            "9105"
+        );
+        assert_eq!(
+            env.iter().find(|(k, _)| k == "trios_EXTENSION_PORT").unwrap().1,
+            "9305"
+        );
+    }
+
+    #[test]
+    fn test_build_env_legacy_compat() {
+        let env = build_env(9000, 9105, 9305, "development");
+
+        // Legacy uppercase (Go tool compat)
+        assert!(env.iter().any(|(k, _)| k == "TRIOS_CDP_PORT"));
+        assert!(env.iter().any(|(k, _)| k == "BROWSEROS_CDP_PORT"));
+
+        // Verify values match
+        assert_eq!(
+            env.iter().find(|(k, _)| k == "TRIOS_CDP_PORT").unwrap().1,
+            "9000"
+        );
+        assert_eq!(
+            env.iter().find(|(k, _)| k == "BROWSEROS_SERVER_PORT").unwrap().1,
+            "9105"
+        );
+    }
+
+    #[test]
+    fn test_build_env_vite_config() {
+        let env = build_env(9000, 9105, 9305, "development");
+
+        // VITE_PUBLIC_trios_API is required by wxt.config.ts
+        assert!(env.iter().any(|(k, v)| {
+            k == "VITE_PUBLIC_trios_API" && v == "https://api.browseros.com"
+        }));
+        assert_eq!(
+            env.iter().find(|(k, _)| k == "VITE_TRIOS_SERVER_PORT").unwrap().1,
+            "9105"
+        );
+    }
+
+    #[test]
+    fn test_build_env_node_env() {
+        let env = build_env(1234, 5678, 9012, "test");
+        assert_eq!(env.iter().find(|(k, _)| k == "NODE_ENV").unwrap().1, "test");
+    }
 }

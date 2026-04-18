@@ -1,13 +1,20 @@
+//! Watch orchestrator — manages the full dev lifecycle
+
 use anyhow::Result;
-use std::{thread, time};
 
 use crate::browser::{self, BrowserArgs};
+use crate::infrastructure::http::HttpClient;
 use crate::log;
 use crate::ports::{self, DEFAULT_PORTS};
 use crate::proc::{self, ManagedProc};
 
-pub fn run(use_random: bool, manual: bool) -> Result<()> {
+use super::builder::build_agent;
+use super::cdp::wait_for_cdp_ready;
+
+/// Start dev environment with HMR + browser + server
+pub async fn run_watch(use_random: bool, manual: bool) -> Result<()> {
     let root = proc::find_monorepo_root()?;
+    let http = HttpClient::new();
 
     let (ports, _l1, _l2, _l3) = if use_random {
         let (p, l1, l2, l3) = ports::reserve_random()?;
@@ -37,20 +44,12 @@ pub fn run(use_random: bool, manual: bool) -> Result<()> {
     let agent_dir = format!("{}/apps/agent", root);
     let server_dir = format!("{}/apps/server", root);
     let user_data_dir = "/tmp/trios-dev".to_string();
-    std::fs::create_dir_all(&user_data_dir).ok();
+    tokio::fs::create_dir_all(&user_data_dir).await.ok();
 
     let mut children: Vec<ManagedProc> = Vec::new();
 
     if manual {
-        log::build("Building agent (dev)...");
-        let status = std::process::Command::new("bun")
-            .args(["--env-file=.env.development", "wxt", "build", "--mode", "development"])
-            .current_dir(&agent_dir)
-            .status()?;
-        if !status.success() {
-            anyhow::bail!("Agent build failed");
-        }
-        log::build("Agent built");
+        build_agent(&agent_dir).await?;
 
         let browser_args = browser::build_args(&BrowserArgs {
             root: root.clone(),
@@ -76,11 +75,8 @@ pub fn run(use_random: bool, manual: bool) -> Result<()> {
     }
 
     // Wait for CDP before starting server
-    log::server("Waiting for CDP...");
-    if browser::wait_for_cdp(ports.cdp, 60) {
-        log::server("CDP ready");
-    } else {
-        log::warn("server", "CDP not available after 60s — check TRIOS.app/BrowserOS.app is installed");
+    if let Err(e) = wait_for_cdp_ready(&http, ports.cdp, 60).await {
+        log::warn("server", &e.to_string());
     }
 
     let server_cmd = vec![
@@ -93,7 +89,7 @@ pub fn run(use_random: bool, manual: bool) -> Result<()> {
         "server", &server_dir, &server_cmd, &env, true,
     ));
 
-    ctrlc_wait();
+    ctrlc_wait().await;
 
     log::info("info", "Shutting down...");
     for c in &children {
@@ -102,8 +98,10 @@ pub fn run(use_random: bool, manual: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn run_test(keep: bool, headless: bool, extra_args: Vec<String>) -> Result<()> {
+/// Run test environment: start server + browser, run bun test, clean up
+pub async fn run_test(keep: bool, headless: bool, extra_args: Vec<String>) -> Result<()> {
     let root = proc::find_monorepo_root()?;
+    let http = HttpClient::new();
 
     log::info("info", "Killing test ports...");
     ports::kill_defaults();
@@ -122,18 +120,7 @@ pub fn run_test(keep: bool, headless: bool, extra_args: Vec<String>) -> Result<(
     let server_proc = ManagedProc::start("server", &root, &server_cmd, &env, false);
 
     let health_url = format!("http://127.0.0.1:{}/health", p.server);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build()
-        .unwrap_or_default();
-    let mut ready = false;
-    for _ in 0..30 {
-        if client.get(&health_url).send().is_ok() {
-            ready = true;
-            break;
-        }
-        thread::sleep(time::Duration::from_secs(1));
-    }
+    let ready = http.wait_for_url(&health_url, 30).await;
     if !ready {
         server_proc.kill();
         anyhow::bail!("Server failed to start on port {}", p.server);
@@ -141,7 +128,7 @@ pub fn run_test(keep: bool, headless: bool, extra_args: Vec<String>) -> Result<(
     log::server("Server ready");
 
     let tmp_dir = std::env::temp_dir().join("trios-test");
-    std::fs::create_dir_all(&tmp_dir).ok();
+    tokio::fs::create_dir_all(&tmp_dir).await.ok();
     let user_data_dir = tmp_dir.to_str().unwrap_or("/tmp/trios-test").to_string();
 
     let browser_args = browser::build_args(&BrowserArgs {
@@ -155,7 +142,7 @@ pub fn run_test(keep: bool, headless: bool, extra_args: Vec<String>) -> Result<(
     })?;
     let browser_proc = ManagedProc::start("browser", &root, &browser_args, &env, false);
 
-    if !browser::wait_for_cdp(p.cdp, 60) {
+    if !browser::wait_for_cdp(&http, p.cdp, 60).await {
         server_proc.kill();
         browser_proc.kill();
         anyhow::bail!("CDP failed on port {}", p.cdp);
@@ -166,17 +153,18 @@ pub fn run_test(keep: bool, headless: bool, extra_args: Vec<String>) -> Result<(
     bun_args.extend(extra_args);
     log::test_log(&format!("Running: bun {}", bun_args.join(" ")));
 
-    let status = std::process::Command::new("bun")
+    let status = tokio::process::Command::new("bun")
         .args(&bun_args)
         .current_dir(&root)
         .envs(env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
-        .status()?;
+        .status()
+        .await?;
 
     server_proc.kill();
     browser_proc.kill();
 
     if !keep {
-        let _ = std::fs::remove_dir_all(&user_data_dir);
+        let _ = tokio::fs::remove_dir_all(&user_data_dir).await;
     }
 
     if !status.success() {
@@ -187,8 +175,23 @@ pub fn run_test(keep: bool, headless: bool, extra_args: Vec<String>) -> Result<(
     Ok(())
 }
 
-fn ctrlc_wait() {
-    let (tx, rx) = std::sync::mpsc::channel();
-    ctrlc::set_handler(move || { let _ = tx.send(()); }).ok();
-    let _ = rx.recv();
+async fn ctrlc_wait() {
+    let tx = std::sync::Arc::new(std::sync::Mutex::new(Some(())));
+    let tx2 = tx.clone();
+    ctrlc::set_handler(move || {
+        if let Ok(mut guard) = tx2.lock() {
+            *guard = None;
+        }
+    }).ok();
+
+    // Spin until ctrlc sets the flag to None
+    loop {
+        {
+            let guard = tx.lock().unwrap();
+            if guard.is_none() {
+                break;
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
 }

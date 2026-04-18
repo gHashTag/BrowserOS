@@ -29,8 +29,10 @@ constexpr SkColor kColorStatusWarning = 0xFFF39C12;  // #F39C12
 // Semantic colors — dark theme
 constexpr SkColor kThemeDarkBackground = 0xFF000000;  // #000000
 constexpr SkColor kThemeDarkCard = 0xFF0A0A0A;  // #0A0A0A
+constexpr SkColor kThemeDarkCardForeground = 0xFFE5E5E5;  // #E5E5E5
 constexpr SkColor kThemeDarkMuted = 0xFF141414;  // #141414
 constexpr SkColor kThemeDarkAccent = 0xFF141414;  // #141414
+constexpr SkColor kThemeDarkAccentForeground = 0xFFE5E5E5;  // #E5E5E5
 constexpr SkColor kThemeDarkBorder = 0xFF1F1F1F;  // #1F1F1F
 constexpr SkColor kThemeDarkInput = 0xFF1F1F1F;  // #1F1F1F
 constexpr SkColor kThemeDarkForeground = 0xFFE5E5E5;  // #E5E5E5
@@ -45,8 +47,13 @@ constexpr SkColor kThemeDarkRing = 0xFFD1AD72;  // #D1AD72
 constexpr SkColor kThemeDarkSidebar = 0xFF000000;  // #000000
 constexpr SkColor kThemeDarkSidebarForeground = 0xFFE5E5E5;  // #E5E5E5
 constexpr SkColor kThemeDarkSidebarPrimary = 0xFFD1AD72;  // #D1AD72
+constexpr SkColor kThemeDarkSidebarPrimaryForeground = 0xFF141414;  // #141414
+constexpr SkColor kThemeDarkSidebarAccent = 0xFF141414;  // #141414
+constexpr SkColor kThemeDarkSidebarAccentForeground = 0xFFE5E5E5;  // #E5E5E5
 constexpr SkColor kThemeDarkSidebarBorder = 0xFF1F1F1F;  // #1F1F1F
+constexpr SkColor kThemeDarkSidebarRing = 0xFFD1AD72;  // #D1AD72
 constexpr SkColor kThemeDarkDestructive = 0xFFE74C3C;  // #E74C3C
+constexpr SkColor kThemeDarkDestructiveForeground = 0xFF000000;  // #000000
 
 // Chromium theme defaults
 constexpr int kDefaultColorScheme = 2;  // BrowserColorScheme::kDark
