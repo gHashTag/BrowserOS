@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -28,7 +28,6 @@ impl ManagedProc {
                 match spawn_proc(&tag2, &dir, &cmd, &env_vec) {
                     Ok(child) => {
                         *child_arc2.lock().unwrap() = Some(child);
-                        // wait for exit
                         if let Some(ref mut c) = *child_arc2.lock().unwrap() {
                             let _ = c.wait();
                         }
@@ -111,16 +110,25 @@ pub fn find_monorepo_root() -> Result<String> {
 }
 
 /// Build environment variables for child processes.
+/// IMPORTANT: config.ts reads lowercase prefix: trios_CDP_PORT, trios_SERVER_PORT, trios_EXTENSION_PORT
+/// UPPERCASE variants (TRIOS_*) are kept for legacy Go tool compatibility only.
 pub fn build_env(cdp: u16, server: u16, ext: u16, node_env: &str) -> Vec<(String, String)> {
     vec![
-        ("BROWSEROS_CDP_PORT".into(), cdp.to_string()),
+        // Canonical names read by config.ts (lowercase prefix)
+        ("trios_CDP_PORT".into(),       cdp.to_string()),
+        ("trios_SERVER_PORT".into(),    server.to_string()),
+        ("trios_EXTENSION_PORT".into(), ext.to_string()),
+        ("trios_ALLOW_NO_CDP".into(),   "0".into()),
+        // Legacy uppercase variants (kept for any remaining Go/shell references)
+        ("TRIOS_CDP_PORT".into(),       cdp.to_string()),
+        ("TRIOS_SERVER_PORT".into(),    server.to_string()),
+        ("TRIOS_EXTENSION_PORT".into(), ext.to_string()),
+        ("BROWSEROS_CDP_PORT".into(),   cdp.to_string()),
         ("BROWSEROS_SERVER_PORT".into(), server.to_string()),
         ("BROWSEROS_EXTENSION_PORT".into(), ext.to_string()),
-        ("TRIOS_CDP_PORT".into(), cdp.to_string()),
-        ("TRIOS_SERVER_PORT".into(), server.to_string()),
-        ("TRIOS_EXTENSION_PORT".into(), ext.to_string()),
+        // Vite public vars for agent build
+        ("VITE_TRIOS_SERVER_PORT".into(),    server.to_string()),
         ("VITE_BROWSEROS_SERVER_PORT".into(), server.to_string()),
-        ("VITE_TRIOS_SERVER_PORT".into(), server.to_string()),
         ("NODE_ENV".into(), node_env.to_string()),
     ]
 }
