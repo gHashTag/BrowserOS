@@ -2,6 +2,48 @@
 
 Requires: `trios-dev watch --manual` (CDP on 127.0.0.1:9000)
 
+---
+
+## ⚠️ BLOCKER: CDP Version Mismatch
+
+**Status:** `Browser.getTabs()` — command not found at runtime
+
+**Root cause:** CDP protocol codegen does not match actual Chromium version in BrowserOS.
+The TypeScript types were generated from a different CDP spec than what the bundled Chromium exposes.
+
+**Fix options (pick one):**
+
+### Option A — Regen CDP types from live Chromium (recommended)
+```bash
+# 1. Start BrowserOS with CDP exposed
+trios-dev watch --manual
+
+# 2. Fetch actual protocol from running instance
+curl http://127.0.0.1:9000/json/protocol > /tmp/actual-protocol.json
+
+# 3. Compare with codegen source
+diff /tmp/actual-protocol.json packages/browseros-agent/apps/server/src/cdp/protocol.json
+
+# 4. Replace and regenerate types
+cp /tmp/actual-protocol.json packages/browseros-agent/apps/server/src/cdp/protocol.json
+bun run codegen  # or whatever the cdp type gen script is
+```
+
+### Option B — Replace Browser.getTabs() with Target.getTargets()
+`Browser.getTabs()` is non-standard. The standard CDP equivalent is:
+```typescript
+// Instead of: Browser.getTabs()
+// Use: Target.getTargets({ filter: [{ type: 'page' }] })
+const { targetInfos } = await cdp.Target.getTargets({
+  filter: [{ type: 'page' }]
+});
+```
+This is available in all Chromium versions.
+
+**Affected tools:** All tools that enumerate tabs (switch_tab, close_tab, get_windows, etc.)
+
+---
+
 ## 🔴 P0 — Navigation (8)
 - [ ] navigate
 - [ ] go_back
