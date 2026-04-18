@@ -1,6 +1,6 @@
 use anyhow::{bail, Context, Result};
 use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -110,25 +110,30 @@ pub fn find_monorepo_root() -> Result<String> {
 }
 
 /// Build environment variables for child processes.
-/// IMPORTANT: config.ts reads lowercase prefix: trios_CDP_PORT, trios_SERVER_PORT, trios_EXTENSION_PORT
-/// UPPERCASE variants (TRIOS_*) are kept for legacy Go tool compatibility only.
+/// config.ts reads lowercase prefix: trios_CDP_PORT, trios_SERVER_PORT, trios_EXTENSION_PORT
+/// wxt.config.ts requires VITE_PUBLIC_trios_API (non-null assertion — crashes if missing)
 pub fn build_env(cdp: u16, server: u16, ext: u16, node_env: &str) -> Vec<(String, String)> {
     vec![
-        // Canonical names read by config.ts (lowercase prefix)
-        ("trios_CDP_PORT".into(),       cdp.to_string()),
-        ("trios_SERVER_PORT".into(),    server.to_string()),
-        ("trios_EXTENSION_PORT".into(), ext.to_string()),
-        ("trios_ALLOW_NO_CDP".into(),   "0".into()),
-        // Legacy uppercase variants (kept for any remaining Go/shell references)
-        ("TRIOS_CDP_PORT".into(),       cdp.to_string()),
-        ("TRIOS_SERVER_PORT".into(),    server.to_string()),
-        ("TRIOS_EXTENSION_PORT".into(), ext.to_string()),
-        ("BROWSEROS_CDP_PORT".into(),   cdp.to_string()),
-        ("BROWSEROS_SERVER_PORT".into(), server.to_string()),
-        ("BROWSEROS_EXTENSION_PORT".into(), ext.to_string()),
-        // Vite public vars for agent build
+        // === Server config (config.ts reads these) ===
+        ("trios_CDP_PORT".into(),            cdp.to_string()),
+        ("trios_SERVER_PORT".into(),         server.to_string()),
+        ("trios_EXTENSION_PORT".into(),      ext.to_string()),
+        ("trios_ALLOW_NO_CDP".into(),        "0".into()),
+
+        // === Agent build (wxt.config.ts requires these) ===
+        // VITE_PUBLIC_trios_API: required, non-null assertion in wxt.config.ts
+        ("VITE_PUBLIC_trios_API".into(),     "https://api.browseros.com".into()),
         ("VITE_TRIOS_SERVER_PORT".into(),    server.to_string()),
         ("VITE_BROWSEROS_SERVER_PORT".into(), server.to_string()),
-        ("NODE_ENV".into(), node_env.to_string()),
+
+        // === Legacy uppercase (Go tool compat) ===
+        ("TRIOS_CDP_PORT".into(),            cdp.to_string()),
+        ("TRIOS_SERVER_PORT".into(),         server.to_string()),
+        ("TRIOS_EXTENSION_PORT".into(),      ext.to_string()),
+        ("BROWSEROS_CDP_PORT".into(),        cdp.to_string()),
+        ("BROWSEROS_SERVER_PORT".into(),     server.to_string()),
+        ("BROWSEROS_EXTENSION_PORT".into(),  ext.to_string()),
+
+        ("NODE_ENV".into(),                  node_env.to_string()),
     ]
 }
