@@ -13,6 +13,7 @@ import { Sentry } from "../../lib/sentry";
 import type { ToolRegistry } from "../../tools/tool-registry";
 import type { KlavisProxyHandle } from "../services/klavis/strata-proxy";
 import { createMcpServer } from "../services/mcp/mcp-server";
+import type { TriosProxyHandle } from "../services/trios-proxy";
 import type { Env } from "../types";
 
 interface McpRouteDeps {
@@ -22,6 +23,7 @@ interface McpRouteDeps {
 	executionDir: string;
 	resourcesDir: string;
 	klavisProxy?: KlavisProxyHandle | null;
+	triosProxy?: TriosProxyHandle | null;
 }
 
 export function createMcpRoutes(deps: McpRouteDeps) {

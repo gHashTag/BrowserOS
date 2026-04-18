@@ -12,6 +12,7 @@ import {
 	type KlavisProxyHandle,
 	registerKlavisTools,
 } from "../klavis/strata-proxy";
+import { registerTriosTools, type TriosProxyHandle } from "../trios-proxy";
 import { MCP_INSTRUCTIONS } from "./mcp-prompt";
 import { registerTools } from "./register-mcp";
 
@@ -22,6 +23,7 @@ export interface McpServiceDeps {
 	executionDir: string;
 	resourcesDir: string;
 	klavisProxy?: KlavisProxyHandle | null;
+	triosProxy?: TriosProxyHandle | null;
 }
 
 export function createMcpServer(deps: McpServiceDeps): McpServer {
@@ -50,6 +52,11 @@ export function createMcpServer(deps: McpServiceDeps): McpServer {
 	// Register Klavis proxy tools (if connected)
 	if (deps.klavisProxy) {
 		registerKlavisTools(server, deps.klavisProxy);
+	}
+
+	// Register TRIOS proxy tools (if connected)
+	if (deps.triosProxy) {
+		registerTriosTools(server, deps.triosProxy);
 	}
 
 	return server;

@@ -46,6 +46,10 @@ import {
 	type KlavisProxyHandle,
 } from "./services/klavis/strata-proxy";
 import { getPodmanRuntime } from "./services/openclaw/podman-runtime";
+import {
+	connectTriosProxy,
+	type TriosProxyHandle,
+} from "./services/trios-proxy";
 import type { Env, HttpServerConfig } from "./types";
 import { defaultCorsConfig } from "./utils/cors";
 import { requireTrustedAppOrigin } from "./utils/request-auth";
@@ -81,7 +85,7 @@ async function assertPortAvailable(port: number): Promise<void> {
  */
 async function tryListen(
 	port: number,
-	maxRetries: number = 2,
+	maxRetries: number = 3,
 	app: Hono<Env>,
 	host?: string,
 	config?: HttpServerConfig,
@@ -186,6 +190,22 @@ export async function createHttpServer(config: HttpServerConfig) {
 		}
 	}
 
+	// Connect TRIOS proxy (non-blocking: browser tools still work if this fails)
+	let triosProxy: TriosProxyHandle | null = null;
+	const triosMcpUrl = process.env.TRIOS_MCP_URL || "http://localhost:9005/mcp";
+	try {
+		triosProxy = await connectTriosProxy({
+			url: triosMcpUrl,
+		});
+	} catch (error) {
+		logger.warn(
+			"Failed to connect TRIOS proxy, MCP will serve browser tools only",
+			{
+				error: error instanceof Error ? error.message : String(error),
+			},
+		);
+	}
+
 	const clawRoutes = new Hono<Env>()
 		.use("/*", requireTrustedAppOrigin())
 		.route("/", createOpenClawRoutes());
@@ -219,6 +239,11 @@ export async function createHttpServer(config: HttpServerConfig) {
 					tokenManager?.stopCallbackServer();
 					klavisProxy?.close().catch((err) =>
 						logger.warn("Failed to close Klavis proxy transport", {
+							error: err instanceof Error ? err.message : String(err),
+						}),
+					);
+					triosProxy?.close().catch((err) =>
+						logger.warn("Failed to close TRIOS proxy transport", {
 							error: err instanceof Error ? err.message : String(err),
 						}),
 					);
@@ -259,6 +284,7 @@ export async function createHttpServer(config: HttpServerConfig) {
 				executionDir,
 				resourcesDir,
 				klavisProxy,
+				triosProxy,
 			}),
 		)
 		.route(
@@ -326,11 +352,9 @@ export async function createHttpServer(config: HttpServerConfig) {
 		);
 	});
 
-	await assertPortAvailable(port);
-
 	app.route("/terminal", terminalRoutes);
 
-	const { server, didRetry } = await tryListen(port, 2, app, host, config);
+	const { server, didRetry } = await tryListen(port, 3, app, host, config);
 
 	if (didRetry) {
 		logger.info("Server started after port conflict was resolved");
