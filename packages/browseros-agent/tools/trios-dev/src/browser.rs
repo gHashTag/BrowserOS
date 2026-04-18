@@ -2,8 +2,8 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 use std::thread;
 
-/// Relative binary candidates (app_name, binary_name).
-/// find_binary() expands these against known prefixes.
+/// App candidates in probe order.
+/// find_binary() checks /Applications then ~/Applications for each.
 const APP_CANDIDATES: &[(&str, &str)] = &[
     ("TRIOS.app",     "TRIOS"),
     ("BrowserOS.app", "BrowserOS"),
@@ -14,13 +14,14 @@ fn candidate_path(prefix: &str, app: &str, bin: &str) -> String {
     format!("{}/{}/Contents/MacOS/{}", prefix, app, bin)
 }
 
-/// Find the first existing browser binary.
-/// Search order per app: /Applications → ~/Desktop → ~/Applications
+/// Find the first existing Chromium browser binary.
+/// Only checks standard macOS install locations — NOT ~/Desktop.
+/// (~/Desktop/TRIOS.app may be a shell-script launcher, not a Mach-O binary)
 pub fn find_binary() -> anyhow::Result<String> {
     let home = std::env::var("HOME").unwrap_or_default();
+    // NOTE: ~/Desktop intentionally excluded — may contain shell-script launchers
     let prefixes: Vec<String> = vec![
         "/Applications".to_string(),
-        format!("{}/Desktop", home),
         format!("{}/Applications", home),
     ];
 
@@ -39,7 +40,10 @@ pub fn find_binary() -> anyhow::Result<String> {
             prefixes.iter().map(move |p| format!("  {}", candidate_path(p, app, bin)))
         })
         .collect();
-    anyhow::bail!("Browser not found. Tried:\n{}", tried.join("\n"))
+    anyhow::bail!(
+        "Chromium browser not found. Install BrowserOS.app or TRIOS.app to /Applications.\nTried:\n{}",
+        tried.join("\n")
+    )
 }
 
 pub struct BrowserArgs {
