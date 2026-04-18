@@ -47,9 +47,9 @@ class CdpBackend implements ICdpBackend {
 	constructor(config: { port: number }) {
 		this.port = config.port;
 
-		const rawSend: RawSend = (method, params) => this.rawSend(method, params);
-		const rawOn: RawOn = (event, handler) => this.rawOn(event, handler);
-		Object.assign(this, createProtocolApi(rawSend, rawOn));
+		const sendFn: RawSend = (method, params) => this.send(method, params);
+		const onFn: RawOn = (event, handler) => this.on(event, handler);
+		Object.assign(this, createProtocolApi(sendFn, onFn));
 	}
 
 	async connect(): Promise<void> {
@@ -221,7 +221,7 @@ class CdpBackend implements ICdpBackend {
 			let timeoutId: ReturnType<typeof setTimeout> | undefined;
 			try {
 				await Promise.race([
-					this.rawSend("Browser.getVersion"),
+					this.send("Browser.getVersion"),
 					new Promise((_, reject) => {
 						timeoutId = setTimeout(
 							() => reject(new Error("CDP keepalive timeout")),
@@ -356,8 +356,8 @@ class CdpBackend implements ICdpBackend {
 		let cached = this.sessionCache.get(sessionId);
 		if (!cached) {
 			cached = createProtocolApi(
-				(method, params) => this.rawSend(method, params, sessionId),
-				(event, handler) => this.rawOn(event, handler),
+				(method, params) => this.send(method, params, sessionId),
+				(event, handler) => this.on(event, handler),
 			);
 			this.sessionCache.set(sessionId, cached);
 		}
@@ -377,7 +377,7 @@ class CdpBackend implements ICdpBackend {
 		}));
 	}
 
-	private async rawSend(
+	private async send(
 		method: string,
 		params?: Record<string, unknown>,
 		sessionId?: string,
@@ -419,7 +419,7 @@ class CdpBackend implements ICdpBackend {
 		});
 	}
 
-	private rawOn(event: string, handler: (params: unknown) => void): () => void {
+	private on(event: string, handler: (params: unknown) => void): () => void {
 		if (!this.eventHandlers.has(event)) {
 			this.eventHandlers.set(event, []);
 		}
