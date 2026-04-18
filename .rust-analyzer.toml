@@ -1,0 +1,14 @@
+# Rust Analyzer configuration for BrowserOS workspace
+
+# Explicitly set the cargo manifests to scan
+# This prevents workspace detection errors when there are multiple projects
+[general]
+cargo.loadOutDirsFromCheck = false
+checkOnSave.command = "clippy"
+
+# Only analyze trios-dev Rust binary, ignore everything else
+[general]
+cargo.target = "aarch64-apple-darwin"
+
+[cargo]
+features = "all"
