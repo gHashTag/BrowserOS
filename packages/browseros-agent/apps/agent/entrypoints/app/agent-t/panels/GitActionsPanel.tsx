@@ -9,15 +9,14 @@
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
-  Branch,
-  CheckCircle2,
-  GitPull,
-  GitPush,
+  CircleCheck,
+  GitBranch,
+  Package,
   RefreshCw,
-  Stash,
 } from 'lucide-react'
 import type { FC } from 'react'
 import { useState } from 'react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -31,16 +30,16 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import type { GitRepository } from '../types'
 import {
+  useGitBranches,
   useGitCommit,
   useGitCreateBranch,
   useGitDeleteBranch,
   useGitPull,
   useGitPush,
   useGitSwitchBranch,
-  useGitBranches,
 } from '../hooks/useGitOrchestrator'
+import type { GitRepository } from '../types'
 
 interface GitActionsPanelProps {
   repository: GitRepository
@@ -57,7 +56,7 @@ export const GitActionsPanel: FC<GitActionsPanelProps> = ({ repository }) => {
   const pull = useGitPull()
   const push = useGitPush()
   const createBranch = useGitCreateBranch()
-  const deleteBranch = useGitDeleteBranch()
+  const _deleteBranch = useGitDeleteBranch()
   const switchBranch = useGitSwitchBranch()
 
   const status = repository.status
@@ -67,7 +66,7 @@ export const GitActionsPanel: FC<GitActionsPanelProps> = ({ repository }) => {
       status.unstaged.length > 0 ||
       status.untracked.length > 0)
 
-  const hasConflicts = status && status.conflicted.length > 0
+  const _hasConflicts = status && status.conflicted.length > 0
   const hasUnpushed = status && status.ahead > 0
   const hasUnpulled = status && status.behind > 0
 
@@ -75,8 +74,8 @@ export const GitActionsPanel: FC<GitActionsPanelProps> = ({ repository }) => {
     if (!commitMessage.trim()) return
 
     const allFiles = [
-      ...status?.staged.map((f) => f.path) || [],
-      ...status?.unstaged.map((f) => f.path) || [],
+      ...(status?.staged.map((f) => f.path) || []),
+      ...(status?.unstaged.map((f) => f.path) || []),
     ]
 
     await commit.mutateAsync({
@@ -116,7 +115,7 @@ export const GitActionsPanel: FC<GitActionsPanelProps> = ({ repository }) => {
               onClick={() => pull.mutate({ repoId: repository.id })}
               disabled={!hasUnpulled || pull.isPending}
             >
-              <GitPull className="mr-1 size-4" />
+              <ArrowDownToLine className="mr-1 size-4" />
               Pull
             </Button>
             <Button
@@ -125,7 +124,7 @@ export const GitActionsPanel: FC<GitActionsPanelProps> = ({ repository }) => {
               onClick={() => push.mutate({ repoId: repository.id })}
               disabled={!hasUnpushed || push.isPending}
             >
-              <GitPush className="mr-1 size-4" />
+              <ArrowUpFromLine className="mr-1 size-4" />
               Push
             </Button>
           </div>
@@ -136,7 +135,7 @@ export const GitActionsPanel: FC<GitActionsPanelProps> = ({ repository }) => {
             onClick={() => setShowCommitDialog(true)}
             disabled={!hasChanges || commit.isPending}
           >
-            <CheckCircle2 className="mr-1 size-4" />
+            <CircleCheck className="mr-1 size-4" />
             Commit
           </Button>
 
@@ -147,17 +146,12 @@ export const GitActionsPanel: FC<GitActionsPanelProps> = ({ repository }) => {
             onClick={() => setShowBranchDialog(true)}
             disabled={createBranch.isPending}
           >
-            <Branch className="mr-1 size-4" />
+            <GitBranch className="mr-1 size-4" />
             New Branch
           </Button>
 
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full"
-            disabled
-          >
-            <Stash className="mr-1 size-4" />
+          <Button variant="outline" size="sm" className="w-full" disabled>
+            <Package className="mr-1 size-4" />
             Stash
           </Button>
         </CardContent>
@@ -238,7 +232,7 @@ export const GitActionsPanel: FC<GitActionsPanelProps> = ({ repository }) => {
               />
             </div>
             {hasChanges && (
-              <div className="text-sm text-muted-foreground">
+              <div className="text-muted-foreground text-sm">
                 Will commit {status?.staged.length || 0} staged,{' '}
                 {status?.unstaged.length || 0} unstaged, and{' '}
                 {status?.untracked.length || 0} untracked files.
