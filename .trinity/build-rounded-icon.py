@@ -9,8 +9,8 @@ import subprocess
 import tempfile
 from PIL import Image, ImageDraw
 
-SOURCE = "/Users/playra/BrowserOS/assets/trinity-logo-full.jpg"
-APP_DIR = "/Users/playra/Desktop/TRI.app"
+SOURCE = "/Users/playra/BrowserOS/assets/trinity-logo-rounded.png"
+APP_DIR = "/Users/playra/Desktop/TRIOS.app"
 ICON_SIZE = 1024  # Base size for the icon
 
 def create_squircle_mask(size: int, corner_ratio: float = 0.4, n: float = 5.0) -> Image.Image:
