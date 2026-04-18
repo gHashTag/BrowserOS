@@ -1,6 +1,6 @@
 # 66 Unified Tools — Verification Checklist
 
-Requires: `trios-dev --manual` (CDP on 127.0.0.1:9222)
+Requires: `trios-dev watch --manual` (CDP on 127.0.0.1:9000)
 
 ## 🔴 P0 — Navigation (8)
 - [ ] navigate
@@ -44,8 +44,8 @@ Requires: `trios-dev --manual` (CDP on 127.0.0.1:9222)
 - [ ] все вспомогательные tools
 
 ## Smoke test
-curl http://localhost:9105/tools/navigate \
-  -H 'Content-Type: application/json' \
-  -d '{"url":"https://example.com"}'
-
-curl http://localhost:9105/tools/screenshot > /tmp/snap.png && open /tmp/snap.png
+```bash
+# Run P0 tests (navigate + screenshot)
+bun test apps/server/tests/tools/navigation.test.ts
+bun test apps/server/tests/tools/observation.test.ts
+```
