@@ -57,6 +57,17 @@ constexpr SkColor kThemeDarkDestructiveForeground = 0xFF000000;  // #000000
 
 // Chromium theme defaults
 constexpr int kDefaultColorScheme = 2;  // BrowserColorScheme::kDark
+
+// TODO(frame-color): kFrameSeedColor is defined but NOT yet wired into
+// ThemeService. Browser frame stays macOS default gray until fixed.
+//
+// Fix required:
+//   chrome/browser/themes/browser_theme_provider.cc (or equivalent patch)
+//   ThemeService::GetColor(ThemeProperties::COLOR_FRAME_ACTIVE)
+//   must return trios::kFrameSeedColor.
+//
+// Workaround until fixed: run `bun run tokens:apply` + restart BrowserOS.
+// This writes user_color2 / color_scheme2 directly to Preferences.
 constexpr SkColor kFrameSeedColor = kColorBlack0;  // #000000 TOTAL BLACK
 
 }  // namespace trios
