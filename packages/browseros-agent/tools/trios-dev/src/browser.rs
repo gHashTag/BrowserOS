@@ -2,29 +2,44 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 use std::thread;
 
-/// Probe order for the Chromium-based browser binary.
-/// TRIOS.app is the target name after full rebuild.
-/// BrowserOS.app is the current installed name until then.
-const CANDIDATE_BINARIES: &[(&str, &str)] = &[
-    ("/Applications/TRIOS.app/Contents/MacOS/TRIOS", "TRIOS.app"),
-    ("/Applications/BrowserOS.app/Contents/MacOS/BrowserOS", "BrowserOS.app"),
+/// Relative binary candidates (app_name, binary_name).
+/// find_binary() expands these against known prefixes.
+const APP_CANDIDATES: &[(&str, &str)] = &[
+    ("TRIOS.app",     "TRIOS"),
+    ("BrowserOS.app", "BrowserOS"),
 ];
 
-/// Find the first existing browser binary or return an error.
-pub fn find_binary() -> anyhow::Result<&'static str> {
-    for (path, _label) in CANDIDATE_BINARIES {
-        if Path::new(path).exists() {
-            return Ok(path);
+/// Build full binary path: <prefix>/<app>/Contents/MacOS/<bin>
+fn candidate_path(prefix: &str, app: &str, bin: &str) -> String {
+    format!("{}/{}/Contents/MacOS/{}", prefix, app, bin)
+}
+
+/// Find the first existing browser binary.
+/// Search order per app: /Applications → ~/Desktop → ~/Applications
+pub fn find_binary() -> anyhow::Result<String> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let prefixes: Vec<String> = vec![
+        "/Applications".to_string(),
+        format!("{}/Desktop", home),
+        format!("{}/Applications", home),
+    ];
+
+    for (app, bin) in APP_CANDIDATES {
+        for prefix in &prefixes {
+            let path = candidate_path(prefix, app, bin);
+            if Path::new(&path).exists() {
+                return Ok(path);
+            }
         }
     }
-    anyhow::bail!(
-        "Browser not found. Tried:\n{}",
-        CANDIDATE_BINARIES
-            .iter()
-            .map(|(p, _)| format!("  {}", p))
-            .collect::<Vec<_>>()
-            .join("\n")
-    )
+
+    let tried: Vec<String> = APP_CANDIDATES
+        .iter()
+        .flat_map(|(app, bin)| {
+            prefixes.iter().map(move |p| format!("  {}", candidate_path(p, app, bin)))
+        })
+        .collect();
+    anyhow::bail!("Browser not found. Tried:\n{}", tried.join("\n"))
 }
 
 pub struct BrowserArgs {
@@ -40,7 +55,7 @@ pub struct BrowserArgs {
 /// Build the argv for launching the browser with CDP + dev extension.
 pub fn build_args(cfg: &BrowserArgs) -> anyhow::Result<Vec<String>> {
     let binary = find_binary()?;
-    let mut args = vec![binary.to_string()];
+    let mut args = vec![binary];
 
     if cfg.load_dev_extensions {
         args.push("--no-first-run".into());
@@ -94,15 +109,13 @@ pub fn wait_for_cdp(cdp_port: u16, timeout_secs: u64) -> bool {
     false
 }
 
-/// Verify no hardcoded old app paths remain in source.
-/// Returns list of offending file:line strings.
+/// Verify no hardcoded app paths remain in source (excluding this file).
 pub fn check_rename(root: &str) -> Vec<String> {
-    // Only flag absolute hardcoded paths — not the fallback list in this file
     let patterns = [
         "BrowserOS.app/Contents/MacOS",
         "TRIOS.app/Contents/MacOS",
     ];
-    let skip_files = ["browser.rs"]; // this file intentionally lists both
+    let skip_files = ["browser.rs"];
     let mut issues = Vec::new();
     let exts = ["go", "ts", "tsx", "json", "toml"];
 
@@ -123,8 +136,7 @@ fn walk_files(
     cb: &mut dyn FnMut(&str, usize, &str),
 ) {
     let skip_dirs = ["node_modules", "dist", "target", ".git", "out"];
-    let path = Path::new(dir);
-    walk_recursive(path, exts, &skip_dirs, skip_files, cb);
+    walk_recursive(Path::new(dir), exts, &skip_dirs, skip_files, cb);
 }
 
 fn walk_recursive(
@@ -139,20 +151,18 @@ fn walk_recursive(
         let p = entry.path();
         if p.is_dir() {
             let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-            if skip_dirs.contains(&name) {
-                continue;
+            if !skip_dirs.contains(&name) {
+                walk_recursive(&p, exts, skip_dirs, skip_files, cb);
             }
-            walk_recursive(&p, exts, skip_dirs, skip_files, cb);
         } else if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
             if exts.contains(&ext) {
                 let fname = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                if skip_files.contains(&fname) {
-                    continue;
-                }
-                if let Ok(content) = std::fs::read_to_string(&p) {
-                    let path_str = p.to_str().unwrap_or("");
-                    for (i, line) in content.lines().enumerate() {
-                        cb(path_str, i + 1, line);
+                if !skip_files.contains(&fname) {
+                    if let Ok(content) = std::fs::read_to_string(&p) {
+                        let path_str = p.to_str().unwrap_or("");
+                        for (i, line) in content.lines().enumerate() {
+                            cb(path_str, i + 1, line);
+                        }
                     }
                 }
             }
