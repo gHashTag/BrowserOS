@@ -192,10 +192,12 @@ export async function createHttpServer(config: HttpServerConfig) {
 
 	// Connect TRIOS proxy (non-blocking: browser tools still work if this fails)
 	let triosProxy: TriosProxyHandle | null = null;
-	const triosMcpUrl = process.env.TRIOS_MCP_URL || "http://localhost:9005/mcp";
+	const triosServerUrl =
+		process.env.TRIOS_SERVER_URL || "http://localhost:9005";
 	try {
 		triosProxy = await connectTriosProxy({
-			url: triosMcpUrl,
+			url: triosServerUrl,
+			apiKey: process.env.TRIOS_API_KEY,
 		});
 	} catch (error) {
 		logger.warn(

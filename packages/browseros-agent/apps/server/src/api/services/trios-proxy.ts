@@ -4,8 +4,6 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
@@ -13,6 +11,16 @@ import { jsonSchemaObjectToZodRawShape } from "zod-from-json-schema";
 import { logger } from "../../lib/logger";
 import { metrics } from "../../lib/metrics";
 
+/**
+ * Handle for the TRIOS REST proxy.
+ *
+ * Unlike the Klavis strata-proxy (which uses MCP Streamable HTTP),
+ * trios-server exposes custom REST endpoints:
+ *   POST /mcp/tools/list  → ListToolsResult
+ *   POST /mcp/tools/call  → CallToolResult
+ *
+ * This proxy uses plain fetch() to call those endpoints directly.
+ */
 export interface TriosProxyHandle {
 	tools: Tool[];
 	inputSchemas: Map<string, Record<string, never>>;
@@ -24,22 +32,40 @@ export interface TriosProxyHandle {
 }
 
 interface ConnectDeps {
+	/** Base URL of trios-server, e.g. "http://localhost:9005" */
 	url: string;
+	/** Optional Bearer token (from TRIOS_API_KEY env var) */
+	apiKey?: string;
 }
 
-// One-time async setup: connect to trios-server and discover tools
+// One-time async setup: discover tools from trios-server REST API
 export async function connectTriosProxy(
 	deps: ConnectDeps,
 ): Promise<TriosProxyHandle> {
-	// Connect MCP client to trios-server endpoint
-	const client = new Client({
-		name: "browseros-trios-proxy",
-		version: "1.0.0",
-	});
-	const transport = new StreamableHTTPClientTransport(new URL(deps.url));
-	await client.connect(transport);
+	const baseUrl = deps.url.replace(/\/+$/, ""); // trim trailing slashes
 
-	const { tools } = await client.listTools();
+	const headers: Record<string, string> = {
+		"Content-Type": "application/json",
+	};
+	if (deps.apiKey) {
+		headers["Authorization"] = `Bearer ${deps.apiKey}`;
+	}
+
+	// Fetch tool list from trios-server REST endpoint
+	const listResponse = await fetch(`${baseUrl}/mcp/tools/list`, {
+		method: "POST",
+		headers,
+		body: "{}",
+	});
+
+	if (!listResponse.ok) {
+		throw new Error(
+			`TRIOS proxy list tools failed: ${listResponse.status} ${listResponse.statusText}`,
+		);
+	}
+
+	const listResult = (await listResponse.json()) as { tools: Tool[] };
+	const tools = listResult.tools;
 
 	// Pre-compute Zod schemas once so registerTriosTools avoids per-request conversion.
 	const inputSchemas = new Map(
@@ -52,16 +78,30 @@ export async function connectTriosProxy(
 	);
 
 	logger.info("TRIOS proxy connected", {
-		url: deps.url,
+		url: baseUrl,
 		toolCount: tools.length,
 	});
 
 	return {
 		tools,
 		inputSchemas,
-		callTool: (name, args) =>
-			client.callTool({ name, arguments: args }) as Promise<CallToolResult>,
-		close: () => client.close(),
+		callTool: async (name, args) => {
+			const response = await fetch(`${baseUrl}/mcp/tools/call`, {
+				method: "POST",
+				headers,
+				body: JSON.stringify({ name, arguments: args }),
+			});
+
+			if (!response.ok) {
+				throw new Error(
+					`TRIOS proxy call tool "${name}" failed: ${response.status} ${response.statusText}`,
+				);
+			}
+
+			return (await response.json()) as CallToolResult;
+		},
+		// No persistent connection to close for REST-based proxy
+		close: async () => {},
 	};
 }
 

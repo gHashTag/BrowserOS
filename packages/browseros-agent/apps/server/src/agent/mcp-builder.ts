@@ -62,19 +62,6 @@ export async function buildMcpServerSpecs(
 		}
 	}
 
-	// Built-in TRIOS Server (Rust, port 9005)
-	// Note: trios-server uses custom REST endpoints, not MCP Streamable HTTP.
-	// Connection will fail gracefully if server is not running.
-	const triosPort = process.env.TRIOS_SERVER_PORT || "9005";
-	specs.push({
-		name: "trios-server",
-		url: `http://localhost:${triosPort}`,
-		transport: "streamable-http",
-		headers: process.env.TRIOS_API_KEY
-			? { Authorization: `Bearer ${process.env.TRIOS_API_KEY}` }
-			: undefined,
-	});
-
 	// User-provided custom MCP servers
 	if (deps.browserContext?.customMcpServers?.length) {
 		const servers = deps.browserContext.customMcpServers;
