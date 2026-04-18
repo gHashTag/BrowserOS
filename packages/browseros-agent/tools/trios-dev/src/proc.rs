@@ -1,0 +1,126 @@
+use anyhow::{Context, Result, bail};
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::sync::{Arc, Mutex};
+use std::thread;
+
+pub struct ManagedProc {
+    pub tag: String,
+    child: Arc<Mutex<Option<Child>>>,
+    restart: bool,
+}
+
+impl ManagedProc {
+    /// Spawn process; if restart=true, respawn on exit.
+    pub fn start(tag: &str, dir: &str, cmd: &[String], env: &[(String, String)], restart: bool) -> Self {
+        let tag = tag.to_string();
+        let dir = dir.to_string();
+        let cmd = cmd.to_vec();
+        let env_vec = env.to_vec();
+        let child_arc: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
+        let child_arc2 = child_arc.clone();
+        let tag2 = tag.clone();
+
+        thread::spawn(move || {
+            loop {
+                crate::log::info(&tag2, &format!("Starting: {}", cmd.join(" ")));
+                match spawn_proc(&tag2, &dir, &cmd, &env_vec) {
+                    Ok(child) => {
+                        *child_arc2.lock().unwrap() = Some(child);
+                        // wait for exit
+                        if let Some(ref mut c) = *child_arc2.lock().unwrap() {
+                            let _ = c.wait();
+                        }
+                        crate::log::info(&tag2, "Process exited");
+                    }
+                    Err(e) => {
+                        crate::log::error(&tag2, &format!("Failed to start: {}", e));
+                    }
+                }
+                if !restart {
+                    break;
+                }
+                crate::log::warn(&tag2, "Restarting in 1s...");
+                thread::sleep(std::time::Duration::from_secs(1));
+            }
+        });
+
+        Self { tag, child: child_arc, restart }
+    }
+
+    pub fn kill(&self) {
+        if let Some(ref mut child) = *self.child.lock().unwrap() {
+            let _ = child.kill();
+        }
+    }
+}
+
+fn spawn_proc(
+    tag: &str,
+    dir: &str,
+    cmd: &[String],
+    env: &[(String, String)],
+) -> Result<Child> {
+    let mut c = Command::new(&cmd[0]);
+    if cmd.len() > 1 {
+        c.args(&cmd[1..]);
+    }
+    c.current_dir(dir);
+    for (k, v) in env {
+        c.env(k, v);
+    }
+    c.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = c.spawn().context("spawn failed")?;
+
+    let tag_out = tag.to_string();
+    let tag_err = tag.to_string();
+
+    if let Some(stdout) = child.stdout.take() {
+        thread::spawn(move || {
+            for line in BufReader::new(stdout).lines().flatten() {
+                crate::log::info(&tag_out, &line);
+            }
+        });
+    }
+    if let Some(stderr) = child.stderr.take() {
+        thread::spawn(move || {
+            for line in BufReader::new(stderr).lines().flatten() {
+                crate::log::info(&tag_err, &line);
+            }
+        });
+    }
+    Ok(child)
+}
+
+/// Find monorepo root by walking up from cwd looking for package.json + apps/
+pub fn find_monorepo_root() -> Result<String> {
+    let cwd = std::env::current_dir().context("cannot get cwd")?;
+    let mut dir: &Path = &cwd;
+    loop {
+        let pkg = dir.join("package.json");
+        let apps = dir.join("apps");
+        if pkg.exists() && apps.exists() {
+            return Ok(dir.to_str().unwrap_or("").to_string());
+        }
+        match dir.parent() {
+            Some(p) => dir = p,
+            None => bail!("Cannot find monorepo root from {}", cwd.display()),
+        }
+    }
+}
+
+/// Build environment variables for child processes.
+pub fn build_env(cdp: u16, server: u16, ext: u16, node_env: &str) -> Vec<(String, String)> {
+    vec![
+        ("BROWSEROS_CDP_PORT".into(), cdp.to_string()),
+        ("BROWSEROS_SERVER_PORT".into(), server.to_string()),
+        ("BROWSEROS_EXTENSION_PORT".into(), ext.to_string()),
+        ("TRIOS_CDP_PORT".into(), cdp.to_string()),
+        ("TRIOS_SERVER_PORT".into(), server.to_string()),
+        ("TRIOS_EXTENSION_PORT".into(), ext.to_string()),
+        ("VITE_BROWSEROS_SERVER_PORT".into(), server.to_string()),
+        ("VITE_TRIOS_SERVER_PORT".into(), server.to_string()),
+        ("NODE_ENV".into(), node_env.to_string()),
+    ]
+}

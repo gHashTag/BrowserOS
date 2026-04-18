@@ -1,0 +1,18 @@
+[package]
+name = "trios-dev"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "trios-dev"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1.0"
+clap = { version = "4", features = ["derive"] }
+colored = "2"
+reqwest = { version = "0.12", features = ["blocking"] }
+
+[profile.release]
+opt-level = 3
+strip = true
