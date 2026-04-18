@@ -215,7 +215,6 @@ export class Browser {
 				this.pages.set(pageId, {
 					pageId,
 					targetId: tab.targetId,
-					tabId: 0,
 					url: tab.url,
 					title: tab.title,
 					isActive: tab.attached,
