@@ -17,12 +17,11 @@ pub fn run() -> Result<()> {
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name_str = name.to_str().unwrap_or("");
-            if prefixes.iter().any(|p| name_str.starts_with(p)) {
-                if entry.path().is_dir() {
-                    if fs::remove_dir_all(entry.path()).is_ok() {
-                        removed += 1;
-                    }
-                }
+            if prefixes.iter().any(|p| name_str.starts_with(p))
+                && entry.path().is_dir()
+                && fs::remove_dir_all(entry.path()).is_ok()
+            {
+                removed += 1;
             }
         }
     }

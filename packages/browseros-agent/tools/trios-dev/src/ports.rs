@@ -164,7 +164,7 @@ mod tests {
         let mut rng = rand::thread_rng();
         for _ in 0..10 {
             let port = random_port_in_range(&mut rng, 1000, 2000).unwrap();
-            assert!(port >= 1000 && port < 2000, "Port out of range");
+            assert!((1000..2000).contains(&port), "Port out of range");
         }
     }
 

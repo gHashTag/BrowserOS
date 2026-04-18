@@ -27,8 +27,6 @@ pub async fn build_agent(agent_dir: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[tokio::test]
     async fn test_build_agent_command() {
         // Just verify the command is constructed correctly
