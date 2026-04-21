@@ -70,6 +70,12 @@ import {
 	ungroup_tabs,
 	update_tab_group,
 } from "./tab-groups";
+import {
+	agentChat,
+	agentDispatch,
+	agentList,
+	conversationHistory,
+} from "./agent";
 import { createRegistry } from "./tool-registry";
 import { trios_info } from "./trios-info";
 import {
@@ -169,4 +175,10 @@ export const registry = createRegistry([
 	gitCommit,
 	gitPull,
 	gitPush,
+
+	// Agent Orchestration (4)
+	agentList,
+	agentDispatch,
+	agentChat,
+	conversationHistory,
 ]);
