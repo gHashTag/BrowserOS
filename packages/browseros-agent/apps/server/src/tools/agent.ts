@@ -10,7 +10,8 @@
  */
 
 import { z } from "zod";
-import { defineTool } from "../framework";
+import { defineTool, type ToolContext } from "../framework";
+import { ToolResponse } from "./response";
 import { agentEventBus } from "./agent-bus";
 
 // ============================================================================
@@ -54,6 +55,107 @@ function generateId(): string {
 }
 
 // ============================================================================
+// Exported state access for REST routes (Phase 5)
+// ============================================================================
+
+/** Dispatch a task to an agent — used by both MCP tool and REST endpoint. */
+export function dispatchTask(params: {
+	soulName: string;
+	prompt: string;
+	issue?: number;
+	cwd?: string;
+}): { conversationId: string; accepted: boolean } {
+	const { soulName, prompt, issue } = params;
+
+	if (!agentRegistry.has(soulName)) {
+		agentRegistry.set(soulName, {
+			soulName,
+			status: "busy",
+			endpoint: `agent://${soulName}`,
+			currentIssue: issue,
+			currentTask: prompt,
+			lastHeartbeat: new Date().toISOString(),
+		});
+	} else {
+		const agent = agentRegistry.get(soulName)!;
+		agent.status = "busy";
+		agent.currentTask = prompt;
+		agent.currentIssue = issue;
+		agent.lastHeartbeat = new Date().toISOString();
+	}
+
+	const conversationId = generateId();
+	const now = new Date().toISOString();
+	const conversation: Conversation = {
+		id: conversationId,
+		agentSoulName: soulName,
+		issue,
+		createdAt: now,
+		messages: [
+			{ ts: now, role: "user", soulName: "orchestrator", text: prompt },
+		],
+	};
+	conversations.set(conversationId, conversation);
+
+	// Broadcast dispatch event
+	agentEventBus.publish({
+		type: "agent_dispatched",
+		ts: now,
+		conversationId,
+		soulName,
+		data: { prompt, issue, accepted: true },
+	});
+
+	return { conversationId, accepted: true };
+}
+
+/** Send a message to an existing conversation — used by both MCP tool and REST endpoint. */
+export function sendChatMessage(params: {
+	conversationId: string;
+	message: string;
+	role?: "user" | "orchestrator";
+}): { accepted: boolean; messageId: string; error?: string } {
+	const { conversationId, message, role = "user" } = params;
+
+	const conversation = conversations.get(conversationId);
+	if (!conversation) {
+		return { accepted: false, messageId: "", error: "Conversation not found" };
+	}
+
+	const msgId = `msg-${Date.now()}`;
+	const now = new Date().toISOString();
+	conversation.messages.push({
+		ts: now,
+		role: role === "orchestrator" ? "system" : "user",
+		soulName: role,
+		text: message,
+	});
+
+	// Broadcast chat event
+	agentEventBus.publish({
+		type: "agent_message",
+		ts: now,
+		conversationId,
+		soulName: conversation.agentSoulName,
+		data: { messageId: msgId, role, text: message },
+	});
+
+	return { accepted: true, messageId: msgId };
+}
+
+/** List all registered agents. */
+export function listAgents(): RegisteredAgent[] {
+	return Array.from(agentRegistry.values());
+}
+
+/** Get a conversation by ID. */
+export function getConversation(
+	conversationId: string,
+): Conversation | undefined {
+	return conversations.get(conversationId);
+}
+
+// ============================================================================
 // Tool: agent_list
 // ============================================================================
 
@@ -77,7 +179,7 @@ export const agentList = defineTool({
 		),
 		count: z.number(),
 	}),
-	handler: async (_args, _ctx, response) => {
+	handler: async (_args: unknown, _ctx: ToolContext, response: ToolResponse) => {
 		const agents = Array.from(agentRegistry.values());
 		const data = { agents, count: agents.length };
 		response.text(`Registered agents: ${agents.length}`);
@@ -88,6 +190,8 @@ export const agentList = defineTool({
 // ============================================================================
 // Tool: agent_dispatch
 // ============================================================================
+
+type AgentDispatchArgs = z.infer<ReturnType<typeof agentDispatch>["output"]>;
 
 export const agentDispatch = defineTool({
 	name: "agent_dispatch",
@@ -106,7 +210,11 @@ export const agentDispatch = defineTool({
 		accepted: z.boolean(),
 		queuePosition: z.number().optional(),
 	}),
-	handler: async (args, _ctx, response) => {
+	handler: async (
+		args: { soulName: string; prompt: string; issue?: number; cwd?: string },
+		_ctx: ToolContext,
+		response: ToolResponse,
+	) => {
 		const { soulName, prompt, issue } = args;
 
 		// Register agent if not seen before
@@ -189,8 +297,12 @@ export const agentChat = defineTool({
 		accepted: z.boolean(),
 		messageId: z.string(),
 	}),
-	handler: async (args, _ctx, response) => {
-		const { conversationId, message, role } = args;
+	handler: async (
+		args: { conversationId: string; message: string; role?: string },
+		_ctx: ToolContext,
+		response: ToolResponse,
+	) => {
+		const { conversationId, message, role = "user" } = args;
 
 		const conversation = conversations.get(conversationId);
 		if (!conversation) {
@@ -260,7 +372,11 @@ export const conversationHistory = defineTool({
 		),
 		count: z.number(),
 	}),
-	handler: async (args, _ctx, response) => {
+	handler: async (
+		args: { conversationId: string; since?: string },
+		_ctx: ToolContext,
+		response: ToolResponse,
+	) => {
 		const { conversationId, since } = args;
 
 		const conversation = conversations.get(conversationId);
