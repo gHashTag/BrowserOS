@@ -40,21 +40,22 @@ export const gitCommit = defineTool({
 
 			const hashResult = await $`git rev-parse HEAD`.cwd(path).quiet();
 
-			response.text(
-				JSON.stringify({
-					success: true,
-					hash: hashResult.stdout.toString().trim(),
-				}),
-			);
+			const data = {
+				success: true,
+				hash: hashResult.stdout.toString().trim(),
+			};
+			response.text(JSON.stringify(data));
+			response.data(data);
 		} catch (error) {
 			const errStr = String(error);
+			let data;
 			if (errStr.includes("nothing to commit")) {
-				response.text(
-					JSON.stringify({ success: false, error: "No changes to commit" }),
-				);
+				data = { success: false, error: "No changes to commit" };
 			} else {
-				response.text(JSON.stringify({ success: false, error: errStr }));
+				data = { success: false, error: errStr };
 			}
+			response.text(JSON.stringify(data));
+			response.data(data);
 		}
 	},
 });

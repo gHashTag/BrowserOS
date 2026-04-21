@@ -52,12 +52,19 @@ export const gitUnstageFiles = defineTool({
 			}
 
 			// Return stashed files and count
-			response.json({
+			const result = {
 				unstaged: saveResult.unstaged || [],
 				stashed_count: stashed_count || 0,
-			});
+			};
+			response.text(JSON.stringify(result));
+			response.data(result);
 		} catch (error) {
+			const errResult = {
+				unstaged: [],
+				stashed_count: 0,
+			};
 			response.error(`Failed to unstage files: ${error}`);
+			response.data(errResult);
 		}
 	},
 });

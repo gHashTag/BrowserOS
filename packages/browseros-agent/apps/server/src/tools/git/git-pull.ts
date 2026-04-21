@@ -36,7 +36,9 @@ export const gitPull = defineTool({
 				await $`git pull`.cwd(path).quiet();
 			}
 
-			response.text(JSON.stringify({ success: true }));
+			const okResult = { success: true };
+			response.text(JSON.stringify(okResult));
+			response.data(okResult);
 		} catch (error) {
 			const errStr = String(error);
 			const conflicts: string[] = [];
@@ -55,13 +57,13 @@ export const gitPull = defineTool({
 				}
 			}
 
-			response.text(
-				JSON.stringify({
-					success: false,
-					error: errStr,
-					conflicts: conflicts.length > 0 ? conflicts : undefined,
-				}),
-			);
+			const errResult = {
+				success: false,
+				error: errStr,
+				conflicts: conflicts.length > 0 ? conflicts : undefined,
+			};
+			response.text(JSON.stringify(errResult));
+			response.data(errResult);
 		}
 	},
 });

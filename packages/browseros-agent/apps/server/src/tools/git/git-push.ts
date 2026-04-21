@@ -38,9 +38,13 @@ export const gitPush = defineTool({
 				await $`git push ${forceFlag} ${remote}`.cwd(path).quiet();
 			}
 
-			response.text(JSON.stringify({ success: true }));
+			const result = { success: true };
+			response.text(JSON.stringify(result));
+			response.data(result);
 		} catch (error) {
-			response.text(JSON.stringify({ success: false, error: String(error) }));
+			const result = { success: false, error: String(error) };
+			response.text(JSON.stringify(result));
+			response.data(result);
 		}
 	},
 });

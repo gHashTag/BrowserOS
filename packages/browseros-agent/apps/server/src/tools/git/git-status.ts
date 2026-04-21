@@ -45,8 +45,8 @@ export const gitStatus = defineTool({
 			const porcelain = await $`git status --porcelain`.cwd(path).quiet();
 			const branch = await $`git rev-parse --abbrev-ref HEAD`.cwd(path).quiet();
 
-			const staged: any[] = [];
-			const unstaged: any[] = [];
+			const staged: Array<{ path: string; status: "added" | "modified" | "deleted" | "renamed"; oldPath?: string }> = [];
+			const unstaged: Array<{ path: string; status: "added" | "modified" | "deleted" | "renamed"; oldPath?: string }> = [];
 			const untracked: string[] = [];
 			const conflicted: string[] = [];
 
@@ -73,17 +73,18 @@ export const gitStatus = defineTool({
 				}
 			}
 
-			response.text(
-				JSON.stringify({
-					branch: branch.stdout.toString().trim(),
-					ahead: 0,
-					behind: 0,
-					staged,
-					unstaged,
-					untracked,
-					conflicted,
-				}),
-			);
+			const result = {
+				branch: branch.stdout.toString().trim(),
+				ahead: 0,
+				behind: 0,
+				staged,
+				unstaged,
+				untracked,
+				conflicted,
+			};
+
+			response.text(JSON.stringify(result));
+			response.data(result);
 		} catch (error) {
 			response.error(String(error));
 		}

@@ -32,22 +32,26 @@ export const gitCheckout = defineTool({
 		try {
 			if (restore) {
 				await $`git restore ${target}`.cwd(path).quiet();
-				response.text(JSON.stringify({ success: true }));
+				const result = { success: true };
+				response.text(JSON.stringify(result));
+				response.data(result);
 			} else {
 				await $`git checkout ${target}`.cwd(path).quiet();
 
 				const branch = await $`git rev-parse --abbrev-ref HEAD`
 					.cwd(path)
 					.quiet();
-				response.text(
-					JSON.stringify({
-						success: true,
-						currentBranch: branch.stdout.toString().trim(),
-					}),
-				);
+				const result = {
+					success: true,
+					currentBranch: branch.stdout.toString().trim(),
+				};
+				response.text(JSON.stringify(result));
+				response.data(result);
 			}
 		} catch (error) {
-			response.text(JSON.stringify({ success: false, error: String(error) }));
+			const result = { success: false, error: String(error) };
+			response.text(JSON.stringify(result));
+			response.data(result);
 		}
 	},
 });

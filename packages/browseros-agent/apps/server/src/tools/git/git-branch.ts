@@ -59,33 +59,34 @@ export const gitBranch = defineTool({
 
 				const current = branches.find((b) => b.isCurrent)?.name || "";
 
-				response.text(
-					JSON.stringify({
-						success: true,
-						branches,
-						currentBranch: current,
-					}),
-				);
+				const data = { success: true, branches, currentBranch: current };
+				response.text(JSON.stringify(data));
+				response.data(data);
 			} else if (action === "switch" && branch) {
 				await $`git checkout ${branch}`.cwd(path).quiet();
-				response.text(JSON.stringify({ success: true, currentBranch: branch }));
+				const data = { success: true, currentBranch: branch };
+				response.text(JSON.stringify(data));
+				response.data(data);
 			} else if (action === "create" && branch) {
 				const base = baseBranch || "";
 				await $`git checkout -b ${branch} ${base}`.cwd(path).quiet();
-				response.text(JSON.stringify({ success: true, currentBranch: branch }));
+				const data = { success: true, currentBranch: branch };
+				response.text(JSON.stringify(data));
+				response.data(data);
 			} else if (action === "delete" && branch) {
 				await $`git branch -D ${branch}`.cwd(path).quiet();
-				response.text(JSON.stringify({ success: true }));
+				const data = { success: true };
+				response.text(JSON.stringify(data));
+				response.data(data);
 			} else {
-				response.text(
-					JSON.stringify({
-						success: false,
-						error: "Invalid action or missing branch name",
-					}),
-				);
+				const data = { success: false, error: "Invalid action or missing branch name" };
+				response.text(JSON.stringify(data));
+				response.data(data);
 			}
 		} catch (error) {
-			response.text(JSON.stringify({ success: false, error: String(error) }));
+			const data = { success: false, error: String(error) };
+			response.text(JSON.stringify(data));
+			response.data(data);
 		}
 	},
 });
