@@ -24,6 +24,7 @@ import { Sentry } from "../lib/sentry";
 import { GitOrchestrator } from "../services/git/git-orchestrator";
 import { createA2ARoutes } from "./routes/a2a";
 import { createAgentBridgeRoutes } from "./routes/agent-bridge";
+import { createAgentEventsRoutes } from "./routes/agent-events";
 import { createChatRoutes } from "./routes/chat";
 import { createCreditsRoutes } from "./routes/credits";
 import { createGitRoutes } from "./routes/git";
@@ -290,7 +291,8 @@ export async function createHttpServer(config: HttpServerConfig) {
 				triosId,
 			}),
 		)
-		.route("/claw", clawRoutes);
+		.route("/claw", clawRoutes)
+		.route("/agent-events", createAgentEventsRoutes());
 
 	// Initialize Git Orchestrator and routes
 	const gitOrchestrator = await GitOrchestrator.create({

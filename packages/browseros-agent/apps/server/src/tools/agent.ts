@@ -11,6 +11,7 @@
 
 import { z } from "zod";
 import { defineTool } from "../framework";
+import { agentEventBus } from "./agent-bus";
 
 // ============================================================================
 // In-memory agent registry (Phase 2 will persist to .trinity/)
@@ -145,6 +146,15 @@ export const agentDispatch = defineTool({
 		};
 		conversations.set(conversationId, conversation);
 
+		// Broadcast dispatch event to SSE listeners (Phase 3)
+		agentEventBus.publish({
+			type: "agent_dispatched",
+			ts: new Date().toISOString(),
+			conversationId,
+			soulName,
+			data: { prompt, issue, accepted: true },
+		});
+
 		const data = {
 			conversationId,
 			accepted: true,
@@ -195,11 +205,21 @@ export const agentChat = defineTool({
 
 		// Append message (L21 — append-only)
 		const msgId = `msg-${Date.now()}`;
+		const now = new Date().toISOString();
 		conversation.messages.push({
-			ts: new Date().toISOString(),
+			ts: now,
 			role: role === "orchestrator" ? "system" : "user",
 			soulName: role,
 			text: message,
+		});
+
+		// Broadcast chat message to SSE listeners (Phase 3)
+		agentEventBus.publish({
+			type: "agent_message",
+			ts: now,
+			conversationId,
+			soulName: conversation.agentSoulName,
+			data: { messageId: msgId, role, text: message },
 		});
 
 		const data = {
