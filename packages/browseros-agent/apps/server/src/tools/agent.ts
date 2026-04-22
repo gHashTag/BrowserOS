@@ -10,7 +10,7 @@
  */
 
 import { z } from "zod";
-import { defineTool, type ToolContext } from "../framework";
+import { defineTool, type ToolContext } from "./framework";
 import { ToolResponse } from "./response";
 import { agentEventBus } from "./agent-bus";
 
@@ -191,14 +191,12 @@ export const agentList = defineTool({
 // Tool: agent_dispatch
 // ============================================================================
 
-type AgentDispatchArgs = z.infer<ReturnType<typeof agentDispatch>["output"]>;
-
 export const agentDispatch = defineTool({
 	name: "agent_dispatch",
 	description:
 		"Send a task to a specific agent by soul-name. Creates a conversation, " +
 		"returns conversationId. Task is appended to conversation log (L21 append-only).",
-	approvalCategory: "automation",
+	approvalCategory: "assistant",
 	input: z.object({
 		soulName: z.string().describe("Agent soul-name to dispatch to"),
 		prompt: z.string().describe("Task prompt for the agent"),
@@ -284,7 +282,7 @@ export const agentChat = defineTool({
 	description:
 		"Send a message into an existing conversation. Supports multi-turn. " +
 		"Events stream via /events SSE endpoint for sidepanel observability.",
-	approvalCategory: "automation",
+	approvalCategory: "assistant",
 	input: z.object({
 		conversationId: z.string().describe("Existing conversation ID"),
 		message: z.string().describe("Message text"),
