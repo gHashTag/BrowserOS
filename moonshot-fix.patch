@@ -1,0 +1,40 @@
+diff --git a/packages/browseros-agent/apps/server/src/agent/provider-factory.ts b/packages/browseros-agent/apps/server/src/agent/provider-factory.ts
+index b3e1ccd5..5d0dc2f5 100644
+--- a/packages/browseros-agent/apps/server/src/agent/provider-factory.ts
++++ b/packages/browseros-agent/apps/server/src/agent/provider-factory.ts
+@@ -8,6 +8,7 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+ import { EXTERNAL_URLS } from "@trios/shared/constants/urls";
+ import { LLM_PROVIDERS } from "@trios/shared/schemas/llm";
+ import type { LanguageModel } from "ai";
++import { createMoonshotFetch } from "../lib/clients/llm/moonshot-fetch";
+ import { createCodexFetch } from "../lib/clients/oauth/codex-fetch";
+ import { createCopilotFetch } from "../lib/clients/oauth/copilot-fetch";
+ import { logger } from "../lib/logger";
+@@ -161,6 +162,7 @@ function createMoonshotFactory(
+ 		name: "moonshot",
+ 		baseURL: config.baseUrl,
+ 		apiKey: config.apiKey,
++		fetch: createMoonshotFetch() as typeof globalThis.fetch,
+ 	});
+ }
+ 
+diff --git a/packages/browseros-agent/apps/server/src/lib/clients/llm/provider.ts b/packages/browseros-agent/apps/server/src/lib/clients/llm/provider.ts
+index 5bcc5e2f..0744c9f4 100644
+--- a/packages/browseros-agent/apps/server/src/lib/clients/llm/provider.ts
++++ b/packages/browseros-agent/apps/server/src/lib/clients/llm/provider.ts
+@@ -19,6 +19,7 @@ import type { LanguageModel } from "ai";
+ import { logger } from "../../logger";
+ import { createOpenRouterCompatibleFetch } from "../../openrouter-fetch";
+ import { createTRIOSFetch } from "../../trios-fetch";
++import { createMoonshotFetch } from "./moonshot-fetch";
+ import { createCodexFetch } from "../oauth/codex-fetch";
+ import { createCopilotFetch } from "../oauth/copilot-fetch";
+ import type { ResolvedLLMConfig } from "./types";
+@@ -165,6 +166,7 @@ function createMoonshotModel(config: ResolvedLLMConfig): LanguageModel {
+ 		name: "moonshot",
+ 		baseURL: config.baseUrl,
+ 		apiKey: config.apiKey,
++		fetch: createMoonshotFetch() as typeof globalThis.fetch,
+ 	})(config.model);
+ }
+ 

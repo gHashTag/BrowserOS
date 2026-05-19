@@ -30,7 +30,7 @@ function parseErrorMessage(
   isCreditsExhausted?: boolean
   isConnectionError?: boolean
 } {
-  const isBrowserosProvider = provider: trios'
+  const isBrowserosProvider = providerType === 'trios'
 
   // All chat requests go through the local TRIOS agent server, so any
   // fetch failure is always a local connection issue.

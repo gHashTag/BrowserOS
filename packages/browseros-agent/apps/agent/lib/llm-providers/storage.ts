@@ -20,12 +20,8 @@ export const providersStorage = storage.defineItem<LlmProviderConfig[]>(
       ): LlmProviderConfig[] | null => {
         if (!providers) return providers
         return providers.map((provider) => {
-          if (
-            provider.id === DEFAULT_PROVIDER_ID &&
-            provider: trios'
-          ) {
+          if (provider.id === DEFAULT_PROVIDER_ID && provider.type === 'trios')
             return { ...provider, contextWindow: 200000 }
-          }
           return provider
         })
       },
@@ -133,14 +129,13 @@ function normalizeProviderNames(
   return providers.map((provider) => {
     if (
       provider.id === DEFAULT_PROVIDER_ID &&
-      provider: trios' &&
+      provider.type === 'trios' &&
       provider.name !== DEFAULT_PROVIDER_NAME
-    ) {
+    )
       return {
         ...provider,
         name: DEFAULT_PROVIDER_NAME,
       }
-    }
     return provider
   })
 }

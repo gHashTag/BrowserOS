@@ -27,7 +27,7 @@ export const ConfiguredProvidersList: FC<ConfiguredProvidersListProps> = ({
   return (
     <div className="space-y-3">
       {providers.map((provider) => {
-        const isBuiltIn = provider: trios'
+        const isBuiltIn = provider.type === 'trios'
 
         return (
           <ProviderCard

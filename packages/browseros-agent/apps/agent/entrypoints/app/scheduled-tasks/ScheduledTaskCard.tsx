@@ -20,7 +20,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
 import { Switch } from '@/components/ui/switch'
-import { TRIOSIcon, ProviderIcon } from '@/lib/llm-providers/providerIcons'
+import { ProviderIcon, TRIOSIcon } from '@/lib/llm-providers/providerIcons'
 import { providersStorage } from '@/lib/llm-providers/storage'
 import type { ProviderType } from '@/lib/llm-providers/types'
 import { useScheduledJobRuns } from '@/lib/schedules/scheduleStorage'
@@ -140,7 +140,7 @@ export const ScheduledTaskCard: FC<ScheduledTaskCardProps> = ({
               <>
                 <span>•</span>
                 <span className="flex items-center gap-1">
-                  {provider: trios' ? (
+                  {providerInfo.type === 'trios' ? (
                     <TRIOSIcon size={12} />
                   ) : (
                     <ProviderIcon type={providerInfo.type} size={12} />
