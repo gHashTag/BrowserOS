@@ -17,6 +17,7 @@ import { EXTERNAL_URLS } from "@trios/shared/constants/urls";
 import { LLM_PROVIDERS } from "@trios/shared/schemas/llm";
 import type { LanguageModel } from "ai";
 import { logger } from "../../logger";
+import { createMoonshotFetch } from "../../moonshot-fetch";
 import { createOpenRouterCompatibleFetch } from "../../openrouter-fetch";
 import { createTRIOSFetch } from "../../trios-fetch";
 import { createCodexFetch } from "../oauth/codex-fetch";
@@ -165,6 +166,7 @@ function createMoonshotModel(config: ResolvedLLMConfig): LanguageModel {
 		name: "moonshot",
 		baseURL: config.baseUrl,
 		apiKey: config.apiKey,
+		fetch: createMoonshotFetch(),
 	})(config.model);
 }
 
