@@ -28,7 +28,10 @@ type ProviderFactory = (config: ResolvedLLMConfig) => LanguageModel;
 
 function createAnthropicModel(config: ResolvedLLMConfig): LanguageModel {
 	if (!config.apiKey) throw new Error("Anthropic provider requires apiKey");
-	return createAnthropic({ apiKey: config.apiKey })(config.model);
+	return createAnthropic({
+		apiKey: config.apiKey,
+		...(config.baseUrl && { baseURL: config.baseUrl }),
+	})(config.model);
 }
 
 function createOpenAIModel(config: ResolvedLLMConfig): LanguageModel {

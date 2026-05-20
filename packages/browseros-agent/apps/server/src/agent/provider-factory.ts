@@ -24,7 +24,10 @@ function createAnthropicFactory(
 	config: ResolvedAgentConfig,
 ): (modelId: string) => unknown {
 	if (!config.apiKey) throw new Error("Anthropic provider requires apiKey");
-	return createAnthropic({ apiKey: config.apiKey });
+	return createAnthropic({
+		apiKey: config.apiKey,
+		...(config.baseUrl && { baseURL: config.baseUrl }),
+	});
 }
 
 function createOpenAIFactory(
