@@ -21,13 +21,17 @@ import { createOpenRouterCompatibleFetch } from "../../openrouter-fetch";
 import { createTRIOSFetch } from "../../trios-fetch";
 import { createCodexFetch } from "../oauth/codex-fetch";
 import { createCopilotFetch } from "../oauth/copilot-fetch";
+import { createMoonshotFetch } from "./moonshot-fetch";
 import type { ResolvedLLMConfig } from "./types";
 
 type ProviderFactory = (config: ResolvedLLMConfig) => LanguageModel;
 
 function createAnthropicModel(config: ResolvedLLMConfig): LanguageModel {
 	if (!config.apiKey) throw new Error("Anthropic provider requires apiKey");
-	return createAnthropic({ apiKey: config.apiKey })(config.model);
+	return createAnthropic({
+		apiKey: config.apiKey,
+		...(config.baseUrl && { baseURL: config.baseUrl }),
+	})(config.model);
 }
 
 function createOpenAIModel(config: ResolvedLLMConfig): LanguageModel {
@@ -165,6 +169,7 @@ function createMoonshotModel(config: ResolvedLLMConfig): LanguageModel {
 		name: "moonshot",
 		baseURL: config.baseUrl,
 		apiKey: config.apiKey,
+		fetch: createMoonshotFetch() as typeof globalThis.fetch,
 	})(config.model);
 }
 

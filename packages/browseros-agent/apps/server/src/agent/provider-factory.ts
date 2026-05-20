@@ -8,6 +8,7 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { EXTERNAL_URLS } from "@trios/shared/constants/urls";
 import { LLM_PROVIDERS } from "@trios/shared/schemas/llm";
 import type { LanguageModel } from "ai";
+import { createMoonshotFetch } from "../lib/clients/llm/moonshot-fetch";
 import { createCodexFetch } from "../lib/clients/oauth/codex-fetch";
 import { createCopilotFetch } from "../lib/clients/oauth/copilot-fetch";
 import { logger } from "../lib/logger";
@@ -23,7 +24,10 @@ function createAnthropicFactory(
 	config: ResolvedAgentConfig,
 ): (modelId: string) => unknown {
 	if (!config.apiKey) throw new Error("Anthropic provider requires apiKey");
-	return createAnthropic({ apiKey: config.apiKey });
+	return createAnthropic({
+		apiKey: config.apiKey,
+		...(config.baseUrl && { baseURL: config.baseUrl }),
+	});
 }
 
 function createOpenAIFactory(
@@ -161,6 +165,7 @@ function createMoonshotFactory(
 		name: "moonshot",
 		baseURL: config.baseUrl,
 		apiKey: config.apiKey,
+		fetch: createMoonshotFetch() as typeof globalThis.fetch,
 	});
 }
 
