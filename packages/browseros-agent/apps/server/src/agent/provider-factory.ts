@@ -11,6 +11,7 @@ import type { LanguageModel } from "ai";
 import { createCodexFetch } from "../lib/clients/oauth/codex-fetch";
 import { createCopilotFetch } from "../lib/clients/oauth/copilot-fetch";
 import { logger } from "../lib/logger";
+import { createMoonshotFetch } from "../lib/moonshot-fetch";
 import { createOpenRouterCompatibleFetch } from "../lib/openrouter-fetch";
 import { createTRIOSFetch } from "../lib/trios-fetch";
 import type { ResolvedAgentConfig } from "./types";
@@ -161,6 +162,7 @@ function createMoonshotFactory(
 		name: "moonshot",
 		baseURL: config.baseUrl,
 		apiKey: config.apiKey,
+		fetch: createMoonshotFetch(),
 	});
 }
 
