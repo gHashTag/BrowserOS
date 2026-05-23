@@ -89,8 +89,7 @@ export const providerTemplates: ProviderTemplate[] = [
   enrichTemplate('openai', {
     defaultModelId: 'gpt-5',
     apiKeyUrl: 'https://platform.openai.com/api-keys',
-    setupGuideUrl:
-      'https://docs.trios.com/features/bring-your-own-llm#openai',
+    setupGuideUrl: 'https://docs.trios.com/features/bring-your-own-llm#openai',
   }),
   {
     id: 'openai-compatible',
@@ -103,14 +102,12 @@ export const providerTemplates: ProviderTemplate[] = [
   enrichTemplate('anthropic', {
     defaultModelId: 'claude-sonnet-4-6',
     apiKeyUrl: 'https://console.anthropic.com/settings/keys',
-    setupGuideUrl:
-      'https://docs.trios.com/features/bring-your-own-llm#claude',
+    setupGuideUrl: 'https://docs.trios.com/features/bring-your-own-llm#claude',
   }),
   enrichTemplate('google', {
     defaultModelId: 'gemini-2.5-flash',
     apiKeyUrl: 'https://aistudio.google.com/app/apikey',
-    setupGuideUrl:
-      'https://docs.trios.com/features/bring-your-own-llm#gemini',
+    setupGuideUrl: 'https://docs.trios.com/features/bring-your-own-llm#gemini',
   }),
   {
     id: 'ollama',
@@ -119,8 +116,7 @@ export const providerTemplates: ProviderTemplate[] = [
     defaultModelId: 'llama3.2',
     supportsImages: false,
     contextWindow: 128000,
-    setupGuideUrl:
-      'https://docs.trios.com/features/bring-your-own-llm#ollama',
+    setupGuideUrl: 'https://docs.trios.com/features/bring-your-own-llm#ollama',
   },
   enrichTemplate('openrouter', {
     defaultModelId: 'anthropic/claude-sonnet-4.5',
@@ -147,7 +143,7 @@ export const providerTemplates: ProviderTemplate[] = [
   enrichTemplate('zai', {
     defaultModelId: 'z-ai/glm-5.1',
     apiKeyUrl: 'https://open.bigmodel.cn/usercenter/apikeys',
-    setupGuideUrl: 'https://docs.trios.com/features/bring-your-own-llm#zai',
+    setupGuideUrl: 'https://z.ai/manage-apikey/apikey-list',
   }),
 ]
 

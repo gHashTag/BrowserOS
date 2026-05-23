@@ -6,7 +6,7 @@
 
 import { TIMEOUTS } from "@trios/shared/constants/timeouts";
 import type { LLMConfig } from "@trios/shared/schemas/llm";
-import { streamText } from "ai";
+import { generateText } from "ai";
 import { logger } from "../../logger";
 import { resolveLLMConfig } from "./config";
 import { createLLMProvider } from "./provider";
@@ -41,13 +41,15 @@ export async function testProviderConnection(
 		const resolvedConfig = await resolveLLMConfig(config, triosId);
 		const model = createLLMProvider(resolvedConfig);
 
-		// streamText works for all providers including Codex (which requires streaming)
-		const stream = streamText({
+		// Use generateText for testing to get clear API errors (streamText wraps
+		// APICallError in NoOutputGeneratedError and loses responseBody details).
+		const result = await generateText({
 			model,
 			messages: [{ role: "user", content: TEST_PROMPT }],
+			maxRetries: 0,
 			abortSignal: AbortSignal.timeout(TIMEOUTS.TEST_PROVIDER),
 		});
-		const text = await stream.text;
+		const text = result.text;
 		const responseTime = Math.round(performance.now() - startTime);
 
 		if (text) {
@@ -66,7 +68,7 @@ export async function testProviderConnection(
 		};
 	} catch (error) {
 		const responseTime = Math.round(performance.now() - startTime);
-		const errorMessage = error instanceof Error ? error.message : String(error);
+		const errorMessage = extractProviderErrorMessage(error, config.provider);
 		logger.error("testProviderConnection failed", {
 			provider: config.provider,
 			model: config.model,
@@ -81,4 +83,38 @@ export async function testProviderConnection(
 			responseTime,
 		};
 	}
+}
+
+function extractProviderErrorMessage(
+	error: unknown,
+	_provider: string,
+): string {
+	// Check for API call error with response body (generateText preserves
+	// APICallError directly, so responseBody is available on the error object)
+	if (
+		error != null &&
+		typeof error === "object" &&
+		"responseBody" in error &&
+		typeof (error as { responseBody?: string }).responseBody === "string"
+	) {
+		try {
+			const parsed = JSON.parse(
+				(error as { responseBody: string }).responseBody,
+			);
+			const msg =
+				parsed?.error?.message ||
+				parsed?.message ||
+				parsed?.error?.code ||
+				(error instanceof Error ? error.message : String(error));
+			return msg;
+		} catch {
+			// Not valid JSON, fall through
+		}
+	}
+
+	if (error instanceof Error) {
+		return error.message;
+	}
+
+	return String(error);
 }
