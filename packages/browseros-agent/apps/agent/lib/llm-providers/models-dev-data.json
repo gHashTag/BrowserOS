@@ -2917,54 +2917,43 @@
       }
     ]
   },
-  "z-ai": {
+  "zai": {
     "name": "z.ai",
-    "api": "https://api.z.ai/api/anthropic",
-    "doc": "https://open.bigmodel.cn/docs",
+    "api": "https://api.z.ai/api/coding/paas/v4",
+    "doc": "https://docs.z.ai/guides/llm/glm-4.6",
     "models": [
       {
-        "id": "z-ai/glm-5.1",
-        "name": "GLM-5.1 (latest)",
-        "contextWindow": 1000000,
-        "maxOutput": 131000,
-        "supportsImages": true,
-        "supportsReasoning": true,
-        "supportsToolCall": true,
-        "inputCost": 0.5,
-        "outputCost": 2.4
-      },
-      {
-        "id": "z-ai/glm-5",
-        "name": "GLM-5",
-        "contextWindow": 1000000,
-        "maxOutput": 131000,
-        "supportsImages": true,
-        "supportsReasoning": true,
-        "supportsToolCall": true,
-        "inputCost": 0.5,
-        "outputCost": 2.4
-      },
-      {
-        "id": "z-ai/glm-4.7",
-        "name": "GLM-4.7",
-        "contextWindow": 204800,
+        "id": "glm-4.6",
+        "name": "GLM-4.6",
+        "contextWindow": 200000,
         "maxOutput": 131072,
         "supportsImages": true,
         "supportsReasoning": true,
         "supportsToolCall": true,
-        "inputCost": 0.3,
-        "outputCost": 1.2
+        "inputCost": 0.6,
+        "outputCost": 2.2
       },
       {
-        "id": "z-ai/glm-4.7-flash",
-        "name": "GLM-4.7-Flash",
-        "contextWindow": 200000,
-        "maxOutput": 65535,
+        "id": "glm-4.5",
+        "name": "GLM-4.5",
+        "contextWindow": 128000,
+        "maxOutput": 96000,
+        "supportsImages": true,
+        "supportsReasoning": true,
+        "supportsToolCall": true,
+        "inputCost": 0.6,
+        "outputCost": 2.2
+      },
+      {
+        "id": "glm-4.5-air",
+        "name": "GLM-4.5-Air",
+        "contextWindow": 128000,
+        "maxOutput": 96000,
         "supportsImages": true,
         "supportsReasoning": true,
         "supportsToolCall": true,
         "inputCost": 0.2,
-        "outputCost": 0.8
+        "outputCost": 1.1
       }
     ]
   },

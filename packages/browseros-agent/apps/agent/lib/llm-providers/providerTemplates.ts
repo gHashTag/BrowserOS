@@ -25,11 +25,7 @@ function enrichTemplate(
     setupGuideUrl?: string
   },
 ): ProviderTemplate {
-  // `models-dev-data.json` stores provider models under key `z-ai`,
-  // while our provider type is `zai`.
-  const modelsDevProviderKey = providerId === 'zai' ? 'z-ai' : providerId
-
-  const provider = getModelsDevProvider(modelsDevProviderKey)
+  const provider = getModelsDevProvider(providerId)
   const model = provider?.models.find((m) => m.id === overrides.defaultModelId)
 
   return {
@@ -89,8 +85,7 @@ export const providerTemplates: ProviderTemplate[] = [
   enrichTemplate('openai', {
     defaultModelId: 'gpt-5',
     apiKeyUrl: 'https://platform.openai.com/api-keys',
-    setupGuideUrl:
-      'https://docs.trios.com/features/bring-your-own-llm#openai',
+    setupGuideUrl: 'https://docs.trios.com/features/bring-your-own-llm#openai',
   }),
   {
     id: 'openai-compatible',
@@ -103,14 +98,12 @@ export const providerTemplates: ProviderTemplate[] = [
   enrichTemplate('anthropic', {
     defaultModelId: 'claude-sonnet-4-6',
     apiKeyUrl: 'https://console.anthropic.com/settings/keys',
-    setupGuideUrl:
-      'https://docs.trios.com/features/bring-your-own-llm#claude',
+    setupGuideUrl: 'https://docs.trios.com/features/bring-your-own-llm#claude',
   }),
   enrichTemplate('google', {
     defaultModelId: 'gemini-2.5-flash',
     apiKeyUrl: 'https://aistudio.google.com/app/apikey',
-    setupGuideUrl:
-      'https://docs.trios.com/features/bring-your-own-llm#gemini',
+    setupGuideUrl: 'https://docs.trios.com/features/bring-your-own-llm#gemini',
   }),
   {
     id: 'ollama',
@@ -119,8 +112,7 @@ export const providerTemplates: ProviderTemplate[] = [
     defaultModelId: 'llama3.2',
     supportsImages: false,
     contextWindow: 128000,
-    setupGuideUrl:
-      'https://docs.trios.com/features/bring-your-own-llm#ollama',
+    setupGuideUrl: 'https://docs.trios.com/features/bring-your-own-llm#ollama',
   },
   enrichTemplate('openrouter', {
     defaultModelId: 'anthropic/claude-sonnet-4.5',
@@ -144,11 +136,16 @@ export const providerTemplates: ProviderTemplate[] = [
     setupGuideUrl:
       'https://docs.aws.amazon.com/bedrock/latest/userguide/getting-started.html',
   }),
-  enrichTemplate('zai', {
-    defaultModelId: 'z-ai/glm-5.1',
-    apiKeyUrl: 'https://open.bigmodel.cn/usercenter/apikeys',
-    setupGuideUrl: 'https://docs.trios.com/features/bring-your-own-llm#zai',
-  }),
+  {
+    id: 'zai',
+    name: 'z.ai',
+    defaultBaseUrl: 'https://api.z.ai/api/coding/paas/v4',
+    defaultModelId: 'glm-4.6',
+    supportsImages: true,
+    contextWindow: 200000,
+    apiKeyUrl: 'https://z.ai/manage-apikey/apikey-list',
+    setupGuideUrl: 'https://docs.z.ai/guides/llm/glm-4.6',
+  },
 ]
 
 /**
@@ -192,7 +189,7 @@ export const DEFAULT_BASE_URLS: Record<ProviderType, string> = {
   'github-copilot': 'https://api.githubcopilot.com',
   'qwen-code': 'https://portal.qwen.ai/v1',
   moonshot: 'https://api.moonshot.ai/v1',
-  zai: 'https://api.z.ai/api/anthropic/v1',
+  zai: 'https://api.z.ai/api/coding/paas/v4',
   anthropic: 'https://api.anthropic.com/v1',
   openai: 'https://api.openai.com/v1',
   'openai-compatible': '',

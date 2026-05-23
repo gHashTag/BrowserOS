@@ -97,22 +97,11 @@ function createBedrockModel(config: ResolvedLLMConfig): LanguageModel {
 
 function createZaiModel(config: ResolvedLLMConfig): LanguageModel {
 	if (!config.apiKey) throw new Error("z.ai provider requires apiKey");
-
-	// Strip the "z-ai/" provider prefix — it's used for UI disambiguation
-	// but the Anthropic API expects bare model names (e.g. "glm-5.1").
-	const modelId = config.model.replace(/^z-ai\//, "");
-
-	logger.info("Creating z.ai (zai) model (Anthropic-compatible)", {
-		model: modelId,
-		baseUrl: EXTERNAL_URLS.ZAI_API,
-		hasApiKey: true,
-	});
-
-	// ZAI uses Anthropic-compatible API at api.z.ai/api/anthropic
-	return createAnthropic({
-		baseURL: EXTERNAL_URLS.ZAI_API,
+	return createOpenAICompatible({
+		name: "zai",
+		baseURL: config.baseUrl || EXTERNAL_URLS.ZAI_API,
 		apiKey: config.apiKey,
-	})(modelId);
+	})(config.model);
 }
 
 function createTRIOSModel(config: ResolvedLLMConfig): LanguageModel {
