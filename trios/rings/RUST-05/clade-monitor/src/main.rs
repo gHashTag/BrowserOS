@@ -125,6 +125,247 @@ struct SafetyBudget {
     halted: bool,
 }
 
+/// Durable record of a long-running task managed by the monitor loop. Writing
+/// intent + claim before work and verdict + release after work ensures an
+/// interrupted agent can be resumed or audited, and prevents orphaned markdown
+/// reports without a task_id binding.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct TaskRecord {
+    task_id: String,
+    title: String,
+    agent: String,
+    claim_id: String,
+    spec_path: String,
+    graph_node: String,
+    priority: String,
+    status: String,
+    started_at: String,
+    finished_at: Option<String>,
+    verdict: Option<String>,
+    artifact: Option<String>,
+}
+
+/// Minimal claim shape persisted to `.trinity/claims/active/{resource}.json`.
+#[derive(Serialize, Deserialize, Debug)]
+struct TaskClaim {
+    claim_id: String,
+    agent_id: String,
+    spec_path: String,
+    graph_node: String,
+    task_id: String,
+    acquired_at: String,
+    ttl_sec: u64,
+    expires_at: String,
+    heartbeat_at: String,
+    priority: String,
+}
+
+/// Append a JSONL event to `.trinity/events/akashic-log.jsonl`. This is the
+/// canonical immutable journal used by t27-* agents; it is separate from the
+/// structured `event_log.jsonl` used by Rust rings for operational telemetry.
+fn log_akashic_event(event: &str, agent: &str, task_id: &str, claim_id: &str, details: &str) {
+    let ts = chrono::Utc::now().to_rfc3339();
+    let line = serde_json::json!({
+        "ts": ts,
+        "event": event,
+        "agent": agent,
+        "task_id": task_id,
+        "claim_id": claim_id,
+        "details": details,
+    });
+    let path = format!("{}/.trinity/events/akashic-log.jsonl", project_dir());
+    if let Err(e) = append_jsonl(&path, &line) {
+        eprintln!("[CladeMonitor] Failed to append Akashic event: {}", e);
+    }
+}
+
+fn append_jsonl(path: &str, value: &serde_json::Value) -> Result<(), String> {
+    let dir = std::path::Path::new(path).parent().ok_or("no parent dir")?;
+    fs::create_dir_all(dir).map_err(|e| format!("create dir: {}", e))?;
+    let mut file = fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open(path)
+        .map_err(|e| format!("open: {}", e))?;
+    file.write_all(serde_json::to_string(value).map_err(|e| e.to_string())?.as_bytes())
+        .map_err(|e| format!("write: {}", e))?;
+    file.write_all(b"\n").map_err(|e| format!("newline: {}", e))?;
+    Ok(())
+}
+
+/// Read the JSON array at `path`, defaulting to empty array on missing/malformed.
+fn read_json_array(path: &str) -> Vec<serde_json::Value> {
+    fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<serde_json::Value>>(&s).ok())
+        .unwrap_or_default()
+}
+
+/// Replace a JSON array at `path` atomically.
+fn write_json_array(path: &str, items: &[serde_json::Value]) -> Result<(), String> {
+    let dir = std::path::Path::new(path).parent().ok_or("no parent dir")?;
+    fs::create_dir_all(dir).map_err(|e| format!("create dir: {}", e))?;
+    let json = serde_json::to_string_pretty(&items).map_err(|e| e.to_string())?;
+    atomic_write(path, &json)
+}
+
+/// Acquire a durable claim and task record before starting a long-running monitor
+/// task. This prevents the "report exists but no trace of who wrote it" failure
+/// mode seen with EVOLUTION_PLAN_TRINITY_v1.md.
+/// Parameter struct for `begin_durable_task` so the call-site stays readable
+/// without triggering clippy::too_many_arguments.
+#[derive(Debug)]
+struct BeginTaskParams<'a> {
+    task_id: &'a str,
+    title: &'a str,
+    agent: &'a str,
+    spec_path: &'a str,
+    graph_node: &'a str,
+    priority: &'a str,
+    ttl_sec: u64,
+    artifact: Option<&'a str>,
+}
+
+fn begin_durable_task(params: BeginTaskParams<'_>) -> String {
+    let now = chrono::Utc::now();
+    let claim_id = format!("{}-{}", params.task_id, uuid_prefix());
+    let expires = now + chrono::Duration::seconds(params.ttl_sec as i64);
+
+    let claim = TaskClaim {
+        claim_id: claim_id.clone(),
+        agent_id: params.agent.to_string(),
+        spec_path: params.spec_path.to_string(),
+        graph_node: params.graph_node.to_string(),
+        task_id: params.task_id.to_string(),
+        acquired_at: now.to_rfc3339(),
+        ttl_sec: params.ttl_sec,
+        expires_at: expires.to_rfc3339(),
+        heartbeat_at: now.to_rfc3339(),
+        priority: params.priority.to_string(),
+    };
+    let claim_path = format!(
+        "{}/.trinity/claims/active/{}.json",
+        project_dir(),
+        sanitize_filename(params.graph_node)
+    );
+    if let Err(e) = atomic_write(&claim_path, &serde_json::to_string_pretty(&claim).unwrap_or_default()) {
+        eprintln!("[CladeMonitor] Failed to write claim {}: {}", claim_id, e);
+    }
+
+    let record = TaskRecord {
+        task_id: params.task_id.to_string(),
+        title: params.title.to_string(),
+        agent: params.agent.to_string(),
+        claim_id: claim_id.clone(),
+        spec_path: params.spec_path.to_string(),
+        graph_node: params.graph_node.to_string(),
+        priority: params.priority.to_string(),
+        status: "in_progress".to_string(),
+        started_at: now.to_rfc3339(),
+        finished_at: None,
+        verdict: None,
+        artifact: params.artifact.map(|s| s.to_string()),
+    };
+    let mut active = read_json_array(&format!("{}/.trinity/queue/active.json", project_dir()));
+    active.retain(|v| v.get("task_id").and_then(|t| t.as_str()) != Some(params.task_id));
+    active.push(serde_json::to_value(&record).unwrap_or_default());
+    if let Err(e) = write_json_array(&format!("{}/.trinity/queue/active.json", project_dir()), &active) {
+        eprintln!("[CladeMonitor] Failed to update active queue: {}", e);
+    }
+
+    log_akashic_event("task.intent", params.agent, params.task_id, &claim_id, params.spec_path);
+    log_akashic_event("claim.acquire", params.agent, params.task_id, &claim_id, params.spec_path);
+    log_event("task_begin", &format!("{} {} {}", params.task_id, claim_id, params.graph_node));
+
+    claim_id
+}
+
+/// Release a durable claim and move the task to done/blocked. Always call this
+/// before exiting a long-running task, even on failure, so the queue reflects
+/// reality and a verifier can pick up the result.
+fn end_durable_task(task_id: &str, claim_id: &str, result: &str, verdict: &str) {
+    let now = chrono::Utc::now().to_rfc3339();
+    let graph_node = claim_graph_node(claim_id);
+
+    let active_path = format!("{}/.trinity/queue/active.json", project_dir());
+    let mut active = read_json_array(&active_path);
+    let mut record: Option<TaskRecord> = None;
+    active.retain(|v| {
+        if v.get("task_id").and_then(|t| t.as_str()) == Some(task_id)
+            && v.get("claim_id").and_then(|c| c.as_str()) == Some(claim_id)
+        {
+            record = serde_json::from_value(v.clone()).ok();
+            false
+        } else {
+            true
+        }
+    });
+    if let Err(e) = write_json_array(&active_path, &active) {
+        eprintln!("[CladeMonitor] Failed to clear active queue: {}", e);
+    }
+
+    if let Some(mut rec) = record {
+        rec.status = result.to_string();
+        rec.finished_at = Some(now.clone());
+        rec.verdict = Some(verdict.to_string());
+        let mut done = read_json_array(&format!("{}/.trinity/queue/done.json", project_dir()));
+        done.retain(|v| v.get("task_id").and_then(|t| t.as_str()) != Some(task_id));
+        done.push(serde_json::to_value(&rec).unwrap_or_default());
+        if let Err(e) = write_json_array(&format!("{}/.trinity/queue/done.json", project_dir()), &done) {
+            eprintln!("[CladeMonitor] Failed to update done queue: {}", e);
+        }
+    }
+
+    let claim_src = format!(
+        "{}/.trinity/claims/active/{}.json",
+        project_dir(),
+        sanitize_filename(&graph_node)
+    );
+    let claim_dst = format!(
+        "{}/.trinity/claims/released/{}.json",
+        project_dir(),
+        sanitize_filename(claim_id)
+    );
+    if std::path::Path::new(&claim_src).exists() {
+        if let Err(e) = fs::rename(&claim_src, &claim_dst) {
+            eprintln!("[CladeMonitor] Failed to move claim to released: {}", e);
+        }
+    }
+
+    log_akashic_event("claim.release", "clade-monitor", task_id, claim_id, result);
+    log_akashic_event("verdict", "t27-verifier", task_id, claim_id, verdict);
+    log_event("task_end", &format!("{} {} {} verdict={}", task_id, claim_id, result, verdict));
+}
+
+fn claim_graph_node(claim_id: &str) -> String {
+    let active_dir = format!("{}/.trinity/claims/active", project_dir());
+    if let Ok(entries) = fs::read_dir(&active_dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if path.extension().map(|e| e == "json").unwrap_or(false) {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    if let Ok(claim) = serde_json::from_str::<TaskClaim>(&content) {
+                        if claim.claim_id == claim_id {
+                            return claim.graph_node;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    "unknown".to_string()
+}
+
+fn uuid_prefix() -> String {
+    let ts = chrono::Utc::now().timestamp_millis() as u64;
+    let pid = std::process::id();
+    format!("{:x}-{:x}", ts, pid)
+}
+
+fn sanitize_filename(s: &str) -> String {
+    s.replace(|c: char| !c.is_alphanumeric() && c != '-' && c != '_', "_")
+}
+
 fn kill_orphan_monitors() -> usize {
     use std::process::{Command, Stdio};
     let my_pid = std::process::id();
@@ -329,14 +570,33 @@ fn main() {
             }
         }
 
-        // Every 24h: deep audit + wrap-up
+        // Every 24h: deep audit + wrap-up. This task scans external state and
+        // produces reports, so it must be durable across crashes/restarts.
         let backoff_24h = calculate_backoff_with_jitter(
             failure_counts.get("24h").copied().unwrap_or(0),
             pid_seed,
         );
         if now.saturating_duration_since(last_24h) >= Duration::from_secs(86400 * backoff_24h) {
             last_24h = now;
-            if run_deep_audit("24h") {
+            let task_id = format!("deep-audit-{}", chrono::Utc::now().format("%Y-%m-%d"));
+            let claim_id = begin_durable_task(BeginTaskParams {
+                task_id: &task_id,
+                title: "24h deep audit + cross-repo report",
+                agent: "clade-monitor",
+                spec_path: ".trinity/state/github.json",
+                graph_node: "deep_audit",
+                priority: "P1",
+                ttl_sec: 3600,
+                artifact: None,
+            });
+            let ok = run_deep_audit("24h");
+            let (result, verdict) = if ok {
+                ("clean", "CLEAN")
+            } else {
+                ("toxic", "NEEDS_FIX")
+            };
+            end_durable_task(&task_id, &claim_id, result, verdict);
+            if ok {
                 failure_counts.remove("24h");
             } else {
                 *failure_counts.entry("24h".to_string()).or_insert(0) += 1;
@@ -490,6 +750,8 @@ fn calculate_backoff_with_jitter(failures: u32, pid_seed: u32) -> u64 {
 }
 
 fn atomic_write(path: &str, content: &str) -> Result<(), String> {
+    let parent = std::path::Path::new(path).parent().ok_or("no parent dir")?;
+    fs::create_dir_all(parent).map_err(|e| format!("create parent: {}", e))?;
     let tmp = format!("{}.tmp", path);
     fs::write(&tmp, content).map_err(|e| format!("write tmp: {}", e))?;
     fs::rename(&tmp, path).map_err(|e| {
@@ -1351,5 +1613,14 @@ mod tests {
     #[test]
     fn circuit_breaker_trip_threshold_constant() {
         assert_eq!(CIRCUIT_BREAKER_TRIP_THRESHOLD, 3);
+    }
+
+    #[test]
+    fn sanitize_filename_replaces_unsafe_chars() {
+        // Dots in the middle are also replaced to keep filenames safe and simple;
+        // only hyphens and underscores are preserved.
+        assert_eq!(sanitize_filename("a/b.c"), "a_b_c");
+        assert_eq!(sanitize_filename("deep_audit"), "deep_audit");
+        assert_eq!(sanitize_filename("deep-audit"), "deep-audit");
     }
 }

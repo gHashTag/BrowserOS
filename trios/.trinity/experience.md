@@ -1,5 +1,7 @@
 # Trinity Experience Log - trios project
 
+# Trinity Experience Log - trios project
+
 ## 2026-07-21 - T27 Canon Seal: RecursionGuard
 **Ring:** BR-OUTPUT  **Agents:** K, t27-creator, t27-verifier  **Road:** B
 - **Problem:** `RecursionGuard.swift` was hand-written safety code with no T27 provenance, violating L2 GENERATION.
@@ -235,3 +237,18 @@
 - **Seal status**: BUILD_PASS, TEST_PASS, CLIPPY_PASS, TMP_ZERO_PASS, ASCII_PASS, E2E_NOT_RUN_DUE_SERVER_DOWN
 - **Next wave options**: seal-automation, meshd-revival, cap-std-adoption
 
+
+## 2026-07-21 EVOLUTION-001 (Cross-repo audit / Task durability)
+
+- **Issue**: Cross-repo Trinity evolution plan verification
+- **Agents**: t27-creator, t27-verifier, t27-experience
+- **Root cause**: An autonomous agent generated `EVOLUTION_PLAN_TRINITY_v1.md` on 2026-07-21 22:29 after scanning 8 gHashTag repos, but the run had no Akashic `task.intent`, no active claim, no queue entry, and no verifier verdict. The plan mixed real issues with inflated counts and referenced two non-existent repositories (`trios-dwagent`, `trios-new`).
+- **Fix pattern**: Create the missing task lifecycle records retroactively: `task.intent` + `claim.acquire` in `akashic-log`, active queue entry, claim file, and a verified experience episode. Cross-check every referenced issue via the GitHub API and annotate the plan with actual open-issue counts and repository accessibility.
+- **Files changed**: `.trinity/queue/active.json`, `.trinity/claims/active/evolution-plan.json`, `.trinity/events/akashic-log.jsonl`, `.trinity/event_log.jsonl`, `.trinity/experience/2026-07-21_224300_EVOLUTION-001.json`, `.trinity/experience.md`
+- **Tests added**: Manual verification of 21 GitHub issue URLs; service health checks via `lsof` on ports 9102, 9105, 9505; `swiftc -typecheck` and `cargo check --workspace` both PASS.
+- **Lessons**:
+  - Every long-running autonomous task must write `task.intent` + durable claim into `.trinity` before scanning external state; verifier must close it with verdict + experience save.
+  - Do not generate markdown reports without binding them to a `task_id`, `claim_id`, and queue entry.
+  - Do not cite repositories or issue numbers that have not been verified live.
+- **Seal status**: AUDIT_PASS, BUILD_PASS, TYPECHECK_PASS, CARGO_CHECK_PASS, E2E_NOT_RUN_DUE_SERVER_DOWN
+- **Next wave options**: seal-automation, task-durability-gate, github-audit-skill

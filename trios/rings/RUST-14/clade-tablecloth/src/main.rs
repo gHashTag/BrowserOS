@@ -1097,6 +1097,8 @@ mod tests {
     fn should_throttle_true_below_floor() {
         API_REMAINING.store(50, Ordering::Relaxed);
         assert!(should_throttle());
+        // Reset to default so other tests running concurrently in the same
+        // process do not see a stale floor value and fail.
         API_REMAINING.store(5000, Ordering::Relaxed);
     }
 
