@@ -276,18 +276,24 @@ struct ChatPanelView: View {
 final class ChatInputTextView: NSTextView {
     var onSubmit: (() -> Void)?
 
-    override func keyDown(with event: NSEvent) {
-        // Return/Enter keyCode = 36, NumpadEnter = 76
-        if event.keyCode == 36 || event.keyCode == 76 {
+    // Use the standard responder command path for Enter instead of raw keyDown.
+    // Intercepting keyDown breaks input-method composition on non-US layouts
+    // (observed as Latin chars being replaced by placeholder Cyrillic glyphs).
+    override func doCommand(by selector: Selector) {
+        switch selector {
+        case #selector(NSResponder.insertNewline(_:)),
+             #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)),
+             #selector(NSTextView.insertLineBreak(_:)):
             if NSEvent.modifierFlags.contains(.shift) {
-                super.keyDown(with: event)
+                super.doCommand(by: selector)
                 return
             }
-            NSLog("[ChatInput] Return pressed - triggering onSubmit")
+            NSLog("[ChatInput] Enter command triggered - calling onSubmit")
             onSubmit?()
             return
+        default:
+            super.doCommand(by: selector)
         }
-        super.keyDown(with: event)
     }
 }
 
@@ -496,7 +502,7 @@ private struct BrowserOSMessageBubble: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 12))
                 .foregroundColor(.yellow)
-            RichMessageView(text: message.content, isUser: false)
+            Text(BrowserOSMessageBubble.cleanErrorContent(message.content))
                 .font(.system(size: 13, weight: .medium, design: .default))
                 .foregroundColor(.grokText)
         }
@@ -508,6 +514,15 @@ private struct BrowserOSMessageBubble: View {
                 .stroke(Color.red.opacity(0.4), lineWidth: 1)
         )
         .cornerRadius(10)
+    }
+
+    private static func cleanErrorContent(_ content: String) -> String {
+        var cleaned = content
+        if cleaned.hasPrefix("[!] ") {
+            cleaned = String(cleaned.dropFirst(4))
+        }
+        cleaned = cleaned.replacingOccurrences(of: "⚠️ ", with: "")
+        return cleaned
     }
 }
 

@@ -88,7 +88,11 @@ struct MessageBubbleView: View {
     private var userBubble: some View {
         Group {
             if !message.content.isEmpty {
-                RichMessageView(text: message.content, isUser: true)
+                // User messages must render as plain Text. Routing them through
+                // RichMessageView's AttributedString(markdown:) path causes glyph
+                // substitution on macOS (Latin/Cyrillic chars become placeholder
+                // glyphs like "фффф" or "9999").
+                Text(message.content)
                     .font(.system(size: 15, weight: .regular, design: .default))
                     .foregroundColor(.grokText)
                     .padding(.horizontal, 14)
@@ -110,7 +114,7 @@ struct MessageBubbleView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 12))
                 .foregroundColor(.yellow)
-            RichMessageView(text: message.content, isUser: false)
+            Text(cleanErrorContent(message.content))
                 .font(.system(size: 13, weight: .medium, design: .default))
                 .foregroundColor(.grokText)
         }
@@ -122,6 +126,16 @@ struct MessageBubbleView: View {
                 .stroke(Color.red.opacity(0.4), lineWidth: 1)
         )
         .cornerRadius(10)
+    }
+
+    private func cleanErrorContent(_ content: String) -> String {
+        var cleaned = content
+        if cleaned.hasPrefix("[!] ") {
+            cleaned = String(cleaned.dropFirst(4))
+        }
+        // Strip legacy emoji warning left over in persisted history.
+        cleaned = cleaned.replacingOccurrences(of: "⚠️ ", with: "")
+        return cleaned
     }
 
     // MARK: - Assistant Container
