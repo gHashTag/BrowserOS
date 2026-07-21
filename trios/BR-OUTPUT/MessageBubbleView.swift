@@ -155,9 +155,14 @@ struct MessageBubbleView: View {
                     .stroke(Color.red.opacity(0.4), lineWidth: 1)
             )
             .cornerRadius(10)
+            .onHover { hovered in
+                isHovered = hovered
+            }
 
-            // Error messages get a copy action bar too.
-            CopyActionBar(content: message.content)
+            // Error messages get a copy action bar too, shown on hover.
+            HoverCopyBar(content: message.content)
+                .opacity(isHovered ? 1 : 0)
+                .animation(.easeInOut(duration: 0.15), value: isHovered)
         }
     }
 
@@ -175,13 +180,13 @@ struct MessageBubbleView: View {
 
     private var assistantContainer: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Reasoning header
+            // Reasoning header / active thinking indicator
             if !reasoningSegments.isEmpty && isFirstInGroup {
                 HStack(spacing: 6) {
-                    Image(systemName: "clock")
+                    Image(systemName: message.isStreaming ? "brain.head.profile" : "clock")
                         .font(.system(size: 11))
                         .foregroundColor(.grokMuted)
-                    Text("Thought for \(reasoningDuration)")
+                    Text(message.isStreaming ? "Thinking..." : "Thought for \(reasoningDuration)")
                         .font(.system(size: 12, weight: .medium, design: .default))
                         .foregroundColor(.grokMuted)
                 }

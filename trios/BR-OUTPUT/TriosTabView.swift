@@ -50,20 +50,26 @@ struct TriosTabView: View {
             Spacer()
 
             HStack(spacing: 8) {
-                Circle()
-                    .fill(viewModel.isServerReachable ? Color.green : Color.grokDim)
-                    .frame(width: 6, height: 6)
-                Text(viewModel.isServerReachable ? "Online" : "Offline")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.grokMuted)
-
-                if viewModel.isA2ARegistered {
+                HStack(spacing: 4) {
                     Circle()
-                        .fill(Color.blue)
+                        .fill(viewModel.isServerReachable ? Color.green : Color.grokDim)
                         .frame(width: 6, height: 6)
-                    Text("A2A")
+                    Text(viewModel.isServerReachable ? "Online" : "Offline")
                         .font(.system(size: 10, weight: .medium))
                         .foregroundColor(.grokMuted)
+                }
+                .help("BrowserOS Agent server \(viewModel.isServerReachable ? "is reachable" : "is not reachable") on port \(ProjectPaths.mcpPort)")
+
+                if viewModel.isA2ARegistered {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(Color.blue)
+                            .frame(width: 6, height: 6)
+                        Text("A2A")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(.grokMuted)
+                    }
+                    .help("A2A registry client is registered")
                 }
             }
 

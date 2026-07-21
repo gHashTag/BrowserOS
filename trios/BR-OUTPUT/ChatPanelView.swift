@@ -91,13 +91,20 @@ struct ChatPanelView: View {
     private var messageStack: some View {
         LazyVStack(spacing: 0) {
             localMessageList
-            if !viewModel.messages.isEmpty && !browserOSVM.messages.isEmpty {
+            if shouldShowBrowserSeparator {
                 browserSeparator
             }
             browserMessageList
             typingIndicatorArea
             contentHeightTracker
         }
+    }
+
+    private var shouldShowBrowserSeparator: Bool {
+        // Only separate when there is actual BrowserOS activity (messages
+        // or an active command/stream), not when the pane is merely idle.
+        if !browserOSVM.messages.isEmpty { return !viewModel.messages.isEmpty }
+        return browserOSVM.isStreaming && !viewModel.messages.isEmpty
     }
 
     private var browserSeparator: some View {
@@ -165,17 +172,30 @@ struct ChatPanelView: View {
     }
 
     // Typing indicators: only while actively streaming, not on error/idle.
+    // Show a labeled wrapper so the user knows *which* agent is typing.
     private var typingIndicatorArea: some View {
-        Group {
+        VStack(alignment: .leading, spacing: 2) {
             if case .streaming = viewModel.state {
-                TypingIndicatorView()
+                typingIndicatorRow(label: "TRIOS Agent")
                     .id("typing-local")
             }
             if browserOSVM.isStreaming {
-                TypingIndicatorView()
+                typingIndicatorRow(label: "BrowserOS Agent")
                     .id("typing-browseros")
             }
         }
+    }
+
+    private func typingIndicatorRow(label: String) -> some View {
+        HStack(spacing: 8) {
+            TypingIndicatorView()
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.grokDim)
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
     }
 
     private var emptyStateView: some View {
@@ -197,6 +217,7 @@ struct ChatPanelView: View {
                 suggestedPromptChip("Take a screenshot of current page")
                 suggestedPromptChip("Run /doctor to check build health")
                 suggestedPromptChip("Show Queen status overview")
+                suggestedPromptChip("Clear this conversation /new")
             }
             .padding(.top, 8)
 
@@ -213,14 +234,14 @@ struct ChatPanelView: View {
             if !viewModel.isServerReachable {
                 emptyStateHint(
                     icon: "exclamationmark.triangle.fill",
-                    text: "BrowserOS Agent is offline. Start it with: BROWSEROS_SERVER_PORT=\(ProjectPaths.mcpPort) bun run --cwd apps/server start:ci",
+                    text: "BrowserOS Agent offline. Start: BROWSEROS_SERVER_PORT=\(ProjectPaths.mcpPort) bun run --cwd apps/server start:ci",
                     color: .yellow
                 )
             }
             if !isAPIKeyConfigured {
                 emptyStateHint(
                     icon: "key.fill",
-                    text: "Set TRIOS_API_KEY to use paid providers. Local Ollama needs no key.",
+                    text: "Set TRIOS_API_KEY for paid providers. Ollama works without a key.",
                     color: .grokDim
                 )
             }
@@ -244,6 +265,11 @@ struct ChatPanelView: View {
 
     private func suggestedPromptChip(_ text: String) -> some View {
         Button(action: {
+            if text.hasSuffix("/new") {
+                viewModel.newConversation()
+                browserOSVM.messages.removeAll()
+                return
+            }
             viewModel.inputText = text
             triggerSend()
         }) {
@@ -328,7 +354,7 @@ struct ChatPanelView: View {
     private var connectionStatusDot: some View {
         StatusDot(
             isOn: viewModel.isServerReachable,
-            label: viewModel.isServerReachable ? "Online" : "Offline",
+            label: nil,
             color: viewModel.isServerReachable ? .green : .red
         )
         .help(viewModel.isServerReachable
@@ -345,14 +371,14 @@ struct ChatPanelView: View {
         if !viewModel.isServerReachable {
             return StatusHint(
                 icon: "exclamationmark.triangle.fill",
-                text: "BrowserOS Agent offline — start the server or check port \(ProjectPaths.mcpPort).",
+                text: "BrowserOS Agent offline — start it or check port \(ProjectPaths.mcpPort).",
                 color: .yellow
             )
         }
         if !isAPIKeyConfigured {
             return StatusHint(
                 icon: "key.fill",
-                text: "No TRIOS_API_KEY set. Local Ollama works; paid providers (OpenRouter/Anthropic/z.ai) need a key.",
+                text: "No TRIOS_API_KEY. Local Ollama works; paid providers need a key.",
                 color: .grokDim
             )
         }
