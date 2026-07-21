@@ -29,6 +29,14 @@ actor SSETransport: ChatTransportProtocol {
         }
         NSLog("[SSETransport] HTTP status: \(httpResponse.statusCode)")
         guard (200...299).contains(httpResponse.statusCode) else {
+            // Capture a sample of the response body to diagnose non-2xx failures.
+            var sampleData = Data()
+            for try await byte in bytes {
+                sampleData.append(byte)
+                if sampleData.count > 500 { break }
+            }
+            let bodySample = String(data: sampleData, encoding: .utf8) ?? String(describing: sampleData)
+            NSLog("[SSETransport] non-2xx response: \(httpResponse.statusCode), body: \(bodySample)")
             throw TransportError.invalidResponse
         }
 

@@ -461,12 +461,26 @@ struct ChatRequestBuilder {
             "userWorkingDir": homeDir
         ]
 
-        // Flatten history for backward-compatible servers
+        // Flatten history for backward-compatible servers.
+        // Server-side validators for the legacy previousConversation field only
+        // accept user/assistant roles; system/error messages must be translated or
+        // omitted to avoid 400 Bad Request.
         if !previousConversation.isEmpty {
-            let history = previousConversation.map { msg in
-                ["role": msg.role.rawValue, "content": msg.content]
+            let history = previousConversation.compactMap { msg -> [String: String]? in
+                switch msg.role {
+                case .user, .assistant:
+                    return ["role": msg.role.rawValue, "content": msg.content]
+                case .system:
+                    // Translate error messages into assistant context so the server
+                    // accepts them while preserving the failure signal for the model.
+                    return ["role": "assistant", "content": "[SYSTEM ERROR] \(msg.content)"]
+                case .tool:
+                    return ["role": "assistant", "content": "[TOOL RESULT] \(msg.content)"]
+                }
             }
-            body["previousConversation"] = history
+            if !history.isEmpty {
+                body["previousConversation"] = history
+            }
         }
 
         if let context = browserContext {
