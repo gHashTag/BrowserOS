@@ -1,4 +1,4 @@
-# Wave Loop 002 — trios shell-safety, ASCII purity, and runtime-path hardening plan
+# Wave Loop 002 -- trios shell-safety, ASCII purity, and runtime-path hardening plan
 
 ## Sources
 - Wave 2 safety audit by t27-creator.
@@ -18,25 +18,25 @@
 1. Execution isolation via process-level sandboxing (IsolateGPT) maps to trios replacing `/bin/zsh -c` with tokenized `Process()` per tool.
 2. MCP/agent capability manifests (AgentBound) justify a strict allowlist of commands instead of regex blocklists.
 3. Static+dynamic effect analysis (Haven) supports adding a `CommandSanitizer` with data-flow validation.
-4. Lifecycle threat models (OpenClaw) show execution-stage defenses are essential — trios TerminalTabView is a pure execution-stage surface.
-5. IterInject/ChatInject prove regex blocklists are bypassable — trios must use allowlists and circuit breakers, not pattern matching.
+4. Lifecycle threat models (OpenClaw) show execution-stage defenses are essential -- trios TerminalTabView is a pure execution-stage surface.
+5. IterInject/ChatInject prove regex blocklists are bypassable -- trios must use allowlists and circuit breakers, not pattern matching.
 6. RepE-based circuit breakers suggest adding an `AGENT-V-WAIVER` gate before any canon shell-related change.
 
 ## Decomposed plan (P0 -> P2)
 
-### P0 — Critical shell-safety
+### P0 -- Critical shell-safety
 - [ ] Replace `TerminalTabView.runCommand` shell invocation with tokenized `Process()` and strict command allowlist.
 - [ ] Replace `QueenStatusViewModel.shell`/`shellAsync` helpers with tokenized `Process()` wrappers for `pgrep`, `ps`, `git`, `tail`.
 - [ ] Add `CommandSanitizer` that rejects commands containing shell metacharacters before any Process spawn.
 - [ ] Add promotion lock so `clade-promote` and `clade-monitor` cannot fight (future wave).
 
-### P1 — ASCII purity and runtime paths
+### P1 -- ASCII purity and runtime paths
 - [ ] Run ASCII cleanup over `BR-OUTPUT/*.swift`, `build.sh`, `.claude/agents/*.md`, `.claude/skills/*/*.md`.
 - [ ] Move singleton lock/PID from `/tmp` to `.trinity/run/` and set `0o600` permissions.
 - [ ] Move build logs from `/tmp` to `.trinity/logs/`.
 - [ ] Fix `.claude/agents/registry.json` sync (missing `agent-H.md`).
 
-### P2 — Tests and observability
+### P2 -- Tests and observability
 - [ ] Add unit tests for `RecursionGuard`, `CladeGuard`, and command sanitizer.
 - [ ] Add CI check that registry.json matches on-disk agent files.
 - [ ] Standardize logging to `.trinity/logs/` with component/correlation IDs.
@@ -51,6 +51,6 @@ Land focused P0/P1 items that do not require UI testing:
 6. Verifier verdict and experience save.
 
 ## [FUTURE OPTIONS]
-1) `terminal-shell-free` — fully replace `TerminalTabView.runCommand` `/bin/zsh -c` with a command allowlist + tokenized Process.
-2) `promote-monitor-lock` — add a promotion lock file that `clade-monitor` respects during `clade-promote` boot probe.
-3) `asciify-all-the-things` — complete ASCII cleanup of `.claude/agents/*.md` and `.claude/skills/*/*.md` and add a CI lint gate.
+1) `terminal-shell-free` -- fully replace `TerminalTabView.runCommand` `/bin/zsh -c` with a command allowlist + tokenized Process.
+2) `promote-monitor-lock` -- add a promotion lock file that `clade-monitor` respects during `clade-promote` boot probe.
+3) `asciify-all-the-things` -- complete ASCII cleanup of `.claude/agents/*.md` and `.claude/skills/*/*.md` and add a CI lint gate.
