@@ -1,3 +1,7 @@
+// AGENT-V-WAIVER: https://github.com/gHashTag/trios/issues/T27-EPIC-001
+// Reason: manual bubble styling fixes on feat/zai-provider before T27 freeze.
+// Expires: 2026-07-28
+// Follow-up: spec-drive MessageBubbleView and re-seal via /t27-phi-loop.
 import SwiftUI
 
 struct MessageBubbleView: View {
@@ -86,7 +90,7 @@ struct MessageBubbleView: View {
     // MARK: - User Message
 
     private var userBubble: some View {
-        Group {
+        VStack(alignment: .trailing, spacing: 4) {
             if !message.content.isEmpty {
                 // User messages must render as plain Text. Routing them through
                 // RichMessageView's AttributedString(markdown:) path causes glyph
@@ -100,32 +104,55 @@ struct MessageBubbleView: View {
                     .background(Color.grokElevated.opacity(0.5))
                     .cornerRadius(14, corners: [.topLeft, .topRight, .bottomLeft])
                     .textSelection(.enabled)
+                    .contextMenu {
+                        Button("Copy") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(message.content, forType: .string)
+                        }
+                    }
             }
 
             if message.isStreaming && message.content.isEmpty {
                 TypingIndicatorView()
                     .foregroundColor(.grokText)
             }
+
+            // User messages also get a copy action bar.
+            if !message.isStreaming && !message.content.isEmpty {
+                CopyActionBar(content: message.content)
+            }
         }
     }
 
     private var systemErrorBadge: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 12))
-                .foregroundColor(.yellow)
-            Text(cleanErrorContent(message.content))
-                .font(.system(size: 13, weight: .medium, design: .default))
-                .foregroundColor(.grokText)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 12))
+                    .foregroundColor(.yellow)
+                Text(cleanErrorContent(message.content))
+                    .font(.system(size: 13, weight: .medium, design: .default))
+                    .foregroundColor(.grokText)
+                    .textSelection(.enabled)
+                    .contextMenu {
+                        Button("Copy") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(message.content, forType: .string)
+                        }
+                    }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.red.opacity(0.15))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.red.opacity(0.4), lineWidth: 1)
+            )
+            .cornerRadius(10)
+
+            // Error messages get a copy action bar too.
+            CopyActionBar(content: message.content)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.red.opacity(0.15))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(Color.red.opacity(0.4), lineWidth: 1)
-        )
-        .cornerRadius(10)
     }
 
     private func cleanErrorContent(_ content: String) -> String {
@@ -165,6 +192,12 @@ struct MessageBubbleView: View {
                     .font(.system(size: 15, weight: .regular, design: .default))
                     .foregroundColor(.grokText)
                     .textSelection(.enabled)
+                    .contextMenu {
+                        Button("Copy") {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(message.content, forType: .string)
+                        }
+                    }
             }
 
             // Tool calls
@@ -190,12 +223,11 @@ struct MessageBubbleView: View {
                 )
             }
 
-            // Hover copy bar - any completed assistant message (ChatGPT / Claude pattern)
-            if !isLastInGroup && !message.isStreaming && !message.content.isEmpty {
-                HoverCopyBar(content: message.content)
-                    .opacity(isHovered ? 1 : 0)
-                    .animation(.easeInOut(duration: 0.15), value: isHovered)
-            }
+            // Hover copy bar for completed assistant messages (ChatGPT / Claude pattern).
+            // Always present; shown on hover so copy is reachable for every answer.
+            HoverCopyBar(content: message.content)
+                .opacity(isHovered ? 1 : 0)
+                .animation(.easeInOut(duration: 0.15), value: isHovered)
         }
         .onHover { hovered in
             isHovered = hovered
@@ -350,6 +382,35 @@ private struct HoverCopyBar: View {
             }) {
                 Image(systemName: copied ? "checkmark" : "doc.on.doc")
                     .font(.system(size: 11, weight: .medium, design: .default))
+                    .foregroundColor(copied ? .grokText : .grokDim)
+            }
+            .buttonStyle(PlainButtonStyle())
+            .help("Copy")
+
+            Spacer()
+        }
+        .padding(.top, 2)
+    }
+}
+
+// MARK: - Standalone Copy Action Bar
+
+private struct CopyActionBar: View {
+    let content: String
+    @State private var copied = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button(action: {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(content, forType: .string)
+                copied = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    copied = false
+                }
+            }) {
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 12, weight: .medium, design: .default))
                     .foregroundColor(copied ? .grokText : .grokDim)
             }
             .buttonStyle(PlainButtonStyle())
