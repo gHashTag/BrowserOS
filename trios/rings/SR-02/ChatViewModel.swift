@@ -448,6 +448,8 @@ struct ChatRequestBuilder {
 
         let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
 
+        let apiKey = ProcessInfo.processInfo.environment["TRIOS_API_KEY"]
+
         var body: [String: Any] = [
             "conversationId": conversationId.uuidString,
             "message": message,
@@ -460,6 +462,14 @@ struct ChatRequestBuilder {
             "messages": messages,
             "userWorkingDir": homeDir
         ]
+
+        // Only send apiKey when the caller has configured one. Providers that
+        // require authentication will fail fast server-side with a clear error;
+        // providers that do not need a key (local Ollama) should not receive
+        // an empty field.
+        if let apiKey = apiKey, !apiKey.isEmpty {
+            body["apiKey"] = apiKey
+        }
 
         // Flatten history for backward-compatible servers.
         // Server-side validators for the legacy previousConversation field only

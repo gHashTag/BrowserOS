@@ -103,6 +103,7 @@ struct MessageBubbleView: View {
                     .padding(.vertical, 10)
                     .background(Color.grokElevated.opacity(0.5))
                     .cornerRadius(14, corners: [.topLeft, .topRight, .bottomLeft])
+                    .frame(maxWidth: 520, alignment: .trailing)
                     .textSelection(.enabled)
                     .contextMenu {
                         Button("Copy") {
@@ -117,10 +118,15 @@ struct MessageBubbleView: View {
                     .foregroundColor(.grokText)
             }
 
-            // User messages also get a copy action bar.
+            // User messages also get a copy action bar, shown on hover.
             if !message.isStreaming && !message.content.isEmpty {
-                CopyActionBar(content: message.content)
+                HoverCopyBar(content: message.content)
+                    .opacity(isHovered ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.15), value: isHovered)
             }
+        }
+        .onHover { hovered in
+            isHovered = hovered
         }
     }
 
@@ -198,6 +204,7 @@ struct MessageBubbleView: View {
                             NSPasteboard.general.setString(message.content, forType: .string)
                         }
                     }
+                    .frame(maxWidth: 720, alignment: .leading)
             }
 
             // Tool calls

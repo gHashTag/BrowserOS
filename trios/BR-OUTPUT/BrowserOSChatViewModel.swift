@@ -69,6 +69,14 @@ class BrowserOSChatViewModel: ObservableObject {
         }
     }
     
+    func cancelStreaming() {
+        streamingTask?.cancel()
+        streamingTask = nil
+        isStreaming = false
+        queenStatus = isBrowserOSConnected ? .alive : .error
+        NSLog("[BrowserOSChatViewModel] streaming cancelled")
+    }
+
     func sendMessage(_ text: String) {
         let userMessage = BrowserOSChatMessage(role: .user, content: text, timestamp: Date())
         messages.append(userMessage)

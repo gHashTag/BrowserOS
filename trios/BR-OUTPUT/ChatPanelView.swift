@@ -91,10 +91,32 @@ struct ChatPanelView: View {
     private var messageStack: some View {
         LazyVStack(spacing: 0) {
             localMessageList
+            if !viewModel.messages.isEmpty && !browserOSVM.messages.isEmpty {
+                browserSeparator
+            }
             browserMessageList
             typingIndicatorArea
             contentHeightTracker
         }
+    }
+
+    private var browserSeparator: some View {
+        HStack(spacing: 8) {
+            Rectangle()
+                .fill(Color.grokDivider.opacity(0.5))
+                .frame(height: 1)
+            Image(systemName: "globe")
+                .font(.system(size: 10))
+                .foregroundColor(.grokDim)
+            Text("BrowserOS")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.grokDim)
+            Rectangle()
+                .fill(Color.grokDivider.opacity(0.5))
+                .frame(height: 1)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
     }
 
     // CRITICAL: snapshot the array once. Indexing the live
@@ -178,9 +200,46 @@ struct ChatPanelView: View {
             }
             .padding(.top, 8)
 
+            statusHintList
+                .padding(.top, 16)
+
             Spacer()
         }
         .padding(.vertical, 60)
+    }
+
+    private var statusHintList: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !viewModel.isServerReachable {
+                emptyStateHint(
+                    icon: "exclamationmark.triangle.fill",
+                    text: "BrowserOS Agent is offline. Start it with: BROWSEROS_SERVER_PORT=\(ProjectPaths.mcpPort) bun run --cwd apps/server start:ci",
+                    color: .yellow
+                )
+            }
+            if !isAPIKeyConfigured {
+                emptyStateHint(
+                    icon: "key.fill",
+                    text: "Set TRIOS_API_KEY to use paid providers. Local Ollama needs no key.",
+                    color: .grokDim
+                )
+            }
+        }
+        .padding(.horizontal, 24)
+    }
+
+    private func emptyStateHint(icon: String, text: String, color: Color) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 11))
+                .foregroundColor(color)
+                .padding(.top, 2)
+            Text(text)
+                .font(.system(size: 12))
+                .foregroundColor(.grokDim)
+                .multilineTextAlignment(.leading)
+            Spacer()
+        }
     }
 
     private func suggestedPromptChip(_ text: String) -> some View {
@@ -205,6 +264,8 @@ struct ChatPanelView: View {
         VStack(spacing: 0) {
             Divider().overlay(Color.grokDivider)
             HStack(spacing: 12) {
+                connectionStatusDot
+
                 ZStack(alignment: .topLeading) {
                     MacTextEditor(
                         text: $viewModel.inputText,
@@ -219,7 +280,7 @@ struct ChatPanelView: View {
                     }
 
                     if viewModel.inputText.isEmpty {
-                        Text("Ask anything...")
+                        Text(inputPlaceholder)
                             .font(.system(size: NSFont.systemFontSize))
                             .foregroundColor(.grokDim)
                             .padding(.horizontal, 4)
@@ -234,20 +295,82 @@ struct ChatPanelView: View {
                 }) {
                     Image(systemName: sendButtonIcon)
                         .font(.system(size: 16, weight: .semibold))
-                        .foregroundColor(viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? .grokDim : .grokText)
+                        .foregroundColor(sendButtonForeground)
                         .frame(width: 32, height: 32)
                         .background(
                             Circle()
-                                .fill(viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color.clear : Color.grokElevated)
+                                .fill(sendButtonBackground)
                         )
                 }
                 .buttonStyle(PlainButtonStyle())
-                .disabled(viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .disabled(sendButtonDisabled)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+
+            if let hint = statusHint {
+                statusHintBar(hint)
+            }
         }
         .padding(.bottom, 20)
+    }
+
+    private var inputPlaceholder: String {
+        if !viewModel.isServerReachable {
+            return "Server offline — check BrowserOS Agent..."
+        }
+        if !isAPIKeyConfigured {
+            return "Add TRIOS_API_KEY to send to paid providers..."
+        }
+        return "Ask anything..."
+    }
+
+    private var connectionStatusDot: some View {
+        StatusDot(
+            isOn: viewModel.isServerReachable,
+            label: viewModel.isServerReachable ? "Online" : "Offline",
+            color: viewModel.isServerReachable ? .green : .red
+        )
+        .help(viewModel.isServerReachable
+            ? "BrowserOS Agent server is reachable on port \(ProjectPaths.mcpPort)"
+            : "BrowserOS Agent server is not reachable on port \(ProjectPaths.mcpPort)")
+    }
+
+    private var isAPIKeyConfigured: Bool {
+        guard let key = ProcessInfo.processInfo.environment["TRIOS_API_KEY"] else { return false }
+        return !key.isEmpty
+    }
+
+    private var statusHint: StatusHint? {
+        if !viewModel.isServerReachable {
+            return StatusHint(
+                icon: "exclamationmark.triangle.fill",
+                text: "BrowserOS Agent offline — start the server or check port \(ProjectPaths.mcpPort).",
+                color: .yellow
+            )
+        }
+        if !isAPIKeyConfigured {
+            return StatusHint(
+                icon: "key.fill",
+                text: "No TRIOS_API_KEY set. Local Ollama works; paid providers (OpenRouter/Anthropic/z.ai) need a key.",
+                color: .grokDim
+            )
+        }
+        return nil
+    }
+
+    private func statusHintBar(_ hint: StatusHint) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: hint.icon)
+                .font(.system(size: 10))
+                .foregroundColor(hint.color)
+            Text(hint.text)
+                .font(.system(size: 11))
+                .foregroundColor(.grokDim)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.bottom, 8)
     }
 
     private var sendButtonIcon: String {
@@ -255,9 +378,35 @@ struct ChatPanelView: View {
         return isSending ? "stop.fill" : "arrow.up"
     }
 
+    private var sendButtonForeground: Color {
+        let trimmed = viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if viewModel.state != .idle || browserOSVM.isStreaming { return .grokText }
+        return trimmed.isEmpty ? .grokDim : .grokText
+    }
+
+    private var sendButtonBackground: Color {
+        let trimmed = viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if viewModel.state != .idle || browserOSVM.isStreaming { return Color.red.opacity(0.25) }
+        return trimmed.isEmpty ? Color.clear : Color.grokElevated
+    }
+
+    private var sendButtonDisabled: Bool {
+        let trimmed = viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty && viewModel.state == .idle && !browserOSVM.isStreaming
+    }
+
     private func triggerSend() {
         let text = viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         NSLog("[ChatPanel] triggerSend called, text='\(text.prefix(40))', isEmpty=\(text.isEmpty)")
+
+        // If streaming is active, the send button becomes a stop button.
+        if viewModel.state != .idle || browserOSVM.isStreaming {
+            NSLog("[ChatPanel] stopping active stream")
+            viewModel.cancelStreaming()
+            browserOSVM.cancelStreaming()
+            return
+        }
+
         guard !text.isEmpty else { return }
 
         if browserOSVM.isLikelyCommand(text) {
@@ -585,4 +734,12 @@ private struct StatusDot: View {
             }
         }
     }
+}
+
+// MARK: - Status Hint Model
+
+private struct StatusHint: Equatable {
+    let icon: String
+    let text: String
+    let color: Color
 }
