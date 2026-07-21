@@ -208,3 +208,20 @@
 - **Seal status**: BUILD_PASS, TEST_PASS, CLIPPY_PASS, ASCII_PASS, E2E_NOT_RUN_DUE_SERVER_DOWN
 - **Next wave options**: seal-automation, meshd-revival, cap-std-adoption
 
+## 2026-07-21 WAVE-008 (tablecloth tmp-zero completion / test hardening)
+
+- **Issue**: #T27-EPIC-001
+- **Agents**: t27-creator, t27-verifier, t27-experience
+- **Root cause**: `clade-tablecloth` still used `/tmp` in six unit tests for `write_atomic` and `independent_verify` fixtures. `clade-improve` tests used `_ => panic!("expected Improve")` markers. There was no automated gate preventing `/tmp` from re-entering workspace Rust/Swift source.
+- **Fix pattern**: Add `tempfile = "3"` to `clade-tablecloth` dev-dependencies and migrate all six tests to `tempfile::tempdir()`. Replace `clade-improve` test panic markers with `assert!(matches!(parse_command(&args), CliCommand::Improve(...)))`. Create `tmp-zero-gate` ring (`rings/RUST-99/tmp-zero-gate`) using `walkdir` to scan `.rs` and `.swift` source with exemptions for docs/smoke/tools/.trinity/.claude. Register the binary in workspace `Cargo.toml`.
+- **Files changed**: trios/rings/RUST-14/clade-tablecloth/{Cargo.toml,src/main.rs}, trios/rings/RUST-04/clade-improve/src/main.rs, trios/rings/RUST-99/tmp-zero-gate/{Cargo.toml,src/main.rs}, trios/Cargo.toml, trios/.claude/skills/tmp-zero/SKILL.md, trios/.claude/skills/panic-hardening/SKILL.md, trios/.trinity/specs/tmp-zero.md, trios/.trinity/specs/tablecloth-tmp-zero.md, trios/.trinity/wave-loop-008.md, .claude/plans/trios-wave-008-tablecloth-tmp-zero.md
+- **Tests added**: `tmp_zero_gate: source_exts_cover_rust_and_swift`, `tmp_zero_gate: is_exempt_accepts_docs`; migrated `clade-tablecloth` /tmp tests and `clade-improve` panic-marker tests.
+- **Lessons**:
+  - The last holdouts for a policy are often in older rings; a dedicated gate binary makes the policy self-sustaining.
+  - Test-only `panic!` markers should be treated the same as production panic surfaces when the codebase adopts a panic-free style.
+  - Pre-existing Unicode placeholders (e.g. `[U+23ED]`, `[U+2190]`) must be cleaned before seal even if not introduced this wave.
+  - `walkdir`-based gates are simple to implement and honor L7 UNITY (no new `.sh` on the critical path).
+- **Episode**: `.trinity/experience/2026-07-21_tablecloth_tmp_zero_WAVE-008.json`
+- **Seal status**: BUILD_PASS, TEST_PASS, CLIPPY_PASS, TMP_ZERO_PASS, ASCII_PASS, E2E_NOT_RUN_DUE_SERVER_DOWN
+- **Next wave options**: seal-automation, meshd-revival, cap-std-adoption
+

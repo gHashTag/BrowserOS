@@ -76,15 +76,31 @@ let drop_path = std::env::var("TRIOS_MESH_DROP").unwrap_or_else(|_| {
 6. Run `cargo clippy -p {ring} --all-targets --all-features`.
 7. Run ASCII scan on changed files.
 
-## CI Gate (backlog)
+## CI Gate: tmp-zero-gate
 
-A future `clade-seal` ring can enforce:
+Use the workspace `tmp-zero-gate` ring to enforce the no-`/tmp` policy:
 
 ```bash
-grep -RIn '/tmp' rings/**/src/*.rs && exit 1
+cd trios
+cargo run --bin tmp-zero-gate
 ```
 
-Exempt only documentation files (`docs/`, `smoke/`, `README.md`) and external tooling.
+It walks `rings/` and `BR-OUTPUT/` for `.rs` and `.swift` files, reports `file:line:ext line`, and exits non-zero if any `/tmp` literal appears. Exemptions: `docs/`, `smoke/`, `tools/`, `.trinity/`, `.claude/`.
+
+Register the gate in workspace `Cargo.toml`:
+
+```toml
+members = [
+    # ... existing rings ...
+    "rings/RUST-99/tmp-zero-gate",
+]
+```
+
+And add `walkdir = "2"` in `tmp-zero-gate/Cargo.toml`.
+
+### Future seal integration
+
+A `clade-seal` ring can invoke `cargo run --bin tmp-zero-gate` as one of its gates, alongside `./build.sh`, `cargo test --workspace`, `cargo clippy --workspace`, and ASCII scan.
 
 ## Real examples from trios
 
@@ -134,6 +150,27 @@ std::env::set_var("TRIOS_ROOT", &root);
 let result = track_build_hash();
 assert!(result.is_none());
 std::env::remove_var("TRIOS_ROOT");
+```
+
+### clade-tablecloth independent verifier tests
+
+Before:
+
+```rust
+let path = "/tmp/clade-verify-ok.swift";
+fs::write(path, "let x = try?(foo())\n").unwrap();
+assert!(independent_verify(path, "let x = try!(foo())", &re).is_ok());
+let _ = fs::remove_file(path);
+```
+
+After:
+
+```rust
+let dir = tempfile::tempdir().expect("tempdir");
+let path = dir.path().join(format!("clade-verify-ok-{}.swift", std::process::id()));
+fs::write(&path, "let x = try?(foo())\n").unwrap();
+assert!(independent_verify(&path.to_string_lossy(), "let x = try!(foo())", &re).is_ok());
+// dir is automatically deleted when it leaves scope.
 ```
 
 ## Rules

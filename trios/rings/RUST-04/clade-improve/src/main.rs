@@ -268,19 +268,22 @@ mod tests {
     #[test]
     fn parse_improve_without_description() {
         let args = vec!["improve".to_string()];
-        match parse_command(&args) {
-            CliCommand::Improve(desc) => assert!(desc.is_none()),
-            _ => panic!("expected Improve"),
-        }
+        assert!(
+            matches!(parse_command(&args), CliCommand::Improve(None)),
+            "expected Improve without description"
+        );
     }
 
     #[test]
     fn parse_improve_with_description() {
         let args = vec!["improve".to_string(), "optimize latency".to_string()];
-        match parse_command(&args) {
-            CliCommand::Improve(desc) => assert_eq!(desc.as_deref(), Some("optimize latency")),
-            _ => panic!("expected Improve"),
-        }
+        assert!(
+            matches!(
+                parse_command(&args),
+                CliCommand::Improve(Some(ref desc)) if desc == "optimize latency"
+            ),
+            "expected Improve with description 'optimize latency'"
+        );
     }
 
     #[test]

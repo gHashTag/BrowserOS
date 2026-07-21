@@ -337,7 +337,7 @@ fn create_issues(report: &AuditReport, dry_run: bool) -> usize {
             });
 
             if should_throttle() {
-                println!("   [U+23ED]  Rate limit floor reached - stopping issue creation");
+                println!("   [SKIP] Rate limit floor reached - stopping issue creation");
                 break;
             }
 
@@ -454,12 +454,12 @@ fn create_pr(repo: &str, title: &str, body: &str, head: &str, base: &str, dry_ru
     }
 
     if pr_already_exists(repo, head, &token) {
-        println!("   [U+23ED]  PR already exists for branch {} - skipping", head);
+        println!("   [SKIP] PR already exists for branch {} - skipping", head);
         return false;
     }
 
     if dry_run {
-        println!("   [DRY-RUN] Would create PR: {} [U+2190] {}", title, head);
+        println!("   [DRY-RUN] Would create PR: {} from {}", title, head);
         return true;
     }
 
@@ -484,7 +484,7 @@ fn create_pr(repo: &str, title: &str, body: &str, head: &str, base: &str, dry_ru
             check_rate_limit(&resp);
             if resp.status().is_success() {
                 println!("   [OK] PR created: {}", title);
-                log_event("pr_created", &format!("{} [U+2190] {}", title, head));
+                log_event("pr_created", &format!("{} from {}", title, head));
                 true
             } else if resp.status().as_u16() == 429 || resp.status().as_u16() == 403 {
                 println!("   [WARN]  Rate limited ({}) - backing off", resp.status());
@@ -1129,10 +1129,11 @@ mod tests {
 
     #[test]
     fn write_atomic_roundtrips() {
-        let path = format!("/tmp/clade-tablecloth-atomic-{}.json", std::process::id());
-        write_atomic(&path, "{\"ok\":true}").unwrap();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(format!("clade-tablecloth-atomic-{}.json", std::process::id()));
+        let path_str = path.to_string_lossy().into_owned();
+        write_atomic(&path_str, "{\"ok\":true}").unwrap();
         assert_eq!(fs::read_to_string(&path).unwrap(), "{\"ok\":true}");
-        fs::remove_file(&path).ok();
     }
 
     // ---- C: constitution gate ----
@@ -1244,46 +1245,46 @@ mod tests {
     #[test]
     fn independent_verify_accepts_clean_fix() {
         let re = regex::Regex::new(r"try!\s*\(").unwrap();
-        let path = format!("/tmp/clade-verify-ok-{}.swift", std::process::id());
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(format!("clade-verify-ok-{}.swift", std::process::id()));
         fs::write(&path, "let x = try?(foo())\n").unwrap();
-        assert!(independent_verify(&path, "let x = try!(foo())", &re).is_ok());
-        fs::remove_file(&path).ok();
+        assert!(independent_verify(&path.to_string_lossy(), "let x = try!(foo())", &re).is_ok());
     }
 
     #[test]
     fn independent_verify_rejects_residual_pattern() {
         let re = regex::Regex::new(r"try!\s*\(").unwrap();
-        let path = format!("/tmp/clade-verify-bad-{}.swift", std::process::id());
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(format!("clade-verify-bad-{}.swift", std::process::id()));
         fs::write(&path, "let x = try!(foo())\n").unwrap();
-        assert!(independent_verify(&path, "let x = try!(foo())", &re).is_err());
-        fs::remove_file(&path).ok();
+        assert!(independent_verify(&path.to_string_lossy(), "let x = try!(foo())", &re).is_err());
     }
 
     #[test]
     fn independent_verify_rejects_introduced_unsafe() {
         let re = regex::Regex::new(r"try!\s*\(").unwrap();
-        let path = format!("/tmp/clade-verify-unsafe-{}.swift", std::process::id());
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(format!("clade-verify-unsafe-{}.swift", std::process::id()));
         fs::write(&path, "unsafe { ptr() }\n").unwrap();
-        assert!(independent_verify(&path, "let x = 1", &re).is_err());
-        fs::remove_file(&path).ok();
+        assert!(independent_verify(&path.to_string_lossy(), "let x = 1", &re).is_err());
     }
 
     #[test]
     fn independent_verify_rejects_missing_file() {
         // Re-read failure must fail closed (Err), never accept the change.
         let re = regex::Regex::new(r"try!\s*\(").unwrap();
-        let path = format!("/tmp/clade-verify-absent-{}.swift", std::process::id());
-        fs::remove_file(&path).ok(); // ensure it does not exist
-        assert!(independent_verify(&path, "x", &re).is_err());
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(format!("clade-verify-absent-{}.swift", std::process::id()));
+        assert!(independent_verify(&path.to_string_lossy(), "x", &re).is_err());
     }
 
     #[test]
     fn independent_verify_rejects_empty_file() {
         let re = regex::Regex::new(r"try!\s*\(").unwrap();
-        let path = format!("/tmp/clade-verify-empty-{}.swift", std::process::id());
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(format!("clade-verify-empty-{}.swift", std::process::id()));
         fs::write(&path, "   \n").unwrap(); // whitespace-only -> empty after trim
-        assert!(independent_verify(&path, "let x = 1", &re).is_err());
-        fs::remove_file(&path).ok();
+        assert!(independent_verify(&path.to_string_lossy(), "let x = 1", &re).is_err());
     }
 
     #[test]

@@ -2,7 +2,7 @@
 :description: Eliminate world-writable /tmp usage from trios workspace Rust ring source files by migrating tests to tempfile and production paths to .trinity/ subdirs.
 :owner: claude
 :status: sealed
-:wave: 006
+:wave: 006-008
 
 # Spec - trios tmp-zero: remove /tmp from Rust ring source
 
@@ -41,6 +41,12 @@ Research on TOCTOU vulnerabilities (Atomicity for Agents, Mind the Gap) and CI r
 - Replaced all `/tmp` sample `WorkingDirectory` strings in tests with project-relative `.trinity/dev/launchd-wd`.
 - Kept the program-path test that contains `&` unchanged except for moving from `/tmp/test&prog` to `.trinity/dev/test&prog`.
 
+### Wave 008 completion - clade-tablecloth and clade-improve
+
+- `clade-tablecloth` had six tests writing to `/tmp` for `write_atomic` roundtrip and `independent_verify` fixtures. Added `tempfile = "3"` to `[dev-dependencies]` and migrated all six to `tempfile::tempdir()`, removing manual `fs::remove_file` cleanup.
+- `clade-improve` tests used `_ => panic!("expected Improve")` for branch assertion. Replaced with `assert!(matches!(parse_command(&args), CliCommand::Improve(None)))` and a pattern guard for `Some(ref desc) if desc == "optimize latency"`.
+- Added `tmp-zero-gate` ring (`rings/RUST-99/tmp-zero-gate`) that walks the workspace for `/tmp` literals in `.rs` and `.swift` source, with exemptions for `docs/`, `smoke/`, `tools/`, `.trinity/`, `.claude/`. Registered in workspace `Cargo.toml`.
+
 ### Skills
 
 - Updated `trios/.claude/skills/portable-paths/SKILL.md`:
@@ -51,9 +57,10 @@ Research on TOCTOU vulnerabilities (Atomicity for Agents, Mind the Gap) and CI r
 ## Verification
 
 - `grep -RIn '/tmp' rings/RUST-*/src/` returns zero matches in workspace Rust source.
-- `cargo test -p clade-experience -p clade-launchd -p clade-audit --all-features` passes (37 tests).
+- `cargo test -p clade-experience -p clade-launchd -p clade-audit -p clade-tablecloth -p clade-improve --all-features` passes.
 - `cargo test --workspace --all-features` passes (full workspace).
 - `cargo clippy --workspace --all-targets --all-features` is clean.
+- `cargo run --bin tmp-zero-gate` reports zero `/tmp` violations.
 - `./build.sh` passes.
 - ASCII scan of changed files is clean.
 
@@ -67,9 +74,9 @@ Research on TOCTOU vulnerabilities (Atomicity for Agents, Mind the Gap) and CI r
 
 ## Backlog
 
-- `seal-automation`: add `clade-seal` ring that runs build/test/clippy/ASCII gate.
+- `seal-automation`: add `clade-seal` ring that runs build/test/clippy/ASCII/`tmp-zero-gate` gate.
 - `meshd-revival`: repair `trios_meshd.rs` API drift and register it as `[[bin]]`.
-- `diff-hardening`: ASCII-clean `clade-diff` console output and add HTTP probe timeout.
+- `cap-std-adoption`: migrate security-sensitive file I/O to capability-based `cap-std`.
 
 ## Related
 

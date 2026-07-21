@@ -142,6 +142,36 @@ In the crate root, allow tests only:
 
 This keeps CI strict while letting tests stay concise.
 
+### 9. Replace test-only `panic!` markers with `matches!`
+
+Tests should avoid `panic!` even when they assert branch behavior, because panic messages in test output complicate log parsing and the panic surface conflicts with the workspace's panic-free style.
+
+Before:
+
+```rust
+match parse_command(&args) {
+    CliCommand::Improve(Some(desc)) => assert_eq!(desc, "optimize latency"),
+    _ => panic!("expected Improve with description 'optimize latency'"),
+}
+```
+
+After:
+
+```rust
+assert!(
+    matches!(
+        parse_command(&args),
+        CliCommand::Improve(Some(ref desc)) if desc == "optimize latency"
+    ),
+    "expected Improve with description 'optimize latency'"
+);
+```
+
+Benefits:
+- No `panic!` in test source.
+- Clearer assertion failure message from `assert!`.
+- Aligns with lint-driven "no panic" posture.
+
 ### 9. Signal-safe shutdown in daemons
 
 Replace raw `libc::signal` callbacks with `signal-hook` atomic flags:
@@ -176,9 +206,11 @@ Why: OS signal handlers are async-signal-unsafe; `signal-hook` safely writes an 
 - [ ] `cargo clippy -p <crate> --all-targets --all-features` reports zero `unwrap_used`/`expect_used` violations in production code.
 - [ ] `cargo test -p <crate> --all-features` passes.
 - [ ] `./build.sh` passes (Swift app still links).
-- [ ] Changed source files are ASCII-only (`grep -RIn '[^\x00-\x7F]' <paths>`).
+- [ ] Changed source files are ASCII-only (`python3 -c "import re,sys; print('FAIL' if re.search(r'[^\\x00-\\x7F]', open(sys.argv[1]).read()) else 'PASS')" <path>`).
 - [ ] Binary startup paths (config, bind, drop file) return errors instead of panicking.
 - [ ] Daemon signal handlers use `signal-hook` or equivalent, not raw `libc::signal` callbacks.
+- [ ] Test-only `panic!` markers are replaced with `matches!`/`assert!` where applicable.
+- [ ] `cargo run --bin tmp-zero-gate` reports zero `/tmp` violations in changed files.
 
 ## Backlog Extensions
 
