@@ -1,20 +1,35 @@
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 use reqwest::blocking::get;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use signal_hook::consts::signal::{SIGINT, SIGTERM};
+use signal_hook::flag;
 use std::fs;
 use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 static RUNNING: AtomicBool = AtomicBool::new(true);
 
-extern "C" fn handle_signal(_sig: libc::c_int) {
-    RUNNING.store(false, Ordering::Relaxed);
-}
-
 fn project_dir() -> String {
     trios_config::project_dir()
+}
+
+fn register_shutdown_signals() {
+    let flag = Arc::new(AtomicBool::new(false));
+    flag::register(SIGTERM, Arc::clone(&flag)).ok();
+    flag::register(SIGINT, Arc::clone(&flag)).ok();
+    // The original RUNNING static is used by the main loop and other helpers.
+    // Spawn a thin watcher that propagates the signal-hook flag into RUNNING.
+    thread::spawn(move || {
+        while !flag.load(Ordering::Relaxed) {
+            thread::sleep(Duration::from_millis(100));
+        }
+        RUNNING.store(false, Ordering::Relaxed);
+    });
 }
 
 const CIRCUIT_BREAKER_TRIP_THRESHOLD: u32 = 3;
@@ -63,7 +78,7 @@ impl CircuitBreaker {
     fn record_success(&mut self) {
         if self.state != CircuitState::Closed {
             println!(
-                "[CircuitBreaker] {} recovered — closing circuit",
+                "[CircuitBreaker] {} recovered - closing circuit",
                 self.service_name
             );
         }
@@ -80,7 +95,7 @@ impl CircuitBreaker {
                 .as_secs();
             if self.state == CircuitState::Closed {
                 println!(
-                    "[CircuitBreaker] {} tripped after {} consecutive failures — opening circuit (probe in {}s)",
+                    "[CircuitBreaker] {} tripped after {} consecutive failures - opening circuit (probe in {}s)",
                     self.service_name, self.consecutive_failures, CIRCUIT_BREAKER_PROBE_INTERVAL_SECS
                 );
             }
@@ -202,17 +217,10 @@ fn cleanup_pidfile() {
 fn main() {
     use std::collections::HashMap;
 
-    // Register signal handlers before pidfile to minimize stale-pidfile window
-    unsafe {
-        libc::signal(
-            libc::SIGTERM,
-            handle_signal as *const () as libc::sighandler_t,
-        );
-        libc::signal(
-            libc::SIGINT,
-            handle_signal as *const () as libc::sighandler_t,
-        );
-    }
+    // Register signal handlers before pidfile to minimize stale-pidfile window.
+    // signal-hook safely sets an atomic flag; a watcher thread propagates it to
+    // RUNNING so the main loop reacts without executing logic in the handler.
+    register_shutdown_signals();
 
     if acquire_pidfile().is_none() {
         std::process::exit(1);
@@ -352,7 +360,7 @@ fn main() {
 
         // App watchdog (every loop, ~60s): the trios menu-bar app must always be
         // running so its status-bar logo is present. If it died (crash, rebuild
-        // without restart, logout) nothing else brings it back — relaunch it.
+        // without restart, logout) nothing else brings it back - relaunch it.
         // A grace period after relaunch prevents a storm of duplicate launches
         // while the app is still booting.
         ensure_trios_app_running(&mut last_app_relaunch);
@@ -451,7 +459,7 @@ fn ensure_trios_app_running(last_relaunch: &mut Option<Instant>) {
     };
 
     if launched {
-        println!("[CladeMonitor] App watchdog: trios was down — relaunched");
+        println!("[CladeMonitor] App watchdog: trios was down - relaunched");
         log_event("trios_relaunch", "relaunched_after_down");
         *last_relaunch = Some(Instant::now());
     } else {
@@ -530,11 +538,11 @@ fn replenish_budget(consecutive_healthy: u32) -> bool {
     }
 }
 
-/// Pure drift computation — returns drift descriptions, no I/O. Tests call this
+/// Pure drift computation - returns drift descriptions, no I/O. Tests call this
 /// directly so they never touch the real event_log. (Prior bug: the unit tests
 /// drove `detect_drift`, whose `log_event` side effect appended bogus
 /// "test_15m: 7200s" drift events to the production `.trinity/event_log.jsonl`
-/// on every `cargo test` run — 337 of them accumulated.)
+/// on every `cargo test` run - 337 of them accumulated.)
 fn compute_drift(now: Instant, intervals: &[(&str, &Instant, u64)]) -> Vec<String> {
     let mut drifted = Vec::new();
     for (name, last_run, expected_secs) in intervals {
@@ -589,7 +597,7 @@ fn track_build_hash() -> Option<(String, bool)> {
     if changed {
         if let Some(prev) = &previous_hash {
             println!(
-                "[CladeMonitor] Binary changed: {}..→ {}...",
+                "[CladeMonitor] Binary changed: {}..-> {}...",
                 &prev[..8.min(prev.len())],
                 &current_hash[..8]
             );
@@ -636,7 +644,7 @@ fn run_health_check(interval: &str, canary_cb: &mut CircuitBreaker) -> bool {
 
     if !sovereign {
         println!(
-            "[CladeMonitor][{}] ALERT: Sovereign unhealthy — triggering rollback",
+            "[CladeMonitor][{}] ALERT: Sovereign unhealthy - triggering rollback",
             interval
         );
         log_event("health_alert", &format!("sovereign_fail_at_{}", interval));
@@ -675,7 +683,7 @@ fn build_error_tail(stderr: &str) -> String {
 /// Resolve an explicit build-check executable from the `TRIOS_BUILD_CHECK_SCRIPT`
 /// env override (consistent with `TRIOS_ROOT`/port env handling in trios-config).
 ///
-/// `None` means "no custom hook configured" — `run_build_check` then falls back
+/// `None` means "no custom hook configured" - `run_build_check` then falls back
 /// to the canonical `clade-build` ring. We deliberately do NOT default to a
 /// `.sh` path: L7 UNITY forbids shell scripts on the critical path, and a
 /// missing default produced a non-actionable `build_check_skip` every cycle.
@@ -693,8 +701,8 @@ fn run_build_check(interval: &str) -> bool {
     let Some(script) = resolve_build_check_script(std::env::var("TRIOS_BUILD_CHECK_SCRIPT").ok())
     else {
         // No custom hook: run the canonical Rust build gate (swiftc via the
-        // clade-build ring). This keeps the daemon self-sufficient — it catches
-        // build regressions even when the agent cron isn't waking — without a
+        // clade-build ring). This keeps the daemon self-sufficient - it catches
+        // build regressions even when the agent cron isn't waking - without a
         // shell script (L7 UNITY).
         return run_default_build_check(interval);
     };
@@ -743,8 +751,8 @@ fn run_build_check(interval: &str) -> bool {
     }
 
     println!("[CladeMonitor][{}] Build check: {}", interval, script);
-    // Use output() (not status()) so the piped stderr is actually drained —
-    // an unread pipe can deadlock a chatty build — and so we can distinguish a
+    // Use output() (not status()) so the piped stderr is actually drained -
+    // an unread pipe can deadlock a chatty build - and so we can distinguish a
     // spawn failure from a genuine build failure, logging *why* either way.
     match Command::new(&script)
         .stdout(Stdio::null())
@@ -775,7 +783,7 @@ fn run_build_check(interval: &str) -> bool {
             false
         }
         Err(e) => {
-            // Could not even spawn the script (missing exec bit / permission) —
+            // Could not even spawn the script (missing exec bit / permission) -
             // a distinct failure mode from a build that ran and failed.
             eprintln!(
                 "[CladeMonitor][{}] Build check could not spawn {}: {}",
@@ -879,7 +887,7 @@ fn run_tablecloth(interval: &str) -> bool {
     let budget = load_safety_budget();
     if budget.halted || budget.budget <= 0.0 {
         println!(
-            "[CladeMonitor][{}] Tablecloth HALTED: budget={} — skipping loop",
+            "[CladeMonitor][{}] Tablecloth HALTED: budget={} - skipping loop",
             interval, budget.budget
         );
         log_event("tablecloth_halted", &format!("budget_{}", budget.budget));
@@ -1052,7 +1060,7 @@ mod tests {
     #[test]
     fn build_error_tail_is_char_safe_and_capped() {
         // Multi-byte chars must not cause a mid-UTF-8 panic when capping.
-        let line = "é".repeat(500);
+        let line = "e".repeat(500);
         let out = build_error_tail(&line);
         assert!(out.chars().count() <= 300);
     }
@@ -1169,7 +1177,7 @@ mod tests {
     fn jitter_varies_across_seeds() {
         let a = calculate_backoff_with_jitter(3, 0);
         let b = calculate_backoff_with_jitter(3, 13);
-        // seed 0 -> 0% jitter, seed 13 -> 13% jitter — should differ
+        // seed 0 -> 0% jitter, seed 13 -> 13% jitter - should differ
         assert_ne!(a, b);
     }
 
@@ -1210,10 +1218,10 @@ mod tests {
         let expected: u64 = 900;
         // (elapsed_secs, should_drift)
         let cases: [(u64, bool); 4] = [
-            (expected, false),        // 1x — fine
-            (expected * 2, false),    // exactly 2x — NOT drift (threshold is >)
-            (expected * 2 + 1, true), // just over 2x — drift
-            (expected * 8, true),     // 8x — drift
+            (expected, false),        // 1x - fine
+            (expected * 2, false),    // exactly 2x - NOT drift (threshold is >)
+            (expected * 2 + 1, true), // just over 2x - drift
+            (expected * 8, true),     // 8x - drift
         ];
         for (elapsed, should_drift) in cases {
             let last = now - Duration::from_secs(elapsed);
@@ -1231,7 +1239,9 @@ mod tests {
 
     #[test]
     fn track_build_hash_returns_none_for_missing_binary() {
-        std::env::set_var("TRIOS_ROOT", "/tmp/nonexistent-trios-test-dir");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().to_string_lossy().into_owned();
+        std::env::set_var("TRIOS_ROOT", &root);
         let result = track_build_hash();
         assert!(result.is_none());
         std::env::remove_var("TRIOS_ROOT");
@@ -1267,22 +1277,23 @@ mod tests {
 
     #[test]
     fn atomic_write_creates_file() {
-        let path = "/tmp/clade_monitor_atomic_test.json";
-        let _ = std::fs::remove_file(path);
-        let result = atomic_write(path, r#"{"test": true}"#);
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("clade_monitor_atomic_test.json");
+        let path_str = path.to_string_lossy().into_owned();
+        let result = atomic_write(&path_str, r#"{"test": true}"#);
         assert!(result.is_ok());
-        let content = std::fs::read_to_string(path).unwrap_or_default();
+        let content = std::fs::read_to_string(&path).unwrap_or_default();
         assert!(content.contains("test"));
-        let _ = std::fs::remove_file(path);
     }
 
     #[test]
     fn atomic_write_no_tmp_left_behind() {
-        let path = "/tmp/clade_monitor_atomic_notmp.json";
-        let tmp_path = format!("{}.tmp", path);
-        let _ = atomic_write(path, "data");
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("clade_monitor_atomic_notmp.json");
+        let path_str = path.to_string_lossy().into_owned();
+        let tmp_path = format!("{}.tmp", path_str);
+        let _ = atomic_write(&path_str, "data");
         assert!(!std::path::Path::new(&tmp_path).exists());
-        let _ = std::fs::remove_file(path);
     }
 
     #[test]

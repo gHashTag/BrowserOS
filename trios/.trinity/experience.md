@@ -192,3 +192,19 @@
 - **Seal status**: BUILD_PASS, TEST_PASS, CLIPPY_PASS, ASCII_PASS, E2E_NOT_RUN_DUE_SERVER_DOWN
 - **Next wave options**: seal-automation, meshd-revival, diff-hardening
 
+## 2026-07-21 WAVE-007 (clade-monitor signal safety / tmp-zero completion)
+
+- **Issue**: #T27-EPIC-001
+- **Agents**: t27-creator, t27-verifier, t27-experience
+- **Root cause**: `clade-monitor` registered SIGTERM/SIGINT via raw `unsafe { libc::signal(...) }`, which is async-signal-unsafe for application logic. It also wrote atomic-write test fixtures to `/tmp` and lacked a test-only clippy exemption for `expect`/`unwrap`.
+- **Fix pattern**: Replace raw signal registration with `signal-hook::flag::register` on an `Arc<AtomicBool>` plus a watcher thread that propagates the flag to the existing `RUNNING` static. Add `signal-hook` dependency. Migrate atomic-write and missing-binary tests to `tempfile::tempdir()`. Add `#![cfg_attr(test, allow(...))]` crate-level exemption. ASCII-clean all touched lines and pre-existing non-ASCII characters in `clade-monitor`.
+- **Files changed**: trios/rings/RUST-05/clade-monitor/{Cargo.toml,src/main.rs}, trios/.trinity/specs/monitor-signal-hardening.md, trios/.trinity/wave-loop-007.md, trios/.claude/skills/panic-hardening/SKILL.md, trios/.claude/skills/tmp-zero/SKILL.md
+- **Tests added**: No new tests; signal behavior is covered by existing daemon semantics, tmp-zero tests migrated.
+- **Lessons**:
+  - `signal-hook` flag pattern is a drop-in replacement for raw `libc::signal` in daemon loops: register flags, watch in a thread, update the existing shutdown boolean.
+  - Completing tmp-zero requires checking every ring's `src/main.rs`, not just the ones flagged in the previous wave.
+  - Adding test exemptions after the workspace lint is at `deny` prevents last-minute clippy failures when tests naturally use `expect("tempdir")`.
+  - ASCII cleanup must scan the whole changed file, not just new lines, because automated scripts can expose pre-existing characters.
+- **Seal status**: BUILD_PASS, TEST_PASS, CLIPPY_PASS, ASCII_PASS, E2E_NOT_RUN_DUE_SERVER_DOWN
+- **Next wave options**: seal-automation, meshd-revival, cap-std-adoption
+

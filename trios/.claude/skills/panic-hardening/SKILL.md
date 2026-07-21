@@ -142,16 +142,47 @@ In the crate root, allow tests only:
 
 This keeps CI strict while letting tests stay concise.
 
+### 9. Signal-safe shutdown in daemons
+
+Replace raw `libc::signal` callbacks with `signal-hook` atomic flags:
+
+```rust
+use signal_hook::consts::signal::{SIGINT, SIGTERM};
+use signal_hook::flag;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
+
+static RUNNING: AtomicBool = AtomicBool::new(true);
+
+fn register_shutdown_signals() {
+    let flag = Arc::new(AtomicBool::new(false));
+    flag::register(SIGTERM, Arc::clone(&flag)).ok();
+    flag::register(SIGINT, Arc::clone(&flag)).ok();
+    thread::spawn(move || {
+        while !flag.load(Ordering::Relaxed) {
+            thread::sleep(Duration::from_millis(100));
+        }
+        RUNNING.store(false, Ordering::Relaxed);
+    });
+}
+```
+
+Why: OS signal handlers are async-signal-unsafe; `signal-hook` safely writes an atomic flag, and the main loop reacts.
+
 ## Verification Checklist
 
-- [ ] `cargo clippy -p <crate> --all-targets --all-features` reports zero `unwrap_used`/`expect_used` violations.
+- [ ] `cargo clippy -p <crate> --all-targets --all-features` reports zero `unwrap_used`/`expect_used` violations in production code.
 - [ ] `cargo test -p <crate> --all-features` passes.
 - [ ] `./build.sh` passes (Swift app still links).
 - [ ] Changed source files are ASCII-only (`grep -RIn '[^\x00-\x7F]' <paths>`).
 - [ ] Binary startup paths (config, bind, drop file) return errors instead of panicking.
+- [ ] Daemon signal handlers use `signal-hook` or equivalent, not raw `libc::signal` callbacks.
 
 ## Backlog Extensions
 
 - `tmp-zero`: replace remaining test `/tmp` paths with `tempfile` or project-relative dirs.
 - `seal-automation`: add a `clade-seal` ring that gates promotion on clippy + test + ASCII.
 - `promotion-lock`: prevent concurrent `clade-promote` runs across rings.
+- `cap-std`: migrate security-sensitive file/network access to capability-based I/O.

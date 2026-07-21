@@ -86,6 +86,56 @@ grep -RIn '/tmp' rings/**/src/*.rs && exit 1
 
 Exempt only documentation files (`docs/`, `smoke/`, `README.md`) and external tooling.
 
+## Real examples from trios
+
+### clade-monitor atomic-write tests
+
+Before:
+
+```rust
+let path = "/tmp/clade_monitor_atomic_test.json";
+let _ = std::fs::remove_file(path);
+let result = atomic_write(path, r#"{"test": true}"#);
+assert!(result.is_ok());
+let content = std::fs::read_to_string(path).unwrap_or_default();
+assert!(content.contains("test"));
+let _ = std::fs::remove_file(path);
+```
+
+After:
+
+```rust
+let dir = tempfile::tempdir().expect("tempdir");
+let path = dir.path().join("clade_monitor_atomic_test.json");
+let path_str = path.to_string_lossy().into_owned();
+let result = atomic_write(&path_str, r#"{"test": true}"#);
+assert!(result.is_ok());
+let content = std::fs::read_to_string(&path).unwrap_or_default();
+assert!(content.contains("test"));
+```
+
+### clade-monitor missing-binary test
+
+Before:
+
+```rust
+std::env::set_var("TRIOS_ROOT", "/tmp/nonexistent-trios-test-dir");
+let result = track_build_hash();
+assert!(result.is_none());
+std::env::remove_var("TRIOS_ROOT");
+```
+
+After:
+
+```rust
+let dir = tempfile::tempdir().expect("tempdir");
+let root = dir.path().to_string_lossy().into_owned();
+std::env::set_var("TRIOS_ROOT", &root);
+let result = track_build_hash();
+assert!(result.is_none());
+std::env::remove_var("TRIOS_ROOT");
+```
+
 ## Rules
 
 - Never write to `/tmp` from trios workspace Rust source.
