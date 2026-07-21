@@ -130,7 +130,7 @@ final class ChatViewModel: ObservableObject {
             await saveHistory()
         } catch {
             NSLog("[TriosChat] transport error: \(error.localizedDescription)")
-            let errorMsg = ChatMessage(role: .system, content: "⚠️ \(error.localizedDescription)")
+            let errorMsg = ChatMessage(role: .system, content: "[!] \(error.localizedDescription)")
             messages.append(errorMsg)
             rebuildCache()
             _ = await stateMachine.transition(to: .error(error.localizedDescription))
@@ -361,7 +361,7 @@ final class ChatViewModel: ObservableObject {
             await saveHistory()
 
         case .streamError(let message):
-            let errorMsg = ChatMessage(role: .system, content: "⚠️ \(message)")
+            let errorMsg = ChatMessage(role: .system, content: "[!] \(message)")
             messages.append(errorMsg)
             rebuildCache()
             _ = await stateMachine.transition(to: .error(message))

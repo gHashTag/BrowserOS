@@ -27,71 +27,12 @@ struct ChatPanelView: View {
     private var unifiedMessageArea: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                GeometryReader { geo in
-                    Color.clear
-                        .preference(key: ScrollOffsetPreferenceKey.self, value: geo.frame(in: .named("scrollArea")).minY)
-                }
-                .frame(height: 0)
+                scrollOffsetTracker
 
                 if viewModel.messages.isEmpty && browserOSVM.messages.isEmpty {
                     emptyStateView
                 } else {
-                    LazyVStack(spacing: 0) {
-                        // Local chat messages.
-                        // CRITICAL: snapshot the array once. Indexing the live
-                        // `viewModel.messages` by an enumerated index crashes
-                        // (EXC_BREAKPOINT) when the array mutates mid-render
-                        // (streaming append, regenerate, conversation switch) -
-                        // the snapshot index then exceeds the shrunk live array.
-                        let localMessages = viewModel.messages
-                        ForEach(Array(localMessages.enumerated()), id: \.element.id) { index, message in
-                            let isFirstInGroup = index == 0 || localMessages[index - 1].role != message.role
-                            let isLastInGroup = index == localMessages.count - 1 || localMessages[index + 1].role != message.role
-
-                            MessageBubbleView(
-                                message: message,
-                                isFirstInGroup: isFirstInGroup,
-                                isLastInGroup: isLastInGroup,
-                                isConversationIdle: viewModel.state == .idle,
-                                onTaskAction: { taskId, state in
-                                    Task { await viewModel.updateTaskState(id: taskId, state: state) }
-                                },
-                                onRegenerate: {
-                                    Task { await viewModel.regenerateLastResponse() }
-                                },
-                                onFeedback: { isPositive in
-                                    Task { await viewModel.sendFeedback(messageId: message.id, isPositive: isPositive) }
-                                }
-                            )
-                            .id(message.id)
-                        }
-
-                        // BrowserOS messages
-                        ForEach(browserOSVM.messages) { message in
-                            BrowserOSMessageBubble(message: message)
-                                .id(message.id)
-                        }
-
-                        // Typing indicators
-                        if viewModel.state != .idle {
-                            TypingIndicatorView()
-                                .id("typing-local")
-                        }
-                        if browserOSVM.isStreaming {
-                            TypingIndicatorView()
-                                .id("typing-browseros")
-                        }
-
-                        // Track total content height for scroll math
-                        GeometryReader { geo in
-                            Color.clear
-                                .preference(
-                                    key: ScrollContentHeightPreferenceKey.self,
-                                    value: geo.frame(in: .named("scrollArea")).maxY
-                                )
-                        }
-                        .frame(height: 0)
-                    }
+                    messageStack
                 }
             }
             .coordinateSpace(name: "scrollArea")
@@ -124,6 +65,93 @@ struct ChatPanelView: View {
                         proxy.scrollTo(last.id, anchor: .bottom)
                     }
                 }
+            }
+        }
+    }
+
+    private var scrollOffsetTracker: some View {
+        GeometryReader { geo in
+            Color.clear
+                .preference(key: ScrollOffsetPreferenceKey.self, value: geo.frame(in: .named("scrollArea")).minY)
+        }
+        .frame(height: 0)
+    }
+
+    private var contentHeightTracker: some View {
+        GeometryReader { geo in
+            Color.clear
+                .preference(
+                    key: ScrollContentHeightPreferenceKey.self,
+                    value: geo.frame(in: .named("scrollArea")).maxY
+                )
+        }
+        .frame(height: 0)
+    }
+
+    private var messageStack: some View {
+        LazyVStack(spacing: 0) {
+            localMessageList
+            browserMessageList
+            typingIndicatorArea
+            contentHeightTracker
+        }
+    }
+
+    // CRITICAL: snapshot the array once. Indexing the live
+    // `viewModel.messages` by an enumerated index crashes
+    // (EXC_BREAKPOINT) when the array mutates mid-render
+    // (streaming append, regenerate, conversation switch) -
+    // the snapshot index then exceeds the shrunk live array.
+    private var localMessageList: some View {
+        let localMessages = viewModel.messages
+        return ForEach(Array(localMessages.enumerated()), id: \.element.id) { index, message in
+            let isFirstInGroup = index == 0 || localMessages[index - 1].role != message.role
+            let isLastInGroup = index == localMessages.count - 1 || localMessages[index + 1].role != message.role
+
+            MessageBubbleView(
+                message: message,
+                isFirstInGroup: isFirstInGroup,
+                isLastInGroup: isLastInGroup,
+                isConversationIdle: viewModel.state == .idle,
+                onTaskAction: { taskId, state in
+                    Task { await viewModel.updateTaskState(id: taskId, state: state) }
+                },
+                onRegenerate: {
+                    Task { await viewModel.regenerateLastResponse() }
+                },
+                onFeedback: { isPositive in
+                    Task { await viewModel.sendFeedback(messageId: message.id, isPositive: isPositive) }
+                }
+            )
+            .id(message.id)
+        }
+    }
+
+    private var browserMessageList: some View {
+        let browserMessages = browserOSVM.messages
+        return ForEach(Array(browserMessages.enumerated()), id: \.element.id) { index, message in
+            let isFirst = index == 0 || browserMessages[index - 1].role != message.role
+            let isLast = index == browserMessages.count - 1 || browserMessages[index + 1].role != message.role
+            BrowserOSMessageBubble(
+                message: message,
+                isFirstInGroup: isFirst,
+                isLastInGroup: isLast,
+                isConversationIdle: !browserOSVM.isStreaming
+            )
+            .id(message.id)
+        }
+    }
+
+    // Typing indicators: only while actively streaming, not on error/idle.
+    private var typingIndicatorArea: some View {
+        Group {
+            if case .streaming = viewModel.state {
+                TypingIndicatorView()
+                    .id("typing-local")
+            }
+            if browserOSVM.isStreaming {
+                TypingIndicatorView()
+                    .id("typing-browseros")
             }
         }
     }
@@ -389,29 +417,97 @@ private func logoView(size: CGSize) -> some View {
 
 private struct BrowserOSMessageBubble: View {
     let message: BrowserOSChatMessage
+    let isFirstInGroup: Bool
+    let isLastInGroup: Bool
+    let isConversationIdle: Bool
+
+    private var isError: Bool {
+        message.role == .system
+    }
 
     var body: some View {
-        HStack {
-            if message.role == .user { Spacer() }
-            VStack(alignment: .leading, spacing: 4) {
-                RichMessageView(text: message.content, isUser: message.role == .user)
-                    .font(.system(size: 14, weight: .regular, design: .default))
-                    .padding(12)
-                    .background(
-                        message.role == .user
-                            ? Color.grokElevated.opacity(0.8)
-                            : Color.grokSurface.opacity(0.6)
-                    )
-                    .foregroundColor(.grokText)
-                    .cornerRadius(16)
-                if !message.toolCalls.isEmpty {
-                    ForEach(message.toolCalls, id: \.name) { tool in
-                        BrowserOSToolCallCard(tool: tool)
+        HStack(alignment: .top, spacing: 8) {
+            if message.role == .user || isError { Spacer(minLength: 4) }
+
+            VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 2) {
+                if isFirstInGroup {
+                    senderLabel
+                }
+
+                if isError {
+                    errorBadge
+                } else {
+                    VStack(alignment: .leading, spacing: 4) {
+                        RichMessageView(text: message.content, isUser: message.role == .user)
+                            .font(.system(size: 14, weight: .regular, design: .default))
+                            .padding(12)
+                            .background(
+                                message.role == .user
+                                    ? Color.grokElevated.opacity(0.8)
+                                    : Color.grokSurface.opacity(0.6)
+                            )
+                            .foregroundColor(.grokText)
+                            .cornerRadius(16)
+                        if !message.toolCalls.isEmpty {
+                            ForEach(message.toolCalls, id: \.name) { tool in
+                                BrowserOSToolCallCard(tool: tool)
+                            }
+                        }
                     }
                 }
+
+                if isLastInGroup {
+                    timestampView
+                }
             }
-            if message.role == .assistant || message.role == .system { Spacer() }
+
+            if message.role == .assistant { avatarView }
+            else { Spacer(minLength: 4) }
         }
+        .padding(.horizontal, 12)
+        .padding(.top, isFirstInGroup ? 12 : 2)
+        .padding(.bottom, isLastInGroup ? 8 : 2)
+    }
+
+    private var avatarView: some View {
+        Image(systemName: "person.fill")
+            .font(.system(size: 12, weight: .medium))
+            .foregroundColor(.grokMuted)
+            .frame(width: 24, height: 24)
+            .background(Circle().fill(Color.grokElevated.opacity(0.3)))
+    }
+
+    private var senderLabel: some View {
+        Text(isError ? "TRIOS Agent" : (message.role == .user ? "You" : "TRIOS Agent"))
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(.grokMuted)
+            .padding(.bottom, 2)
+    }
+
+    private var timestampView: some View {
+        Text(message.timestamp, style: .relative)
+            .font(.system(size: 9))
+            .foregroundColor(.grokDim)
+            .padding(.top, 2)
+    }
+
+    private var errorBadge: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 12))
+                .foregroundColor(.yellow)
+            RichMessageView(text: message.content, isUser: false)
+                .font(.system(size: 13, weight: .medium, design: .default))
+                .foregroundColor(.grokText)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.red.opacity(0.15))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.red.opacity(0.4), lineWidth: 1)
+        )
+        .cornerRadius(10)
     }
 }
 

@@ -15,6 +15,8 @@ struct MessageBubbleView: View {
         HStack(alignment: .top, spacing: 8) {
             if message.role == .assistant {
                 avatarView
+            } else if message.role == .system {
+                EmptyView()
             } else {
                 Spacer(minLength: 4)
             }
@@ -26,6 +28,8 @@ struct MessageBubbleView: View {
 
                 if message.role == .assistant {
                     assistantContainer
+                } else if message.role == .system {
+                    systemErrorBadge
                 } else {
                     userBubble
                 }
@@ -37,6 +41,8 @@ struct MessageBubbleView: View {
 
             if message.role == .user {
                 avatarView
+            } else if message.role == .system {
+                EmptyView()
             } else {
                 Spacer(minLength: 4)
             }
@@ -62,7 +68,7 @@ struct MessageBubbleView: View {
     // MARK: - Sender Label
 
     private var senderLabel: some View {
-        Text(message.role == .user ? "You" : "TRIOS Agent")
+        Text(message.role == .user ? "You" : (message.role == .system ? "TRIOS Agent" : "TRIOS Agent"))
             .font(.system(size: 11, weight: .medium))
             .foregroundColor(.grokMuted)
             .padding(.bottom, 2)
@@ -97,6 +103,25 @@ struct MessageBubbleView: View {
                     .foregroundColor(.grokText)
             }
         }
+    }
+
+    private var systemErrorBadge: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 12))
+                .foregroundColor(.yellow)
+            RichMessageView(text: message.content, isUser: false)
+                .font(.system(size: 13, weight: .medium, design: .default))
+                .foregroundColor(.grokText)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color.red.opacity(0.15))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.red.opacity(0.4), lineWidth: 1)
+        )
+        .cornerRadius(10)
     }
 
     // MARK: - Assistant Container

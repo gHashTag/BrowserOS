@@ -11,7 +11,10 @@ enum ProjectPaths {
             return envRoot
         }
         // Try to find the project relative to the app bundle first.
-        if let bundlePath = Bundle.main.resourcePath {
+        // Bundle.main.bundlePath is the .app directory; its parent is the
+        // project root when the app is built inside the repository.
+        let bundlePath = Bundle.main.bundlePath
+        if bundlePath.hasSuffix(".app") {
             let candidate = (bundlePath as NSString).deletingLastPathComponent
             if FileManager.default.fileExists(atPath: "\(candidate)/main.swift") {
                 return candidate
