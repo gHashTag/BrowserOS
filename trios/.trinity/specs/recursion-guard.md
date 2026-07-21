@@ -3,7 +3,10 @@ name: recursion-guard
 domain: Kernel
 agent: K
 priority: P0
-status: draft
+status: active
+claim_id: RECURSION-001
+task_id: RECURSION-001
+issue: "#T27-EPIC-001"
 ---
 
 # Spec: RecursionGuard - Prevent Recursive Self-Launch of trios
@@ -39,9 +42,9 @@ The `clade-monitor` app watchdog must not relaunch trios while a healthy Soverei
 
 ### Detection Methods (priority order)
 
-1. POSIX advisory file lock on `/tmp/trios_singleton.lock`.
+1. POSIX advisory file lock on the project runtime lock file (`ProjectPaths.singletonLockFile`, resolved under `.trinity/run/trios_singleton.lock`).
 2. `NSRunningApplication.runningApplications(withBundleIdentifier: "com.browseros.trios")`.
-3. PID file `/tmp/trios_singleton.pid` with process validation by `comm` + command-line args.
+3. PID file (`ProjectPaths.singletonPIDFile`, resolved under `.trinity/run/trios_singleton.pid`) with process validation by `comm` + command-line args.
 
 ### Main Entry Point
 
@@ -76,6 +79,7 @@ Kill trios while clade-monitor is running. Wait 60 seconds. Verify exactly one t
 ## Constraints
 
 - No hardcoded absolute paths inside the Swift guard; use `ProjectPaths` or standard temp paths.
+- Runtime singleton paths are resolved via `ProjectPaths.singletonLockFile` and `ProjectPaths.singletonPIDFile` (under `.trinity/run`), not hardcoded `/tmp`.
 - ASCII-only source; English identifiers and comments.
 - No new shell scripts (L7 UNITY).
 

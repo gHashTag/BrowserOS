@@ -1,11 +1,34 @@
+// T27-CANON: RecursionGuard.swift
+// Domain: Kernel
+// Agent: K / t27-creator
+// Task: RECURSION-001
+// Claim: claim-RECURSION-001
+// Issue: #T27-EPIC-001
+// Spec: trios/.trinity/specs/recursion-guard.md
+// Status: canon
+//
+// This file is a T27 canon artifact. Any change must follow the spec change flow:
+//   1. Spec update (recursion-guard.md)
+//   2. t27-creator implementation
+//   3. t27-verifier L1-L7 verdict
+//   4. /t27-tri-pipeline seal
+//   5. Land with `Closes #T27-EPIC-001`
+//   6. /t27-experience-save
+//
+// Invariants enforced:
+//   INV-1 Single user instance
+//   INV-2 Convergence of .app and bare-binary launch paths
+//   INV-3 Existing instance activation (not replacement)
+//   INV-4 Crash safety via POSIX advisory file lock
+//   INV-5 Health-aware clade-monitor watchdog (see clade-monitor ring)
+
 import Cocoa
 import Foundation
 
 /// Prevents recursive self-launch of trios by enforcing a single running instance.
-/// Spec source: `.trinity/specs/recursion-guard.md`
 ///
-/// Uses three methods in priority order:
-///   1. POSIX file lock (works for ALL launch paths including ./trios_app)
+/// Uses three detection methods in priority order:
+///   1. POSIX advisory file lock (works for ALL launch paths including ./trios_app)
 ///   2. NSRunningApplication by bundle ID (works for .app bundles)
 ///   3. PID file fallback (works for direct binary ./trios_app)
 ///
@@ -169,14 +192,31 @@ final class RecursionGuard {
 
     // MARK: - Process Detection
 
+    /// Locates an executable by searching `PATH`. Avoids hardcoded absolute paths.
+    private func pathForExecutable(named name: String) -> String? {
+        let pathEnv = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        let fm = FileManager.default
+        for dir in pathEnv.split(separator: ":") {
+            let candidate = "\(dir)/\(name)"
+            if fm.isExecutableFile(atPath: candidate) {
+                return candidate
+            }
+        }
+        return nil
+    }
+
     /// Returns true if `pid` is a trios/trios_app process. We check both the
     /// short command name (`comm`) and the full command-line arguments so a
     /// stale PID pointing at an unrelated process is not mistaken for trios.
     private func isTriosProcess(pid: pid_t) -> Bool {
         guard pid > 0 else { return false }
 
+        guard let psPath = pathForExecutable(named: "ps") else {
+            return false
+        }
+
         let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/bin/ps")
+        task.executableURL = URL(fileURLWithPath: psPath)
         task.arguments = ["-p", String(pid), "-o", "comm=,args="]
         let pipe = Pipe()
         task.standardOutput = pipe

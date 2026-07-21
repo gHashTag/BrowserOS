@@ -1,5 +1,15 @@
 # Trinity Experience Log - trios project
 
+## 2026-07-21 - T27 Canon Seal: RecursionGuard
+**Ring:** BR-OUTPUT  **Agents:** K, t27-creator, t27-verifier  **Road:** B
+- **Problem:** `RecursionGuard.swift` was hand-written safety code with no T27 provenance, violating L2 GENERATION.
+- **Root cause:** Spec was in draft state; file had no active claim, seal, or waiver.
+- **Fix:** Moved spec to active; acquired claim; canonized implementation with T27-CANON header, ProjectPaths-based paths, PATH-resolved `ps`; verifier CLEAN verdict; seal file written.
+- **Files:** `BR-OUTPUT/RecursionGuard.swift`, `.trinity/specs/recursion-guard.md`, `tests/swift/recursion_guard_test.swift`, `.trinity/seals/RecursionGuard.json`
+- **Tests:** `./build.sh` PASS, Swift unit test PASS, `cargo test --workspace` PASS, `cargo clippy --all-targets --all-features` PASS.
+- **Episode:** `.trinity/experience/2026-07-21_153500_RECURSION-001.json`
+
+
 ## 2026-05-24 - Queen BrowserOS Awakening
 - Event: Full agent infrastructure deployed
 - Agents created: queen-browseros.md

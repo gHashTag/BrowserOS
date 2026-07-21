@@ -55,6 +55,14 @@ struct BuildCheckResult {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+struct CanonCheckResult {
+    passed: bool,
+    findings: Vec<AuditFinding>,
+    scanned_files: usize,
+    duration_ms: u128,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 struct SecurityCheckResult {
     passed: bool,
     findings: Vec<AuditFinding>,
@@ -564,6 +572,156 @@ fn unused_code_check() -> SecurityCheckResult {
     }
 }
 
+/// T27 L2 GENERATION enforcement: every BR-OUTPUT/*.swift file must either
+/// have an active claim, a valid AGENT-V-WAIVER block, or an existing seal.
+/// L6 SSOT files (ProjectPaths.swift, TriosTheme.swift) require a spec and
+/// explicit L6 waiver in the ownership index instead of a generated seal.
+fn canon_check(dry_run: bool) -> CanonCheckResult {
+    let start = Instant::now();
+    let mut findings: Vec<AuditFinding> = vec![];
+    let mut scanned = 0;
+
+    let ownership_path = std::path::PathBuf::from(format!("{}/.trinity/state/ownership-index.json", project_dir()));
+    let ownership: serde_json::Value = match fs::read_to_string(&ownership_path) {
+        Ok(raw) => serde_json::from_str(&raw).unwrap_or_else(|e| {
+            eprintln!("[audit] Failed to parse ownership-index.json: {}", e);
+            serde_json::Value::Null
+        }),
+        Err(e) => {
+            eprintln!("[audit] Missing ownership-index.json: {}", e);
+            serde_json::Value::Null
+        }
+    };
+
+    let l6_ssot: Vec<String> = ownership
+        .get("l6_ssot_files")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+
+    let files = ownership.get("files").and_then(|v| v.as_object()).cloned().unwrap_or_default();
+
+    let active_claims_dir = std::path::PathBuf::from(format!("{}/.trinity/claims/active", project_dir()));
+    let seals_dir = std::path::PathBuf::from(format!("{}/.trinity/seals", project_dir()));
+
+    let active_claim_resources: std::collections::HashSet<String> = match fs::read_dir(&active_claims_dir) {
+        Ok(entries) => entries
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let path = e.path();
+                if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                    return None;
+                }
+                let raw = fs::read_to_string(&path).ok()?;
+                let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+                // Claim may cover a spec_path, graph_node, or file key.
+                v.get("spec_path")
+                    .and_then(|x| x.as_str().map(String::from))
+                    .or_else(|| v.get("graph_node").and_then(|x| x.as_str().map(String::from)))
+                    .or_else(|| v.get("resource").and_then(|x| x.as_str().map(String::from)))
+            })
+            .collect(),
+        Err(_) => std::collections::HashSet::new(),
+    };
+
+    let seal_files: std::collections::HashSet<String> = match fs::read_dir(&seals_dir) {
+        Ok(entries) => entries
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let path = e.path();
+                path.file_stem().and_then(|s| s.to_str()).map(String::from)
+            })
+            .collect(),
+        Err(_) => std::collections::HashSet::new(),
+    };
+
+    let br_output = std::path::PathBuf::from(format!("{}/BR-OUTPUT", project_dir()));
+    for entry in WalkDir::new(&br_output)
+        .max_depth(1)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("swift"))
+    {
+        scanned += 1;
+        let path = entry.path();
+        let rel = relative_audit_path(path);
+        let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("").to_string();
+        let meta = files.get(&rel);
+
+        let content = match read_file_bounded(path) {
+            Some(c) => c,
+            None => continue,
+        };
+
+        let has_waiver_block = content.contains("AGENT-V-WAIVER:");
+        let has_active_claim = active_claim_resources.iter().any(|r| {
+            rel.contains(r)
+                || meta.as_ref().is_some_and(|m| {
+                    m.get("spec")
+                        .and_then(|s| s.as_str())
+                        .is_some_and(|s| r.contains(s) || s.contains(r))
+                        || m.get("graph_node")
+                            .and_then(|s| s.as_str())
+                            .is_some_and(|s| r.contains(s) || s.contains(r))
+                })
+        });
+        let has_seal = seal_files.contains(&stem);
+        let is_l6_ssot = l6_ssot.contains(&rel);
+        let has_spec = meta.as_ref().is_some_and(|m| m.get("spec").is_some());
+
+        if dry_run {
+            eprintln!(
+                "[DRY-RUN] {}: waiver={} claim={} seal={} spec={} l6={}",
+                rel, has_waiver_block, has_active_claim, has_seal, has_spec, is_l6_ssot
+            );
+        }
+
+        if is_l6_ssot {
+            if !has_spec {
+                findings.push(AuditFinding {
+                    file: rel.clone(),
+                    line: 1,
+                    severity: "critical".to_string(),
+                    category: "l2_generation".to_string(),
+                    message: "L6 SSOT file has no spec in ownership-index.json".to_string(),
+                    fingerprint: format!("{}:1:l6_ssot_missing_spec", rel),
+                });
+            }
+            if !has_waiver_block && !has_active_claim && !has_seal {
+                findings.push(AuditFinding {
+                    file: rel.clone(),
+                    line: 1,
+                    severity: "warning".to_string(),
+                    category: "l2_generation".to_string(),
+                    message: "L6 SSOT file has no active claim, waiver, or seal".to_string(),
+                    fingerprint: format!("{}:1:l6_ssot_unprotected", rel),
+                });
+            }
+            continue;
+        }
+
+        if has_waiver_block || has_active_claim || has_seal {
+            continue;
+        }
+
+        findings.push(AuditFinding {
+            file: rel.clone(),
+            line: 1,
+            severity: "critical".to_string(),
+            category: "l2_generation".to_string(),
+            message: "Canon Swift file has no active claim, AGENT-V-WAIVER, or seal".to_string(),
+            fingerprint: format!("{}:1:canon_unprotected", rel),
+        });
+    }
+
+    CanonCheckResult {
+        passed: findings.is_empty(),
+        findings,
+        scanned_files: scanned,
+        duration_ms: start.elapsed().as_millis(),
+    }
+}
+
 /// Detect retain cycle risks: closures capturing self without [weak self]
 /// in Combine sinks, DispatchQueue.asyncAfter, and URLSession tasks.
 fn retain_cycle_check() -> SecurityCheckResult {
@@ -638,6 +796,7 @@ fn main() {
 
     let dry_run = args.iter().any(|a| a == "--dry-run");
     let json_mode = args.iter().any(|a| a == "--json");
+    let canon_mode = args.iter().any(|a| a == "--canon");
 
     // Subcommand: generate-awareness
     if args.iter().any(|a| a == "generate-awareness") {
@@ -658,6 +817,30 @@ fn main() {
         ($($arg:tt)*) => {{
             if json_mode { eprintln!($($arg)*); } else { println!($($arg)*); }
         }};
+    }
+
+    if canon_mode {
+        let canon = canon_check(dry_run);
+        if json_mode {
+            let report = serde_json::json!({"canon_check": canon});
+            println!("{}", serde_json::to_string_pretty(&report).unwrap_or_default());
+        } else {
+            println!("===========================================================");
+            println!("  CLADE-AUDIT: T27 Canon Guard");
+            println!("  Dry run: {}", dry_run);
+            println!("===========================================================\n");
+            println!(
+                "   {} Files scanned: {} | Findings: {} | {}ms",
+                if canon.passed { "[OK]" } else { "[FAIL]" },
+                canon.scanned_files,
+                canon.findings.len(),
+                canon.duration_ms
+            );
+            for f in &canon.findings {
+                println!("   [{}] {}:{} - {}", f.severity.to_uppercase(), f.file, f.line, f.message);
+            }
+        }
+        std::process::exit(if canon.passed { 0 } else { 1 });
     }
 
     note!("===========================================================");
@@ -979,7 +1162,7 @@ fn print_help() {
 clade-audit - Continuous code critic for Trinity
 
 USAGE:
-    cargo run --bin clade-audit -- [COMMAND] [--dry-run] [--json]
+    cargo run --bin clade-audit -- [COMMAND] [--dry-run] [--json] [--canon]
 
 COMMANDS:
     generate-awareness   Write .trinity/self-awareness.json
@@ -993,6 +1176,12 @@ CHECKS (default run):
     6. TODO/FIXME     - categorized severity inventory
     7. Unused code    - dead function/module detection
     8. Retain cycles  - missing [weak self] in async closures
+
+T27 CANON GUARD:
+    --canon              Check L2 GENERATION for BR-OUTPUT/*.swift:
+                         every canon file must have an active claim,
+                         AGENT-V-WAIVER block, or existing seal.
+    --canon --dry-run    Print per-file protection status without failing.
 
 OUTPUT:
     --json   Emit structured report to stdout
