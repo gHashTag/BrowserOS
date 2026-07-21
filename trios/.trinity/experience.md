@@ -176,3 +176,19 @@
 - **Seal status**: BUILD_PASS, TEST_PASS, CLIPPY_PASS, ASCII_PASS, E2E_NOT_RUN_DUE_SERVER_DOWN
 - **Next wave options**: meshd-revival, tmp-zero, seal-automation
 
+## 2026-07-21 WAVE-006 (tmp-zero / CI isolation)
+
+- **Issue**: #T27-EPIC-001
+- **Agents**: t27-creator, t27-verifier, t27-experience
+- **Root cause**: Three trios Rust rings still used `/tmp` in unit tests and sample strings: `clade-experience` wrote size-test fixtures under `/tmp`, `clade-audit` read/wrote test files under `/tmp`, and `clade-launchd` tests used `/tmp` as sample WorkingDirectory values.
+- **Fix pattern**: Add `tempfile = "3"` as dev-dependency to `clade-experience` and `clade-audit`; rewrite tests to use isolated `tempfile::tempdir()` directories with automatic cleanup. Replace `/tmp` sample strings in `clade-launchd` tests with project-relative `.trinity/dev/launchd-wd`. Update `portable-paths/SKILL.md` and create `tmp-zero/SKILL.md`.
+- **Files changed**: trios/rings/RUST-07/clade-experience/{Cargo.toml,src/main.rs}, trios/rings/RUST-09/clade-launchd/src/main.rs, trios/rings/RUST-12/clade-audit/{Cargo.toml,src/main.rs}, trios/.trinity/specs/tmp-zero.md, trios/.trinity/wave-loop-006.md, trios/.claude/skills/portable-paths/SKILL.md, trios/.claude/skills/tmp-zero/SKILL.md
+- **Tests added**: No new tests; existing tests migrated to tempfile.
+- **Lessons**:
+  - `tempfile::tempdir()` is the standard Rust replacement for hand-rolled `/tmp` test directories; it handles unique names and cleanup.
+  - String-only tests (like `clade-launchd` plist XML generation) do not need a real filesystem; project-relative example paths are sufficient.
+  - Migrating `/tmp` usage is a mechanical but high-value cleanup that directly improves CI reproducibility and TOCTOU posture.
+  - A dedicated `tmp-zero` skill makes the policy reusable across future rings.
+- **Seal status**: BUILD_PASS, TEST_PASS, CLIPPY_PASS, ASCII_PASS, E2E_NOT_RUN_DUE_SERVER_DOWN
+- **Next wave options**: seal-automation, meshd-revival, diff-hardening
+

@@ -1136,17 +1136,19 @@ mod tests {
 
     #[test]
     fn read_file_bounded_returns_none_for_missing() {
-        let result = read_file_bounded(std::path::Path::new("/tmp/nonexistent_audit_test_file"));
+        let dir = tempfile::tempdir().expect("tempdir");
+        let missing = dir.path().join("nonexistent_audit_test_file");
+        let result = read_file_bounded(&missing);
         assert!(result.is_none());
     }
 
     #[test]
     fn read_file_bounded_reads_small_file() {
-        let path = "/tmp/clade_audit_bounded_test.txt";
-        fs::write(path, "hello bounded").ok();
-        let result = read_file_bounded(std::path::Path::new(path));
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("clade_audit_bounded_test.txt");
+        fs::write(&path, "hello bounded").ok();
+        let result = read_file_bounded(&path);
         assert_eq!(result, Some("hello bounded".to_string()));
-        fs::remove_file(path).ok();
     }
 
     #[test]

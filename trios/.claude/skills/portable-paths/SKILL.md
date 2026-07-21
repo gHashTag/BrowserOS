@@ -71,7 +71,25 @@ Move persistent state from `/tmp/` to `.trinity/` subdirs:
 | `/tmp/trios_screenshot.png` | `{project_dir()}/.trinity/e2e/trios_screenshot.png` |
 | `/tmp/clade-rollback` | `{project_dir()}/.trinity/rollback` |
 | `/tmp/clade-dev` | `{project_dir()}/.trinity/dev` |
-| `/tmp/mesh.drop` | `{project_dir()}/.trinity/run/mesh.drop` (P1 backlog) |
+| `/tmp/mesh.drop` | `{project_dir()}/.trinity/run/mesh.drop` |
+
+## Test Scratch Directories
+
+For unit tests that need a temporary filesystem, use the `tempfile` crate instead of `/tmp`:
+
+```toml
+[dev-dependencies]
+tempfile = "3"
+```
+
+```rust
+let dir = tempfile::tempdir().expect("tempdir");
+let path = dir.path().join("test-file.txt");
+fs::write(&path, "payload").ok();
+// dir is automatically deleted when it leaves scope.
+```
+
+This avoids cross-test collisions, TOCTOU races, and world-writable path leakage.
 
 Ensure directories are created with restricted permissions (`0o700`) where security matters.
 

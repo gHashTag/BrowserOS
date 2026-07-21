@@ -142,20 +142,20 @@ mod tests {
 
     #[test]
     fn plist_contains_label() {
-        let xml = plist_xml("com.test.label", "/usr/bin/test", "/tmp");
+        let xml = plist_xml("com.test.label", "/usr/bin/test", ".trinity/dev/launchd-wd");
         assert!(xml.contains("<string>com.test.label</string>"));
     }
 
     #[test]
     fn plist_contains_program() {
-        let xml = plist_xml("com.test.label", "/usr/bin/test", "/tmp");
+        let xml = plist_xml("com.test.label", "/usr/bin/test", ".trinity/dev/launchd-wd");
         assert!(xml.contains("<string>/usr/bin/test</string>"));
     }
 
     #[test]
     fn plist_contains_working_dir() {
-        let xml = plist_xml("com.test.label", "/usr/bin/test", "/tmp/workdir");
-        assert!(xml.contains("<string>/tmp/workdir</string>"));
+        let xml = plist_xml("com.test.label", "/usr/bin/test", ".trinity/dev/launchd-wd");
+        assert!(xml.contains("<string>.trinity/dev/launchd-wd</string>"));
     }
 
     #[test]
@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn plist_is_valid_xml_structure() {
-        let xml = plist_xml("com.test", "/bin/test", "/tmp");
+        let xml = plist_xml("com.test", "/bin/test", ".trinity/dev/launchd-wd");
         assert!(xml.starts_with("<?xml"));
         assert!(xml.contains("<plist version=\"1.0\">"));
         assert!(xml.contains("</plist>"));
@@ -215,7 +215,7 @@ mod tests {
 
     #[test]
     fn plist_escapes_special_chars_in_path() {
-        let xml = plist_xml("com.test", "/tmp/test&prog", "/tmp");
+        let xml = plist_xml("com.test", ".trinity/dev/test&prog", ".trinity/dev/launchd-wd");
         assert!(xml.contains("test&amp;prog"));
         assert!(!xml.contains("test&prog"));
     }

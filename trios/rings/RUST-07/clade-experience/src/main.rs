@@ -256,25 +256,26 @@ mod tests {
 
     #[test]
     fn load_episodes_skips_oversized_files() {
-        let dir = "/tmp/clade_experience_size_test";
-        let _ = fs::create_dir_all(dir);
-        let big_path = format!("{}/big.json", dir);
+        let dir = tempfile::tempdir().expect("tempdir");
+        let dir_path = dir.path().to_string_lossy().into_owned();
+        let big_path = format!("{}/big.json", dir_path);
         let small = serde_json::to_string(&make_episode(&["test"], "A", true, "p")).unwrap_or_default();
-        fs::write(format!("{}/small.json", dir), &small).ok();
+        fs::write(format!("{}/small.json", dir_path), &small).ok();
         // 1.1MB file - should be skipped
         let big = "x".repeat(1_100_000);
         fs::write(&big_path, &big).ok();
 
-        std::env::set_var("TRIOS_ROOT", "/tmp/clade_experience_size_test_root");
-        let _ = fs::create_dir_all("/tmp/clade_experience_size_test_root/.trinity/experience");
-        fs::write("/tmp/clade_experience_size_test_root/.trinity/experience/small.json", &small).ok();
+        let root = tempfile::tempdir().expect("tempdir root");
+        let root_path = root.path().to_string_lossy().into_owned();
+        std::env::set_var("TRIOS_ROOT", &root_path);
+        let exp_dir = format!("{}/.trinity/experience", root_path);
+        let _ = fs::create_dir_all(&exp_dir);
+        fs::write(format!("{}/small.json", exp_dir), &small).ok();
         let big2 = "x".repeat(1_100_000);
-        fs::write("/tmp/clade_experience_size_test_root/.trinity/experience/big.json", &big2).ok();
+        fs::write(format!("{}/big.json", exp_dir), &big2).ok();
         let episodes = load_episodes();
         // big.json should be skipped, small.json may or may not parse depending on format
         assert!(episodes.len() <= 1);
         std::env::remove_var("TRIOS_ROOT");
-        let _ = fs::remove_dir_all(dir);
-        let _ = fs::remove_dir_all("/tmp/clade_experience_size_test_root");
     }
 }
