@@ -14,7 +14,12 @@ final class LLMClient {
     private let session = URLSession.shared
 
     init(apiKey: String? = nil) {
-        self.apiKey = apiKey ?? ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"] ?? ""
+        // Prefer TRIOS_API_KEY (the key the rest of the app and UI use) with a
+        // fallback to the legacy OPENROUTER_API_KEY variable.
+        self.apiKey = apiKey
+            ?? ProcessInfo.processInfo.environment["TRIOS_API_KEY"]
+            ?? ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"]
+            ?? ""
     }
 
     struct Message: Codable {

@@ -19,12 +19,12 @@ final class ChatViewModel: ObservableObject {
     private let persister: ChatPersisterProtocol
     private let stateMachine: ConversationStateMachine
     let a2aClient: A2ARegistryClient?
-    private let throttler = EventThrottler()
 
     private var conversationId: UUID = UUID()
     private var messageCache: [UUID: Int] = [:]
     private var a2aRouter: A2AMessageRouter?
     private var a2aStreamTask: Task<Void, Never>?
+    private var healthCheckTask: Task<Void, Never>?
     private var lastSendTime: Date = .distantPast
 
     init(
@@ -51,7 +51,17 @@ final class ChatViewModel: ObservableObject {
             await checkHealth()
             NSLog("ChatViewModel.init Task done")
         }
+        healthCheckTask = Task {
+            while !Task.isCancelled {
+                await checkHealth()
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+            }
+        }
         NSLog("ChatViewModel.init finished")
+    }
+
+    deinit {
+        healthCheckTask?.cancel()
     }
 
     func setupConversationId() async {
@@ -70,6 +80,12 @@ final class ChatViewModel: ObservableObject {
     }
 
     func switchConversation(id: UUID) async {
+        // Cancel any in-flight stream before loading a different conversation;
+        // otherwise late SSE events could corrupt the newly loaded messages.
+        await transport.cancel()
+        _ = await stateMachine.transition(to: .idle)
+        state = await stateMachine.currentState()
+
         conversationId = id
         persister.setCurrentConversationId(id)
         await loadHistory()
@@ -77,7 +93,7 @@ final class ChatViewModel: ObservableObject {
         showHistory = false
     }
 
-    func sendMessage() async {
+    func sendMessage(appendUser: Bool = true) async {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
@@ -90,21 +106,30 @@ final class ChatViewModel: ObservableObject {
 
         NSLog("[TriosChat] sendMessage start: \"\(text.prefix(40))\"")
 
-        let userMessage = ChatMessage(role: .user, content: text)
-        messages.append(userMessage)
-        rebuildCache()
+        if appendUser {
+            let userMessage = ChatMessage(role: .user, content: text)
+            messages.append(userMessage)
+            rebuildCache()
+        }
         inputText = ""
 
         let ok = await stateMachine.tryTransition(to: .streaming(messageId: UUID()))
         guard ok else {
             NSLog("[TriosChat] stateMachine blocked transition, aborting")
-            messages.removeLast()
-            rebuildCache()
+            if appendUser {
+                messages.removeLast()
+                rebuildCache()
+            }
             inputText = text
             return
         }
         state = await stateMachine.currentState()
         NSLog("[TriosChat] state transitioned to streaming")
+
+        // Exclude the current user message from previousConversation: the server
+        // receives it separately via the `message` field, and duplicating it
+        // confuses the model and the UI.
+        let historyForRequest = Array(messages.dropLast())
 
         guard let requestBody = try? ChatRequestBuilder(
             conversationId: conversationId,
@@ -112,7 +137,7 @@ final class ChatViewModel: ObservableObject {
             mode: "agent",
             origin: "sidepanel",
             userSystemPrompt: nil,
-            previousConversation: messages,
+            previousConversation: historyForRequest,
             browserContext: nil
         ).build() else {
             NSLog("[TriosChat] ChatRequestBuilder failed")
@@ -129,15 +154,22 @@ final class ChatViewModel: ObservableObject {
             NSLog("[TriosChat] transport stream opened")
             for await event in stream {
                 NSLog("[TriosChat] SSE event: \(event)")
-                await throttler.throttle {
-                    await self.handleEvent(event)
-                }
+                await handleEvent(event)
             }
             NSLog("[TriosChat] stream ended normally")
             _ = await stateMachine.transition(to: .idle)
             state = await stateMachine.currentState()
             await saveHistory()
         } catch {
+            // Manual cancellation is not a user-visible error.
+            if let urlError = error as? URLError, urlError.code == .cancelled {
+                NSLog("[TriosChat] stream cancelled by user")
+                _ = await stateMachine.transition(to: .idle)
+                state = await stateMachine.currentState()
+                await saveHistory()
+                return
+            }
+
             NSLog("[TriosChat] transport error: \(error.localizedDescription)")
             let errorMsg = ChatMessage(role: .system, content: "[!] \(error.localizedDescription)")
             messages.append(errorMsg)
@@ -166,7 +198,8 @@ final class ChatViewModel: ObservableObject {
         messages.removeSubrange((lastUserIndex + 1)...)
         rebuildCache()
         inputText = userText
-        await sendMessage()
+        // Re-send the existing user message without appending a duplicate.
+        await sendMessage(appendUser: false)
     }
 
     func sendFeedback(messageId: UUID, isPositive: Bool) async {
@@ -380,7 +413,20 @@ final class ChatViewModel: ObservableObject {
     }
 
     func rebuildCache() {
-        messages.sort { $0.timestamp < $1.timestamp }
+        // Stable sort: timestamp is primary, original index is tie-breaker.
+        // Without a tie-breaker, Array.sort is unstable and messages created in
+        // the same millisecond can appear out of order.
+        let indexed = messages.enumerated().map { (index: $0, message: $1) }
+        let sorted = indexed.sorted { a, b in
+            if a.message.timestamp != b.message.timestamp {
+                return a.message.timestamp < b.message.timestamp
+            }
+            return a.index < b.index
+        }
+        messages = sorted.map { $0.message }
+
+        deduplicateMessages()
+
         messageCache = [:]
         for (index, message) in messages.enumerated() {
             messageCache[message.id] = index
@@ -418,6 +464,26 @@ struct ChatRequestBuilder {
         Reference prior context naturally. If the user refers to "that", "it", or previous topics, \
         use your memory to understand the reference. Maintain continuity across the entire session.
         """
+    }
+
+    /// Return a sensible default model for common providers so that an
+    /// unconfigured launch does not immediately fail with a model mismatch
+    /// (e.g., Ollama cannot load a cloud-only model name).
+    static func defaultModel(for provider: String) -> String {
+        switch provider {
+        case "zai":
+            return "glm-4.6"
+        case "openrouter":
+            return "anthropic/claude-4-sonnet"
+        case "anthropic":
+            return "claude-4-sonnet"
+        case "openai":
+            return "gpt-5"
+        case "ollama":
+            return "llama3.1"
+        default:
+            return "llama3.1"
+        }
     }
 
     func build() throws -> Data {
@@ -468,6 +534,8 @@ struct ChatRequestBuilder {
         let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
 
         let apiKey = ProcessInfo.processInfo.environment["TRIOS_API_KEY"]
+        let provider = ProcessInfo.processInfo.environment["TRIOS_PROVIDER"] ?? "ollama"
+        let defaultModel = Self.defaultModel(for: provider)
 
         var body: [String: Any] = [
             "conversationId": conversationId.uuidString,
@@ -475,8 +543,8 @@ struct ChatRequestBuilder {
             "mode": mode,
             "origin": origin,
             "supportsImages": true,
-            "provider": ProcessInfo.processInfo.environment["TRIOS_PROVIDER"] ?? "ollama",
-            "model": ProcessInfo.processInfo.environment["TRIOS_MODEL"] ?? "kimi-k2.6:cloud",
+            "provider": provider,
+            "model": ProcessInfo.processInfo.environment["TRIOS_MODEL"] ?? defaultModel,
             "baseUrl": ProcessInfo.processInfo.environment["TRIOS_BASE_URL"] ?? "http://127.0.0.1:11434/v1",
             "messages": messages,
             "userWorkingDir": homeDir

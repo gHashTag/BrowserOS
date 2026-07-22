@@ -67,6 +67,32 @@ enum ChatLogicTests {
         check(ChatLogic.parseIntent("what is the weather", pageId: nil) == nil,
               "parseIntent returns nil for unrecognized input (no shell fallthrough)")
 
+        // Advertised shell prefixes now route through filesystem_bash.
+        if let ls = ChatLogic.parseIntent("ls -la", pageId: nil) {
+            check(ls.0 == "filesystem_bash", "parseIntent maps 'ls ' -> filesystem_bash")
+            check((ls.1["command"] as? String) == "ls -la", "ls command is preserved")
+        } else {
+            check(false, "parseIntent 'ls -la' returned nil unexpectedly")
+        }
+        if let pwd = ChatLogic.parseIntent("pwd", pageId: nil) {
+            check(pwd.0 == "filesystem_bash", "parseIntent maps 'pwd' -> filesystem_bash")
+        } else {
+            check(false, "parseIntent 'pwd' returned nil unexpectedly")
+        }
+
+        // Click selector parsing: default to 1, parse explicit integer.
+        if let clickDefault = ChatLogic.parseIntent("click", pageId: nil) {
+            check(clickDefault.0 == "click", "parseIntent maps 'click' -> click")
+            check((clickDefault.1["element"] as? String) == "1", "click without selector defaults to element 1")
+        } else {
+            check(false, "parseIntent 'click' returned nil unexpectedly")
+        }
+        if let clickThree = ChatLogic.parseIntent("click 3", pageId: nil) {
+            check((clickThree.1["element"] as? String) == "3", "click selector parses explicit integer")
+        } else {
+            check(false, "parseIntent 'click 3' returned nil unexpectedly")
+        }
+
         // parseIntent — pageId threading + URL extraction
         if let nav = ChatLogic.parseIntent("open https://example.com", pageId: 7) {
             check(nav.0 == "navigate_page", "navigate tool name")

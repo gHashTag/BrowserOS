@@ -62,6 +62,12 @@ final class TriosMCPClient: ObservableObject {
         }
 
         let decoded = try JSONDecoder().decode(MCPResponse.self, from: data)
+        if let error = decoded.error {
+            throw MCPError.toolError("MCP error \(error.code): \(error.message)")
+        }
+        if let result = decoded.result, result.isError == true {
+            throw MCPError.toolError("Tool returned an error")
+        }
         return decoded
     }
 
@@ -215,6 +221,7 @@ enum MCPError: Error, LocalizedError {
     case noData
     case invalidResponse
     case toolNotFound
+    case toolError(String)
 
     var errorDescription: String? {
         switch self {
@@ -223,6 +230,7 @@ enum MCPError: Error, LocalizedError {
         case .noData: return "No data received"
         case .invalidResponse: return "Invalid server response"
         case .toolNotFound: return "MCP tool not found"
+        case .toolError(let message): return message
         }
     }
 }

@@ -277,6 +277,9 @@ class BrowserOSChatViewModel: ObservableObject {
     }
     
     private func extractResultText(_ response: MCPResponse) -> String {
+        if let error = response.error {
+            return "MCP error \(error.code): \(error.message)"
+        }
         guard let result = response.result else { return "No result" }
         return result.content.compactMap { $0.text }.joined(separator: "\n")
     }
@@ -294,7 +297,17 @@ class BrowserOSChatViewModel: ObservableObject {
     /// Keep chat history strictly in chronological order regardless of async
     /// completion order. Must be called after every `messages.append`.
     private func sortMessages() {
-        messages.sort { $0.timestamp < $1.timestamp }
+        // Stable sort: timestamp is primary, original index is tie-breaker.
+        // Without a tie-breaker, Array.sort is unstable and messages created in
+        // the same millisecond can appear out of order.
+        let indexed = messages.enumerated().map { (index: $0, message: $1) }
+        let sorted = indexed.sorted { a, b in
+            if a.message.timestamp != b.message.timestamp {
+                return a.message.timestamp < b.message.timestamp
+            }
+            return a.index < b.index
+        }
+        messages = sorted.map { $0.message }
         deduplicateMessages()
     }
 

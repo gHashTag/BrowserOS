@@ -267,6 +267,7 @@ struct ChatPanelView: View {
         Button(action: {
             if text.hasSuffix("/new") {
                 viewModel.newConversation()
+                viewModel.inputText = ""
                 browserOSVM.messages.removeAll()
                 return
             }

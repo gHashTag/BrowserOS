@@ -37,7 +37,7 @@ actor SSETransport: ChatTransportProtocol {
             }
             let bodySample = String(data: sampleData, encoding: .utf8) ?? String(describing: sampleData)
             NSLog("[SSETransport] non-2xx response: \(httpResponse.statusCode), body: \(bodySample)")
-            throw TransportError.invalidResponse
+            throw TransportError.serverError(statusCode: httpResponse.statusCode, bodySample: bodySample)
         }
 
         return AsyncStream { continuation in
@@ -75,12 +75,14 @@ actor SSETransport: ChatTransportProtocol {
                         }
                     }
 
-                    // Flush remaining buffer after stream ends
-                    if let remaining = String(data: buffer, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
-                       remaining.hasPrefix("data: ") {
-                        if let event = SSEEventParser.parse(line: remaining) {
-                            continuation.yield(event)
-                        }
+                    // Flush remaining buffer after stream ends. Use lossy UTF-8
+                    // decoding so a trailing incomplete multi-byte sequence does not
+                    // silently drop the final event.
+                    let remaining = String(decoding: buffer, as: UTF8.self)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    if remaining.hasPrefix("data: "),
+                       let event = SSEEventParser.parse(line: remaining) {
+                        continuation.yield(event)
                     }
 
                     continuation.finish()
@@ -119,4 +121,16 @@ actor SSETransport: ChatTransportProtocol {
 enum TransportError: Error {
     case invalidResponse
     case connectionFailed
+    case serverError(statusCode: Int, bodySample: String)
+
+    var localizedDescription: String {
+        switch self {
+        case .invalidResponse:
+            return "Invalid server response"
+        case .connectionFailed:
+            return "Connection failed"
+        case .serverError(let statusCode, let bodySample):
+            return "Server returned \(statusCode): \(bodySample)"
+        }
+    }
 }

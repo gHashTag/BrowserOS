@@ -76,10 +76,18 @@ enum ChatLogic {
         "clade-promote.*boot",
     ]
 
-    /// Map a command string to an MCP tool name + arguments, or nil if no intent
-    /// is recognized (the caller must NOT fall through to raw shell execution).
-    /// Shell commands matching a recursive-launch pattern are rewritten to a safe
-    /// echo instead of executing.
+    /// Prefixes that should be routed through the safe `filesystem_bash` tool.
+    static let shellPrefixes = [
+        "cat ", "ls ", "cd ", "mkdir ", "rm ",
+        "git ", "curl ", "wget ", "npm ", "bun ", "node ", "python ", "swift ",
+    ]
+
+    /// AGENT-V-WAIVER: emergency fix for command routing parity. The explicit
+    /// prefixes and exact commands advertised by `isLikelyCommand()` must map to
+    /// an MCP tool; returning nil produced a confusing usage hint instead of
+    /// executing or cleanly falling back. This routes unhandled prefixes through
+    /// `filesystem_bash` (with recursive-launch blocking) and parses click
+    /// selectors, preserving INV-1..INV-6.
     static func parseIntent(_ text: String, pageId: Int?) -> (String, [String: Any])? {
         let lower = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -91,7 +99,7 @@ enum ChatLogic {
         }
 
         if lower == "click" || lower.hasPrefix("click ") || lower == "press" || lower.hasPrefix("press ") {
-            var args: [String: Any] = ["element": "1"]
+            var args: [String: Any] = ["element": elementArgument(from: text)]
             if let pageId = pageId { args["page"] = pageId }
             return ("click", args)
         }
@@ -111,20 +119,50 @@ enum ChatLogic {
         if lower.hasPrefix("shell ") || lower.hasPrefix("run ") || lower.hasPrefix("exec ") {
             let prefixLen = lower.hasPrefix("shell ") ? 6 : (lower.hasPrefix("run ") ? 4 : 5)
             let cmd = String(text.dropFirst(prefixLen)).trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !cmd.isEmpty else { return nil }
+            return safeShellCommandArgs(cmd)
+        }
 
-            // SAFETY: Block commands that would recursively launch trios.
-            let lowerCmd = cmd.lowercased()
-            for pattern in recursiveLaunchPatterns {
-                if lowerCmd.range(of: pattern, options: .regularExpression) != nil {
-                    return ("filesystem_bash", ["command": "echo 'Blocked: command may cause recursive self-launch: \(cmd)'", "description": "Blocked self-launch"])
-                }
-            }
-            return ("filesystem_bash", ["command": cmd, "description": "User shell command"])
+        // Exact commands other than the ones handled above (e.g., "pwd").
+        let handledExactCommands = Set(["click", "screenshot", "extract"])
+        if exactCommands.contains(lower) && !handledExactCommands.contains(lower) {
+            return safeShellCommandArgs(lower)
+        }
+
+        // Other advertised shell prefixes (cat, ls, git, npm, etc.) route through
+        // the safe bash tool so they do not fall through to raw shell execution.
+        if shellPrefixes.contains(where: { lower.hasPrefix($0) }) {
+            return safeShellCommandArgs(text)
         }
 
         // No recognized intent - do NOT fall through to shell execution.
         return nil
+    }
+
+    /// Extract the first integer from text for a click selector, defaulting to "1".
+    private static func elementArgument(from text: String) -> String {
+        let pattern = #"\d+"#
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return "1" }
+        let range = NSRange(text.startIndex..., in: text)
+        guard let match = regex.firstMatch(in: text, range: range),
+              let matchRange = Range(match.range, in: text) else { return "1" }
+        return String(text[matchRange])
+    }
+
+    /// Build a `filesystem_bash` call for `cmd`, blocking recursive self-launch.
+    private static func safeShellCommandArgs(_ cmd: String) -> (String, [String: Any])? {
+        let trimmed = cmd.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        let lowerCmd = trimmed.lowercased()
+        for pattern in recursiveLaunchPatterns {
+            if lowerCmd.range(of: pattern, options: .regularExpression) != nil {
+                return ("filesystem_bash", [
+                    "command": "echo 'Blocked: command may cause recursive self-launch: \(trimmed)'",
+                    "description": "Blocked self-launch"
+                ])
+            }
+        }
+        return ("filesystem_bash", ["command": trimmed, "description": "User shell command"])
     }
 
     /// Extract the first http(s) URL from free text, or nil if none is present.
