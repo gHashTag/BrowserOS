@@ -25,6 +25,7 @@ final class ChatViewModel: ObservableObject {
     private var messageCache: [UUID: Int] = [:]
     private var a2aRouter: A2AMessageRouter?
     private var a2aStreamTask: Task<Void, Never>?
+    private var lastSendTime: Date = .distantPast
 
     init(
         transport: ChatTransportProtocol,
@@ -79,6 +80,14 @@ final class ChatViewModel: ObservableObject {
     func sendMessage() async {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
+
+        let now = Date()
+        guard now.timeIntervalSince(lastSendTime) >= 0.5 else {
+            NSLog("[TriosChat] debounce blocked")
+            return
+        }
+        lastSendTime = now
+
         NSLog("[TriosChat] sendMessage start: \"\(text.prefix(40))\"")
 
         let userMessage = ChatMessage(role: .user, content: text)
@@ -371,9 +380,19 @@ final class ChatViewModel: ObservableObject {
     }
 
     func rebuildCache() {
+        messages.sort { $0.timestamp < $1.timestamp }
         messageCache = [:]
         for (index, message) in messages.enumerated() {
             messageCache[message.id] = index
+        }
+    }
+
+    func deduplicateMessages() {
+        var seenIds = Set<UUID>()
+        messages = messages.filter { msg in
+            guard !seenIds.contains(msg.id) else { return false }
+            seenIds.insert(msg.id)
+            return true
         }
     }
 
