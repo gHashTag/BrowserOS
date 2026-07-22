@@ -20,6 +20,7 @@ class BrowserOSChatViewModel: ObservableObject {
     private var streamingTask: Task<Void, Never>?
     private var sessionStartTime: Date = Date()
     private var pageDetectionTask: Task<Void, Never>?
+    private var lastSendTime: Date = .distantPast
 
     enum QueenStatus: String {
         case idle = "idle"
@@ -78,8 +79,16 @@ class BrowserOSChatViewModel: ObservableObject {
     }
 
     func sendMessage(_ text: String) {
-        let userMessage = BrowserOSChatMessage(role: .user, content: text, timestamp: Date())
+        let now = Date()
+        guard now.timeIntervalSince(lastSendTime) >= 0.5 else {
+            NSLog("[BrowserOSChatViewModel] debounce blocked")
+            return
+        }
+        lastSendTime = now
+
+        let userMessage = BrowserOSChatMessage(role: .user, content: text, timestamp: now)
         messages.append(userMessage)
+        sortMessages()
         if isLikelyCommand(text) {
             if let (toolName, args) = parseIntent(text, pageId: nil) {
                 executeBrowserOSCommand(toolName: toolName, args: args, originalText: text)
@@ -117,6 +126,7 @@ class BrowserOSChatViewModel: ObservableObject {
                     timestamp: Date()
                 )
                 messages.append(agentMessage)
+                sortMessages()
                 queenStatus = .alive
 
             } catch {
@@ -126,6 +136,7 @@ class BrowserOSChatViewModel: ObservableObject {
                     timestamp: Date()
                 )
                 messages.append(errorMessage)
+                sortMessages()
                 queenStatus = .error
             }
             isStreaming = false
@@ -152,6 +163,7 @@ class BrowserOSChatViewModel: ObservableObject {
             timestamp: Date()
         )
         messages.append(agentMessage)
+        sortMessages()
         isStreaming = false
     }
 
@@ -200,6 +212,7 @@ class BrowserOSChatViewModel: ObservableObject {
                     toolCalls: [BrowserOSToolCall(name: toolName, result: resultText)]
                 )
                 messages.append(agentMessage)
+                sortMessages()
 
                 queenStatus = .alive
 
@@ -210,6 +223,7 @@ class BrowserOSChatViewModel: ObservableObject {
                     timestamp: Date()
                 )
                 messages.append(errorMessage)
+                sortMessages()
                 queenStatus = .error
             }
 
@@ -275,6 +289,23 @@ class BrowserOSChatViewModel: ObservableObject {
     
     var queenStatusText: String {
         "[Q] \(queenStatus.rawValue) \(sessionDuration)"
+    }
+
+    /// Keep chat history strictly in chronological order regardless of async
+    /// completion order. Must be called after every `messages.append`.
+    private func sortMessages() {
+        messages.sort { $0.timestamp < $1.timestamp }
+        deduplicateMessages()
+    }
+
+    /// Remove duplicate messages by UUID, preserving the first occurrence.
+    private func deduplicateMessages() {
+        var seen = Set<UUID>()
+        messages = messages.filter { msg in
+            guard !seen.contains(msg.id) else { return false }
+            seen.insert(msg.id)
+            return true
+        }
     }
 }
 
