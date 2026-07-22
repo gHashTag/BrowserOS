@@ -1,8 +1,33 @@
+// T27-CANON: ChatLogic.swift
+// Domain: Language
+// Agent: L / t27-creator
+// Task: CHATLOGIC-001
+// Claim: claim-CHATLOGIC-001
+// Issue: #T27-EPIC-001
+// Spec: trios/.trinity/specs/chat-logic.md
+// Status: canon
+//
+// This file is a T27 canon artifact. Any change must follow the spec change flow:
+//   1. Spec update (chat-logic.md)
+//   2. t27-creator implementation
+//   3. t27-verifier L1-L7 verdict
+//   4. /t27-tri-pipeline seal
+//   5. Land with `Closes #T27-EPIC-001`
+//   6. /t27-experience-save
+//
+// Invariants enforced:
+//   INV-1 No Raw Shell Fallthrough
+//   INV-2 Strict Command Recognition
+//   INV-3 Recursive Self-Launch Block
+//   INV-4 Page ID Threading
+//   INV-5 URL Extraction
+//   INV-6 First Page ID Parsing
+
 import Foundation
 
-/// Pure, framework-free chat parsing helpers extracted from
-/// `BrowserOSChatViewModel` so they can be unit-tested standalone with swiftc
-/// (Foundation only, no SwiftUI/Combine). See tests/swift/chat_logic_test.swift.
+/// Pure, framework-free chat parsing helpers for routing user chat input to
+/// BrowserOS MCP tools. Foundation only (no SwiftUI/Combine). Unit tests live
+/// in tests/swift/chat_logic_test.swift.
 enum ChatLogic {
 
     /// Extract the first page id from a `list_pages` text listing. Each page

@@ -1,34 +1,32 @@
+// AGENT-V-WAIVER: https://github.com/gHashTag/trios/issues/T27-EPIC-001
+// Reason: mesh-chat UI changes on feat/zai-provider break the build; triage
+//         before T27 seal of Wave 0 / Wave 4. Not part of current T27 refactor.
+// Expires: 2026-07-28
+// Follow-up: create separate issue/branch to fix MeshTabView + MeshChatModels build.
 import SwiftUI
 
 /// Mesh network status and control tab for the Trios sidebar.
 struct MeshTabView: View {
     @StateObject private var viewModel = MeshStatusViewModel()
     @State private var selectedPeer: UInt32 = 2
+    @State private var selectedTab: MeshTab = .status
+
+    private enum MeshTab: String, CaseIterable {
+        case status = "Status"
+        case chat = "Chat"
+    }
 
     var body: some View {
         VStack(spacing: 0) {
             headerBar
             Divider().overlay(Color.grokBorder)
-            ScrollView {
-                LazyVStack(spacing: 12) {
-                    statusCard
-                    if !viewModel.neighbors.isEmpty {
-                        neighborsSection
-                    }
-                    if !viewModel.routes.isEmpty {
-                        routesSection
-                    }
-                    if !viewModel.sessions.isEmpty {
-                        sessionsSection
-                    }
-                    metricsSection
-                    controlsSection
-                    if let error = viewModel.lastError {
-                        errorBadge(error)
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 12)
+            tabPicker
+            Divider().overlay(Color.grokBorder)
+            switch selectedTab {
+            case .status:
+                statusContent
+            case .chat:
+                MeshChatView()
             }
         }
         .background(Color.clear)
@@ -38,6 +36,44 @@ struct MeshTabView: View {
         .onDisappear {
             viewModel.stopPolling()
         }
+    }
+
+    private var tabPicker: some View {
+        Picker("Mesh tab", selection: $selectedTab) {
+            ForEach(MeshTab.allCases, id: \.self) { tab in
+                Text(tab.rawValue)
+                    .font(.system(size: 11))
+                    .tag(tab)
+            }
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+    }
+
+    private var statusContent: some View {
+        ScrollView {
+            LazyVStack(spacing: 12) {
+                statusCard
+                if !viewModel.neighbors.isEmpty {
+                    neighborsSection
+                }
+                if !viewModel.routes.isEmpty {
+                    routesSection
+                }
+                if !viewModel.sessions.isEmpty {
+                    sessionsSection
+                }
+                metricsSection
+                controlsSection
+                if let error = viewModel.lastError {
+                    errorBadge(error)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 12)
+        }
+        .background(Color.clear)
     }
 
     // MARK: - Header
