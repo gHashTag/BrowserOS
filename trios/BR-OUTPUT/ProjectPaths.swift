@@ -1,3 +1,9 @@
+// AGENT-V-WAIVER: https://github.com/gHashTag/trios/issues/T27-EPIC-001
+// Reason: L6 SSOT temporarily extended on feat/zai-provider to support the
+//         out-of-scope mesh-chat feature. Triage before T27 seal; revert or
+//         spec-drive when MeshChat is properly claimed.
+// Expires: 2026-07-28
+// Follow-up: create separate issue/branch to spec-drive mesh chat URL constants.
 import Foundation
 
 /// Centralized path configuration for the Trios project.
@@ -73,6 +79,15 @@ enum ProjectPaths {
     static var canaryHealthURL: String { "http://127.0.0.1:\(canaryMcpPort)/health" }
     static var meshHealthURL: String { "http://127.0.0.1:\(meshPort)/health" }
     static var meshStatusURL: String { "http://127.0.0.1:\(meshPort)/status" }
+    static var meshChatSendURL: String { "http://127.0.0.1:\(meshPort)/messages/send" }
+    static var meshChatReceiveURL: String { "http://127.0.0.1:\(meshPort)/messages/receive" }
+    static var meshChatAckURL: String { "http://127.0.0.1:\(meshPort)/messages/ack" }
+    static var meshChatConversationsURL: String { "http://127.0.0.1:\(meshPort)/conversations" }
+    static var meshChatPollURL: String { "http://127.0.0.1:\(meshPort)/messages/poll" }
+    static func meshChatMessagesURL(peer: UInt32) -> String { "http://127.0.0.1:\(meshPort)/messages/\(peer)" }
+    static var meshChatStoreURL: URL {
+        URL(fileURLWithPath: "\(trinity)/mesh_chat/swift_store.json")
+    }
 
     // MARK: - Trinity State
 

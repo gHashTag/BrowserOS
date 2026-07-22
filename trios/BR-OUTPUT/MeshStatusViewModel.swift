@@ -1,3 +1,8 @@
+// AGENT-V-WAIVER: https://github.com/gHashTag/trios/issues/T27-EPIC-001
+// Reason: mesh tab integration files on feat/zai-provider lack T27 provenance;
+//         triage before T27 seal. Not part of current T27 refactor.
+// Expires: 2026-07-28
+// Follow-up: create separate issue/branch to spec-drive Mesh models + view model.
 import Foundation
 import SwiftUI
 
