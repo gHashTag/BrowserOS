@@ -5,6 +5,8 @@
 //!
 //! phi^2 + phi^-2 = 3
 
+mod chat;
+
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -27,13 +29,26 @@ struct MeshState {
     node: Node,
     /// Derived public keys for any peers we have seeded.
     peer_keys: HashMap<NodeId, Vec<u8>>,
+    /// Chat message and conversation store.
+    store: chat::MessageStore,
 }
 
 impl MeshState {
     fn new(id: NodeId) -> Self {
+        let path = std::path::PathBuf::from(format!(".clade_meshd_chat_{}.json", id));
         Self {
             node: Node::new(id, ETX_WINDOW),
             peer_keys: HashMap::new(),
+            store: chat::MessageStore::new(path),
+        }
+    }
+
+    #[cfg(test)]
+    fn new_with_store(id: NodeId, path: std::path::PathBuf) -> Self {
+        Self {
+            node: Node::new(id, ETX_WINDOW),
+            peer_keys: HashMap::new(),
+            store: chat::MessageStore::new(path),
         }
     }
 }
@@ -118,6 +133,56 @@ struct OpenResponse {
 #[derive(Deserialize, Debug, Clone)]
 struct PeerRequest {
     peer: NodeId,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct ChatSendRequest {
+    dst: u32,
+    kind: u8,
+    text: Option<String>,
+    payload_base64: Option<String>,
+}
+
+#[derive(Serialize, Debug, Clone)]
+struct ChatSendResponse {
+    id: u64,
+    frame: String,
+    queued: bool,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct ChatReceiveRequest {
+    src: u32,
+    frame: String,
+}
+
+#[derive(Serialize, Debug, Clone)]
+struct ChatReceiveResponse {
+    id: u64,
+    kind: u8,
+    text: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct ChatAckRequest {
+    peer: u32,
+}
+
+#[derive(Serialize, Debug, Clone)]
+struct ChatMessagesResponse {
+    peer: u32,
+    messages: Vec<chat::ChatMessage>,
+}
+
+#[derive(Serialize, Debug, Clone)]
+struct ChatPollResponse {
+    messages: Vec<chat::ChatMessage>,
+    conversations: Vec<chat::Conversation>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct SinceIdQuery {
+    since_id: u64,
 }
 
 fn port() -> u16 {
@@ -209,7 +274,10 @@ async fn observe_handler(
     state: Arc<RwLock<MeshState>>,
 ) -> Result<impl warp::Reply, Infallible> {
     let mut state = state.write().await;
-    state.node.etx.record(req.peer, req.we_heard, req.they_heard);
+    state
+        .node
+        .etx
+        .record(req.peer, req.we_heard, req.they_heard);
     Ok(json(&serde_json::json!({ "ok": true })))
 }
 
@@ -356,20 +424,220 @@ fn deterministic_seed(id: NodeId) -> [u8; 32] {
     seed
 }
 
-async fn link_loss_handler(
-    state: Arc<RwLock<MeshState>>,
-) -> Result<impl warp::Reply, Infallible> {
+async fn link_loss_handler(state: Arc<RwLock<MeshState>>) -> Result<impl warp::Reply, Infallible> {
     let mut state = state.write().await;
     state.node.on_link_loss_detected();
     Ok(json(&serde_json::json!({ "ok": true })))
 }
 
-async fn reroute_handler(
-    state: Arc<RwLock<MeshState>>,
-) -> Result<impl warp::Reply, Infallible> {
+async fn reroute_handler(state: Arc<RwLock<MeshState>>) -> Result<impl warp::Reply, Infallible> {
     let mut state = state.write().await;
     state.node.on_reroute_completed();
     Ok(json(&serde_json::json!({ "ok": true })))
+}
+
+fn chat_error(
+    msg: &str,
+    code: warp::http::StatusCode,
+) -> Result<warp::reply::WithStatus<warp::reply::Json>, Infallible> {
+    Ok(warp::reply::with_status(
+        json(&serde_json::json!({ "error": msg })),
+        code,
+    ))
+}
+
+fn build_envelope(req: &ChatSendRequest) -> Result<Vec<u8>, String> {
+    let text = req.text.as_deref().unwrap_or("");
+    if req.kind == chat::MSG_TEXT && req.text.is_none() {
+        return Err("text messages require a text field".to_string());
+    }
+    if req.kind == chat::MSG_TEXT {
+        chat::encode_text_message(req.kind, text)
+    } else {
+        // Media / status / ack: envelope is [kind][caption_len][caption?][payload?].
+        let caption_bytes = text.as_bytes();
+        if caption_bytes.len() > chat::MAX_TEXT {
+            return Err(format!(
+                "caption too long: {} > {}",
+                caption_bytes.len(),
+                chat::MAX_TEXT
+            ));
+        }
+        let len = u8::try_from(caption_bytes.len())
+            .map_err(|_| format!("caption length {} does not fit in u8", caption_bytes.len()))?;
+        let payload = req
+            .payload_base64
+            .as_ref()
+            .map(|b| BASE64.decode(b))
+            .transpose()
+            .map_err(|_| "invalid payload_base64".to_string())?
+            .unwrap_or_default();
+        let mut out = Vec::with_capacity(2 + caption_bytes.len() + payload.len());
+        out.push(req.kind);
+        out.push(len);
+        out.extend_from_slice(caption_bytes);
+        out.extend_from_slice(&payload);
+        Ok(out)
+    }
+}
+
+async fn chat_send_handler(
+    req: ChatSendRequest,
+    state: Arc<RwLock<MeshState>>,
+) -> Result<impl warp::Reply, Infallible> {
+    let envelope = match build_envelope(&req) {
+        Ok(e) => e,
+        Err(e) => return chat_error(&e, warp::http::StatusCode::BAD_REQUEST),
+    };
+
+    let mut state = state.write().await;
+    let ttl = 8;
+    let frame = match state.node.seal_data(req.dst, ttl, &envelope) {
+        Some(f) => f,
+        None => {
+            return chat_error(
+                "no session or seal failed",
+                warp::http::StatusCode::SERVICE_UNAVAILABLE,
+            )
+        }
+    };
+
+    let channel = chat::channel_for_peer(&state);
+    let msg = match state.store.record_outgoing(
+        req.dst,
+        req.kind,
+        req.text.clone(),
+        req.payload_base64.clone(),
+        channel,
+    ) {
+        Ok(m) => m,
+        Err(e) => {
+            return chat_error(
+                &format!("store error: {e}"),
+                warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        }
+    };
+
+    Ok(warp::reply::with_status(
+        json(&ChatSendResponse {
+            id: msg.id,
+            frame: BASE64.encode(&frame),
+            queued: true,
+        }),
+        warp::http::StatusCode::OK,
+    ))
+}
+
+async fn chat_receive_handler(
+    req: ChatReceiveRequest,
+    state: Arc<RwLock<MeshState>>,
+) -> Result<impl warp::Reply, Infallible> {
+    let frame = match BASE64.decode(&req.frame) {
+        Ok(f) => f,
+        Err(_) => return chat_error("invalid base64 frame", warp::http::StatusCode::BAD_REQUEST),
+    };
+
+    let mut state = state.write().await;
+    let payload = match state.node.open_data(req.src, &frame) {
+        Ok(p) => p,
+        Err(e) => return chat_error(&format!("{:?}", e), warp::http::StatusCode::UNAUTHORIZED),
+    };
+
+    let (kind, text, payload_b64) = match chat::decode_chat_payload(&payload) {
+        Ok(v) => v,
+        Err(_) => {
+            // Not a chat envelope; ignore silently so generic data frames do
+            // not pollute the chat log.
+            return Ok(warp::reply::with_status(
+                json(&ChatReceiveResponse {
+                    id: 0,
+                    kind: chat::MSG_STATUS,
+                    text: Some("not a chat frame".to_string()),
+                }),
+                warp::http::StatusCode::OK,
+            ));
+        }
+    };
+
+    let channel = chat::channel_for_peer(&state);
+    let msg = match state
+        .store
+        .record_incoming(req.src, kind, text, payload_b64, channel)
+    {
+        Ok(m) => m,
+        Err(e) => {
+            return chat_error(
+                &format!("store error: {e}"),
+                warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+            )
+        }
+    };
+
+    Ok(warp::reply::with_status(
+        json(&ChatReceiveResponse {
+            id: msg.id,
+            kind: msg.kind,
+            text: msg.text,
+        }),
+        warp::http::StatusCode::OK,
+    ))
+}
+
+async fn chat_messages_handler(
+    peer: u32,
+    state: Arc<RwLock<MeshState>>,
+) -> Result<impl warp::Reply, Infallible> {
+    let state = state.read().await;
+    let messages = state.store.messages_for(peer).to_vec();
+    Ok(warp::reply::with_status(
+        json(&ChatMessagesResponse { peer, messages }),
+        warp::http::StatusCode::OK,
+    ))
+}
+
+async fn chat_ack_handler(
+    req: ChatAckRequest,
+    state: Arc<RwLock<MeshState>>,
+) -> Result<impl warp::Reply, Infallible> {
+    let mut state = state.write().await;
+    match state.store.ack_peer(req.peer) {
+        Ok(()) => Ok(warp::reply::with_status(
+            json(&serde_json::json!({ "ok": true, "peer": req.peer })),
+            warp::http::StatusCode::OK,
+        )),
+        Err(e) => chat_error(
+            &format!("store error: {e}"),
+            warp::http::StatusCode::INTERNAL_SERVER_ERROR,
+        ),
+    }
+}
+
+async fn chat_conversations_handler(
+    state: Arc<RwLock<MeshState>>,
+) -> Result<impl warp::Reply, Infallible> {
+    let state = state.read().await;
+    let conversations = state.store.conversations();
+    Ok(warp::reply::with_status(
+        json(&conversations),
+        warp::http::StatusCode::OK,
+    ))
+}
+
+async fn chat_poll_handler(
+    q: SinceIdQuery,
+    state: Arc<RwLock<MeshState>>,
+) -> Result<impl warp::Reply, Infallible> {
+    let state = state.read().await;
+    let messages = state.store.poll_since(q.since_id);
+    let conversations = state.store.conversations();
+    Ok(warp::reply::with_status(
+        json(&ChatPollResponse {
+            messages,
+            conversations,
+        }),
+        warp::http::StatusCode::OK,
+    ))
 }
 
 fn routes(
@@ -431,6 +699,44 @@ fn routes(
         .and(with_state(state.clone()))
         .and_then(reroute_handler);
 
+    let chat_send = warp::path("messages")
+        .and(warp::path("send"))
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(with_state(state.clone()))
+        .and_then(chat_send_handler);
+
+    let chat_receive = warp::path("messages")
+        .and(warp::path("receive"))
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(with_state(state.clone()))
+        .and_then(chat_receive_handler);
+
+    let chat_messages = warp::path!("messages" / u32)
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(chat_messages_handler);
+
+    let chat_ack = warp::path("messages")
+        .and(warp::path("ack"))
+        .and(warp::post())
+        .and(warp::body::json())
+        .and(with_state(state.clone()))
+        .and_then(chat_ack_handler);
+
+    let chat_conversations = warp::path("conversations")
+        .and(warp::get())
+        .and(with_state(state.clone()))
+        .and_then(chat_conversations_handler);
+
+    let chat_poll = warp::path("messages")
+        .and(warp::path("poll"))
+        .and(warp::get())
+        .and(warp::query::<SinceIdQuery>())
+        .and(with_state(state.clone()))
+        .and_then(chat_poll_handler);
+
     let cors = warp::cors()
         .allow_any_origin()
         .allow_methods(vec!["GET", "POST", "OPTIONS"])
@@ -446,6 +752,12 @@ fn routes(
         .or(seed_peer)
         .or(link_loss)
         .or(reroute)
+        .or(chat_send)
+        .or(chat_receive)
+        .or(chat_messages)
+        .or(chat_ack)
+        .or(chat_conversations)
+        .or(chat_poll)
         .with(cors)
 }
 
@@ -457,6 +769,12 @@ async fn main() {
         .unwrap_or(1);
 
     let state = Arc::new(RwLock::new(MeshState::new(node_id)));
+    {
+        let mut guard = state.write().await;
+        if let Err(e) = guard.store.load() {
+            eprintln!("[clade-meshd] failed to load chat store: {e}; starting fresh");
+        }
+    }
     let port = port();
     println!("[clade-meshd] node_id={node_id} port={port}");
     warp::serve(routes(state)).run(([127, 0, 0, 1], port)).await;
@@ -481,5 +799,71 @@ mod tests {
         assert_eq!(format_etx(3.0), "fair");
         assert_eq!(format_etx(10.0), "poor");
         assert_eq!(format_etx(f32::INFINITY), "dead");
+    }
+
+    fn seed_both(a: &mut MeshState, b: &mut MeshState) -> Result<(), String> {
+        use trios_mesh::crypto::Handshake;
+        let a_hs = Handshake::new();
+        let b_hs = Handshake::new();
+        let a_pub = a_hs.public;
+        let b_pub = b_hs.public;
+
+        let a_session = a_hs
+            .complete(&b_pub, true)
+            .map_err(|e| format!("{:?}", e))?;
+        let b_session = b_hs
+            .complete(&a_pub, false)
+            .map_err(|e| format!("{:?}", e))?;
+
+        a.node.add_session(b.node.id, a_session);
+        b.node.add_session(a.node.id, b_session);
+        Ok(())
+    }
+
+    #[test]
+    fn chat_round_trip_seal_open_and_store() -> Result<(), String> {
+        use std::path::PathBuf;
+
+        let mut alice =
+            MeshState::new_with_store(1, PathBuf::from("/tmp/clade_meshd_test_alice.json"));
+        let mut bob = MeshState::new_with_store(2, PathBuf::from("/tmp/clade_meshd_test_bob.json"));
+        seed_both(&mut alice, &mut bob)?;
+
+        alice.store.load().map_err(|e| format!("{:?}", e))?;
+        bob.store.load().map_err(|e| format!("{:?}", e))?;
+
+        let text = "hello mesh";
+        let envelope = chat::encode_text_message(chat::MSG_TEXT, text)?;
+        let frame = alice
+            .node
+            .seal_data(2, 8, &envelope)
+            .ok_or_else(|| "seal_data returned None".to_string())?;
+
+        let payload = bob
+            .node
+            .open_data(1, &frame)
+            .map_err(|e| format!("{:?}", e))?;
+        let (kind, decoded_text, _payload_b64) = chat::decode_chat_payload(&payload)?;
+
+        assert_eq!(kind, chat::MSG_TEXT);
+        assert_eq!(decoded_text.as_deref(), Some(text));
+
+        let channel = chat::channel_for_peer(&alice);
+        let msg = alice
+            .store
+            .record_outgoing(2, chat::MSG_TEXT, Some(text.to_string()), None, channel)
+            .map_err(|e| format!("{e}"))?;
+        assert_eq!(msg.peer, 2);
+        assert!(msg.is_outgoing);
+
+        bob.store
+            .record_incoming(1, kind, decoded_text, None, channel)
+            .map_err(|e| format!("{e}"))?;
+        let bob_messages = bob.store.messages_for(1);
+        assert_eq!(bob_messages.len(), 1);
+        assert!(!bob_messages[0].is_outgoing);
+        assert_eq!(bob_messages[0].text.as_deref(), Some(text));
+
+        Ok(())
     }
 }

@@ -11,14 +11,14 @@
 - **Tests:** `./build.sh` PASS, Swift unit test PASS, `cargo test --workspace` 341 PASS, `cargo clippy --all-targets --all-features` PASS, `cargo run --bin clade-audit -- --canon` 0 CRITICAL findings (35 CRITICAL baseline waived/sealed).
 - **Episode:** `.trinity/experience/2026-07-22_094500_CLADEGUARD-001.json`
 
-## 2026-07-22 - T27 Canon Seal: ChatLogic
-**Ring:** BR-OUTPUT  **Agents:** L, t27-creator, t27-verifier  **Road:** B
-- **Problem:** `ChatLogic.swift` was hand-written intent parsing code with no T27 spec or provenance.
-- **Root cause:** No spec existed; L2 GENERATION violation.
-- **Fix:** Created `chat-logic.md` spec with invariants INV-1..INV-6; acquired claim CHATLOGIC-001; canonized the file with T27-CANON header; verifier CLEAN.
-- **Files:** `BR-OUTPUT/ChatLogic.swift`, `.trinity/specs/chat-logic.md`, `.trinity/seals/ChatLogic.json`
-- **Tests:** `swiftc` unit test 35/35 PASS, `./build.sh` PASS, `cargo test --workspace` 341 PASS, `cargo clippy` clean.
-- **Episode:** `.trinity/experience/2026-07-22_022413_CHATLOGIC-001.json`
+## 2026-07-22 - Mesh Chat Backend Recovery
+**Ring:** RUST-13  **Agents:** K  **Road:** B
+- **Problem:** Branch switch to `queen/ui-ux-message-order-fixes` discarded uncommitted `clade-meshd` chat backend (`chat.rs` + `main.rs` routes/store/test).
+- **Root cause:** Uncommitted new files on `feat/zai-provider` were wiped by checkout; Swift UI files survived because already committed.
+- **Fix:** Recreated `chat.rs` message store and tri-net text envelope; re-applied `mod chat;`, `MeshState.store`, chat HTTP routes, handlers, and integration test; used existing `Handshake`/`Node::add_session` API for the test seed; made `new_with_store` `#[cfg(test)]`; added `trios/.trinity/mesh_chat/` to `.gitignore`.
+- **Files:** `rings/RUST-13/clade-meshd/src/chat.rs`, `rings/RUST-13/clade-meshd/src/main.rs`, `.gitignore`
+- **Tests:** `cargo fmt`, `cargo clippy --all-targets --all-features` clean, `cargo test -p clade-meshd` 6/6 PASS; two-node HTTP round-trip (nodes 1/2 on ports 9505/9506) sent text, received, conversation and message list populated correctly; `./build.sh` PASS; relaunched `trios.app`.
+- **Episode:** `.trinity/experience/2026-07-22_mesh_chat_backend_recovery.json`
 
 ## 2026-07-21 - T27 Canon Seal: RecursionGuard
 **Ring:** BR-OUTPUT  **Agents:** K, t27-creator, t27-verifier  **Road:** B
