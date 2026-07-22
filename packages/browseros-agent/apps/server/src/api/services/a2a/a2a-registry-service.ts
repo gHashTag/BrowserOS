@@ -47,6 +47,8 @@ export class A2aRegistryService {
   private messageQueue = new Map<string, A2aMessage[]>()
   private tasks = new Map<string, A2aTask>()
   private subscribers = new Map<string, MessageHandler>()
+  private memoryAgents = new Map<string, A2aAgentCard>()
+  private memoryHeartbeats = new Map<string, number>()
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null
   private pg: PgAgentStore | null = null
   private pgReady = false
@@ -87,6 +89,8 @@ export class A2aRegistryService {
     if (this.pgReady) {
       await this.pg!.upsertAgent(card, 'online')
     }
+    this.memoryAgents.set(card.id, card)
+    this.memoryHeartbeats.set(card.id, Date.now())
     logger.info('A2A agent registered', { agentId: card.id, name: card.name })
   }
 
@@ -94,6 +98,8 @@ export class A2aRegistryService {
     if (this.pgReady) {
       await this.pg!.markOffline(agentId)
     }
+    this.memoryAgents.delete(agentId)
+    this.memoryHeartbeats.delete(agentId)
     this.subscribers.delete(agentId)
     this.messageQueue.delete(agentId)
     logger.info('A2A agent unregistered', { agentId })
@@ -103,7 +109,15 @@ export class A2aRegistryService {
   async heartbeat(agentId: string): Promise<boolean> {
     if (this.pgReady) {
       const ok = await this.pg!.heartbeat(agentId)
+      if (ok) {
+        this.memoryHeartbeats.set(agentId, Date.now())
+      }
       return ok
+    }
+    // Memory-only fallback: accept heartbeats for registered agents.
+    if (this.memoryAgents.has(agentId)) {
+      this.memoryHeartbeats.set(agentId, Date.now())
+      return true
     }
     return false
   }
@@ -112,7 +126,13 @@ export class A2aRegistryService {
     if (this.pgReady) {
       return this.pg!.listAgents(true)
     }
-    return []
+    // Memory-only fallback: return agents with recent heartbeats.
+    const threshold = 120_000
+    const now = Date.now()
+    return Array.from(this.memoryAgents.values()).filter((card) => {
+      const last = this.memoryHeartbeats.get(card.id) ?? 0
+      return now - last < threshold
+    })
   }
 
   async listMatrix(): Promise<any[]> {
@@ -125,9 +145,10 @@ export class A2aRegistryService {
   sendMessage(message: A2aMessage): boolean {
     const delivered = this.deliver(message)
     if (!delivered) {
-      const queue = this.messageQueue.get(message.recipient ?? '') ?? []
+      const target = message.recipient ?? '__broadcast__'
+      const queue = this.messageQueue.get(target) ?? []
       queue.push(message)
-      this.messageQueue.set(message.recipient ?? '', queue)
+      this.messageQueue.set(target, queue)
     }
     return delivered
   }
@@ -190,8 +211,22 @@ export class A2aRegistryService {
   }
 
   private deliver(message: A2aMessage): boolean {
-    const target = message.recipient ?? ''
-    if (!target) return false
+    const target = message.recipient
+
+    // Broadcast (no explicit recipient): fan out to all current subscribers.
+    if (!target) {
+      let anyDelivered = false
+      for (const [agentId, handler] of this.subscribers) {
+        if (agentId === message.sender) continue
+        try {
+          handler(message)
+          anyDelivered = true
+        } catch {
+          // Drop failed broadcast deliveries; client can re-register.
+        }
+      }
+      return anyDelivered
+    }
 
     const handler = this.subscribers.get(target)
     if (handler) {
@@ -231,6 +266,9 @@ export class A2aRegistryService {
 
   private startHeartbeatWatchdog(): void {
     this.heartbeatInterval = setInterval(async () => {
+      const threshold = 120_000
+      const now = Date.now()
+
       if (this.pgReady) {
         try {
           const stale = await this.pg!.pruneOffline(90)
@@ -244,6 +282,18 @@ export class A2aRegistryService {
           logger.warn('A2A heartbeat watchdog PG error', {
             error: err instanceof Error ? err.message : String(err),
           })
+        }
+      } else {
+        // Memory-only pruning.
+        for (const [agentId, last] of this.memoryHeartbeats) {
+          if (now - last >= threshold) {
+            logger.warn('A2A agent marked offline due to missed heartbeats', {
+              agentId,
+            })
+            this.memoryAgents.delete(agentId)
+            this.memoryHeartbeats.delete(agentId)
+            this.subscribers.delete(agentId)
+          }
         }
       }
     }, 60_000)

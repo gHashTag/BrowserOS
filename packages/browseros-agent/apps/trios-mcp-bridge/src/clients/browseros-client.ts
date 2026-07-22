@@ -15,11 +15,47 @@ const RETRY_ATTEMPTS = 3
 const RETRY_BASE_MS = 200
 const HEALTH_CHECK_MS = 30000
 
+export type BrowserToolContract = 'browserclaw' | 'legacy'
+
+export function resolveBrowserToolContract(
+  toolNames: Iterable<string>,
+): BrowserToolContract {
+  const names = new Set(toolNames)
+  return names.has('tabs') && names.has('screenshot') ? 'browserclaw' : 'legacy'
+}
+
+export function parseBrowserPages(
+  text: string,
+): Array<{ id: number; url: string; title: string }> {
+  const pages: Array<{ id: number; url: string; title: string }> = []
+  for (const line of text.split('\n')) {
+    const claw = line.match(/^\[(\d+)\]\s+(\S+)(?:\s+\((.*)\))?$/)
+    if (claw) {
+      pages.push({
+        id: Number(claw[1]),
+        url: claw[2],
+        title: claw[3]?.trim() ?? '',
+      })
+      continue
+    }
+    const legacy = line.match(/\[(\d+)\]\s+(.+?)\s+(https?:\/\/\S+)/)
+    if (legacy) {
+      pages.push({
+        id: Number(legacy[1]),
+        title: legacy[2].trim(),
+        url: legacy[3].trim(),
+      })
+    }
+  }
+  return pages
+}
+
 export class BrowserOSClient {
   private client: Client | null = null
   private transport: StreamableHTTPClientTransport | null = null
   private serverUrl: string
   private connecting = false
+  private contract: BrowserToolContract | null = null
   private healthCheckTimer?: ReturnType<typeof setInterval>
   readonly circuit: CircuitBreaker
 
@@ -154,9 +190,13 @@ export class BrowserOSClient {
   async listPages(): Promise<
     Array<{ id: number; url: string; title: string }>
   > {
-    const result = await this.callBrowserTool('list_pages', {})
+    const contract = await this.getContract()
+    const result = await this.callBrowserTool(
+      contract === 'browserclaw' ? 'tabs' : 'list_pages',
+      contract === 'browserclaw' ? { action: 'list' } : {},
+    )
     const text = this.extractText(result)
-    return this.parsePagesList(text)
+    return parseBrowserPages(text)
   }
 
   async findGitButlerPage(): Promise<{
@@ -175,10 +215,14 @@ export class BrowserOSClient {
   }
 
   async takeScreenshot(pageId: number): Promise<ScreenshotResult> {
-    const result = await this.callBrowserTool('take_screenshot', {
-      page: pageId,
-      format: 'png',
-    })
+    const contract = await this.getContract()
+    const result = await this.callBrowserTool(
+      contract === 'browserclaw' ? 'screenshot' : 'take_screenshot',
+      {
+        page: pageId,
+        format: 'png',
+      },
+    )
 
     const imageContent = result.content?.find((c: any) => c.type === 'image')
     if (imageContent?.data) {
@@ -192,35 +236,49 @@ export class BrowserOSClient {
   }
 
   async takeSnapshot(pageId: number): Promise<SnapshotResult> {
-    const result = await this.callBrowserTool('take_snapshot', {
-      page: pageId,
-    })
+    const contract = await this.getContract()
+    const result = await this.callBrowserTool(
+      contract === 'browserclaw' ? 'snapshot' : 'take_snapshot',
+      {
+        page: pageId,
+      },
+    )
     const text = this.extractText(result)
     return { snapshot: text }
   }
 
   async getPageContent(pageId: number): Promise<string> {
-    const result = await this.callBrowserTool('get_page_content', {
-      page: pageId,
-    })
+    const contract = await this.getContract()
+    const result = await this.callBrowserTool(
+      contract === 'browserclaw' ? 'read' : 'get_page_content',
+      {
+        page: pageId,
+      },
+    )
     return this.extractText(result)
   }
 
   async clickAt(pageId: number, x: number, y: number): Promise<string> {
-    const result = await this.callBrowserTool('click_at', {
-      page: pageId,
-      x,
-      y,
-    })
+    const contract = await this.getContract()
+    const result = await this.callBrowserTool(
+      contract === 'browserclaw' ? 'act' : 'click_at',
+      contract === 'browserclaw'
+        ? { page: pageId, kind: 'click_at', x, y }
+        : { page: pageId, x, y },
+    )
     return this.extractText(result)
   }
 
   async navigate(pageId: number, url: string): Promise<string> {
-    const result = await this.callBrowserTool('navigate_page', {
-      page: pageId,
-      action: 'url',
-      url,
-    })
+    const contract = await this.getContract()
+    const result = await this.callBrowserTool(
+      contract === 'browserclaw' ? 'navigate' : 'navigate_page',
+      {
+        page: pageId,
+        action: 'url',
+        url,
+      },
+    )
     return this.extractText(result)
   }
 
@@ -236,7 +294,11 @@ export class BrowserOSClient {
     Array<{ id: number; title: string; color: string; pageIds: number[] }>
   > {
     try {
-      const result = await this.callBrowserTool('list_tab_groups', {})
+      const contract = await this.getContract()
+      const result = await this.callBrowserTool(
+        contract === 'browserclaw' ? 'tab_groups' : 'list_tab_groups',
+        contract === 'browserclaw' ? { action: 'list' } : {},
+      )
       const text = this.extractText(result)
       return this.parseTabGroups(text)
     } catch {
@@ -250,11 +312,18 @@ export class BrowserOSClient {
     color?: string,
   ): Promise<{ ok: boolean; groupId?: number }> {
     try {
-      const args: Record<string, unknown> = { pageIds }
+      const contract = await this.getContract()
+      const args: Record<string, unknown> =
+        contract === 'browserclaw'
+          ? { action: 'create', pages: pageIds }
+          : { pageIds }
       if (title) args.title = title
       if (color) args.color = color
 
-      const result = await this.callBrowserTool('group_tabs', args)
+      const result = await this.callBrowserTool(
+        contract === 'browserclaw' ? 'tab_groups' : 'group_tabs',
+        args,
+      )
       const text = this.extractText(result)
       const match = text.match(/group.*?(\d+)/i)
       return { ok: true, groupId: match ? Number(match[1]) : undefined }
@@ -276,6 +345,17 @@ export class BrowserOSClient {
       await this.client.close().catch(() => {})
       this.client = null
     }
+    this.contract = null
+  }
+
+  private async getContract(): Promise<BrowserToolContract> {
+    if (this.contract) return this.contract
+    const client = await this.ensureConnected()
+    const result = await client.listTools()
+    this.contract = resolveBrowserToolContract(
+      result.tools.map((tool) => tool.name),
+    )
+    return this.contract
   }
 
   private extractText(result: any): string {
@@ -284,24 +364,6 @@ export class BrowserOSClient {
       .filter((c: any) => c.type === 'text')
       .map((c: any) => c.text)
       .join('\n')
-  }
-
-  private parsePagesList(
-    text: string,
-  ): Array<{ id: number; url: string; title: string }> {
-    const pages: Array<{ id: number; url: string; title: string }> = []
-    const lines = text.split('\n')
-    for (const line of lines) {
-      const match = line.match(/\[(\d+)\]\s+(.+?)\s+(https?:\/\/\S+)/)
-      if (match) {
-        pages.push({
-          id: Number(match[1]),
-          title: match[2].trim(),
-          url: match[3].trim(),
-        })
-      }
-    }
-    return pages
   }
 
   private parseTabGroups(

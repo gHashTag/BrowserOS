@@ -230,16 +230,18 @@ impl MessageStore {
 }
 
 /// Resolve an absolute store path from the environment or a default relative
-/// to the current working directory. Callers are responsible for running from
-/// a writable directory (e.g. the trios repo root).
-#[allow(dead_code)]
+/// to the user's home directory so the daemon does not lose messages when
+/// launched from an unexpected working directory.
 pub fn default_store_path() -> PathBuf {
     std::env::var("TRIOS_MESH_CHAT_STORE")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from(".trinity/mesh_chat/clade_meshd_store.json"))
+        .unwrap_or_else(|_| {
+            dirs::home_dir()
+                .map(|h| h.join(".trinity/mesh_chat/clade_meshd_store.json"))
+                .unwrap_or_else(|| PathBuf::from(".trinity/mesh_chat/clade_meshd_store.json"))
+        })
 }
 
-#[allow(dead_code)]
 pub fn absolute_store_path() -> PathBuf {
     let p = default_store_path();
     if p.is_absolute() {

@@ -23,6 +23,9 @@ function parseArgs(): Partial<BridgeConfig> {
       case '--browseros-url':
         config.browserosMcpUrl = args[++i]
         break
+      case '--browserclaw-url':
+        config.browserosMcpUrl = args[++i]
+        break
       case '--gitbutler-cli':
         config.gitbutlerCliPath = args[++i]
         break
@@ -57,8 +60,9 @@ TRIOS MCP Bridge — Vision + GitButler + t27 CLI
 Usage: bun run src/index.ts [options]
 
 Options:
-  --port <number>            Bridge server port (default: 9200)
-  --browseros-url <url>      BrowserOS MCP URL (default: http://127.0.0.1:9105/mcp)
+  --port <number>            Bridge server port (default: 9203)
+  --browserclaw-url <url>    BrowserClaw MCP URL (default: http://127.0.0.1:9200/mcp)
+  --browseros-url <url>      Legacy alias for --browserclaw-url
   --gitbutler-cli <path>       GitButler CLI path (default: but)
   --tri-cli <path>             t27 CLI path (default: tri)
   --rag-cli <path>             trios-mcp-rag binary path (default: trios-mcp-rag)
@@ -70,8 +74,8 @@ Options:
   --log-level <level>           Log level: debug|info|warn|error (default: info)
 
 Examples:
-  bun run src/index.ts --port 9200
-  bun run src/index.ts --browseros-url http://127.0.0.1:9000/mcp
+  bun run src/index.ts --port 9203
+  bun run src/index.ts --browserclaw-url http://127.0.0.1:9200/mcp
 `)
         process.exit(0)
         break
@@ -107,7 +111,7 @@ async function _main() {
   const github = new GitHubMcpClient(config.githubCliPath)
 
   console.log(`  Port:         ${config.port}`)
-  console.log(`  BrowserOS:    ${config.browserosMcpUrl}`)
+  console.log(`  BrowserClaw:  ${config.browserosMcpUrl}`)
   console.log(
     `  GitButler:    ${config.gitbutlerCliPath} (internal: ${config.gitbutlerInternal})`,
   )

@@ -145,7 +145,7 @@ export class PgAgentStore {
   async pruneOffline(thresholdSeconds = 90): Promise<string[]> {
     const rows = await this.query<{ id: string }>(
       `UPDATE agents SET status = 'offline', updated_at = NOW()
-       WHERE status = 'online' AND last_heartbeat < NOW() - INTERVAL '${thresholdSeconds} seconds'
+       WHERE status = 'online' AND last_heartbeat < NOW() - INTERVAL '${thresholdSeconds.toString()} seconds'
        RETURNING id`,
     )
     return (rows ?? []).map((r) => r.id)

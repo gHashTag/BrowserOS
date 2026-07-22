@@ -2,8 +2,14 @@
 
 ## Overview
 
+BrowserClaw is the canonical browser automation endpoint for TRIOS. It owns
+`http://127.0.0.1:9200/mcp`; the TRIOS aggregation bridge owns port 9203 and
+adapts both the current BrowserClaw tool catalog and the legacy BrowserOS
+catalog.
+
 The TRIOS MCP Bridge connects six components:
-- **BrowserOS MCP** (port 9105) — Browser automation and external service integrations
+- **BrowserClaw MCP** (port 9200) — Browser automation, isolated agent tabs, audit, and replay
+- **Legacy BrowserOS MCP** (port 9105) — Backward-compatible browser automation endpoint
 - **trios-server** (port 9005) — Rust-based Zig workflow server
 - **trios-mcp-bridge** (port 9203) — Vision + GitButler orchestration layer (~44 tools)
 - **trios-mcp-rag** (stdio) — RAG over Railway PostgreSQL (GOLDEN BRIDGE chapters)

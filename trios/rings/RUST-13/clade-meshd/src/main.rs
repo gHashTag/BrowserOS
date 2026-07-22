@@ -35,7 +35,7 @@ struct MeshState {
 
 impl MeshState {
     fn new(id: NodeId) -> Self {
-        let path = std::path::PathBuf::from(format!(".clade_meshd_chat_{}.json", id));
+        let path = chat::absolute_store_path();
         Self {
             node: Node::new(id, ETX_WINDOW),
             peer_keys: HashMap::new(),

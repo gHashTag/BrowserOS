@@ -198,8 +198,13 @@ struct MeshChatThreadView: View {
                     )
                     .onChange(of: viewModel.composerText) { _, newValue in
                         if newValue.utf8.count > 200 {
-                            let capped = Data(newValue.utf8.prefix(200))
-                            viewModel.composerText = String(data: capped, encoding: .utf8) ?? ""
+                            // Truncate on a valid Character boundary so we do not
+                            // split a multi-byte UTF-8 sequence and clear the field.
+                            var capped = newValue
+                            while capped.utf8.count > 200, !capped.isEmpty {
+                                capped.removeLast()
+                            }
+                            viewModel.composerText = capped
                         }
                     }
                 Button(action: {

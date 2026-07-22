@@ -1,19 +1,19 @@
-# TRIOS MCP Bridge — BrowserOS Integration Guide
+# TRIOS MCP Bridge — BrowserClaw Integration Guide
 
 ## Step 1: Start the bridge
 
 ```bash
 cd packages/browseros-agent
 bun run start:trios-bridge
-# Bridge starts at http://127.0.0.1:9200
+# BrowserClaw MCP stays on 9200; the TRIOS bridge starts on 9203
 ```
 
-## Step 2: Register in BrowserOS
+## Step 2: Register in BrowserClaw
 
-Open BrowserOS Settings → MCP Servers → Add Custom Server:
+Open BrowserClaw Settings → MCP Servers → Add Custom Server:
 
 - **Name**: TRIOS MCP Bridge
-- **URL**: `http://127.0.0.1:9200/mcp`
+- **URL**: `http://127.0.0.1:9203/mcp`
 - **Transport**: Streamable HTTP
 
 Or use the registration config:

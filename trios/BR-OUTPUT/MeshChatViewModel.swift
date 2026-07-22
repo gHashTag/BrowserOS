@@ -32,35 +32,51 @@ final class MeshChatViewModel: ObservableObject {
 
     // MARK: - Polling
 
+    private var pollTask: Task<Void, Never>?
+    private var refreshTask: Task<Void, Never>?
+
     func startPolling(interval: TimeInterval = 2.0) {
-        pollTimer?.invalidate()
-        pollTimer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                await self?.refresh()
+        stopPolling()
+        pollTask = Task {
+            while !Task.isCancelled {
+                await refresh()
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
             }
-        }
-        Task { @MainActor [weak self] in
-            await self?.refresh()
         }
     }
 
     func stopPolling() {
-        pollTimer?.invalidate()
-        pollTimer = nil
+        pollTask?.cancel()
+        pollTask = nil
+        refreshTask?.cancel()
+        refreshTask = nil
     }
 
     func refresh() async {
-        isLoading = true
-        defer { isLoading = false }
+        // Prevent overlapping refresh calls when the timer fires faster than
+        // a slow network round-trip completes.
+        if let existing = refreshTask, !existing.isCancelled {
+            await existing.value
+            return
+        }
 
-        await checkHealth()
-        guard isReachable else { return }
+        refreshTask = Task {
+            isLoading = true
+            defer { isLoading = false }
 
-        await fetchConversations()
-        await fetchSelectedThread()
-        await pollNewMessages()
-        await updateChannelFromStatus()
-        saveCache()
+            await checkHealth()
+            guard isReachable, !Task.isCancelled else { return }
+
+            await fetchConversations()
+            await fetchSelectedThread()
+            await pollNewMessages()
+            await updateChannelFromStatus()
+            if !Task.isCancelled {
+                saveCache()
+            }
+        }
+        await refreshTask?.value
+        refreshTask = nil
     }
 
     // MARK: - Health / Status

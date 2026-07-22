@@ -24,6 +24,21 @@ interface A2aRouteDeps {
   service: A2aRegistryService
 }
 
+function normalizePayloadForSwift(msg: A2aMessage): A2aMessage {
+  if (msg.payload === undefined || msg.payload === null) {
+    return { ...msg, payload: '' }
+  }
+  if (typeof msg.payload === 'string') {
+    return msg
+  }
+  // Serialize object payloads to a JSON string so Swift Data.from utf-8 works.
+  try {
+    return { ...msg, payload: JSON.stringify(msg.payload) }
+  } catch {
+    return { ...msg, payload: String(msg.payload) }
+  }
+}
+
 export function createA2aRoutes(deps: A2aRouteDeps) {
   const { service } = deps
 
@@ -116,9 +131,12 @@ export function createA2aRoutes(deps: A2aRouteDeps) {
         const encoder = new TextEncoder()
 
         service.subscribe(agentId, (msg) => {
-          s.write(encoder.encode(`data: ${JSON.stringify(msg)}\n\n`)).catch(
-            () => {},
-          )
+          // Swift A2AMessage.payload is Data and decodes from a base64 string.
+          // Normalize task/object payloads so the SSE message is self-describing.
+          const normalized = normalizePayloadForSwift(msg)
+          s.write(
+            encoder.encode(`data: ${JSON.stringify(normalized)}\n\n`),
+          ).catch(() => {})
         })
 
         try {

@@ -30,7 +30,8 @@ actor A2ARegistryClient {
         self.serverURL = serverURL
         self.agentCard = agentCard
         self.session = session
-        encoder.keyEncodingStrategy = .convertToSnakeCase
+        // The Hono server expects camelCase keys (agentId, createdAt, etc.).
+        // Using convertToSnakeCase would serialize them as agent_id, causing 400s.
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         decoder.dateDecodingStrategy = .iso8601
     }
@@ -178,23 +179,31 @@ actor A2ARegistryClient {
         request.httpMethod = "GET"
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
 
-        let (bytes, response) = try await session.bytes(for: request)
-        guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
-            throw A2AError.invalidResponse((response as? HTTPURLResponse)?.statusCode ?? 0)
-        }
-
         return AsyncStream<A2AMessage> { continuation in
             let task = Task {
-                do {
-                    for try await line in bytes.lines {
-                        if let message = self.parseSSELine(line) {
-                            continuation.yield(message)
+                var attempt = 0
+                while !Task.isCancelled {
+                    do {
+                        let (bytes, response) = try await self.session.bytes(for: request)
+                        guard let http = response as? HTTPURLResponse,
+                              (200...299).contains(http.statusCode) else {
+                            throw A2AError.invalidResponse((response as? HTTPURLResponse)?.statusCode ?? 0)
                         }
+                        attempt = 0
+                        for try await line in bytes.lines {
+                            if Task.isCancelled { break }
+                            if let message = self.parseSSELine(line) {
+                                continuation.yield(message)
+                            }
+                        }
+                    } catch {
+                        attempt += 1
+                        // Retry with capped exponential backoff: max ~30s.
+                        let delay = min(30.0, pow(2.0, Double(attempt)))
+                        try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     }
-                    continuation.finish()
-                } catch {
-                    continuation.finish()
                 }
+                continuation.finish()
             }
             continuation.onTermination = { @Sendable _ in
                 task.cancel()
