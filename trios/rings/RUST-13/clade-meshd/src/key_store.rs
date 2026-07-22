@@ -11,7 +11,7 @@
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use trios_mesh::crypto::{public_from_bytes, PublicKey, StaticKey, StaticSecret};
@@ -120,7 +120,7 @@ mod tests {
 
     fn with_key_dir<F, T>(f: F) -> T
     where
-        F: FnOnce(&Path) -> T,
+        F: FnOnce(&std::path::Path) -> T,
     {
         let tmp_dir = std::env::temp_dir().join(format!(
             "clade_meshd_key_test_{}", std::process::id()));

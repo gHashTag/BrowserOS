@@ -79,6 +79,7 @@ enum ProjectPaths {
     static var canaryHealthURL: String { "http://127.0.0.1:\(canaryMcpPort)/health" }
     static var meshHealthURL: String { "http://127.0.0.1:\(meshPort)/health" }
     static var meshStatusURL: String { "http://127.0.0.1:\(meshPort)/status" }
+    static var meshSeedPeerURL: String { "http://127.0.0.1:\(meshPort)/seed-peer" }
     static var meshChatSendURL: String { "http://127.0.0.1:\(meshPort)/messages/send" }
     static var meshChatReceiveURL: String { "http://127.0.0.1:\(meshPort)/messages/receive" }
     static var meshChatAckURL: String { "http://127.0.0.1:\(meshPort)/messages/ack" }

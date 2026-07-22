@@ -165,6 +165,29 @@ final class MeshChatViewModel: ObservableObject {
         }
     }
 
+    /// Seed a peer's static public key and optional UDP address with clade-meshd.
+    /// Must be called before sending sealed frames to that peer.
+    func seedPeer(peer: UInt32, publicKey: String, address: String) async {
+        guard let url = URL(string: ProjectPaths.meshSeedPeerURL) else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? encoder.encode(
+            MeshSeedPeerRequest(peer: peer, publicKey: publicKey, address: address)
+        )
+
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                lastError = "/seed-peer failed"
+                return
+            }
+            lastError = nil
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
     // MARK: - Thread Messages
 
     private func fetchSelectedThread() async {
@@ -254,6 +277,9 @@ final class MeshChatViewModel: ObservableObject {
             let send = try decoder.decode(MeshChatSendResponse.self, from: data)
             if send.id > sinceId {
                 sinceId = send.id
+            }
+            if !send.queued {
+                lastError = "message stored but not forwarded: seed peer and UDP address"
             }
             composerText = ""
             await refresh()

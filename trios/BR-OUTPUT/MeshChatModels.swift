@@ -143,6 +143,12 @@ struct MeshChatAckRequest: Codable {
     let peer: UInt32
 }
 
+struct MeshSeedPeerRequest: Codable {
+    let peer: UInt32
+    let publicKey: String
+    let address: String?
+}
+
 // MARK: - Responses
 
 struct MeshChatSendResponse: Codable {

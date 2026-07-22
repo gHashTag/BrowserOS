@@ -7,18 +7,21 @@
 
 mod chat;
 mod key_store;
+mod transport;
 
 use std::collections::HashMap;
 use std::convert::Infallible;
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
 use tokio::sync::RwLock;
 use warp::{reply::json, Filter};
 
 use trios_mesh::crypto::StaticKey;
-use trios_mesh::daemon::Node;
+use trios_mesh::daemon::{Node, Transport};
 use trios_mesh::discovery::Hello;
 use trios_mesh::NodeId;
 
@@ -34,26 +37,47 @@ struct MeshState {
     peer_keys: HashMap<NodeId, Vec<u8>>,
     /// Chat message and conversation store.
     store: chat::MessageStore,
+    /// Channel to the UDP send task.
+    udp_outbound: mpsc::UnboundedSender<(SocketAddr, Vec<u8>)>,
+    /// Seeded UDP address for each peer.
+    peer_addrs: HashMap<NodeId, SocketAddr>,
+    /// Reverse lookup from UDP address to peer id.
+    addr_to_peer: HashMap<SocketAddr, NodeId>,
+    /// Per-peer transport pipe.
+    transports: HashMap<NodeId, Box<dyn Transport + Send + Sync>>,
 }
 
 impl MeshState {
-    fn new(id: NodeId, my_key: StaticKey) -> Self {
+    fn new(id: NodeId, my_key: StaticKey, udp: &transport::UdpIo) -> Self {
         let path = chat::absolute_store_path();
         Self {
             node: Node::new(id, ETX_WINDOW),
             my_key,
             peer_keys: HashMap::new(),
             store: chat::MessageStore::new(path),
+            udp_outbound: udp.outbound.clone(),
+            peer_addrs: HashMap::new(),
+            addr_to_peer: HashMap::new(),
+            transports: HashMap::new(),
         }
     }
 
     #[cfg(test)]
-    fn new_with_store(id: NodeId, my_key: StaticKey, path: std::path::PathBuf) -> Self {
+    fn new_with_store(
+        id: NodeId,
+        my_key: StaticKey,
+        path: std::path::PathBuf,
+        udp: &transport::UdpIo,
+    ) -> Self {
         Self {
             node: Node::new(id, ETX_WINDOW),
             my_key,
             peer_keys: HashMap::new(),
             store: chat::MessageStore::new(path),
+            udp_outbound: udp.outbound.clone(),
+            peer_addrs: HashMap::new(),
+            addr_to_peer: HashMap::new(),
+            transports: HashMap::new(),
         }
     }
 }
@@ -145,6 +169,8 @@ struct SeedPeerRequest {
     peer: NodeId,
     /// Base64-encoded X25519 public key of the peer.
     public_key: String,
+    /// Optional UDP address for sealed frame transport, e.g. "127.0.0.1:9602".
+    address: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -202,6 +228,43 @@ fn port() -> u16 {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(DEFAULT_PORT)
+}
+
+fn udp_bind_addr(node_id: NodeId) -> SocketAddr {
+    std::env::var("TRIOS_MESH_UDP_BIND")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| {
+            let port = (9600u32 + node_id as u32).min(u16::MAX as u32) as u16;
+            SocketAddr::from(([127, 0, 0, 1], port))
+        })
+}
+
+/// Process incoming UDP frames: map source address -> peer, open, decode, store.
+async fn run_frame_processor(
+    state: Arc<RwLock<MeshState>>,
+    mut frames: mpsc::UnboundedReceiver<(SocketAddr, Vec<u8>)>,
+) {
+    while let Some((addr, raw_frame)) = frames.recv().await {
+        let mut guard = state.write().await;
+        let src = match guard.addr_to_peer.get(&addr).copied() {
+            Some(id) => id,
+            None => continue,
+        };
+
+        let payload = match guard.node.open_data(src, &raw_frame) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+
+        let (kind, text, payload_b64) = match chat::decode_chat_payload(&payload) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let channel = chat::channel_for_peer(&*guard);
+        let _ = guard.store.record_incoming(src, kind, text, payload_b64, channel);
+    }
 }
 
 fn with_state(
@@ -394,6 +457,17 @@ async fn force_dead_handler(
     Ok(json(&serde_json::json!({ "ok": true, "peer": req.peer })))
 }
 
+fn peer_addr_from_env_or_req(req: &SeedPeerRequest) -> Option<SocketAddr> {
+    req.address
+        .as_deref()
+        .and_then(|s| s.parse().ok())
+        .or_else(|| {
+            std::env::var(format!("TRIOS_MESH_PEER_ADDR_{}", req.peer))
+                .ok()
+                .and_then(|s| s.parse().ok())
+        })
+}
+
 async fn seed_peer_handler(
     req: SeedPeerRequest,
     state: Arc<RwLock<MeshState>>,
@@ -421,6 +495,14 @@ async fn seed_peer_handler(
     };
     state.node.add_session(req.peer, session);
     state.peer_keys.insert(req.peer, peer_bytes.to_vec());
+
+    if let Some(addr) = peer_addr_from_env_or_req(&req) {
+        state.peer_addrs.insert(req.peer, addr);
+        state.addr_to_peer.insert(addr, req.peer);
+        let transport = transport::UdpTransport::new(state.udp_outbound.clone(), addr);
+        state.transports.insert(req.peer, Box::new(transport));
+    }
+
     Ok(warp::reply::with_status(
         json(&serde_json::json!({
             "ok": true,
@@ -526,11 +608,17 @@ async fn chat_send_handler(
         }
     };
 
+    let queued = state
+        .transports
+        .get_mut(&req.dst)
+        .map(|t| t.send(&frame).is_ok())
+        .unwrap_or(false);
+
     Ok(warp::reply::with_status(
         json(&ChatSendResponse {
             id: msg.id,
             frame: BASE64.encode(&frame),
-            queued: true,
+            queued,
         }),
         warp::http::StatusCode::OK,
     ))
@@ -784,15 +872,31 @@ async fn main() {
     };
     let public_key_b64 = key_store::public_key_base64(&my_key);
 
-    let state = Arc::new(RwLock::new(MeshState::new(node_id, my_key)));
+    let udp_bind = udp_bind_addr(node_id);
+    let udp = match transport::spawn_udp_io(udp_bind).await {
+        Ok(u) => u,
+        Err(e) => {
+            eprintln!("[clade-meshd] FATAL: cannot bind UDP {udp_bind}: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    let state = Arc::new(RwLock::new(MeshState::new(node_id, my_key, &udp)));
     {
         let mut guard = state.write().await;
         if let Err(e) = guard.store.load() {
             eprintln!("[clade-meshd] failed to load chat store: {e}; starting fresh");
         }
     }
+
+    let frames = udp.frames;
+    tokio::spawn(run_frame_processor(state.clone(), frames));
+
     let port = port();
-    println!("[clade-meshd] node_id={node_id} port={port} public_key={public_key_b64}");
+    let udp_local = udp.socket.local_addr().unwrap_or(udp_bind);
+    println!(
+        "[clade-meshd] node_id={node_id} http_port={port} udp={udp_local} public_key={public_key_b64}"
+    );
     warp::serve(routes(state)).run(([127, 0, 0, 1], port)).await;
 }
 
@@ -828,20 +932,24 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn chat_round_trip_seal_open_and_store() -> Result<(), String> {
+    #[tokio::test]
+    async fn chat_round_trip_seal_open_and_store() -> Result<(), String> {
         use std::path::PathBuf;
 
-        let mut alice = MeshState::new_with_store(
-            1,
-            StaticKey::generate(),
-            PathBuf::from("/tmp/clade_meshd_test_alice.json"),
-        );
-        let mut bob = MeshState::new_with_store(
-            2,
-            StaticKey::generate(),
-            PathBuf::from("/tmp/clade_meshd_test_bob.json"),
-        );
+        let alice_path = PathBuf::from("/tmp/clade_meshd_test_alice.json");
+        let bob_path = PathBuf::from("/tmp/clade_meshd_test_bob.json");
+        let _ = std::fs::remove_file(&alice_path);
+        let _ = std::fs::remove_file(&bob_path);
+
+        let alice_udp = transport::spawn_udp_io("127.0.0.1:0".parse().unwrap())
+            .await
+            .map_err(|e| format!("{e}"))?;
+        let bob_udp = transport::spawn_udp_io("127.0.0.1:0".parse().unwrap())
+            .await
+            .map_err(|e| format!("{e}"))?;
+
+        let mut alice = MeshState::new_with_store(1, StaticKey::generate(), alice_path, &alice_udp);
+        let mut bob = MeshState::new_with_store(2, StaticKey::generate(), bob_path, &bob_udp);
         seed_both(&mut alice, &mut bob)?;
 
         alice.store.load().map_err(|e| format!("{:?}", e))?;
@@ -878,6 +986,101 @@ mod tests {
         assert_eq!(bob_messages.len(), 1);
         assert!(!bob_messages[0].is_outgoing);
         assert_eq!(bob_messages[0].text.as_deref(), Some(text));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn udp_chat_transport_round_trip() -> Result<(), String> {
+        use std::path::PathBuf;
+        use std::time::Duration;
+        use tokio::time::timeout;
+
+        let alice_path = PathBuf::from("/tmp/clade_meshd_udp_alice.json");
+        let bob_path = PathBuf::from("/tmp/clade_meshd_udp_bob.json");
+        let _ = std::fs::remove_file(&alice_path);
+        let _ = std::fs::remove_file(&bob_path);
+
+        let alice_udp = transport::spawn_udp_io("127.0.0.1:0".parse().unwrap())
+            .await
+            .map_err(|e| format!("{e}"))?;
+        let bob_udp = transport::spawn_udp_io("127.0.0.1:0".parse().unwrap())
+            .await
+            .map_err(|e| format!("{e}"))?;
+
+        let alice_addr = alice_udp.socket.local_addr().map_err(|e| format!("{e}"))?;
+        let bob_addr = bob_udp.socket.local_addr().map_err(|e| format!("{e}"))?;
+
+        let mut alice = MeshState::new_with_store(1, StaticKey::generate(), alice_path, &alice_udp);
+        let mut bob = MeshState::new_with_store(2, StaticKey::generate(), bob_path, &bob_udp);
+        let alice_id = alice.node.id;
+        let bob_id = bob.node.id;
+
+        // Seed each side with the other's static public key and UDP address.
+        let alice_pub = alice.my_key.public();
+        let bob_pub = bob.my_key.public();
+
+        let a_session = alice
+            .my_key
+            .session_with(&bob_pub, alice_id < bob_id)
+            .map_err(|e| format!("{:?}", e))?;
+        let b_session = bob
+            .my_key
+            .session_with(&alice_pub, bob_id < alice_id)
+            .map_err(|e| format!("{:?}", e))?;
+
+        alice.node.add_session(bob_id, a_session);
+        bob.node.add_session(alice_id, b_session);
+
+        alice.addr_to_peer.insert(bob_addr, bob_id);
+        alice.peer_addrs.insert(bob_id, bob_addr);
+        alice.transports.insert(
+            bob_id,
+            Box::new(transport::UdpTransport::new(alice.udp_outbound.clone(), bob_addr)),
+        );
+
+        bob.addr_to_peer.insert(alice_addr, alice_id);
+        bob.peer_addrs.insert(alice_id, alice_addr);
+
+        // Run Bob's frame processor so the UDP frame is opened and stored.
+        let bob_state = Arc::new(RwLock::new(bob));
+        let bob_frames = bob_udp.frames;
+        tokio::spawn(run_frame_processor(bob_state.clone(), bob_frames));
+
+        let text = "hello over udp";
+        let envelope = chat::encode_text_message(chat::MSG_TEXT, text)?;
+        let frame = alice
+            .node
+            .seal_data(bob_id, 8, &envelope)
+            .ok_or_else(|| "seal failed".to_string())?;
+
+        // Push the frame through the transport.
+        let mut transport = alice
+            .transports
+            .remove(&bob_id)
+            .ok_or_else(|| "missing transport".to_string())?;
+        transport
+            .send(&frame)
+            .map_err(|e| format!("transport send failed: {e}"))?;
+
+        // Wait for the frame to arrive and be stored.
+        let _ = timeout(Duration::from_secs(2), async {
+            loop {
+                {
+                    let guard = bob_state.read().await;
+                    let msgs = guard.store.messages_for(alice_id);
+                    if !msgs.is_empty() {
+                        assert_eq!(msgs.len(), 1);
+                        assert!(!msgs[0].is_outgoing);
+                        assert_eq!(msgs[0].text.as_deref(), Some(text));
+                        return;
+                    }
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .map_err(|_| "timed out waiting for incoming message")?;
 
         Ok(())
     }
