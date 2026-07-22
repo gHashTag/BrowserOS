@@ -1,0 +1,56 @@
+#!/bin/bash
+# Compile and run the ChatViewModel SSE end-to-end test.
+# Usage: bash tests/swift/run_chat_sse_e2e.sh
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+OUTPUT="/tmp/trios_chat_sse_e2e_test"
+LOG_DIR="$PROJECT_DIR/.trinity/logs"
+LOG_FILE="$LOG_DIR/chat_sse_e2e_build_$(date +%s).log"
+
+mkdir -p "$LOG_DIR"
+
+# All rings sources contain the chat protocols, parser, state machine,
+# request builder, and ChatViewModel.
+PROD_FILES=(
+    $(find "$PROJECT_DIR/rings" -name "*.swift" | sort)
+)
+
+# Only the BR-OUTPUT files that rings actually references are needed for this
+# test. Including the whole BR-OUTPUT directory pulls in MenuBuilder and
+# WindowManager, which depend on AppDelegate/TriosScreenManager defined in
+# main.swift (and main.swift must stay excluded because the test has its own
+# @main entry point).
+PROD_FILES+=(
+    "$PROJECT_DIR/BR-OUTPUT/ProjectPaths.swift"
+    "$PROJECT_DIR/BR-OUTPUT/QueenStatusViewModel.swift"
+    "$PROJECT_DIR/BR-OUTPUT/A2AMessageRouter.swift"
+)
+
+# Add the test files.
+PROD_FILES+=(
+    "$SCRIPT_DIR/ChatSSETestMocks.swift"
+    "$SCRIPT_DIR/ChatSSEEndToEndTest.swift"
+)
+
+echo "Compiling ${#PROD_FILES[@]} Swift files..."
+
+swiftc -j 1 -O -o "$OUTPUT" \
+    -framework SwiftUI \
+    -framework AppKit \
+    -framework WebKit \
+    -framework Combine \
+    -framework Security \
+    "${PROD_FILES[@]}" 2>&1 | tee "$LOG_FILE"
+
+if [ ${PIPESTATUS[0]} -eq 0 ]; then
+    echo "[OK] Build successful: $OUTPUT"
+    chmod +x "$OUTPUT"
+    echo "Running $OUTPUT..."
+    "$OUTPUT"
+else
+    echo "[FAIL] Build failed (log: $LOG_FILE)"
+    exit 1
+fi
