@@ -6,6 +6,7 @@
 //! phi^2 + phi^-2 = 3
 
 mod chat;
+mod key_store;
 
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -27,6 +28,8 @@ const ETX_WINDOW: usize = 16;
 /// Global node state protected by a read-write lock.
 struct MeshState {
     node: Node,
+    /// This node's long-term static identity key.
+    my_key: StaticKey,
     /// Derived public keys for any peers we have seeded.
     peer_keys: HashMap<NodeId, Vec<u8>>,
     /// Chat message and conversation store.
@@ -34,19 +37,21 @@ struct MeshState {
 }
 
 impl MeshState {
-    fn new(id: NodeId) -> Self {
+    fn new(id: NodeId, my_key: StaticKey) -> Self {
         let path = chat::absolute_store_path();
         Self {
             node: Node::new(id, ETX_WINDOW),
+            my_key,
             peer_keys: HashMap::new(),
             store: chat::MessageStore::new(path),
         }
     }
 
     #[cfg(test)]
-    fn new_with_store(id: NodeId, path: std::path::PathBuf) -> Self {
+    fn new_with_store(id: NodeId, my_key: StaticKey, path: std::path::PathBuf) -> Self {
         Self {
             node: Node::new(id, ETX_WINDOW),
+            my_key,
             peer_keys: HashMap::new(),
             store: chat::MessageStore::new(path),
         }
@@ -133,6 +138,13 @@ struct OpenResponse {
 #[derive(Deserialize, Debug, Clone)]
 struct PeerRequest {
     peer: NodeId,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+struct SeedPeerRequest {
+    peer: NodeId,
+    /// Base64-encoded X25519 public key of the peer.
+    public_key: String,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -383,16 +395,22 @@ async fn force_dead_handler(
 }
 
 async fn seed_peer_handler(
-    req: PeerRequest,
+    req: SeedPeerRequest,
     state: Arc<RwLock<MeshState>>,
 ) -> Result<impl warp::Reply, Infallible> {
-    let mut state = state.write().await;
-    let seed = deterministic_seed(req.peer);
-    let peer_key = StaticKey::from_seed(seed).public();
+    let peer_key = match key_store::decode_public_key(&req.public_key) {
+        Ok(k) => k,
+        Err(e) => {
+            return Ok(warp::reply::with_status(
+                json(&serde_json::json!({"error": e})),
+                warp::http::StatusCode::BAD_REQUEST,
+            ))
+        }
+    };
     let peer_bytes = peer_key.to_bytes();
-    let my_seed = deterministic_seed(state.node.id);
-    let my_key = StaticKey::from_seed(my_seed);
-    let session = match my_key.session_with(&peer_key, state.node.id < req.peer) {
+
+    let mut state = state.write().await;
+    let session = match state.my_key.session_with(&peer_key, state.node.id < req.peer) {
         Ok(s) => s,
         Err(_) => {
             return Ok(warp::reply::with_status(
@@ -411,17 +429,6 @@ async fn seed_peer_handler(
         })),
         warp::http::StatusCode::OK,
     ))
-}
-
-/// Deterministic 32-byte seed from a node id.
-fn deterministic_seed(id: NodeId) -> [u8; 32] {
-    let mut seed = [0u8; 32];
-    seed[0..4].copy_from_slice(&id.to_be_bytes());
-    // Fill remainder with a simple pattern; not for production keys.
-    for (i, slot) in seed.iter_mut().enumerate().skip(4) {
-        *slot = ((i * 7 + (id as usize)) % 251) as u8;
-    }
-    seed
 }
 
 async fn link_loss_handler(state: Arc<RwLock<MeshState>>) -> Result<impl warp::Reply, Infallible> {
@@ -768,7 +775,16 @@ async fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(1);
 
-    let state = Arc::new(RwLock::new(MeshState::new(node_id)));
+    let my_key = match key_store::load_or_generate(node_id) {
+        Ok(k) => k,
+        Err(e) => {
+            eprintln!("[clade-meshd] FATAL: cannot load node key: {e}");
+            std::process::exit(1);
+        }
+    };
+    let public_key_b64 = key_store::public_key_base64(&my_key);
+
+    let state = Arc::new(RwLock::new(MeshState::new(node_id, my_key)));
     {
         let mut guard = state.write().await;
         if let Err(e) = guard.store.load() {
@@ -776,21 +792,13 @@ async fn main() {
         }
     }
     let port = port();
-    println!("[clade-meshd] node_id={node_id} port={port}");
+    println!("[clade-meshd] node_id={node_id} port={port} public_key={public_key_b64}");
     warp::serve(routes(state)).run(([127, 0, 0, 1], port)).await;
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn deterministic_seed_is_stable() {
-        let a = deterministic_seed(42);
-        let b = deterministic_seed(42);
-        assert_eq!(a, b);
-        assert_eq!(a[0..4], 42u32.to_be_bytes());
-    }
 
     #[test]
     fn format_etx_labels() {
@@ -824,9 +832,16 @@ mod tests {
     fn chat_round_trip_seal_open_and_store() -> Result<(), String> {
         use std::path::PathBuf;
 
-        let mut alice =
-            MeshState::new_with_store(1, PathBuf::from("/tmp/clade_meshd_test_alice.json"));
-        let mut bob = MeshState::new_with_store(2, PathBuf::from("/tmp/clade_meshd_test_bob.json"));
+        let mut alice = MeshState::new_with_store(
+            1,
+            StaticKey::generate(),
+            PathBuf::from("/tmp/clade_meshd_test_alice.json"),
+        );
+        let mut bob = MeshState::new_with_store(
+            2,
+            StaticKey::generate(),
+            PathBuf::from("/tmp/clade_meshd_test_bob.json"),
+        );
         seed_both(&mut alice, &mut bob)?;
 
         alice.store.load().map_err(|e| format!("{:?}", e))?;
