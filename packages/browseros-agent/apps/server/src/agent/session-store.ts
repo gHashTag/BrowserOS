@@ -83,6 +83,9 @@ export class SessionStore {
   }
 
   set(conversationId: string, session: AgentSession): void {
+    if (this.deletingConversations.has(conversationId)) {
+      throw new Error('Cannot replace a session while deletion is pending')
+    }
     this.sessions.set(conversationId, session)
     logger.info('Session added to store', {
       conversationId,
@@ -119,6 +122,9 @@ export class SessionStore {
     runId: string,
     approvalIds: readonly string[],
   ): ExecutionRun | undefined {
+    if (this.deletingConversations.has(conversationId)) {
+      return undefined
+    }
     const activeRun = this.activeRuns.get(conversationId)
     if (!activeRun || activeRun.runId !== runId) {
       return undefined
@@ -184,6 +190,9 @@ export class SessionStore {
           effectState?: ExecutionEffectState
         },
   ): boolean {
+    if (this.deletingConversations.has(conversationId)) {
+      return false
+    }
     const activeRun = this.activeRuns.get(conversationId)
     if (!activeRun || activeRun.runId !== runId) {
       return false
@@ -201,6 +210,9 @@ export class SessionStore {
     runId: string,
     event: EvidenceEvent,
   ): boolean {
+    if (this.deletingConversations.has(conversationId)) {
+      return false
+    }
     const activeRun = this.activeRuns.get(conversationId)
     if (!activeRun || activeRun.runId !== runId) {
       return false
@@ -212,6 +224,9 @@ export class SessionStore {
   }
 
   remove(conversationId: string): boolean {
+    if (this.deletingConversations.has(conversationId)) {
+      return false
+    }
     const existed = this.sessions.delete(conversationId)
     if (existed) {
       logger.info('Session removed from store (without dispose)', {
@@ -265,6 +280,7 @@ export class SessionStore {
         this.sessions.delete(conversationId)
       }
       if (
+        removedSession &&
         capturedRunIsUnchanged &&
         runWasApprovalSuspended &&
         capturedRunId !== undefined

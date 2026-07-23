@@ -54,6 +54,21 @@ function createDeferredDisposal() {
   return { promise, resolve, reject }
 }
 
+function beginApprovalDeletion(store: SessionStore) {
+  const disposal = createDeferredDisposal()
+  const session = createSession(() => disposal.promise)
+  store.set('conversation-1', session)
+  acquireTurn(store, createRunningRun('run-1'))
+  const waiting = store.suspendTurnForApproval('conversation-1', 'run-1', [
+    'approval-a',
+  ])
+  if (!waiting) {
+    throw new Error('Expected the active run to wait for approval')
+  }
+  const deletion = store.delete('conversation-1')
+  return { deletion, disposal, session, waiting }
+}
+
 describe('SessionStore turn leases', () => {
   it('acquires the first turn and refuses a second turn with the original run', () => {
     const store = new SessionStore()
@@ -490,6 +505,98 @@ describe('SessionStore turn leases', () => {
     expect(store.get('conversation-1')).toBeUndefined()
     expect(store.getActiveRun('conversation-1')).toBeUndefined()
     expect(store.tryAcquireTurn(nextRun).acquired).toBe(true)
+  })
+
+  it('refuses finishing the captured run while deletion is pending', async () => {
+    const store = new SessionStore()
+    const { deletion, disposal, waiting } = beginApprovalDeletion(store)
+
+    expect(
+      store.finishTurn('conversation-1', 'run-1', {
+        status: 'failed',
+        failureReason: 'denied',
+      }),
+    ).toBe(false)
+    expect(store.getActiveRun('conversation-1')).toBe(waiting)
+    disposal.resolve()
+
+    expect(await deletion).toBe(true)
+    expect(store.get('conversation-1')).toBeUndefined()
+    expect(store.getActiveRun('conversation-1')).toBeUndefined()
+  })
+
+  it('refuses recording evidence on the captured run while deletion is pending', async () => {
+    const store = new SessionStore()
+    const { deletion, disposal, waiting } = beginApprovalDeletion(store)
+    const event = {
+      eventId: 'event-during-deletion',
+      toolCallId: 'call-during-deletion',
+      toolName: 'observe',
+      kind: 'settled',
+      effects: ['observe'],
+      retrySafety: 'safe',
+      argumentDigest: 'argument-digest',
+      recordedAt: 200,
+    } satisfies EvidenceEvent
+
+    expect(store.recordEvidence('conversation-1', 'run-1', event)).toBe(false)
+    expect(store.getActiveRun('conversation-1')).toBe(waiting)
+    disposal.resolve()
+
+    expect(await deletion).toBe(true)
+    expect(store.get('conversation-1')).toBeUndefined()
+    expect(store.getActiveRun('conversation-1')).toBeUndefined()
+  })
+
+  it('refuses another approval suspension while deletion is pending', async () => {
+    const store = new SessionStore()
+    const { deletion, disposal, waiting } = beginApprovalDeletion(store)
+
+    expect(
+      store.suspendTurnForApproval('conversation-1', 'run-1', ['approval-b']),
+    ).toBeUndefined()
+    expect(store.getActiveRun('conversation-1')).toBe(waiting)
+    disposal.resolve()
+
+    expect(await deletion).toBe(true)
+    expect(store.getActiveRun('conversation-1')).toBeUndefined()
+  })
+
+  it('rejects session replacement and removal while deletion is pending', async () => {
+    const store = new SessionStore()
+    const { deletion, disposal, session, waiting } =
+      beginApprovalDeletion(store)
+
+    expect(() => store.set('conversation-1', createSession())).toThrow(
+      'Cannot replace a session while deletion is pending',
+    )
+    expect(store.remove('conversation-1')).toBe(false)
+    expect(store.get('conversation-1')).toBe(session)
+    expect(store.has('conversation-1')).toBe(true)
+    expect(store.getActiveRun('conversation-1')).toBe(waiting)
+    disposal.resolve()
+
+    expect(await deletion).toBe(true)
+    expect(store.get('conversation-1')).toBeUndefined()
+    expect(store.has('conversation-1')).toBe(false)
+    expect(store.getActiveRun('conversation-1')).toBeUndefined()
+  })
+
+  it('preserves a lease if the captured session is unexpectedly replaced', async () => {
+    const store = new SessionStore()
+    const { deletion, disposal, waiting } = beginApprovalDeletion(store)
+    const replacement = createSession()
+    const sessions = (
+      store as unknown as {
+        sessions: Map<string, AgentSession>
+      }
+    ).sessions
+    sessions.set('conversation-1', replacement)
+    disposal.resolve()
+
+    expect(await deletion).toBe(false)
+    expect(store.get('conversation-1')).toBe(replacement)
+    expect(store.getActiveRun('conversation-1')).toBe(waiting)
   })
 
   it('records deeply frozen evidence without mutating prior or caller input', () => {
