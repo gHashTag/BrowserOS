@@ -58,20 +58,27 @@ UDP2=$(grep -o 'udp=[^ ]*' "$TMP/d2.log" | cut -d= -f2)
 echo "[e2e] node 1 udp=$UDP1 pub=${PUB1:0:16}..."
 echo "[e2e] node 2 udp=$UDP2 pub=${PUB2:0:16}..."
 
+# Extract the auto-generated API tokens from stderr logs.
+TOKEN1=$(grep -o 'generated API token: [^ ]*' "$TMP/d1.log" | cut -d' ' -f4 || echo "")
+TOKEN2=$(grep -o 'generated API token: [^ ]*' "$TMP/d2.log" | cut -d' ' -f4 || echo "")
+
 # Seed each side with the other's key + UDP address.
 echo "[e2e] seeding peers..."
 curl -fs -X POST "http://127.0.0.1:9505/seed-peer" \
   -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN1" \
   -d "{\"peer\":2,\"public_key\":\"$PUB2\",\"address\":\"$UDP2\"}" >/dev/null
 
 curl -fs -X POST "http://127.0.0.1:9506/seed-peer" \
   -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN2" \
   -d "{\"peer\":1,\"public_key\":\"$PUB1\",\"address\":\"$UDP1\"}" >/dev/null
 
 # Send a message from node 1 to node 2.
 echo "[e2e] sending message..."
 SEND=$(curl -fs -X POST "http://127.0.0.1:9505/messages/send" \
   -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $TOKEN1" \
   -d '{"dst":2,"kind":0,"text":"hello over udp"}')
 echo "[e2e] send response: $SEND"
 if ! echo "$SEND" | grep -q '"queued":true'; then
@@ -82,7 +89,7 @@ fi
 # Poll node 2 until the message arrives.
 echo "[e2e] polling node 2..."
 for _ in $(seq 1 50); do
-  POLL=$(curl -fs "http://127.0.0.1:9506/messages/poll?since_id=0" 2>/dev/null || echo '{}')
+  POLL=$(curl -fs -H "Authorization: Bearer $TOKEN2" "http://127.0.0.1:9506/messages/poll?since_id=0" 2>/dev/null || echo '{}')
   if echo "$POLL" | grep -q 'hello over udp'; then
     echo "[e2e] SUCCESS: message delivered over UDP"
     kill $D1 $D2 2>/dev/null || true

@@ -11,6 +11,7 @@
 
 mod chat;
 mod key_store;
+mod security;
 mod transport;
 
 use std::collections::HashMap;
@@ -42,7 +43,7 @@ struct MeshState {
     /// Chat message and conversation store.
     store: chat::MessageStore,
     /// Channel to the UDP send task.
-    udp_outbound: mpsc::UnboundedSender<(SocketAddr, Vec<u8>)>,
+    udp_outbound: mpsc::Sender<(SocketAddr, Vec<u8>)>,
     /// Seeded UDP address for each peer.
     peer_addrs: HashMap<NodeId, SocketAddr>,
     /// Reverse lookup from UDP address to peer id.
@@ -235,39 +236,55 @@ fn port() -> u16 {
 }
 
 fn udp_bind_addr(node_id: NodeId) -> SocketAddr {
-    std::env::var("TRIOS_MESH_UDP_BIND")
+    let addr = std::env::var("TRIOS_MESH_UDP_BIND")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or_else(|| {
             let port = (9600u32 + node_id).min(u16::MAX as u32) as u16;
             SocketAddr::from(([127, 0, 0, 1], port))
-        })
+        });
+    // Fail closed if an operator override points outside loopback.
+    security::validate_udp_bind(addr).unwrap_or_else(|e| {
+        eprintln!("[clade-meshd] FATAL: {e}");
+        std::process::exit(1);
+    })
 }
 
 /// Process incoming UDP frames: map source address -> peer, open, decode, store.
+///
+/// Persistence is moved off the async write lock to a background task so that a
+/// flood of UDP frames does not block all HTTP handlers.
 async fn run_frame_processor(
     state: Arc<RwLock<MeshState>>,
-    mut frames: mpsc::UnboundedReceiver<(SocketAddr, Vec<u8>)>,
+    mut frames: mpsc::Receiver<(SocketAddr, Vec<u8>)>,
 ) {
     while let Some((addr, raw_frame)) = frames.recv().await {
-        let mut guard = state.write().await;
-        let src = match guard.addr_to_peer.get(&addr).copied() {
-            Some(id) => id,
-            None => continue,
+        let opened = {
+            let mut guard = state.write().await;
+            let src = match guard.addr_to_peer.get(&addr).copied() {
+                Some(id) => id,
+                None => continue,
+            };
+
+            let payload = match guard.node.open_data(src, &raw_frame) {
+                Ok(p) => p,
+                Err(_) => continue,
+            };
+
+            let (kind, text, payload_b64) = match chat::decode_chat_payload(&payload) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            (src, kind, text, payload_b64, chat::channel_for_peer(&guard))
         };
 
-        let payload = match guard.node.open_data(src, &raw_frame) {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
-
-        let (kind, text, payload_b64) = match chat::decode_chat_payload(&payload) {
-            Ok(v) => v,
-            Err(_) => continue,
-        };
-
-        let channel = chat::channel_for_peer(&guard);
-        let _ = guard.store.record_incoming(src, kind, text, payload_b64, channel);
+        let (src, kind, text, payload_b64, channel) = opened;
+        let state_clone = state.clone();
+        tokio::spawn(async move {
+            let mut guard = state_clone.write().await;
+            let _ = guard.store.record_incoming(src, kind, text, payload_b64, channel);
+        });
     }
 }
 
@@ -393,11 +410,11 @@ async fn send_handler(
     req: SendRequest,
     state: Arc<RwLock<MeshState>>,
 ) -> Result<impl warp::Reply, Infallible> {
-    let payload = match BASE64.decode(&req.payload) {
+    let payload = match security::validate_raw_payload_b64(&req.payload) {
         Ok(p) => p,
-        Err(_) => {
+        Err(e) => {
             return Ok(warp::reply::with_status(
-                json(&serde_json::json!({"error": "invalid base64 payload"})),
+                json(&serde_json::json!({"error": e})),
                 warp::http::StatusCode::BAD_REQUEST,
             ))
         }
@@ -425,11 +442,11 @@ async fn open_handler(
     req: OpenRequest,
     state: Arc<RwLock<MeshState>>,
 ) -> Result<impl warp::Reply, Infallible> {
-    let frame = match BASE64.decode(&req.frame) {
+    let frame = match security::validate_raw_payload_b64(&req.frame) {
         Ok(f) => f,
-        Err(_) => {
+        Err(e) => {
             return Ok(warp::reply::with_status(
-                json(&serde_json::json!({"error": "invalid base64 frame"})),
+                json(&serde_json::json!({"error": e})),
                 warp::http::StatusCode::BAD_REQUEST,
             ))
         }
@@ -443,8 +460,8 @@ async fn open_handler(
             }),
             warp::http::StatusCode::OK,
         )),
-        Err(e) => Ok(warp::reply::with_status(
-            json(&serde_json::json!({ "error": format!("{:?}", e) })),
+        Err(_) => Ok(warp::reply::with_status(
+            json(&serde_json::json!({ "error": "decrypt failed" })),
             warp::http::StatusCode::UNAUTHORIZED,
         )),
     }
@@ -501,6 +518,13 @@ async fn seed_peer_handler(
     state.peer_keys.insert(req.peer, peer_bytes.to_vec());
 
     if let Some(addr) = peer_addr_from_env_or_req(&req) {
+        let existing = state.addr_to_peer.get(&addr).copied();
+        if let Err(e) = security::validate_seed_addr(addr, existing) {
+            return Ok(warp::reply::with_status(
+                json(&serde_json::json!({"error": e})),
+                warp::http::StatusCode::BAD_REQUEST,
+            ));
+        }
         state.peer_addrs.insert(req.peer, addr);
         state.addr_to_peer.insert(addr, req.peer);
         let transport = transport::UdpTransport::new(state.udp_outbound.clone(), addr);
@@ -540,22 +564,14 @@ fn chat_error(
 }
 
 fn build_envelope(req: &ChatSendRequest) -> Result<Vec<u8>, String> {
+    security::validate_chat_envelope(req)?;
+
     let text = req.text.as_deref().unwrap_or("");
-    if req.kind == chat::MSG_TEXT && req.text.is_none() {
-        return Err("text messages require a text field".to_string());
-    }
     if req.kind == chat::MSG_TEXT {
         chat::encode_text_message(req.kind, text)
     } else {
         // Media / status / ack: envelope is [kind][caption_len][caption?][payload?].
         let caption_bytes = text.as_bytes();
-        if caption_bytes.len() > chat::MAX_TEXT {
-            return Err(format!(
-                "caption too long: {} > {}",
-                caption_bytes.len(),
-                chat::MAX_TEXT
-            ));
-        }
         let len = u8::try_from(caption_bytes.len())
             .map_err(|_| format!("caption length {} does not fit in u8", caption_bytes.len()))?;
         let payload = req
@@ -565,6 +581,13 @@ fn build_envelope(req: &ChatSendRequest) -> Result<Vec<u8>, String> {
             .transpose()
             .map_err(|_| "invalid payload_base64".to_string())?
             .unwrap_or_default();
+        if payload.len() > security::MAX_CHAT_PAYLOAD {
+            return Err(format!(
+                "payload too large: {} > {}",
+                payload.len(),
+                security::MAX_CHAT_PAYLOAD
+            ));
+        }
         let mut out = Vec::with_capacity(2 + caption_bytes.len() + payload.len());
         out.push(req.kind);
         out.push(len);
@@ -632,15 +655,15 @@ async fn chat_receive_handler(
     req: ChatReceiveRequest,
     state: Arc<RwLock<MeshState>>,
 ) -> Result<impl warp::Reply, Infallible> {
-    let frame = match BASE64.decode(&req.frame) {
+    let frame = match security::validate_raw_payload_b64(&req.frame) {
         Ok(f) => f,
-        Err(_) => return chat_error("invalid base64 frame", warp::http::StatusCode::BAD_REQUEST),
+        Err(e) => return chat_error(&e, warp::http::StatusCode::BAD_REQUEST),
     };
 
     let mut state = state.write().await;
     let payload = match state.node.open_data(req.src, &frame) {
         Ok(p) => p,
-        Err(e) => return chat_error(&format!("{:?}", e), warp::http::StatusCode::UNAUTHORIZED),
+        Err(_) => return chat_error("decrypt failed", warp::http::StatusCode::UNAUTHORIZED),
     };
 
     let (kind, text, payload_b64) = match chat::decode_chat_payload(&payload) {
@@ -741,7 +764,11 @@ async fn chat_poll_handler(
 
 fn routes(
     state: Arc<RwLock<MeshState>>,
-) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+    api_token: String,
+) -> impl Filter<Extract = impl warp::Reply, Error = std::convert::Infallible> + Clone {
+    let auth = security::auth_filter(api_token);
+    let body_limit = warp::body::content_length_limit(security::MAX_HTTP_BODY_BYTES);
+
     let health = warp::path("health")
         .and(warp::get())
         .and(with_state(state.clone()))
@@ -749,58 +776,69 @@ fn routes(
 
     let status = warp::path("status")
         .and(warp::get())
+        .and(auth.clone())
         .and(with_state(state.clone()))
         .and_then(status_handler);
 
     let observe = warp::path("observe")
         .and(warp::post())
+        .and(auth.clone())
         .and(warp::body::json())
         .and(with_state(state.clone()))
         .and_then(observe_handler);
 
     let hello = warp::path("hello")
         .and(warp::post())
+        .and(auth.clone())
         .and(warp::body::json())
         .and(with_state(state.clone()))
         .and_then(hello_handler);
 
     let send = warp::path("send")
         .and(warp::post())
+        .and(auth.clone())
         .and(warp::body::json())
         .and(with_state(state.clone()))
         .and_then(send_handler);
 
     let open = warp::path("open")
         .and(warp::post())
+        .and(auth.clone())
         .and(warp::body::json())
         .and(with_state(state.clone()))
         .and_then(open_handler);
 
     let force_dead = warp::path("force-dead")
         .and(warp::post())
+        .and(auth.clone())
         .and(warp::body::json())
         .and(with_state(state.clone()))
         .and_then(force_dead_handler);
 
     let seed_peer = warp::path("seed-peer")
         .and(warp::post())
+        .and(auth.clone())
         .and(warp::body::json())
         .and(with_state(state.clone()))
         .and_then(seed_peer_handler);
 
     let link_loss = warp::path("link-loss")
         .and(warp::post())
+        .and(auth.clone())
         .and(with_state(state.clone()))
         .and_then(link_loss_handler);
 
     let reroute = warp::path("reroute")
         .and(warp::post())
+        .and(auth.clone())
         .and(with_state(state.clone()))
         .and_then(reroute_handler);
 
     let chat_send = warp::path("messages")
         .and(warp::path("send"))
         .and(warp::post())
+        .and(auth.clone())
+        .and(body_limit)
         .and(warp::body::json())
         .and(with_state(state.clone()))
         .and_then(chat_send_handler);
@@ -808,30 +846,35 @@ fn routes(
     let chat_receive = warp::path("messages")
         .and(warp::path("receive"))
         .and(warp::post())
+        .and(auth.clone())
         .and(warp::body::json())
         .and(with_state(state.clone()))
         .and_then(chat_receive_handler);
 
     let chat_messages = warp::path!("messages" / u32)
         .and(warp::get())
+        .and(auth.clone())
         .and(with_state(state.clone()))
         .and_then(chat_messages_handler);
 
     let chat_ack = warp::path("messages")
         .and(warp::path("ack"))
         .and(warp::post())
+        .and(auth.clone())
         .and(warp::body::json())
         .and(with_state(state.clone()))
         .and_then(chat_ack_handler);
 
     let chat_conversations = warp::path("conversations")
         .and(warp::get())
+        .and(auth.clone())
         .and(with_state(state.clone()))
         .and_then(chat_conversations_handler);
 
     let chat_poll = warp::path("messages")
         .and(warp::path("poll"))
         .and(warp::get())
+        .and(auth.clone())
         .and(warp::query::<SinceIdQuery>())
         .and(with_state(state.clone()))
         .and_then(chat_poll_handler);
@@ -858,6 +901,7 @@ fn routes(
         .or(chat_conversations)
         .or(chat_poll)
         .with(cors)
+        .recover(security::unauthorized_reply)
 }
 
 #[tokio::main]
@@ -898,10 +942,17 @@ async fn main() {
 
     let port = port();
     let udp_local = udp.socket.local_addr().unwrap_or(udp_bind);
+    let api_token = security::load_api_token();
+    if std::env::var(security::API_TOKEN_ENV).is_err() {
+        eprintln!(
+            "[clade-meshd] generated API token: {} (set TRIOS_MESH_API_TOKEN to persist)",
+            api_token
+        );
+    }
     println!(
         "[clade-meshd] node_id={node_id} http_port={port} udp={udp_local} public_key={public_key_b64}"
     );
-    warp::serve(routes(state)).run(([127, 0, 0, 1], port)).await;
+    warp::serve(routes(state, api_token)).run(([127, 0, 0, 1], port)).await;
 }
 
 #[cfg(test)]
