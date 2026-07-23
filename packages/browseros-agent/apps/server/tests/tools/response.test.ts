@@ -130,4 +130,116 @@ describe('ToolResponse', () => {
     assert.strictEqual(removedAbortListeners, 1)
     assert.strictEqual(activeAbortListeners, 0)
   })
+
+  it('ignores a snapshot that resolves after its build was aborted', async () => {
+    const response = new ToolResponse({ postActionTimeoutMs: 1_000 })
+    response.text('ok')
+    response.includeSnapshot(1)
+    let resolveSnapshot: ((value: string) => void) | undefined
+    const snapshot = new Promise<string>((resolve) => {
+      resolveSnapshot = resolve
+    })
+    const browser = {
+      snapshot: async () => snapshot,
+    } as unknown as Browser
+    const controller = new AbortController()
+
+    const pending = response.build(browser, controller.signal)
+    controller.abort('cancel snapshot')
+    const result = await pending
+    const returnedContent = result.content.map((item) => ({ ...item }))
+    assert.ok(resolveSnapshot)
+
+    resolveSnapshot('[99] button "Too late"')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    assert.deepStrictEqual(result.content, returnedContent)
+    assert.deepStrictEqual(response.toResult().content, returnedContent)
+    assert.ok(!textOf(result).includes('Too late'))
+    assert.ok(!textOf(response.toResult()).includes('Too late'))
+  })
+
+  it('does not launch queued post-actions for a pre-aborted build', async () => {
+    const response = new ToolResponse({ postActionTimeoutMs: 1_000 })
+    response.text('ok')
+    response.includeSnapshot(1)
+    response.includeScreenshot(1)
+    response.includePages()
+    const calls = {
+      snapshot: 0,
+      screenshot: 0,
+      pages: 0,
+    }
+    const browser = {
+      snapshot: async () => {
+        calls.snapshot += 1
+        return 'snapshot'
+      },
+      screenshot: async () => {
+        calls.screenshot += 1
+        return { data: 'image', mimeType: 'image/png' }
+      },
+      listPages: async () => {
+        calls.pages += 1
+        return []
+      },
+    } as unknown as Browser
+    const controller = new AbortController()
+    controller.abort('cancel before build')
+
+    const start = Date.now()
+    const result = await response.build(browser, controller.signal)
+    const elapsed = Date.now() - start
+
+    assert.ok(elapsed < 100, `Expected prompt pre-abort, got ${elapsed}ms`)
+    assert.ok(!result.isError)
+    assert.deepStrictEqual(calls, {
+      snapshot: 0,
+      screenshot: 0,
+      pages: 0,
+    })
+    assert.ok(textOf(result).includes('ok'))
+    assert.ok(!textOf(result).includes('snapshot'))
+  })
+
+  it('ignores a snapshot that resolves after its post-action timeout', async () => {
+    const response = new ToolResponse({ postActionTimeoutMs: 10 })
+    response.text('ok')
+    response.includeSnapshot(1)
+    let resolveSnapshot: ((value: string) => void) | undefined
+    const snapshot = new Promise<string>((resolve) => {
+      resolveSnapshot = resolve
+    })
+    const browser = {
+      snapshot: async () => snapshot,
+    } as unknown as Browser
+
+    const result = await response.build(browser)
+    const returnedContent = result.content.map((item) => ({ ...item }))
+    assert.ok(resolveSnapshot)
+
+    resolveSnapshot('[100] link "Arrived after timeout"')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    assert.deepStrictEqual(result.content, returnedContent)
+    assert.deepStrictEqual(response.toResult().content, returnedContent)
+    assert.ok(!textOf(result).includes('Arrived after timeout'))
+    assert.ok(!textOf(response.toResult()).includes('Arrived after timeout'))
+  })
+
+  it('returns defensive content and structured-data snapshots', () => {
+    const response = new ToolResponse()
+    response.text('original')
+    response.data({ count: 1 })
+
+    const first = response.toResult()
+    first.content.push({ type: 'text', text: 'external mutation' })
+    assert.ok(first.structuredContent)
+    first.structuredContent.count = 999
+
+    const second = response.toResult()
+
+    assert.deepStrictEqual(second.content, [{ type: 'text', text: 'original' }])
+    assert.deepStrictEqual(second.structuredContent, { count: 1 })
+  })
 })

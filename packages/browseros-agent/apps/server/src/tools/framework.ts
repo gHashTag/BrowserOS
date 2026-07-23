@@ -138,8 +138,12 @@ export async function executeTool(
   try {
     await tool.handler(args, ctx, response, signal)
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
-    response.error(`Internal error in ${tool.name}: ${message}`)
+    if (signal.aborted) {
+      response.error('Request was aborted')
+    } else {
+      const message = err instanceof Error ? err.message : String(err)
+      response.error(`Internal error in ${tool.name}: ${message}`)
+    }
   }
 
   const result = await response.build(ctx.browser, signal)

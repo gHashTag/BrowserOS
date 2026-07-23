@@ -75,47 +75,50 @@ export class ToolResponse {
   private async runPostAction(
     action: PostAction,
     browser: Browser,
-  ): Promise<void> {
+  ): Promise<ContentItem[]> {
     switch (action.type) {
       case 'snapshot': {
         const tree = await browser.snapshot(action.page)
-        if (tree) this.text(`[Page ${action.page} snapshot]\n${tree}`)
-        return
+        return tree
+          ? [{ type: 'text', text: `[Page ${action.page} snapshot]\n${tree}` }]
+          : []
       }
       case 'screenshot': {
         const result = await browser.screenshot(action.page, {
           format: 'png',
           fullPage: false,
         })
-        this.text(`[Page ${action.page} screenshot]`)
-        this.image(result.data, result.mimeType)
-        return
+        return [
+          { type: 'text', text: `[Page ${action.page} screenshot]` },
+          { type: 'image', data: result.data, mimeType: result.mimeType },
+        ]
       }
       case 'pages': {
         const pages = await browser.listPages()
         if (pages.length === 0) {
-          this.text('[Open pages] None')
-        } else {
-          const lines = pages.map(
-            (p) =>
-              `  ${p.pageId}. ${p.title || '(untitled)'} — ${p.url}${p.isActive ? ' [ACTIVE]' : ''}`,
-          )
-          this.text(`[Open pages]\n${lines.join('\n')}`)
+          return [{ type: 'text', text: '[Open pages] None' }]
         }
-        return
+        const lines = pages.map(
+          (p) =>
+            `  ${p.pageId}. ${p.title || '(untitled)'} — ${p.url}${p.isActive ? ' [ACTIVE]' : ''}`,
+        )
+        return [{ type: 'text', text: `[Open pages]\n${lines.join('\n')}` }]
       }
     }
   }
 
   private async withTimeout<T>(
-    task: Promise<T>,
+    task: () => Promise<T>,
     signal?: AbortSignal,
   ): Promise<T> {
+    if (signal?.aborted) {
+      throw new Error('Post-action aborted')
+    }
+
     let timeoutId: ReturnType<typeof setTimeout> | undefined
     let abortListener: (() => void) | undefined
     try {
-      const pending = [
-        task,
+      const pending: Promise<T>[] = [
         new Promise<T>((_, reject) => {
           timeoutId = setTimeout(() => {
             reject(new Error('Post-action timed out'))
@@ -137,6 +140,14 @@ export class ToolResponse {
         )
       }
 
+      const taskPromise = Promise.resolve().then(async () => {
+        if (signal?.aborted) {
+          throw new Error('Post-action aborted')
+        }
+        return await task()
+      })
+      pending.unshift(taskPromise)
+
       return await Promise.race(pending)
     } finally {
       if (timeoutId !== undefined) clearTimeout(timeoutId)
@@ -152,10 +163,17 @@ export class ToolResponse {
     }
 
     for (const action of this.postActions) {
+      if (signal?.aborted) break
       try {
-        await this.withTimeout(this.runPostAction(action, browser), signal)
+        const content = await this.withTimeout(
+          () => this.runPostAction(action, browser),
+          signal,
+        )
+        if (signal?.aborted) break
+        this.content.push(...content)
       } catch {
         // Post-action failure doesn't fail the tool
+        if (signal?.aborted) break
       }
     }
     return this.toResult()
@@ -164,9 +182,9 @@ export class ToolResponse {
   toResult(): ToolResult {
     const hasStructured = Object.keys(this.structured).length > 0
     return {
-      content: this.content,
+      content: [...this.content],
       ...(this.hasError && { isError: true }),
-      ...(hasStructured && { structuredContent: this.structured }),
+      ...(hasStructured && { structuredContent: { ...this.structured } }),
     }
   }
 }

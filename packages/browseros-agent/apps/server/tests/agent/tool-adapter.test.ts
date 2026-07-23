@@ -44,6 +44,15 @@ function executionOptions(abortSignal?: AbortSignal): ToolExecutionOptions {
   }
 }
 
+function resultText(result: ToolResult): string {
+  return result.content
+    .filter(
+      (item): item is { type: 'text'; text: string } => item.type === 'text',
+    )
+    .map((item) => item.text)
+    .join('\n')
+}
+
 describe('browser tool adapter abort propagation', () => {
   it('passes a composed signal that follows request cancellation to the handler', async () => {
     let capturedSignal: AbortSignal | undefined
@@ -208,5 +217,89 @@ describe('browser tool adapter abort propagation', () => {
       pageId: 7,
       action: 'observed',
     })
+  })
+
+  it('reports the standard abort error when an aborted handler throws', async () => {
+    const controller = new AbortController()
+    const registry = new ToolRegistry([
+      defineTool({
+        name: 'abort_then_throw',
+        description: 'Abort while the handler is in flight',
+        approvalCategory: 'observation',
+        input: z.object({}),
+        handler: async (_args, _ctx, _response, signal) => {
+          controller.abort('cancel during handler')
+          assert.strictEqual(signal.aborted, true)
+          throw new Error('browser operation interrupted')
+        },
+      }),
+    ])
+    const toolSet = buildBrowserToolSet(registry, createContext())
+
+    const result = await executeRegisteredTool(
+      toolSet,
+      'abort_then_throw',
+      {},
+      executionOptions(controller.signal),
+    )
+
+    assert.strictEqual(result.isError, true)
+    assert.match(resultText(result), /Request was aborted/)
+    assert.doesNotMatch(resultText(result), /Internal error/)
+  })
+
+  it('keeps ordinary handler failures classified as internal errors', async () => {
+    const registry = new ToolRegistry([
+      defineTool({
+        name: 'ordinary_failure',
+        description: 'Fail without request cancellation',
+        approvalCategory: 'observation',
+        input: z.object({}),
+        handler: async () => {
+          throw new Error('ordinary failure')
+        },
+      }),
+    ])
+    const toolSet = buildBrowserToolSet(registry, createContext())
+
+    const result = await executeRegisteredTool(
+      toolSet,
+      'ordinary_failure',
+      {},
+      executionOptions(),
+    )
+
+    assert.strictEqual(result.isError, true)
+    assert.match(
+      resultText(result),
+      /Internal error in ordinary_failure: ordinary failure/,
+    )
+  })
+
+  it('does not discard a completed handler result solely because cancellation arrived', async () => {
+    const controller = new AbortController()
+    const registry = new ToolRegistry([
+      defineTool({
+        name: 'completed_side_effect',
+        description: 'Complete before returning after cancellation',
+        approvalCategory: 'observation',
+        input: z.object({}),
+        handler: async (_args, _ctx, response) => {
+          response.text('side effect completed')
+          controller.abort('arrived after completion')
+        },
+      }),
+    ])
+    const toolSet = buildBrowserToolSet(registry, createContext())
+
+    const result = await executeRegisteredTool(
+      toolSet,
+      'completed_side_effect',
+      {},
+      executionOptions(controller.signal),
+    )
+
+    assert.ok(!result.isError)
+    assert.match(resultText(result), /side effect completed/)
   })
 })
