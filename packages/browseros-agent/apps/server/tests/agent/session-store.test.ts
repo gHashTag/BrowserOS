@@ -5,6 +5,7 @@ import {
 } from '../../src/agent/execution-run'
 import type {
   EvidenceEvent,
+  ExecutionRun,
   NormalizedToolResult,
   ToolEffect,
 } from '../../src/agent/execution-types'
@@ -25,10 +26,20 @@ function createRunningRun(runId: string, conversationId = 'conversation-1') {
   )
 }
 
-function createSession(): AgentSession {
+function acquireTurn(store: SessionStore, run: ExecutionRun): ExecutionRun {
+  const result = store.tryAcquireTurn(run)
+  if (!result.acquired) {
+    throw new Error('Expected the turn lease to be acquired')
+  }
+  return result.run
+}
+
+function createSession(
+  dispose: () => Promise<void> = async () => undefined,
+): AgentSession {
   return {
     agent: {
-      dispose: async () => undefined,
+      dispose,
     } as unknown as AgentSession['agent'],
   }
 }
@@ -39,15 +50,18 @@ describe('SessionStore turn leases', () => {
     const first = createRunningRun('run-1')
     const second = createRunningRun('run-2')
 
-    expect(store.tryAcquireTurn(first)).toEqual({
-      acquired: true,
-      run: first,
-    })
+    const acquired = store.tryAcquireTurn(first)
+    expect(acquired.acquired).toBe(true)
+    if (!acquired.acquired) {
+      throw new Error('Expected the first turn lease to be acquired')
+    }
+    expect(acquired.run).toEqual(first)
+    expect(acquired.run).not.toBe(first)
     expect(store.tryAcquireTurn(second)).toEqual({
       acquired: false,
-      activeRun: first,
+      activeRun: acquired.run,
     })
-    expect(store.getActiveRun('conversation-1')).toBe(first)
+    expect(store.getActiveRun('conversation-1')).toBe(acquired.run)
   })
 
   it('acquires turns for different conversations independently', () => {
@@ -55,29 +69,106 @@ describe('SessionStore turn leases', () => {
     const first = createRunningRun('run-1', 'conversation-1')
     const second = createRunningRun('run-2', 'conversation-2')
 
-    expect(store.tryAcquireTurn(first)).toEqual({
-      acquired: true,
-      run: first,
-    })
-    expect(store.tryAcquireTurn(second)).toEqual({
-      acquired: true,
-      run: second,
-    })
-    expect(store.getActiveRun('conversation-1')).toBe(first)
-    expect(store.getActiveRun('conversation-2')).toBe(second)
+    const firstSnapshot = acquireTurn(store, first)
+    const secondSnapshot = acquireTurn(store, second)
+
+    expect(firstSnapshot).toEqual(first)
+    expect(secondSnapshot).toEqual(second)
+    expect(store.getActiveRun('conversation-1')).toBe(firstSnapshot)
+    expect(store.getActiveRun('conversation-2')).toBe(secondSnapshot)
+  })
+
+  it('deeply snapshots caller-owned mutable runs on acquisition', () => {
+    const store = new SessionStore()
+    const expectedEffects: ToolEffect[] = ['filesystem-write']
+    const eventEffects: ToolEffect[] = ['filesystem-write']
+    const result: MutableNormalizedToolResult = {
+      transportStatus: 'received',
+      executionStatus: 'success',
+      effectStatus: 'applied',
+      verificationStatus: 'not-run',
+    }
+    const event = {
+      eventId: 'event-1',
+      toolCallId: 'call-1',
+      toolName: 'write-file',
+      kind: 'settled',
+      effects: eventEffects,
+      retrySafety: 'unsafe',
+      result,
+      argumentDigest: 'argument-digest',
+      outputDigest: 'output-digest',
+      recordedAt: 100,
+    } satisfies EvidenceEvent
+    const evidence: EvidenceEvent[] = [event]
+    const callerRun = {
+      runId: 'run-1',
+      conversationId: 'conversation-1',
+      userMessageId: 'message-1',
+      intent: 'action',
+      expectedEffects,
+      phase: 'running',
+      waitingFor: undefined,
+      attempt: 0,
+      evidence,
+      failureReason: undefined,
+      effectState: 'complete',
+      startedAt: 100,
+      finishedAt: undefined,
+    } satisfies ExecutionRun
+
+    const snapshot = acquireTurn(store, callerRun)
+    const snapshotEvent = snapshot.evidence[0]
+
+    expect(snapshot).not.toBe(callerRun)
+    expect(snapshot.expectedEffects).not.toBe(expectedEffects)
+    expect(snapshot.evidence).not.toBe(evidence)
+    expect(snapshotEvent).not.toBe(event)
+    expect(snapshotEvent.effects).not.toBe(eventEffects)
+    expect(snapshotEvent.result).not.toBe(result)
+    expect(Object.isFrozen(snapshot)).toBe(true)
+    expect(Object.isFrozen(snapshot.expectedEffects)).toBe(true)
+    expect(Object.isFrozen(snapshot.evidence)).toBe(true)
+    expect(Object.isFrozen(snapshotEvent)).toBe(true)
+    expect(Object.isFrozen(snapshotEvent.effects)).toBe(true)
+    expect(Object.isFrozen(snapshotEvent.result)).toBe(true)
+    expect(Object.isFrozen(callerRun)).toBe(false)
+    expect(Object.isFrozen(expectedEffects)).toBe(false)
+    expect(Object.isFrozen(evidence)).toBe(false)
+    expect(Object.isFrozen(event)).toBe(false)
+    expect(Object.isFrozen(eventEffects)).toBe(false)
+    expect(Object.isFrozen(result)).toBe(false)
+
+    callerRun.runId = 'mutated-run'
+    expectedEffects.push('command')
+    event.toolName = 'mutated-tool'
+    eventEffects.push('command')
+    result.executionStatus = 'error'
+    evidence.push({ ...event, eventId: 'event-2' })
+
+    expect(snapshot.runId).toBe('run-1')
+    expect(snapshot.expectedEffects).toEqual(['filesystem-write'])
+    expect(snapshot.evidence).toHaveLength(1)
+    expect(snapshotEvent.toolName).toBe('write-file')
+    expect(snapshotEvent.effects).toEqual(['filesystem-write'])
+    expect(snapshotEvent.result?.executionStatus).toBe('success')
+    expect(store.getActiveRun('conversation-1')).toBe(snapshot)
+    expect(
+      store.finishTurn('conversation-1', 'run-1', { status: 'succeeded' }),
+    ).toBe(true)
   })
 
   it('suspends only the owning run and stores sorted approval IDs', () => {
     const store = new SessionStore()
     const running = createRunningRun('run-1')
-    store.tryAcquireTurn(running)
+    const activeRun = acquireTurn(store, running)
 
     expect(
       store.suspendTurnForApproval('conversation-1', 'stale-run', [
         'approval-a',
       ]),
     ).toBeUndefined()
-    expect(store.getActiveRun('conversation-1')).toBe(running)
+    expect(store.getActiveRun('conversation-1')).toBe(activeRun)
 
     const waiting = store.suspendTurnForApproval('conversation-1', 'run-1', [
       'approval-b',
@@ -95,7 +186,7 @@ describe('SessionStore turn leases', () => {
   it('blocks an ordinary second turn while approval is pending', () => {
     const store = new SessionStore()
     const running = createRunningRun('run-1')
-    store.tryAcquireTurn(running)
+    acquireTurn(store, running)
     const waiting = store.suspendTurnForApproval('conversation-1', 'run-1', [
       'approval-a',
     ])
@@ -110,7 +201,7 @@ describe('SessionStore turn leases', () => {
   it('resumes matching approval IDs on the same run', () => {
     const store = new SessionStore()
     const running = createRunningRun('run-1')
-    store.tryAcquireTurn(running)
+    acquireTurn(store, running)
     const waiting = store.suspendTurnForApproval('conversation-1', 'run-1', [
       'approval-b',
       'approval-a',
@@ -134,7 +225,7 @@ describe('SessionStore turn leases', () => {
   it('does not resume or mutate on unknown, partial, mixed, or replayed IDs', () => {
     const store = new SessionStore()
     const running = createRunningRun('run-1')
-    store.tryAcquireTurn(running)
+    acquireTurn(store, running)
     const waiting = store.suspendTurnForApproval('conversation-1', 'run-1', [
       'approval-a',
       'approval-b',
@@ -195,7 +286,7 @@ describe('SessionStore turn leases', () => {
   it('releases only the owner and ignores stale or duplicate finishes', () => {
     const store = new SessionStore()
     const first = createRunningRun('run-1')
-    store.tryAcquireTurn(first)
+    const firstSnapshot = acquireTurn(store, first)
 
     expect(
       store.finishTurn('conversation-1', 'stale-run', {
@@ -203,7 +294,7 @@ describe('SessionStore turn leases', () => {
         failureReason: 'execution-error',
       }),
     ).toBe(false)
-    expect(store.getActiveRun('conversation-1')).toBe(first)
+    expect(store.getActiveRun('conversation-1')).toBe(firstSnapshot)
     expect(
       store.finishTurn('conversation-1', 'run-1', {
         status: 'succeeded',
@@ -212,13 +303,13 @@ describe('SessionStore turn leases', () => {
     expect(store.getActiveRun('conversation-1')).toBeUndefined()
 
     const second = createRunningRun('run-2')
-    expect(store.tryAcquireTurn(second).acquired).toBe(true)
+    const secondSnapshot = acquireTurn(store, second)
     expect(
       store.finishTurn('conversation-1', 'run-1', {
         status: 'succeeded',
       }),
     ).toBe(false)
-    expect(store.getActiveRun('conversation-1')).toBe(second)
+    expect(store.getActiveRun('conversation-1')).toBe(secondSnapshot)
     expect(
       store.finishTurn('conversation-1', 'run-2', {
         status: 'failed',
@@ -234,22 +325,75 @@ describe('SessionStore turn leases', () => {
     ).toBe(false)
   })
 
-  it('keeps an active lease while its agent session is replaced or removed', async () => {
+  it('releases an owner-matched planned run during pre-stream cleanup', () => {
+    const store = new SessionStore()
+    const planned = createExecutionRun({
+      runId: 'run-1',
+      conversationId: 'conversation-1',
+      userMessageId: 'message-1',
+      now: 100,
+    })
+    acquireTurn(store, planned)
+
+    expect(
+      store.finishTurn('conversation-1', 'run-1', {
+        status: 'failed',
+        failureReason: 'execution-error',
+      }),
+    ).toBe(true)
+    expect(store.getActiveRun('conversation-1')).toBeUndefined()
+  })
+
+  it('keeps an active lease while its agent session is replaced or removed', () => {
     const store = new SessionStore()
     const running = createRunningRun('run-1')
 
     store.set('conversation-1', createSession())
-    store.tryAcquireTurn(running)
+    const activeRun = acquireTurn(store, running)
     store.set('conversation-1', createSession())
-    expect(store.getActiveRun('conversation-1')).toBe(running)
+    expect(store.getActiveRun('conversation-1')).toBe(activeRun)
 
     expect(store.remove('conversation-1')).toBe(true)
-    expect(store.getActiveRun('conversation-1')).toBe(running)
+    expect(store.getActiveRun('conversation-1')).toBe(activeRun)
 
     store.set('conversation-1', createSession())
-    expect(store.getActiveRun('conversation-1')).toBe(running)
+    expect(store.getActiveRun('conversation-1')).toBe(activeRun)
+  })
+
+  it('explicitly deletes a session and its waiting approval lease', async () => {
+    const store = new SessionStore()
+    store.set('conversation-1', createSession())
+    acquireTurn(store, createRunningRun('run-1'))
+    store.suspendTurnForApproval('conversation-1', 'run-1', ['approval-a'])
+
     expect(await store.delete('conversation-1')).toBe(true)
-    expect(store.getActiveRun('conversation-1')).toBe(running)
+    expect(store.has('conversation-1')).toBe(false)
+    expect(store.getActiveRun('conversation-1')).toBeUndefined()
+  })
+
+  it('explicitly deletes an active lease when no session exists', async () => {
+    const store = new SessionStore()
+    acquireTurn(store, createRunningRun('run-1'))
+
+    expect(await store.delete('conversation-1')).toBe(false)
+    expect(store.getActiveRun('conversation-1')).toBeUndefined()
+  })
+
+  it('cleans up the session and lease when agent disposal fails', async () => {
+    const store = new SessionStore()
+    store.set(
+      'conversation-1',
+      createSession(async () => {
+        throw new Error('dispose failed')
+      }),
+    )
+    acquireTurn(store, createRunningRun('run-1'))
+
+    await expect(store.delete('conversation-1')).rejects.toThrow(
+      'dispose failed',
+    )
+    expect(store.has('conversation-1')).toBe(false)
+    expect(store.getActiveRun('conversation-1')).toBeUndefined()
   })
 
   it('records deeply frozen evidence without mutating prior or caller input', () => {
@@ -274,7 +418,7 @@ describe('SessionStore turn leases', () => {
       outputDigest: 'output-digest',
       recordedAt: 150,
     } satisfies EvidenceEvent
-    store.tryAcquireTurn(running)
+    const prior = acquireTurn(store, running)
 
     expect(store.recordEvidence('conversation-1', 'run-1', event)).toBe(true)
 
@@ -283,9 +427,9 @@ describe('SessionStore turn leases', () => {
       throw new Error('Expected evidence to be recorded')
     }
     const storedEvent = updated.evidence[0]
-    expect(updated).not.toBe(running)
-    expect(updated.evidence).not.toBe(running.evidence)
-    expect(running.evidence).toEqual([])
+    expect(updated).not.toBe(prior)
+    expect(updated.evidence).not.toBe(prior.evidence)
+    expect(prior.evidence).toEqual([])
     expect(storedEvent).not.toBe(event)
     expect(storedEvent.effects).not.toBe(effects)
     expect(storedEvent.result).not.toBe(result)
@@ -312,5 +456,23 @@ describe('SessionStore turn leases', () => {
       false,
     )
     expect(store.getActiveRun('conversation-1')).toBe(updated)
+
+    const verification = {
+      eventId: 'event-2',
+      toolCallId: 'call-2',
+      toolName: 'verify-write',
+      kind: 'verification',
+      effects: ['verify'],
+      retrySafety: 'safe',
+      argumentDigest: 'verification-argument-digest',
+      outputDigest: 'verification-output-digest',
+      recordedAt: 200,
+    } satisfies EvidenceEvent
+    expect(store.recordEvidence('conversation-1', 'run-1', verification)).toBe(
+      true,
+    )
+    const appended = store.getActiveRun('conversation-1')
+    expect(appended?.evidence).toHaveLength(2)
+    expect(appended?.evidence[0]).toBe(storedEvent)
   })
 })

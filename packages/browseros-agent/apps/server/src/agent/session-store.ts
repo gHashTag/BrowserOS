@@ -25,10 +25,7 @@ function freezeEvidenceEvent(event: EvidenceEvent): EvidenceEvent {
   })
 }
 
-function appendFrozenEvidence(
-  run: ExecutionRun,
-  event: EvidenceEvent,
-): ExecutionRun {
+function freezeExecutionRunSnapshot(run: ExecutionRun): ExecutionRun {
   const waitingFor = run.waitingFor
     ? Object.freeze({
         kind: 'approval' as const,
@@ -40,11 +37,22 @@ function appendFrozenEvidence(
     ...run,
     expectedEffects: Object.freeze([...run.expectedEffects]),
     waitingFor,
-    evidence: Object.freeze([
-      ...run.evidence.map(freezeEvidenceEvent),
-      freezeEvidenceEvent(event),
-    ]),
+    evidence: Object.freeze(run.evidence.map(freezeEvidenceEvent)),
   })
+}
+
+function appendFrozenEvidence(
+  run: ExecutionRun,
+  event: EvidenceEvent,
+): ExecutionRun {
+  return Object.freeze({
+    ...run,
+    evidence: Object.freeze([...run.evidence, freezeEvidenceEvent(event)]),
+  })
+}
+
+function isApprovalMismatchError(error: unknown): boolean {
+  return error instanceof Error && error.message === 'Approval IDs do not match'
 }
 
 export interface AgentSession {
@@ -86,8 +94,9 @@ export class SessionStore {
       return { acquired: false, activeRun }
     }
 
-    this.activeRuns.set(run.conversationId, run)
-    return { acquired: true, run }
+    const runSnapshot = freezeExecutionRunSnapshot(run)
+    this.activeRuns.set(run.conversationId, runSnapshot)
+    return { acquired: true, run: runSnapshot }
   }
 
   getActiveRun(conversationId: string): ExecutionRun | undefined {
@@ -133,7 +142,10 @@ export class SessionStore {
     let resumedRun: ExecutionRun
     try {
       resumedRun = resumeExecutionRun(activeRun, approvalIds)
-    } catch {
+    } catch (error) {
+      if (!isApprovalMismatchError(error)) {
+        throw error
+      }
       return { resumed: false, reason: 'approval-mismatch', activeRun }
     }
 
@@ -157,7 +169,9 @@ export class SessionStore {
       return false
     }
 
-    completeExecutionRun(activeRun, outcome)
+    if (activeRun.phase !== 'planned') {
+      completeExecutionRun(activeRun, outcome)
+    }
     this.activeRuns.delete(conversationId)
     return true
   }
@@ -190,10 +204,17 @@ export class SessionStore {
 
   async delete(conversationId: string): Promise<boolean> {
     const session = this.sessions.get(conversationId)
-    if (!session) return false
+    if (!session) {
+      this.activeRuns.delete(conversationId)
+      return false
+    }
 
-    await session.agent.dispose()
-    this.sessions.delete(conversationId)
+    try {
+      await session.agent.dispose()
+    } finally {
+      this.sessions.delete(conversationId)
+      this.activeRuns.delete(conversationId)
+    }
     logger.info('Session deleted', {
       conversationId,
       remainingSessions: this.sessions.size,
