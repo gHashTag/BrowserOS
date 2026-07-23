@@ -750,13 +750,14 @@ function updateDigestToken(
   hash: ReturnType<typeof createHash>,
   kind: string,
   value = '',
+  encoding: 'utf8' | 'utf16le' = 'utf8',
 ): void {
   hash.update(String(kind.length))
   hash.update(':')
   hash.update(kind)
   hash.update(String(value.length))
   hash.update(':')
-  hash.update(value)
+  hash.update(value, encoding)
 }
 
 interface EvidenceDigest {
@@ -791,7 +792,7 @@ function canonicalDigest(value: unknown): EvidenceDigest {
           fidelity = 'coarse'
           updateDigestToken(hash, 'string-opaque', String(value.length))
         } else {
-          updateDigestToken(hash, 'string', value)
+          updateDigestToken(hash, 'string', value, 'utf16le')
         }
         break
       case 'bigint':
@@ -819,21 +820,7 @@ function canonicalDigest(value: unknown): EvidenceDigest {
           break
         }
         fidelity = 'coarse'
-        if (safeArrayCheck(value) === true) {
-          const length = readOwnDataProperty(value, 'length')
-          if (
-            length.state === 'data' &&
-            Number.isSafeInteger(length.value) &&
-            (length.value as number) >= 0
-          ) {
-            updateDigestToken(hash, 'array-opaque', String(length.value))
-          } else {
-            fidelity = 'unavailable'
-            updateDigestToken(hash, 'array-unavailable')
-          }
-        } else {
-          updateDigestToken(hash, 'object-opaque')
-        }
+        updateDigestToken(hash, 'object-opaque')
         break
     }
     return Object.freeze({ value: hash.digest('hex'), fidelity })
@@ -910,7 +897,10 @@ function safelyRecord(
   event: EvidenceEvent,
 ): void {
   try {
-    sink?.record(event)
+    const completion: unknown = sink?.record(event)
+    if (completion !== undefined) {
+      void Promise.resolve(completion).catch(() => {})
+    }
   } catch {
     // Evidence is observe-only. A telemetry failure must not affect the tool.
   }

@@ -16,6 +16,10 @@ import type { CallToolResult, Tool } from '@modelcontextprotocol/sdk/types.js'
 import type { ToolSet } from 'ai'
 import { z } from 'zod'
 import { jsonSchemaObjectToZodRawShape } from 'zod-from-json-schema'
+import {
+  createToolSetDictionary,
+  defineToolSetEntry,
+} from '../../../agent/tool-set-dictionary'
 import { KlavisClient } from '../../../lib/clients/klavis/klavis-client'
 import { OAUTH_MCP_SERVERS } from '../../../lib/clients/klavis/oauth-mcp-servers'
 import { logger } from '../../../lib/logger'
@@ -220,19 +224,19 @@ export function connectKlavisInBackground(
 }
 
 export function buildKlavisToolSet(handle: KlavisProxyHandle): ToolSet {
-  const toolSet: ToolSet = {}
+  const toolSet = createToolSetDictionary()
 
   for (const t of handle.tools) {
     const rawShape = handle.inputSchemas.get(t.name)
     const name = t.name
-    toolSet[name] = {
+    defineToolSetEntry(toolSet, name, {
       description: t.description ?? '',
       inputSchema: z.object((rawShape ?? {}) as z.ZodRawShape),
       execute: async (args: Record<string, unknown>) =>
         handle.callTool(name, args),
       toModelOutput: ({ output }: { output: unknown }) =>
         klavisResultToModelOutput(output),
-    } satisfies ToolSet[string]
+    } satisfies ToolSet[string])
   }
 
   return toolSet

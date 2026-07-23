@@ -1750,6 +1750,47 @@ describe('wrapToolSetWithEvidence', () => {
     }
   })
 
+  it('absorbs a rejected thenable returned by the evidence sink', async () => {
+    const output = { text: 'source output' }
+    const telemetryError = new Error('async telemetry unavailable')
+    let rejectionHandlers = 0
+    const rejectingSink = {
+      record: () =>
+        Object.defineProperty({}, 'then', {
+          value: (
+            _resolve: (value: unknown) => void,
+            reject: (error: unknown) => void,
+          ) => {
+            rejectionHandlers += 1
+            reject(telemetryError)
+          },
+        }),
+    } as unknown as ToolEvidenceSink
+    const wrapped = wrapToolSetWithEvidence(
+      {
+        succeeds: tool({
+          description: 'success',
+          inputSchema: z.unknown(),
+          execute: () => output,
+        }),
+      },
+      {
+        evidenceSink: rejectingSink,
+        describeTool: readDescriptor,
+      },
+    )
+
+    expect(
+      requireExecute(wrapped, 'succeeds')(
+        {},
+        executionOptions('call-async-sink'),
+      ),
+    ).toBe(output)
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(rejectionHandlers).toBe(2)
+  })
+
   it('captures one relay target for requested and late settled events', async () => {
     let releaseExecution: ((output: object) => void) | undefined
     const pendingOutput = new Promise<object>((resolve) => {

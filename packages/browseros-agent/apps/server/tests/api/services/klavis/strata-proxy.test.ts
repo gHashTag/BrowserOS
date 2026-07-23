@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, it, mock } from 'bun:test'
+import type { ToolSet } from 'ai'
 import {
   buildKlavisToolSet,
   connectKlavisInBackground,
@@ -136,6 +137,35 @@ describe('buildKlavisToolSet', () => {
         },
       ],
     })
+  })
+
+  it('preserves __proto__ and constructor as own dynamic tool names', async () => {
+    const callTool = mock(async (name: string) => ({ name }))
+    const names = ['__proto__', 'constructor']
+    const handle: KlavisProxyHandle = {
+      tools: names.map(
+        (name) =>
+          ({
+            name,
+            description: `${name} tool`,
+            inputSchema: { type: 'object' },
+          }) as never,
+      ),
+      inputSchemas: new Map(names.map((name) => [name, {} as never])),
+      callTool,
+      close: async () => {},
+    }
+
+    const toolSet = buildKlavisToolSet(handle)
+
+    expect(Object.getPrototypeOf(toolSet)).toBeNull()
+    expect(Object.keys(toolSet)).toEqual(names)
+    for (const name of names) {
+      expect(Object.hasOwn(toolSet, name)).toBe(true)
+      const dynamicTool = Reflect.get(toolSet, name) as ToolSet[string]
+      expect(await dynamicTool.execute?.({})).toEqual({ name })
+    }
+    expect(callTool).toHaveBeenCalledTimes(2)
   })
 })
 

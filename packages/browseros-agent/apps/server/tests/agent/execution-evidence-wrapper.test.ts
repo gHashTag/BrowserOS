@@ -781,6 +781,85 @@ describe('tool evidence wrapper hardening', () => {
     }
   })
 
+  it('does not trigger proxy-backed array traps while digesting an argument', () => {
+    let trapCalls = 0
+    let receivedInput: unknown
+    const proxyArray = new Proxy([], {
+      get: (target, property, receiver) => {
+        trapCalls += 1
+        return Reflect.get(target, property, receiver)
+      },
+      getOwnPropertyDescriptor: (target, property) => {
+        trapCalls += 1
+        return Reflect.getOwnPropertyDescriptor(target, property)
+      },
+      ownKeys: (target) => {
+        trapCalls += 1
+        return Reflect.ownKeys(target)
+      },
+    })
+    const events: EvidenceEvent[] = []
+    const wrapped = wrapToolSetWithEvidence(
+      {
+        digest: tool({
+          description: 'proxy array digest',
+          inputSchema: z.unknown(),
+          execute: (input) => {
+            receivedInput = input
+            return 'unchanged output'
+          },
+        }),
+      },
+      {
+        evidenceSink: { record: (event) => events.push(event) },
+        describeTool: writeDescriptor,
+      },
+    )
+
+    expect(
+      executeOf(wrapped, 'digest')(proxyArray, executionOptions('proxy-array')),
+    ).toBe('unchanged output')
+    expect(receivedInput).toBe(proxyArray)
+    expect(trapCalls).toBe(0)
+    expect(events[0]?.argumentDigestFidelity).toBe('coarse')
+  })
+
+  it('hashes exact strings losslessly by UTF-16 code unit', () => {
+    const events: EvidenceEvent[] = []
+    const wrapped = wrapToolSetWithEvidence(
+      {
+        digest: tool({
+          description: 'UTF-16 digest',
+          inputSchema: z.unknown(),
+          execute: () => 'done',
+        }),
+      },
+      {
+        evidenceSink: { record: (event) => events.push(event) },
+        describeTool: writeDescriptor,
+      },
+    )
+    const values = ['\uD800', '\uDC00', '\uFFFD']
+
+    for (const [index, value] of values.entries()) {
+      executeOf(wrapped, 'digest')(value, executionOptions(`utf16-${index}`))
+    }
+
+    const requested = events.filter((event) => event.kind === 'requested')
+    expect(requested.map((event) => event.argumentDigestFidelity)).toEqual([
+      'exact',
+      'exact',
+      'exact',
+    ])
+    const decisionDigests = requested.map((event) =>
+      digestForReliabilityDecision(
+        event.argumentDigest,
+        event.argumentDigestFidelity,
+      ),
+    )
+    expect(new Set(decisionDigests).size).toBe(3)
+  })
+
   it('never converts BigInt or enumerates generic objects while digesting', () => {
     let bigintConversions = 0
     let ownKeyReads = 0
