@@ -141,16 +141,7 @@ private struct TaskHistorySidebar: View {
     }
 
     private var sidebarHeader: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 9) {
-                Image(systemName: "triangle.fill")
-                    .font(.system(size: 14))
-                    .rotationEffect(.degrees(180))
-                    .foregroundColor(.grokText)
-
-                Spacer()
-            }
-
+        VStack(alignment: .leading, spacing: 0) {
             Button(action: { viewModel.newConversation() }) {
                 HStack(spacing: 9) {
                     Image(systemName: "square.and.pencil")

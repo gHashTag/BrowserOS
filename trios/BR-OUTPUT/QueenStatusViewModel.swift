@@ -463,9 +463,10 @@ final class QueenStatusViewModel: ObservableObject {
 
     func stopTrios() {
         isRunningAction = true
-        // Kill both the bare binary and the .app bundle binary names.
-        execDirect("/usr/bin/pkill", arguments: ["-9", "-f", "\(projectRoot)/trios.app/Contents/MacOS/trios"])
-        execDirect("/usr/bin/pkill", arguments: ["-9", "trios_app"])
+        // Use pid-based termination instead of `pkill -f` regexes, which can
+        // match unrelated processes whose command line contains the same
+        // substring. Discover both the bare binary and the .app bundle binary.
+        terminateProcesses(named: "trios")
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
             self?.refreshAll()
             self?.isRunningAction = false
@@ -474,7 +475,7 @@ final class QueenStatusViewModel: ObservableObject {
 
     func restartMCP() {
         isRunningAction = true
-        execDirect("/usr/bin/pkill", arguments: ["-f", "bun.*start:server"])
+        terminateProcesses(named: "bun", matchingArguments: ["start:server"])
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
             let bunPath = ProcessInfo.processInfo.environment["TRIOS_BUN_PATH"] ?? "/opt/homebrew/bin/bun"
             self?.execDirect(bunPath, arguments: ["run", "start:server"], workDir: self?.projectRoot)
@@ -487,7 +488,7 @@ final class QueenStatusViewModel: ObservableObject {
 
     func restartAgentServer() {
         isRunningAction = true
-        execDirect("/usr/bin/pkill", arguments: ["-f", "bun.*agent"])
+        terminateProcesses(named: "bun", matchingArguments: ["start:agent"])
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
             let bunPath = ProcessInfo.processInfo.environment["TRIOS_BUN_PATH"] ?? "/opt/homebrew/bin/bun"
             self?.execDirect(bunPath, arguments: ["run", "start:agent"], workDir: self?.projectRoot)
@@ -496,6 +497,59 @@ final class QueenStatusViewModel: ObservableObject {
                 self?.isRunningAction = false
             }
         }
+    }
+
+    /// Terminates processes whose executable base name matches `name` and whose
+    /// full argument list contains every token in `matchingArguments`.
+    /// Avoids `pkill -f` regexes that can collide with unrelated command lines.
+    private func terminateProcesses(named name: String, matchingArguments: [String] = []) {
+        let knownPIDs = Self.listMatchingPIDs(named: name, arguments: matchingArguments)
+        for pid in knownPIDs {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/bin/kill")
+            task.arguments = ["-9", String(pid)]
+            do {
+                try task.run()
+                task.waitUntilExit()
+            } catch {
+                NSLog("[QueenStatus] Failed to kill pid \(pid): \(error)")
+            }
+        }
+    }
+
+    /// Lists PIDs by scanning `/bin/ps -eo pid,comm,args` and matching the
+    /// executable base name plus an optional argument filter.
+    private static func listMatchingPIDs(named name: String, arguments: [String]) -> [Int] {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/bin/ps")
+        task.arguments = ["-eo", "pid,comm,args"]
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = FileHandle.nullDevice
+        do {
+            try task.run()
+            task.waitUntilExit()
+        } catch {
+            return []
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        guard let text = String(data: data, encoding: .utf8) else { return [] }
+
+        var pids: [Int] = []
+        for line in text.split(separator: "\n").dropFirst() { // skip header
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            let tokens = trimmed.split(separator: " ", omittingEmptySubsequences: true)
+            guard tokens.count >= 2,
+                  let pid = Int(tokens[0]) else { continue }
+            let comm = String(tokens[1])
+            let args = tokens.dropFirst(2).map(String.init)
+            let commMatches = (comm as NSString).lastPathComponent == name
+            let argsMatch = arguments.allSatisfy { arg in args.contains(arg) }
+            if commMatches && argsMatch {
+                pids.append(pid)
+            }
+        }
+        return pids
     }
 
     func runCron() {
@@ -541,13 +595,25 @@ final class QueenStatusViewModel: ObservableObject {
         }
     }
 
+    /// Exact command prefixes allowed for direct shell-out. Prefix matching is
+    /// intentionally coarse; dangerous substrings and unlisted executables are
+    /// rejected separately. Commands must resolve to a fixed absolute binary
+    /// via `CommandResolver`.
     private static let commandAllowlist: [String] = [
         "git status", "git log", "git diff", "git branch",
         "cargo check", "cargo build", "cargo run --bin clade-",
         "curl -s http://127.0.0.1:", "swift --version",
         "cat .trinity/", "ls ", "wc ", "tail ", "head ",
-        "pgrep", "ps aux",
-        "TRIOS_MESH_NODE_ID=", "TRIOS_MESH_PORT="
+        "pgrep", "ps aux"
+    ]
+
+    /// Substrings that are never allowed in user-typed commands, regardless of
+    /// allowlist match. These block shell metacharacters, traversal, path
+    /// expansion, and dangerous invocations like `pkill -f`.
+    private static let commandDenylist: [String] = [
+        ";", "&&", "||", "|", "`", "$(", "${", ">", "<", "~", "..",
+        "rm -rf", "\n", "\r", "$'", "pkill -f", "/bin/zsh -c", "sudo ",
+        ">>", "curl -s http://127.0.0.1: |", "bash -c", "sh -c"
     ]
 
     /// Runs a user-typed command using a fixed executable path and literal argv.
@@ -557,8 +623,7 @@ final class QueenStatusViewModel: ObservableObject {
     func runCommand(_ cmd: String) {
         let trimmed = cmd.trimmingCharacters(in: .whitespaces)
 
-        let blocked = [";", "&&", "||", "|", "`", "$(", "${", ">", "<", "..", "~", "rm -rf", "\n", "\r"]
-        for b in blocked {
+        for b in Self.commandDenylist {
             if trimmed.range(of: b) != nil {
                 NSLog("[QueenStatus] BLOCKED dangerous token in command: \(b)")
                 return
@@ -570,31 +635,44 @@ final class QueenStatusViewModel: ObservableObject {
             return
         }
 
-        let tokens = trimmed.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-        guard !tokens.isEmpty else { return }
-
-        // Parse leading KEY=value env assignments (used by mesh launch commands).
+        // Parse KEY=value env assignments first, then the command and its args.
         var envOverrides: [String: String] = [:]
+        let commandTokens = trimmed.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
         var commandStart = 0
-        for (i, token) in tokens.enumerated() {
+        for (i, token) in commandTokens.enumerated() {
             let parts = token.split(separator: "=", maxSplits: 1)
             if parts.count == 2, !parts[0].isEmpty {
-                envOverrides[String(parts[0])] = String(parts[1])
+                let key = String(parts[0])
+                let value = String(parts[1])
+                // Reject values that contain shell metacharacters or traversal.
+                guard Self.isSafeEnvValue(value) else {
+                    NSLog("[QueenStatus] BLOCKED unsafe env value for \(key)")
+                    return
+                }
+                envOverrides[key] = value
                 commandStart = i + 1
             } else {
                 break
             }
         }
-        guard commandStart < tokens.count else {
+        guard commandStart < commandTokens.count else {
             NSLog("[QueenStatus] BLOCKED command with only env assignments")
             return
         }
 
-        let commandName = tokens[commandStart]
-        let arguments = Array(tokens[(commandStart + 1)...])
+        let commandName = commandTokens[commandStart]
+        let arguments = Array(commandTokens[(commandStart + 1)...])
 
         guard let executableURL = CommandResolver.executableURL(for: commandName) else {
             NSLog("[QueenStatus] BLOCKED unknown executable: \(commandName)")
+            return
+        }
+
+        // Defensive: every resolved executable must be a regular file (not a
+        // symlink) and must not live in a user-writable directory. This blocks
+        // PATH-spoofing and symlink-based binary replacement.
+        guard Self.isTrustedExecutable(executableURL) else {
+            NSLog("[QueenStatus] BLOCKED untrusted executable path: \(executableURL.path)")
             return
         }
 
@@ -612,6 +690,26 @@ final class QueenStatusViewModel: ObservableObject {
         }
     }
 
+    /// Validates that an executable path is a regular file and resides under a
+    /// trusted system directory. Rejects symlinks and user-writable locations.
+    private static func isTrustedExecutable(_ url: URL) -> Bool {
+        let fm = FileManager.default
+        let path = url.path
+        let trustedRoots = ["/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin"]
+        guard trustedRoots.contains(where: { path.hasPrefix($0) }) else { return false }
+        var isDirectory: ObjCBool = false
+        guard fm.fileExists(atPath: path, isDirectory: &isDirectory),
+              !isDirectory.boolValue else { return false }
+        do {
+            let attrs = try fm.attributesOfItem(atPath: path)
+            let type = attrs[.type] as? FileAttributeType
+            guard type == .typeRegular else { return false }
+        } catch {
+            return false
+        }
+        return true
+    }
+
     private func execDirect(_ executable: String, arguments: [String], workDir: String? = nil, environment: [String: String]? = nil) {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: executable)
@@ -625,6 +723,15 @@ final class QueenStatusViewModel: ObservableObject {
         } catch {
             NSLog("[QueenStatus] execDirect failed (\(executable)): \(error)")
         }
+    }
+
+    /// Allowed env-value characters: alphanumerics, dash, dot, colon, slash,
+    /// and underscore. This prevents injecting additional argv tokens or shell
+    /// metacharacters through an env assignment like `KEY="1; rm -rf /"`.
+    private static func isSafeEnvValue(_ value: String) -> Bool {
+        let allowed = CharacterSet.alphanumerics
+            .union(CharacterSet(charactersIn: "-./:_"))
+        return value.rangeOfCharacter(from: allowed.inverted) == nil
     }
 
     /// Maps allowed command names to fixed, absolute executables so we never rely
@@ -644,6 +751,7 @@ final class QueenStatusViewModel: ObservableObject {
             case "pgrep": return URL(fileURLWithPath: "/usr/bin/pgrep")
             case "ps": return URL(fileURLWithPath: "/bin/ps")
             case "claude": return resolveClaude()
+            case "kill": return URL(fileURLWithPath: "/bin/kill")
             default: return nil
             }
         }

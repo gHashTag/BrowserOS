@@ -223,7 +223,7 @@ struct ChatPanelView: View {
             let isLastInGroup = index == localMessages.count - 1 || localMessages[index + 1].role != message.role
 
             if shouldRenderMessageBubble(message) {
-                MessageBubbleView(
+                StableMessageView(
                     message: message,
                     isFirstInGroup: isFirstInGroup,
                     isLastInGroup: isLastInGroup,

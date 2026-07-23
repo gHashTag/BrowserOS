@@ -150,12 +150,21 @@ struct AnalyticsEvent: Codable {
     let properties: [String: Any]
     let sessionId: String
     let userId: String
-    
+
     enum CodingKeys: String, CodingKey {
         case id, timestamp, event, sessionId, userId
         case properties
     }
-    
+
+    init(id: UUID = UUID(), timestamp: Date = Date(), event: String, properties: [String: Any] = [:], sessionId: String, userId: String) {
+        self.id = id
+        self.timestamp = timestamp
+        self.event = event
+        self.properties = properties
+        self.sessionId = sessionId
+        self.userId = userId
+    }
+
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(id, forKey: .id)
@@ -163,10 +172,22 @@ struct AnalyticsEvent: Codable {
         try container.encode(event, forKey: .event)
         try container.encode(sessionId, forKey: .sessionId)
         try container.encode(userId, forKey: .userId)
-        
+
         // Encode properties as JSON string
         let jsonData = try JSONSerialization.data(withJSONObject: properties)
         let jsonString = String(data: jsonData, encoding: .utf8)
         try container.encode(jsonString, forKey: .properties)
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        event = try container.decode(String.self, forKey: .event)
+        sessionId = try container.decode(String.self, forKey: .sessionId)
+        userId = try container.decode(String.self, forKey: .userId)
+        let jsonString = try container.decode(String.self, forKey: .properties)
+        let jsonData = jsonString.data(using: .utf8) ?? Data()
+        properties = (try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any]) ?? [:]
     }
 }

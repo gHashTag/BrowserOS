@@ -82,18 +82,18 @@ Report accessibility issues via GitHub Issues with label `a11y`.
 1. Fork the repo
 2. Create feature branch (`feature/your-feature`)
 3. Make changes
-4. Run tests (`swift test`)
+4. Run tests (`./trios/build.sh` — builds the app, compiles the Swift package, and runs `swift test` when XCTest is available)
 5. Submit PR
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
 
 ## 📊 Stats
 
-- **Lines of Code**: ~6,200
-- **Files**: 20
-- **Total Size**: 247KB
-- **Waves**: 5 (complete)
-- **Languages**: 5
+- **Lines of Code**: ~77,000 (Swift + Rust + docs/scripts)
+- **Files**: ~492 tracked Swift/Rust/Markdown/Shell files
+- **Total Size**: ~6.2GB (full workspace tree, including build artifacts)
+- **Waves**: 7+ continuous hardening loops in progress
+- **Languages**: Swift, Rust, TypeScript, Shell, Markdown
 - **Plugins**: Template included
 
 ## 🎓 Research

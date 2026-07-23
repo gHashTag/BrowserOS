@@ -23,6 +23,7 @@ let package = Package(
                 "BR-OUTPUT/A2AMessageRouter.swift",
                 "BR-OUTPUT/ChatLogic.swift",
                 "BR-OUTPUT/CladeGuard.swift",
+                "rings/SR-01/ChatEvents.swift",
             ]
         ),
         .testTarget(

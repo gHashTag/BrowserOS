@@ -13,7 +13,9 @@ struct ChatSidebarView: View {
     @State private var editingConversationId: UUID?
     @State private var editedName: String = ""
     @State private var searchText: String = ""
-    
+    @State private var selectedConversationId: UUID? = nil
+    @FocusState private var isEditingName: Bool
+
     var body: some View {
         VStack(spacing: 0) {
             headerBar
@@ -74,13 +76,12 @@ struct ChatSidebarView: View {
     }
     
     private var listContent: some View {
-        List(selection: $viewModel.selectedConversationId) {
+        List {
             // Pinned conversations
             if !pinnedConversations.isEmpty {
                 Section {
                     ForEach(pinnedConversations) { conversation in
                         conversationRow(conversation)
-                            .tag(conversation.id)
                     }
                 } header: {
                     Text("Pinned")
@@ -94,7 +95,6 @@ struct ChatSidebarView: View {
             Section {
                 ForEach(filteredConversations.filter { !$0.isPinned }) { conversation in
                     conversationRow(conversation)
-                        .tag(conversation.id)
                 }
             }
         }
@@ -102,21 +102,21 @@ struct ChatSidebarView: View {
         .background(Color.clear)
     }
     
-    private var pinnedConversations: [Conversation] {
+    private var pinnedConversations: [ChatConversation] {
         viewModel.conversations.filter { $0.isPinned }
     }
     
-    private var filteredConversations: [Conversation] {
+    private var filteredConversations: [ChatConversation] {
         if searchText.isEmpty {
             return viewModel.conversations
         }
         return viewModel.conversations.filter {
-            $0.name.localizedCaseInsensitiveContains(searchText)
+            $0.title.localizedCaseInsensitiveContains(searchText)
         }
     }
     
-    private func conversationRow(_ conversation: Conversation) -> some View {
-        let messages = viewModel.getMessages(for: conversation.id)
+    private func conversationRow(_ conversation: ChatConversation) -> some View {
+        let messages = viewModel.sidebarMessages(for: conversation.id)
         let last = messages.last
         
         return HStack(spacing: 10) {
@@ -136,12 +136,12 @@ struct ChatSidebarView: View {
                             .textFieldStyle(.plain)
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.grokText)
-                            .focused()
+                            .focused($isEditingName)
                             .onSubmit {
                                 saveEditedName(for: conversation)
                             }
                     } else {
-                        Text(conversation.name)
+                        Text(conversation.title)
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.grokText)
                     }
@@ -149,7 +149,7 @@ struct ChatSidebarView: View {
                     Spacer()
                     
                     if let last = last {
-                        Text(last.formattedTime)
+                        Text(last.timestamp.formatted(date: .omitted, time: .shortened))
                             .font(.system(size: 9))
                             .foregroundColor(.grokDim)
                     }
@@ -181,14 +181,20 @@ struct ChatSidebarView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
-        .background(rowBackground(isSelected: viewModel.selectedConversationId == conversation.id))
+        .background(rowBackground(isSelected: viewModel.conversationId == conversation.id))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            Task {
+                await viewModel.switchConversation(id: conversation.id)
+            }
+        }
         .contextMenu {
             contextMenuItems(for: conversation)
         }
     }
     
     @ViewBuilder
-    private func contextMenuItems(for conversation: Conversation) -> some View {
+    private func contextMenuItems(for conversation: ChatConversation) -> some View {
         Button(action: { startEditing(conversation) }) {
             Label("Rename", systemImage: "pencil")
         }
@@ -206,17 +212,19 @@ struct ChatSidebarView: View {
         }
     }
     
-    private func startEditing(_ conversation: Conversation) {
+    private func startEditing(_ conversation: ChatConversation) {
         editingConversationId = conversation.id
-        editedName = conversation.name
+        editedName = conversation.title
+        isEditingName = true
     }
-    
-    private func saveEditedName(for conversation: Conversation) {
+
+    private func saveEditedName(for conversation: ChatConversation) {
         viewModel.renameConversation(conversation.id, to: editedName.trimmingCharacters(in: .whitespacesAndNewlines))
         editingConversationId = nil
+        isEditingName = false
     }
     
-    private func togglePin(_ conversation: Conversation) {
+    private func togglePin(_ conversation: ChatConversation) {
         viewModel.togglePin(conversation.id)
     }
     
@@ -235,7 +243,7 @@ struct ChatSidebarView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
     
-    private func avatar(for conversation: Conversation) -> some View {
+    private func avatar(for conversation: ChatConversation) -> some View {
         ZStack {
             Circle()
                 .fill(Color.grokElevated.opacity(0.5))
@@ -264,7 +272,7 @@ struct ChatSidebarView: View {
 // MARK: - Menu Button (Shows on Hover)
 
 struct MenuButton: View {
-    let conversation: Conversation
+    let conversation: ChatConversation
     let isEditing: Bool
     let onRename: () -> Void
     
@@ -290,56 +298,14 @@ struct MenuButton: View {
     }
 }
 
-// MARK: - Conversation Model
-
-struct Conversation: Identifiable, Hashable {
-    let id: UUID
-    var name: String
-    var icon: String
-    var isPinned: Bool
-    var unreadCount: Int
-    let createdAt: Date
-    var lastMessageAt: Date
-}
-
 // MARK: - ChatViewModel Extension
 
+// ChatSidebarView keeps its own local view state; it must not extend
+// ChatViewModel with methods that duplicate or conflict with the canonical
+// conversation-management API in rings/SR-02/ChatViewModel.swift.
 extension ChatViewModel {
-    func createNewConversation() {
-        let conversation = Conversation(
-            id: UUID(),
-            name: "New Chat",
-            icon: "message.fill",
-            isPinned: false,
-            unreadCount: 0,
-            createdAt: Date(),
-            lastMessageAt: Date()
-        )
-        conversations.append(conversation)
-        selectedConversationId = conversation.id
-    }
-    
-    func renameConversation(_ id: UUID, to newName: String) {
-        if let index = conversations.firstIndex(where: { $0.id == id }) {
-            conversations[index].name = newName.isEmpty ? "Untitled" : newName
-        }
-    }
-    
-    func togglePin(_ id: UUID) {
-        if let index = conversations.firstIndex(where: { $0.id == id }) {
-            conversations[index].isPinned.toggle()
-        }
-    }
-    
-    func deleteConversation(_ id: UUID) {
-        conversations.removeAll { $0.id == id }
-        if selectedConversationId == id {
-            selectedConversationId = nil
-        }
-    }
-    
-    func getMessages(for conversationId: UUID) -> [ChatMessage] {
-        // Return messages for this conversation
+    func sidebarMessages(for conversationId: UUID) -> [ChatMessage] {
+        // Sidebar-specific message preview; return empty until wired to persister.
         return []
     }
 }

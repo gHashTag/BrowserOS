@@ -593,21 +593,22 @@ final class ChatViewModel: ObservableObject {
     }
     
     // MARK: - Conversation Management
-    
+
     func renameConversation(_ id: UUID, to newName: String) {
         if let index = conversations.firstIndex(where: { $0.id == id }) {
-            conversations[index].title = newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled" : newName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+            conversations[index].title = trimmed.isEmpty ? "Untitled" : trimmed
             objectWillChange.send()
         }
     }
-    
+
     func togglePin(_ id: UUID) {
         if let index = conversations.firstIndex(where: { $0.id == id }) {
             conversations[index].isPinned.toggle()
             objectWillChange.send()
         }
     }
-    
+
     func createNewConversation() {
         let newConv = ChatConversation(
             id: UUID(),
@@ -622,14 +623,15 @@ final class ChatViewModel: ObservableObject {
         messages = []
         objectWillChange.send()
     }
-    
+
+    func selectConversation(_ id: UUID) {
+        conversationId = id
+    }
+
     func deleteConversation(_ id: UUID) {
-        conversations.removeAll { $0.id == id }
-        if conversationId == id {
-            conversationId = conversations.first?.id ?? UUID()
-            messages = []
+        Task {
+            await deleteConversation(id: id)
         }
-        objectWillChange.send()
     }
 }
 

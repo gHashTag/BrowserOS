@@ -13,6 +13,8 @@ struct Variant {
     bundle_id: &'static str,
     mcp_port: &'static str,
     a2a_port: &'static str,
+    mesh_port: &'static str,
+    canary_mcp_port: &'static str,
     build_root: PathBuf,
 }
 
@@ -99,13 +101,17 @@ fn main() {
     <key>TRIOS_VARIANT</key><string>{}</string>
     <key>TRIOS_MCP_PORT</key><string>{}</string>
     <key>TRIOS_A2A_PORT</key><string>{}</string>
+    <key>TRIOS_MESH_PORT</key><string>{}</string>
+    <key>TRIOS_CANARY_MCP_PORT</key><string>{}</string>
 </dict>
 </plist>"#,
         variant.bundle_id,
         capitalize(variant.name),
         variant.name,
         variant.mcp_port,
-        variant.a2a_port
+        variant.a2a_port,
+        variant.mesh_port,
+        variant.canary_mcp_port
     );
     if let Err(e) = fs::write(variant.app_bundle.join("Contents/Info.plist"), plist) {
         eprintln!("[FAIL] Failed to write Info.plist: {}", e);
@@ -113,11 +119,13 @@ fn main() {
     }
 
     println!(
-        "[OK] Copied to .app bundle: {} (files={}, ports MCP={} A2A={})",
+        "[OK] Copied to .app bundle: {} (files={}, ports MCP={} A2A={} MESH={} CANARY={})",
         variant.app_bundle.display(),
         file_count,
         variant.mcp_port,
-        variant.a2a_port
+        variant.a2a_port,
+        variant.mesh_port,
+        variant.canary_mcp_port
     );
 }
 
@@ -130,6 +138,8 @@ fn resolve_variant(name: &str) -> Variant {
             bundle_id: "com.browseros.trios.staging",
             mcp_port: "9205",
             a2a_port: "9300",
+            mesh_port: "9505",
+            canary_mcp_port: "9205",
             build_root: PathBuf::from(format!("{}/.worktrees/staging/trios", &project_dir())),
         }
     } else {
@@ -140,6 +150,8 @@ fn resolve_variant(name: &str) -> Variant {
             bundle_id: "com.browseros.trios",
             mcp_port: "9105",
             a2a_port: "9200",
+            mesh_port: "9505",
+            canary_mcp_port: "9205",
             build_root: PathBuf::from(&project_dir()),
         }
     }
@@ -195,6 +207,8 @@ mod tests {
         assert_eq!(v.name, "prod");
         assert_eq!(v.mcp_port, "9105");
         assert_eq!(v.a2a_port, "9200");
+        assert_eq!(v.mesh_port, "9505");
+        assert_eq!(v.canary_mcp_port, "9205");
         assert_eq!(v.bundle_id, "com.browseros.trios");
     }
 
@@ -204,6 +218,8 @@ mod tests {
         assert_eq!(v.name, "staging");
         assert_eq!(v.mcp_port, "9205");
         assert_eq!(v.a2a_port, "9300");
+        assert_eq!(v.mesh_port, "9505");
+        assert_eq!(v.canary_mcp_port, "9205");
         assert_eq!(v.bundle_id, "com.browseros.trios.staging");
     }
 

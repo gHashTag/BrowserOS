@@ -175,27 +175,7 @@ enum ExtensionStoreError: Error {
     case notFound
 }
 
-// MARK: - Extension Manager
-
-@MainActor
-class ExtensionManager: ObservableObject {
-    
-    @Published var extensions: [LoadedExtension] = []
-    
-    private let storeAPI: ExtensionStoreAPI
-    private let pluginAPI: PluginAPI
-    
-    init(storeAPI: ExtensionStoreAPI = ExtensionStoreAPI(),
-         pluginAPI: PluginAPI = PluginAPI()) {
-        self.storeAPI = storeAPI
-        self.pluginAPI = pluginAPI
-    }
-    
-    func loadExtensions() async {
-        // Load installed extensions
-        // Initialize plugin system
-    }
-}
+// MARK: - Loaded Extension
 
 struct LoadedExtension {
     let id: String

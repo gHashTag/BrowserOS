@@ -16,15 +16,12 @@ final class LLMClient {
         !apiKey.isEmpty
     }
 
+    /// Creates a client with an explicit API key. Keys are never read from
+    /// environment variables inside this initializer; callers must supply a key
+    /// obtained from macOS Keychain (e.g. via `ModelCredentialStore`). This
+    /// prevents accidental exfiltration via `.env` files or shell history.
     init(apiKey: String? = nil) {
-        // Prefer TRIOS_API_KEY (the key the rest of the app and UI use) with a
-        // fallback to the legacy OPENROUTER_API_KEY variable. Empty strings are
-        // treated as missing so the client fails closed instead of sending an
-        // invalid `Bearer ` header.
-        self.apiKey = apiKey
-            ?? ProcessInfo.processInfo.environment["TRIOS_API_KEY"]
-            ?? ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"]
-            ?? ""
+        self.apiKey = apiKey ?? ""
     }
 
     struct Message: Codable {
@@ -80,7 +77,7 @@ enum LLMError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .missingAPIKey:
-            return "LLM: TRIOS_API_KEY or OPENROUTER_API_KEY must be set"
+            return "LLM: API key is required. Store it in macOS Keychain via ModelCredentialStore and pass it to LLMClient.init(apiKey:)."
         case .httpError(let text): return "LLM HTTP error: \(text)"
         }
     }

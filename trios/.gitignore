@@ -33,6 +33,9 @@ lefthook.yml
 # Built app bundle
 trios.app/
 
+# Archived prototypes (kept locally, not part of build)
+.archive/
+
 # SwiftPM build artifacts + local frameworks
 .build/
 Frameworks/

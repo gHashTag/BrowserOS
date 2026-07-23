@@ -35,6 +35,8 @@ macOS full-screen, while preserving the existing compact side-panel experience.
 - Input remains pinned below the message scroll area.
 - Existing colors, glass material, Markdown renderer, and status indicators are
   reused instead of introducing a second chat implementation.
+- The Trinity brand mark appears only in the title bar; the task-history sidebar
+  does not repeat it.
 
 ## Tests
 
@@ -51,4 +53,3 @@ macOS full-screen, while preserving the existing compact side-panel experience.
 - Swift and first-party Markdown additions are English and ASCII-only.
 - No new shell script is introduced.
 - Existing unrelated worktree changes are preserved.
-
