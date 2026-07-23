@@ -73,4 +73,61 @@ describe('ToolResponse', () => {
     assert.ok(text.includes('[Page 1 snapshot]'))
     assert.ok(text.includes('[42] button "Submit"'))
   })
+
+  it('stops waiting for a post-action when the request is aborted', async () => {
+    const response = new ToolResponse({ postActionTimeoutMs: 1_000 })
+    response.text('ok')
+    response.includeSnapshot(1)
+
+    const browser = {
+      snapshot: async () => await new Promise<string>(() => {}),
+    } as unknown as Browser
+    const controller = new AbortController()
+    let activeAbortListeners = 0
+    let addedAbortListeners = 0
+    let removedAbortListeners = 0
+    const trackedSignal = {
+      get aborted() {
+        return controller.signal.aborted
+      },
+      get reason() {
+        return controller.signal.reason
+      },
+      addEventListener(
+        type: string,
+        listener: EventListenerOrEventListenerObject,
+        options?: boolean | AddEventListenerOptions,
+      ) {
+        if (type === 'abort') {
+          activeAbortListeners += 1
+          addedAbortListeners += 1
+        }
+        controller.signal.addEventListener(type, listener, options)
+      },
+      removeEventListener(
+        type: string,
+        listener: EventListenerOrEventListenerObject,
+        options?: boolean | EventListenerOptions,
+      ) {
+        if (type === 'abort') {
+          activeAbortListeners -= 1
+          removedAbortListeners += 1
+        }
+        controller.signal.removeEventListener(type, listener, options)
+      },
+    } as AbortSignal
+
+    const start = Date.now()
+    const pending = response.build(browser, trackedSignal)
+    controller.abort('cancel post-action')
+    const result = await pending
+    const elapsed = Date.now() - start
+
+    assert.ok(elapsed < 250, `Expected prompt abort, got ${elapsed}ms`)
+    assert.ok(!result.isError)
+    assert.ok(textOf(result).includes('ok'))
+    assert.strictEqual(addedAbortListeners, 1)
+    assert.strictEqual(removedAbortListeners, 1)
+    assert.strictEqual(activeAbortListeners, 0)
+  })
 })

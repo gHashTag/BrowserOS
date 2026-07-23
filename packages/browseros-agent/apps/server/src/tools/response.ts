@@ -107,30 +107,53 @@ export class ToolResponse {
     }
   }
 
-  private async withTimeout<T>(task: Promise<T>): Promise<T> {
+  private async withTimeout<T>(
+    task: Promise<T>,
+    signal?: AbortSignal,
+  ): Promise<T> {
     let timeoutId: ReturnType<typeof setTimeout> | undefined
+    let abortListener: (() => void) | undefined
     try {
-      return await Promise.race([
+      const pending = [
         task,
         new Promise<T>((_, reject) => {
           timeoutId = setTimeout(() => {
             reject(new Error('Post-action timed out'))
           }, this.postActionTimeoutMs)
         }),
-      ])
+      ]
+
+      if (signal) {
+        pending.push(
+          new Promise<T>((_, reject) => {
+            const abort = () => reject(new Error('Post-action aborted'))
+            if (signal.aborted) {
+              abort()
+              return
+            }
+            abortListener = abort
+            signal.addEventListener('abort', abort, { once: true })
+          }),
+        )
+      }
+
+      return await Promise.race(pending)
     } finally {
       if (timeoutId !== undefined) clearTimeout(timeoutId)
+      if (abortListener) {
+        signal?.removeEventListener('abort', abortListener)
+      }
     }
   }
 
-  async build(browser: Browser): Promise<ToolResult> {
+  async build(browser: Browser, signal?: AbortSignal): Promise<ToolResult> {
     if (this.postActions.length > 0) {
       this.text('\n--- Additional context (auto-included) ---')
     }
 
     for (const action of this.postActions) {
       try {
-        await this.withTimeout(this.runPostAction(action, browser))
+        await this.withTimeout(this.runPostAction(action, browser), signal)
       } catch {
         // Post-action failure doesn't fail the tool
       }

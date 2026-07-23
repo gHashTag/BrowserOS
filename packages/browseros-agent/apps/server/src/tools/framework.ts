@@ -19,6 +19,7 @@ export type ToolHandler = (
   args: unknown,
   ctx: ToolContext,
   response: ToolResponse,
+  signal: AbortSignal,
 ) => Promise<void>
 
 export interface ToolDirectories {
@@ -59,6 +60,7 @@ export function defineTool<
     args: z.infer<TInput>,
     ctx: ToolContext,
     response: ToolResponse,
+    signal: AbortSignal,
   ) => Promise<void>
 }): ToolDefinition {
   return config as ToolDefinition
@@ -79,6 +81,7 @@ export function defineToolWithCategory(
       args: z.infer<TInput>,
       ctx: ToolContext,
       response: ToolResponse,
+      signal: AbortSignal,
     ) => Promise<void>
   }): ToolDefinition =>
     defineTool({
@@ -108,6 +111,10 @@ export async function executeTool(
       ctx.browser,
       ctx.aclRules,
     )
+    if (signal.aborted) {
+      response.error('Request was aborted')
+      return response.toResult()
+    }
     if (check.blocked) {
       const desc =
         check.rule?.description ??
@@ -129,13 +136,13 @@ export async function executeTool(
   }
 
   try {
-    await tool.handler(args, ctx, response)
+    await tool.handler(args, ctx, response, signal)
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
     response.error(`Internal error in ${tool.name}: ${message}`)
   }
 
-  const result = await response.build(ctx.browser)
+  const result = await response.build(ctx.browser, signal)
 
   const pageId = (args as Record<string, unknown>).page
   if (typeof pageId === 'number') {

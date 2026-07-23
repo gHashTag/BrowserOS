@@ -7,6 +7,16 @@ import { executeTool, type ToolContext } from '../tools/framework'
 import type { ContentItem } from '../tools/response'
 import type { ToolRegistry } from '../tools/tool-registry'
 
+export function combineToolAbortSignals(
+  requestSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(timeoutMs)
+  return requestSignal
+    ? AbortSignal.any([requestSignal, timeoutSignal])
+    : timeoutSignal
+}
+
 function contentToModelOutput(
   content: ContentItem[],
 ): LanguageModelV2ToolResultOutput {
@@ -58,15 +68,11 @@ export function buildBrowserToolSet(
       description: def.description,
       inputSchema: def.input,
       needsApproval: approvalConfig?.categories[def.approvalCategory] === true,
-      execute: async (params) => {
+      execute: async (params, options) => {
         const startTime = performance.now()
         try {
-          const result = await executeTool(
-            def,
-            params,
-            ctx,
-            AbortSignal.timeout(120_000),
-          )
+          const signal = combineToolAbortSignals(options.abortSignal, 120_000)
+          const result = await executeTool(def, params, ctx, signal)
 
           metrics.log('tool_executed', {
             tool_name: def.name,
@@ -79,6 +85,7 @@ export function buildBrowserToolSet(
             content: result.content,
             isError: result.isError ?? false,
             metadata: result.metadata,
+            structuredContent: result.structuredContent,
           }
         } catch (error) {
           const errorText =
