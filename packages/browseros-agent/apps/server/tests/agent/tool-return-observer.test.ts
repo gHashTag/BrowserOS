@@ -111,6 +111,75 @@ describe('observeToolReturn', () => {
     expect(resolved).toEqual([chunk])
   })
 
+  it('captures a stateful next accessor once like native for-await', async () => {
+    const rejection = new Error('exact second-pull rejection')
+    const accessorError = new Error('next accessor read twice')
+    const createSource = (label: string) => {
+      const yielded = { done: false, value: { label } }
+      let accessorReads = 0
+      let pulls = 0
+      const sourceIterator = Object.defineProperty({}, 'next', {
+        get() {
+          accessorReads += 1
+          if (accessorReads > 1) {
+            throw accessorError
+          }
+          return async () => {
+            pulls += 1
+            if (pulls === 1) {
+              return yielded
+            }
+            throw rejection
+          }
+        },
+      })
+      return {
+        accessorReads: () => accessorReads,
+        iterable: {
+          [Symbol.asyncIterator]: () => sourceIterator,
+        },
+        pulls: () => pulls,
+        yielded,
+      }
+    }
+
+    const baseline = createSource('baseline')
+    const baselineValues: unknown[] = []
+    let baselineError: unknown
+    try {
+      for await (const value of baseline.iterable) {
+        baselineValues.push(value)
+      }
+    } catch (error) {
+      baselineError = error
+    }
+    expect(baselineValues).toEqual([baseline.yielded.value])
+    expect(baselineError).toBe(rejection)
+    expect(baseline.accessorReads()).toBe(1)
+    expect(baseline.pulls()).toBe(2)
+
+    const source = createSource('observed')
+    const observedRejections: unknown[] = []
+    const observed = observeToolReturn(source.iterable, {
+      onResolved: () => {},
+      onRejected: (error) => observedRejections.push(error),
+      onCancelled: () => {},
+    }) as AsyncIterable<unknown>
+    const iterator = observed[Symbol.asyncIterator]()
+
+    expect(await iterator.next()).toBe(source.yielded)
+    let observedError: unknown
+    try {
+      await iterator.next()
+    } catch (error) {
+      observedError = error
+    }
+    expect(observedError).toBe(rejection)
+    expect(observedRejections).toEqual([rejection])
+    expect(source.accessorReads()).toBe(1)
+    expect(source.pulls()).toBe(2)
+  })
+
   it('forwards return before the first next and reports cancellation once', async () => {
     const returned = { done: true, value: 'closed' }
     let iteratorFactoryCalls = 0

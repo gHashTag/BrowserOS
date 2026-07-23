@@ -69,6 +69,9 @@ function observeAsyncIterator(
   sourceIterator: object,
   observer: ToolReturnObserver,
 ): AsyncIterator<unknown> & AsyncIterable<unknown> {
+  const nextMethod = iteratorMethod(sourceIterator, 'next', true) as (
+    ...args: unknown[]
+  ) => unknown
   let settled = false
   let cancellationRequested = false
   let lastOutput: unknown
@@ -105,13 +108,8 @@ function observeAsyncIterator(
   const observedIterator: AsyncIterator<unknown> & AsyncIterable<unknown> = {
     async next(...args: [] | [unknown]): Promise<IteratorResult<unknown>> {
       try {
-        const method = iteratorMethod(sourceIterator, 'next', true)
         return observeResult(
-          await Reflect.apply(
-            method as (...args: unknown[]) => unknown,
-            sourceIterator,
-            args,
-          ),
+          await Reflect.apply(nextMethod, sourceIterator, args),
         )
       } catch (error) {
         rejectOnce(error)
