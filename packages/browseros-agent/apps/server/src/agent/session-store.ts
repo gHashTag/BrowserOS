@@ -1,7 +1,7 @@
 import type { BrowserContext } from '@browseros/shared/schemas/browser-context'
 import { logger } from '../lib/logger'
 import type { AiSdkAgent } from './ai-sdk-agent'
-import type { ToolEvidenceSink } from './execution-evidence'
+import { appendEvidence, type ToolEvidenceSink } from './execution-evidence'
 import {
   completeExecutionRun,
   markRunWaitingForApproval,
@@ -47,13 +47,13 @@ function freezeExecutionRunSnapshot(run: ExecutionRun): ExecutionRun {
   })
 }
 
-function appendFrozenEvidence(
+function appendValidatedEvidence(
   run: ExecutionRun,
   event: EvidenceEvent,
 ): ExecutionRun {
   return Object.freeze({
     ...run,
-    evidence: Object.freeze([...run.evidence, freezeEvidenceEvent(event)]),
+    evidence: appendEvidence(run.evidence, event),
   })
 }
 
@@ -219,7 +219,7 @@ export class SessionStore {
       return false
     }
 
-    const updatedRun = appendFrozenEvidence(activeRun, event)
+    const updatedRun = appendValidatedEvidence(activeRun, event)
     this.activeRuns.set(conversationId, updatedRun)
     return true
   }

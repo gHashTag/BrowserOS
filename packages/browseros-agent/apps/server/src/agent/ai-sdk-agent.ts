@@ -47,43 +47,14 @@ import {
 import { buildSystemPrompt } from './prompt'
 import { createLanguageModel } from './provider-factory'
 import { buildBrowserToolSet } from './tool-adapter'
+import { observeToolReturn } from './tool-return-observer'
+import {
+  createToolSetDictionary,
+  defineToolSetEntry,
+} from './tool-set-dictionary'
 import type { ResolvedAgentConfig } from './types'
 
 type RuntimeToolExecute = (...args: unknown[]) => unknown
-
-function dataMethod(
-  value: unknown,
-  property: PropertyKey,
-): RuntimeToolExecute | undefined {
-  if (
-    (typeof value !== 'object' || value === null) &&
-    typeof value !== 'function'
-  ) {
-    return undefined
-  }
-
-  let current: object | null = value as object
-  for (let depth = 0; current !== null && depth < 16; depth += 1) {
-    let descriptor: PropertyDescriptor | undefined
-    try {
-      descriptor = Object.getOwnPropertyDescriptor(current, property)
-    } catch {
-      return undefined
-    }
-    if (descriptor !== undefined) {
-      return Object.hasOwn(descriptor, 'value') &&
-        typeof descriptor.value === 'function'
-        ? descriptor.value
-        : undefined
-    }
-    try {
-      current = Object.getPrototypeOf(current)
-    } catch {
-      return undefined
-    }
-  }
-  return undefined
-}
 
 function safeErrorMessage(error: unknown): string {
   try {
@@ -139,53 +110,12 @@ function instrumentExternalMcpTool(
       throw error
     }
 
-    const asyncIteratorMethod = dataMethod(output, Symbol.asyncIterator)
-    if (asyncIteratorMethod !== undefined) {
-      return (async function* () {
-        let completed = false
-        try {
-          for await (const chunk of output as AsyncIterable<unknown>) {
-            yield chunk
-          }
-          completed = true
-          settle(true)
-        } catch (error) {
-          settle(false, error)
-          throw error
-        } finally {
-          if (!completed) {
-            settle(false, new Error('Tool output iteration was cancelled'))
-          }
-        }
-      })()
-    }
-
-    const thenMethod = dataMethod(output, 'then')
-    if (
-      thenMethod !== undefined &&
-      (typeof output === 'object' || typeof output === 'function') &&
-      output !== null
-    ) {
-      return new Promise<unknown>((resolve, reject) => {
-        try {
-          thenMethod.call(output, resolve, reject)
-        } catch (error) {
-          reject(error)
-        }
-      }).then(
-        (resolved) => {
-          settle(true)
-          return resolved
-        },
-        (error) => {
-          settle(false, error)
-          throw error
-        },
-      )
-    }
-
-    settle(true)
-    return output
+    return observeToolReturn(output, {
+      onResolved: () => settle(true),
+      onRejected: (error) => settle(false, error),
+      onCancelled: () =>
+        settle(false, new Error('Tool output iteration was cancelled')),
+    })
   }
 
   const descriptors = Object.getOwnPropertyDescriptors(
@@ -199,6 +129,18 @@ function instrumentExternalMcpTool(
     Object.getPrototypeOf(sourceTool),
     descriptors,
   ) as ToolSet[string]
+}
+
+export function instrumentExternalMcpTools(tools: ToolSet): ToolSet {
+  const instrumented = createToolSetDictionary()
+  for (const [name, sourceTool] of Object.entries(tools)) {
+    defineToolSetEntry(
+      instrumented,
+      name,
+      instrumentExternalMcpTool(name, sourceTool),
+    )
+  }
+  return instrumented
 }
 
 export interface AiSdkAgentConfig {
@@ -308,10 +250,7 @@ export class AiSdkAgent {
     // Wrap external MCP tools (Klavis, custom) with return-shape-preserving
     // metrics. In particular, AsyncIterable preliminary outputs must remain
     // AsyncIterable instead of becoming Promise<AsyncIterable>.
-    const externalMcpTools: ToolSet = {}
-    for (const [name, t] of Object.entries(rawExternalMcpTools)) {
-      externalMcpTools[name] = instrumentExternalMcpTool(name, t)
-    }
+    const externalMcpTools = instrumentExternalMcpTools(rawExternalMcpTools)
 
     // Add filesystem tools — skip in chat mode (read-only) and when no workspace is selected
     const filesystemTools =

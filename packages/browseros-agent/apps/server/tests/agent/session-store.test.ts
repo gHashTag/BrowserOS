@@ -710,4 +710,38 @@ describe('SessionStore turn leases', () => {
     ).toBe(true)
     expect(() => ownerSink.record(hostileStaleEvent)).not.toThrow()
   })
+
+  it('rejects malformed owner evidence while the observe-only sink ignores it', () => {
+    const store = new SessionStore()
+    acquireTurn(store, createRunningRun('run-1'))
+    const validEvent = {
+      eventId: 'valid-event',
+      toolCallId: 'valid-call',
+      toolName: 'filesystem_read',
+      kind: 'settled',
+      effects: ['filesystem-read'],
+      retrySafety: 'safe',
+      argumentDigest: 'argument-digest',
+      recordedAt: 400,
+    } satisfies EvidenceEvent
+    const malformedEvent = {
+      ...validEvent,
+      eventId: 'malformed-event',
+      kind: 'fabricated',
+    } as unknown as EvidenceEvent
+
+    expect(() =>
+      store.recordEvidence('conversation-1', 'run-1', malformedEvent),
+    ).toThrow(TypeError)
+    expect(store.getActiveRun('conversation-1')?.evidence).toEqual([])
+
+    const ownerSink = store.createEvidenceSink('conversation-1', 'run-1')
+    expect(() => ownerSink.record(malformedEvent)).not.toThrow()
+    expect(store.getActiveRun('conversation-1')?.evidence).toEqual([])
+
+    expect(store.recordEvidence('conversation-1', 'run-1', validEvent)).toBe(
+      true,
+    )
+    expect(store.getActiveRun('conversation-1')?.evidence).toHaveLength(1)
+  })
 })

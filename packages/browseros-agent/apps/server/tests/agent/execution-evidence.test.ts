@@ -1589,6 +1589,7 @@ describe('wrapToolSetWithEvidence', () => {
     expect(events[1].result).toEqual(
       result({
         executionStatus: 'aborted',
+        effectStatus: 'unknown',
         verificationStatus: 'not-run',
       }),
     )

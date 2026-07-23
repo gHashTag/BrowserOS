@@ -11,6 +11,11 @@ import type {
   NormalizedToolResult,
   ToolEffect,
 } from './execution-types'
+import { observeToolReturn } from './tool-return-observer'
+import {
+  createToolSetDictionary,
+  defineToolSetEntry,
+} from './tool-set-dictionary'
 
 export interface ToolExecutionReceipt {
   readonly effectStatus?: NormalizedToolResult['effectStatus']
@@ -716,6 +721,22 @@ export class MutableToolEvidenceSinkRelay implements ToolEvidenceSink {
 
 const MAX_DIGEST_DEPTH = 64
 const MAX_DIGEST_ENTRIES = 10_000
+const MAX_DIGEST_OBJECT_KEYS = 2_048
+const MAX_DIGEST_STRING_LENGTH = 4_096
+const MAX_DIGEST_STRING_BUDGET = 64 * 1_024
+const MAX_DIGEST_KEY_CHARS_PER_OBJECT = 32 * 1_024
+const MAX_DIGEST_WORK = 50_000
+
+interface DigestBudget {
+  remainingStringChars: number
+  remainingWork: number
+  exhausted: boolean
+}
+
+type EvidenceToolExecute = (
+  input: unknown,
+  executionOptions: ToolExecutionOptions,
+) => unknown
 
 function updateDigestToken(
   hash: ReturnType<typeof createHash>,
@@ -733,7 +754,22 @@ function updateDigestToken(
 function writePrimitiveDigest(
   hash: ReturnType<typeof createHash>,
   value: unknown,
+  budget: DigestBudget,
 ): boolean {
+  const writeBoundedString = (kind: string, text: string): void => {
+    if (text.length > MAX_DIGEST_STRING_LENGTH) {
+      updateDigestToken(hash, `${kind}-opaque`, String(text.length))
+      return
+    }
+    if (text.length > budget.remainingStringChars) {
+      updateDigestToken(hash, 'string-budget-limit')
+      budget.exhausted = true
+      return
+    }
+    budget.remainingStringChars -= text.length
+    updateDigestToken(hash, kind, text)
+  }
+
   switch (typeof value) {
     case 'undefined':
       updateDigestToken(hash, 'undefined')
@@ -753,13 +789,13 @@ function writePrimitiveDigest(
       )
       return true
     case 'bigint':
-      updateDigestToken(hash, 'bigint', value.toString())
+      writeBoundedString('bigint', value.toString())
       return true
     case 'string':
-      updateDigestToken(hash, 'string', value)
+      writeBoundedString('string', value)
       return true
     case 'symbol':
-      updateDigestToken(hash, 'symbol', String(value))
+      writeBoundedString('symbol', String(value))
       return true
     case 'function':
       updateDigestToken(hash, 'function')
@@ -776,16 +812,38 @@ function writePrimitiveDigest(
 function canonicalDigest(value: unknown): string {
   const hash = createHash('sha256')
   const seen = new WeakMap<object, number>()
+  const budget: DigestBudget = {
+    remainingStringChars: MAX_DIGEST_STRING_BUDGET,
+    remainingWork: MAX_DIGEST_WORK,
+    exhausted: false,
+  }
   let nextObjectId = 0
   let entryCount = 0
 
+  const consumeWork = (units: number): boolean => {
+    if (budget.exhausted) {
+      return false
+    }
+    if (units > budget.remainingWork) {
+      updateDigestToken(hash, 'work-budget-limit')
+      budget.exhausted = true
+      return false
+    }
+    budget.remainingWork -= units
+    return true
+  }
+
+  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: One bounded walker keeps the global work budget authoritative across recursive frames.
   const visit = (current: unknown, depth: number): void => {
+    if (!consumeWork(1)) {
+      return
+    }
     if (depth > MAX_DIGEST_DEPTH) {
       updateDigestToken(hash, 'depth-limit')
       return
     }
 
-    if (writePrimitiveDigest(hash, current)) {
+    if (writePrimitiveDigest(hash, current, budget)) {
       return
     }
 
@@ -800,6 +858,26 @@ function canonicalDigest(value: unknown): string {
     seen.set(objectValue, objectId)
     updateDigestToken(hash, 'object', String(objectId))
 
+    const arrayCheck = safeArrayCheck(objectValue)
+    if (arrayCheck === true) {
+      const lengthProperty = readOwnDataProperty(objectValue, 'length')
+      if (
+        lengthProperty.state !== 'data' ||
+        !Number.isSafeInteger(lengthProperty.value) ||
+        (lengthProperty.value as number) < 0
+      ) {
+        updateDigestToken(hash, 'opaque-array-length')
+        return
+      }
+      if ((lengthProperty.value as number) > MAX_DIGEST_OBJECT_KEYS) {
+        updateDigestToken(hash, 'opaque-array', String(lengthProperty.value))
+        return
+      }
+    } else if (arrayCheck === undefined) {
+      updateDigestToken(hash, 'opaque-array-check')
+      return
+    }
+
     let keys: PropertyKey[]
     try {
       keys = Reflect.ownKeys(objectValue)
@@ -808,18 +886,60 @@ function canonicalDigest(value: unknown): string {
       return
     }
 
-    const sortableKeys = keys
-      .map((key) => ({
-        key,
-        label:
-          typeof key === 'string' ? `string:${key}` : `symbol:${String(key)}`,
-      }))
-      .sort((left, right) => left.label.localeCompare(right.label))
+    const remainingEntries = MAX_DIGEST_ENTRIES - entryCount
+    if (
+      keys.length > MAX_DIGEST_OBJECT_KEYS ||
+      keys.length > remainingEntries
+    ) {
+      updateDigestToken(
+        hash,
+        arrayCheck ? 'opaque-array-keys' : 'opaque-object-keys',
+        String(keys.length),
+      )
+      return
+    }
+
+    const sortWork =
+      keys.length * Math.max(1, Math.ceil(Math.log2(Math.max(2, keys.length))))
+    if (!consumeWork(keys.length + sortWork)) {
+      return
+    }
+
+    const sortableKeys: Array<{ key: PropertyKey; label: string }> = []
+    let keyChars = 0
+    for (const key of keys) {
+      const label =
+        typeof key === 'string' ? `string:${key}` : `symbol:${String(key)}`
+      keyChars += label.length
+      if (
+        label.length > MAX_DIGEST_STRING_LENGTH ||
+        keyChars > MAX_DIGEST_KEY_CHARS_PER_OBJECT
+      ) {
+        updateDigestToken(
+          hash,
+          arrayCheck ? 'opaque-array-key-text' : 'opaque-object-key-text',
+          String(keys.length),
+        )
+        return
+      }
+      sortableKeys.push({ key, label })
+    }
+    if (keyChars > budget.remainingStringChars) {
+      updateDigestToken(hash, 'string-budget-limit')
+      budget.exhausted = true
+      return
+    }
+    budget.remainingStringChars -= keyChars
+    sortableKeys.sort((left, right) => left.label.localeCompare(right.label))
 
     for (const { key, label } of sortableKeys) {
+      if (budget.exhausted) {
+        return
+      }
       entryCount += 1
       if (entryCount > MAX_DIGEST_ENTRIES) {
         updateDigestToken(hash, 'entry-limit')
+        budget.exhausted = true
         return
       }
       updateDigestToken(hash, 'key', label)
@@ -890,9 +1010,13 @@ function safeDescriptor(
 function capturedSink(
   sink: ToolEvidenceSink | undefined,
 ): ToolEvidenceSink | undefined {
-  return sink instanceof MutableToolEvidenceSinkRelay
-    ? sink.captureTarget()
-    : sink
+  try {
+    return sink instanceof MutableToolEvidenceSinkRelay
+      ? sink.captureTarget()
+      : sink
+  } catch {
+    return undefined
+  }
 }
 
 function safelyRecord(
@@ -932,122 +1056,49 @@ function createEvidenceEvent(input: {
   )
 }
 
-function dataMethod(
-  value: unknown,
-  property: PropertyKey,
-): ((...args: unknown[]) => unknown) | undefined {
-  if (
-    (typeof value !== 'object' || value === null) &&
-    typeof value !== 'function'
-  ) {
-    return undefined
-  }
-
-  let current: object | null = value as object
-  for (let depth = 0; current !== null && depth < 16; depth += 1) {
-    let descriptor: PropertyDescriptor | undefined
-    try {
-      descriptor = Object.getOwnPropertyDescriptor(current, property)
-    } catch {
-      return undefined
-    }
-    if (descriptor !== undefined) {
-      return Object.hasOwn(descriptor, 'value') &&
-        typeof descriptor.value === 'function'
-        ? descriptor.value
-        : undefined
-    }
-    try {
-      current = Object.getPrototypeOf(current)
-    } catch {
-      return undefined
-    }
-  }
-  return undefined
-}
-
-function observePromiseLike(
-  value: object,
-  thenMethod: (...args: unknown[]) => unknown,
-  onResolved: (output: unknown) => void,
-  onRejected: (error: unknown) => void,
-): Promise<unknown> {
-  return new Promise<unknown>((resolve, reject) => {
-    try {
-      thenMethod.call(value, resolve, reject)
-    } catch (error) {
-      reject(error)
-    }
-  }).then(
-    (output) => {
-      onResolved(output)
-      return output
-    },
-    (error) => {
-      onRejected(error)
-      throw error
-    },
-  )
-}
-
-function observeAsyncIterable(
-  value: AsyncIterable<unknown>,
-  onResolved: (output: unknown) => void,
-  onRejected: (error: unknown) => void,
-  onCancelled: (output: unknown) => void,
-): AsyncIterable<unknown> {
-  return (async function* () {
-    let completed = false
-    let lastOutput: unknown
-    try {
-      for await (const output of value) {
-        lastOutput = output
-        yield output
-      }
-      completed = true
-      onResolved(lastOutput)
-    } catch (error) {
-      onRejected(error)
-      throw error
-    } finally {
-      if (!completed) {
-        onCancelled(lastOutput)
-      }
-    }
-  })()
-}
-
-function wrapExecutableTool(
+function createObservedExecute(
   toolName: string,
-  sourceTool: ToolSet[string],
   sourceExecute: (...args: unknown[]) => unknown,
   options: {
     readonly evidenceSink: ToolEvidenceSink
     readonly describeTool: (name: string) => ToolReliabilityDescriptor
   },
-): ToolSet[string] {
-  const wrappedExecute = function (
+): EvidenceToolExecute {
+  return function (
     this: unknown,
     input: unknown,
     executionOptions: ToolExecutionOptions,
   ): unknown {
     const sink = capturedSink(options.evidenceSink)
-    const descriptor = safeDescriptor(toolName, options.describeTool)
-    const argumentDigest = canonicalDigest(input)
-    const preAborted = executionOptions.abortSignal?.aborted === true
-    const started = !preAborted
+    if (sink === undefined) {
+      return sourceExecute.call(this, input, executionOptions)
+    }
+    let descriptor: ToolReliabilityDescriptor
+    let argumentDigest: string
+    let toolCallId: string
+    let abortSignal: AbortSignal | undefined
+    let preAborted: boolean
+    try {
+      descriptor = safeDescriptor(toolName, options.describeTool)
+      argumentDigest = canonicalDigest(input)
+      toolCallId = executionOptions.toolCallId
+      abortSignal = executionOptions.abortSignal
+      preAborted = abortSignal?.aborted === true
+      safelyRecord(
+        sink,
+        createEvidenceEvent({
+          toolCallId,
+          toolName,
+          kind: 'requested',
+          descriptor,
+          argumentDigest,
+        }),
+      )
+    } catch {
+      return sourceExecute.call(this, input, executionOptions)
+    }
+    let started = false
     let settled = false
-
-    safelyRecord(
-      sink,
-      createEvidenceEvent({
-        toolCallId: executionOptions.toolCallId,
-        toolName,
-        kind: 'requested',
-        descriptor,
-        argumentDigest,
-      }),
-    )
 
     const settle = (
       outcome: ToolResultObservation['outcome'],
@@ -1057,67 +1108,59 @@ function wrapExecutableTool(
         return
       }
       settled = true
-      const effectiveOutcome =
-        preAborted || executionOptions.abortSignal?.aborted === true
-          ? 'aborted'
-          : outcome
-      const normalized = normalizeToolResult({
-        outcome: effectiveOutcome,
-        started,
-        effects: descriptor.effects,
-        output,
-      })
-      safelyRecord(
-        sink,
-        createEvidenceEvent({
-          toolCallId: executionOptions.toolCallId,
-          toolName,
-          kind: 'settled',
-          descriptor,
-          argumentDigest,
-          result: normalized,
-          outputDigest:
-            outcome === 'rejected' ? undefined : canonicalDigest(output),
-        }),
-      )
+      try {
+        const effectiveOutcome =
+          preAborted || abortSignal?.aborted === true ? 'aborted' : outcome
+        const normalized = normalizeToolResult({
+          outcome: effectiveOutcome,
+          started,
+          effects: descriptor.effects,
+          output,
+        })
+        safelyRecord(
+          sink,
+          createEvidenceEvent({
+            toolCallId,
+            toolName,
+            kind: 'settled',
+            descriptor,
+            argumentDigest,
+            result: normalized,
+            outputDigest:
+              outcome === 'rejected' ? undefined : canonicalDigest(output),
+          }),
+        )
+      } catch {
+        // Evidence settlement is observe-only and cannot replace tool behavior.
+      }
     }
 
     let output: unknown
     try {
+      started = true
       output = sourceExecute.call(this, input, executionOptions)
     } catch (error) {
       settle('rejected', error)
       throw error
     }
 
-    const asyncIteratorMethod = dataMethod(output, Symbol.asyncIterator)
-    if (asyncIteratorMethod !== undefined) {
-      return observeAsyncIterable(
-        output as AsyncIterable<unknown>,
-        (finalOutput) => settle('resolved', finalOutput),
-        (error) => settle('rejected', error),
-        (lastOutput) => settle('aborted', lastOutput),
-      )
-    }
-
-    const thenMethod = dataMethod(output, 'then')
-    if (
-      thenMethod !== undefined &&
-      (typeof output === 'object' || typeof output === 'function') &&
-      output !== null
-    ) {
-      return observePromiseLike(
-        output,
-        thenMethod,
-        (resolved) => settle('resolved', resolved),
-        (error) => settle('rejected', error),
-      )
-    }
-
-    settle('resolved', output)
-    return output
+    return observeToolReturn(output, {
+      onResolved: (resolved) => settle('resolved', resolved),
+      onRejected: (error) => settle('rejected', error),
+      onCancelled: (lastOutput) => settle('aborted', lastOutput),
+    })
   }
+}
 
+function wrapDataExecutableTool(
+  toolName: string,
+  sourceTool: ToolSet[string],
+  sourceExecute: (...args: unknown[]) => unknown,
+  options: {
+    readonly evidenceSink: ToolEvidenceSink
+    readonly describeTool: (name: string) => ToolReliabilityDescriptor
+  },
+): ToolSet[string] {
   const descriptors = Object.getOwnPropertyDescriptors(
     sourceTool,
   ) as PropertyDescriptorMap
@@ -1128,7 +1171,59 @@ function wrapExecutableTool(
       enumerable: true,
       writable: true,
     }),
-    value: wrappedExecute,
+    value: createObservedExecute(toolName, sourceExecute, options),
+  }
+  return Object.create(
+    Object.getPrototypeOf(sourceTool),
+    descriptors,
+  ) as ToolSet[string]
+}
+
+type ExecuteDescriptorLookup =
+  | { readonly state: 'missing' }
+  | { readonly state: 'failed' }
+  | { readonly state: 'found'; readonly descriptor: PropertyDescriptor }
+
+function findExecuteDescriptor(
+  sourceTool: ToolSet[string],
+): ExecuteDescriptorLookup {
+  let current: object | null = sourceTool
+  try {
+    while (current !== null) {
+      const descriptor = Object.getOwnPropertyDescriptor(current, 'execute')
+      if (descriptor !== undefined) {
+        return { state: 'found', descriptor }
+      }
+      current = Object.getPrototypeOf(current)
+    }
+  } catch {
+    return { state: 'failed' }
+  }
+  return { state: 'missing' }
+}
+
+function wrapAccessorExecutableTool(
+  toolName: string,
+  sourceTool: ToolSet[string],
+  executeDescriptor: PropertyDescriptor,
+  options: {
+    readonly evidenceSink: ToolEvidenceSink
+    readonly describeTool: (name: string) => ToolReliabilityDescriptor
+  },
+): ToolSet[string] {
+  const descriptors = Object.getOwnPropertyDescriptors(
+    sourceTool,
+  ) as PropertyDescriptorMap
+  descriptors.execute = {
+    configurable: executeDescriptor.configurable ?? true,
+    enumerable: executeDescriptor.enumerable ?? false,
+    get(this: unknown): unknown {
+      const sourceExecute = executeDescriptor.get?.call(this)
+      return typeof sourceExecute === 'function'
+        ? createObservedExecute(toolName, sourceExecute, options)
+        : sourceExecute
+    },
+    set: executeDescriptor.set,
   }
   return Object.create(
     Object.getPrototypeOf(sourceTool),
@@ -1147,26 +1242,47 @@ export function wrapToolSetWithEvidence(
     return tools
   }
 
-  const wrapped: ToolSet = {}
+  const wrapped = createToolSetDictionary()
   for (const [name, sourceTool] of Object.entries(tools)) {
-    const executeDescriptor = Object.getOwnPropertyDescriptor(
-      sourceTool,
-      'execute',
-    )
-    wrapped[name] =
-      executeDescriptor !== undefined &&
-      Object.hasOwn(executeDescriptor, 'value') &&
-      typeof executeDescriptor.value === 'function'
-        ? wrapExecutableTool(
-            name,
-            sourceTool,
-            executeDescriptor.value,
-            options as {
-              readonly evidenceSink: ToolEvidenceSink
-              readonly describeTool: (name: string) => ToolReliabilityDescriptor
-            },
-          )
-        : sourceTool
+    const lookup = findExecuteDescriptor(sourceTool)
+    if (
+      lookup.state === 'found' &&
+      Object.hasOwn(lookup.descriptor, 'value') &&
+      typeof lookup.descriptor.value === 'function'
+    ) {
+      defineToolSetEntry(
+        wrapped,
+        name,
+        wrapDataExecutableTool(
+          name,
+          sourceTool,
+          lookup.descriptor.value,
+          options as {
+            readonly evidenceSink: ToolEvidenceSink
+            readonly describeTool: (name: string) => ToolReliabilityDescriptor
+          },
+        ),
+      )
+    } else if (
+      lookup.state === 'found' &&
+      !Object.hasOwn(lookup.descriptor, 'value')
+    ) {
+      defineToolSetEntry(
+        wrapped,
+        name,
+        wrapAccessorExecutableTool(
+          name,
+          sourceTool,
+          lookup.descriptor,
+          options as {
+            readonly evidenceSink: ToolEvidenceSink
+            readonly describeTool: (name: string) => ToolReliabilityDescriptor
+          },
+        ),
+      )
+    } else {
+      defineToolSetEntry(wrapped, name, sourceTool)
+    }
   }
   return wrapped
 }
