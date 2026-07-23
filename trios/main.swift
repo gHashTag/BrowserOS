@@ -141,6 +141,7 @@ class KeyWindow: NSWindow {
 
 // MARK: - AppDelegate
 
+@MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     let windowManager = WindowManager()
@@ -168,6 +169,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSLog("applicationDidFinishLaunching called")
         NSApplication.shared.setActivationPolicy(.regular)
         NSApplication.shared.activate(ignoringOtherApps: true)
+        ApplicationMenuInstaller.install(delegate: self)
 
         setupStatusItem()
         // CRITICAL: setupSidePanel MUST run synchronously before any UI interaction.
@@ -176,6 +178,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupSidePanel()
         accessibilityGranted = AXIsProcessTrusted()
         setupGlobalHotkey()
+        serverManager.startIfNeeded()
 
         Task { @MainActor in
             if let vm = chatViewModel {
@@ -189,6 +192,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             cg.startMonitoring()
             await chatViewModel?.registerA2A()
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        sessionGuard?.stopMonitoring()
+        cladeGuard?.stopMonitoring()
+        serverManager.terminateAll()
+    }
+
+    @objc func exportSessionRecoveryPackage(_ sender: Any?) {
+        NSLog("Export session recovery package requested")
+        NotificationCenter.default.post(name: .exportSessionRecoveryPackage, object: nil)
     }
 
     private func setupStatusItem() {
@@ -470,7 +484,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func openPublic() {
-        guard let url = URL(string: "https://playras-macbook-pro-1.tail01804b.ts.net") else { return }
+        let host = ProcessInfo.processInfo.environment["TRIOS_PUBLIC_HOST"]
+            ?? "https://playras-macbook-pro-1.tail01804b.ts.net"
+        guard let url = URL(string: host) else { return }
         NSWorkspace.shared.open(url)
     }
 
@@ -578,6 +594,7 @@ struct CompositionRoot {
         let parser = UIMessageStreamParser()
         let persister = ConversationPersister()
         let stateMachine = ConversationStateMachine()
+        let modelStore = ModelConfigurationStore.shared
 
         let serverURL = URL(string: ProjectPaths.mcpBaseURL) ?? URL(fileURLWithPath: "/dev/null")
         let agentCard = AgentCard(
@@ -597,7 +614,8 @@ struct CompositionRoot {
             parser: parser,
             persister: persister,
             stateMachine: stateMachine,
-            a2aClient: a2aClient
+            a2aClient: a2aClient,
+            modelStore: modelStore
         )
         NSLog("CompositionRoot: ChatViewModel created")
         return vm
@@ -633,6 +651,8 @@ guard RecursionGuard.shared.ensureSingleInstance() else {
     exit(0)
 }
 
-let delegate = AppDelegate()
-NSApplication.shared.delegate = delegate
-NSApplication.shared.run()
+MainActor.assumeIsolated {
+    let delegate = AppDelegate()
+    NSApplication.shared.delegate = delegate
+    NSApplication.shared.run()
+}

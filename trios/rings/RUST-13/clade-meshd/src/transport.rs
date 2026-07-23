@@ -37,14 +37,9 @@ pub async fn spawn_udp_io(bind_addr: SocketAddr) -> io::Result<UdpIo> {
     let rx_socket = socket.clone();
     tokio::spawn(async move {
         let mut buf = vec![0u8; 2048];
-        loop {
-            match rx_socket.recv_from(&mut buf).await {
-                Ok((n, addr)) => {
-                    if frame_tx.send((addr, buf[..n].to_vec())).is_err() {
-                        break;
-                    }
-                }
-                Err(_) => break,
+        while let Ok((n, addr)) = rx_socket.recv_from(&mut buf).await {
+            if frame_tx.send((addr, buf[..n].to_vec())).is_err() {
+                break;
             }
         }
     });

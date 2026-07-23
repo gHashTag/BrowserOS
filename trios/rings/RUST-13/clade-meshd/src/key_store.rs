@@ -60,7 +60,7 @@ pub fn load_or_generate(node_id: NodeId) -> Result<StaticKey, String> {
 
     let key = StaticKey::generate();
     let secret_bytes = key.secret_bytes();
-    let encoded = BASE64.encode(&secret_bytes);
+    let encoded = BASE64.encode(secret_bytes);
 
     let dir = default_key_dir();
     fs::create_dir_all(&dir).map_err(|e| format!("cannot create key dir {}: {e}", dir.display()))?;

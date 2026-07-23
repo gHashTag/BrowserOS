@@ -5,6 +5,10 @@
 //!
 //! phi^2 + phi^-2 = 3
 
+// Tests assert on infallible test-only roundtrips; unwrap/expect are allowed
+// in test code while production code remains covered by the workspace deny lint.
+#![cfg_attr(test, allow(clippy::unwrap_used, clippy::expect_used))]
+
 mod chat;
 mod key_store;
 mod transport;
@@ -235,7 +239,7 @@ fn udp_bind_addr(node_id: NodeId) -> SocketAddr {
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or_else(|| {
-            let port = (9600u32 + node_id as u32).min(u16::MAX as u32) as u16;
+            let port = (9600u32 + node_id).min(u16::MAX as u32) as u16;
             SocketAddr::from(([127, 0, 0, 1], port))
         })
 }
@@ -262,7 +266,7 @@ async fn run_frame_processor(
             Err(_) => continue,
         };
 
-        let channel = chat::channel_for_peer(&*guard);
+        let channel = chat::channel_for_peer(&guard);
         let _ = guard.store.record_incoming(src, kind, text, payload_b64, channel);
     }
 }
@@ -833,7 +837,7 @@ fn routes(
         .and_then(chat_poll_handler);
 
     let cors = warp::cors()
-        .allow_any_origin()
+        .allow_origin("http://127.0.0.1")
         .allow_methods(vec!["GET", "POST", "OPTIONS"])
         .allow_headers(vec!["content-type"]);
 
@@ -934,12 +938,14 @@ mod tests {
 
     #[tokio::test]
     async fn chat_round_trip_seal_open_and_store() -> Result<(), String> {
-        use std::path::PathBuf;
-
-        let alice_path = PathBuf::from("/tmp/clade_meshd_test_alice.json");
-        let bob_path = PathBuf::from("/tmp/clade_meshd_test_bob.json");
-        let _ = std::fs::remove_file(&alice_path);
-        let _ = std::fs::remove_file(&bob_path);
+        let tmp = std::env::temp_dir().join(format!(
+            "clade-meshd-main-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = std::fs::create_dir_all(&tmp);
+        let alice_path = tmp.join("alice.json");
+        let bob_path = tmp.join("bob.json");
 
         let alice_udp = transport::spawn_udp_io("127.0.0.1:0".parse().unwrap())
             .await
@@ -987,19 +993,23 @@ mod tests {
         assert!(!bob_messages[0].is_outgoing);
         assert_eq!(bob_messages[0].text.as_deref(), Some(text));
 
+        let _ = std::fs::remove_dir_all(&tmp);
         Ok(())
     }
 
     #[tokio::test]
     async fn udp_chat_transport_round_trip() -> Result<(), String> {
-        use std::path::PathBuf;
         use std::time::Duration;
         use tokio::time::timeout;
 
-        let alice_path = PathBuf::from("/tmp/clade_meshd_udp_alice.json");
-        let bob_path = PathBuf::from("/tmp/clade_meshd_udp_bob.json");
-        let _ = std::fs::remove_file(&alice_path);
-        let _ = std::fs::remove_file(&bob_path);
+        let tmp = std::env::temp_dir().join(format!(
+            "clade-meshd-udp-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = std::fs::create_dir_all(&tmp);
+        let alice_path = tmp.join("alice.json");
+        let bob_path = tmp.join("bob.json");
 
         let alice_udp = transport::spawn_udp_io("127.0.0.1:0".parse().unwrap())
             .await
@@ -1064,7 +1074,7 @@ mod tests {
             .map_err(|e| format!("transport send failed: {e}"))?;
 
         // Wait for the frame to arrive and be stored.
-        let _ = timeout(Duration::from_secs(2), async {
+        timeout(Duration::from_secs(2), async {
             loop {
                 {
                     let guard = bob_state.read().await;
@@ -1082,6 +1092,7 @@ mod tests {
         .await
         .map_err(|_| "timed out waiting for incoming message")?;
 
+        let _ = std::fs::remove_dir_all(&tmp);
         Ok(())
     }
 }
