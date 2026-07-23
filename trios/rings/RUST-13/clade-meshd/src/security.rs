@@ -12,7 +12,6 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use rand::{distributions::Alphanumeric, Rng};
 use subtle::ConstantTimeEq;
 use warp::Filter;
 
@@ -37,26 +36,14 @@ pub const MAX_FRAME_SIZE: usize = 512;
 /// media payload.
 pub const MAX_CHAT_PAYLOAD: usize = 4 * 1024;
 
-/// Length of generated API tokens.
-const TOKEN_LEN: usize = 32;
-
-/// Load or generate the daemon API token.
+/// Load the daemon API token from the environment.
 ///
-/// If `TRIOS_MESH_API_TOKEN` is set and non-empty it is used verbatim.
-/// Otherwise a URL-safe random token is generated.
-pub fn load_api_token() -> String {
+/// Returns `None` if `TRIOS_MESH_API_TOKEN` is unset or empty. Callers are
+/// expected to fail-closed rather than generate a secret and print it to logs.
+pub fn load_api_token() -> Option<String> {
     std::env::var(API_TOKEN_ENV)
         .ok()
         .filter(|s| !s.is_empty())
-        .unwrap_or_else(generate_random_token)
-}
-
-fn generate_random_token() -> String {
-    rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(TOKEN_LEN)
-        .map(char::from)
-        .collect()
 }
 
 /// Warp filter that rejects requests without a valid `Authorization: Bearer`

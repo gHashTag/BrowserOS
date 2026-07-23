@@ -876,10 +876,13 @@ fn routes(
         .and(with_state(state.clone()))
         .and_then(chat_poll_handler);
 
+    // All state-changing endpoints require the bearer token, so we can safely
+    // allow loopback origins regardless of port. `allow_any_origin()` is
+    // acceptable here because the auth filter provides the actual access control.
     let cors = warp::cors()
-        .allow_origin("http://127.0.0.1")
+        .allow_any_origin()
         .allow_methods(vec!["GET", "POST", "OPTIONS"])
-        .allow_headers(vec!["content-type"]);
+        .allow_headers(vec!["content-type", "authorization"]);
 
     health
         .or(status)
@@ -939,13 +942,22 @@ async fn main() {
 
     let port = port();
     let udp_local = udp.socket.local_addr().unwrap_or(udp_bind);
-    let api_token = security::load_api_token();
-    if std::env::var(security::API_TOKEN_ENV).is_err() {
-        eprintln!(
-            "[clade-meshd] generated API token: {} (set TRIOS_MESH_API_TOKEN to persist)",
-            api_token
-        );
-    }
+
+    // Fail-closed: the daemon must be launched with an explicit API token so
+    // that the Swift UI (or any other client) can authenticate. Generating a
+    // secret and printing it to stderr is unsafe because it leaks to logs and
+    // leaves the UI with no programmatic way to obtain the token.
+    let api_token = match security::load_api_token() {
+        Some(token) => token,
+        None => {
+            eprintln!(
+                "[clade-meshd] FATAL: {} must be set to a non-empty value before starting",
+                security::API_TOKEN_ENV
+            );
+            std::process::exit(1);
+        }
+    };
+
     println!(
         "[clade-meshd] node_id={node_id} http_port={port} udp={udp_local} public_key={public_key_b64}"
     );

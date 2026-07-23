@@ -500,7 +500,12 @@ final class QueenStatusViewModel: ObservableObject {
 
     func runCron() {
         isRunningAction = true
-        execDirect("/usr/bin/env", arguments: ["cargo", "run", "--bin", "clade-monitor"])
+        guard let cargo = CommandResolver.executableURL(for: "cargo") else {
+            NSLog("[QueenStatus] cargo not found; set TRIOS_CARGO_PATH")
+            isRunningAction = false
+            return
+        }
+        execDirect(cargo.path, arguments: ["run", "--bin", "clade-monitor"])
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             self?.refreshAll()
             self?.isRunningAction = false
@@ -518,7 +523,15 @@ final class QueenStatusViewModel: ObservableObject {
         skills[index] = SkillRun(name: name, lastRun: skills[index].lastRun, success: skills[index].success, isRunning: true)
         objectWillChange.send()
 
-        execDirect("/usr/bin/env", arguments: ["claude", name])
+        guard let claude = CommandResolver.executableURL(for: "claude") else {
+            NSLog("[QueenStatus] claude not found; set TRIOS_CLAUDE_PATH")
+            if let idx = skills.firstIndex(where: { $0.name == name }) {
+                skills[idx] = SkillRun(name: name, lastRun: skills[idx].lastRun, success: false, isRunning: false)
+                objectWillChange.send()
+            }
+            return
+        }
+        execDirect(claude.path, arguments: [name])
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
             if let idx = self?.skills.firstIndex(where: { $0.name == name }) {
                 self?.skills[idx] = SkillRun(name: name, lastRun: Date(), success: true, isRunning: false)
@@ -537,18 +550,15 @@ final class QueenStatusViewModel: ObservableObject {
         "TRIOS_MESH_NODE_ID=", "TRIOS_MESH_PORT="
     ]
 
+    /// Runs a user-typed command using a fixed executable path and literal argv.
+    /// The previous `/usr/bin/env` dispatcher resolved the first token via PATH,
+    /// which is PATH-spoofable. We now resolve known commands to absolute system
+    /// paths and reject anything else.
     func runCommand(_ cmd: String) {
         let trimmed = cmd.trimmingCharacters(in: .whitespaces)
-        // Literal (not regex) substring blocklist. The previous
-        // `.regularExpression` match was unsafe: `$(` is an invalid pattern
-        // (unclosed group) so it was never blocked, while `|`/`||` are regex
-        // alternations matching the empty string. Literal `contains` matching
-        // closes both. Per CWE-78 / OWASP A03 this blocklist over a shell is
-        // bypassable (command/argument/wildcard injection), so it is
-        // defense-in-depth only - the robust fix is shell-free `execDirect`.
+
         let blocked = [";", "&&", "||", "|", "`", "$(", "${", ">", "<", "..", "~", "rm -rf", "\n", "\r"]
         for b in blocked {
-            // Literal substring match (no `.regularExpression` options).
             if trimmed.range(of: b) != nil {
                 NSLog("[QueenStatus] BLOCKED dangerous token in command: \(b)")
                 return
@@ -559,27 +569,41 @@ final class QueenStatusViewModel: ObservableObject {
             NSLog("[QueenStatus] BLOCKED unlisted command: \(trimmed)")
             return
         }
-        isRunningAction = true
-        // Shell-free execution: tokenise and run via /usr/bin/env, NOT
-        // `/bin/zsh -c`. Shell metacharacters can no longer be interpreted -
-        // at most they become literal argv - which structurally removes the
-        // command-injection class (CWE-78 / OWASP A03). The blocklist/allowlist
-        // above remain as defense-in-depth. PATH resolution is unchanged (env
-        // inherits the same environment the old `zsh -c` did).
+
         let tokens = trimmed.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
-        guard !tokens.isEmpty else {
-            isRunningAction = false
+        guard !tokens.isEmpty else { return }
+
+        // Parse leading KEY=value env assignments (used by mesh launch commands).
+        var envOverrides: [String: String] = [:]
+        var commandStart = 0
+        for (i, token) in tokens.enumerated() {
+            let parts = token.split(separator: "=", maxSplits: 1)
+            if parts.count == 2, !parts[0].isEmpty {
+                envOverrides[String(parts[0])] = String(parts[1])
+                commandStart = i + 1
+            } else {
+                break
+            }
+        }
+        guard commandStart < tokens.count else {
+            NSLog("[QueenStatus] BLOCKED command with only env assignments")
             return
         }
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        task.arguments = tokens
-        task.currentDirectoryURL = URL(fileURLWithPath: projectRoot)
-        do {
-            try task.run()
-        } catch {
-            NSLog("[QueenStatus] Command failed: \(error)")
+
+        let commandName = tokens[commandStart]
+        let arguments = Array(tokens[(commandStart + 1)...])
+
+        guard let executableURL = CommandResolver.executableURL(for: commandName) else {
+            NSLog("[QueenStatus] BLOCKED unknown executable: \(commandName)")
+            return
         }
+
+        isRunningAction = true
+        var environment = ProcessInfo.processInfo.environment
+        for (k, v) in envOverrides {
+            environment[k] = v
+        }
+        execDirect(executableURL.path, arguments: arguments, environment: environment)
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
             Task { @MainActor [weak self] in
                 await self?.loadLogTailAsync()
@@ -588,15 +612,64 @@ final class QueenStatusViewModel: ObservableObject {
         }
     }
 
-    private func execDirect(_ executable: String, arguments: [String], workDir: String? = nil) {
+    private func execDirect(_ executable: String, arguments: [String], workDir: String? = nil, environment: [String: String]? = nil) {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: executable)
         task.arguments = arguments
         task.currentDirectoryURL = URL(fileURLWithPath: workDir ?? projectRoot)
+        if let environment {
+            task.environment = environment
+        }
         do {
             try task.run()
         } catch {
             NSLog("[QueenStatus] execDirect failed (\(executable)): \(error)")
+        }
+    }
+
+    /// Maps allowed command names to fixed, absolute executables so we never rely
+    /// on PATH resolution for the binary itself.
+    private enum CommandResolver {
+        static func executableURL(for name: String) -> URL? {
+            switch name {
+            case "git": return URL(fileURLWithPath: "/usr/bin/git")
+            case "cargo": return resolveCargo()
+            case "curl": return URL(fileURLWithPath: "/usr/bin/curl")
+            case "swift": return URL(fileURLWithPath: "/usr/bin/swift")
+            case "cat": return URL(fileURLWithPath: "/bin/cat")
+            case "ls": return URL(fileURLWithPath: "/bin/ls")
+            case "wc": return URL(fileURLWithPath: "/usr/bin/wc")
+            case "tail": return URL(fileURLWithPath: "/usr/bin/tail")
+            case "head": return URL(fileURLWithPath: "/usr/bin/head")
+            case "pgrep": return URL(fileURLWithPath: "/usr/bin/pgrep")
+            case "ps": return URL(fileURLWithPath: "/bin/ps")
+            case "claude": return resolveClaude()
+            default: return nil
+            }
+        }
+
+        private static func resolveCargo() -> URL? {
+            let env = ProcessInfo.processInfo.environment
+            let candidates = [
+                env["TRIOS_CARGO_PATH"],
+                "/usr/local/bin/cargo",
+                "/opt/homebrew/bin/cargo"
+            ].compactMap { $0 }
+            return candidates
+                .first { FileManager.default.isExecutableFile(atPath: $0) }
+                .map { URL(fileURLWithPath: $0) }
+        }
+
+        private static func resolveClaude() -> URL? {
+            let env = ProcessInfo.processInfo.environment
+            let candidates = [
+                env["TRIOS_CLAUDE_PATH"],
+                "/usr/local/bin/claude",
+                "/opt/homebrew/bin/claude"
+            ].compactMap { $0 }
+            return candidates
+                .first { FileManager.default.isExecutableFile(atPath: $0) }
+                .map { URL(fileURLWithPath: $0) }
         }
     }
 }

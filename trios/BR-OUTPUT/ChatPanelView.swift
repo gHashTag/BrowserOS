@@ -42,7 +42,17 @@ struct ChatPanelView: View {
     @State private var pendingAttachmentImports = 0
     @State private var attachmentNotice: String?
     @State private var attachmentImportGeneration = UUID()
+    @StateObject private var scrollManager = SmoothScrollManager()
+    @StateObject private var batchUpdater = MessageBatchUpdater()
+    @StateObject private var throttle = StreamingThrottle()
     private let attachmentImporter = ChatAttachmentImporter()
+
+    // Manual previous-value tracking for .onChange compatibility with the
+    // swiftc-based build path, which does not consistently expose the two-arg
+    // (oldValue, newValue) overload across all deployment targets.
+    @State private var previousMessageCount = 0
+    @State private var previousLastContent: String? = nil
+    @State private var previousBrowserMessageCount = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -103,20 +113,26 @@ struct ChatPanelView: View {
                 let viewportHeight = scrollOffset.isZero ? totalHeight : abs(scrollOffset)
                 isNearBottom = abs(totalHeight - viewportHeight) < 100
             }
-            .onChange(of: viewModel.messages.count) {
-                if isNearBottom {
-                    scrollToBottom(using: proxy, animated: true)
+            .onChange(of: viewModel.messages.count) { newCount in
+                // Scroll only when a brand-new message is appended.
+                if newCount > previousMessageCount && isNearBottom {
+                    scrollManager.requestScroll(animated: true)
                 }
+                previousMessageCount = newCount
             }
-            .onChange(of: viewModel.messages.last?.content) {
-                if isNearBottom {
-                    scrollToBottom(using: proxy, animated: true)
+            .onChange(of: viewModel.messages.last?.content) { newContent in
+                // Throttled scroll during streaming: react only when the last
+                // message content actually changed.
+                if isNearBottom && newContent != previousLastContent {
+                    scrollManager.requestScroll(animated: true)
                 }
+                previousLastContent = newContent
             }
-            .onChange(of: browserOSVM.messages.count) {
-                if isNearBottom {
-                    scrollToBottom(using: proxy, animated: true)
+            .onChange(of: browserOSVM.messages.count) { newCount in
+                if newCount > previousBrowserMessageCount && isNearBottom {
+                    scrollManager.requestScroll(animated: true)
                 }
+                previousBrowserMessageCount = newCount
             }
         }
     }
@@ -159,7 +175,8 @@ struct ChatPanelView: View {
         isNearBottom = true
         DispatchQueue.main.async {
             if animated {
-                withAnimation(.easeOut(duration: 0.2)) {
+                // Используем smooth scroll с spring animation
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                     proxy.scrollTo(ChatScrollAnchor.bottom, anchor: .bottom)
                 }
             } else {
@@ -221,7 +238,8 @@ struct ChatPanelView: View {
                         Task { await viewModel.sendFeedback(messageId: message.id, isPositive: isPositive) }
                     }
                 )
-                .id(message.id)
+                // Stable ID prevents view recreation during streaming updates.
+                .id("\(message.id.uuidString)-\(message.role.rawValue)")
             }
         }
     }

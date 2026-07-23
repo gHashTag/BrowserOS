@@ -2,7 +2,6 @@ import Foundation
 
 /// Minimal LLM client for OpenRouter (Claude models).
 /// Streams or completes chat messages and returns assistant text.
-@MainActor
 final class LLMClient {
     private let apiKey: String
     private let baseURL: URL = {
@@ -15,11 +14,16 @@ final class LLMClient {
 
     init(apiKey: String? = nil) {
         // Prefer TRIOS_API_KEY (the key the rest of the app and UI use) with a
-        // fallback to the legacy OPENROUTER_API_KEY variable.
+        // fallback to the legacy OPENROUTER_API_KEY variable. Empty strings are
+        // treated as missing so the client fails closed instead of sending an
+        // invalid `Bearer ` header.
         self.apiKey = apiKey
             ?? ProcessInfo.processInfo.environment["TRIOS_API_KEY"]
             ?? ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"]
             ?? ""
+        guard !self.apiKey.isEmpty else {
+            fatalError("LLMClient: set TRIOS_API_KEY or OPENROUTER_API_KEY")
+        }
     }
 
     struct Message: Codable {
@@ -74,7 +78,8 @@ enum LLMError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .missingAPIKey: return "LLM: OPENROUTER_API_KEY not found in environment"
+        case .missingAPIKey:
+            return "LLM: TRIOS_API_KEY or OPENROUTER_API_KEY must be set"
         case .httpError(let text): return "LLM HTTP error: \(text)"
         }
     }

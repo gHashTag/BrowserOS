@@ -8,6 +8,10 @@ BIN="$PROJECT_DIR/trios/target/debug/clade-meshd"
 TMP="$(mktemp -d)"
 trap 'kill $(jobs -p) 2>/dev/null || true; rm -rf "$TMP"' EXIT
 
+# Shared API token for both daemon instances in this E2E run. In production the
+# token is supplied by the launcher (e.g. the Swift app or clade-launchd).
+TOKEN=$(openssl rand -hex 32)
+
 # Build the daemon once.
 echo "[e2e] building clade-meshd..."
 cargo build -p clade-meshd --manifest-path "$PROJECT_DIR/trios/Cargo.toml" 2>&1 | tail -5
@@ -21,6 +25,7 @@ env \
   TRIOS_MESH_UDP_BIND=127.0.0.1:9601 \
   TRIOS_MESH_KEY_DIR="$TMP/keys1" \
   TRIOS_MESH_CHAT_STORE="$TMP/store1.json" \
+  TRIOS_MESH_API_TOKEN="$TOKEN" \
   "$BIN" > "$TMP/d1.log" 2>&1 &
 D1=$!
 
@@ -31,6 +36,7 @@ env \
   TRIOS_MESH_UDP_BIND=127.0.0.1:9602 \
   TRIOS_MESH_KEY_DIR="$TMP/keys2" \
   TRIOS_MESH_CHAT_STORE="$TMP/store2.json" \
+  TRIOS_MESH_API_TOKEN="$TOKEN" \
   "$BIN" > "$TMP/d2.log" 2>&1 &
 D2=$!
 
@@ -59,26 +65,25 @@ echo "[e2e] node 1 udp=$UDP1 pub=${PUB1:0:16}..."
 echo "[e2e] node 2 udp=$UDP2 pub=${PUB2:0:16}..."
 
 # Extract the auto-generated API tokens from stderr logs.
-TOKEN1=$(grep -o 'generated API token: [^ ]*' "$TMP/d1.log" | cut -d' ' -f4 || echo "")
-TOKEN2=$(grep -o 'generated API token: [^ ]*' "$TMP/d2.log" | cut -d' ' -f4 || echo "")
+# The token is generated before launch; no need to scrape logs.
 
 # Seed each side with the other's key + UDP address.
 echo "[e2e] seeding peers..."
 curl -fs -X POST "http://127.0.0.1:9505/seed-peer" \
   -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $TOKEN1" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "{\"peer\":2,\"public_key\":\"$PUB2\",\"address\":\"$UDP2\"}" >/dev/null
 
 curl -fs -X POST "http://127.0.0.1:9506/seed-peer" \
   -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $TOKEN2" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "{\"peer\":1,\"public_key\":\"$PUB1\",\"address\":\"$UDP1\"}" >/dev/null
 
 # Send a message from node 1 to node 2.
 echo "[e2e] sending message..."
 SEND=$(curl -fs -X POST "http://127.0.0.1:9505/messages/send" \
   -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $TOKEN1" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"dst":2,"kind":0,"text":"hello over udp"}')
 echo "[e2e] send response: $SEND"
 if ! echo "$SEND" | grep -q '"queued":true'; then
@@ -89,7 +94,7 @@ fi
 # Poll node 2 until the message arrives.
 echo "[e2e] polling node 2..."
 for _ in $(seq 1 50); do
-  POLL=$(curl -fs -H "Authorization: Bearer $TOKEN2" "http://127.0.0.1:9506/messages/poll?since_id=0" 2>/dev/null || echo '{}')
+  POLL=$(curl -fs -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:9506/messages/poll?since_id=0" 2>/dev/null || echo '{}')
   if echo "$POLL" | grep -q 'hello over udp'; then
     echo "[e2e] SUCCESS: message delivered over UDP"
     kill $D1 $D2 2>/dev/null || true

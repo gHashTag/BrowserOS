@@ -22,11 +22,17 @@ final class MeshStatusViewModel: ObservableObject {
     private let statusURL: URL
     private var pollTimer: Timer?
     private let decoder = JSONDecoder()
+    private let meshToken: String
 
-    init(healthURL: URL = URL(string: ProjectPaths.meshHealthURL)!,
-         statusURL: URL = URL(string: ProjectPaths.meshStatusURL)!) {
+    init(healthURL: URL? = URL(string: ProjectPaths.meshHealthURL),
+         statusURL: URL? = URL(string: ProjectPaths.meshStatusURL),
+         meshToken: String = MeshAuth.token) {
+        guard let healthURL, let statusURL else {
+            fatalError("MeshStatusViewModel: invalid health/status URL")
+        }
         self.healthURL = healthURL
         self.statusURL = statusURL
+        self.meshToken = meshToken
     }
 
     func startPolling(interval: TimeInterval = 2.0) {
@@ -68,7 +74,8 @@ final class MeshStatusViewModel: ObservableObject {
         }
 
         do {
-            let (data, response) = try await URLSession.shared.data(from: statusURL)
+            let request = authorizedRequest(url: statusURL)
+            let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 lastError = "mesh status returned non-200"
                 return
@@ -84,55 +91,67 @@ final class MeshStatusViewModel: ObservableObject {
         }
     }
 
+    private func authorizedRequest(url: URL, method: String = "GET", body: Data? = nil) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if !meshToken.isEmpty {
+            request.setValue("Bearer \(meshToken)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = body
+        return request
+    }
+
+    private func url(for path: String) -> URL? {
+        URL(string: path, relativeTo: statusURL)?.absoluteURL
+    }
+
     func observe(peer: UInt32, weHeard: Bool, theyHeard: Bool) async {
-        await postJSON(path: "/observe", body: MeshObserveRequest(peer: peer, we_heard: weHeard, they_heard: theyHeard))
+        guard let url = url(for: "/observe") else { return }
+        let body = try? JSONEncoder().encode(MeshObserveRequest(peer: peer, we_heard: weHeard, they_heard: theyHeard))
+        let request = authorizedRequest(url: url, method: "POST", body: body)
+        await post(request: request, path: "/observe")
         await refresh()
     }
 
     func hello(peer: UInt32, seq: UInt32 = 1, heard: [UInt32] = []) async {
-        await postJSON(path: "/hello", body: MeshHelloRequest(peer: peer, seq: seq, heard: heard))
+        guard let url = url(for: "/hello") else { return }
+        let body = try? JSONEncoder().encode(MeshHelloRequest(peer: peer, seq: seq, heard: heard))
+        let request = authorizedRequest(url: url, method: "POST", body: body)
+        await post(request: request, path: "/hello")
         await refresh()
     }
 
     func seedPeer(_ peer: UInt32) async {
-        await postJSON(path: "/seed-peer", body: MeshPeerRequest(peer: peer))
+        guard let url = url(for: "/seed-peer") else { return }
+        let body = try? JSONEncoder().encode(MeshPeerRequest(peer: peer))
+        let request = authorizedRequest(url: url, method: "POST", body: body)
+        await post(request: request, path: "/seed-peer")
         await refresh()
     }
 
     func forceDead(_ peer: UInt32) async {
-        await postJSON(path: "/force-dead", body: MeshPeerRequest(peer: peer))
+        guard let url = url(for: "/force-dead") else { return }
+        let body = try? JSONEncoder().encode(MeshPeerRequest(peer: peer))
+        let request = authorizedRequest(url: url, method: "POST", body: body)
+        await post(request: request, path: "/force-dead")
         await refresh()
     }
 
     func linkLoss() async {
-        await postEmpty(path: "/link-loss")
+        guard let url = url(for: "/link-loss") else { return }
+        let request = authorizedRequest(url: url, method: "POST")
+        await post(request: request, path: "/link-loss")
     }
 
     func reroute() async {
-        await postEmpty(path: "/reroute")
+        guard let url = url(for: "/reroute") else { return }
+        let request = authorizedRequest(url: url, method: "POST")
+        await post(request: request, path: "/reroute")
         await refresh()
     }
 
-    private func postJSON<T: Encodable>(path: String, body: T) async {
-        guard let url = URL(string: path, relativeTo: statusURL)?.absoluteURL else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? JSONEncoder().encode(body)
-        do {
-            let (_, response) = try await URLSession.shared.data(for: request)
-            if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-                lastError = "\(path) returned \(http.statusCode)"
-            }
-        } catch {
-            lastError = error.localizedDescription
-        }
-    }
-
-    private func postEmpty(path: String) async {
-        guard let url = URL(string: path, relativeTo: statusURL)?.absoluteURL else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
+    private func post(request: URLRequest, path: String) async {
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
             if let http = response as? HTTPURLResponse, http.statusCode != 200 {

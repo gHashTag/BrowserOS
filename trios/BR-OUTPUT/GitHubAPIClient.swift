@@ -5,18 +5,19 @@ actor GitHubAPIClient {
     let baseURL = "https://api.github.com"
 
     var token: String? {
-        ProcessInfo.processInfo.environment["GITHUB_TOKEN"]
+        ProcessInfo.processInfo.environment["GITHUB_TOKEN"]?.filter { !$0.isWhitespace }
     }
 
     private func request(_ endpoint: String) throws -> URLRequest {
+        guard let token = token, !token.isEmpty else {
+            throw GitHubAPIError.missingToken
+        }
         guard let url = URL(string: baseURL + endpoint) else {
             throw URLError(.badURL)
         }
         var request = URLRequest(url: url)
         request.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
-        if let token = token {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         return request
     }
 
@@ -26,13 +27,22 @@ actor GitHubAPIClient {
     }
 
     func fetchIssues(repo: String, state: String = "all") async throws -> [GitHubIssue] {
-        let (data, _) = try await URLSession.shared.data(for: request("/repos/gHashTag/\(repo)/issues?state=\(state)&per_page=100"))
+        let path = try encodedRepoPath(repo: repo, suffix: "/issues?state=\(state)&per_page=100")
+        let (data, _) = try await URLSession.shared.data(for: request(path))
         return try JSONDecoder().decode([GitHubIssue].self, from: data)
     }
 
     func fetchIssueComments(repo: String, issueNumber: Int) async throws -> [GitHubComment] {
-        let (data, _) = try await URLSession.shared.data(for: request("/repos/gHashTag/\(repo)/issues/\(issueNumber)/comments"))
+        let path = try encodedRepoPath(repo: repo, suffix: "/issues/\(issueNumber)/comments")
+        let (data, _) = try await URLSession.shared.data(for: request(path))
         return try JSONDecoder().decode([GitHubComment].self, from: data)
+    }
+
+    private func encodedRepoPath(repo: String, suffix: String) throws -> String {
+        guard let encoded = repo.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
+            throw URLError(.badURL)
+        }
+        return "/repos/gHashTag/\(encoded)\(suffix)"
     }
 
     func createIssue(repo: String, title: String, body: String, labels: [String] = []) async throws -> GitHubIssue {
@@ -72,5 +82,82 @@ actor GitHubAPIClient {
         req.httpBody = try JSONSerialization.data(withJSONObject: payload)
         let (data, _) = try await URLSession.shared.data(for: req)
         return try JSONDecoder().decode(GitHubComment.self, from: data)
+    }
+
+    func fetchTriNetSnapshot() async throws -> TriNetRepositorySnapshot {
+        let repositoryRequest = try request("/repos/gHashTag/tri-net")
+        let pullRequest = try request("/repos/gHashTag/tri-net/pulls/89")
+        let commitsRequest = try request("/repos/gHashTag/tri-net/commits?sha=main&per_page=12")
+
+        async let repositoryResponse = URLSession.shared.data(for: repositoryRequest)
+        async let pullResponse = URLSession.shared.data(for: pullRequest)
+        async let commitsResponse = URLSession.shared.data(for: commitsRequest)
+
+        let (repositoryPair, pullPair, commitsPair) = try await (
+            repositoryResponse,
+            pullResponse,
+            commitsResponse
+        )
+        try validate(repositoryPair.1)
+        try validate(pullPair.1)
+        try validate(commitsPair.1)
+
+        let decoder = JSONDecoder()
+        let repository = try decoder.decode(TriNetRepositoryPayload.self, from: repositoryPair.0)
+        let pull = try decoder.decode(TriNetPullRequestPayload.self, from: pullPair.0)
+        let commits = try decoder.decode([TriNetCommitPayload].self, from: commitsPair.0)
+        guard let mainCommit = commits.first else {
+            throw URLError(.cannotParseResponse)
+        }
+
+        let compareRequest = try request(
+            "/repos/gHashTag/tri-net/compare/\(pull.merge_commit_sha)...\(repository.default_branch)"
+        )
+        let (compareData, compareResponse) = try await URLSession.shared.data(for: compareRequest)
+        try validate(compareResponse)
+        let comparison = try decoder.decode(TriNetComparePayload.self, from: compareData)
+
+        return TriNetRepositorySnapshot(
+            repositoryURL: repository.html_url,
+            repositoryDescription: repository.description ?? "TRI-NET mesh repository",
+            defaultBranch: repository.default_branch,
+            pullRequestNumber: pull.number,
+            pullRequestTitle: pull.title,
+            pullRequestURL: pull.html_url,
+            pullRequestMerged: pull.merged,
+            pullRequestMergedAt: pull.merged_at,
+            pullRequestMergedBy: pull.merged_by.login,
+            pullRequestCommitCount: pull.commits,
+            pullRequestHeadSHA: pull.head.sha,
+            mergeCommitSHA: pull.merge_commit_sha,
+            currentMainSHA: mainCommit.sha,
+            commitsSinceMerge: comparison.ahead_by,
+            recentCommits: commits.map { commit in
+                TriNetCommitHighlight(
+                    sha: commit.sha,
+                    headline: commit.commit.message.components(separatedBy: "\n").first ?? commit.commit.message,
+                    url: commit.html_url
+                )
+            },
+            source: .live,
+            fetchedAt: Date()
+        )
+    }
+
+    private func validate(_ response: URLResponse) throws {
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else {
+            throw URLError(.badServerResponse)
+        }
+    }
+}
+
+enum GitHubAPIError: Error, LocalizedError {
+    case missingToken
+
+    var errorDescription: String? {
+        switch self {
+        case .missingToken: return "GITHUB_TOKEN is not set or empty"
+        }
     }
 }

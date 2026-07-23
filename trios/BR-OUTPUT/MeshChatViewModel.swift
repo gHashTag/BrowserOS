@@ -22,9 +22,12 @@ final class MeshChatViewModel: ObservableObject {
     private let decoder = JSONDecoder()
     private let encoder = JSONEncoder()
     private let storeURL: URL
+    private let meshToken: String
 
-    init(storeURL: URL = ProjectPaths.meshChatStoreURL) {
+    init(storeURL: URL = ProjectPaths.meshChatStoreURL,
+         meshToken: String = MeshAuth.token) {
         self.storeURL = storeURL
+        self.meshToken = meshToken
         self.decoder.keyDecodingStrategy = .convertFromSnakeCase
         self.encoder.keyEncodingStrategy = .convertToSnakeCase
         loadCache()
@@ -79,11 +82,33 @@ final class MeshChatViewModel: ObservableObject {
         refreshTask = nil
     }
 
+    // MARK: - Request helpers
+
+    private func authorizedRequest(url: URL, method: String = "GET", body: Data? = nil) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if !meshToken.isEmpty {
+            request.setValue("Bearer \(meshToken)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = body
+        return request
+    }
+
+    private func safeURL(_ string: String) -> URL? {
+        URL(string: string)
+    }
+
     // MARK: - Health / Status
 
     private func checkHealth() async {
+        guard let url = safeURL(ProjectPaths.meshHealthURL) else {
+            isReachable = false
+            lastError = "invalid mesh health URL"
+            return
+        }
         do {
-            let (data, response) = try await URLSession.shared.data(from: healthURL)
+            let (data, response) = try await URLSession.shared.data(from: url)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 isReachable = false
                 lastError = "mesh health check failed"
@@ -100,8 +125,10 @@ final class MeshChatViewModel: ObservableObject {
     }
 
     private func updateChannelFromStatus() async {
+        guard let url = safeURL(ProjectPaths.meshStatusURL) else { return }
+        let request = authorizedRequest(url: url)
         do {
-            let (data, response) = try await URLSession.shared.data(from: statusURL)
+            let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return }
             let status = try decoder.decode(MeshStatus.self, from: data)
             let best = status.neighbors.map { $0.etx }.min() ?? .infinity
@@ -120,8 +147,10 @@ final class MeshChatViewModel: ObservableObject {
     // MARK: - Conversations
 
     private func fetchConversations() async {
+        guard let url = safeURL(ProjectPaths.meshChatConversationsURL) else { return }
+        let request = authorizedRequest(url: url)
         do {
-            let (data, response) = try await URLSession.shared.data(from: conversationsURL)
+            let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 lastError = "/conversations returned non-200"
                 return
@@ -141,11 +170,9 @@ final class MeshChatViewModel: ObservableObject {
     }
 
     func ackPeer(_ peer: UInt32) async {
-        guard let url = URL(string: ProjectPaths.meshChatAckURL) else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? encoder.encode(MeshChatAckRequest(peer: peer))
+        guard let url = safeURL(ProjectPaths.meshChatAckURL) else { return }
+        let body = try? encoder.encode(MeshChatAckRequest(peer: peer))
+        let request = authorizedRequest(url: url, method: "POST", body: body)
 
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
@@ -168,13 +195,11 @@ final class MeshChatViewModel: ObservableObject {
     /// Seed a peer's static public key and optional UDP address with clade-meshd.
     /// Must be called before sending sealed frames to that peer.
     func seedPeer(peer: UInt32, publicKey: String, address: String) async {
-        guard let url = URL(string: ProjectPaths.meshSeedPeerURL) else { return }
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try? encoder.encode(
+        guard let url = safeURL(ProjectPaths.meshSeedPeerURL) else { return }
+        let body = try? encoder.encode(
             MeshSeedPeerRequest(peer: peer, publicKey: publicKey, address: address)
         )
+        let request = authorizedRequest(url: url, method: "POST", body: body)
 
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
@@ -193,10 +218,11 @@ final class MeshChatViewModel: ObservableObject {
     private func fetchSelectedThread() async {
         guard let peer = selectedPeer else { return }
         let urlString = ProjectPaths.meshChatMessagesURL(peer: peer)
-        guard let url = URL(string: urlString) else { return }
+        guard let url = safeURL(urlString) else { return }
+        let request = authorizedRequest(url: url)
 
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
+            let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
                 lastError = "/messages/\(peer) returned non-200"
                 return
@@ -213,9 +239,10 @@ final class MeshChatViewModel: ObservableObject {
         guard var components = URLComponents(string: ProjectPaths.meshChatPollURL) else { return }
         components.queryItems = [URLQueryItem(name: "since_id", value: String(sinceId))]
         guard let url = components.url else { return }
+        let request = authorizedRequest(url: url)
 
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
+            let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return }
             let poll = try decoder.decode(MeshChatPollResponse.self, from: data)
             for msg in poll.messages {
@@ -262,11 +289,9 @@ final class MeshChatViewModel: ObservableObject {
             payloadBase64: nil
         )
 
-        guard let url = URL(string: ProjectPaths.meshChatSendURL) else { return }
-        var urlRequest = URLRequest(url: url)
-        urlRequest.httpMethod = "POST"
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.httpBody = try? encoder.encode(request)
+        guard let url = safeURL(ProjectPaths.meshChatSendURL) else { return }
+        let body = try? encoder.encode(request)
+        let urlRequest = authorizedRequest(url: url, method: "POST", body: body)
 
         do {
             let (data, response) = try await URLSession.shared.data(for: urlRequest)
@@ -293,11 +318,9 @@ final class MeshChatViewModel: ObservableObject {
     /// Deliver a sealed frame to the local daemon as if it arrived over the mesh.
     func receiveFrame(src: UInt32, frame: String) async {
         let request = MeshChatReceiveRequest(src: src, frame: frame)
-        guard let url = URL(string: ProjectPaths.meshChatReceiveURL) else { return }
-        var urlRequest = URLRequest(url: url)
-        urlRequest.httpMethod = "POST"
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.httpBody = try? encoder.encode(request)
+        guard let url = safeURL(ProjectPaths.meshChatReceiveURL) else { return }
+        let body = try? encoder.encode(request)
+        let urlRequest = authorizedRequest(url: url, method: "POST", body: body)
 
         do {
             let (_, response) = try await URLSession.shared.data(for: urlRequest)
@@ -341,12 +364,6 @@ final class MeshChatViewModel: ObservableObject {
             lastError = "cache save failed: \(error.localizedDescription)"
         }
     }
-
-    // MARK: - URLs
-
-    private var healthURL: URL { URL(string: ProjectPaths.meshHealthURL)! }
-    private var statusURL: URL { URL(string: ProjectPaths.meshStatusURL)! }
-    private var conversationsURL: URL { URL(string: ProjectPaths.meshChatConversationsURL)! }
 }
 
 // MARK: - Local Cache Codable
