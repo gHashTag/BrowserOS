@@ -52,12 +52,13 @@ enum ChatRole: String, Codable, Equatable {
 enum MessageSegment: Codable, Equatable, Hashable {
     case text(String)
     case reasoning(String)
+    case toolCall(id: String)
     case toolInput(name: String, arguments: String)
     case toolOutput(name: String, result: String)
     case error(String)
 
     enum CodingKeys: String, CodingKey {
-        case kind, text, name, arguments, result
+        case kind, text, name, arguments, result, toolCallId
     }
 
     init(from decoder: Decoder) throws {
@@ -68,6 +69,8 @@ enum MessageSegment: Codable, Equatable, Hashable {
             self = .text(try container.decode(String.self, forKey: .text))
         case "reasoning":
             self = .reasoning(try container.decode(String.self, forKey: .text))
+        case "toolCall":
+            self = .toolCall(id: try container.decode(String.self, forKey: .toolCallId))
         case "toolInput":
             self = .toolInput(
                 name: try container.decode(String.self, forKey: .name),
@@ -94,6 +97,9 @@ enum MessageSegment: Codable, Equatable, Hashable {
         case .reasoning(let text):
             try container.encode("reasoning", forKey: .kind)
             try container.encode(text, forKey: .text)
+        case .toolCall(let id):
+            try container.encode("toolCall", forKey: .kind)
+            try container.encode(id, forKey: .toolCallId)
         case .toolInput(let name, let arguments):
             try container.encode("toolInput", forKey: .kind)
             try container.encode(name, forKey: .name)

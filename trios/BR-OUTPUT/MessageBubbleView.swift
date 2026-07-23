@@ -26,8 +26,8 @@ struct MessageBubbleView: View {
             }
 
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 2) {
-                if isFirstInGroup {
-                    senderLabel
+                if isFirstInGroup, let senderName {
+                    senderLabel(senderName)
                 }
 
                 if message.role == .assistant {
@@ -71,8 +71,15 @@ struct MessageBubbleView: View {
 
     // MARK: - Sender Label
 
-    private var senderLabel: some View {
-        Text(message.role == .user ? "You" : (message.role == .system ? "TRIOS Agent" : "TRIOS Agent"))
+    private var senderName: String? {
+        let kind: ChatSenderKind = message.role == .user
+            ? .user
+            : (message.role == .system ? .system : .assistant)
+        return ChatSenderLabelPolicy.label(for: kind)
+    }
+
+    private func senderLabel(_ senderName: String) -> some View {
+        Text(senderName)
             .font(.system(size: 11, weight: .medium))
             .foregroundColor(.grokMuted)
             .padding(.bottom, 2)
@@ -180,84 +187,77 @@ struct MessageBubbleView: View {
 
     private var assistantContainer: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Reasoning header / active thinking indicator
-            if !reasoningSegments.isEmpty && isFirstInGroup {
-                HStack(spacing: 6) {
-                    Image(systemName: message.isStreaming ? "brain.head.profile" : "clock")
-                        .font(.system(size: 11))
-                        .foregroundColor(.grokMuted)
-                    Text(message.isStreaming ? "Thinking..." : "Thought for \(reasoningDuration)")
-                        .font(.system(size: 12, weight: .medium, design: .default))
-                        .foregroundColor(.grokMuted)
-                }
+            ForEach(Array(assistantTimeline.enumerated()), id: \.offset) { _, item in
+                assistantTimelineView(item)
             }
 
-            // Reasoning (collapsible)
-            ForEach(reasoningSegments, id: \.self) { text in
-                ReasoningCollapsibleView(content: text)
-            }
-
-            // Main content
-            if !message.content.isEmpty {
-                RichMessageView(text: message.content, isUser: false)
-                    .font(.system(size: 15, weight: .regular, design: .default))
-                    .foregroundColor(.grokText)
-                    .textSelection(.enabled)
-                    .contextMenu {
-                        Button("Copy") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(message.content, forType: .string)
-                        }
-                    }
-                    .frame(maxWidth: 720, alignment: .leading)
-            }
-
-            // Tool calls
-            if !message.toolCalls.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    ForEach(message.toolCalls) { toolCall in
-                        ToolCallCardView(toolCall: toolCall)
-                    }
-                }
-            }
-
-            // Streaming indicator
-            if message.isStreaming && message.content.isEmpty && message.segments.isEmpty {
-                TypingIndicatorView()
-            }
-
-            // Inline action bar - only after the entire assistant turn is fully complete
-            if !message.isStreaming && !message.content.isEmpty && isLastInGroup && isConversationIdle {
+            switch assistantActionPresentation {
+            case .primary:
                 MessageActionBar(
                     content: message.content,
                     onRegenerate: onRegenerate,
                     onFeedback: onFeedback
                 )
+            case .hoverCopy:
+                HoverCopyBar(content: message.content)
+                    .opacity(isHovered ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.15), value: isHovered)
+            case .none:
+                EmptyView()
             }
-
-            // Hover copy bar for completed assistant messages (ChatGPT / Claude pattern).
-            // Always present; shown on hover so copy is reachable for every answer.
-            HoverCopyBar(content: message.content)
-                .opacity(isHovered ? 1 : 0)
-                .animation(.easeInOut(duration: 0.15), value: isHovered)
         }
         .onHover { hovered in
             isHovered = hovered
         }
     }
 
-    private var reasoningSegments: [String] {
-        message.segments.compactMap {
-            if case .reasoning(let text) = $0 { return text }
-            return nil
-        }
+    private var assistantActionPresentation: AssistantActionPresentation {
+        AssistantActionBarPolicy.presentation(
+            isStreaming: message.isStreaming,
+            hasContent: !message.content.isEmpty,
+            isLastInGroup: isLastInGroup,
+            isConversationIdle: isConversationIdle
+        )
     }
 
-    private var reasoningDuration: String {
-        let lines = reasoningSegments.reduce(0) { count, text in
-            count + text.components(separatedBy: .newlines).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }.count
+    private var assistantTimeline: [AssistantTimelineItem] {
+        AssistantTimelineBuilder.build(
+            content: message.content,
+            segments: message.segments,
+            toolCalls: message.toolCalls
+        )
+    }
+
+    @ViewBuilder
+    private func assistantTimelineView(_ item: AssistantTimelineItem) -> some View {
+        switch item {
+        case .reasoning(let text):
+            ReasoningCollapsibleView(content: text)
+
+        case .text(let text):
+            RichMessageView(text: text, isUser: false)
+                .font(.system(size: 15, weight: .regular, design: .default))
+                .foregroundColor(.grokText)
+                .textSelection(.enabled)
+                .contextMenu {
+                    Button("Copy") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(text, forType: .string)
+                    }
+                }
+                .frame(maxWidth: 720, alignment: .leading)
+
+        case .toolCall(let id):
+            if let toolCall = message.toolCalls.first(where: { $0.id == id }) {
+                ToolCallCardView(toolCall: toolCall)
+            }
+
+        case .error(let text):
+            Text(text)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.red)
+                .textSelection(.enabled)
         }
-        return lines <= 1 ? "1s" : "\(lines)s"
     }
 }
 

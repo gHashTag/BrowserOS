@@ -1,3 +1,6 @@
+// AGENT-V-WAIVER: https://github.com/gHashTag/trios/issues/T27-EPIC-001
+// Reason: FULLSCREEN-CHAT-001 exposes persisted task selection to adaptive UI.
+// Follow-up: seal against .trinity/specs/fullscreen-chat-history.md.
 import Foundation
 import SwiftUI
 
@@ -10,8 +13,11 @@ final class ChatViewModel: ObservableObject {
     @Published var isA2ARegistered: Bool = false
     @Published var conversations: [ChatConversation] = []
     @Published var showHistory = false
+    @Published var messageHistory: [String] = []  // Hotkey history (↑↓ navigation)
+    @Published private(set) var tokenUsage = TokenUsageLedger()
 
     let queenStatusVM = QueenStatusViewModel()
+    let modelStore: ModelConfigurationStore
 
     private let transport: ChatTransportProtocol
     private let healthCheck: ChatHealthCheckProtocol
@@ -20,12 +26,16 @@ final class ChatViewModel: ObservableObject {
     private let stateMachine: ConversationStateMachine
     let a2aClient: A2ARegistryClient?
 
-    private var conversationId: UUID = UUID()
+    @Published private(set) var conversationId: UUID = UUID()
     private var messageCache: [UUID: Int] = [:]
     private var a2aRouter: A2AMessageRouter?
     private var a2aStreamTask: Task<Void, Never>?
     private var healthCheckTask: Task<Void, Never>?
     private var lastSendTime: Date = .distantPast
+    private var pendingEstimatedInputTokens = 0
+    private var pendingEstimatedOutput = ""
+    private var pendingUsageActive = false
+    private var receivedProviderUsage = false
 
     init(
         transport: ChatTransportProtocol,
@@ -33,7 +43,8 @@ final class ChatViewModel: ObservableObject {
         parser: ChatParserProtocol,
         persister: ChatPersisterProtocol,
         stateMachine: ConversationStateMachine,
-        a2aClient: A2ARegistryClient? = nil
+        a2aClient: A2ARegistryClient? = nil,
+        modelStore: ModelConfigurationStore
     ) {
         NSLog("ChatViewModel.init starting")
         self.transport = transport
@@ -42,12 +53,14 @@ final class ChatViewModel: ObservableObject {
         self.persister = persister
         self.stateMachine = stateMachine
         self.a2aClient = a2aClient
+        self.modelStore = modelStore
         NSLog("ChatViewModel.init properties set")
 
         Task {
             NSLog("ChatViewModel.init Task started")
             await setupConversationId()
             await loadHistory()
+            await loadConversations()
             await checkHealth()
             NSLog("ChatViewModel.init Task done")
         }
@@ -79,6 +92,46 @@ final class ChatViewModel: ObservableObject {
         conversations = await persister.listAllConversations()
     }
 
+    func sessionRecoveryConversations() async -> SessionRecoverySanitized<[SessionRecoveryConversation]> {
+        let activeID = conversationId
+        let activeMessages = messages
+        let activeTitle = conversations.first(where: { $0.id == activeID })?.title
+            ?? activeMessages.first(where: { $0.role == .user })?.content
+            ?? "New task"
+        let activeUpdatedAt = activeMessages.last?.timestamp ?? Date()
+        let activeRaw = SessionRecoverySnapshotFactory.conversation(
+            id: activeID,
+            title: activeTitle,
+            updatedAt: activeUpdatedAt,
+            messages: activeMessages
+        )
+        let active = SessionRecoverySanitizer.sanitize(activeRaw)
+
+        let summaries = await persister.listAllConversations()
+        var persisted: [SessionRecoveryConversation] = []
+        var redactionCount = active.redactionCount
+        for summary in summaries where summary.id != activeID {
+            let storedMessages = await persister.load(conversationId: summary.id)
+            let raw = SessionRecoverySnapshotFactory.conversation(
+                id: summary.id,
+                title: summary.title,
+                updatedAt: summary.updatedAt,
+                messages: storedMessages
+            )
+            let sanitized = SessionRecoverySanitizer.sanitize(raw)
+            redactionCount += sanitized.redactionCount
+            persisted.append(sanitized.value)
+        }
+
+        return SessionRecoverySanitized(
+            value: SessionRecoveryConversationMerger.merge(
+                persisted: persisted,
+                active: active.value
+            ),
+            redactionCount: redactionCount
+        )
+    }
+
     func switchConversation(id: UUID) async {
         // Cancel any in-flight stream before loading a different conversation;
         // otherwise late SSE events could corrupt the newly loaded messages.
@@ -90,10 +143,14 @@ final class ChatViewModel: ObservableObject {
         persister.setCurrentConversationId(id)
         await loadHistory()
         await loadConversations()
+        tokenUsage.reset()
         showHistory = false
     }
 
-    func sendMessage(appendUser: Bool = true) async {
+    func sendMessage(
+        appendUser: Bool = true,
+        onAccepted: (() -> Void)? = nil
+    ) async {
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
@@ -105,6 +162,12 @@ final class ChatViewModel: ObservableObject {
         lastSendTime = now
 
         NSLog("[TriosChat] sendMessage start: \"\(text.prefix(40))\"")
+
+        // Save to message history for ↑↓ hotkey navigation
+        messageHistory.append(text)
+        if messageHistory.count > 50 {  // Limit history to 50 messages
+            messageHistory.removeFirst()
+        }
 
         if appendUser {
             let userMessage = ChatMessage(role: .user, content: text)
@@ -125,11 +188,13 @@ final class ChatViewModel: ObservableObject {
         }
         state = await stateMachine.currentState()
         NSLog("[TriosChat] state transitioned to streaming")
+        onAccepted?()
 
         // Exclude the current user message from previousConversation: the server
         // receives it separately via the `message` field, and duplicating it
         // confuses the model and the UI.
         let historyForRequest = Array(messages.dropLast())
+        beginUsageEstimate(message: text, history: historyForRequest)
 
         guard let requestBody = try? ChatRequestBuilder(
             conversationId: conversationId,
@@ -138,11 +203,13 @@ final class ChatViewModel: ObservableObject {
             origin: "sidepanel",
             userSystemPrompt: nil,
             previousConversation: historyForRequest,
-            browserContext: nil
+            browserContext: nil,
+            modelConfiguration: modelStore.runtimeConfiguration
         ).build() else {
             NSLog("[TriosChat] ChatRequestBuilder failed")
             _ = await stateMachine.transition(to: .error("Failed to build request"))
             state = await stateMachine.currentState()
+            clearPendingUsage()
             return
         }
         NSLog("[TriosChat] request body built, size: \(requestBody.count)")
@@ -156,6 +223,7 @@ final class ChatViewModel: ObservableObject {
                 NSLog("[TriosChat] SSE event: \(event)")
                 await handleEvent(event)
             }
+            finalizeEstimatedUsageIfNeeded()
             NSLog("[TriosChat] stream ended normally")
             _ = await stateMachine.transition(to: .idle)
             state = await stateMachine.currentState()
@@ -171,6 +239,7 @@ final class ChatViewModel: ObservableObject {
             }
 
             NSLog("[TriosChat] transport error: \(error.localizedDescription)")
+            clearPendingUsage()
             let errorMsg = ChatMessage(role: .system, content: "[!] \(error.localizedDescription)")
             messages.append(errorMsg)
             rebuildCache()
@@ -183,6 +252,7 @@ final class ChatViewModel: ObservableObject {
     func cancelStreaming() {
         Task {
             await transport.cancel()
+            clearPendingUsage()
             _ = await stateMachine.transition(to: .idle)
             state = await stateMachine.currentState()
         }
@@ -217,10 +287,32 @@ final class ChatViewModel: ObservableObject {
         messages = []
         messageCache = [:]
         state = .idle
+        tokenUsage.reset()
+        clearPendingUsage()
         Task {
+            await transport.cancel()
+            _ = await stateMachine.transition(to: .idle)
             persister.setCurrentConversationId(conversationId)
             await loadConversations()
         }
+    }
+
+    func deleteConversation(id: UUID) async {
+        if id == conversationId {
+            await transport.cancel()
+            _ = await stateMachine.transition(to: .idle)
+            state = await stateMachine.currentState()
+            await persister.clear(conversationId: id)
+            conversationId = UUID()
+            persister.setCurrentConversationId(conversationId)
+            messages = []
+            tokenUsage.reset()
+            clearPendingUsage()
+            rebuildCache()
+        } else {
+            await persister.clear(conversationId: id)
+        }
+        await loadConversations()
     }
 
     // MARK: - A2A Actions
@@ -319,7 +411,16 @@ final class ChatViewModel: ObservableObject {
         case .appendText(let messageId, let delta):
             guard let index = messageCache[messageId] else { return }
             messages[index].content += delta
+            if let lastIndex = messages[index].segments.indices.last,
+               case .text(let existing) = messages[index].segments[lastIndex] {
+                messages[index].segments[lastIndex] = .text(existing + delta)
+            } else {
+                messages[index].segments.append(.text(delta))
+            }
             messages[index].isStreaming = true
+            if pendingUsageActive {
+                pendingEstimatedOutput += delta
+            }
             objectWillChange.send()
 
         case .finishMessage(let messageId):
@@ -347,11 +448,15 @@ final class ChatViewModel: ObservableObject {
                     break
                 }
             }
+            if pendingUsageActive {
+                pendingEstimatedOutput += delta
+            }
             objectWillChange.send()
 
         case .addToolCall(let messageId, let toolCall):
             guard let index = messageCache[messageId] else { return }
             messages[index].toolCalls.append(toolCall)
+            messages[index].segments.append(.toolCall(id: toolCall.id))
             objectWillChange.send()
 
         case .appendToolInput(let messageId, let toolCallId, let delta):
@@ -384,11 +489,22 @@ final class ChatViewModel: ObservableObject {
             }
             objectWillChange.send()
 
+        case .recordUsage(let inputTokens, let outputTokens, let totalTokens):
+            guard !receivedProviderUsage else { return }
+            let resolvedOutput = inputTokens + outputTokens > 0 ? outputTokens : totalTokens
+            tokenUsage.record(
+                inputTokens: inputTokens,
+                outputTokens: resolvedOutput,
+                source: .provider
+            )
+            receivedProviderUsage = true
+
         case .streamComplete:
             if let lastIndex = messages.indices.last,
                messages[lastIndex].role == .assistant {
                 messages[lastIndex].isStreaming = false
             }
+            finalizeEstimatedUsageIfNeeded()
             _ = await stateMachine.transition(to: .idle)
             state = await stateMachine.currentState()
             await saveHistory()
@@ -398,11 +514,13 @@ final class ChatViewModel: ObservableObject {
                messages[lastIndex].role == .assistant {
                 messages[lastIndex].isStreaming = false
             }
+            clearPendingUsage()
             _ = await stateMachine.transition(to: .idle)
             state = await stateMachine.currentState()
             await saveHistory()
 
         case .streamError(let message):
+            clearPendingUsage()
             let errorMsg = ChatMessage(role: .system, content: "[!] \(message)")
             messages.append(errorMsg)
             rebuildCache()
@@ -410,6 +528,33 @@ final class ChatViewModel: ObservableObject {
             state = await stateMachine.currentState()
             await saveHistory()
         }
+    }
+
+    private func beginUsageEstimate(message: String, history: [ChatMessage]) {
+        let context = history.map(\.content).joined(separator: "\n") + "\n" + message
+        pendingEstimatedInputTokens = TokenEstimator.estimate(context)
+        pendingEstimatedOutput = ""
+        pendingUsageActive = true
+        receivedProviderUsage = false
+    }
+
+    private func finalizeEstimatedUsageIfNeeded() {
+        guard pendingUsageActive else { return }
+        if !receivedProviderUsage {
+            tokenUsage.record(
+                inputTokens: pendingEstimatedInputTokens,
+                outputTokens: TokenEstimator.estimate(pendingEstimatedOutput),
+                source: .estimate
+            )
+        }
+        clearPendingUsage()
+    }
+
+    private func clearPendingUsage() {
+        pendingEstimatedInputTokens = 0
+        pendingEstimatedOutput = ""
+        pendingUsageActive = false
+        receivedProviderUsage = false
     }
 
     func rebuildCache() {
@@ -446,6 +591,46 @@ final class ChatViewModel: ObservableObject {
         await persister.save(messages: messages, conversationId: conversationId)
         await loadConversations()
     }
+    
+    // MARK: - Conversation Management
+    
+    func renameConversation(_ id: UUID, to newName: String) {
+        if let index = conversations.firstIndex(where: { $0.id == id }) {
+            conversations[index].title = newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Untitled" : newName.trimmingCharacters(in: .whitespacesAndNewlines)
+            objectWillChange.send()
+        }
+    }
+    
+    func togglePin(_ id: UUID) {
+        if let index = conversations.firstIndex(where: { $0.id == id }) {
+            conversations[index].isPinned.toggle()
+            objectWillChange.send()
+        }
+    }
+    
+    func createNewConversation() {
+        let newConv = ChatConversation(
+            id: UUID(),
+            title: "New Chat",
+            isPinned: false,
+            icon: "message.fill",
+            updatedAt: Date(),
+            unreadCount: 0
+        )
+        conversations.insert(newConv, at: 0)
+        conversationId = newConv.id
+        messages = []
+        objectWillChange.send()
+    }
+    
+    func deleteConversation(_ id: UUID) {
+        conversations.removeAll { $0.id == id }
+        if conversationId == id {
+            conversationId = conversations.first?.id ?? UUID()
+            messages = []
+        }
+        objectWillChange.send()
+    }
 }
 
 struct ChatRequestBuilder {
@@ -456,10 +641,31 @@ struct ChatRequestBuilder {
     let userSystemPrompt: String?
     let previousConversation: [ChatMessage]
     let browserContext: BrowserContext?
+    let modelConfiguration: ModelRuntimeConfiguration?
+
+    init(
+        conversationId: UUID,
+        message: String,
+        mode: String,
+        origin: String,
+        userSystemPrompt: String?,
+        previousConversation: [ChatMessage],
+        browserContext: BrowserContext?,
+        modelConfiguration: ModelRuntimeConfiguration? = nil
+    ) {
+        self.conversationId = conversationId
+        self.message = message
+        self.mode = mode
+        self.origin = origin
+        self.userSystemPrompt = userSystemPrompt
+        self.previousConversation = previousConversation
+        self.browserContext = browserContext
+        self.modelConfiguration = modelConfiguration
+    }
 
     private var memoryPrompt: String {
         """
-        You are TRIOS AGENT, a native macOS AI assistant with full memory of this conversation. \
+        You are \(TriosBranding.displayName), a native macOS AI assistant with full memory of this conversation. \
         You can see all previous messages, reasoning steps, tool calls, and user instructions. \
         Reference prior context naturally. If the user refers to "that", "it", or previous topics, \
         use your memory to understand the reference. Maintain continuity across the entire session.
@@ -533,9 +739,7 @@ struct ChatRequestBuilder {
 
         let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
 
-        let apiKey = ProcessInfo.processInfo.environment["TRIOS_API_KEY"]
-        let provider = ProcessInfo.processInfo.environment["TRIOS_PROVIDER"] ?? "ollama"
-        let defaultModel = Self.defaultModel(for: provider)
+        let runtimeConfiguration = modelConfiguration ?? .environmentFallback()
 
         var body: [String: Any] = [
             "conversationId": conversationId.uuidString,
@@ -543,20 +747,10 @@ struct ChatRequestBuilder {
             "mode": mode,
             "origin": origin,
             "supportsImages": true,
-            "provider": provider,
-            "model": ProcessInfo.processInfo.environment["TRIOS_MODEL"] ?? defaultModel,
-            "baseUrl": ProcessInfo.processInfo.environment["TRIOS_BASE_URL"] ?? "http://127.0.0.1:11434/v1",
             "messages": messages,
             "userWorkingDir": homeDir
         ]
-
-        // Only send apiKey when the caller has configured one. Providers that
-        // require authentication will fail fast server-side with a clear error;
-        // providers that do not need a key (local Ollama) should not receive
-        // an empty field.
-        if let apiKey = apiKey, !apiKey.isEmpty {
-            body["apiKey"] = apiKey
-        }
+        runtimeConfiguration.apply(to: &body)
 
         // Flatten history for backward-compatible servers.
         // Server-side validators for the legacy previousConversation field only

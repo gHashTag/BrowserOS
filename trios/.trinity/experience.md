@@ -270,3 +270,19 @@
   - Do not cite repositories or issue numbers that have not been verified live.
 - **Seal status**: AUDIT_PASS, BUILD_PASS, TYPECHECK_PASS, CARGO_CHECK_PASS, E2E_NOT_RUN_DUE_SERVER_DOWN
 - **Next wave options**: seal-automation, task-durability-gate, github-audit-skill
+
+## 2026-07-23 QUEEN-OPERATIONAL-WORKSPACES-001 (Operational 999 workspaces)
+
+- **Issue**: #T27-EPIC-001
+- **Agents**: codex creator, verifier, experience
+- **Root cause**: Concrete route types concealed incomplete behavior: opaque per-screen surfaces, two placeholder interfaces, stale state, silent action failure, and incompatible action queue JSON.
+- **Fix pattern**: Apply one tested glass profile at the Queen boundary, catalogue every route and action, refresh data centrally, require confirmation for risky operations, persist runtime actions in compact JSON, and verify all 27 destinations in the real compact host.
+- **Files changed**: Queen operational workspace, navigation, action queue, TRI tools, settings, Issues layout, embedded refresh, Trios hosted Settings, and the Trios build source allowlist.
+- **Tests added**: Six operational-workspace tests covering 27 route uniqueness, exact glass tokens, action coverage and risk, compact JSON round trips, TRI command coverage, and ANSI-clean command output; one Trios regression test proving paid-provider keys are optional at startup.
+- **Lessons**:
+  - Route coverage is not feature completion; every destination needs data, actions, feedback, and a runtime smoke test.
+  - Durable queue payloads must be encoded and decoded by both sides of the bridge, never parsed by whitespace-sensitive string matching.
+  - Compact screenshots catch intrinsic-width failures that unit tests cannot see.
+  - Optional paid-provider configuration must fail at request time, never terminate a local-model session during app startup.
+- **Seal status**: BUILD_PASS, TEST_PASS, SIGNATURE_PASS, 27_ROUTE_E2E_PASS, NO_KEY_RUNTIME_PASS, BROWSEROS_HEALTH_PASS
+- **Next wave options**: queen-runtime-consumer, queen-responsive-audit, queen-action-history

@@ -58,6 +58,13 @@ actor UIMessageStreamParser: ChatParserProtocol {
             guard let messageId = currentMessageId else { return nil }
             return .setToolError(messageId: messageId, toolCallId: toolCallId, error: error)
 
+        case .usage(let inputTokens, let outputTokens, let totalTokens):
+            return .recordUsage(
+                inputTokens: inputTokens,
+                outputTokens: outputTokens,
+                totalTokens: totalTokens
+            )
+
         case .finish:
             currentMessageId = nil
             currentToolCallId = nil

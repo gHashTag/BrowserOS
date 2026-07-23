@@ -8,6 +8,7 @@ import SwiftUI
 /// Mesh network status and control tab for the Trios sidebar.
 struct MeshTabView: View {
     @StateObject private var viewModel = MeshStatusViewModel()
+    @StateObject private var triNetStatus = TriNetRepositoryStatusStore.shared
     @State private var selectedPeer: UInt32 = 2
     @State private var selectedTab: MeshTab = .status
 
@@ -54,6 +55,7 @@ struct MeshTabView: View {
     private var statusContent: some View {
         ScrollView {
             LazyVStack(spacing: 12) {
+                TriNetRepositoryStatusCard(store: triNetStatus, context: .mesh)
                 statusCard
                 if !viewModel.neighbors.isEmpty {
                     neighborsSection
@@ -83,7 +85,7 @@ struct MeshTabView: View {
             Image(systemName: "antenna.radiowaves.left.and.right")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.grokText)
-            Text("Mesh")
+            Text("Mesh / tri-net")
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.grokText)
             Spacer()

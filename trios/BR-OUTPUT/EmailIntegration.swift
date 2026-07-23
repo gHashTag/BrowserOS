@@ -44,10 +44,10 @@ class EmailIntegration {
     
     /// Send email
     func send(_ message: String, to recipient: String) async -> Bool {
-        guard let smtp = smtpCredentials else { return false }
+        guard smtpCredentials != nil else { return false }
         
         // Send via SMTP
-        let email = """
+        _ = """
         From: queen@trios.ai
         To: \(recipient)
         Subject: TriOS Queen
@@ -61,7 +61,7 @@ class EmailIntegration {
     
     /// Send email with attachments
     func sendWithAttachments(_ message: String, to recipient: String, attachments: [String]) async -> Bool {
-        guard let smtp = smtpCredentials else { return false }
+        guard smtpCredentials != nil else { return false }
         
         // Send email with attachments via SMTP
         return true
@@ -69,7 +69,7 @@ class EmailIntegration {
     
     /// Read unread emails
     func readUnread() async -> [Email] {
-        guard let imap = imapCredentials else { return [] }
+        guard imapCredentials != nil else { return [] }
         
         // Fetch unread emails via IMAP
         return []

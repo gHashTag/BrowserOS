@@ -69,7 +69,7 @@ class SlackIntegration {
     
     /// Send message with blocks (rich formatting)
     func sendBlocks(_ blocks: [SlackBlock], to channel: String) async -> Bool {
-        guard let token = authToken else { return false }
+        guard authToken != nil else { return false }
         
         // Call Slack API with blocks
         return true

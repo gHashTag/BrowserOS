@@ -20,6 +20,7 @@ enum SSEEvent: Equatable {
     case toolInputAvailable(id: String, toolCallId: String, args: Data)
     case toolOutputAvailable(id: String, toolCallId: String, result: Data)
     case toolOutputError(id: String, toolCallId: String, error: String)
+    case usage(inputTokens: Int, outputTokens: Int, totalTokens: Int)
     case finish(id: String)
     case abort(id: String)
     case error(id: String, message: String)
@@ -38,6 +39,7 @@ enum ParserAction: Equatable {
     case finalizeToolInput(messageId: UUID, toolCallId: String, arguments: String)
     case setToolOutput(messageId: UUID, toolCallId: String, output: String)
     case setToolError(messageId: UUID, toolCallId: String, error: String)
+    case recordUsage(inputTokens: Int, outputTokens: Int, totalTokens: Int)
     case streamComplete
     case streamAborted
     case streamError(String)
@@ -116,6 +118,16 @@ struct SSEEventParser {
             let toolCallId = dict["toolCallId"] as? String ?? ""
             let error = dict["errorText"] as? String ?? dict["error"] as? String ?? "Unknown error"
             return .toolOutputError(id: id, toolCallId: toolCallId, error: error)
+        case "usage":
+            let usage = dict["usage"] as? [String: Any] ?? dict
+            let input = integer(in: usage, keys: ["prompt_tokens", "input_tokens", "inputTokens"])
+            let output = integer(in: usage, keys: ["completion_tokens", "output_tokens", "outputTokens"])
+            let total = integer(in: usage, keys: ["total_tokens", "totalTokens"])
+            return .usage(
+                inputTokens: input,
+                outputTokens: output,
+                totalTokens: total > 0 ? total : input + output
+            )
         case "finish":
             return .finish(id: id)
         case "abort":
@@ -126,5 +138,13 @@ struct SSEEventParser {
         default:
             return .unknown(data: json)
         }
+    }
+
+    private static func integer(in object: [String: Any], keys: [String]) -> Int {
+        for key in keys {
+            if let value = object[key] as? Int { return value }
+            if let value = object[key] as? NSNumber { return value.intValue }
+        }
+        return 0
     }
 }

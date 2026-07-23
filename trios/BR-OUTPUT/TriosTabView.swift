@@ -1,51 +1,49 @@
+// AGENT-V-WAIVER: https://github.com/gHashTag/trios/issues/T27-EPIC-001
+// Reason: FULLSCREEN-CHAT-001 routes the Chat tab through adaptive workspace UI.
+// Follow-up: seal against .trinity/specs/fullscreen-chat-history.md.
 import SwiftUI
-
-enum MainTab: String, CaseIterable {
-    case chat = "Chat"
-    case git = "Git"
-    case terminal = "Terminal"
-    case mesh = "Mesh"
-    case queen = "Queen"
-    case settings = "Settings"
-
-    var icon: String {
-        switch self {
-        case .chat: return "bubble.left.fill"
-        case .git: return "arrow.triangle.branch"
-        case .terminal: return "terminal.fill"
-        case .mesh: return "antenna.radiowaves.left.and.right"
-        case .queen: return "crown.fill"
-        case .settings: return "gear"
-        }
-    }
-}
+import QueenUILib
 
 struct TriosTabView: View {
     @ObservedObject var viewModel: ChatViewModel
-    @State private var selectedTab: MainTab = .chat
+    @StateObject private var modelStore: ModelConfigurationStore
+
+    init(viewModel: ChatViewModel) {
+        self.viewModel = viewModel
+        _modelStore = StateObject(wrappedValue: viewModel.modelStore)
+    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            titleBar
-            tabBar
-            Divider().overlay(Color.grokBorder)
-            content
+        ZStack {
+            UnifiedTriosGlassBackground()
+
+            VStack(spacing: 0) {
+                titleBar
+                Divider().overlay(Color.grokBorder)
+                QueenTabView(viewModel: viewModel)
+            }
         }
-        .background(Color.clear)
         .sheet(isPresented: $viewModel.showHistory) {
             historySheet
         }
+        .environmentObject(modelStore)
     }
 
     // MARK: - Title Bar
 
     private var titleBar: some View {
         HStack(spacing: 12) {
-            logoView(size: CGSize(width: 22, height: 18))
+            Button(action: QueenHostNavigation.showMenu) {
+                HStack(spacing: 12) {
+                    logoView(size: CGSize(width: 22, height: 18))
 
-            Text("TRIOS AGENT")
-                .font(.system(size: 12, weight: .bold, design: .default))
-                .foregroundColor(.grokText)
+                    Text(TriosBranding.displayName)
+                        .font(.system(size: 12, weight: .bold, design: .default))
+                        .foregroundColor(.grokText)
+                }
+            }
+            .buttonStyle(.plain)
+            .help("Open the 999 menu")
 
             Spacer()
 
@@ -75,72 +73,33 @@ struct TriosTabView: View {
 
             Button(action: {
                 viewModel.newConversation()
+                if let chat = Trinity999TabMap.route(for: .chat) {
+                    QueenHostNavigation.open(petalIndex: chat.petalIndex)
+                }
             }) {
                 Image(systemName: "plus")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(.grokMuted)
             }
             .buttonStyle(.plain)
+
+            Button(action: toggleFullScreen) {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.grokMuted)
+            }
+            .buttonStyle(.plain)
+            .help("Toggle full screen")
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
     }
 
-    // MARK: - Tab Bar (Icons)
-
-    private var tabBar: some View {
-        HStack(spacing: 0) {
-            ForEach(MainTab.allCases, id: \.self) { tab in
-                tabButton(for: tab)
-            }
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-    }
-
-    private func tabButton(for tab: MainTab) -> some View {
-        let isSelected = selectedTab == tab
-        return Button(action: { selectedTab = tab }) {
-            HStack(spacing: 4) {
-                Image(systemName: tab.icon)
-                    .font(.system(size: 13, weight: isSelected ? .semibold : .regular))
-                    .foregroundColor(isSelected ? .grokText : .grokMuted)
-                if isSelected {
-                    Text(tab.rawValue)
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.grokText)
-                }
-            }
-            .padding(.horizontal, isSelected ? 10 : 8)
-            .padding(.vertical, 6)
-            .background(
-                isSelected
-                    ? Color.white.opacity(0.12)
-                    : Color.clear
-            )
-            .cornerRadius(8)
-        }
-        .buttonStyle(.plain)
-    }
-
-    // MARK: - Content
-
-    @ViewBuilder
-    private var content: some View {
-        switch selectedTab {
-        case .chat:
-            ChatPanelView(viewModel: viewModel)
-        case .git:
-            GitWorkspaceView()
-        case .terminal:
-            TerminalTabView()
-        case .mesh:
-            MeshTabView()
-        case .queen:
-            QueenTabView()
-        case .settings:
-            SettingsTabView()
-        }
+    private func toggleFullScreen() {
+        guard let window = NSApplication.shared.keyWindow else { return }
+        window.collectionBehavior.remove(.fullScreenAuxiliary)
+        window.collectionBehavior.insert(.fullScreenPrimary)
+        window.toggleFullScreen(nil)
     }
 
     // MARK: - History Sheet
@@ -229,18 +188,6 @@ struct TriosTabView: View {
 
 struct SettingsTabView: View {
     var body: some View {
-        VStack(spacing: 16) {
-            Spacer()
-            Image(systemName: "gear")
-                .font(.system(size: 40))
-                .foregroundColor(.grokDim)
-            Text("Settings")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.grokText)
-            Text("Coming soon")
-                .font(.system(size: 12))
-                .foregroundColor(.grokMuted)
-            Spacer()
-        }
+        SettingsScreen()
     }
 }

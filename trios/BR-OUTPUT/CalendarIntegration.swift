@@ -42,10 +42,10 @@ class CalendarIntegration {
     
     /// Create calendar event
     func createEvent(title: String, description: String, start: Date, end: Date, attendees: [String]) async -> Bool {
-        guard let credentials = apiCredentials else { return false }
+        guard apiCredentials != nil else { return false }
         
         // Call Calendar API to create event
-        let event: [String: Any] = [
+        let _: [String: Any] = [
             "summary": title,
             "description": description,
             "start": [
@@ -73,7 +73,7 @@ class CalendarIntegration {
     
     /// Update event
     func updateEvent(_ eventId: String, updates: [String: Any]) async -> Bool {
-        guard let credentials = apiCredentials else { return false }
+        guard apiCredentials != nil else { return false }
         
         // PATCH event in calendar API
         return true
@@ -81,7 +81,7 @@ class CalendarIntegration {
     
     /// Delete event
     func deleteEvent(_ eventId: String) async -> Bool {
-        guard let credentials = apiCredentials else { return false }
+        guard apiCredentials != nil else { return false }
         
         // DELETE event from calendar API
         return true

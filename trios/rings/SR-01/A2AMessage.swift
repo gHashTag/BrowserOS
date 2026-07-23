@@ -26,7 +26,7 @@ struct A2AMessage: Codable, Identifiable, Sendable {
 }
 
 enum A2AMessageType: String, Codable, Sendable {
-    case direct, broadcast, taskAssign, taskUpdate, taskResult, heartbeat, error
+    case direct, broadcast, taskAssign, taskUpdate, taskResult, addToolCall, heartbeat, error
 }
 
 struct AgentTask: Codable, Identifiable, Sendable, Equatable {

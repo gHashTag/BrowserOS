@@ -12,8 +12,20 @@ protocol ChatParserProtocol: Sendable {
 
 struct ChatConversation: Identifiable, Codable, Equatable {
     let id: UUID
-    let title: String
+    var title: String
+    var isPinned: Bool
+    var icon: String
     let updatedAt: Date
+    var unreadCount: Int
+    
+    init(id: UUID, title: String, isPinned: Bool = false, icon: String = "message.fill", updatedAt: Date = Date(), unreadCount: Int = 0) {
+        self.id = id
+        self.title = title
+        self.isPinned = isPinned
+        self.icon = icon
+        self.updatedAt = updatedAt
+        self.unreadCount = unreadCount
+    }
 }
 
 protocol ChatPersisterProtocol: Sendable {

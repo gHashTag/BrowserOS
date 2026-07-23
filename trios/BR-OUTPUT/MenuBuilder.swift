@@ -1,7 +1,119 @@
 import Cocoa
 import SwiftUI
 
+extension Notification.Name {
+    static let exportSessionRecoveryPackage = Notification.Name("trios.exportSessionRecoveryPackage")
+}
+
+@MainActor
+enum ApplicationMenuInstaller {
+    static func install(delegate: AppDelegate) {
+        let mainMenu = NSMenu(title: "Main Menu")
+        mainMenu.addItem(applicationMenuItem(delegate: delegate))
+        mainMenu.addItem(editMenuItem())
+        NSApplication.shared.mainMenu = mainMenu
+    }
+
+    private static func applicationMenuItem(delegate: AppDelegate) -> NSMenuItem {
+        let rootItem = NSMenuItem()
+        let menu = NSMenu(title: "TRIOS")
+
+        let aboutItem = NSMenuItem(
+            title: "About TRIOS",
+            action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
+            keyEquivalent: ""
+        )
+        aboutItem.target = NSApplication.shared
+        menu.addItem(aboutItem)
+        menu.addItem(.separator())
+
+        let recoveryItem = NSMenuItem(
+            title: "Export Session Recovery Package...",
+            action: #selector(AppDelegate.exportSessionRecoveryPackage(_:)),
+            keyEquivalent: "e"
+        )
+        recoveryItem.keyEquivalentModifierMask = [.command, .shift]
+        recoveryItem.target = delegate
+        menu.addItem(recoveryItem)
+        menu.addItem(.separator())
+
+        let hideItem = NSMenuItem(
+            title: "Hide TRIOS",
+            action: #selector(NSApplication.hide(_:)),
+            keyEquivalent: "h"
+        )
+        hideItem.target = NSApplication.shared
+        menu.addItem(hideItem)
+
+        let hideOthersItem = NSMenuItem(
+            title: "Hide Others",
+            action: #selector(NSApplication.hideOtherApplications(_:)),
+            keyEquivalent: "h"
+        )
+        hideOthersItem.keyEquivalentModifierMask = [.command, .option]
+        hideOthersItem.target = NSApplication.shared
+        menu.addItem(hideOthersItem)
+
+        let showAllItem = NSMenuItem(
+            title: "Show All",
+            action: #selector(NSApplication.unhideAllApplications(_:)),
+            keyEquivalent: ""
+        )
+        showAllItem.target = NSApplication.shared
+        menu.addItem(showAllItem)
+        menu.addItem(.separator())
+
+        let quitItem = NSMenuItem(
+            title: "Quit TRIOS",
+            action: #selector(NSApplication.terminate(_:)),
+            keyEquivalent: "q"
+        )
+        quitItem.target = NSApplication.shared
+        menu.addItem(quitItem)
+
+        rootItem.submenu = menu
+        return rootItem
+    }
+
+    private static func editMenuItem() -> NSMenuItem {
+        let rootItem = NSMenuItem()
+        let menu = NSMenu(title: "Edit")
+
+        menu.addItem(responderItem(title: "Undo", action: Selector(("undo:")), key: "z"))
+        menu.addItem(
+            responderItem(
+                title: "Redo",
+                action: Selector(("redo:")),
+                key: "z",
+                modifiers: [.command, .shift]
+            )
+        )
+        menu.addItem(.separator())
+        menu.addItem(responderItem(title: "Cut", action: #selector(NSText.cut(_:)), key: "x"))
+        menu.addItem(responderItem(title: "Copy", action: #selector(NSText.copy(_:)), key: "c"))
+        menu.addItem(responderItem(title: "Paste", action: #selector(NSText.paste(_:)), key: "v"))
+        menu.addItem(.separator())
+        menu.addItem(responderItem(title: "Select All", action: #selector(NSText.selectAll(_:)), key: "a"))
+
+        rootItem.submenu = menu
+        return rootItem
+    }
+
+    private static func responderItem(
+        title: String,
+        action: Selector,
+        key: String,
+        modifiers: NSEvent.ModifierFlags = [.command]
+    ) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+        item.keyEquivalentModifierMask = modifiers
+        item.target = nil
+        return item
+    }
+}
+
 /// Builds the status bar menu dynamically based on current state.
+@MainActor
 final class MenuBuilder {
     private weak var delegate: AppDelegate?
     private let screenManager: TriosScreenManager

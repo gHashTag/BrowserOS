@@ -21,7 +21,6 @@ struct QueenTabView: View {
                 missingSourceView
             }
         }
-        .background(Color.black)
         .clipped()
         .accessibilityIdentifier("trinity-queen-embedded-root")
         .onChange(of: modelStore.modelsTabRequest) {

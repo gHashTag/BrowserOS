@@ -1,17 +1,23 @@
 import SwiftUI
 
-// MARK: - Grok.com Monochrome Palette
+// MARK: - Central Black Glass Palette
 
 extension Color {
-    static let grokBackground = Color.black
-    static let grokSurface  = Color(white: 0.06)
-    static let grokElevated = Color(white: 0.10)
-    static let grokBorder   = Color(white: 0.18)
-    static let grokDivider  = Color(white: 0.22)
-    static let grokText     = Color.white
-    static let grokMuted    = Color(white: 0.55)
-    static let grokDim      = Color(white: 0.40)
-    static let grokAccent   = Color.white
+    private static let triosTheme = TriosVisualTheme.current
+
+    static let grokBackground = Color.black.opacity(triosTheme.rootBlackOpacity)
+    static let grokSurface = Color.black.opacity(triosTheme.surfaceBlackOpacity)
+    static let grokElevated = Color.black.opacity(triosTheme.elevatedBlackOpacity)
+    static let grokBorder = Color.white.opacity(triosTheme.borderWhiteOpacity)
+    static let grokDivider = Color.white.opacity(triosTheme.dividerWhiteOpacity)
+    static let grokText = Color.white
+    static let grokMuted = Color.white.opacity(triosTheme.mutedTextWhiteOpacity)
+    static let grokDim = Color.white.opacity(triosTheme.dimTextWhiteOpacity)
+    static let grokAccent = Color.white
+
+    static let triosGlassStrong = Color.black.opacity(triosTheme.strongBlackOpacity)
+    static let triosGlassHighlight = Color.white.opacity(triosTheme.highlightWhiteOpacity)
+    static let triosGlassShadow = Color.black.opacity(triosTheme.shadowBlackOpacity)
 
     // Legacy aliases
     static let triosGold = grokAccent
@@ -20,7 +26,7 @@ extension Color {
     static let triosReasoningBackground = grokElevated
     static let triosToolBackground = grokElevated
     static let triosSuccessBackground = grokElevated
-    static let triosErrorBackground = Color(white: 0.06)
+    static let triosErrorBackground = grokSurface
 }
 
 // MARK: - Corner Radius Style

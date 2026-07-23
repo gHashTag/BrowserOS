@@ -2,6 +2,7 @@ import SwiftUI
 
 struct GitHubDashboardView: View {
     @StateObject private var vm = GitHubDashboardViewModel()
+    @StateObject private var triNetStatus = TriNetRepositoryStatusStore.shared
     @State private var selectedRepo: GitHubRepo?
 
     var body: some View {
@@ -32,6 +33,12 @@ struct GitHubDashboardView: View {
             .padding(.vertical, 8)
 
             Divider().overlay(Color.grokBorder)
+
+            TriNetRepositoryStatusCard(store: triNetStatus, context: .git)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+
+            Divider().overlay(Color.grokBorder.opacity(0.7))
 
             if let error = vm.errorMessage {
                 HStack(spacing: 6) {

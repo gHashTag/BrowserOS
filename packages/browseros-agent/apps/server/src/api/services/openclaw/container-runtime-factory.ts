@@ -33,15 +33,15 @@ export function buildContainerRuntime(
   input: ContainerRuntimeFactoryInput,
 ): ContainerRuntime {
   const platform = input.platform ?? process.platform
+  if (process.env.BROWSEROS_SKIP_OPENCLAW === '1') {
+    return new UnsupportedPlatformTestRuntime(input.projectDir)
+  }
   if (platform !== 'darwin') {
     // BROWSEROS_SKIP_OPENCLAW=1 is the explicit opt-in for non-darwin hosts
     // (e.g. Linux CI runners) where OpenClaw can't actually run but the rest
-    // of the server should still come up. Returns a no-op runtime — any
+    // of the server should still come up. Returns a no-op runtime; any
     // OpenClaw API call hitting it will fail loudly at request time.
-    if (
-      process.env.NODE_ENV === 'test' ||
-      process.env.BROWSEROS_SKIP_OPENCLAW === '1'
-    ) {
+    if (process.env.NODE_ENV === 'test') {
       return new UnsupportedPlatformTestRuntime(input.projectDir)
     }
     throw unsupportedPlatformError()

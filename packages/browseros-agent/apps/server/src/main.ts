@@ -91,7 +91,7 @@ export class Application {
     try {
       await createHttpServer({
         port: this.config.serverPort,
-        host: '0.0.0.0',
+        host: '127.0.0.1',
         version: VERSION,
         browser,
         registry,
@@ -132,7 +132,7 @@ export class Application {
     this.logStartupSummary()
     startSkillSync()
 
-    // OpenClaw is best-effort — a failure here must not crash the server.
+    // OpenClaw is best-effort; a failure here must not crash the server.
     // The container runtime constructor throws synchronously on non-darwin
     // (e.g. Linux CI runners), and the .catch() on tryAutoStart() only
     // handles async throws inside auto-start. Wrap both in try/catch so the

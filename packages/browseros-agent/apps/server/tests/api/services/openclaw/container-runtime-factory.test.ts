@@ -16,6 +16,7 @@ describe('container-runtime factory', () => {
   let root: string
   let resourcesDir: string
   let originalNodeEnv: string | undefined
+  let originalSkipOpenClaw: string | undefined
 
   beforeEach(async () => {
     root = await mkdtemp('/tmp/openclaw-runtime-factory-')
@@ -45,6 +46,7 @@ describe('container-runtime factory', () => {
       'mounts: []\n',
     )
     originalNodeEnv = process.env.NODE_ENV
+    originalSkipOpenClaw = process.env.BROWSEROS_SKIP_OPENCLAW
     process.env.NODE_ENV = 'production'
   })
 
@@ -53,6 +55,11 @@ describe('container-runtime factory', () => {
       delete process.env.NODE_ENV
     } else {
       process.env.NODE_ENV = originalNodeEnv
+    }
+    if (originalSkipOpenClaw === undefined) {
+      delete process.env.BROWSEROS_SKIP_OPENCLAW
+    } else {
+      process.env.BROWSEROS_SKIP_OPENCLAW = originalSkipOpenClaw
     }
     await rm(root, { recursive: true, force: true })
   })
@@ -88,6 +95,23 @@ describe('container-runtime factory', () => {
     )
     await expect(runtime.isGatewayCurrent()).resolves.toBe(false)
     await expect(runtime.stopVm()).resolves.toBeUndefined()
+  })
+
+  it('returns a disabled runtime when OpenClaw is explicitly skipped on macOS', async () => {
+    process.env.BROWSEROS_SKIP_OPENCLAW = '1'
+
+    const runtime = buildContainerRuntime({
+      resourcesDir: join(root, 'missing-resources'),
+      projectDir: join(root, 'project'),
+      browserosRoot: root,
+      platform: 'darwin',
+    })
+
+    await expect(runtime.getMachineStatus()).resolves.toEqual({
+      initialized: false,
+      running: false,
+    })
+    await expect(runtime.isGatewayCurrent()).resolves.toBe(false)
   })
 
   it('migrates legacy OpenClaw state into the VM state directory', async () => {

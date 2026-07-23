@@ -6,39 +6,38 @@ struct RichMessageView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            ForEach(blocks, id: \.id) { block in
+            ForEach(blocks) { block in
                 blockView(block)
             }
         }
     }
 
-    private var blocks: [TextBlock] {
-        parseBlocks(from: text)
+    private var blocks: [MarkdownBlock] {
+        MarkdownBlockParser.parse(text)
     }
 
     @ViewBuilder
-    private func blockView(_ block: TextBlock) -> some View {
-        switch block.type {
+    private func blockView(_ block: MarkdownBlock) -> some View {
+        switch block.kind {
         case .heading(let level, let content):
             HeadingBlockView(level: level, content: content)
-        case .list(let items):
-            ListBlockView(items: items)
+        case .list(let ordered, let items):
+            ListBlockView(ordered: ordered, items: items)
         case .code(let language, let code):
             CodeBlockView(language: language, code: code)
-        case .text(let markdown):
+        case .paragraph(let markdown):
             InlineMarkdownText(text: markdown, isUser: isUser)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        case .table(let table):
+            MarkdownTableView(table: table)
+        case .thematicBreak:
+            Divider()
+                .overlay(Color.grokBorder.opacity(0.7))
+                .padding(.vertical, 4)
+        case .quote(let content):
+            MarkdownQuoteView(content: content)
         }
-    }
-}
-
-private struct TextBlock: Identifiable {
-    let id = UUID()
-    let type: BlockType
-    enum BlockType {
-        case text(String)
-        case code(language: String?, String)
-        case heading(level: Int, String)
-        case list([String])
     }
 }
 
@@ -49,12 +48,8 @@ struct InlineMarkdownText: View {
     var body: some View {
         if let attributed = renderAttributed() {
             Text(attributed)
-                .font(.body)
-                .foregroundColor(.grokText)
         } else {
             manualMarkdown()
-                .font(.body)
-                .foregroundColor(.grokText)
         }
     }
 
@@ -127,107 +122,6 @@ private func parseInline(_ text: String) -> [InlineSegment] {
     return segments.isEmpty ? [.plain(text)] : segments
 }
 
-// MARK: - Block Parser
-
-private func parseBlocks(from text: String) -> [TextBlock] {
-    var blocks: [TextBlock] = []
-    let lines = text.components(separatedBy: .newlines)
-    var i = 0
-
-    while i < lines.count {
-        let line = lines[i]
-
-        // Code block
-        if line.hasPrefix("```") {
-            let lang = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
-            var codeLines: [String] = []
-            i += 1
-            while i < lines.count && !lines[i].hasPrefix("```") {
-                codeLines.append(lines[i])
-                i += 1
-            }
-            blocks.append(TextBlock(type: .code(language: lang.isEmpty ? nil : lang, codeLines.joined(separator: "\n"))))
-            i += 1
-            continue
-        }
-
-        // Heading
-        if let heading = parseHeading(line) {
-            blocks.append(TextBlock(type: .heading(level: heading.level, heading.text)))
-            i += 1
-            continue
-        }
-
-        // List
-        if isListItem(line) {
-            var items: [String] = []
-            while i < lines.count {
-                let current = lines[i]
-                if isListItem(current) {
-                    items.append(stripListPrefix(current))
-                    i += 1
-                } else if current.trimmingCharacters(in: .whitespaces).isEmpty {
-                    i += 1
-                } else {
-                    break
-                }
-            }
-            if !items.isEmpty {
-                blocks.append(TextBlock(type: .list(items)))
-            }
-            continue
-        }
-
-        // Paragraph / text block
-        var paragraphLines: [String] = []
-        while i < lines.count {
-            let current = lines[i]
-            if current.trimmingCharacters(in: .whitespaces).isEmpty {
-                i += 1
-                break
-            }
-            if current.hasPrefix("```") || parseHeading(current) != nil || isListItem(current) {
-                break
-            }
-            paragraphLines.append(current)
-            i += 1
-        }
-        if !paragraphLines.isEmpty {
-            blocks.append(TextBlock(type: .text(paragraphLines.joined(separator: " "))))
-        }
-    }
-
-    return blocks.isEmpty ? [TextBlock(type: .text(text))] : blocks
-}
-
-private func parseHeading(_ line: String) -> (level: Int, text: String)? {
-    let trimmed = line.trimmingCharacters(in: .whitespaces)
-    guard trimmed.hasPrefix("#") else { return nil }
-    var level = 0
-    for char in trimmed {
-        if char == "#" { level += 1 } else { break }
-    }
-    guard level >= 1 && level <= 6 else { return nil }
-    let text = trimmed.dropFirst(level).trimmingCharacters(in: .whitespaces)
-    return (level, String(text))
-}
-
-private func isListItem(_ line: String) -> Bool {
-    let trimmed = line.trimmingCharacters(in: .whitespaces)
-    return trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") ||
-        (trimmed.range(of: "^\\d+\\. ", options: .regularExpression) != nil)
-}
-
-private func stripListPrefix(_ line: String) -> String {
-    let trimmed = line.trimmingCharacters(in: .whitespaces)
-    if trimmed.hasPrefix("- ") { return String(trimmed.dropFirst(2)) }
-    if trimmed.hasPrefix("* ") { return String(trimmed.dropFirst(2)) }
-    if let range = trimmed.range(of: "^\\d+\\. ", options: .regularExpression) {
-        return String(trimmed[range.upperBound...])
-    }
-    return trimmed
-}
-
 // MARK: - Block Views
 
 struct HeadingBlockView: View {
@@ -259,20 +153,108 @@ struct HeadingBlockView: View {
 }
 
 struct ListBlockView: View {
+    let ordered: Bool
     let items: [String]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                 HStack(alignment: .top, spacing: 6) {
-                    Text("- ")
+                    Text(ordered ? "\(index + 1)." : "-")
                         .font(.body)
                         .foregroundColor(.grokMuted)
+                        .frame(minWidth: ordered ? 20 : 8, alignment: .trailing)
                     InlineMarkdownText(text: item, isUser: false)
                         .font(.body)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
+    }
+}
+
+struct MarkdownTableView: View {
+    let table: MarkdownTable
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: table.columnCount > 2) {
+            Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
+                GridRow {
+                    ForEach(Array(table.headers.enumerated()), id: \.offset) { index, header in
+                        tableCell(header, column: index, isHeader: true)
+                    }
+                }
+
+                Divider()
+                    .overlay(Color.grokBorder.opacity(0.8))
+                    .gridCellColumns(table.columnCount)
+
+                ForEach(Array(table.rows.enumerated()), id: \.offset) { rowIndex, row in
+                    GridRow {
+                        ForEach(Array(row.enumerated()), id: \.offset) { column, content in
+                            tableCell(content, column: column, isHeader: false)
+                        }
+                    }
+                    .background(
+                        rowIndex.isMultiple(of: 2)
+                            ? Color.grokElevated.opacity(0.16)
+                            : Color.clear
+                    )
+                }
+            }
+            .background(Color.grokElevated.opacity(0.24))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.grokBorder.opacity(0.45), lineWidth: 1)
+            )
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func alignment(for column: Int) -> Alignment {
+        guard table.alignments.indices.contains(column) else { return .leading }
+        switch table.alignments[column] {
+        case .leading: return .leading
+        case .center: return .center
+        case .trailing: return .trailing
+        }
+    }
+
+    private func tableCell(_ content: String, column: Int, isHeader: Bool) -> some View {
+        InlineMarkdownText(text: content, isUser: false)
+            .font(.system(size: 13, weight: isHeader ? .semibold : .regular))
+            .lineLimit(nil)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(
+                minWidth: 96,
+                idealWidth: 150,
+                maxWidth: 260,
+                alignment: alignment(for: column)
+            )
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(isHeader ? Color.grokElevated.opacity(0.5) : Color.clear)
+    }
+}
+
+struct MarkdownQuoteView: View {
+    let content: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            RoundedRectangle(cornerRadius: 1)
+                .fill(Color.grokMuted.opacity(0.8))
+                .frame(width: 3)
+
+            InlineMarkdownText(text: content, isUser: false)
+                .foregroundColor(.grokMuted)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 6)
+        .padding(.trailing, 10)
+        .background(Color.grokElevated.opacity(0.18))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }
 

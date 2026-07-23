@@ -12,6 +12,10 @@ final class LLMClient {
     }()
     private let session = URLSession.shared
 
+    var isConfigured: Bool {
+        !apiKey.isEmpty
+    }
+
     init(apiKey: String? = nil) {
         // Prefer TRIOS_API_KEY (the key the rest of the app and UI use) with a
         // fallback to the legacy OPENROUTER_API_KEY variable. Empty strings are
@@ -21,9 +25,6 @@ final class LLMClient {
             ?? ProcessInfo.processInfo.environment["TRIOS_API_KEY"]
             ?? ProcessInfo.processInfo.environment["OPENROUTER_API_KEY"]
             ?? ""
-        guard !self.apiKey.isEmpty else {
-            fatalError("LLMClient: set TRIOS_API_KEY or OPENROUTER_API_KEY")
-        }
     }
 
     struct Message: Codable {
