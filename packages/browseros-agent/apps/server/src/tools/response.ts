@@ -35,6 +35,21 @@ function cloneStructuredValue<T>(value: T): T {
   }
 }
 
+function cloneAndValidateStructured(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  const cloned = cloneStructuredValue(value)
+  try {
+    JSON.stringify(cloned)
+  } catch (error) {
+    throw new TypeError(
+      'ToolResponse structured data must be JSON-serializable',
+      { cause: error },
+    )
+  }
+  return cloned
+}
+
 export class ToolResponse {
   private content: ContentItem[] = []
   private hasError = false
@@ -63,11 +78,13 @@ export class ToolResponse {
   data(key: string, value: unknown): void
   data(obj: Record<string, unknown>): void
   data(keyOrObj: string | Record<string, unknown>, value?: unknown): void {
+    const candidate = { ...this.structured }
     if (typeof keyOrObj === 'string') {
-      this.structured[keyOrObj] = cloneStructuredValue(value)
-      return
+      candidate[keyOrObj] = value
+    } else {
+      Object.assign(candidate, keyOrObj)
     }
-    Object.assign(this.structured, cloneStructuredValue(keyOrObj))
+    this.structured = cloneAndValidateStructured(candidate)
   }
 
   includeSnapshot(page: number): void {

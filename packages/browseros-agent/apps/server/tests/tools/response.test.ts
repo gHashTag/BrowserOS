@@ -320,4 +320,91 @@ describe('ToolResponse', () => {
     )
     assert.strictEqual(response.toResult().structuredContent, undefined)
   })
+
+  it('rejects cyclic object-overload input atomically', () => {
+    const response = new ToolResponse()
+    response.data({ stable: 'before failure' })
+    const cyclic: Record<string, unknown> = { label: 'cycle' }
+    cyclic.self = cyclic
+
+    assert.throws(() => response.data({ cyclic }), {
+      name: 'TypeError',
+      message: /structured data must be JSON-serializable/i,
+    })
+    assert.deepStrictEqual(response.toResult().structuredContent, {
+      stable: 'before failure',
+    })
+  })
+
+  it('rejects cyclic key-value input atomically', () => {
+    const response = new ToolResponse()
+    response.data('stable', 'before failure')
+    const cyclic: Record<string, unknown> = { label: 'cycle' }
+    cyclic.self = cyclic
+
+    assert.throws(() => response.data('cyclic', cyclic), {
+      name: 'TypeError',
+      message: /structured data must be JSON-serializable/i,
+    })
+    assert.deepStrictEqual(response.toResult().structuredContent, {
+      stable: 'before failure',
+    })
+  })
+
+  it('rejects BigInt structured input atomically', () => {
+    const response = new ToolResponse()
+    response.data({ stable: 'before failure' })
+
+    assert.throws(() => response.data('unsupportedBigInt', 1n), {
+      name: 'TypeError',
+      message: /structured data must be JSON-serializable/i,
+    })
+    assert.deepStrictEqual(response.toResult().structuredContent, {
+      stable: 'before failure',
+    })
+  })
+
+  it('accepts shared aliases and preserves optional undefined values', () => {
+    const shared = { title: 'Shared page' }
+    const response = new ToolResponse()
+
+    response.data({
+      primary: shared,
+      duplicate: shared,
+      optional: undefined,
+      optionalItems: [undefined, 'present'],
+    })
+    const structured = response.toResult().structuredContent
+
+    assert.deepStrictEqual(structured, {
+      primary: { title: 'Shared page' },
+      duplicate: { title: 'Shared page' },
+      optional: undefined,
+      optionalItems: [undefined, 'present'],
+    })
+    assert.ok(structured)
+    assert.strictEqual(Object.hasOwn(structured, 'optional'), true)
+    assert.strictEqual(
+      JSON.stringify(structured),
+      '{"primary":{"title":"Shared page"},"duplicate":{"title":"Shared page"},"optionalItems":[null,"present"]}',
+    )
+  })
+
+  it('emits JSON-serializable structured content for accepted input', () => {
+    const response = new ToolResponse()
+    response.data({
+      page: { id: 7, title: 'Serializable' },
+      actions: ['click', 'snapshot'],
+      active: true,
+    })
+
+    const structured = response.toResult().structuredContent
+
+    assert.doesNotThrow(() => JSON.stringify(structured))
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(structured)), {
+      page: { id: 7, title: 'Serializable' },
+      actions: ['click', 'snapshot'],
+      active: true,
+    })
+  })
 })
