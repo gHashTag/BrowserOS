@@ -110,7 +110,9 @@ describe('ExecutionRun', () => {
       retrySafety: 'safe',
       result,
       argumentDigest: 'argument-digest',
+      argumentDigestFidelity: 'exact',
       outputDigest: 'output-digest',
+      outputDigestFidelity: 'exact',
       recordedAt: 100,
     } satisfies EvidenceEvent
     const evidence: EvidenceEvent[] = [event]

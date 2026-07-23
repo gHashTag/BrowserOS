@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it, spyOn } from 'bun:test'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -6,12 +6,14 @@ import { type ToolExecutionOptions, type ToolSet, tool } from 'ai'
 import { z } from 'zod'
 import { instrumentExternalMcpTools } from '../../src/agent/ai-sdk-agent'
 import {
+  digestForReliabilityDecision,
   MutableToolEvidenceSinkRelay,
   resolveToolReliabilityDescriptor,
   type ToolReliabilityDescriptor,
   wrapToolSetWithEvidence,
 } from '../../src/agent/execution-evidence'
 import type { EvidenceEvent } from '../../src/agent/execution-types'
+import { metrics } from '../../src/lib/metrics'
 import { createWriteTool } from '../../src/tools/filesystem/write'
 
 type RuntimeExecute = (input: unknown, options: ToolExecutionOptions) => unknown
@@ -479,6 +481,105 @@ describe('tool evidence wrapper hardening', () => {
     }
   })
 
+  it.each([
+    'inherited-data',
+    'own-accessor',
+    'inherited-accessor',
+  ] as const)('instruments %s external MCP execute with native receivers', (placement) => {
+    const output = { placement }
+    const lookupReceiver = { lookup: placement }
+    const callReceiver = { call: placement }
+    let getterCalls = 0
+    let actualLookupReceiver: unknown
+    let actualCallReceiver: unknown
+    const sourceExecute = function (this: unknown) {
+      actualCallReceiver = this
+      return output
+    }
+    const executeDescriptor: PropertyDescriptor =
+      placement === 'inherited-data'
+        ? { configurable: true, value: sourceExecute }
+        : {
+            configurable: true,
+            get(this: unknown) {
+              getterCalls += 1
+              actualLookupReceiver = this
+              return sourceExecute
+            },
+          }
+    const base = tool({
+      description: placement,
+      inputSchema: z.unknown(),
+    })
+    const sourceTool =
+      placement === 'own-accessor'
+        ? Object.defineProperty(base, 'execute', executeDescriptor)
+        : Object.assign(
+            Object.create(
+              Object.defineProperty({}, 'execute', executeDescriptor),
+            ) as object,
+            base,
+          )
+    const metricSpy = spyOn(metrics, 'log').mockImplementation(() => {})
+
+    try {
+      const instrumented = instrumentExternalMcpTools({
+        external: sourceTool as ToolSet[string],
+      })
+      expect(getterCalls).toBe(0)
+      const execute = Reflect.get(
+        instrumented.external as object,
+        'execute',
+        lookupReceiver,
+      )
+      expect(
+        (execute as RuntimeExecute).call(
+          callReceiver,
+          {},
+          executionOptions(`external-${placement}`),
+        ),
+      ).toBe(output)
+      expect(actualCallReceiver).toBe(callReceiver)
+      if (placement !== 'inherited-data') {
+        expect(getterCalls).toBe(1)
+        expect(actualLookupReceiver).toBe(lookupReceiver)
+      }
+      expect(metricSpy).toHaveBeenCalledTimes(1)
+    } finally {
+      metricSpy.mockRestore()
+    }
+  })
+
+  it('dispatches an external MCP tool when metrics clock setup throws', () => {
+    const output = { dispatched: true }
+    let calls = 0
+    const clockSpy = spyOn(performance, 'now').mockImplementation(() => {
+      throw new Error('clock unavailable')
+    })
+    const instrumented = instrumentExternalMcpTools({
+      external: tool({
+        description: 'clock failure',
+        inputSchema: z.unknown(),
+        execute: () => {
+          calls += 1
+          return output
+        },
+      }),
+    })
+
+    try {
+      expect(
+        executeOf(instrumented, 'external')(
+          {},
+          executionOptions('clock-failure'),
+        ),
+      ).toBe(output)
+      expect(calls).toBe(1)
+    } finally {
+      clockSpy.mockRestore()
+    }
+  })
+
   it('uses bounded coarse digests for oversized strings, arrays, and objects', () => {
     const digests = new Map<string, string>()
     const wrapped = wrapToolSetWithEvidence(
@@ -549,5 +650,92 @@ describe('tool evidence wrapper hardening', () => {
     for (const digest of digests.values()) {
       expect(digest).toMatch(/^[a-f0-9]{64}$/)
     }
+  })
+
+  it('never converts BigInt or enumerates generic objects while digesting', () => {
+    let bigintConversions = 0
+    let ownKeyReads = 0
+    const originalBigIntToString = BigInt.prototype.toString
+    BigInt.prototype.toString = function (...args): string {
+      bigintConversions += 1
+      return originalBigIntToString.apply(this, args)
+    }
+    const genericObject = new Proxy(
+      { private: 'value' },
+      {
+        ownKeys: (target) => {
+          ownKeyReads += 1
+          return Reflect.ownKeys(target)
+        },
+      },
+    )
+    const events: EvidenceEvent[] = []
+    const wrapped = wrapToolSetWithEvidence(
+      {
+        digest: tool({
+          description: 'bounded digest',
+          inputSchema: z.unknown(),
+          execute: (input) => input,
+        }),
+      },
+      {
+        evidenceSink: { record: (event) => events.push(event) },
+        describeTool: writeDescriptor,
+      },
+    )
+    const execute = executeOf(wrapped, 'digest')
+    const bigint = 1n << 512n
+
+    try {
+      expect(execute(bigint, executionOptions('bigint'))).toBe(bigint)
+      expect(execute(genericObject, executionOptions('generic-object'))).toBe(
+        genericObject,
+      )
+    } finally {
+      BigInt.prototype.toString = originalBigIntToString
+    }
+
+    expect(bigintConversions).toBe(0)
+    expect(ownKeyReads).toBe(0)
+    const requested = events.filter((event) => event.kind === 'requested')
+    expect(requested.map((event) => event.argumentDigestFidelity)).toEqual([
+      'coarse',
+      'coarse',
+    ])
+  })
+
+  it('records exact digest fidelity for bounded primitives', () => {
+    const events: EvidenceEvent[] = []
+    const wrapped = wrapToolSetWithEvidence(
+      {
+        digest: tool({
+          description: 'exact digest',
+          inputSchema: z.unknown(),
+          execute: (input) => input,
+        }),
+      },
+      {
+        evidenceSink: { record: (event) => events.push(event) },
+        describeTool: writeDescriptor,
+      },
+    )
+
+    executeOf(wrapped, 'digest')('bounded', executionOptions('exact'))
+
+    expect(events[0]?.argumentDigestFidelity).toBe('exact')
+    expect(events[1]?.argumentDigestFidelity).toBe('exact')
+    expect(events[1]?.outputDigestFidelity).toBe('exact')
+  })
+
+  it('exposes only exact digests to reliability decisions', () => {
+    expect(digestForReliabilityDecision('exact-digest', 'exact')).toBe(
+      'exact-digest',
+    )
+    expect(
+      digestForReliabilityDecision('coarse-digest', 'coarse'),
+    ).toBeUndefined()
+    expect(
+      digestForReliabilityDecision('unavailable-digest', 'unavailable'),
+    ).toBeUndefined()
   })
 })

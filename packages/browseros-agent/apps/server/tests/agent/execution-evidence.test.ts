@@ -87,7 +87,9 @@ function event(overrides: Partial<EvidenceEvent> = {}): EvidenceEvent {
       verificationStatus: 'not-run',
     }),
     argumentDigest: 'args',
+    argumentDigestFidelity: 'exact',
     outputDigest: 'output',
+    outputDigestFidelity: 'exact',
     recordedAt: 100,
     ...overrides,
   }

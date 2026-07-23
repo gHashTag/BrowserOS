@@ -7,10 +7,15 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { ToolExecutionOptions, ToolSet } from 'ai'
 import type {
+  DigestFidelity,
   EvidenceEvent,
   NormalizedToolResult,
   ToolEffect,
 } from './execution-types'
+import {
+  type RuntimeToolExecute,
+  wrapToolExecuteProperty,
+} from './tool-execute-wrapper'
 import { observeToolReturn } from './tool-return-observer'
 import {
   createToolSetDictionary,
@@ -192,6 +197,10 @@ function isVerificationStatus(
     value === 'failed' ||
     value === 'not-required'
   )
+}
+
+function isDigestFidelity(value: unknown): value is DigestFidelity {
+  return value === 'exact' || value === 'coarse' || value === 'unavailable'
 }
 
 function snapshotEffects(value: unknown): EffectsSnapshot {
@@ -496,7 +505,15 @@ function snapshotEvidenceEvent(
   const retrySafety = requireEventProperty(event, 'retrySafety')
   const resultValue = optionalEventProperty(event, 'result')
   const argumentDigest = requireStringProperty(event, 'argumentDigest')
+  const argumentDigestFidelity = requireEventProperty(
+    event,
+    'argumentDigestFidelity',
+  )
   const outputDigestValue = optionalEventProperty(event, 'outputDigest')
+  const outputDigestFidelity = optionalEventProperty(
+    event,
+    'outputDigestFidelity',
+  )
   const recordedAt = requireEventProperty(event, 'recordedAt')
 
   if (
@@ -505,8 +522,13 @@ function snapshotEvidenceEvent(
     (retrySafety !== 'safe' &&
       retrySafety !== 'unsafe' &&
       retrySafety !== 'unknown') ||
+    !isDigestFidelity(argumentDigestFidelity) ||
     (outputDigestValue !== undefined &&
       typeof outputDigestValue !== 'string') ||
+    (outputDigestValue === undefined) !==
+      (outputDigestFidelity === undefined) ||
+    (outputDigestFidelity !== undefined &&
+      !isDigestFidelity(outputDigestFidelity)) ||
     typeof recordedAt !== 'number' ||
     !Number.isFinite(recordedAt)
   ) {
@@ -525,7 +547,9 @@ function snapshotEvidenceEvent(
         ? undefined
         : snapshotNormalizedResult(resultValue),
     argumentDigest,
+    argumentDigestFidelity,
     outputDigest: outputDigestValue,
+    outputDigestFidelity,
     recordedAt,
   })
   OWNED_EVIDENCE_EVENTS.add(snapshot)
@@ -719,24 +743,8 @@ export class MutableToolEvidenceSinkRelay implements ToolEvidenceSink {
   }
 }
 
-const MAX_DIGEST_DEPTH = 64
-const MAX_DIGEST_ENTRIES = 10_000
-const MAX_DIGEST_OBJECT_KEYS = 2_048
 const MAX_DIGEST_STRING_LENGTH = 4_096
-const MAX_DIGEST_STRING_BUDGET = 64 * 1_024
-const MAX_DIGEST_KEY_CHARS_PER_OBJECT = 32 * 1_024
-const MAX_DIGEST_WORK = 50_000
-
-interface DigestBudget {
-  remainingStringChars: number
-  remainingWork: number
-  exhausted: boolean
-}
-
-type EvidenceToolExecute = (
-  input: unknown,
-  executionOptions: ToolExecutionOptions,
-) => unknown
+const UNAVAILABLE_DIGEST = '0'.repeat(64)
 
 function updateDigestToken(
   hash: ReturnType<typeof createHash>,
@@ -751,224 +759,102 @@ function updateDigestToken(
   hash.update(value)
 }
 
-function writePrimitiveDigest(
-  hash: ReturnType<typeof createHash>,
-  value: unknown,
-  budget: DigestBudget,
-): boolean {
-  const writeBoundedString = (kind: string, text: string): void => {
-    if (text.length > MAX_DIGEST_STRING_LENGTH) {
-      updateDigestToken(hash, `${kind}-opaque`, String(text.length))
-      return
-    }
-    if (text.length > budget.remainingStringChars) {
-      updateDigestToken(hash, 'string-budget-limit')
-      budget.exhausted = true
-      return
-    }
-    budget.remainingStringChars -= text.length
-    updateDigestToken(hash, kind, text)
-  }
+interface EvidenceDigest {
+  readonly value: string
+  readonly fidelity: DigestFidelity
+}
 
-  switch (typeof value) {
-    case 'undefined':
-      updateDigestToken(hash, 'undefined')
-      return true
-    case 'boolean':
-      updateDigestToken(hash, 'boolean', value ? '1' : '0')
-      return true
-    case 'number':
-      updateDigestToken(
-        hash,
-        'number',
-        Number.isNaN(value)
-          ? 'NaN'
-          : Object.is(value, -0)
-            ? '-0'
-            : String(value),
-      )
-      return true
-    case 'bigint':
-      writeBoundedString('bigint', value.toString())
-      return true
-    case 'string':
-      writeBoundedString('string', value)
-      return true
-    case 'symbol':
-      writeBoundedString('symbol', String(value))
-      return true
-    case 'function':
-      updateDigestToken(hash, 'function')
-      return true
-    case 'object':
-      if (value === null) {
-        updateDigestToken(hash, 'null')
-        return true
-      }
-      return false
+function canonicalDigest(value: unknown): EvidenceDigest {
+  try {
+    const hash = createHash('sha256')
+    let fidelity: DigestFidelity = 'exact'
+    switch (typeof value) {
+      case 'undefined':
+        updateDigestToken(hash, 'undefined')
+        break
+      case 'boolean':
+        updateDigestToken(hash, 'boolean', value ? '1' : '0')
+        break
+      case 'number':
+        updateDigestToken(
+          hash,
+          'number',
+          Number.isNaN(value)
+            ? 'NaN'
+            : Object.is(value, -0)
+              ? '-0'
+              : String(value),
+        )
+        break
+      case 'string':
+        if (value.length > MAX_DIGEST_STRING_LENGTH) {
+          fidelity = 'coarse'
+          updateDigestToken(hash, 'string-opaque', String(value.length))
+        } else {
+          updateDigestToken(hash, 'string', value)
+        }
+        break
+      case 'bigint':
+        fidelity = 'coarse'
+        updateDigestToken(
+          hash,
+          value === 0n
+            ? 'bigint-zero'
+            : value < 0n
+              ? 'bigint-negative'
+              : 'bigint-positive',
+        )
+        break
+      case 'symbol':
+        fidelity = 'coarse'
+        updateDigestToken(hash, 'symbol-opaque')
+        break
+      case 'function':
+        fidelity = 'coarse'
+        updateDigestToken(hash, 'function-opaque')
+        break
+      case 'object':
+        if (value === null) {
+          updateDigestToken(hash, 'null')
+          break
+        }
+        fidelity = 'coarse'
+        if (safeArrayCheck(value) === true) {
+          const length = readOwnDataProperty(value, 'length')
+          if (
+            length.state === 'data' &&
+            Number.isSafeInteger(length.value) &&
+            (length.value as number) >= 0
+          ) {
+            updateDigestToken(hash, 'array-opaque', String(length.value))
+          } else {
+            fidelity = 'unavailable'
+            updateDigestToken(hash, 'array-unavailable')
+          }
+        } else {
+          updateDigestToken(hash, 'object-opaque')
+        }
+        break
+    }
+    return Object.freeze({ value: hash.digest('hex'), fidelity })
+  } catch {
+    return Object.freeze({
+      value: UNAVAILABLE_DIGEST,
+      fidelity: 'unavailable',
+    })
   }
 }
 
-function canonicalDigest(value: unknown): string {
-  const hash = createHash('sha256')
-  const seen = new WeakMap<object, number>()
-  const budget: DigestBudget = {
-    remainingStringChars: MAX_DIGEST_STRING_BUDGET,
-    remainingWork: MAX_DIGEST_WORK,
-    exhausted: false,
-  }
-  let nextObjectId = 0
-  let entryCount = 0
-
-  const consumeWork = (units: number): boolean => {
-    if (budget.exhausted) {
-      return false
-    }
-    if (units > budget.remainingWork) {
-      updateDigestToken(hash, 'work-budget-limit')
-      budget.exhausted = true
-      return false
-    }
-    budget.remainingWork -= units
-    return true
-  }
-
-  // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: One bounded walker keeps the global work budget authoritative across recursive frames.
-  const visit = (current: unknown, depth: number): void => {
-    if (!consumeWork(1)) {
-      return
-    }
-    if (depth > MAX_DIGEST_DEPTH) {
-      updateDigestToken(hash, 'depth-limit')
-      return
-    }
-
-    if (writePrimitiveDigest(hash, current, budget)) {
-      return
-    }
-
-    const objectValue = current as object
-    const priorId = seen.get(objectValue)
-    if (priorId !== undefined) {
-      updateDigestToken(hash, 'reference', String(priorId))
-      return
-    }
-    const objectId = nextObjectId
-    nextObjectId += 1
-    seen.set(objectValue, objectId)
-    updateDigestToken(hash, 'object', String(objectId))
-
-    const arrayCheck = safeArrayCheck(objectValue)
-    if (arrayCheck === true) {
-      const lengthProperty = readOwnDataProperty(objectValue, 'length')
-      if (
-        lengthProperty.state !== 'data' ||
-        !Number.isSafeInteger(lengthProperty.value) ||
-        (lengthProperty.value as number) < 0
-      ) {
-        updateDigestToken(hash, 'opaque-array-length')
-        return
-      }
-      if ((lengthProperty.value as number) > MAX_DIGEST_OBJECT_KEYS) {
-        updateDigestToken(hash, 'opaque-array', String(lengthProperty.value))
-        return
-      }
-    } else if (arrayCheck === undefined) {
-      updateDigestToken(hash, 'opaque-array-check')
-      return
-    }
-
-    let keys: PropertyKey[]
-    try {
-      keys = Reflect.ownKeys(objectValue)
-    } catch {
-      updateDigestToken(hash, 'opaque-own-keys')
-      return
-    }
-
-    const remainingEntries = MAX_DIGEST_ENTRIES - entryCount
-    if (
-      keys.length > MAX_DIGEST_OBJECT_KEYS ||
-      keys.length > remainingEntries
-    ) {
-      updateDigestToken(
-        hash,
-        arrayCheck ? 'opaque-array-keys' : 'opaque-object-keys',
-        String(keys.length),
-      )
-      return
-    }
-
-    const sortWork =
-      keys.length * Math.max(1, Math.ceil(Math.log2(Math.max(2, keys.length))))
-    if (!consumeWork(keys.length + sortWork)) {
-      return
-    }
-
-    const sortableKeys: Array<{ key: PropertyKey; label: string }> = []
-    let keyChars = 0
-    for (const key of keys) {
-      const label =
-        typeof key === 'string' ? `string:${key}` : `symbol:${String(key)}`
-      keyChars += label.length
-      if (
-        label.length > MAX_DIGEST_STRING_LENGTH ||
-        keyChars > MAX_DIGEST_KEY_CHARS_PER_OBJECT
-      ) {
-        updateDigestToken(
-          hash,
-          arrayCheck ? 'opaque-array-key-text' : 'opaque-object-key-text',
-          String(keys.length),
-        )
-        return
-      }
-      sortableKeys.push({ key, label })
-    }
-    if (keyChars > budget.remainingStringChars) {
-      updateDigestToken(hash, 'string-budget-limit')
-      budget.exhausted = true
-      return
-    }
-    budget.remainingStringChars -= keyChars
-    sortableKeys.sort((left, right) => left.label.localeCompare(right.label))
-
-    for (const { key, label } of sortableKeys) {
-      if (budget.exhausted) {
-        return
-      }
-      entryCount += 1
-      if (entryCount > MAX_DIGEST_ENTRIES) {
-        updateDigestToken(hash, 'entry-limit')
-        budget.exhausted = true
-        return
-      }
-      updateDigestToken(hash, 'key', label)
-
-      let descriptor: PropertyDescriptor | undefined
-      try {
-        descriptor = Object.getOwnPropertyDescriptor(objectValue, key)
-      } catch {
-        updateDigestToken(hash, 'opaque-descriptor')
-        continue
-      }
-      if (descriptor === undefined) {
-        updateDigestToken(hash, 'missing-descriptor')
-        continue
-      }
-      if (!Object.hasOwn(descriptor, 'value')) {
-        updateDigestToken(hash, 'accessor')
-        continue
-      }
-      visit(descriptor.value, depth + 1)
-    }
-  }
-
-  try {
-    visit(value, 0)
-  } catch {
-    updateDigestToken(hash, 'unavailable')
-  }
-  return hash.digest('hex')
+/**
+ * Reliability decisions may only consume exact digests. Coarse and
+ * unavailable observations are telemetry and cannot identify effects,
+ * idempotency, or terminal completion.
+ */
+export function digestForReliabilityDecision(
+  digest: string,
+  fidelity: DigestFidelity,
+): string | undefined {
+  return fidelity === 'exact' ? digest : undefined
 }
 
 function safeDescriptor(
@@ -1035,9 +921,9 @@ function createEvidenceEvent(input: {
   readonly toolName: string
   readonly kind: 'requested' | 'settled'
   readonly descriptor: ToolReliabilityDescriptor
-  readonly argumentDigest: string
+  readonly argumentDigest: EvidenceDigest
   readonly result?: NormalizedToolResult
-  readonly outputDigest?: string
+  readonly outputDigest?: EvidenceDigest
 }): EvidenceEvent {
   return snapshotEvidenceEvent(
     {
@@ -1048,8 +934,10 @@ function createEvidenceEvent(input: {
       effects: input.descriptor.effects,
       retrySafety: input.descriptor.retrySafety,
       result: input.result,
-      argumentDigest: input.argumentDigest,
-      outputDigest: input.outputDigest,
+      argumentDigest: input.argumentDigest.value,
+      argumentDigestFidelity: input.argumentDigest.fidelity,
+      outputDigest: input.outputDigest?.value,
+      outputDigestFidelity: input.outputDigest?.fidelity,
       recordedAt: Date.now(),
     },
     false,
@@ -1058,23 +946,21 @@ function createEvidenceEvent(input: {
 
 function createObservedExecute(
   toolName: string,
-  sourceExecute: (...args: unknown[]) => unknown,
+  sourceExecute: RuntimeToolExecute,
   options: {
     readonly evidenceSink: ToolEvidenceSink
     readonly describeTool: (name: string) => ToolReliabilityDescriptor
   },
-): EvidenceToolExecute {
-  return function (
-    this: unknown,
-    input: unknown,
-    executionOptions: ToolExecutionOptions,
-  ): unknown {
+): RuntimeToolExecute {
+  return function (this: unknown, ...args: unknown[]): unknown {
+    const input = args[0]
+    const executionOptions = args[1] as ToolExecutionOptions
     const sink = capturedSink(options.evidenceSink)
     if (sink === undefined) {
-      return sourceExecute.call(this, input, executionOptions)
+      return sourceExecute.apply(this, args)
     }
     let descriptor: ToolReliabilityDescriptor
-    let argumentDigest: string
+    let argumentDigest: EvidenceDigest
     let toolCallId: string
     let abortSignal: AbortSignal | undefined
     let preAborted: boolean
@@ -1095,7 +981,7 @@ function createObservedExecute(
         }),
       )
     } catch {
-      return sourceExecute.call(this, input, executionOptions)
+      return sourceExecute.apply(this, args)
     }
     let started = false
     let settled = false
@@ -1138,7 +1024,7 @@ function createObservedExecute(
     let output: unknown
     try {
       started = true
-      output = sourceExecute.call(this, input, executionOptions)
+      output = sourceExecute.apply(this, args)
     } catch (error) {
       settle('rejected', error)
       throw error
@@ -1150,85 +1036,6 @@ function createObservedExecute(
       onCancelled: (lastOutput) => settle('aborted', lastOutput),
     })
   }
-}
-
-function wrapDataExecutableTool(
-  toolName: string,
-  sourceTool: ToolSet[string],
-  sourceExecute: (...args: unknown[]) => unknown,
-  options: {
-    readonly evidenceSink: ToolEvidenceSink
-    readonly describeTool: (name: string) => ToolReliabilityDescriptor
-  },
-): ToolSet[string] {
-  const descriptors = Object.getOwnPropertyDescriptors(
-    sourceTool,
-  ) as PropertyDescriptorMap
-  const executeDescriptor = descriptors.execute
-  descriptors.execute = {
-    ...(executeDescriptor ?? {
-      configurable: true,
-      enumerable: true,
-      writable: true,
-    }),
-    value: createObservedExecute(toolName, sourceExecute, options),
-  }
-  return Object.create(
-    Object.getPrototypeOf(sourceTool),
-    descriptors,
-  ) as ToolSet[string]
-}
-
-type ExecuteDescriptorLookup =
-  | { readonly state: 'missing' }
-  | { readonly state: 'failed' }
-  | { readonly state: 'found'; readonly descriptor: PropertyDescriptor }
-
-function findExecuteDescriptor(
-  sourceTool: ToolSet[string],
-): ExecuteDescriptorLookup {
-  let current: object | null = sourceTool
-  try {
-    while (current !== null) {
-      const descriptor = Object.getOwnPropertyDescriptor(current, 'execute')
-      if (descriptor !== undefined) {
-        return { state: 'found', descriptor }
-      }
-      current = Object.getPrototypeOf(current)
-    }
-  } catch {
-    return { state: 'failed' }
-  }
-  return { state: 'missing' }
-}
-
-function wrapAccessorExecutableTool(
-  toolName: string,
-  sourceTool: ToolSet[string],
-  executeDescriptor: PropertyDescriptor,
-  options: {
-    readonly evidenceSink: ToolEvidenceSink
-    readonly describeTool: (name: string) => ToolReliabilityDescriptor
-  },
-): ToolSet[string] {
-  const descriptors = Object.getOwnPropertyDescriptors(
-    sourceTool,
-  ) as PropertyDescriptorMap
-  descriptors.execute = {
-    configurable: executeDescriptor.configurable ?? true,
-    enumerable: executeDescriptor.enumerable ?? false,
-    get(this: unknown): unknown {
-      const sourceExecute = executeDescriptor.get?.call(this)
-      return typeof sourceExecute === 'function'
-        ? createObservedExecute(toolName, sourceExecute, options)
-        : sourceExecute
-    },
-    set: executeDescriptor.set,
-  }
-  return Object.create(
-    Object.getPrototypeOf(sourceTool),
-    descriptors,
-  ) as ToolSet[string]
 }
 
 export function wrapToolSetWithEvidence(
@@ -1244,45 +1051,20 @@ export function wrapToolSetWithEvidence(
 
   const wrapped = createToolSetDictionary()
   for (const [name, sourceTool] of Object.entries(tools)) {
-    const lookup = findExecuteDescriptor(sourceTool)
-    if (
-      lookup.state === 'found' &&
-      Object.hasOwn(lookup.descriptor, 'value') &&
-      typeof lookup.descriptor.value === 'function'
-    ) {
-      defineToolSetEntry(
-        wrapped,
-        name,
-        wrapDataExecutableTool(
+    defineToolSetEntry(
+      wrapped,
+      name,
+      wrapToolExecuteProperty(sourceTool, (sourceExecute) =>
+        createObservedExecute(
           name,
-          sourceTool,
-          lookup.descriptor.value,
+          sourceExecute,
           options as {
             readonly evidenceSink: ToolEvidenceSink
             readonly describeTool: (name: string) => ToolReliabilityDescriptor
           },
         ),
-      )
-    } else if (
-      lookup.state === 'found' &&
-      !Object.hasOwn(lookup.descriptor, 'value')
-    ) {
-      defineToolSetEntry(
-        wrapped,
-        name,
-        wrapAccessorExecutableTool(
-          name,
-          sourceTool,
-          lookup.descriptor,
-          options as {
-            readonly evidenceSink: ToolEvidenceSink
-            readonly describeTool: (name: string) => ToolReliabilityDescriptor
-          },
-        ),
-      )
-    } else {
-      defineToolSetEntry(wrapped, name, sourceTool)
-    }
+      ),
+    )
   }
   return wrapped
 }

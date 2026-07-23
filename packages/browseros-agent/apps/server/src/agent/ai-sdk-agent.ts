@@ -47,14 +47,16 @@ import {
 import { buildSystemPrompt } from './prompt'
 import { createLanguageModel } from './provider-factory'
 import { buildBrowserToolSet } from './tool-adapter'
+import {
+  type RuntimeToolExecute,
+  wrapToolExecuteProperty,
+} from './tool-execute-wrapper'
 import { observeToolReturn } from './tool-return-observer'
 import {
   createToolSetDictionary,
   defineToolSetEntry,
 } from './tool-set-dictionary'
 import type { ResolvedAgentConfig } from './types'
-
-type RuntimeToolExecute = (...args: unknown[]) => unknown
 
 function safeErrorMessage(error: unknown): string {
   try {
@@ -64,71 +66,62 @@ function safeErrorMessage(error: unknown): string {
   }
 }
 
+function safePerformanceNow(): number | undefined {
+  try {
+    return performance.now()
+  } catch {
+    return undefined
+  }
+}
+
 function instrumentExternalMcpTool(
   name: string,
   sourceTool: ToolSet[string],
 ): ToolSet[string] {
-  const executeDescriptor = Object.getOwnPropertyDescriptor(
+  return wrapToolExecuteProperty(
     sourceTool,
-    'execute',
-  )
-  if (
-    executeDescriptor === undefined ||
-    !Object.hasOwn(executeDescriptor, 'value') ||
-    typeof executeDescriptor.value !== 'function'
-  ) {
-    return sourceTool
-  }
-  const sourceExecute = executeDescriptor.value as RuntimeToolExecute
+    (sourceExecute: RuntimeToolExecute): RuntimeToolExecute =>
+      function (this: unknown, ...args: unknown[]): unknown {
+        const startTime = safePerformanceNow()
+        let settled = false
+        const settle = (success: boolean, error?: unknown): void => {
+          if (settled) {
+            return
+          }
+          settled = true
+          try {
+            const finishedAt = safePerformanceNow()
+            if (startTime === undefined || finishedAt === undefined) {
+              return
+            }
+            metrics.log('tool_executed', {
+              tool_name: name,
+              duration_ms: Math.round(finishedAt - startTime),
+              success,
+              ...(success ? {} : { error_message: safeErrorMessage(error) }),
+              source: 'chat',
+            })
+          } catch {
+            // Metrics are observe-only and must never affect the external tool.
+          }
+        }
 
-  const execute = function (this: unknown, ...args: unknown[]): unknown {
-    const startTime = performance.now()
-    let settled = false
-    const settle = (success: boolean, error?: unknown): void => {
-      if (settled) {
-        return
-      }
-      settled = true
-      try {
-        metrics.log('tool_executed', {
-          tool_name: name,
-          duration_ms: Math.round(performance.now() - startTime),
-          success,
-          ...(success ? {} : { error_message: safeErrorMessage(error) }),
-          source: 'chat',
+        let output: unknown
+        try {
+          output = sourceExecute.apply(this, args)
+        } catch (error) {
+          settle(false, error)
+          throw error
+        }
+
+        return observeToolReturn(output, {
+          onResolved: () => settle(true),
+          onRejected: (error) => settle(false, error),
+          onCancelled: () =>
+            settle(false, new Error('Tool output iteration was cancelled')),
         })
-      } catch {
-        // Metrics are observe-only and must never affect the external tool.
-      }
-    }
-
-    let output: unknown
-    try {
-      output = sourceExecute.call(this, ...args)
-    } catch (error) {
-      settle(false, error)
-      throw error
-    }
-
-    return observeToolReturn(output, {
-      onResolved: () => settle(true),
-      onRejected: (error) => settle(false, error),
-      onCancelled: () =>
-        settle(false, new Error('Tool output iteration was cancelled')),
-    })
-  }
-
-  const descriptors = Object.getOwnPropertyDescriptors(
-    sourceTool,
-  ) as PropertyDescriptorMap
-  descriptors.execute = {
-    ...executeDescriptor,
-    value: execute,
-  }
-  return Object.create(
-    Object.getPrototypeOf(sourceTool),
-    descriptors,
-  ) as ToolSet[string]
+      },
+  )
 }
 
 export function instrumentExternalMcpTools(tools: ToolSet): ToolSet {

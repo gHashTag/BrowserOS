@@ -25,11 +25,13 @@ function observePromiseLike(
   observer: ToolReturnObserver,
 ): Promise<unknown> {
   return new Promise<unknown>((resolve, reject) => {
-    try {
-      thenMethod.call(value, resolve, reject)
-    } catch (error) {
-      reject(error)
-    }
+    queueMicrotask(() => {
+      try {
+        thenMethod.call(value, resolve, reject)
+      } catch (error) {
+        reject(error)
+      }
+    })
   }).then(
     (output) => {
       notify(observer.onResolved, output)

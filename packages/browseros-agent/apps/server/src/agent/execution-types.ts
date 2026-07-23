@@ -21,6 +21,8 @@ export type ExecutionRunFailureReason =
 
 export type ExecutionEffectState = 'none' | 'partial' | 'complete' | 'unknown'
 
+export type DigestFidelity = 'exact' | 'coarse' | 'unavailable'
+
 export type ToolEffect =
   | 'observe'
   | 'filesystem-read'
@@ -46,7 +48,9 @@ export interface EvidenceEvent {
   readonly retrySafety: 'safe' | 'unsafe' | 'unknown'
   readonly result?: NormalizedToolResult
   readonly argumentDigest: string
+  readonly argumentDigestFidelity: DigestFidelity
   readonly outputDigest?: string
+  readonly outputDigestFidelity?: DigestFidelity
   readonly recordedAt: number
 }
 

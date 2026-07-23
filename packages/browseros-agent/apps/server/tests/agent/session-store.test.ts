@@ -122,7 +122,9 @@ describe('SessionStore turn leases', () => {
       retrySafety: 'unsafe',
       result,
       argumentDigest: 'argument-digest',
+      argumentDigestFidelity: 'exact',
       outputDigest: 'output-digest',
+      outputDigestFidelity: 'exact',
       recordedAt: 100,
     } satisfies EvidenceEvent
     const evidence: EvidenceEvent[] = [event]
@@ -536,6 +538,7 @@ describe('SessionStore turn leases', () => {
       effects: ['observe'],
       retrySafety: 'safe',
       argumentDigest: 'argument-digest',
+      argumentDigestFidelity: 'exact',
       recordedAt: 200,
     } satisfies EvidenceEvent
 
@@ -618,7 +621,9 @@ describe('SessionStore turn leases', () => {
       retrySafety: 'unsafe',
       result,
       argumentDigest: 'argument-digest',
+      argumentDigestFidelity: 'exact',
       outputDigest: 'output-digest',
+      outputDigestFidelity: 'exact',
       recordedAt: 150,
     } satisfies EvidenceEvent
     const prior = acquireTurn(store, running)
@@ -668,7 +673,9 @@ describe('SessionStore turn leases', () => {
       effects: ['verify'],
       retrySafety: 'safe',
       argumentDigest: 'verification-argument-digest',
+      argumentDigestFidelity: 'exact',
       outputDigest: 'verification-output-digest',
+      outputDigestFidelity: 'exact',
       recordedAt: 200,
     } satisfies EvidenceEvent
     expect(store.recordEvidence('conversation-1', 'run-1', verification)).toBe(
@@ -692,6 +699,7 @@ describe('SessionStore turn leases', () => {
       effects: ['filesystem-read'],
       retrySafety: 'safe',
       argumentDigest: 'argument-digest',
+      argumentDigestFidelity: 'exact',
       recordedAt: 300,
     } satisfies EvidenceEvent
     const hostileStaleEvent = new Proxy(ownerEvent, {
@@ -722,6 +730,7 @@ describe('SessionStore turn leases', () => {
       effects: ['filesystem-read'],
       retrySafety: 'safe',
       argumentDigest: 'argument-digest',
+      argumentDigestFidelity: 'exact',
       recordedAt: 400,
     } satisfies EvidenceEvent
     const malformedEvent = {
