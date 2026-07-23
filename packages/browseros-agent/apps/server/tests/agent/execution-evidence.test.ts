@@ -985,4 +985,98 @@ describe('appendEvidence', () => {
       /Cannot snapshot evidence event/,
     )
   })
+
+  it('ignores an overridden ledger map instead of accepting injected entries', () => {
+    let mapCalls = 0
+    let injectedReads = 0
+    const actual = event({ eventId: 'actual-prior' })
+    const injected = event({ eventId: 'injected-prior' })
+    Object.defineProperty(injected, 'toolName', {
+      get: () => {
+        injectedReads += 1
+        return 'injected-tool'
+      },
+    })
+    Object.freeze(injected)
+    const ledger = [actual]
+    Object.defineProperty(ledger, 'map', {
+      value: () => {
+        mapCalls += 1
+        return [injected]
+      },
+    })
+
+    const next = appendEvidence(ledger, event({ eventId: 'next' }))
+
+    expect(next.map((entry) => entry.eventId)).toEqual(['actual-prior', 'next'])
+    expect(mapCalls).toBe(0)
+    expect(injectedReads).toBe(0)
+  })
+
+  it('rejects a sparse ledger without changing the caller-owned new event', () => {
+    const ledger = new Array<EvidenceEvent>(1)
+    const effects: ToolEffect[] = ['filesystem-write']
+    const normalized: MutableNormalizedToolResult = {
+      transportStatus: 'received',
+      executionStatus: 'success',
+      effectStatus: 'unknown',
+      verificationStatus: 'not-run',
+    }
+    const input = event({ effects, result: normalized })
+
+    expect(() => appendEvidence(ledger, input)).toThrow(TypeError)
+    expect(() => appendEvidence(ledger, input)).toThrow(
+      /Cannot snapshot evidence ledger/,
+    )
+    expect(Object.isFrozen(input)).toBe(false)
+    expect(Object.isFrozen(effects)).toBe(false)
+    expect(Object.isFrozen(normalized)).toBe(false)
+    expect(input.effects).toBe(effects)
+    expect(input.result).toBe(normalized)
+  })
+
+  it('rejects a non-array ledger runtime value with a clear TypeError', () => {
+    const ledger = {
+      length: 0,
+      map: () => [],
+    } as unknown as readonly EvidenceEvent[]
+
+    expect(() => appendEvidence(ledger, event())).toThrow(TypeError)
+    expect(() => appendEvidence(ledger, event())).toThrow(
+      /Cannot snapshot evidence ledger/,
+    )
+  })
+
+  it('rejects a ledger index accessor without invoking it', () => {
+    let reads = 0
+    const ledger = new Array<EvidenceEvent>(1)
+    Object.defineProperty(ledger, '0', {
+      get: () => {
+        reads += 1
+        return event({ eventId: 'accessor-prior' })
+      },
+    })
+
+    expect(() => appendEvidence(ledger, event())).toThrow(TypeError)
+    expect(() => appendEvidence(ledger, event())).toThrow(
+      /Cannot snapshot evidence ledger/,
+    )
+    expect(reads).toBe(0)
+  })
+
+  it('wraps ledger proxy trap failures without producing partial output', () => {
+    const ledger = new Proxy([event({ eventId: 'proxy-prior' })], {
+      get: () => {
+        throw new Error('raw ledger get failure')
+      },
+      getOwnPropertyDescriptor: () => {
+        throw new Error('raw ledger descriptor failure')
+      },
+    })
+
+    expect(() => appendEvidence(ledger, event())).toThrow(TypeError)
+    expect(() => appendEvidence(ledger, event())).toThrow(
+      /Cannot snapshot evidence ledger/,
+    )
+  })
 })

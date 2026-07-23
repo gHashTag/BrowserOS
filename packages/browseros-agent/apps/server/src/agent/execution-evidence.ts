@@ -72,6 +72,7 @@ const MUTATING_EFFECTS: ReadonlySet<ToolEffect> = new Set([
 
 const OWNED_EVIDENCE_EVENTS = new WeakSet<object>()
 const MAX_EFFECT_COUNT = 64
+const MAX_LEDGER_EVENT_COUNT = 10_000
 
 function isObject(value: unknown): value is object {
   return typeof value === 'object' && value !== null
@@ -501,10 +502,44 @@ function snapshotEvidenceEvent(
   return snapshot
 }
 
+function evidenceLedgerError(): TypeError {
+  return new TypeError(
+    'Cannot snapshot evidence ledger: expected a bounded dense array of own data entries',
+  )
+}
+
+function snapshotLedgerEntries(ledger: unknown): readonly EvidenceEvent[] {
+  if (!isObject(ledger) || safeArrayCheck(ledger) !== true) {
+    throw evidenceLedgerError()
+  }
+
+  const lengthProperty = readOwnDataProperty(ledger, 'length')
+  if (
+    lengthProperty.state !== 'data' ||
+    !Number.isSafeInteger(lengthProperty.value) ||
+    (lengthProperty.value as number) < 0 ||
+    (lengthProperty.value as number) > MAX_LEDGER_EVENT_COUNT
+  ) {
+    throw evidenceLedgerError()
+  }
+
+  const entries: EvidenceEvent[] = []
+  for (let index = 0; index < (lengthProperty.value as number); index += 1) {
+    const entryProperty = readOwnDataProperty(ledger, String(index))
+    if (entryProperty.state !== 'data') {
+      throw evidenceLedgerError()
+    }
+    entries.push(
+      snapshotEvidenceEvent(entryProperty.value as EvidenceEvent, true),
+    )
+  }
+  return entries
+}
+
 export function appendEvidence(
   ledger: readonly EvidenceEvent[],
   event: EvidenceEvent,
 ): readonly EvidenceEvent[] {
-  const prior = ledger.map((entry) => snapshotEvidenceEvent(entry, true))
+  const prior = snapshotLedgerEntries(ledger)
   return Object.freeze([...prior, snapshotEvidenceEvent(event, false)])
 }
