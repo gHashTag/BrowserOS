@@ -27,6 +27,10 @@ function observation(
   }
 }
 
+function runtimeObservation(value: unknown): ToolResultObservation {
+  return value as ToolResultObservation
+}
+
 function result(
   overrides: Partial<NormalizedToolResult> = {},
 ): NormalizedToolResult {
@@ -34,7 +38,7 @@ function result(
     transportStatus: 'received',
     executionStatus: 'success',
     effectStatus: 'none',
-    verificationStatus: 'not-required',
+    verificationStatus: 'not-run',
     ...overrides,
   }
 }
@@ -132,7 +136,7 @@ describe('normalizeToolResult', () => {
       }),
     },
     {
-      name: 'marks a successful read as effect-free and not requiring verification',
+      name: 'marks a successful read as effect-free without fabricating verification policy',
       observation: observation({ effects: ['filesystem-read'] }),
       expected: result(),
     },
@@ -252,14 +256,13 @@ describe('normalizeToolResult', () => {
       normalizeToolResult(
         observation({ effects: ['filesystem-read'], output }),
       ),
-    ).toEqual(result())
+    ).toEqual(result({ executionStatus: 'error' }))
     expect(reads).toBe(0)
   })
 
   it.each([
     ['applied', 'passed'],
     ['partial', 'failed'],
-    ['none', 'not-required'],
     ['unknown', 'not-run'],
   ] as const)('accepts trusted mutation receipt effect=%s verification=%s', (effectStatus, verificationStatus) => {
     expect(
@@ -327,12 +330,7 @@ describe('normalizeToolResult', () => {
           },
         }),
       ),
-    ).toEqual(
-      result({
-        executionStatus: 'denied',
-        verificationStatus: 'passed',
-      }),
-    )
+    ).toEqual(result({ executionStatus: 'denied' }))
   })
 
   it.each([
@@ -367,8 +365,393 @@ describe('normalizeToolResult', () => {
       ),
     ).toEqual(
       result({
+        executionStatus: 'error',
         effectStatus: 'unknown',
-        verificationStatus: 'not-run',
+      }),
+    )
+  })
+
+  it.each([
+    ['read', ['filesystem-read'] as const],
+    ['observe', ['observe'] as const],
+    ['verify', ['verify'] as const],
+  ])('leaves successful %s verification not-run without an explicit passed or failed receipt', (_name, effects) => {
+    expect(normalizeToolResult(observation({ effects }))).toEqual(result())
+  })
+
+  it('accepts an explicit verifier result only after execution started', () => {
+    expect(
+      normalizeToolResult(
+        observation({
+          effects: ['verify'],
+          receipt: { verificationStatus: 'passed' },
+        }),
+      ),
+    ).toEqual(result({ verificationStatus: 'passed' }))
+  })
+
+  it('ignores receipt not-required because policy owns that decision', () => {
+    expect(
+      normalizeToolResult(
+        observation({
+          effects: ['filesystem-write'],
+          receipt: {
+            effectStatus: 'applied',
+            verificationStatus: 'not-required',
+          },
+        }),
+      ),
+    ).toEqual(result({ effectStatus: 'applied' }))
+  })
+
+  it.each([
+    ['denied', 'denied'],
+    ['aborted', 'aborted'],
+    ['rejected', 'error'],
+  ] as const)('ignores receipt verification when %s occurs before execution starts', (outcome, executionStatus) => {
+    expect(
+      normalizeToolResult(
+        observation({
+          outcome,
+          started: false,
+          effects: ['filesystem-write'],
+          receipt: {
+            effectStatus: 'applied',
+            verificationStatus: 'passed',
+          },
+        }),
+      ),
+    ).toEqual(
+      result({
+        transportStatus: outcome === 'rejected' ? 'failed' : 'received',
+        executionStatus,
+      }),
+    )
+  })
+
+  it('fails closed when a resolved observation claims execution never started', () => {
+    expect(
+      normalizeToolResult(
+        observation({
+          started: false,
+          effects: ['filesystem-write'],
+          receipt: {
+            effectStatus: 'applied',
+            verificationStatus: 'passed',
+          },
+        }),
+      ),
+    ).toEqual(result({ executionStatus: 'error' }))
+  })
+
+  it('fails an unknown runtime outcome at the transport boundary', () => {
+    expect(
+      normalizeToolResult(
+        runtimeObservation({
+          outcome: 'invented',
+          started: true,
+          effects: ['filesystem-read'],
+          output: {},
+        }),
+      ),
+    ).toEqual(
+      result({
+        transportStatus: 'failed',
+        executionStatus: 'error',
+      }),
+    )
+  })
+
+  it('treats an unknown runtime effect as potentially mutating', () => {
+    expect(
+      normalizeToolResult(
+        runtimeObservation({
+          outcome: 'resolved',
+          started: true,
+          effects: ['unexpected-write'],
+          output: {},
+        }),
+      ),
+    ).toEqual(
+      result({
+        executionStatus: 'error',
+        effectStatus: 'unknown',
+      }),
+    )
+  })
+
+  it.each([
+    ['null', null],
+    ['plain object', { 0: 'observe', length: 1 }],
+    ['string', 'observe'],
+  ])('fails closed for non-array effects: %s', (_name, effects) => {
+    expect(
+      normalizeToolResult(
+        runtimeObservation({
+          outcome: 'resolved',
+          started: true,
+          effects,
+          output: {},
+        }),
+      ),
+    ).toEqual(
+      result({
+        executionStatus: 'error',
+        effectStatus: 'unknown',
+      }),
+    )
+  })
+
+  it.each([
+    ['missing', undefined],
+    ['string', 'true'],
+    ['number', 1],
+  ])('fails closed for a malformed started field: %s', (_name, started) => {
+    expect(
+      normalizeToolResult(
+        runtimeObservation({
+          outcome: 'resolved',
+          started,
+          effects: ['filesystem-read'],
+          output: {},
+        }),
+      ),
+    ).toEqual(
+      result({
+        executionStatus: 'error',
+        effectStatus: 'unknown',
+      }),
+    )
+  })
+
+  it('does not invoke an accessor element in the effects array', () => {
+    let reads = 0
+    const effects: unknown[] = []
+    Object.defineProperty(effects, '0', {
+      enumerable: true,
+      get: () => {
+        reads += 1
+        return 'observe'
+      },
+    })
+
+    expect(
+      normalizeToolResult(
+        runtimeObservation({
+          outcome: 'resolved',
+          started: true,
+          effects,
+          output: {},
+        }),
+      ),
+    ).toEqual(
+      result({
+        executionStatus: 'error',
+        effectStatus: 'unknown',
+      }),
+    )
+    expect(reads).toBe(0)
+  })
+
+  it('contains a throwing effects proxy without invoking its get trap', () => {
+    let gets = 0
+    const effects = new Proxy(['observe'], {
+      get: () => {
+        gets += 1
+        throw new Error('effects get must not run')
+      },
+      getOwnPropertyDescriptor: () => {
+        throw new Error('effects descriptor failed')
+      },
+    })
+
+    expect(() =>
+      normalizeToolResult(
+        runtimeObservation({
+          outcome: 'resolved',
+          started: true,
+          effects,
+          output: {},
+        }),
+      ),
+    ).not.toThrow()
+    expect(
+      normalizeToolResult(
+        runtimeObservation({
+          outcome: 'resolved',
+          started: true,
+          effects,
+          output: {},
+        }),
+      ),
+    ).toEqual(
+      result({
+        executionStatus: 'error',
+        effectStatus: 'unknown',
+      }),
+    )
+    expect(gets).toBe(0)
+  })
+
+  it('does not invoke observation accessors and fails transport closed', () => {
+    let reads = 0
+    const input = Object.defineProperties(
+      {},
+      {
+        outcome: {
+          get: () => {
+            reads += 1
+            return 'resolved'
+          },
+        },
+        started: {
+          get: () => {
+            reads += 1
+            return true
+          },
+        },
+        effects: {
+          get: () => {
+            reads += 1
+            return ['observe']
+          },
+        },
+      },
+    )
+
+    expect(normalizeToolResult(runtimeObservation(input))).toEqual(
+      result({
+        transportStatus: 'failed',
+        executionStatus: 'error',
+        effectStatus: 'unknown',
+      }),
+    )
+    expect(reads).toBe(0)
+  })
+
+  it('contains an observation proxy whose descriptor trap throws', () => {
+    const input = new Proxy(
+      {
+        outcome: 'resolved',
+        started: true,
+        effects: ['observe'],
+      },
+      {
+        getOwnPropertyDescriptor: () => {
+          throw new Error('observation descriptor failed')
+        },
+      },
+    )
+
+    expect(() => normalizeToolResult(runtimeObservation(input))).not.toThrow()
+    expect(normalizeToolResult(runtimeObservation(input))).toEqual(
+      result({
+        transportStatus: 'failed',
+        executionStatus: 'error',
+        effectStatus: 'unknown',
+      }),
+    )
+  })
+
+  it('contains a throwing output proxy as a semantic error', () => {
+    const output = new Proxy(
+      {},
+      {
+        getOwnPropertyDescriptor: () => {
+          throw new Error('output descriptor failed')
+        },
+      },
+    )
+
+    expect(() =>
+      normalizeToolResult(
+        observation({ effects: ['filesystem-read'], output }),
+      ),
+    ).not.toThrow()
+    expect(
+      normalizeToolResult(
+        observation({ effects: ['filesystem-read'], output }),
+      ),
+    ).toEqual(result({ executionStatus: 'error' }))
+  })
+
+  it('does not invoke receipt accessors and fails closed', () => {
+    let reads = 0
+    const receipt = Object.defineProperty({}, 'effectStatus', {
+      get: () => {
+        reads += 1
+        return 'applied'
+      },
+    })
+
+    expect(
+      normalizeToolResult(
+        runtimeObservation({
+          outcome: 'resolved',
+          started: true,
+          effects: ['filesystem-write'],
+          output: {},
+          receipt,
+        }),
+      ),
+    ).toEqual(
+      result({
+        executionStatus: 'error',
+        effectStatus: 'unknown',
+      }),
+    )
+    expect(reads).toBe(0)
+  })
+
+  it('contains a throwing receipt proxy and fails closed', () => {
+    const receipt = new Proxy(
+      {},
+      {
+        getOwnPropertyDescriptor: () => {
+          throw new Error('receipt descriptor failed')
+        },
+      },
+    )
+
+    expect(() =>
+      normalizeToolResult(
+        runtimeObservation({
+          outcome: 'resolved',
+          started: true,
+          effects: ['filesystem-write'],
+          output: {},
+          receipt,
+        }),
+      ),
+    ).not.toThrow()
+    expect(
+      normalizeToolResult(
+        runtimeObservation({
+          outcome: 'resolved',
+          started: true,
+          effects: ['filesystem-write'],
+          output: {},
+          receipt,
+        }),
+      ),
+    ).toEqual(
+      result({
+        executionStatus: 'error',
+        effectStatus: 'unknown',
+      }),
+    )
+  })
+
+  it.each([
+    ['null', null],
+    ['primitive', 7],
+    ['array', []],
+  ])('fails transport closed for a malformed observation: %s', (_name, input) => {
+    expect(normalizeToolResult(runtimeObservation(input))).toEqual(
+      result({
+        transportStatus: 'failed',
+        executionStatus: 'error',
+        effectStatus: 'unknown',
       }),
     )
   })
@@ -408,7 +791,7 @@ describe('appendEvidence', () => {
     expect(stored.toolName).toBe('filesystem_write')
   })
 
-  it('preserves deeply frozen prior event identity', () => {
+  it('does not trust arbitrary deeply frozen prior event identity', () => {
     const priorResult = Object.freeze(result())
     const priorEffects = Object.freeze(['filesystem-read'] as ToolEffect[])
     const priorEvent = Object.freeze(
@@ -422,7 +805,17 @@ describe('appendEvidence', () => {
 
     const next = appendEvidence(prior, event({ eventId: 'next' }))
 
-    expect(next[0]).toBe(priorEvent)
+    expect(next[0]).not.toBe(priorEvent)
+    expect(next).toHaveLength(2)
+  })
+
+  it('preserves identity only for snapshots created by this module', () => {
+    const firstLedger = appendEvidence([], event({ eventId: 'prior' }))
+    const ownedPrior = firstLedger[0]
+
+    const next = appendEvidence(firstLedger, event({ eventId: 'next' }))
+
+    expect(next[0]).toBe(ownedPrior)
     expect(next).toHaveLength(2)
   })
 
@@ -468,5 +861,128 @@ describe('appendEvidence', () => {
     expect(next[0].result).toBeUndefined()
     expect(Object.isFrozen(next[0])).toBe(true)
     expect(Object.isFrozen(next[0].effects)).toBe(true)
+  })
+
+  it('rejects a frozen prior event accessor without invoking it or changing the prior ledger', () => {
+    let reads = 0
+    const unsafe = event({ eventId: 'unsafe-prior' })
+    Object.freeze(unsafe.effects)
+    if (unsafe.result !== undefined) {
+      Object.freeze(unsafe.result)
+    }
+    Object.defineProperty(unsafe, 'toolName', {
+      enumerable: true,
+      get: () => {
+        reads += 1
+        return 'accessor-tool'
+      },
+    })
+    Object.freeze(unsafe)
+    const prior = Object.freeze([unsafe])
+
+    expect(() => appendEvidence(prior, event({ eventId: 'next' }))).toThrow(
+      TypeError,
+    )
+    expect(() => appendEvidence(prior, event({ eventId: 'next' }))).toThrow(
+      /Cannot snapshot evidence event/,
+    )
+    expect(reads).toBe(0)
+    expect(prior).toEqual([unsafe])
+    expect(prior[0]).toBe(unsafe)
+  })
+
+  it('drops unexpected nested event and result fields from the owned snapshot', () => {
+    const unexpectedEvent = { live: { value: 'event-original' } }
+    const unexpectedResult = { live: { value: 'result-original' } }
+    const inputResult = Object.assign(result(), {
+      unexpected: unexpectedResult,
+    })
+    const input = Object.assign(
+      event({
+        result: inputResult,
+      }),
+      { unexpected: unexpectedEvent },
+    )
+
+    const stored = appendEvidence([], input as unknown as EvidenceEvent)[0]
+
+    expect(Object.hasOwn(stored, 'unexpected')).toBe(false)
+    expect(Object.hasOwn(stored.result ?? {}, 'unexpected')).toBe(false)
+
+    unexpectedEvent.live.value = 'event-mutated'
+    unexpectedResult.live.value = 'result-mutated'
+
+    expect(Object.hasOwn(stored, 'unexpected')).toBe(false)
+    expect(Object.hasOwn(stored.result ?? {}, 'unexpected')).toBe(false)
+  })
+
+  it('wraps an event proxy failure in a clear TypeError and preserves the prior ledger', () => {
+    const prior = appendEvidence([], event({ eventId: 'prior' }))
+    const priorEntry = prior[0]
+    const unsafe = new Proxy(event({ eventId: 'unsafe' }), {
+      getOwnPropertyDescriptor: () => {
+        throw new Error('event descriptor failed')
+      },
+    })
+
+    expect(() => appendEvidence(prior, unsafe)).toThrow(TypeError)
+    expect(() => appendEvidence(prior, unsafe)).toThrow(
+      /Cannot snapshot evidence event/,
+    )
+    expect(prior).toHaveLength(1)
+    expect(prior[0]).toBe(priorEntry)
+  })
+
+  it('wraps a throwing effects proxy without invoking its get trap', () => {
+    let gets = 0
+    const effects = new Proxy(['filesystem-read'] as ToolEffect[], {
+      get: () => {
+        gets += 1
+        throw new Error('effects get must not run')
+      },
+      getOwnPropertyDescriptor: () => {
+        throw new Error('effects descriptor failed')
+      },
+    })
+    const input = event({ effects })
+
+    expect(() => appendEvidence([], input)).toThrow(TypeError)
+    expect(() => appendEvidence([], input)).toThrow(
+      /Cannot snapshot evidence event/,
+    )
+    expect(gets).toBe(0)
+  })
+
+  it('rejects a result accessor without invoking it', () => {
+    let reads = 0
+    const unsafeResult = result()
+    Object.defineProperty(unsafeResult, 'executionStatus', {
+      enumerable: true,
+      get: () => {
+        reads += 1
+        return 'success'
+      },
+    })
+    const input = event({ result: unsafeResult })
+
+    expect(() => appendEvidence([], input)).toThrow(TypeError)
+    expect(() => appendEvidence([], input)).toThrow(
+      /Cannot snapshot evidence event/,
+    )
+    expect(reads).toBe(0)
+  })
+
+  it('wraps a throwing result proxy in a clear TypeError', () => {
+    const unsafeResult = new Proxy(result(), {
+      getOwnPropertyDescriptor: () => {
+        throw new Error('result descriptor failed')
+      },
+    })
+    const input = event({ result: unsafeResult })
+
+    expect(() => appendEvidence([], input)).toThrow(TypeError)
+    expect(() => appendEvidence([], input)).toThrow(
+      /Cannot snapshot evidence event/,
+    )
   })
 })
