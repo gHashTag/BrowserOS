@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
+import { createHash, randomUUID } from 'node:crypto'
+import type { ToolExecutionOptions, ToolSet } from 'ai'
 import type {
   EvidenceEvent,
   NormalizedToolResult,
@@ -21,6 +23,29 @@ export interface ToolResultObservation {
   readonly effects: readonly ToolEffect[]
   readonly output?: unknown
   readonly receipt?: ToolExecutionReceipt
+}
+
+export interface ToolEvidenceSink {
+  record(event: EvidenceEvent): void
+}
+
+export interface ToolReliabilityDescriptor {
+  readonly effects: readonly ToolEffect[]
+  readonly retrySafety: 'safe' | 'unsafe' | 'unknown'
+}
+
+export type ToolReliabilitySource =
+  | {
+      readonly kind: 'browser'
+      readonly approvalCategory?: string
+    }
+  | { readonly kind: 'external' }
+  | { readonly kind: 'filesystem' }
+  | { readonly kind: 'memory' }
+
+export interface ToolReliabilityLayer {
+  readonly toolNames: readonly string[]
+  readonly describeTool: (name: string) => ToolReliabilityDescriptor
 }
 
 type ObservationOutcome = ToolResultObservation['outcome']
@@ -542,4 +567,606 @@ export function appendEvidence(
 ): readonly EvidenceEvent[] {
   const prior = snapshotLedgerEntries(ledger)
   return Object.freeze([...prior, snapshotEvidenceEvent(event, false)])
+}
+
+const OBSERVE_SAFE_DESCRIPTOR: ToolReliabilityDescriptor = Object.freeze({
+  effects: Object.freeze(['observe'] as const),
+  retrySafety: 'safe',
+})
+const FILESYSTEM_READ_SAFE_DESCRIPTOR: ToolReliabilityDescriptor =
+  Object.freeze({
+    effects: Object.freeze(['filesystem-read'] as const),
+    retrySafety: 'safe',
+  })
+const FILESYSTEM_WRITE_SAFE_DESCRIPTOR: ToolReliabilityDescriptor =
+  Object.freeze({
+    effects: Object.freeze(['filesystem-write'] as const),
+    retrySafety: 'safe',
+  })
+const FILESYSTEM_WRITE_UNSAFE_DESCRIPTOR: ToolReliabilityDescriptor =
+  Object.freeze({
+    effects: Object.freeze(['filesystem-write'] as const),
+    retrySafety: 'unsafe',
+  })
+const FILESYSTEM_WRITE_UNKNOWN_DESCRIPTOR: ToolReliabilityDescriptor =
+  Object.freeze({
+    effects: Object.freeze(['filesystem-write'] as const),
+    retrySafety: 'unknown',
+  })
+const COMMAND_UNKNOWN_DESCRIPTOR: ToolReliabilityDescriptor = Object.freeze({
+  effects: Object.freeze(['command'] as const),
+  retrySafety: 'unknown',
+})
+const BROWSER_WRITE_UNSAFE_DESCRIPTOR: ToolReliabilityDescriptor =
+  Object.freeze({
+    effects: Object.freeze(['browser-write'] as const),
+    retrySafety: 'unsafe',
+  })
+const BROWSER_WRITE_UNKNOWN_DESCRIPTOR: ToolReliabilityDescriptor =
+  Object.freeze({
+    effects: Object.freeze(['browser-write'] as const),
+    retrySafety: 'unknown',
+  })
+const EXTERNAL_WRITE_UNKNOWN_DESCRIPTOR: ToolReliabilityDescriptor =
+  Object.freeze({
+    effects: Object.freeze(['external-write'] as const),
+    retrySafety: 'unknown',
+  })
+
+const FILESYSTEM_READ_TOOL_NAMES = new Set([
+  'filesystem_read',
+  'filesystem_grep',
+  'filesystem_find',
+  'filesystem_ls',
+])
+const MEMORY_READ_TOOL_NAMES = new Set([
+  'memory_search',
+  'memory_read_core',
+  'soul_read',
+])
+const MEMORY_WRITE_TOOL_NAMES = new Set([
+  'memory_write',
+  'memory_update_core',
+  'soul_update',
+])
+
+/**
+ * Resolve reliability from both the final tool name and the source that won
+ * merge precedence. Names alone are insufficient because MCP tools may collide
+ * with BrowserOS or local tools.
+ */
+export function resolveToolReliabilityDescriptor(
+  name: string,
+  source: ToolReliabilitySource,
+): ToolReliabilityDescriptor {
+  switch (source.kind) {
+    case 'browser':
+      return source.approvalCategory === 'observation' ||
+        source.approvalCategory === 'screenshots'
+        ? OBSERVE_SAFE_DESCRIPTOR
+        : source.approvalCategory === undefined
+          ? BROWSER_WRITE_UNKNOWN_DESCRIPTOR
+          : BROWSER_WRITE_UNSAFE_DESCRIPTOR
+    case 'external':
+      return EXTERNAL_WRITE_UNKNOWN_DESCRIPTOR
+    case 'filesystem':
+      if (FILESYSTEM_READ_TOOL_NAMES.has(name)) {
+        return FILESYSTEM_READ_SAFE_DESCRIPTOR
+      }
+      // filesystem_write is a complete overwrite, so repeating the same
+      // validated input is idempotent. Edit and command execution are not.
+      if (name === 'filesystem_write') {
+        return FILESYSTEM_WRITE_SAFE_DESCRIPTOR
+      }
+      if (name === 'filesystem_edit') {
+        return FILESYSTEM_WRITE_UNSAFE_DESCRIPTOR
+      }
+      if (name === 'filesystem_bash') {
+        return COMMAND_UNKNOWN_DESCRIPTOR
+      }
+      return FILESYSTEM_WRITE_UNKNOWN_DESCRIPTOR
+    case 'memory':
+      if (MEMORY_READ_TOOL_NAMES.has(name)) {
+        return FILESYSTEM_READ_SAFE_DESCRIPTOR
+      }
+      if (MEMORY_WRITE_TOOL_NAMES.has(name)) {
+        return FILESYSTEM_WRITE_UNSAFE_DESCRIPTOR
+      }
+      return FILESYSTEM_WRITE_UNKNOWN_DESCRIPTOR
+  }
+}
+
+export function createMergedToolDescriptorResolver(
+  layers: readonly ToolReliabilityLayer[],
+): (name: string) => ToolReliabilityDescriptor {
+  const descriptors = new Map<string, ToolReliabilityDescriptor>()
+  for (const layer of layers) {
+    for (const name of layer.toolNames) {
+      try {
+        descriptors.set(name, layer.describeTool(name))
+      } catch {
+        descriptors.set(name, EXTERNAL_WRITE_UNKNOWN_DESCRIPTOR)
+      }
+    }
+  }
+
+  return (name) => descriptors.get(name) ?? EXTERNAL_WRITE_UNKNOWN_DESCRIPTOR
+}
+
+/**
+ * A stable relay lets an AiSdkAgent keep one wrapped tool set while changing
+ * the run-owned ledger. captureTarget() binds both events of an in-flight call
+ * to the same owner even if the current target changes before settlement.
+ */
+export class MutableToolEvidenceSinkRelay implements ToolEvidenceSink {
+  private target: ToolEvidenceSink | undefined
+
+  setTarget(target: ToolEvidenceSink | undefined): void {
+    this.target = target
+  }
+
+  captureTarget(): ToolEvidenceSink | undefined {
+    return this.target
+  }
+
+  record(event: EvidenceEvent): void {
+    this.target?.record(event)
+  }
+}
+
+const MAX_DIGEST_DEPTH = 64
+const MAX_DIGEST_ENTRIES = 10_000
+
+function updateDigestToken(
+  hash: ReturnType<typeof createHash>,
+  kind: string,
+  value = '',
+): void {
+  hash.update(String(kind.length))
+  hash.update(':')
+  hash.update(kind)
+  hash.update(String(value.length))
+  hash.update(':')
+  hash.update(value)
+}
+
+function writePrimitiveDigest(
+  hash: ReturnType<typeof createHash>,
+  value: unknown,
+): boolean {
+  switch (typeof value) {
+    case 'undefined':
+      updateDigestToken(hash, 'undefined')
+      return true
+    case 'boolean':
+      updateDigestToken(hash, 'boolean', value ? '1' : '0')
+      return true
+    case 'number':
+      updateDigestToken(
+        hash,
+        'number',
+        Number.isNaN(value)
+          ? 'NaN'
+          : Object.is(value, -0)
+            ? '-0'
+            : String(value),
+      )
+      return true
+    case 'bigint':
+      updateDigestToken(hash, 'bigint', value.toString())
+      return true
+    case 'string':
+      updateDigestToken(hash, 'string', value)
+      return true
+    case 'symbol':
+      updateDigestToken(hash, 'symbol', String(value))
+      return true
+    case 'function':
+      updateDigestToken(hash, 'function')
+      return true
+    case 'object':
+      if (value === null) {
+        updateDigestToken(hash, 'null')
+        return true
+      }
+      return false
+  }
+}
+
+function canonicalDigest(value: unknown): string {
+  const hash = createHash('sha256')
+  const seen = new WeakMap<object, number>()
+  let nextObjectId = 0
+  let entryCount = 0
+
+  const visit = (current: unknown, depth: number): void => {
+    if (depth > MAX_DIGEST_DEPTH) {
+      updateDigestToken(hash, 'depth-limit')
+      return
+    }
+
+    if (writePrimitiveDigest(hash, current)) {
+      return
+    }
+
+    const objectValue = current as object
+    const priorId = seen.get(objectValue)
+    if (priorId !== undefined) {
+      updateDigestToken(hash, 'reference', String(priorId))
+      return
+    }
+    const objectId = nextObjectId
+    nextObjectId += 1
+    seen.set(objectValue, objectId)
+    updateDigestToken(hash, 'object', String(objectId))
+
+    let keys: PropertyKey[]
+    try {
+      keys = Reflect.ownKeys(objectValue)
+    } catch {
+      updateDigestToken(hash, 'opaque-own-keys')
+      return
+    }
+
+    const sortableKeys = keys
+      .map((key) => ({
+        key,
+        label:
+          typeof key === 'string' ? `string:${key}` : `symbol:${String(key)}`,
+      }))
+      .sort((left, right) => left.label.localeCompare(right.label))
+
+    for (const { key, label } of sortableKeys) {
+      entryCount += 1
+      if (entryCount > MAX_DIGEST_ENTRIES) {
+        updateDigestToken(hash, 'entry-limit')
+        return
+      }
+      updateDigestToken(hash, 'key', label)
+
+      let descriptor: PropertyDescriptor | undefined
+      try {
+        descriptor = Object.getOwnPropertyDescriptor(objectValue, key)
+      } catch {
+        updateDigestToken(hash, 'opaque-descriptor')
+        continue
+      }
+      if (descriptor === undefined) {
+        updateDigestToken(hash, 'missing-descriptor')
+        continue
+      }
+      if (!Object.hasOwn(descriptor, 'value')) {
+        updateDigestToken(hash, 'accessor')
+        continue
+      }
+      visit(descriptor.value, depth + 1)
+    }
+  }
+
+  try {
+    visit(value, 0)
+  } catch {
+    updateDigestToken(hash, 'unavailable')
+  }
+  return hash.digest('hex')
+}
+
+function safeDescriptor(
+  name: string,
+  describeTool: (name: string) => ToolReliabilityDescriptor,
+): ToolReliabilityDescriptor {
+  let candidate: unknown
+  try {
+    candidate = describeTool(name)
+  } catch {
+    return EXTERNAL_WRITE_UNKNOWN_DESCRIPTOR
+  }
+  if (!isNonArrayObject(candidate)) {
+    return EXTERNAL_WRITE_UNKNOWN_DESCRIPTOR
+  }
+
+  const effectsProperty = readOwnDataProperty(candidate, 'effects')
+  const retrySafetyProperty = readOwnDataProperty(candidate, 'retrySafety')
+  const effects =
+    effectsProperty.state === 'data'
+      ? snapshotEffects(effectsProperty.value)
+      : { valid: false, values: Object.freeze([]) }
+  const retrySafety =
+    retrySafetyProperty.state === 'data' ? retrySafetyProperty.value : undefined
+  if (
+    !effects.valid ||
+    (retrySafety !== 'safe' &&
+      retrySafety !== 'unsafe' &&
+      retrySafety !== 'unknown')
+  ) {
+    return EXTERNAL_WRITE_UNKNOWN_DESCRIPTOR
+  }
+  return Object.freeze({
+    effects: effects.values,
+    retrySafety,
+  })
+}
+
+function capturedSink(
+  sink: ToolEvidenceSink | undefined,
+): ToolEvidenceSink | undefined {
+  return sink instanceof MutableToolEvidenceSinkRelay
+    ? sink.captureTarget()
+    : sink
+}
+
+function safelyRecord(
+  sink: ToolEvidenceSink | undefined,
+  event: EvidenceEvent,
+): void {
+  try {
+    sink?.record(event)
+  } catch {
+    // Evidence is observe-only. A telemetry failure must not affect the tool.
+  }
+}
+
+function createEvidenceEvent(input: {
+  readonly toolCallId: string
+  readonly toolName: string
+  readonly kind: 'requested' | 'settled'
+  readonly descriptor: ToolReliabilityDescriptor
+  readonly argumentDigest: string
+  readonly result?: NormalizedToolResult
+  readonly outputDigest?: string
+}): EvidenceEvent {
+  return snapshotEvidenceEvent(
+    {
+      eventId: randomUUID(),
+      toolCallId: input.toolCallId,
+      toolName: input.toolName,
+      kind: input.kind,
+      effects: input.descriptor.effects,
+      retrySafety: input.descriptor.retrySafety,
+      result: input.result,
+      argumentDigest: input.argumentDigest,
+      outputDigest: input.outputDigest,
+      recordedAt: Date.now(),
+    },
+    false,
+  )
+}
+
+function dataMethod(
+  value: unknown,
+  property: PropertyKey,
+): ((...args: unknown[]) => unknown) | undefined {
+  if (
+    (typeof value !== 'object' || value === null) &&
+    typeof value !== 'function'
+  ) {
+    return undefined
+  }
+
+  let current: object | null = value as object
+  for (let depth = 0; current !== null && depth < 16; depth += 1) {
+    let descriptor: PropertyDescriptor | undefined
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(current, property)
+    } catch {
+      return undefined
+    }
+    if (descriptor !== undefined) {
+      return Object.hasOwn(descriptor, 'value') &&
+        typeof descriptor.value === 'function'
+        ? descriptor.value
+        : undefined
+    }
+    try {
+      current = Object.getPrototypeOf(current)
+    } catch {
+      return undefined
+    }
+  }
+  return undefined
+}
+
+function observePromiseLike(
+  value: object,
+  thenMethod: (...args: unknown[]) => unknown,
+  onResolved: (output: unknown) => void,
+  onRejected: (error: unknown) => void,
+): Promise<unknown> {
+  return new Promise<unknown>((resolve, reject) => {
+    try {
+      thenMethod.call(value, resolve, reject)
+    } catch (error) {
+      reject(error)
+    }
+  }).then(
+    (output) => {
+      onResolved(output)
+      return output
+    },
+    (error) => {
+      onRejected(error)
+      throw error
+    },
+  )
+}
+
+function observeAsyncIterable(
+  value: AsyncIterable<unknown>,
+  onResolved: (output: unknown) => void,
+  onRejected: (error: unknown) => void,
+  onCancelled: (output: unknown) => void,
+): AsyncIterable<unknown> {
+  return (async function* () {
+    let completed = false
+    let lastOutput: unknown
+    try {
+      for await (const output of value) {
+        lastOutput = output
+        yield output
+      }
+      completed = true
+      onResolved(lastOutput)
+    } catch (error) {
+      onRejected(error)
+      throw error
+    } finally {
+      if (!completed) {
+        onCancelled(lastOutput)
+      }
+    }
+  })()
+}
+
+function wrapExecutableTool(
+  toolName: string,
+  sourceTool: ToolSet[string],
+  sourceExecute: (...args: unknown[]) => unknown,
+  options: {
+    readonly evidenceSink: ToolEvidenceSink
+    readonly describeTool: (name: string) => ToolReliabilityDescriptor
+  },
+): ToolSet[string] {
+  const wrappedExecute = function (
+    this: unknown,
+    input: unknown,
+    executionOptions: ToolExecutionOptions,
+  ): unknown {
+    const sink = capturedSink(options.evidenceSink)
+    const descriptor = safeDescriptor(toolName, options.describeTool)
+    const argumentDigest = canonicalDigest(input)
+    const preAborted = executionOptions.abortSignal?.aborted === true
+    const started = !preAborted
+    let settled = false
+
+    safelyRecord(
+      sink,
+      createEvidenceEvent({
+        toolCallId: executionOptions.toolCallId,
+        toolName,
+        kind: 'requested',
+        descriptor,
+        argumentDigest,
+      }),
+    )
+
+    const settle = (
+      outcome: ToolResultObservation['outcome'],
+      output?: unknown,
+    ): void => {
+      if (settled) {
+        return
+      }
+      settled = true
+      const effectiveOutcome =
+        preAborted || executionOptions.abortSignal?.aborted === true
+          ? 'aborted'
+          : outcome
+      const normalized = normalizeToolResult({
+        outcome: effectiveOutcome,
+        started,
+        effects: descriptor.effects,
+        output,
+      })
+      safelyRecord(
+        sink,
+        createEvidenceEvent({
+          toolCallId: executionOptions.toolCallId,
+          toolName,
+          kind: 'settled',
+          descriptor,
+          argumentDigest,
+          result: normalized,
+          outputDigest:
+            outcome === 'rejected' ? undefined : canonicalDigest(output),
+        }),
+      )
+    }
+
+    let output: unknown
+    try {
+      output = sourceExecute.call(this, input, executionOptions)
+    } catch (error) {
+      settle('rejected', error)
+      throw error
+    }
+
+    const asyncIteratorMethod = dataMethod(output, Symbol.asyncIterator)
+    if (asyncIteratorMethod !== undefined) {
+      return observeAsyncIterable(
+        output as AsyncIterable<unknown>,
+        (finalOutput) => settle('resolved', finalOutput),
+        (error) => settle('rejected', error),
+        (lastOutput) => settle('aborted', lastOutput),
+      )
+    }
+
+    const thenMethod = dataMethod(output, 'then')
+    if (
+      thenMethod !== undefined &&
+      (typeof output === 'object' || typeof output === 'function') &&
+      output !== null
+    ) {
+      return observePromiseLike(
+        output,
+        thenMethod,
+        (resolved) => settle('resolved', resolved),
+        (error) => settle('rejected', error),
+      )
+    }
+
+    settle('resolved', output)
+    return output
+  }
+
+  const descriptors = Object.getOwnPropertyDescriptors(
+    sourceTool,
+  ) as PropertyDescriptorMap
+  const executeDescriptor = descriptors.execute
+  descriptors.execute = {
+    ...(executeDescriptor ?? {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+    }),
+    value: wrappedExecute,
+  }
+  return Object.create(
+    Object.getPrototypeOf(sourceTool),
+    descriptors,
+  ) as ToolSet[string]
+}
+
+export function wrapToolSetWithEvidence(
+  tools: ToolSet,
+  options: {
+    readonly evidenceSink?: ToolEvidenceSink
+    readonly describeTool: (name: string) => ToolReliabilityDescriptor
+  },
+): ToolSet {
+  if (options.evidenceSink === undefined) {
+    return tools
+  }
+
+  const wrapped: ToolSet = {}
+  for (const [name, sourceTool] of Object.entries(tools)) {
+    const executeDescriptor = Object.getOwnPropertyDescriptor(
+      sourceTool,
+      'execute',
+    )
+    wrapped[name] =
+      executeDescriptor !== undefined &&
+      Object.hasOwn(executeDescriptor, 'value') &&
+      typeof executeDescriptor.value === 'function'
+        ? wrapExecutableTool(
+            name,
+            sourceTool,
+            executeDescriptor.value,
+            options as {
+              readonly evidenceSink: ToolEvidenceSink
+              readonly describeTool: (name: string) => ToolReliabilityDescriptor
+            },
+          )
+        : sourceTool
+  }
+  return wrapped
 }

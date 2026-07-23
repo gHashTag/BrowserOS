@@ -678,4 +678,36 @@ describe('SessionStore turn leases', () => {
     expect(appended?.evidence).toHaveLength(2)
     expect(appended?.evidence[0]).toBe(storedEvent)
   })
+
+  it('creates an owner-checked evidence sink that ignores stale owners', () => {
+    const store = new SessionStore()
+    acquireTurn(store, createRunningRun('run-1'))
+    const ownerSink = store.createEvidenceSink('conversation-1', 'run-1')
+    const staleSink = store.createEvidenceSink('conversation-1', 'stale-run')
+    const ownerEvent = {
+      eventId: 'owner-event',
+      toolCallId: 'owner-call',
+      toolName: 'filesystem_read',
+      kind: 'settled',
+      effects: ['filesystem-read'],
+      retrySafety: 'safe',
+      argumentDigest: 'argument-digest',
+      recordedAt: 300,
+    } satisfies EvidenceEvent
+    const hostileStaleEvent = new Proxy(ownerEvent, {
+      ownKeys: () => {
+        throw new Error('stale evidence must not be inspected')
+      },
+    })
+
+    expect(() => staleSink.record(hostileStaleEvent)).not.toThrow()
+    expect(store.getActiveRun('conversation-1')?.evidence).toEqual([])
+    expect(() => ownerSink.record(ownerEvent)).not.toThrow()
+    expect(store.getActiveRun('conversation-1')?.evidence).toHaveLength(1)
+
+    expect(
+      store.finishTurn('conversation-1', 'run-1', { status: 'succeeded' }),
+    ).toBe(true)
+    expect(() => ownerSink.record(hostileStaleEvent)).not.toThrow()
+  })
 })

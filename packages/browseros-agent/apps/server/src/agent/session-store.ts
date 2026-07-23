@@ -1,6 +1,7 @@
 import type { BrowserContext } from '@browseros/shared/schemas/browser-context'
 import { logger } from '../lib/logger'
 import type { AiSdkAgent } from './ai-sdk-agent'
+import type { ToolEvidenceSink } from './execution-evidence'
 import {
   completeExecutionRun,
   markRunWaitingForApproval,
@@ -221,6 +222,19 @@ export class SessionStore {
     const updatedRun = appendFrozenEvidence(activeRun, event)
     this.activeRuns.set(conversationId, updatedRun)
     return true
+  }
+
+  createEvidenceSink(conversationId: string, runId: string): ToolEvidenceSink {
+    return Object.freeze({
+      record: (event: EvidenceEvent): void => {
+        try {
+          this.recordEvidence(conversationId, runId, event)
+        } catch {
+          // Evidence is observe-only; a stale or malformed telemetry event
+          // must never affect the owning tool execution.
+        }
+      },
+    })
   }
 
   remove(conversationId: string): boolean {
