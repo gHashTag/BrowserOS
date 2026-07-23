@@ -11,12 +11,21 @@ type ExecuteDescriptorLookup =
   | { readonly state: 'failed' }
   | { readonly state: 'found'; readonly descriptor: PropertyDescriptor }
 
+const MAX_PROTOTYPE_DEPTH = 64
+
 function findExecuteDescriptor(
   sourceTool: ToolSet[string],
 ): ExecuteDescriptorLookup {
   let current: object | null = sourceTool
+  let depth = 0
+  const visited = new WeakSet<object>()
   try {
     while (current !== null) {
+      if (depth >= MAX_PROTOTYPE_DEPTH || visited.has(current)) {
+        return { state: 'failed' }
+      }
+      visited.add(current)
+      depth += 1
       const descriptor = Object.getOwnPropertyDescriptor(current, 'execute')
       if (descriptor !== undefined) {
         return { state: 'found', descriptor }
@@ -40,6 +49,19 @@ function safelyWrapExecute(
   }
 }
 
+function receiverAwareExecute(
+  sourceExecute: RuntimeToolExecute,
+  wrapper: RuntimeToolExecuteWrapper,
+  sourceTool: ToolSet[string],
+  wrappedTool: () => ToolSet[string] | undefined,
+): RuntimeToolExecute {
+  const wrappedExecute = safelyWrapExecute(sourceExecute, wrapper)
+  return function (this: unknown, ...args: unknown[]): unknown {
+    const receiver = this === wrappedTool() ? sourceTool : this
+    return Reflect.apply(wrappedExecute, receiver, args)
+  }
+}
+
 export function wrapToolExecuteProperty(
   sourceTool: ToolSet[string],
   wrapper: RuntimeToolExecuteWrapper,
@@ -55,6 +77,7 @@ export function wrapToolExecuteProperty(
       return sourceTool
     }
     try {
+      let wrappedTool: ToolSet[string] | undefined
       const descriptors = Object.getOwnPropertyDescriptors(
         sourceTool,
       ) as PropertyDescriptorMap
@@ -64,18 +87,25 @@ export function wrapToolExecuteProperty(
           enumerable: descriptor.enumerable ?? true,
           writable: true,
         }),
-        value: safelyWrapExecute(descriptor.value, wrapper),
+        value: receiverAwareExecute(
+          descriptor.value,
+          wrapper,
+          sourceTool,
+          () => wrappedTool,
+        ),
       }
-      return Object.create(
+      wrappedTool = Object.create(
         Object.getPrototypeOf(sourceTool),
         descriptors,
       ) as ToolSet[string]
+      return wrappedTool
     } catch {
       return sourceTool
     }
   }
 
   try {
+    let wrappedTool: ToolSet[string] | undefined
     const descriptors = Object.getOwnPropertyDescriptors(
       sourceTool,
     ) as PropertyDescriptorMap
@@ -83,20 +113,37 @@ export function wrapToolExecuteProperty(
       configurable: descriptor.configurable ?? true,
       enumerable: descriptor.enumerable ?? false,
       get(this: unknown): unknown {
+        const receiver = this === wrappedTool ? sourceTool : this
         const sourceExecute =
           descriptor.get === undefined
             ? undefined
-            : Reflect.apply(descriptor.get, this, [])
+            : Reflect.apply(descriptor.get, receiver, [])
         return typeof sourceExecute === 'function'
-          ? safelyWrapExecute(sourceExecute, wrapper)
+          ? receiverAwareExecute(
+              sourceExecute,
+              wrapper,
+              sourceTool,
+              () => wrappedTool,
+            )
           : sourceExecute
       },
-      set: descriptor.set,
+      set:
+        descriptor.set === undefined
+          ? undefined
+          : function (this: unknown, value: unknown): void {
+              const receiver = this === wrappedTool ? sourceTool : this
+              Reflect.apply(
+                descriptor.set as (value: unknown) => void,
+                receiver,
+                [value],
+              )
+            },
     }
-    return Object.create(
+    wrappedTool = Object.create(
       Object.getPrototypeOf(sourceTool),
       descriptors,
     ) as ToolSet[string]
+    return wrappedTool
   } catch {
     return sourceTool
   }
