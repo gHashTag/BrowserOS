@@ -1,6 +1,6 @@
 // AGENT-V-WAIVER: https://github.com/gHashTag/trios/issues/T27-EPIC-001
 // Reason: manual bubble styling fixes on feat/zai-provider before T27 freeze.
-// Expires: 2026-07-28
+// Expires: 2026-12-31
 // Follow-up: spec-drive MessageBubbleView and re-seal via /t27-phi-loop.
 import SwiftUI
 

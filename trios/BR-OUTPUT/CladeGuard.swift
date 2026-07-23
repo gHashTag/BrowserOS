@@ -133,8 +133,7 @@ final class CladeGuard: ObservableObject {
         do {
             try SafeFilePath.validateWritePath(
                 candidatePath: snapshotPath,
-                basePath: ProjectPaths.trinity,
-                allowMissingBase: true
+                basePath: ProjectPaths.trinity
             )
         } catch {
             NSLog("[CladeGuard] Snapshot path rejected by SafeFilePath: \(error)")

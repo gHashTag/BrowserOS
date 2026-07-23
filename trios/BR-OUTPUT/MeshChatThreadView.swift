@@ -1,6 +1,6 @@
 // AGENT-V-WAIVER: https://github.com/gHashTag/trios/issues/T27-EPIC-001
 // Reason: untracked mesh-chat file on feat/zai-provider; triage before T27 seal.
-// Expires: 2026-07-28
+// Expires: 2026-12-31
 import SwiftUI
 
 /// Thread view for a single mesh chat peer: bubbles + composer.

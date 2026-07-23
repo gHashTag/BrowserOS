@@ -42,6 +42,8 @@ enum SafeFilePath {
     ///   - baseURL: The trusted root the write must stay under.
     ///   - allowMissingBase: If true, a missing base directory is allowed
     ///     (useful when creating the first file under a new temp dir).
+    ///     Defaults to `false` so callers must opt in and cannot silently
+    ///     resolve a non-existent or symlinked base.
     static func validateWritePath(
         candidate: URL,
         baseURL: URL,

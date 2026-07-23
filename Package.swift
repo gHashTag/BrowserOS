@@ -16,6 +16,7 @@ let package = Package(
                 "rings/SR-01",
                 "rings/SR-02",
                 "BR-OUTPUT/ProjectPaths.swift",
+                "rings/SR-00/KeychainSecrets.swift",
                 "BR-OUTPUT/TriosTheme.swift",
                 "BR-OUTPUT/GitHubModels.swift",
                 "BR-OUTPUT/GitHubAPIClient.swift",

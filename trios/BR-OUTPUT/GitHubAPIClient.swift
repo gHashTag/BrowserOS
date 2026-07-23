@@ -4,14 +4,43 @@ actor GitHubAPIClient {
     static let shared = GitHubAPIClient()
     let baseURL = "https://api.github.com"
 
-    var token: String? {
-        ProcessInfo.processInfo.environment["GITHUB_TOKEN"]?.filter { !$0.isWhitespace }
+    /// macOS Keychain service/account where the GitHub token must be stored.
+    /// The token is intentionally never read from the environment; env fallbacks
+    /// leave secrets in shell history, launchctl, and process args.
+    private static let keychainService = "ai.browseros.trios"
+    private static let keychainAccount = "github-token"
+
+    private func token() throws -> String {
+        let value = try KeychainSecrets.read(
+            service: Self.keychainService,
+            account: Self.keychainAccount
+        )
+        let trimmed = value.filter { !$0.isWhitespace }
+        guard !trimmed.isEmpty else {
+            throw GitHubAPIError.missingToken
+        }
+        return trimmed
+    }
+
+    /// Convenience for callers that need to seed the Keychain from a UI flow.
+    static func storeToken(_ token: String) throws {
+        try KeychainSecrets.write(
+            service: keychainService,
+            account: keychainAccount,
+            secret: token
+        )
+    }
+
+    /// Remove the stored token from the Keychain.
+    static func deleteToken() throws {
+        try KeychainSecrets.delete(
+            service: keychainService,
+            account: keychainAccount
+        )
     }
 
     private func request(_ endpoint: String) throws -> URLRequest {
-        guard let token = token, !token.isEmpty else {
-            throw GitHubAPIError.missingToken
-        }
+        let token = try token()
         guard let url = URL(string: baseURL + endpoint) else {
             throw URLError(.badURL)
         }
@@ -157,7 +186,8 @@ enum GitHubAPIError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
-        case .missingToken: return "GITHUB_TOKEN is not set or empty"
+        case .missingToken:
+            return "GitHub token not found in Keychain. Store it with GitHubAPIClient.storeToken(_:) or in Keychain item 'ai.browseros.trios' / 'github-token'."
         }
     }
 }

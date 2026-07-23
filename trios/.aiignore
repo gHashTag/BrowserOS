@@ -1,0 +1,33 @@
+# AI-context exclusion defaults for TriOS
+# Keep sensitive host state and large generated artifacts out of agent context.
+
+# Host secrets and credentials
+.env*
+.ssh/
+*.keychain*
+*.keychain-db
+.aws/
+.gnupg/
+.docker/
+.kube/
+
+# Runtime/generated state that changes frequently and may contain secrets
+.trinity/snapshots/
+.trinity/state/
+.trinity/run/
+.trinity/events/
+.trinity/claims/
+.trinity/queue/
+.trinity/rollback/
+.trinity/dev/
+
+# Build artifacts and archived prototypes
+target/
+.archive/
+.build/
+Frameworks/
+trios_app
+trios.app/
+
+# Lock files with external dependency paths
+Cargo.lock

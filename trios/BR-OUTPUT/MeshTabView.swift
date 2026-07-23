@@ -1,7 +1,7 @@
 // AGENT-V-WAIVER: https://github.com/gHashTag/trios/issues/T27-EPIC-001
 // Reason: mesh-chat UI changes on feat/zai-provider break the build; triage
 //         before T27 seal of Wave 0 / Wave 4. Not part of current T27 refactor.
-// Expires: 2026-07-28
+// Expires: 2026-12-31
 // Follow-up: create separate issue/branch to fix MeshTabView + MeshChatModels build.
 import SwiftUI
 

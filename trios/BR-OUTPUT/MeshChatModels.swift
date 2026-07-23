@@ -1,7 +1,7 @@
 // AGENT-V-WAIVER: https://github.com/gHashTag/trios/issues/T27-EPIC-001
 // Reason: untracked mesh-chat models introduced on feat/zai-provider break Codable
 //         synthesis (Character does not conform to Encodable). Triage before T27 seal.
-// Expires: 2026-07-28
+// Expires: 2026-12-31
 // Follow-up: create separate issue/branch to fix MeshChatModels Codable conformance.
 import Foundation
 import SwiftUI

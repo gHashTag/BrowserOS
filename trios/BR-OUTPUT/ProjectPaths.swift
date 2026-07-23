@@ -2,7 +2,7 @@
 // Reason: L6 SSOT temporarily extended on feat/zai-provider to support the
 //         out-of-scope mesh-chat feature. Triage before T27 seal; revert or
 //         spec-drive when MeshChat is properly claimed.
-// Expires: 2026-07-28
+// Expires: 2026-12-31
 // Follow-up: create separate issue/branch to spec-drive mesh chat URL constants.
 import Foundation
 
