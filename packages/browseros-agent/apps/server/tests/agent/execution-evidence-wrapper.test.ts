@@ -21,6 +21,19 @@ type RuntimeExecute = (input: unknown, options: ToolExecutionOptions) => unknown
 
 const tempDirectories: string[] = []
 
+function poisonCallableHelpers<T extends (...args: never[]) => unknown>(
+  callable: T,
+): T {
+  const poisoned = () => {
+    throw new Error('poisoned callable helper')
+  }
+  Object.defineProperties(callable, {
+    apply: { configurable: true, value: poisoned },
+    call: { configurable: true, value: poisoned },
+  })
+  return callable
+}
+
 afterEach(async () => {
   await Promise.all(
     tempDirectories
@@ -226,7 +239,69 @@ describe('tool evidence wrapper hardening', () => {
     )
   })
 
-  it('uses normal async-iterator accessor lookup and preserves stream cancellation', async () => {
+  it('invokes an execute accessor whose own call and apply helpers are poisoned', () => {
+    const output = { accessor: true }
+    const execute = () => output
+    const getter = poisonCallableHelpers(() => execute)
+    const sourceTool = Object.defineProperty(
+      tool({
+        description: 'poisoned accessor',
+        inputSchema: z.unknown(),
+      }),
+      'execute',
+      {
+        configurable: true,
+        get: getter,
+      },
+    )
+    const wrapped = wrapToolSetWithEvidence(
+      { accessor: sourceTool },
+      {
+        evidenceSink: { record: () => {} },
+        describeTool: writeDescriptor,
+      },
+    )
+
+    expect(
+      executeOf(wrapped, 'accessor')({}, executionOptions('poisoned-accessor')),
+    ).toBe(output)
+  })
+
+  it.each([
+    'evidence',
+    'external-metrics',
+  ] as const)('invokes %s execute when its own apply helper is poisoned', (layer) => {
+    const output = { layer }
+    const sourceExecute = poisonCallableHelpers(() => output)
+    const source = {
+      poisoned: tool({
+        description: 'poisoned execute',
+        inputSchema: z.unknown(),
+        execute: sourceExecute,
+      }),
+    } satisfies ToolSet
+    const metricSpy = spyOn(metrics, 'log').mockImplementation(() => {})
+    const wrapped =
+      layer === 'evidence'
+        ? wrapToolSetWithEvidence(source, {
+            evidenceSink: { record: () => {} },
+            describeTool: writeDescriptor,
+          })
+        : instrumentExternalMcpTools(source)
+
+    try {
+      expect(
+        executeOf(wrapped, 'poisoned')(
+          {},
+          executionOptions(`poisoned-${layer}`),
+        ),
+      ).toBe(output)
+    } finally {
+      metricSpy.mockRestore()
+    }
+  })
+
+  it('captures the async-iterator accessor once and preserves stream cancellation', async () => {
     const first = { chunk: 1 }
     const second = { chunk: 2 }
     let iteratorLookups = 0
@@ -270,7 +345,7 @@ describe('tool evidence wrapper hardening', () => {
       break
     }
 
-    expect(iteratorLookups).toBe(2)
+    expect(iteratorLookups).toBe(1)
     expect(sourceCancelled).toBe(1)
     expect(events.at(-1)?.result).toMatchObject({
       executionStatus: 'aborted',

@@ -986,7 +986,7 @@ function createObservedExecute(
     const executionOptions = args[1] as ToolExecutionOptions
     const sink = capturedSink(options.evidenceSink)
     if (sink === undefined) {
-      return sourceExecute.apply(this, args)
+      return Reflect.apply(sourceExecute, this, args)
     }
     let descriptor: ToolReliabilityDescriptor
     let argumentDigest: EvidenceDigest
@@ -1018,7 +1018,7 @@ function createObservedExecute(
         }),
       )
     } catch {
-      return sourceExecute.apply(this, args)
+      return Reflect.apply(sourceExecute, this, args)
     }
     let started = false
     let settled = false
@@ -1063,7 +1063,7 @@ function createObservedExecute(
     let output: unknown
     try {
       started = true
-      output = sourceExecute.apply(this, args)
+      output = Reflect.apply(sourceExecute, this, args)
     } catch (error) {
       settle('rejected', error)
       throw error

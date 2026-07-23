@@ -108,7 +108,7 @@ function instrumentExternalMcpTool(
 
         let output: unknown
         try {
-          output = sourceExecute.apply(this, args)
+          output = Reflect.apply(sourceExecute, this, args)
         } catch (error) {
           settle(false, error)
           throw error

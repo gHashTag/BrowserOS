@@ -83,7 +83,10 @@ export function wrapToolExecuteProperty(
       configurable: descriptor.configurable ?? true,
       enumerable: descriptor.enumerable ?? false,
       get(this: unknown): unknown {
-        const sourceExecute = descriptor.get?.call(this)
+        const sourceExecute =
+          descriptor.get === undefined
+            ? undefined
+            : Reflect.apply(descriptor.get, this, [])
         return typeof sourceExecute === 'function'
           ? safelyWrapExecute(sourceExecute, wrapper)
           : sourceExecute
