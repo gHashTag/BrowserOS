@@ -371,29 +371,84 @@ describe('SessionStore turn leases', () => {
     expect(store.getActiveRun('conversation-1')).toBeUndefined()
   })
 
-  it('explicitly deletes an active lease when no session exists', async () => {
+  it('refuses deletion while a turn is running and keeps later turns blocked', async () => {
     const store = new SessionStore()
-    acquireTurn(store, createRunningRun('run-1'))
+    let disposeCalls = 0
+    const session = createSession(async () => {
+      disposeCalls += 1
+    })
+    store.set('conversation-1', session)
+    const activeRun = acquireTurn(store, createRunningRun('run-1'))
 
+    expect(await store.delete('conversation-1')).toBe(false)
+    expect(disposeCalls).toBe(0)
+    expect(store.get('conversation-1')).toBe(session)
+    expect(store.getActiveRun('conversation-1')).toBe(activeRun)
+    expect(store.tryAcquireTurn(createRunningRun('run-2'))).toEqual({
+      acquired: false,
+      activeRun,
+    })
+  })
+
+  it('preserves an active orphan lease but removes an approval-suspended orphan', async () => {
+    const store = new SessionStore()
+    const activeRun = acquireTurn(store, createRunningRun('run-1'))
+
+    expect(await store.delete('conversation-1')).toBe(false)
+    expect(store.getActiveRun('conversation-1')).toBe(activeRun)
+
+    const waiting = store.suspendTurnForApproval('conversation-1', 'run-1', [
+      'approval-a',
+    ])
+    expect(waiting?.waitingFor?.approvalIds).toEqual(['approval-a'])
     expect(await store.delete('conversation-1')).toBe(false)
     expect(store.getActiveRun('conversation-1')).toBeUndefined()
   })
 
-  it('cleans up the session and lease when agent disposal fails', async () => {
+  it('preserves the session and approval lease when agent disposal fails', async () => {
     const store = new SessionStore()
-    store.set(
-      'conversation-1',
-      createSession(async () => {
-        throw new Error('dispose failed')
-      }),
-    )
+    const session = createSession(async () => {
+      throw new Error('dispose failed')
+    })
+    store.set('conversation-1', session)
     acquireTurn(store, createRunningRun('run-1'))
+    const waiting = store.suspendTurnForApproval('conversation-1', 'run-1', [
+      'approval-a',
+    ])
 
     await expect(store.delete('conversation-1')).rejects.toThrow(
       'dispose failed',
     )
-    expect(store.has('conversation-1')).toBe(false)
-    expect(store.getActiveRun('conversation-1')).toBeUndefined()
+    expect(store.get('conversation-1')).toBe(session)
+    expect(store.getActiveRun('conversation-1')).toBe(waiting)
+  })
+
+  it('does not delete a newer session or run after disposal resolves', async () => {
+    const store = new SessionStore()
+    let resolveDisposal: () => void = () => undefined
+    const disposal = new Promise<void>((resolve) => {
+      resolveDisposal = resolve
+    })
+    const capturedSession = createSession(() => disposal)
+    store.set('conversation-1', capturedSession)
+    acquireTurn(store, createRunningRun('run-1'))
+    store.suspendTurnForApproval('conversation-1', 'run-1', ['approval-a'])
+
+    const deletion = store.delete('conversation-1')
+    expect(
+      store.finishTurn('conversation-1', 'run-1', {
+        status: 'failed',
+        failureReason: 'denied',
+      }),
+    ).toBe(true)
+    const newerSession = createSession()
+    store.set('conversation-1', newerSession)
+    const newerRun = acquireTurn(store, createRunningRun('run-2'))
+    resolveDisposal()
+
+    expect(await deletion).toBe(false)
+    expect(store.get('conversation-1')).toBe(newerSession)
+    expect(store.getActiveRun('conversation-1')).toBe(newerRun)
   })
 
   it('records deeply frozen evidence without mutating prior or caller input', () => {

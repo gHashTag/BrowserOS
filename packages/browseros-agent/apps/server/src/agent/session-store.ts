@@ -203,23 +203,46 @@ export class SessionStore {
   }
 
   async delete(conversationId: string): Promise<boolean> {
-    const session = this.sessions.get(conversationId)
-    if (!session) {
-      this.activeRuns.delete(conversationId)
+    const capturedSession = this.sessions.get(conversationId)
+    const capturedRun = this.activeRuns.get(conversationId)
+    const capturedRunId = capturedRun?.runId
+    const runWasApprovalSuspended = capturedRun?.waitingFor?.kind === 'approval'
+
+    if (capturedRun && !runWasApprovalSuspended) {
       return false
     }
 
-    try {
-      await session.agent.dispose()
-    } finally {
+    if (!capturedSession) {
+      if (
+        runWasApprovalSuspended &&
+        capturedRunId !== undefined &&
+        this.activeRuns.get(conversationId)?.runId === capturedRunId
+      ) {
+        this.activeRuns.delete(conversationId)
+      }
+      return false
+    }
+
+    await capturedSession.agent.dispose()
+
+    const removedSession = this.sessions.get(conversationId) === capturedSession
+    if (removedSession) {
       this.sessions.delete(conversationId)
+    }
+    if (
+      runWasApprovalSuspended &&
+      capturedRunId !== undefined &&
+      this.activeRuns.get(conversationId)?.runId === capturedRunId
+    ) {
       this.activeRuns.delete(conversationId)
     }
-    logger.info('Session deleted', {
-      conversationId,
-      remainingSessions: this.sessions.size,
-    })
-    return true
+    if (removedSession) {
+      logger.info('Session deleted', {
+        conversationId,
+        remainingSessions: this.sessions.size,
+      })
+    }
+    return removedSession
   }
 
   count(): number {
