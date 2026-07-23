@@ -916,7 +916,36 @@ function safelyRecord(
   }
 }
 
+let fallbackEvidenceEventId = 0
+
+function nextFallbackEvidenceEventId(): string {
+  fallbackEvidenceEventId += 1
+  if (!Number.isSafeInteger(fallbackEvidenceEventId)) {
+    fallbackEvidenceEventId = 1
+  }
+  return `fallback-evidence-event-${fallbackEvidenceEventId}`
+}
+
+function safeEvidenceEventId(): string {
+  try {
+    return randomUUID()
+  } catch {
+    return nextFallbackEvidenceEventId()
+  }
+}
+
+function safeRecordedAt(fallback: number): number {
+  try {
+    const recordedAt = Date.now()
+    return Number.isFinite(recordedAt) ? recordedAt : fallback
+  } catch {
+    return fallback
+  }
+}
+
 function createEvidenceEvent(input: {
+  readonly eventId: string
+  readonly recordedAt: number
   readonly toolCallId: string
   readonly toolName: string
   readonly kind: 'requested' | 'settled'
@@ -927,7 +956,7 @@ function createEvidenceEvent(input: {
 }): EvidenceEvent {
   return snapshotEvidenceEvent(
     {
-      eventId: randomUUID(),
+      eventId: input.eventId,
       toolCallId: input.toolCallId,
       toolName: input.toolName,
       kind: input.kind,
@@ -938,7 +967,7 @@ function createEvidenceEvent(input: {
       argumentDigestFidelity: input.argumentDigest.fidelity,
       outputDigest: input.outputDigest?.value,
       outputDigestFidelity: input.outputDigest?.fidelity,
-      recordedAt: Date.now(),
+      recordedAt: input.recordedAt,
     },
     false,
   )
@@ -964,15 +993,23 @@ function createObservedExecute(
     let toolCallId: string
     let abortSignal: AbortSignal | undefined
     let preAborted: boolean
+    let requestedEventId: string
+    let settledEventId: string
+    let requestedRecordedAt: number
     try {
       descriptor = safeDescriptor(toolName, options.describeTool)
       argumentDigest = canonicalDigest(input)
       toolCallId = executionOptions.toolCallId
       abortSignal = executionOptions.abortSignal
       preAborted = abortSignal?.aborted === true
+      requestedEventId = safeEvidenceEventId()
+      settledEventId = safeEvidenceEventId()
+      requestedRecordedAt = safeRecordedAt(0)
       safelyRecord(
         sink,
         createEvidenceEvent({
+          eventId: requestedEventId,
+          recordedAt: requestedRecordedAt,
           toolCallId,
           toolName,
           kind: 'requested',
@@ -1006,6 +1043,8 @@ function createObservedExecute(
         safelyRecord(
           sink,
           createEvidenceEvent({
+            eventId: settledEventId,
+            recordedAt: safeRecordedAt(requestedRecordedAt),
             toolCallId,
             toolName,
             kind: 'settled',

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, spyOn } from 'bun:test'
+import * as nodeCrypto from 'node:crypto'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -380,7 +381,7 @@ describe('tool evidence wrapper hardening', () => {
     expect(calls).toBe(1)
   })
 
-  it('never replaces an original rejection when settled-event setup fails', () => {
+  it('records settlement without replacing a rejection when the terminal clock fails', () => {
     const originalError = new Error('original tool rejection')
     const eventSetupError = new Error('settled event clock unavailable')
     const originalNow = Date.now
@@ -419,7 +420,60 @@ describe('tool evidence wrapper hardening', () => {
     } finally {
       Date.now = originalNow
     }
-    expect(events.map((event) => event.kind)).toEqual(['requested'])
+    expect(events.map((event) => event.kind)).toEqual(['requested', 'settled'])
+    expect(events[1]?.result).toMatchObject({
+      transportStatus: 'failed',
+      executionStatus: 'error',
+    })
+  })
+
+  it('records settlement without replacing a rejection when the terminal UUID factory fails', () => {
+    const originalError = new Error('original tool rejection')
+    const eventSetupError = new Error('settled event UUID unavailable')
+    const originalRandomUUID = nodeCrypto.randomUUID
+    let uuidReads = 0
+    const events: EvidenceEvent[] = []
+    const uuidSpy = spyOn(nodeCrypto, 'randomUUID').mockImplementation(() => {
+      uuidReads += 1
+      if (uuidReads === 2) {
+        throw eventSetupError
+      }
+      return originalRandomUUID()
+    })
+    const wrapped = wrapToolSetWithEvidence(
+      {
+        rejects: tool({
+          description: 'rejects',
+          inputSchema: z.unknown(),
+          execute: () => {
+            throw originalError
+          },
+        }),
+      },
+      {
+        evidenceSink: { record: (event) => events.push(event) },
+        describeTool: writeDescriptor,
+      },
+    )
+
+    try {
+      expect(() =>
+        executeOf(wrapped, 'rejects')(
+          {},
+          executionOptions('uuid-settlement-failure'),
+        ),
+      ).toThrow(originalError)
+    } finally {
+      uuidSpy.mockRestore()
+    }
+
+    expect(uuidReads).toBe(2)
+    expect(events.map((event) => event.kind)).toEqual(['requested', 'settled'])
+    expect(events[0]?.eventId).not.toBe(events[1]?.eventId)
+    expect(events[1]?.result).toMatchObject({
+      transportStatus: 'failed',
+      executionStatus: 'error',
+    })
   })
 
   it('preserves executable __proto__ and constructor evidence keys as own properties', () => {
