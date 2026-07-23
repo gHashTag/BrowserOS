@@ -27,6 +27,9 @@ PROD_FILES+=(
     "$PROJECT_DIR/BR-OUTPUT/ProjectPaths.swift"
     "$PROJECT_DIR/BR-OUTPUT/QueenStatusViewModel.swift"
     "$PROJECT_DIR/BR-OUTPUT/A2AMessageRouter.swift"
+    "$PROJECT_DIR/BR-OUTPUT/TriosTheme.swift"
+    "$PROJECT_DIR/BR-OUTPUT/GitHubModels.swift"
+    "$PROJECT_DIR/BR-OUTPUT/GitHubAPIClient.swift"
 )
 
 # Add the test files.
