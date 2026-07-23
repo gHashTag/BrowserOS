@@ -335,6 +335,21 @@ describe('deriveSessionExecutionFingerprint', () => {
     )
   })
 
+  it.each([
+    'apiKey',
+    'secretAccessKey',
+    'sessionToken',
+  ] as const)('distinguishes a lone surrogate from U+FFFD in %s', (credential) => {
+    const loneSurrogate = createConfig()
+    loneSurrogate.resolvedConfig[credential] = '\uD800'
+    const replacementCharacter = createConfig()
+    replacementCharacter.resolvedConfig[credential] = '\uFFFD'
+
+    expect(deriveSessionExecutionFingerprint(loneSurrogate)).not.toBe(
+      deriveSessionExecutionFingerprint(replacementCharacter),
+    )
+  })
+
   it('normalizes undefined and empty credential tuple members', () => {
     const omitted = createConfig()
     omitted.resolvedConfig.apiKey = undefined
@@ -367,14 +382,14 @@ describe('deriveSessionExecutionFingerprint', () => {
     )
   })
 
-  it('uses UTF-8 byte lengths for Unicode credential framing', () => {
+  it('uses lossless UTF-16BE code units for Unicode credential framing', () => {
     const config = createConfig()
     config.resolvedConfig.apiKey = 'clé-🔐'
     config.resolvedConfig.secretAccessKey = '秘密'
     config.resolvedConfig.sessionToken = 'токен'
 
     expect(deriveSessionExecutionFingerprint(config)).toBe(
-      '540c2a09b37ea379b604eab888c79b3e0ec2fcdfb30a18db1004471f85f65d7d',
+      'f81c960c49c3981b30f3049a0cb1f9003f8d2de20f9aedfc80ad15ce469c8acc',
     )
   })
 

@@ -15,8 +15,9 @@ type CanonicalValue =
   | CanonicalValue[]
   | { readonly [key: string]: CanonicalValue }
 
-const CREDENTIAL_REVISION_DOMAIN = 'browseros/session-credential-revision/v1\0'
-const FINGERPRINT_VERSION = 'browseros/session-execution-fingerprint/v1'
+const CREDENTIAL_REVISION_DOMAIN =
+  'browseros/session-credential-revision/v2:utf16be\0'
+const FINGERPRINT_VERSION = 'browseros/session-execution-fingerprint/v2'
 
 function canonicalize(value: CanonicalValue): CanonicalValue {
   if (Array.isArray(value)) {
@@ -53,15 +54,19 @@ function projectAclRules(
   }))
 }
 
-function updateLengthPrefixedUtf8(
+function updateLengthPrefixedUtf16BigEndian(
   hash: ReturnType<typeof createHash>,
   value: string,
 ): void {
-  const bytes = Buffer.from(value, 'utf8')
+  const codeUnitCount = value.length
   const lengthPrefix = Buffer.alloc(4)
-  lengthPrefix.writeUInt32BE(bytes.byteLength)
+  lengthPrefix.writeUInt32BE(codeUnitCount)
+  const codeUnits = Buffer.alloc(codeUnitCount * 2)
+  for (let index = 0; index < codeUnitCount; index += 1) {
+    codeUnits.writeUInt16BE(value.charCodeAt(index), index * 2)
+  }
   hash.update(lengthPrefix)
-  hash.update(bytes)
+  hash.update(codeUnits)
 }
 
 function deriveCredentialRevision(
@@ -72,7 +77,7 @@ function deriveCredentialRevision(
   const hash = createHash('sha256')
   hash.update(CREDENTIAL_REVISION_DOMAIN, 'utf8')
   for (const credential of [apiKey, secretAccessKey, sessionToken]) {
-    updateLengthPrefixedUtf8(hash, credential ?? '')
+    updateLengthPrefixedUtf16BigEndian(hash, credential ?? '')
   }
   return hash.digest('hex')
 }
