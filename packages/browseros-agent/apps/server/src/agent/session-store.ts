@@ -16,6 +16,11 @@ import type {
 export type AcquireTurnResult =
   | { acquired: true; run: ExecutionRun }
   | { acquired: false; activeRun: ExecutionRun }
+  | {
+      acquired: false
+      reason: 'deletion-pending'
+      activeRun?: ExecutionRun
+    }
 
 function freezeEvidenceEvent(event: EvidenceEvent): EvidenceEvent {
   return Object.freeze({
@@ -71,6 +76,7 @@ export interface AgentSession {
 export class SessionStore {
   private sessions = new Map<string, AgentSession>()
   private activeRuns = new Map<string, ExecutionRun>()
+  private deletingConversations = new Set<string>()
 
   get(conversationId: string): AgentSession | undefined {
     return this.sessions.get(conversationId)
@@ -90,6 +96,11 @@ export class SessionStore {
 
   tryAcquireTurn(run: ExecutionRun): AcquireTurnResult {
     const activeRun = this.activeRuns.get(run.conversationId)
+    if (this.deletingConversations.has(run.conversationId)) {
+      return activeRun
+        ? { acquired: false, reason: 'deletion-pending', activeRun }
+        : { acquired: false, reason: 'deletion-pending' }
+    }
     if (activeRun) {
       return { acquired: false, activeRun }
     }
@@ -125,10 +136,19 @@ export class SessionStore {
     | { resumed: true; run: ExecutionRun }
     | {
         resumed: false
-        reason: 'no-active-run' | 'not-waiting' | 'approval-mismatch'
+        reason:
+          | 'no-active-run'
+          | 'not-waiting'
+          | 'approval-mismatch'
+          | 'deletion-pending'
         activeRun?: ExecutionRun
       } {
     const activeRun = this.activeRuns.get(conversationId)
+    if (this.deletingConversations.has(conversationId)) {
+      return activeRun
+        ? { resumed: false, reason: 'deletion-pending', activeRun }
+        : { resumed: false, reason: 'deletion-pending' }
+    }
     if (!activeRun) {
       return { resumed: false, reason: 'no-active-run' }
     }
@@ -203,6 +223,10 @@ export class SessionStore {
   }
 
   async delete(conversationId: string): Promise<boolean> {
+    if (this.deletingConversations.has(conversationId)) {
+      return false
+    }
+
     const capturedSession = this.sessions.get(conversationId)
     const capturedRun = this.activeRuns.get(conversationId)
     const capturedRunId = capturedRun?.runId
@@ -223,26 +247,40 @@ export class SessionStore {
       return false
     }
 
-    await capturedSession.agent.dispose()
+    this.deletingConversations.add(conversationId)
+    try {
+      await capturedSession.agent.dispose()
 
-    const removedSession = this.sessions.get(conversationId) === capturedSession
-    if (removedSession) {
-      this.sessions.delete(conversationId)
+      const currentRun = this.activeRuns.get(conversationId)
+      const capturedRunIsUnchanged =
+        capturedRun === undefined
+          ? currentRun === undefined
+          : currentRun === capturedRun &&
+            currentRun.waitingFor?.kind === 'approval'
+      const removedSession =
+        capturedRunIsUnchanged &&
+        this.sessions.get(conversationId) === capturedSession
+
+      if (removedSession) {
+        this.sessions.delete(conversationId)
+      }
+      if (
+        capturedRunIsUnchanged &&
+        runWasApprovalSuspended &&
+        capturedRunId !== undefined
+      ) {
+        this.activeRuns.delete(conversationId)
+      }
+      if (removedSession) {
+        logger.info('Session deleted', {
+          conversationId,
+          remainingSessions: this.sessions.size,
+        })
+      }
+      return removedSession
+    } finally {
+      this.deletingConversations.delete(conversationId)
     }
-    if (
-      runWasApprovalSuspended &&
-      capturedRunId !== undefined &&
-      this.activeRuns.get(conversationId)?.runId === capturedRunId
-    ) {
-      this.activeRuns.delete(conversationId)
-    }
-    if (removedSession) {
-      logger.info('Session deleted', {
-        conversationId,
-        remainingSessions: this.sessions.size,
-      })
-    }
-    return removedSession
   }
 
   count(): number {

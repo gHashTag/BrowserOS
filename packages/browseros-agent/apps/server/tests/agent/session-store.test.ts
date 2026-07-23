@@ -44,6 +44,16 @@ function createSession(
   }
 }
 
+function createDeferredDisposal() {
+  let resolve: () => void = () => undefined
+  let reject: (reason: unknown) => void = () => undefined
+  const promise = new Promise<void>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise
+    reject = rejectPromise
+  })
+  return { promise, resolve, reject }
+}
+
 describe('SessionStore turn leases', () => {
   it('acquires the first turn and refuses a second turn with the original run', () => {
     const store = new SessionStore()
@@ -407,48 +417,79 @@ describe('SessionStore turn leases', () => {
 
   it('preserves the session and approval lease when agent disposal fails', async () => {
     const store = new SessionStore()
-    const session = createSession(async () => {
-      throw new Error('dispose failed')
-    })
+    const disposal = createDeferredDisposal()
+    const session = createSession(() => disposal.promise)
     store.set('conversation-1', session)
     acquireTurn(store, createRunningRun('run-1'))
     const waiting = store.suspendTurnForApproval('conversation-1', 'run-1', [
       'approval-a',
     ])
 
-    await expect(store.delete('conversation-1')).rejects.toThrow(
-      'dispose failed',
-    )
+    const deletion = store.delete('conversation-1')
+    expect(
+      store.tryResumeApprovalTurn('conversation-1', ['approval-a']),
+    ).toEqual({
+      resumed: false,
+      reason: 'deletion-pending',
+      activeRun: waiting,
+    })
+    disposal.reject(new Error('dispose failed'))
+    await expect(deletion).rejects.toThrow('dispose failed')
     expect(store.get('conversation-1')).toBe(session)
     expect(store.getActiveRun('conversation-1')).toBe(waiting)
+    const resumed = store.tryResumeApprovalTurn('conversation-1', [
+      'approval-a',
+    ])
+    expect(resumed.resumed).toBe(true)
   })
 
-  it('does not delete a newer session or run after disposal resolves', async () => {
+  it('rejects approval resume while deletion is pending', async () => {
     const store = new SessionStore()
-    let resolveDisposal: () => void = () => undefined
-    const disposal = new Promise<void>((resolve) => {
-      resolveDisposal = resolve
-    })
-    const capturedSession = createSession(() => disposal)
-    store.set('conversation-1', capturedSession)
+    const disposal = createDeferredDisposal()
+    const session = createSession(() => disposal.promise)
+    store.set('conversation-1', session)
     acquireTurn(store, createRunningRun('run-1'))
-    store.suspendTurnForApproval('conversation-1', 'run-1', ['approval-a'])
+    const waiting = store.suspendTurnForApproval('conversation-1', 'run-1', [
+      'approval-a',
+    ])
 
     const deletion = store.delete('conversation-1')
     expect(
-      store.finishTurn('conversation-1', 'run-1', {
-        status: 'failed',
-        failureReason: 'denied',
-      }),
-    ).toBe(true)
-    const newerSession = createSession()
-    store.set('conversation-1', newerSession)
-    const newerRun = acquireTurn(store, createRunningRun('run-2'))
-    resolveDisposal()
+      store.tryResumeApprovalTurn('conversation-1', ['approval-a']),
+    ).toEqual({
+      resumed: false,
+      reason: 'deletion-pending',
+      activeRun: waiting,
+    })
+    expect(store.getActiveRun('conversation-1')).toBe(waiting)
+    disposal.resolve()
 
-    expect(await deletion).toBe(false)
-    expect(store.get('conversation-1')).toBe(newerSession)
-    expect(store.getActiveRun('conversation-1')).toBe(newerRun)
+    expect(await deletion).toBe(true)
+    expect(store.get('conversation-1')).toBeUndefined()
+    expect(store.getActiveRun('conversation-1')).toBeUndefined()
+  })
+
+  it('rejects new lease acquisition while session deletion is pending', async () => {
+    const store = new SessionStore()
+    const disposal = createDeferredDisposal()
+    store.set(
+      'conversation-1',
+      createSession(() => disposal.promise),
+    )
+
+    const deletion = store.delete('conversation-1')
+    const nextRun = createRunningRun('run-1')
+    expect(store.tryAcquireTurn(nextRun)).toEqual({
+      acquired: false,
+      reason: 'deletion-pending',
+    })
+    expect(store.getActiveRun('conversation-1')).toBeUndefined()
+    disposal.resolve()
+
+    expect(await deletion).toBe(true)
+    expect(store.get('conversation-1')).toBeUndefined()
+    expect(store.getActiveRun('conversation-1')).toBeUndefined()
+    expect(store.tryAcquireTurn(nextRun).acquired).toBe(true)
   })
 
   it('records deeply frozen evidence without mutating prior or caller input', () => {
