@@ -8,6 +8,16 @@ import {
   resumeExecutionRun,
   startExecutionRun,
 } from '../../src/agent/execution-run'
+import type {
+  EvidenceEvent,
+  ExecutionRun,
+  NormalizedToolResult,
+  ToolEffect,
+} from '../../src/agent/execution-types'
+
+type MutableNormalizedToolResult = {
+  -readonly [Key in keyof NormalizedToolResult]: NormalizedToolResult[Key]
+}
 
 function createPlannedRun() {
   return createExecutionRun({
@@ -80,6 +90,72 @@ describe('ExecutionRun', () => {
     expect(generated.runId).toBeString()
     expect(generated.runId.length).toBeGreaterThan(0)
     expect(supplied.runId).toBe('supplied-run-id')
+  })
+
+  it('deeply freezes snapshots without retaining caller-owned mutable inputs', () => {
+    const expectedEffects: ToolEffect[] = ['observe']
+    const eventEffects: ToolEffect[] = ['filesystem-read']
+    const result: MutableNormalizedToolResult = {
+      transportStatus: 'received',
+      executionStatus: 'success',
+      effectStatus: 'none',
+      verificationStatus: 'not-required',
+    }
+    const event = {
+      eventId: 'event-1',
+      toolCallId: 'call-1',
+      toolName: 'read-file',
+      kind: 'settled',
+      effects: eventEffects,
+      retrySafety: 'safe',
+      result,
+      argumentDigest: 'argument-digest',
+      outputDigest: 'output-digest',
+      recordedAt: 100,
+    } satisfies EvidenceEvent
+    const evidence: EvidenceEvent[] = [event]
+    const callerOwnedRun: ExecutionRun = {
+      runId: 'run-1',
+      conversationId: 'conversation-1',
+      userMessageId: 'message-1',
+      intent: 'unknown',
+      expectedEffects,
+      phase: 'planned',
+      waitingFor: undefined,
+      attempt: 0,
+      evidence,
+      failureReason: undefined,
+      effectState: 'none',
+      startedAt: 100,
+      finishedAt: undefined,
+    }
+
+    const snapshot = startExecutionRun(callerOwnedRun)
+    const snapshotEvent = snapshot.evidence[0]
+
+    expect(Object.isFrozen(snapshot)).toBe(true)
+    expect(Object.isFrozen(snapshot.expectedEffects)).toBe(true)
+    expect(Object.isFrozen(snapshot.evidence)).toBe(true)
+    expect(Object.isFrozen(snapshotEvent)).toBe(true)
+    expect(Object.isFrozen(snapshotEvent.effects)).toBe(true)
+    expect(Object.isFrozen(snapshotEvent.result)).toBe(true)
+    expect(snapshot.expectedEffects).not.toBe(expectedEffects)
+    expect(snapshot.evidence).not.toBe(evidence)
+    expect(snapshotEvent).not.toBe(event)
+    expect(snapshotEvent.effects).not.toBe(eventEffects)
+    expect(snapshotEvent.result).not.toBe(result)
+
+    expectedEffects.push('command')
+    eventEffects.push('filesystem-write')
+    result.executionStatus = 'error'
+    event.toolName = 'mutated-tool'
+    evidence.push({ ...event, eventId: 'event-2' })
+
+    expect(snapshot.expectedEffects).toEqual(['observe'])
+    expect(snapshot.evidence).toHaveLength(1)
+    expect(snapshotEvent.toolName).toBe('read-file')
+    expect(snapshotEvent.effects).toEqual(['filesystem-read'])
+    expect(snapshotEvent.result?.executionStatus).toBe('success')
   })
 
   it('moves through running, approval suspension, resume, and success', () => {
