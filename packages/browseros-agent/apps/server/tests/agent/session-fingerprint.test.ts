@@ -374,7 +374,7 @@ describe('deriveSessionExecutionFingerprint', () => {
     config.resolvedConfig.sessionToken = 'токен'
 
     expect(deriveSessionExecutionFingerprint(config)).toBe(
-      '50776a9da5600848e2c9ee5cb5b0c1ebfa4d8b494e62d1f17d29502e5c81a7cd',
+      '540c2a09b37ea379b604eab888c79b3e0ec2fcdfb30a18db1004471f85f65d7d',
     )
   })
 

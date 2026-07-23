@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto'
 import { AGENT_LIMITS } from '@browseros/shared/constants/limits'
 import { LLM_PROVIDERS } from '@browseros/shared/schemas/llm'
+import type { AclRule } from '@browseros/shared/types/acl'
 import type { AiSdkAgentConfig } from './ai-sdk-agent'
+import { getMessageNormalizationOptions } from './message-normalization'
 
 export type SessionExecutionFingerprint = string
 
@@ -32,6 +34,23 @@ function canonicalize(value: CanonicalValue): CanonicalValue {
 
 function optionalString(value: string | undefined): string | null {
   return value ?? null
+}
+
+function sortedUnique(values: readonly string[] | undefined): string[] {
+  return [...new Set(values ?? [])].sort()
+}
+
+function projectAclRules(
+  rules: readonly AclRule[] | undefined,
+): CanonicalValue[] {
+  return (rules ?? []).map((rule) => ({
+    id: rule.id,
+    sitePattern: rule.sitePattern,
+    selector: optionalString(rule.selector),
+    textMatch: optionalString(rule.textMatch),
+    description: optionalString(rule.description),
+    enabled: rule.enabled,
+  }))
 }
 
 function updateLengthPrefixedUtf8(
@@ -86,6 +105,30 @@ export function deriveSessionExecutionFingerprint(
     workingDir,
   } = config.resolvedConfig
   const isChatGPTPro = provider === LLM_PROVIDERS.CHATGPT_PRO
+  const enabledMcpServers = sortedUnique(
+    config.browserContext?.enabledMcpServers,
+  )
+  const customMcpServers = (config.browserContext?.customMcpServers ?? []).map(
+    (server) => ({
+      name: server.name,
+      url: server.url,
+    }),
+  )
+  const klavisState =
+    enabledMcpServers.length === 0
+      ? 'disabled'
+      : config.klavisRef?.handle
+        ? 'connected'
+        : 'pending'
+  const enabledApprovalCategories = Object.entries(
+    config.resolvedConfig.toolApprovalConfig?.categories ?? {},
+  )
+    .filter(([, enabled]) => enabled === true)
+    .map(([category]) => category)
+    .sort()
+  const normalizationOptions = getMessageNormalizationOptions(
+    config.resolvedConfig,
+  )
   const safeMaterial = {
     version: FINGERPRINT_VERSION,
     resolvedConfig: {
@@ -118,8 +161,23 @@ export function deriveSessionExecutionFingerprint(
       isScheduledTask: isScheduledTask ?? false,
       origin: origin ?? 'sidepanel',
       browserosId: optionalString(browserosId),
+      declinedApps: sortedUnique(config.resolvedConfig.declinedApps),
     },
     aiSdkDevtoolsEnabled: config.aiSdkDevtoolsEnabled ?? false,
+    registryToolNames: sortedUnique(config.registry.names()),
+    browserContext: {
+      activePageId: config.browserContext?.activeTab?.pageId ?? null,
+      enabledMcpServers,
+      customMcpServers,
+    },
+    klavisState,
+    enabledApprovalCategories,
+    aclRules: projectAclRules(config.aclRules),
+    normalization: {
+      supportsImages: normalizationOptions.supportsImages,
+      supportsMediaInToolResults:
+        normalizationOptions.supportsMediaInToolResults,
+    },
   } satisfies CanonicalValue
   const serialized = JSON.stringify(canonicalize(safeMaterial))
 
