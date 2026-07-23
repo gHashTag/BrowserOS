@@ -424,6 +424,85 @@ describe('tool evidence wrapper hardening', () => {
     })
   })
 
+  it.each([
+    {
+      expectedReads: { done: 1, value: 0 },
+      property: 'done',
+    },
+    {
+      expectedReads: { done: 1, value: 1 },
+      property: 'value',
+    },
+  ] as const)('settles an iterator-result $property accessor error exactly once', async ({
+    expectedReads,
+    property,
+  }) => {
+    const accessorError = new Error(`${property} accessor failed`)
+    const reads = { done: 0, value: 0 }
+    const iteratorResult = Object.defineProperties(
+      {},
+      {
+        done: {
+          get() {
+            reads.done += 1
+            if (property === 'done') {
+              throw accessorError
+            }
+            return false
+          },
+        },
+        value: {
+          get() {
+            reads.value += 1
+            if (property === 'value') {
+              throw accessorError
+            }
+            return { terminal: true }
+          },
+        },
+      },
+    )
+    const output = {
+      [Symbol.asyncIterator]: () => ({
+        next: async () => iteratorResult,
+      }),
+    }
+    const events: EvidenceEvent[] = []
+    const wrapped = wrapToolSetWithEvidence(
+      {
+        brokenResult: tool({
+          description: 'broken iterator result',
+          inputSchema: z.unknown(),
+          execute: () => output,
+        }),
+      },
+      {
+        evidenceSink: { record: (event) => events.push(event) },
+        describeTool: writeDescriptor,
+      },
+    )
+    const stream = executeOf(wrapped, 'brokenResult')(
+      {},
+      executionOptions(`broken-result-${property}`),
+    ) as AsyncIterable<unknown>
+    const iterator = stream[Symbol.asyncIterator]()
+    let actualError: unknown
+
+    try {
+      await iterator.next()
+    } catch (error) {
+      actualError = error
+    }
+
+    expect(actualError).toBe(accessorError)
+    expect(reads).toEqual(expectedReads)
+    expect(events.map((event) => event.kind)).toEqual(['requested', 'settled'])
+    expect(events[1]?.result).toMatchObject({
+      transportStatus: 'failed',
+      executionStatus: 'error',
+    })
+  })
+
   it('disables evidence setup when telemetry-only execution options are hostile', () => {
     const output = { dispatched: true }
     let calls = 0

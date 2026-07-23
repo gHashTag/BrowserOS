@@ -97,12 +97,14 @@ function observeAsyncIterator(
     if (!isObjectLike(result)) {
       throw new TypeError('Async iterator result must be an object')
     }
-    if (propertyValue(result, 'done')) {
+    const done = Boolean(propertyValue(result, 'done'))
+    if (done) {
       resolveOnce()
-    } else {
-      lastOutput = propertyValue(result, 'value')
+      return { done: true, value: undefined }
     }
-    return result as IteratorResult<unknown>
+    const value = propertyValue(result, 'value')
+    lastOutput = value
+    return { done: false, value }
   }
 
   const observedIterator: AsyncIterator<unknown> & AsyncIterable<unknown> = {

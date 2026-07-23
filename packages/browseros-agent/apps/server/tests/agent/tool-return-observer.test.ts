@@ -101,8 +101,11 @@ describe('observeToolReturn', () => {
     }) as AsyncIterable<unknown>
     const iterator = observed[Symbol.asyncIterator]()
 
-    expect(await iterator.next()).toBe(yielded)
-    expect(await iterator.next()).toBe(completed)
+    const observedYielded = await iterator.next()
+    const observedCompleted = await iterator.next()
+    expect(observedYielded).toEqual(yielded)
+    expect(observedYielded.value).toBe(chunk)
+    expect(observedCompleted).toEqual({ done: true, value: undefined })
     expect(accessorReads).toBe(1)
     expect(iteratorFactoryCalls).toBe(1)
     expect(iteratorFactoryReceiver).toBe(source)
@@ -167,7 +170,9 @@ describe('observeToolReturn', () => {
     }) as AsyncIterable<unknown>
     const iterator = observed[Symbol.asyncIterator]()
 
-    expect(await iterator.next()).toBe(source.yielded)
+    const observedYielded = await iterator.next()
+    expect(observedYielded).toEqual(source.yielded)
+    expect(observedYielded.value).toBe(source.yielded.value)
     let observedError: unknown
     try {
       await iterator.next()
@@ -178,6 +183,151 @@ describe('observeToolReturn', () => {
     expect(observedRejections).toEqual([rejection])
     expect(source.accessorReads()).toBe(1)
     expect(source.pulls()).toBe(2)
+  })
+
+  it('matches native for-await with one read of stateful done and value accessors', async () => {
+    const duplicateReadError = new Error('iterator result accessor read twice')
+    const createSource = (label: string) => {
+      const reads = [
+        { done: 0, value: 0 },
+        { done: 0, value: 0 },
+      ]
+      const values = [
+        { label, index: 0 },
+        { label, index: 1 },
+      ]
+      const results = values.map((value, index) =>
+        Object.defineProperties(
+          {},
+          {
+            done: {
+              get() {
+                reads[index].done += 1
+                if (reads[index].done > 1) {
+                  throw duplicateReadError
+                }
+                return false
+              },
+            },
+            value: {
+              get() {
+                reads[index].value += 1
+                if (reads[index].value > 1) {
+                  throw duplicateReadError
+                }
+                return value
+              },
+            },
+          },
+        ),
+      )
+      let pulls = 0
+      let returnCalls = 0
+      return {
+        iterable: {
+          [Symbol.asyncIterator]: () => ({
+            next: async () => results[pulls++],
+            return: async () => {
+              returnCalls += 1
+              return { done: true, value: undefined }
+            },
+          }),
+        },
+        reads,
+        returnCalls: () => returnCalls,
+        values,
+      }
+    }
+    const collectTwo = async (iterable: AsyncIterable<unknown>) => {
+      const values: unknown[] = []
+      let error: unknown
+      try {
+        for await (const value of iterable) {
+          values.push(value)
+          if (values.length === 2) {
+            break
+          }
+        }
+      } catch (caught) {
+        error = caught
+      }
+      return { error, values }
+    }
+
+    const baseline = createSource('baseline')
+    const baselineResult = await collectTwo(baseline.iterable)
+    expect(baselineResult).toEqual({
+      error: undefined,
+      values: baseline.values,
+    })
+    expect(baseline.reads).toEqual([
+      { done: 1, value: 1 },
+      { done: 1, value: 1 },
+    ])
+    expect(baseline.returnCalls()).toBe(1)
+
+    const source = createSource('observed')
+    const cancelled: unknown[] = []
+    const rejected: unknown[] = []
+    const observed = observeToolReturn(source.iterable, {
+      onResolved: () => {},
+      onRejected: (error) => rejected.push(error),
+      onCancelled: (value) => cancelled.push(value),
+    }) as AsyncIterable<unknown>
+    const observedResult = await collectTwo(observed)
+
+    expect(observedResult).toEqual({
+      error: undefined,
+      values: source.values,
+    })
+    expect(source.reads).toEqual([
+      { done: 1, value: 1 },
+      { done: 1, value: 1 },
+    ])
+    expect(source.returnCalls()).toBe(1)
+    expect(rejected).toEqual([])
+    expect(cancelled).toEqual([source.values[1]])
+  })
+
+  it('does not read a terminal iterator-result value accessor', async () => {
+    const terminalValueError = new Error('terminal value must not be read')
+    const reads = { done: 0, value: 0 }
+    const terminalResult = Object.defineProperties(
+      {},
+      {
+        done: {
+          get() {
+            reads.done += 1
+            return true
+          },
+        },
+        value: {
+          get() {
+            reads.value += 1
+            throw terminalValueError
+          },
+        },
+      },
+    )
+    const source = {
+      [Symbol.asyncIterator]: () => ({
+        next: async () => terminalResult,
+      }),
+    }
+    const resolved: unknown[] = []
+    const rejected: unknown[] = []
+    const observed = observeToolReturn(source, {
+      onResolved: (value) => resolved.push(value),
+      onRejected: (error) => rejected.push(error),
+      onCancelled: () => {},
+    }) as AsyncIterable<unknown>
+
+    const result = await observed[Symbol.asyncIterator]().next()
+
+    expect(result).toEqual({ done: true, value: undefined })
+    expect(reads).toEqual({ done: 1, value: 0 })
+    expect(resolved).toEqual([undefined])
+    expect(rejected).toEqual([])
   })
 
   it('forwards return before the first next and reports cancellation once', async () => {
@@ -212,7 +362,10 @@ describe('observeToolReturn', () => {
     }) as AsyncIterable<unknown>
     const iterator = observed[Symbol.asyncIterator]()
 
-    expect(await iterator.return?.('stop')).toBe(returned)
+    expect(await iterator.return?.('stop')).toEqual({
+      done: true,
+      value: undefined,
+    })
     expect(iteratorFactoryCalls).toBe(1)
     expect(returnCalls).toBe(1)
     expect(returnReceiver).toBe(sourceIterator)
