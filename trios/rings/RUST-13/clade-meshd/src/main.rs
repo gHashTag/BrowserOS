@@ -27,7 +27,6 @@ use warp::{reply::json, Filter};
 
 use trios_mesh::crypto::StaticKey;
 use trios_mesh::daemon::{Node, Transport};
-use trios_mesh::discovery::Hello;
 use trios_mesh::NodeId;
 
 const DEFAULT_PORT: u16 = 9505;
@@ -138,6 +137,9 @@ struct ObserveRequest {
 #[derive(Deserialize, Debug, Clone)]
 struct HelloRequest {
     peer: NodeId,
+    /// Sequence number is carried for future replay-window use; the current
+    /// control-plane /hello handler records ETX without verifying the beacon MAC.
+    #[allow(dead_code)]
     seq: u32,
     heard: Vec<NodeId>,
 }
@@ -383,18 +385,13 @@ async fn hello_handler(
 ) -> Result<impl warp::Reply, Infallible> {
     let mut state = state.write().await;
     let my_id = state.node.id;
-    let hello = match Hello::authenticated(req.peer, req.seq, req.heard, &None) {
-        Ok(h) => h,
-        Err(_) => {
-            return Ok(warp::reply::with_status(
-                json(&serde_json::json!({"error": "hello mac failed"})),
-                warp::http::StatusCode::INTERNAL_SERVER_ERROR,
-            ))
-        }
-    };
-    let heard_us = hello.reports_hearing(my_id);
-    // Update ETX as if we heard the peer and the peer does not hear us yet.
-    // A real implementation would parse the HELLO MAC and reverse-link quality.
+
+    let heard_us = req.heard.contains(&my_id);
+    // The HTTP /hello endpoint is a control-plane convenience; real HELLO
+    // beacons travel over the authenticated UDP/mesh session. Until the HTTP
+    // request carries a verifiable MAC, we record the ETX observation without
+    // claiming cryptographic authenticity. This avoids the previous bug where
+    // Hello::authenticated was called with a hardcoded/public None key.
     state.node.etx.record(req.peer, true, heard_us);
     Ok(warp::reply::with_status(
         json(&serde_json::json!({
