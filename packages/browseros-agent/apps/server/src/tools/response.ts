@@ -25,6 +25,16 @@ interface ToolResponseOptions {
   postActionTimeoutMs?: number
 }
 
+function cloneStructuredValue<T>(value: T): T {
+  try {
+    return structuredClone(value)
+  } catch (error) {
+    throw new TypeError('ToolResponse structured data must be cloneable', {
+      cause: error,
+    })
+  }
+}
+
 export class ToolResponse {
   private content: ContentItem[] = []
   private hasError = false
@@ -54,10 +64,10 @@ export class ToolResponse {
   data(obj: Record<string, unknown>): void
   data(keyOrObj: string | Record<string, unknown>, value?: unknown): void {
     if (typeof keyOrObj === 'string') {
-      this.structured[keyOrObj] = value
+      this.structured[keyOrObj] = cloneStructuredValue(value)
       return
     }
-    Object.assign(this.structured, keyOrObj)
+    Object.assign(this.structured, cloneStructuredValue(keyOrObj))
   }
 
   includeSnapshot(page: number): void {
@@ -182,9 +192,11 @@ export class ToolResponse {
   toResult(): ToolResult {
     const hasStructured = Object.keys(this.structured).length > 0
     return {
-      content: [...this.content],
+      content: this.content.map((item) => ({ ...item })),
       ...(this.hasError && { isError: true }),
-      ...(hasStructured && { structuredContent: { ...this.structured } }),
+      ...(hasStructured && {
+        structuredContent: cloneStructuredValue(this.structured),
+      }),
     }
   }
 }

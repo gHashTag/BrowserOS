@@ -242,4 +242,82 @@ describe('ToolResponse', () => {
     assert.deepStrictEqual(second.content, [{ type: 'text', text: 'original' }])
     assert.deepStrictEqual(second.structuredContent, { count: 1 })
   })
+
+  it('does not expose mutable references to existing content items', () => {
+    const response = new ToolResponse()
+    response.text('original')
+
+    const first = response.toResult()
+    const firstItem = first.content[0]
+    assert.ok(firstItem)
+    assert.strictEqual(firstItem.type, 'text')
+    firstItem.text = 'external mutation'
+
+    const second = response.toResult()
+
+    assert.deepStrictEqual(second.content, [{ type: 'text', text: 'original' }])
+  })
+
+  it('deeply snapshots nested structured objects and arrays on output', () => {
+    const response = new ToolResponse()
+    response.data({
+      page: { title: 'Original page' },
+      tabs: [{ title: 'First tab' }, { title: 'Second tab' }],
+    })
+
+    const first = response.toResult()
+    assert.ok(first.structuredContent)
+    const firstPage = first.structuredContent.page as { title: string }
+    const firstTabs = first.structuredContent.tabs as Array<{ title: string }>
+    firstPage.title = 'Mutated page'
+    firstTabs[0].title = 'Mutated tab'
+    firstTabs.push({ title: 'Injected tab' })
+
+    const second = response.toResult()
+
+    assert.deepStrictEqual(second.structuredContent, {
+      page: { title: 'Original page' },
+      tabs: [{ title: 'First tab' }, { title: 'Second tab' }],
+    })
+  })
+
+  it('snapshots nested structured inputs when data is recorded', () => {
+    const page = {
+      title: 'Original page',
+      labels: ['stable'],
+    }
+    const tabs = [{ title: 'First tab' }]
+    const response = new ToolResponse()
+
+    response.data({ page, tabs })
+    page.title = 'Changed after data()'
+    page.labels.push('late mutation')
+    tabs[0].title = 'Changed tab'
+    tabs.push({ title: 'Late tab' })
+
+    assert.deepStrictEqual(response.toResult().structuredContent, {
+      page: {
+        title: 'Original page',
+        labels: ['stable'],
+      },
+      tabs: [{ title: 'First tab' }],
+    })
+  })
+
+  it('rejects unsupported structured values without partially recording them', () => {
+    const response = new ToolResponse()
+
+    assert.throws(
+      () =>
+        response.data({
+          validBeforeFailure: 'must not leak',
+          unsupported: () => 'not cloneable',
+        }),
+      {
+        name: 'TypeError',
+        message: /structured data must be cloneable/i,
+      },
+    )
+    assert.strictEqual(response.toResult().structuredContent, undefined)
+  })
 })
