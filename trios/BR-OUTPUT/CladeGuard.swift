@@ -128,6 +128,19 @@ final class CladeGuard: ObservableObject {
         let snapshotName = "trios_app-\(ts)-\(cladeId)"
         let snapshotPath = "\(snapshotDir)/\(snapshotName)"
 
+        // GhostApproval defense: ensure the snapshot tree stays under the
+        // trusted Trinity state directory and does not traverse symlinks.
+        do {
+            try SafeFilePath.validateWritePath(
+                candidatePath: snapshotPath,
+                basePath: ProjectPaths.trinity,
+                allowMissingBase: true
+            )
+        } catch {
+            NSLog("[CladeGuard] Snapshot path rejected by SafeFilePath: \(error)")
+            return
+        }
+
         let targets = [
             ProjectPaths.triosBinary,
             "\(ProjectPaths.appBundle)/Contents/MacOS/trios"
@@ -251,6 +264,20 @@ final class CladeGuard: ObservableObject {
 
                 let targetURL = URL(fileURLWithPath: target)
                 let snapshotURL = URL(fileURLWithPath: snapshotPath)
+
+                // GhostApproval defense: refuse to replace a binary that has been
+                // turned into a symlink pointing outside the project tree (e.g.
+                // ~/.ssh/authorized_keys) and keep temp writes under the project.
+                do {
+                    try SafeFilePath.validateWritePath(
+                        candidate: targetURL,
+                        baseURL: URL(fileURLWithPath: ProjectPaths.root)
+                    )
+                } catch {
+                    NSLog("[CladeGuard] Rollback target rejected by SafeFilePath: \(error)")
+                    continue
+                }
+
                 let tempURL = targetURL.appendingPathExtension("tmp")
 
                 // INV-3: Copy snapshot to a temp file next to the target, then

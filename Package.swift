@@ -22,6 +22,7 @@ let package = Package(
                 "BR-OUTPUT/QueenStatusViewModel.swift",
                 "BR-OUTPUT/A2AMessageRouter.swift",
                 "BR-OUTPUT/ChatLogic.swift",
+                "BR-OUTPUT/CladeGuard.swift",
             ]
         ),
         .testTarget(

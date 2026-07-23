@@ -1,0 +1,85 @@
+import Foundation
+
+enum ModelProvider: String, CaseIterable, Codable, Identifiable {
+    case ollama
+    case openai
+    case anthropic
+    case openrouter
+    case zai
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .ollama: return "Ollama"
+        case .openai: return "OpenAI"
+        case .anthropic: return "Anthropic"
+        case .openrouter: return "OpenRouter"
+        case .zai: return "Z.AI"
+        }
+    }
+
+    var requiresAPIKey: Bool {
+        self != .ollama
+    }
+
+    var defaultBaseURL: String {
+        switch self {
+        case .ollama: return "http://127.0.0.1:11434/v1"
+        case .openai: return "https://api.openai.com/v1"
+        case .anthropic: return "https://api.anthropic.com/v1"
+        case .openrouter: return "https://openrouter.ai/api/v1"
+        case .zai: return "https://api.z.ai/api/paas/v4"
+        }
+    }
+
+    var defaultModel: String {
+        suggestedModels[0]
+    }
+
+    var suggestedModels: [String] {
+        switch self {
+        case .ollama:
+            return ["llama3.1", "qwen3", "gemma3"]
+        case .openai:
+            return ["gpt-5.2", "gpt-5", "gpt-4.1"]
+        case .anthropic:
+            return ["claude-sonnet-4-5", "claude-opus-4-5", "claude-haiku-4-5"]
+        case .openrouter:
+            return ["openai/gpt-5.2", "anthropic/claude-sonnet-4.5", "google/gemini-2.5-pro"]
+        case .zai:
+            return ["glm-5.1", "glm-5-turbo", "glm-5", "glm-4.7", "glm-4.7-flash", "glm-4.6"]
+        }
+    }
+}
+
+struct ModelRuntimeConfiguration: Equatable {
+    let provider: ModelProvider
+    let model: String
+    let baseURL: String
+    let apiKey: String?
+
+    func apply(to body: inout [String: Any]) {
+        body["provider"] = provider.rawValue
+        body["model"] = model
+        body["baseUrl"] = baseURL
+        if let apiKey, !apiKey.isEmpty {
+            body["apiKey"] = apiKey
+        }
+    }
+
+    /// Returns a runtime configuration derived from non-secret environment
+    /// overrides only. API keys are intentionally excluded; they must come from
+    /// macOS Keychain via `ModelCredentialStore`.
+    static func environmentFallback(
+        _ environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> ModelRuntimeConfiguration {
+        let provider = ModelProvider(rawValue: environment["TRIOS_PROVIDER"] ?? "") ?? .ollama
+        return ModelRuntimeConfiguration(
+            provider: provider,
+            model: environment["TRIOS_MODEL"] ?? provider.defaultModel,
+            baseURL: environment["TRIOS_BASE_URL"] ?? provider.defaultBaseURL,
+            apiKey: nil
+        )
+    }
+}
