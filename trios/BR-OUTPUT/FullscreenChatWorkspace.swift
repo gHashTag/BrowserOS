@@ -1,5 +1,6 @@
 // AGENT-V-WAIVER: https://github.com/gHashTag/trios/issues/T27-EPIC-001
-// Reason: FULLSCREEN-CHAT-001 adds the spec-driven adaptive chat workspace.
+// Reason: FULLSCREEN-CHAT-001 adds the spec-driven adaptive chat workspace and a
+// trailing live TODO inspector sourced from real planner state.
 // Follow-up: seal against .trinity/specs/fullscreen-chat-history.md.
 import SwiftUI
 
@@ -7,6 +8,9 @@ struct AdaptiveChatWorkspace: View {
     @ObservedObject var viewModel: ChatViewModel
     let scrollToBottomRequest: Int
     @State private var sidebarCollapsed = false
+    // nil until the user toggles, then it overrides the width-derived default so
+    // an explicit choice is preserved across resizes.
+    @State private var todoPresentedOverride: Bool?
     @StateObject private var intelligenceEngine = QueenIntelligenceEngine()
 
     var body: some View {
@@ -14,6 +18,10 @@ struct AdaptiveChatWorkspace: View {
             let metrics = ChatWorkspaceLayout.metrics(
                 width: Double(geometry.size.width),
                 sidebarCollapsed: sidebarCollapsed
+            )
+            let todoMetrics = TodoPanelPolicy.metrics(
+                width: Double(geometry.size.width),
+                mode: metrics.mode
             )
 
             if metrics.mode == .compact {
@@ -27,21 +35,33 @@ struct AdaptiveChatWorkspace: View {
                 ExpandedChatWorkspace(
                     viewModel: viewModel,
                     sidebarCollapsed: $sidebarCollapsed,
+                    todoPresented: todoPresentedBinding(default: todoMetrics.presentedByDefault),
                     metrics: metrics,
+                    todoMetrics: todoMetrics,
                     scrollToBottomRequest: scrollToBottomRequest,
                     intelligenceEngine: intelligenceEngine
                 )
             }
         }
     }
+
+    private func todoPresentedBinding(default defaultValue: Bool) -> Binding<Bool> {
+        Binding(
+            get: { todoPresentedOverride ?? defaultValue },
+            set: { todoPresentedOverride = $0 }
+        )
+    }
 }
 
 private struct ExpandedChatWorkspace: View {
     @ObservedObject var viewModel: ChatViewModel
     @Binding var sidebarCollapsed: Bool
+    @Binding var todoPresented: Bool
     let metrics: ChatWorkspaceMetrics
+    let todoMetrics: TodoPanelMetrics
     let scrollToBottomRequest: Int
     @ObservedObject var intelligenceEngine: QueenIntelligenceEngine
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let glassProfile = ChatGlassStyle.shared
 
     var body: some View {
@@ -73,9 +93,26 @@ private struct ExpandedChatWorkspace: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Color.black.opacity(glassProfile.contentOverlayOpacity))
+        .inspector(isPresented: todoInspectorBinding) {
+            TodoInspectorPanel(viewModel: viewModel)
+                .inspectorColumnWidth(
+                    min: CGFloat(todoMetrics.minWidth),
+                    ideal: CGFloat(todoMetrics.idealWidth),
+                    max: CGFloat(todoMetrics.maxWidth)
+                )
+        }
         .task {
             await viewModel.loadConversations()
         }
+    }
+
+    // The inspector is only reachable in expanded mode; guard the binding so a
+    // stale override cannot present it when the policy disallows the panel.
+    private var todoInspectorBinding: Binding<Bool> {
+        Binding(
+            get: { todoMetrics.isAvailable && todoPresented },
+            set: { todoPresented = $0 }
+        )
     }
 
     private var conversationHeader: some View {
@@ -96,9 +133,37 @@ private struct ExpandedChatWorkspace: View {
 
             Spacer()
 
+            todoToggleButton
         }
         .padding(.horizontal, 14)
         .frame(height: 44)
+    }
+
+    @ViewBuilder
+    private var todoToggleButton: some View {
+        if todoMetrics.isAvailable {
+            Button(action: toggleTodoPanel) {
+                Image(systemName: todoPresented ? "checklist.checked" : "checklist")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(todoPresented ? .grokText : .grokMuted)
+                    .frame(width: 28, height: 28)
+            }
+            .buttonStyle(.plain)
+            .help(todoPresented ? "Hide tasks" : "Show tasks")
+            .accessibilityLabel("Toggle task list")
+            .accessibilityValue(todoPresented ? "shown" : "hidden")
+            .keyboardShortcut("t", modifiers: [.command, .shift])
+        }
+    }
+
+    private func toggleTodoPanel() {
+        if reduceMotion {
+            todoPresented.toggle()
+        } else {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                todoPresented.toggle()
+            }
+        }
     }
 
     private var currentTitle: String {
@@ -362,4 +427,111 @@ private struct TaskHistorySection: Identifiable {
     let title: String
     let conversations: [ChatConversation]
     var id: String { title }
+}
+
+// MARK: - Live TODO Panel
+
+/// Trailing checklist panel. Tasks are projected from the conversation's real
+/// planner state (`TodoListProjection`) — never from static fixtures.
+private struct TodoInspectorPanel: View {
+    @ObservedObject var viewModel: ChatViewModel
+    private let glassProfile = ChatGlassStyle.shared
+
+    var body: some View {
+        let tasks = TodoListProjection.tasks(from: viewModel.messages)
+        let openCount = tasks.filter { !$0.isFinished }.count
+
+        VStack(spacing: 0) {
+            header(openCount: openCount, total: tasks.count)
+            Divider().overlay(Color.grokBorder.opacity(0.55))
+
+            if tasks.isEmpty {
+                emptyState
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 10) {
+                        ForEach(tasks) { task in
+                            TodoTaskRow(task: task) { newState in
+                                Task { await viewModel.updateTaskState(id: task.id, state: newState) }
+                            }
+                        }
+                    }
+                    .padding(12)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(glassProfile.sidebarOverlayOpacity))
+    }
+
+    private func header(openCount: Int, total: Int) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checklist")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(.grokMuted)
+            Text("Tasks")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.grokText)
+            Spacer()
+            if total > 0 {
+                Text("\(openCount) open")
+                    .font(.system(size: 11))
+                    .foregroundColor(.grokDim)
+            }
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 44)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(total == 0 ? "Task list, empty" : "Task list, \(openCount) open of \(total)")
+    }
+
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Spacer()
+            Image(systemName: "checklist")
+                .font(.system(size: 22))
+                .foregroundColor(.grokDim)
+            Text("No tasks yet")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.grokMuted)
+            Text("Planner tasks for this conversation appear here.")
+                .font(.system(size: 10))
+                .foregroundColor(.grokDim)
+                .multilineTextAlignment(.center)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(20)
+    }
+}
+
+private struct TodoTaskRow: View {
+    let task: AgentTask
+    let onState: (AgentTaskState) -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Button(action: toggleCompletion) {
+                Image(systemName: task.isFinished ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 16))
+                    .foregroundColor(task.isFinished ? .green : .grokMuted)
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .help(task.isFinished ? "Reopen task" : "Mark task complete")
+            .accessibilityLabel("Toggle completion for \(task.title)")
+            .accessibilityValue(task.state.rawValue)
+
+            AgentTaskBubbleView(
+                task: task,
+                onAccept: { onState(.assigned) },
+                onReject: { onState(.cancelled) },
+                onComplete: { onState(.completed) }
+            )
+        }
+    }
+
+    private func toggleCompletion() {
+        onState(task.isFinished ? .inProgress : .completed)
+    }
 }
