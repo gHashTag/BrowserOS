@@ -32,8 +32,9 @@ protocol ChatPersisterProtocol: Sendable {
     func save(messages: [ChatMessage], conversationId: UUID) async
     func load(conversationId: UUID) async -> [ChatMessage]
     func clear(conversationId: UUID) async
-    func currentConversationId() -> UUID
-    func setCurrentConversationId(_ id: UUID)
+    func renameConversation(id: UUID, title: String) async
+    func currentConversationId() async -> UUID
+    func setCurrentConversationId(_ id: UUID) async
     func listAllConversations() async -> [ChatConversation]
 }
 

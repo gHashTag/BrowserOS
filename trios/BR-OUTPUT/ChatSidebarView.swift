@@ -219,9 +219,12 @@ struct ChatSidebarView: View {
     }
 
     private func saveEditedName(for conversation: ChatConversation) {
-        viewModel.renameConversation(conversation.id, to: editedName.trimmingCharacters(in: .whitespacesAndNewlines))
+        let title = editedName
         editingConversationId = nil
         isEditingName = false
+        Task {
+            await viewModel.renameConversation(conversation.id, to: title)
+        }
     }
     
     private func togglePin(_ conversation: ChatConversation) {

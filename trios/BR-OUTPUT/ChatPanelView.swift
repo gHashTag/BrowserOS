@@ -17,21 +17,17 @@ struct ChatPanelView: View {
     let scrollToBottomRequest: Int
     var workspaceMode: ChatWorkspaceMode = .compact
     @StateObject private var browserOSVM = BrowserOSChatViewModel()
-    @StateObject private var queenVM = QueenMasterViewModel()
-    @ObservedObject var intelligenceEngine: QueenIntelligenceEngine
     
     init(viewModel: ChatViewModel,
          scrollToBottomRequest: Int,
-         workspaceMode: ChatWorkspaceMode = .compact,
-         intelligenceEngine: QueenIntelligenceEngine) {
+         workspaceMode: ChatWorkspaceMode = .compact) {
         self.viewModel = viewModel
         self.scrollToBottomRequest = scrollToBottomRequest
         self.workspaceMode = workspaceMode
-        self.intelligenceEngine = intelligenceEngine
     }
     @State private var isNearBottom = true
-    @State private var scrollOffset: CGFloat = 0
-    @State private var contentHeight: CGFloat = 0
+    @State private var viewportHeight: CGFloat = 0
+    @State private var bottomAnchorY: CGFloat = 0
     @State private var isInputFocused = false
     @State private var composerEditorHeight: CGFloat = 42
     @State private var showHotkeyHelp = false
@@ -89,8 +85,6 @@ struct ChatPanelView: View {
     private var unifiedMessageArea: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                scrollOffsetTracker
-
                 if viewModel.messages.isEmpty && browserOSVM.messages.isEmpty {
                     emptyStateView
                 } else {
@@ -98,20 +92,34 @@ struct ChatPanelView: View {
                 }
             }
             .coordinateSpace(name: "scrollArea")
+            .background(
+                GeometryReader { geometry in
+                    Color.clear.preference(
+                        key: ScrollViewportHeightPreferenceKey.self,
+                        value: geometry.size.height
+                    )
+                }
+            )
             .onAppear {
                 scrollToBottom(using: proxy, animated: false)
             }
             .onChange(of: scrollToBottomRequest) {
                 scrollToBottom(using: proxy, animated: false)
             }
-            .onPreferenceChange(ScrollOffsetPreferenceKey.self) { offset in
-                scrollOffset = offset
+            .onPreferenceChange(ScrollViewportHeightPreferenceKey.self) { height in
+                viewportHeight = height
+                updateNearBottom()
             }
-            .onPreferenceChange(ScrollContentHeightPreferenceKey.self) { totalHeight in
-                contentHeight = totalHeight
-                // If scroll offset + viewport height is close to total content height, we're near bottom
-                let viewportHeight = scrollOffset.isZero ? totalHeight : abs(scrollOffset)
-                isNearBottom = abs(totalHeight - viewportHeight) < 100
+            .onPreferenceChange(ScrollBottomAnchorPreferenceKey.self) { anchorY in
+                bottomAnchorY = anchorY
+                updateNearBottom()
+            }
+            .onChange(of: scrollManager.scrollRequest) { request in
+                guard request.sequence > 0 else { return }
+                scrollToBottom(
+                    using: proxy,
+                    animated: request.animated
+                )
             }
             .onChange(of: viewModel.messages.count) { newCount in
                 // Scroll only when a brand-new message is appended.
@@ -137,23 +145,16 @@ struct ChatPanelView: View {
         }
     }
 
-    private var scrollOffsetTracker: some View {
-        GeometryReader { geo in
-            Color.clear
-                .preference(key: ScrollOffsetPreferenceKey.self, value: geo.frame(in: .named("scrollArea")).minY)
-        }
-        .frame(height: 0)
-    }
-
-    private var contentHeightTracker: some View {
+    private var bottomAnchorTracker: some View {
         GeometryReader { geo in
             Color.clear
                 .preference(
-                    key: ScrollContentHeightPreferenceKey.self,
+                    key: ScrollBottomAnchorPreferenceKey.self,
                     value: geo.frame(in: .named("scrollArea")).maxY
                 )
         }
-        .frame(height: 0)
+        .frame(height: 1)
+        .id(ChatScrollAnchor.bottom)
     }
 
     private var messageStack: some View {
@@ -164,11 +165,16 @@ struct ChatPanelView: View {
             }
             browserMessageList
             typingIndicatorArea
-            contentHeightTracker
-            Color.clear
-                .frame(height: 1)
-                .id(ChatScrollAnchor.bottom)
+            bottomAnchorTracker
         }
+    }
+
+    private func updateNearBottom() {
+        guard viewportHeight > 0 else { return }
+        isNearBottom = ChatScrollPolicy.isNearBottom(
+            bottomAnchorY: Double(bottomAnchorY),
+            viewportHeight: Double(viewportHeight)
+        )
     }
 
     private func scrollToBottom(using proxy: ScrollViewProxy, animated: Bool) {
@@ -1568,14 +1574,14 @@ struct MacTextEditor: NSViewRepresentable {
 
 // MARK: - Scroll Offset Tracking
 
-struct ScrollOffsetPreferenceKey: PreferenceKey {
+struct ScrollViewportHeightPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
     }
 }
 
-struct ScrollContentHeightPreferenceKey: PreferenceKey {
+struct ScrollBottomAnchorPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = nextValue()
@@ -1809,95 +1815,34 @@ private struct StatusDot: View {
     }
 }
 
-// MARK: - Queen Activity Feed
+// MARK: - Execution Planner
 
 private extension ChatPanelView {
     var queenActivityFeed: some View {
-        queenActivityContent
-            .padding(8)
-            .background(Color.purple.opacity(0.05), alignment: .center)
-    }
-
-    @ViewBuilder
-    private var queenActivityContent: some View {
-        if queenVM.isActive {
-            queenHeader
-            if let plan = intelligenceEngine.currentPlan {
-                queenTaskList(plan: plan)
+        TODOListView(
+            planner: viewModel.todoPlanner,
+            conversationId: viewModel.conversationId,
+            memoryControlRevision: viewModel.memoryControlRevision,
+            isExpanded: workspaceMode == .expanded,
+            recalledMemories: viewModel.recalledMemories,
+            onSearchMemory: { query in
+                await viewModel.searchMemories(query)
+            },
+            onLoadRecentMemory: { limit in
+                try await viewModel.recentMemories(limit: limit)
+            },
+            onForgetMemory: { memoryId in
+                try await viewModel.forgetMemory(id: memoryId)
+            },
+            onClearConversationMemory: { conversationId in
+                try await viewModel.clearConversationMemories(
+                    conversationId: conversationId
+                )
             }
-            if let prediction = intelligenceEngine.predictions.first {
-                queenPrediction(prediction: prediction)
-            }
-        }
-    }
-
-    var queenHeader: some View {
-        HStack {
-            Image(systemName: "crown.fill")
-                .foregroundColor(.purple)
-                .font(.caption)
-            Text("Queen Active")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.primary)
-            Spacer()
-            if intelligenceEngine.isPlanning {
-                ProgressView()
-                    .scaleEffect(0.7)
-            }
-        }
-    }
-    
-    func queenTaskList(plan: QueenTaskPlan) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            ForEach(plan.tasks.prefix(3)) { task in
-                HStack(spacing: 6) {
-                    Image(systemName: task.statusIcon)
-                        .font(.caption2)
-                        .foregroundColor(task.statusColor)
-                    Text(task.description)
-                        .font(.caption)
-                        .lineLimit(1)
-                    Spacer()
-                    Text("\(Int(task.estimatedDuration))s")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                }
-            }
-        }
-        .padding(6)
-        .background(Color.purple.opacity(0.1))
-        .cornerRadius(6)
-    }
-    
-    func queenPrediction(prediction: QueenAction) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: "lightbulb.fill")
-                .font(.caption2)
-                .foregroundColor(.yellow)
-            Text(prediction.description)
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-    }
-}
-
-private extension QueenTask {
-    var statusIcon: String {
-        switch status {
-        case .pending: return "circle"
-        case .inProgress: return "circle.fill"
-        case .completed: return "checkmark.circle.fill"
-        case .failed: return "exclamationmark.circle.fill"
-        }
-    }
-    
-    var statusColor: Color {
-        switch status {
-        case .pending: return .secondary
-        case .inProgress: return .blue
-        case .completed: return .green
-        case .failed: return .red
-        }
+        )
+        .padding(.horizontal, workspaceMode == .expanded ? 28 : 12)
+        .padding(.vertical, 8)
+        .background(Color.clear)
     }
 }
 

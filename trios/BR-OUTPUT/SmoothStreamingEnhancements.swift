@@ -50,60 +50,6 @@ struct StableMessageView: View {
     }
 }
 
-// MARK: - 2. Throttled Scroll Manager
-
-/// Менеджер скролла с throttling для предотвращения дергания
-@MainActor
-class SmoothScrollManager: ObservableObject {
-    @Published var shouldScrollToBottom: Bool = false
-    @Published var scrollTrigger: Int = 0
-    
-    private var lastScrollTime: Date = .distantPast
-    private let scrollThrottleInterval: TimeInterval = 0.1 // 100ms
-    private var pendingScrollTask: Task<Void, Never>?
-    
-    /// Запросить скролл вниз (throttled)
-    func requestScroll(animated: Bool = true) {
-        // Отменяем предыдущий pending scroll
-        pendingScrollTask?.cancel()
-        
-        // Throttle: не чаще чем каждые 100ms
-        let now = Date()
-        let timeSinceLastScroll = now.timeIntervalSince(lastScrollTime)
-        
-        if timeSinceLastScroll >= scrollThrottleInterval {
-            // Выполняем немедленно
-            executeScroll(animated: animated)
-        } else {
-            // Откладываем
-            let delay = scrollThrottleInterval - timeSinceLastScroll
-            pendingScrollTask = Task {
-                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
-                guard !Task.isCancelled else { return }
-                executeScroll(animated: animated)
-            }
-        }
-    }
-    
-    private func executeScroll(animated: Bool) {
-        lastScrollTime = Date()
-        scrollTrigger += 1
-        shouldScrollToBottom = true
-        
-        // Сбрасываем флаг после выполнения
-        Task {
-            try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
-            shouldScrollToBottom = false
-        }
-    }
-    
-    /// Force scroll немедленно (для user-initiated)
-    func forceScroll(animated: Bool = true) {
-        pendingScrollTask?.cancel()
-        executeScroll(animated: animated)
-    }
-}
-
 // MARK: - 3. Batched Message Updates
 
 /// Debouncer для batch updates сообщений (16ms = 60fps)

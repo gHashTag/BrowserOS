@@ -7,7 +7,6 @@ struct AdaptiveChatWorkspace: View {
     @ObservedObject var viewModel: ChatViewModel
     let scrollToBottomRequest: Int
     @State private var sidebarCollapsed = false
-    @StateObject private var intelligenceEngine = QueenIntelligenceEngine()
 
     var body: some View {
         GeometryReader { geometry in
@@ -20,16 +19,14 @@ struct AdaptiveChatWorkspace: View {
                 ChatPanelView(
                     viewModel: viewModel,
                     scrollToBottomRequest: scrollToBottomRequest,
-                    workspaceMode: .compact,
-                    intelligenceEngine: intelligenceEngine
+                    workspaceMode: .compact
                 )
             } else {
                 ExpandedChatWorkspace(
                     viewModel: viewModel,
                     sidebarCollapsed: $sidebarCollapsed,
                     metrics: metrics,
-                    scrollToBottomRequest: scrollToBottomRequest,
-                    intelligenceEngine: intelligenceEngine
+                    scrollToBottomRequest: scrollToBottomRequest
                 )
             }
         }
@@ -41,7 +38,6 @@ private struct ExpandedChatWorkspace: View {
     @Binding var sidebarCollapsed: Bool
     let metrics: ChatWorkspaceMetrics
     let scrollToBottomRequest: Int
-    @ObservedObject var intelligenceEngine: QueenIntelligenceEngine
     private let glassProfile = ChatGlassStyle.shared
 
     var body: some View {
@@ -63,8 +59,7 @@ private struct ExpandedChatWorkspace: View {
                     ChatPanelView(
                         viewModel: viewModel,
                         scrollToBottomRequest: scrollToBottomRequest,
-                        workspaceMode: .expanded,
-                        intelligenceEngine: intelligenceEngine
+                        workspaceMode: .expanded
                     )
                         .frame(maxWidth: CGFloat(metrics.contentMaxWidth))
                     Spacer(minLength: 24)
@@ -118,6 +113,9 @@ private struct TaskHistorySidebar: View {
     @ObservedObject var viewModel: ChatViewModel
     @State private var searchText = ""
     @State private var hoveredConversationId: UUID?
+    @State private var editingConversationId: UUID?
+    @State private var draftTitle = ""
+    @FocusState private var focusedConversationId: UUID?
     private let glassProfile = ChatGlassStyle.shared
 
     var body: some View {
@@ -249,13 +247,35 @@ private struct TaskHistorySidebar: View {
     private func conversationRow(_ conversation: ChatConversation) -> some View {
         let isSelected = conversation.id == viewModel.conversationId
         let isHovered = conversation.id == hoveredConversationId
+        let isEditing = conversation.id == editingConversationId
 
         return HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(conversation.title)
-                    .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
-                    .foregroundColor(.grokText)
-                    .lineLimit(1)
+                if isEditing {
+                    TextField("Task title", text: $draftTitle)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.grokText)
+                        .focused($focusedConversationId, equals: conversation.id)
+                        .onSubmit {
+                            saveTitle(for: conversation)
+                        }
+                        .onExitCommand {
+                            cancelTitleEditing()
+                        }
+                } else {
+                    Text(conversation.title)
+                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                        .foregroundColor(.grokText)
+                        .lineLimit(1)
+                        .contentShape(Rectangle())
+                        .highPriorityGesture(
+                            TapGesture(count: 2)
+                                .onEnded {
+                                    startTitleEditing(conversation)
+                                }
+                        )
+                }
 
                 Text(conversation.updatedAt, style: .relative)
                     .font(.system(size: 9))
@@ -264,14 +284,44 @@ private struct TaskHistorySidebar: View {
 
             Spacer(minLength: 4)
 
-            if isHovered {
+            if isEditing {
+                Button(action: { saveTitle(for: conversation) }) {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.grokText)
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .help("Save title")
+                .accessibilityLabel("Save title")
+
+                Button(action: cancelTitleEditing) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.grokMuted)
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .help("Cancel editing")
+                .accessibilityLabel("Cancel editing")
+            } else if isHovered {
+                Button(action: { startTitleEditing(conversation) }) {
+                    Image(systemName: "pencil")
+                        .font(.system(size: 10))
+                        .foregroundColor(.grokMuted)
+                        .frame(width: 22, height: 22)
+                }
+                .buttonStyle(.plain)
+                .help("Rename task")
+                .accessibilityLabel("Rename task")
+
                 Button(action: {
                     Task { await viewModel.deleteConversation(id: conversation.id) }
                 }) {
                     Image(systemName: "trash")
                         .font(.system(size: 10))
                         .foregroundColor(.grokMuted)
-                        .frame(width: 24, height: 24)
+                        .frame(width: 22, height: 22)
                 }
                 .buttonStyle(.plain)
                 .help("Delete task")
@@ -287,16 +337,47 @@ private struct TaskHistorySidebar: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .contentShape(Rectangle())
         .onTapGesture {
+            guard editingConversationId != conversation.id else { return }
             Task { await viewModel.switchConversation(id: conversation.id) }
         }
         .onHover { hovered in
             hoveredConversationId = hovered ? conversation.id : nil
         }
+        .accessibilityAction(named: Text("Rename task")) {
+            startTitleEditing(conversation)
+        }
         .contextMenu {
+            Button("Rename") {
+                startTitleEditing(conversation)
+            }
             Button("Delete", role: .destructive) {
                 Task { await viewModel.deleteConversation(id: conversation.id) }
             }
         }
+    }
+
+    private func startTitleEditing(_ conversation: ChatConversation) {
+        draftTitle = conversation.title
+        editingConversationId = conversation.id
+        DispatchQueue.main.async {
+            focusedConversationId = conversation.id
+        }
+    }
+
+    private func saveTitle(for conversation: ChatConversation) {
+        let title = draftTitle
+        editingConversationId = nil
+        focusedConversationId = nil
+        draftTitle = ""
+        Task {
+            await viewModel.renameConversation(conversation.id, to: title)
+        }
+    }
+
+    private func cancelTitleEditing() {
+        editingConversationId = nil
+        focusedConversationId = nil
+        draftTitle = ""
     }
 
     private var connectionFooter: some View {

@@ -12,6 +12,7 @@ import SwiftUI
 @MainActor
 struct ChatSSEEndToEndTests {
     static var failures = 0
+    static let testFingerprintKey = Data(repeating: 0x5A, count: 32)
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         if condition() {
@@ -31,6 +32,25 @@ struct ChatSSEEndToEndTests {
         await runHappyPathStreaming()
         await runCancellationIsNonError()
         await runDeduplication()
+        await runConversationRenamePersistence()
+        await runMemoryStoreAndPlannerPersistence()
+        await runChatMemoryPlannerIntegration()
+        await runPlannerStreamTerminalStates()
+        await runUnterminatedStreamFailsClosed()
+        await runEmptyStreamDoesNotReusePriorAnswer()
+        await runExplicitCancellationWinsTransportErrorRace()
+        await runThrownTransportErrorStopsStreamingIndicator()
+        await runNewConversationStopsRecallBeforeTransport()
+        await runPlannerStorageFailureIsVisible()
+        await runAttachmentTurnIsNotRemembered()
+        await runDeletionBlocksReentrantSend()
+        await runFailedActiveDeletionPersistsRetainedHistory()
+        await runImmediateNewConversationSurvivesInitialization()
+        await runMemoryClearBlocksInflightWrite()
+        await runUnrelatedClearPreservesInflightWrite()
+        await runClearWaitsForStartedMemoryWrite()
+        await runConversationSwitchPreservesStartedMemoryWrite()
+        await runScrollPositionPolicyAndRequestDelivery()
 
         if failures == 0 {
             print("\nAll ChatSSEEndToEnd tests passed.")
@@ -62,7 +82,15 @@ struct ChatSSEEndToEndTests {
             persister: persister,
             stateMachine: stateMachine,
             a2aClient: nil,
-            modelStore: modelStore
+            modelStore: modelStore,
+            memoryService: AgentMemoryService(
+                store: VolatileMemoryStore(),
+                fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: TODOPlanner(
+                store: VolatileMemoryStore(),
+                preferences: testDefaults
+            )
         )
 
         // Let the background init Task settle.
@@ -140,7 +168,15 @@ struct ChatSSEEndToEndTests {
             persister: persister,
             stateMachine: stateMachine,
             a2aClient: nil,
-            modelStore: modelStore
+            modelStore: modelStore,
+            memoryService: AgentMemoryService(
+                store: VolatileMemoryStore(),
+                fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: TODOPlanner(
+                store: VolatileMemoryStore(),
+                preferences: testDefaults
+            )
         )
 
         try? await Task.sleep(nanoseconds: 50_000_000)
@@ -186,7 +222,15 @@ struct ChatSSEEndToEndTests {
             persister: persister,
             stateMachine: stateMachine,
             a2aClient: nil,
-            modelStore: modelStore
+            modelStore: modelStore,
+            memoryService: AgentMemoryService(
+                store: VolatileMemoryStore(),
+                fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: TODOPlanner(
+                store: VolatileMemoryStore(),
+                preferences: testDefaults
+            )
         )
 
         try? await Task.sleep(nanoseconds: 50_000_000)
@@ -200,5 +244,1613 @@ struct ChatSSEEndToEndTests {
 
         check(viewModel.messages.count == 1, "duplicate UUIDs collapse to a single message")
         check(viewModel.messages.first?.content == "first", "first duplicate survives")
+    }
+
+    // MARK: - Scenario 4: custom conversation title persistence
+
+    static func runConversationRenamePersistence() async {
+        print("\n# Scenario: conversation title survives reload")
+
+        let suiteName = "trios-chat-title-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            fail("isolated title preferences unavailable")
+            return
+        }
+        defaults.removePersistentDomain(forName: suiteName)
+
+        let conversationId = UUID()
+        let originalMessages = [
+            ChatMessage(role: .user, content: "Original generated title"),
+            ChatMessage(role: .assistant, content: "Response")
+        ]
+        let persister = ConversationPersister(suiteName: suiteName)
+        await persister.save(
+            messages: originalMessages,
+            conversationId: conversationId
+        )
+        await persister.renameConversation(
+            id: conversationId,
+            title: "  Editable\n   release   plan  "
+        )
+
+        let renamed = await persister.listAllConversations()
+        check(renamed.first?.title == "Editable release plan",
+              "rename normalizes whitespace")
+
+        let reloadedPersister = ConversationPersister(suiteName: suiteName)
+        let reloaded = await reloadedPersister.listAllConversations()
+        check(reloaded.first?.title == "Editable release plan",
+              "custom title survives persister reload")
+
+        let storedMessages = await reloadedPersister.load(
+            conversationId: conversationId
+        )
+        check(storedMessages == originalMessages,
+              "rename leaves message history unchanged")
+
+        await reloadedPersister.renameConversation(
+            id: conversationId,
+            title: String(repeating: "x", count: 100)
+        )
+        let limited = await reloadedPersister.listAllConversations()
+        check(limited.first?.title.count == 80,
+              "custom title is limited to 80 characters")
+
+        await reloadedPersister.renameConversation(
+            id: conversationId,
+            title: " \n\t "
+        )
+        let untitled = await reloadedPersister.listAllConversations()
+        check(untitled.first?.title == "Untitled",
+              "blank title becomes Untitled")
+
+        await reloadedPersister.clear(conversationId: conversationId)
+        await reloadedPersister.save(
+            messages: originalMessages,
+            conversationId: conversationId
+        )
+        let recreated = await reloadedPersister.listAllConversations()
+        check(recreated.first?.title == "Original generated title",
+              "clearing a conversation also clears its custom title")
+
+        await reloadedPersister.clear(conversationId: conversationId)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    // MARK: - Scenario 5: durable memory and TODO plan persistence
+
+    static func runMemoryStoreAndPlannerPersistence() async {
+        print("\n# Scenario: durable memory and TODO plan persistence")
+
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("trios-memory-\(UUID().uuidString)", isDirectory: true)
+        let databaseURL = directory.appendingPathComponent("agent-memory.sqlite3")
+        let suiteName = "trios-memory-planner-\(UUID().uuidString)"
+        let preferences = UserDefaults(suiteName: suiteName) ?? .standard
+        preferences.removePersistentDomain(forName: suiteName)
+
+        do {
+            let store = try MemoryStore(databaseURL: databaseURL)
+            let schemaVersion = await store.schemaVersion()
+            check(schemaVersion == 1,
+                  "memory database schema is version 1")
+            let journalMode = await store.journalMode()
+            check(journalMode == "wal",
+                  "memory database uses WAL mode")
+
+            let memoryService = AgentMemoryService(
+                store: store,
+                fingerprintKey: testFingerprintKey
+            )
+            let conversationId = UUID()
+            let sourceMessageId = UUID()
+            let unicodeText = "\u{041F}\u{0440}\u{0438}\u{0432}\u{0435}\u{0442}"
+            let parameterizedRecord = AgentMemoryRecord(
+                id: UUID(),
+                conversationId: conversationId,
+                sourceMessageId: UUID(),
+                body: """
+                Goal: Parameterized "quoted" \(unicodeText)
+                Result: Completed successfully.
+                Recall: parameterizedprobe
+                """,
+                createdAt: Date(timeIntervalSince1970: 1)
+            )
+            try await store.saveMemory(parameterizedRecord)
+            let stored = await memoryService.rememberCompletedTurn(
+                conversationId: conversationId,
+                sourceMessageId: sourceMessageId,
+                goal: "Trinity release \"quoted\" \(unicodeText) sk-testSecret1234567890",
+                assistantResult: "Prepared the release plan and verification."
+            )
+            check(stored != nil, "completed turn is stored as memory")
+            check(stored?.body.contains("Sensitive values were redacted") == true,
+                  "memory records that sensitive values were removed")
+            check(stored?.body.contains("sk-testSecret") == false,
+                  "raw secret is absent from memory")
+            check(stored?.body.contains("\"quoted\"") == false,
+                  "raw goal prose is not copied into memory")
+            check(stored?.body.contains(unicodeText) == false,
+                  "goal text is represented by private recall features")
+            check(stored?.body.contains("Prepared the release plan") == false,
+                  "raw assistant output is not copied into memory")
+
+            let longPEM = """
+            -----BEGIN CUSTOM PRIVATE KEY-----
+            \(String(repeating: "sensitive-key-payload-", count: 160))
+            -----END CUSTOM PRIVATE KEY-----
+            """
+            let pemMemory = await memoryService.rememberCompletedTurn(
+                conversationId: conversationId,
+                sourceMessageId: UUID(),
+                goal: "Audit \(longPEM) before release",
+                assistantResult: "The credential audit completed."
+            )
+            check(pemMemory?.body.contains("sensitive-key-payload") == false,
+                  "long PEM payload is redacted before truncation")
+            check(pemMemory?.body.contains("Sensitive values were redacted") == true,
+                  "long PEM redaction is recorded")
+
+            let embeddedFile = await memoryService.rememberCompletedTurn(
+                conversationId: conversationId,
+                sourceMessageId: UUID(),
+                goal: "Review this file:\n```\nsecret file body\n```",
+                assistantResult: "Review completed."
+            )
+            check(embeddedFile == nil,
+                  "explicit embedded file payload is rejected")
+
+            let unmarkedPaste = await memoryService.rememberCompletedTurn(
+                conversationId: conversationId,
+                sourceMessageId: UUID(),
+                goal: "alpha confidential clause beta",
+                assistantResult: "The request completed."
+            )
+            check(unmarkedPaste?.body.contains("confidential clause") == false,
+                  "short unmarked pasted content is not stored verbatim")
+
+            let fuzzyMatches = await memoryService.recall(
+                for: "trinitt relese",
+                limit: 3
+            )
+            check(fuzzyMatches.first?.record.id == stored?.id,
+                  "misspelled query finds relevant memory")
+            check(fuzzyMatches.count <= 3,
+                  "memory search respects result limit")
+            let repeatedMatches = await memoryService.recall(
+                for: "trinitt relese",
+                limit: 3
+            )
+            check(
+                fuzzyMatches.map(\.record.id) == repeatedMatches.map(\.record.id),
+                "repeated memory search has deterministic ordering"
+            )
+            let wrongKeyService = AgentMemoryService(
+                store: store,
+                fingerprintKey: Data(repeating: 0x33, count: 32)
+            )
+            let wrongKeyMatches = await wrongKeyService.recall(
+                for: "Trinity release",
+                limit: 3
+            )
+            check(wrongKeyMatches.isEmpty,
+                  "recall fingerprints cannot be matched without the Keychain key")
+
+            let planner = TODOPlanner(store: store, preferences: preferences)
+            await planner.startPlan(
+                conversationId: conversationId,
+                goal: "Ship the verified Trinity release"
+            )
+            check(planner.activePlan?.items.count == 3,
+                  "new plan has three ordered steps")
+            check(planner.activePlan?.items.map(\.order) == [0, 1, 2],
+                  "new plan steps have deterministic order")
+            check(planner.activePlan?.items.first?.state == .inProgress,
+                  "understand starts while the request is prepared")
+            check(planner.activePlan?.items.dropFirst().first?.state == .pending,
+                  "execute remains pending before the stream opens")
+
+            await planner.markExecutionStarted()
+            check(planner.activePlan?.items.first?.state == .completed,
+                  "stream start completes understand")
+            check(planner.activePlan?.items.dropFirst().first?.state == .inProgress,
+                  "stream start begins execute")
+
+            await planner.completePlan()
+            check(planner.activePlan?.state == .completed,
+                  "successful plan reaches completed state")
+            check(planner.activePlan?.progress == 1,
+                  "completed plan reports full progress")
+
+            await store.close()
+
+            let reloadedStore = try MemoryStore(databaseURL: databaseURL)
+            let reloadedPlan = try await reloadedStore.loadPlan(
+                conversationId: conversationId
+            )
+            check(reloadedPlan?.state == .completed,
+                  "plan survives closing and reopening SQLite")
+
+            let reloadedService = AgentMemoryService(
+                store: reloadedStore,
+                fingerprintKey: testFingerprintKey
+            )
+            let reloadedMatches = await reloadedService.recall(
+                for: "Trinity release",
+                limit: 3
+            )
+            check(reloadedMatches.first?.record.id == stored?.id,
+                  "memory survives closing and reopening SQLite")
+            let parameterizedRows = try await reloadedStore.memoryCandidates(
+                for: "parameterizedprobe",
+                limit: 10
+            )
+            let parameterizedReload = parameterizedRows.first {
+                $0.id == parameterizedRecord.id
+            }
+            check(parameterizedReload?.body == parameterizedRecord.body,
+                  "parameterized storage round-trips quotes and Unicode")
+
+            let otherConversationId = UUID()
+            let otherRecord = AgentMemoryRecord(
+                id: UUID(),
+                conversationId: otherConversationId,
+                sourceMessageId: UUID(),
+                body: """
+                Topics: memory controls
+                Result: Completed successfully.
+                Recall: otherconversationprobe
+                """,
+                createdAt: Date(timeIntervalSince1970: 10)
+            )
+            try await reloadedStore.saveMemory(otherRecord)
+
+            let recent = try await reloadedService.recentMemories(limit: 2)
+            check(recent.count == 2,
+                  "recent memory browsing respects its limit")
+            let recentRecords = recent.map(\.record)
+            let isNewestFirst = zip(
+                recentRecords,
+                recentRecords.dropFirst()
+            ).allSatisfy { lhs, rhs in
+                lhs.createdAt > rhs.createdAt
+                    || (
+                        lhs.createdAt == rhs.createdAt
+                            && lhs.id.uuidString < rhs.id.uuidString
+                    )
+            }
+            check(isNewestFirst,
+                  "recent memory browsing is deterministic and newest first")
+
+            let didForget = try await reloadedService.forgetMemory(
+                id: parameterizedRecord.id
+            )
+            check(didForget,
+                  "forgetting one durable memory reports a deleted row")
+            let didForgetAgain = try await reloadedService.forgetMemory(
+                id: parameterizedRecord.id
+            )
+            check(didForgetAgain == false,
+                  "forgetting an unknown durable memory is idempotent")
+            let forgottenRows = try await reloadedStore.memoryCandidates(
+                for: "parameterizedprobe",
+                limit: 10
+            )
+            check(forgottenRows.contains {
+                $0.id == parameterizedRecord.id
+            } == false,
+                  "forgotten memory is removed from FTS candidates")
+
+            let clearedCount = try await reloadedService
+                .clearConversationMemories(
+                    conversationId: conversationId
+                )
+            check(clearedCount > 0,
+                  "scoped clear removes current-conversation memories")
+            let preservedOther = try await reloadedService
+                .recentMemories(limit: 64)
+            check(preservedOther.contains {
+                $0.record.id == otherRecord.id
+            },
+                  "scoped clear preserves another conversation's memory")
+            let preservedPlan = try await reloadedStore.loadPlan(
+                conversationId: conversationId
+            )
+            check(preservedPlan?.state == .completed,
+                  "memory-only clear preserves the TODO plan")
+
+            let volatileStore = VolatileMemoryStore()
+            let volatileConversationId = UUID()
+            let volatileRecord = AgentMemoryRecord(
+                id: UUID(),
+                conversationId: volatileConversationId,
+                sourceMessageId: UUID(),
+                body: otherRecord.body,
+                createdAt: Date(timeIntervalSince1970: 20)
+            )
+            let volatileNeighbor = AgentMemoryRecord(
+                id: UUID(),
+                conversationId: UUID(),
+                sourceMessageId: UUID(),
+                body: otherRecord.body,
+                createdAt: Date(timeIntervalSince1970: 30)
+            )
+            try await volatileStore.saveMemory(volatileRecord)
+            try await volatileStore.saveMemory(volatileNeighbor)
+            let volatileDeleted = try await volatileStore.deleteMemory(
+                id: volatileRecord.id
+            )
+            check(
+                volatileDeleted,
+                "volatile store forgets one memory"
+            )
+            let volatileDeletedAgain = try await volatileStore.deleteMemory(
+                id: volatileRecord.id
+            )
+            check(
+                volatileDeletedAgain == false,
+                "volatile forget is idempotent"
+            )
+            let volatileCleared = try await volatileStore.deleteMemories(
+                conversationId: volatileNeighbor.conversationId
+            )
+            check(volatileCleared == 1,
+                  "volatile scoped clear matches durable semantics")
+
+            let cancelledConversationId = UUID()
+            let terminalPlanner = TODOPlanner(
+                store: reloadedStore,
+                preferences: preferences
+            )
+            await terminalPlanner.startPlan(
+                conversationId: cancelledConversationId,
+                goal: "Cancel this plan"
+            )
+            await terminalPlanner.markExecutionStarted()
+            await terminalPlanner.cancelPlan()
+            check(terminalPlanner.activePlan?.state == .cancelled,
+                  "cancelled plan reaches cancelled state")
+            check(terminalPlanner.activePlan?.items[1].state == .cancelled,
+                  "cancellation marks the active execute item")
+            check(terminalPlanner.activePlan?.progress == (1.0 / 3.0),
+                  "cancelled progress derives only from completed items")
+
+            let failedConversationId = UUID()
+            await terminalPlanner.startPlan(
+                conversationId: failedConversationId,
+                goal: "Fail this plan"
+            )
+            await terminalPlanner.markExecutionStarted()
+            await terminalPlanner.failPlan(message: "Network unavailable")
+            check(terminalPlanner.activePlan?.state == .failed,
+                  "failed plan reaches failed state")
+            check(terminalPlanner.activePlan?.items[1].state == .failed,
+                  "failure marks the active execute item")
+            check(terminalPlanner.activePlan?.progress == (1.0 / 3.0),
+                  "failed progress derives only from completed items")
+
+            let customConversationId = UUID()
+            await terminalPlanner.startPlan(
+                conversationId: customConversationId,
+                goal: "Keep user tasks independent"
+            )
+            await terminalPlanner.markExecutionStarted()
+            await terminalPlanner.addTask(title: "User follow-up")
+            await terminalPlanner.completePlan()
+            check(terminalPlanner.activePlan?.items.last?.state == .pending,
+                  "stream success does not complete user-added tasks")
+            check(terminalPlanner.activePlan?.state == .active,
+                  "plan stays active while a user-added task remains")
+
+            try await reloadedStore.deleteConversationData(
+                conversationId: conversationId
+            )
+            let deletedPlan = try await reloadedStore.loadPlan(
+                conversationId: conversationId
+            )
+            let deletedMemories = await reloadedService.recall(
+                for: "Trinity release",
+                limit: 3
+            )
+            check(deletedPlan == nil,
+                  "conversation deletion removes its plan")
+            check(deletedMemories.isEmpty,
+                  "conversation deletion removes scoped memories")
+            await reloadedStore.close()
+        } catch {
+            fail("durable memory setup failed: \(error.localizedDescription)")
+        }
+
+        try? FileManager.default.removeItem(at: directory)
+        preferences.removePersistentDomain(forName: suiteName)
+    }
+
+    // MARK: - Scenario 6: chat integration
+
+    static func runChatMemoryPlannerIntegration() async {
+        print("\n# Scenario: chat recalls memory and advances TODO plan")
+
+        let store = VolatileMemoryStore()
+        let memoryService = AgentMemoryService(
+            store: store,
+            fingerprintKey: testFingerprintKey
+        )
+        let testDefaults = UserDefaults(
+            suiteName: "trios-chat-memory-\(UUID().uuidString)"
+        ) ?? .standard
+        let planner = TODOPlanner(store: store, preferences: testDefaults)
+        let remembered = await memoryService.rememberCompletedTurn(
+            conversationId: UUID(),
+            sourceMessageId: UUID(),
+            goal: "Trinity deployment checklist",
+            assistantResult: "Verify signature, health, and CDP."
+        )
+        check(remembered != nil, "integration fixture memory is stored")
+
+        let transport = MockChatTransport()
+        let healthCheck = MockHealthCheck()
+        let persister = InMemoryPersister()
+        let parser = UIMessageStreamParser()
+        let stateMachine = ConversationStateMachine()
+        let modelStore = ModelConfigurationStore(
+            defaults: testDefaults,
+            environment: [:]
+        )
+        let conversationId = UUID()
+        await persister.setCurrentConversationId(conversationId)
+
+        let viewModel = ChatViewModel(
+            transport: transport,
+            healthCheck: healthCheck,
+            parser: parser,
+            persister: persister,
+            stateMachine: stateMachine,
+            a2aClient: nil,
+            modelStore: modelStore,
+            memoryService: memoryService,
+            todoPlanner: planner
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        await transport.setEvents([
+            .start(id: "memory-msg"),
+            .textDelta(id: "memory-msg", delta: "Deployment verified."),
+            .finish(id: "memory-msg")
+        ])
+        viewModel.inputText = "Use the Trinty deployment cheklist"
+        await viewModel.sendMessage()
+
+        check(planner.activePlan?.conversationId == conversationId,
+              "chat creates a plan for the active conversation")
+        check(planner.activePlan?.state == .completed,
+              "successful stream completes the active plan")
+        check(viewModel.recalledMemories.isEmpty == false,
+              "chat exposes recalled memories to the UI")
+
+        if let body = await transport.lastBody,
+           let json = body.asJSONObject(),
+           let messages = json["messages"] as? [[String: Any]],
+           let system = messages.first?["content"] as? String {
+            check(system.contains("UNTRUSTED LONG-TERM MEMORY"),
+                  "request labels recalled memory as untrusted")
+            check(system.lowercased().contains("trinity"),
+                  "request contains a safe topic summary")
+            check(system.contains("deployment checklist") == false,
+                  "request does not expose raw historical goal prose")
+            check(system.contains("Recall: m") == false,
+                  "request does not expose private recall fingerprints")
+        } else {
+            fail("memory-aware request body is missing")
+        }
+
+        if let remembered {
+            do {
+                let didForget = try await viewModel.forgetMemory(
+                    id: remembered.id
+                )
+                check(didForget,
+                      "chat confirms individual memory deletion")
+                check(viewModel.recalledMemories.contains {
+                    $0.record.id == remembered.id
+                } == false,
+                      "chat removes a forgotten record from recalled state")
+            } catch {
+                fail("chat memory deletion failed: \(error.localizedDescription)")
+            }
+        }
+
+        do {
+            let clearedCount = try await viewModel
+                .clearCurrentConversationMemories()
+            check(clearedCount >= 1,
+                  "chat clears only current-task memory")
+            check(planner.activePlan?.state == .completed,
+                  "chat memory clear preserves the execution plan")
+            let storedMessages = await persister.load(
+                conversationId: conversationId
+            )
+            check(storedMessages.count == 2,
+                  "chat memory clear preserves message history")
+        } catch {
+            fail("chat scoped memory clear failed: \(error.localizedDescription)")
+        }
+
+        let failingMemory = AgentMemoryService(
+            store: AlwaysFailingMemoryStore(),
+            fingerprintKey: testFingerprintKey
+        )
+        var deletionFailedAsExpected = false
+        do {
+            _ = try await failingMemory.forgetMemory(id: UUID())
+        } catch {
+            deletionFailedAsExpected = true
+        }
+        check(deletionFailedAsExpected,
+              "memory deletion surfaces storage failure")
+    }
+
+    // MARK: - Scenario 7: planner stream terminal states
+
+    static func runPlannerStreamTerminalStates() async {
+        print("\n# Scenario: stream abort and error update planner")
+
+        let cancelStore = VolatileMemoryStore()
+        let cancelDefaults = UserDefaults(
+            suiteName: "trios-chat-plan-cancel-\(UUID().uuidString)"
+        ) ?? .standard
+        let cancelPlanner = TODOPlanner(
+            store: cancelStore,
+            preferences: cancelDefaults
+        )
+        let cancelTransport = MockChatTransport()
+        let cancelViewModel = ChatViewModel(
+            transport: cancelTransport,
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: InMemoryPersister(),
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: ModelConfigurationStore(
+                defaults: cancelDefaults,
+                environment: [:]
+            ),
+            memoryService: AgentMemoryService(
+                store: cancelStore,
+                fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: cancelPlanner
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        await cancelTransport.setEvents([
+            .start(id: "cancel-plan"),
+            .abort(id: "cancel-plan")
+        ])
+        cancelViewModel.inputText = "Cancel this streamed task"
+        await cancelViewModel.sendMessage()
+        check(cancelPlanner.activePlan?.state == .cancelled,
+              "stream abort marks the plan cancelled")
+        check(cancelPlanner.activePlan?.items[1].state == .cancelled,
+              "stream abort marks execute cancelled")
+
+        let failureStore = VolatileMemoryStore()
+        let failureDefaults = UserDefaults(
+            suiteName: "trios-chat-plan-failure-\(UUID().uuidString)"
+        ) ?? .standard
+        let failurePlanner = TODOPlanner(
+            store: failureStore,
+            preferences: failureDefaults
+        )
+        let failureTransport = MockChatTransport()
+        let failureViewModel = ChatViewModel(
+            transport: failureTransport,
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: InMemoryPersister(),
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: ModelConfigurationStore(
+                defaults: failureDefaults,
+                environment: [:]
+            ),
+            memoryService: AgentMemoryService(
+                store: failureStore,
+                fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: failurePlanner
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        await failureTransport.setEvents([
+            .start(id: "failed-plan"),
+            .error(id: "failed-plan", message: "Provider unavailable")
+        ])
+        failureViewModel.inputText = "Fail this streamed task"
+        await failureViewModel.sendMessage()
+        check(failurePlanner.activePlan?.state == .failed,
+              "stream error marks the plan failed")
+        check(failurePlanner.activePlan?.items[1].state == .failed,
+              "stream error marks execute failed")
+        check(
+            failureViewModel.messages
+                .first(where: { $0.role == .assistant })?
+                .isStreaming == false,
+            "stream error stops the assistant streaming indicator"
+        )
+    }
+
+    // MARK: - Scenario 8: unterminated stream fails closed
+
+    static func runUnterminatedStreamFailsClosed() async {
+        print("\n# Scenario: unterminated stream fails closed")
+
+        let store = VolatileMemoryStore()
+        let memoryService = AgentMemoryService(
+            store: store,
+            fingerprintKey: testFingerprintKey
+        )
+        let defaults = UserDefaults(
+            suiteName: "trios-chat-unterminated-\(UUID().uuidString)"
+        ) ?? .standard
+        let planner = TODOPlanner(store: store, preferences: defaults)
+        let transport = MockChatTransport()
+        let stateMachine = ConversationStateMachine()
+        let viewModel = ChatViewModel(
+            transport: transport,
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: InMemoryPersister(),
+            stateMachine: stateMachine,
+            a2aClient: nil,
+            modelStore: ModelConfigurationStore(
+                defaults: defaults,
+                environment: [:]
+            ),
+            memoryService: memoryService,
+            todoPlanner: planner
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        await transport.setEvents([
+            .start(id: "unterminated"),
+            .textDelta(
+                id: "unterminated",
+                delta: "Partial build output"
+            )
+        ])
+
+        viewModel.inputText = "Verify build and test results"
+        await viewModel.sendMessage()
+
+        check(planner.activePlan?.state == .failed,
+              "unterminated EOF marks the plan failed")
+        do {
+            let memories = try await memoryService.recentMemories(limit: 20)
+            check(memories.isEmpty,
+                  "unterminated EOF creates no durable memory")
+        } catch {
+            fail("unterminated EOF memory inspection failed")
+        }
+
+        let assistant = viewModel.messages.last {
+            $0.role == .assistant
+        }
+        check(assistant?.content == "Partial build output",
+              "unterminated EOF preserves partial chat history")
+        check(assistant?.isStreaming == false,
+              "unterminated EOF clears the streaming indicator")
+
+        let finalState = await stateMachine.currentState()
+        let isVisibleError: Bool
+        if case .error = finalState {
+            isVisibleError = true
+        } else {
+            isVisibleError = false
+        }
+        check(isVisibleError,
+              "unterminated EOF leaves a visible error state")
+    }
+
+    // MARK: - Scenario 9: empty stream memory isolation
+
+    static func runEmptyStreamDoesNotReusePriorAnswer() async {
+        print("\n# Scenario: empty stream does not reuse prior answer")
+
+        let store = VolatileMemoryStore()
+        let memoryService = AgentMemoryService(
+            store: store,
+            fingerprintKey: testFingerprintKey
+        )
+        let defaults = UserDefaults(
+            suiteName: "trios-chat-empty-memory-\(UUID().uuidString)"
+        ) ?? .standard
+        let planner = TODOPlanner(store: store, preferences: defaults)
+        let transport = MockChatTransport()
+        let persister = InMemoryPersister()
+        let conversationId = UUID()
+        await persister.setCurrentConversationId(conversationId)
+        await persister.save(
+            messages: [
+                ChatMessage(role: .user, content: "Old request"),
+                ChatMessage(role: .assistant, content: "Old unique answer")
+            ],
+            conversationId: conversationId
+        )
+
+        let viewModel = ChatViewModel(
+            transport: transport,
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: persister,
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: ModelConfigurationStore(
+                defaults: defaults,
+                environment: [:]
+            ),
+            memoryService: memoryService,
+            todoPlanner: planner
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        await transport.setEvents([
+            .finish(id: "empty")
+        ])
+        viewModel.inputText = "Brand new empty stream request"
+        await viewModel.sendMessage()
+
+        let matches = await memoryService.recall(
+            for: "brand new empty stream",
+            limit: 3
+        )
+        check(matches.isEmpty,
+              "empty stream stores no memory from an earlier assistant")
+    }
+
+    // MARK: - Scenario 9: explicit cancellation ordering
+
+    static func runExplicitCancellationWinsTransportErrorRace() async {
+        print("\n# Scenario: explicit cancellation wins transport error race")
+
+        let store = VolatileMemoryStore()
+        let defaults = UserDefaults(
+            suiteName: "trios-chat-cancel-race-\(UUID().uuidString)"
+        ) ?? .standard
+        let planner = TODOPlanner(store: store, preferences: defaults)
+        let transport = CancellationRaceTransport()
+        let persister = InMemoryPersister()
+        let stateMachine = ConversationStateMachine()
+        let viewModel = ChatViewModel(
+            transport: transport,
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: persister,
+            stateMachine: stateMachine,
+            a2aClient: nil,
+            modelStore: ModelConfigurationStore(
+                defaults: defaults,
+                environment: [:]
+            ),
+            memoryService: AgentMemoryService(
+                store: store,
+                fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: planner
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        let conversationId = viewModel.conversationId
+        viewModel.inputText = "Stop this task safely"
+        let sendTask = Task {
+            await viewModel.sendMessage()
+        }
+        for _ in 0..<50 {
+            if viewModel.messages.contains(where: {
+                $0.role == .assistant
+                    && $0.content == "Partial answer before explicit Stop."
+            }) {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        viewModel.cancelStreaming()
+        await sendTask.value
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        check(planner.activePlan?.state == .cancelled,
+              "explicit stop remains cancelled when transport emits an error")
+        check(viewModel.messages.contains(where: { $0.role == .system }) == false,
+              "explicit stop does not append a transport error")
+        let finalState = await stateMachine.currentState()
+        check(finalState == .idle,
+              "explicit stop leaves the state machine idle")
+        check(
+            viewModel.messages
+                .first(where: { $0.role == .assistant })?
+                .isStreaming == false,
+            "explicit stop clears the assistant streaming indicator"
+        )
+        let persisted = await persister.load(
+            conversationId: conversationId
+        )
+        check(
+            persisted.count == 2
+                && persisted[0].role == .user
+                && persisted[1].role == .assistant
+                && persisted[1].content
+                    == "Partial answer before explicit Stop."
+                && persisted[1].isStreaming == false,
+            "explicit stop persists the finalized partial response"
+        )
+    }
+
+    // MARK: - Scenario 10: thrown transport error finalizes partial UI
+
+    static func runThrownTransportErrorStopsStreamingIndicator() async {
+        print("\n# Scenario: thrown transport error stops streaming UI")
+
+        let store = VolatileMemoryStore()
+        let defaults = UserDefaults(
+            suiteName: "trios-chat-transport-error-\(UUID().uuidString)"
+        ) ?? .standard
+        let transport = MockChatTransport()
+        let stateMachine = ConversationStateMachine()
+        let viewModel = ChatViewModel(
+            transport: transport,
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: InMemoryPersister(),
+            stateMachine: stateMachine,
+            a2aClient: nil,
+            modelStore: ModelConfigurationStore(
+                defaults: defaults,
+                environment: [:]
+            ),
+            memoryService: AgentMemoryService(
+                store: store,
+                fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: TODOPlanner(store: store, preferences: defaults)
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        viewModel.messages = [
+            ChatMessage(
+                role: .assistant,
+                content: "Partial response",
+                isStreaming: true
+            )
+        ]
+        await transport.setNextError(URLError(.cannotConnectToHost))
+        viewModel.inputText = "Continue after the partial response"
+        await viewModel.sendMessage()
+
+        check(
+            viewModel.messages
+                .first(where: { $0.role == .assistant })?
+                .isStreaming == false,
+            "thrown transport error clears a partial streaming indicator"
+        )
+        let finalState = await stateMachine.currentState()
+        if case .error = finalState {
+            check(true, "thrown transport error remains visible")
+        } else {
+            check(false, "thrown transport error remains visible")
+        }
+    }
+
+    // MARK: - Scenario 11: navigation during recall
+
+    static func runNewConversationStopsRecallBeforeTransport() async {
+        print("\n# Scenario: new conversation stops recall before transport")
+
+        let store = DelayedMemoryStore(
+            recallDelayNanoseconds: 0,
+            waitsForExplicitRecallRelease: true
+        )
+        let defaults = UserDefaults(
+            suiteName: "trios-chat-new-during-recall-\(UUID().uuidString)"
+        ) ?? .standard
+        let planner = TODOPlanner(store: store, preferences: defaults)
+        let transport = MockChatTransport()
+        let viewModel = ChatViewModel(
+            transport: transport,
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: InMemoryPersister(),
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: ModelConfigurationStore(
+                defaults: defaults,
+                environment: [:]
+            ),
+            memoryService: AgentMemoryService(
+                store: store,
+                fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: planner
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        let oldConversationId = viewModel.conversationId
+        viewModel.inputText = "Start a request with delayed recall"
+        let sendTask = Task {
+            await viewModel.sendMessage()
+        }
+        for _ in 0..<200 {
+            if await store.hasStartedRecall() {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let recallStarted = await store.hasStartedRecall()
+        check(recallStarted,
+              "recall gate opened before navigation")
+        viewModel.newConversation()
+        await store.releaseRecall()
+        await sendTask.value
+        for _ in 0..<100 {
+            if viewModel.conversationId != oldConversationId,
+               planner.activePlan == nil {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+
+        let transportSendCount = await transport.sendCount
+        check(transportSendCount == 0,
+              "cancelled recall never reaches transport")
+        check(viewModel.conversationId != oldConversationId,
+              "new conversation becomes active")
+        check(planner.activePlan == nil,
+              "old cancelled plan is not shown in the new conversation")
+        check(viewModel.recalledMemories.isEmpty,
+              "old delayed recall cannot overwrite the new conversation")
+    }
+
+    // MARK: - Scenario 11: planner storage failure
+
+    static func runPlannerStorageFailureIsVisible() async {
+        print("\n# Scenario: planner storage failure is visible")
+
+        let defaults = UserDefaults(
+            suiteName: "trios-planner-store-failure-\(UUID().uuidString)"
+        ) ?? .standard
+        let planner = TODOPlanner(
+            store: AlwaysFailingMemoryStore(),
+            preferences: defaults
+        )
+        let conversationId = UUID()
+        await planner.startPlan(
+            conversationId: conversationId,
+            goal: "Continue despite planner storage failure"
+        )
+        check(planner.activePlan != nil,
+              "planner storage failure does not block request planning")
+        check(planner.persistenceWarning?.contains("storage unavailable") == true,
+              "planner storage failure is exposed to the UI")
+
+        do {
+            try await planner.deleteConversationData(
+                conversationId: conversationId
+            )
+            fail("privacy cleanup failure must be returned to the caller")
+        } catch {
+            check(planner.activePlan != nil,
+                  "failed privacy cleanup keeps the visible plan intact")
+        }
+    }
+
+    // MARK: - Scenario 12: attachment memory exclusion
+
+    static func runAttachmentTurnIsNotRemembered() async {
+        print("\n# Scenario: attachment turn is not remembered")
+
+        let store = VolatileMemoryStore()
+        let memoryService = AgentMemoryService(
+            store: store,
+            fingerprintKey: testFingerprintKey
+        )
+        let defaults = UserDefaults(
+            suiteName: "trios-chat-attachment-memory-\(UUID().uuidString)"
+        ) ?? .standard
+        let planner = TODOPlanner(store: store, preferences: defaults)
+        let transport = MockChatTransport()
+        let viewModel = ChatViewModel(
+            transport: transport,
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: InMemoryPersister(),
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: ModelConfigurationStore(
+                defaults: defaults,
+                environment: [:]
+            ),
+            memoryService: memoryService,
+            todoPlanner: planner
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        await transport.setEvents([
+            .start(id: "attachment-turn"),
+            .textDelta(id: "attachment-turn", delta: "File reviewed."),
+            .finish(id: "attachment-turn")
+        ])
+        viewModel.inputText = """
+        Review the attached contract
+        <local_attachments>
+        [{"name":"contract.txt","path":"/private/contract.txt"}]
+        </local_attachments>
+        """
+        await viewModel.sendMessage()
+
+        let matches = await memoryService.recall(
+            for: "attached contract",
+            limit: 3
+        )
+        check(matches.isEmpty,
+              "successful attachment turn stores no long-term memory")
+        check(planner.activePlan?.state == .completed,
+              "attachment turn still completes its execution plan")
+    }
+
+    // MARK: - Scenario 13: deletion reentrancy
+
+    static func runDeletionBlocksReentrantSend() async {
+        print("\n# Scenario: active deletion blocks reentrant send")
+
+        let store = DelayedMemoryStore(
+            recallDelayNanoseconds: 0,
+            deletionDelayNanoseconds: 300_000_000
+        )
+        let defaults = UserDefaults(
+            suiteName: "trios-chat-delete-race-\(UUID().uuidString)"
+        ) ?? .standard
+        let transport = MockChatTransport()
+        let persister = InMemoryPersister()
+        let viewModel = ChatViewModel(
+            transport: transport,
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: persister,
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: ModelConfigurationStore(
+                defaults: defaults,
+                environment: [:]
+            ),
+            memoryService: AgentMemoryService(
+                store: store,
+                fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: TODOPlanner(store: store, preferences: defaults)
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        let deletedConversationId = viewModel.conversationId
+        let seededHistory = [
+            ChatMessage(
+                role: .user,
+                content: "Delete this concrete conversation"
+            ),
+            ChatMessage(
+                role: .assistant,
+                content: "This answer must not be resurrected"
+            )
+        ]
+        viewModel.messages = seededHistory
+        await persister.save(
+            messages: seededHistory,
+            conversationId: deletedConversationId
+        )
+        check(
+            persister.containsConversation(deletedConversationId),
+            "successful deletion fixture starts with persisted history"
+        )
+
+        viewModel.deleteConversation(deletedConversationId)
+        viewModel.inputText = "This send must wait for deletion"
+        await viewModel.sendMessage()
+
+        for _ in 0..<100 {
+            if viewModel.conversationId != deletedConversationId {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        let sendCount = await transport.sendCount
+        check(sendCount == 0,
+              "send cannot start while private deletion is pending")
+        check(viewModel.conversationId != deletedConversationId,
+              "active conversation resets only after cleanup succeeds")
+        check(viewModel.inputText == "This send must wait for deletion",
+              "blocked send remains available for the new conversation")
+        let deletedHistory = await persister.load(
+            conversationId: deletedConversationId
+        )
+        check(
+            deletedHistory.isEmpty,
+            "successful deletion leaves no loadable message history"
+        )
+        check(
+            !persister.containsConversation(deletedConversationId),
+            "successful deletion removes the persisted conversation record"
+        )
+    }
+
+    // MARK: - Scenario 14: failed deletion retains active history
+
+    static func runFailedActiveDeletionPersistsRetainedHistory() async {
+        print("\n# Scenario: failed active deletion preserves chat history")
+
+        let store = DeleteFailingMemoryStore()
+        let defaults = UserDefaults(
+            suiteName: "trios-chat-delete-failure-\(UUID().uuidString)"
+        ) ?? .standard
+        let transport = ControlledCompletionTransport()
+        let persister = InMemoryPersister()
+        let viewModel = ChatViewModel(
+            transport: transport,
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: persister,
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: ModelConfigurationStore(
+                defaults: defaults,
+                environment: [:]
+            ),
+            memoryService: AgentMemoryService(
+                store: store,
+                fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: TODOPlanner(store: store, preferences: defaults)
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        let retainedConversationId = viewModel.conversationId
+        viewModel.inputText = "Keep this chat when private cleanup fails"
+        let sendTask = Task {
+            await viewModel.sendMessage()
+        }
+        for _ in 0..<100 {
+            if viewModel.messages.contains(where: {
+                $0.role == .assistant
+                    && $0.content == "This result must not be remembered."
+            }) {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        await viewModel.deleteConversation(id: retainedConversationId)
+        await sendTask.value
+
+        check(
+            viewModel.messages
+                .first(where: { $0.role == .assistant })?
+                .isStreaming == false,
+            "failed deletion finalizes the retained partial response"
+        )
+
+        let persisted = await persister.load(
+            conversationId: retainedConversationId
+        )
+        check(
+            persisted.count == 3
+                && persisted[0].role == .user
+                && persisted[1].role == .assistant
+                && persisted[1].content
+                    == "This result must not be remembered."
+                && persisted[1].isStreaming == false
+                && persisted[2].role == .system
+                && persisted[2].content.contains(
+                    "Conversation was not deleted"
+                ),
+            "failed deletion reloads the chat with its failure receipt"
+        )
+    }
+
+    // MARK: - Scenario 15: initialization ordering
+
+    static func runImmediateNewConversationSurvivesInitialization() async {
+        print("\n# Scenario: immediate new conversation survives initialization")
+
+        let persistedConversationId = UUID()
+        let persister = DelayedInitializationPersister(
+            currentId: persistedConversationId,
+            messages: [
+                ChatMessage(role: .user, content: "Persisted conversation"),
+                ChatMessage(role: .assistant, content: "Persisted answer")
+            ],
+            initializationDelayNanoseconds: 300_000_000
+        )
+        let store = VolatileMemoryStore()
+        let defaults = UserDefaults(
+            suiteName: "trios-chat-init-race-\(UUID().uuidString)"
+        ) ?? .standard
+        let viewModel = ChatViewModel(
+            transport: MockChatTransport(),
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: persister,
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: ModelConfigurationStore(
+                defaults: defaults,
+                environment: [:]
+            ),
+            memoryService: AgentMemoryService(
+                store: store,
+                fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: TODOPlanner(store: store, preferences: defaults)
+        )
+
+        viewModel.newConversation()
+        for _ in 0..<100 {
+            let persistedCurrentId = await persister.peekCurrentConversationId()
+            if viewModel.conversationId == persistedCurrentId,
+               persistedCurrentId != persistedConversationId,
+               viewModel.messages.isEmpty {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+
+        let finalPersistedId = await persister.peekCurrentConversationId()
+        check(viewModel.conversationId == finalPersistedId,
+              "new conversation and persister converge after initialization")
+        check(finalPersistedId != persistedConversationId,
+              "late initialization cannot restore the old conversation")
+        check(viewModel.messages.isEmpty,
+              "late initialization cannot restore old messages")
+    }
+
+    // MARK: - Scenario 15: clearing memory during an active turn
+
+    static func runMemoryClearBlocksInflightWrite() async {
+        print("\n# Scenario: memory clear blocks in-flight persistence")
+
+        let store = VolatileMemoryStore()
+        let defaults = UserDefaults(
+            suiteName: "trios-memory-clear-race-\(UUID().uuidString)"
+        ) ?? .standard
+        let memoryService = AgentMemoryService(
+            store: store,
+            fingerprintKey: testFingerprintKey
+        )
+        let transport = ControlledCompletionTransport()
+        let viewModel = ChatViewModel(
+            transport: transport,
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: InMemoryPersister(),
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: ModelConfigurationStore(
+                defaults: defaults,
+                environment: [:]
+            ),
+            memoryService: memoryService,
+            todoPlanner: TODOPlanner(
+                store: store,
+                preferences: defaults
+            )
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        viewModel.inputText = "Remember this only if memory remains enabled"
+        let sendTask = Task {
+            await viewModel.sendMessage()
+        }
+        for _ in 0..<100 {
+            if await transport.hasStarted {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        do {
+            _ = try await viewModel.clearCurrentConversationMemories()
+        } catch {
+            fail("in-flight memory clear failed: \(error.localizedDescription)")
+        }
+        await transport.finish()
+        await sendTask.value
+
+        do {
+            let recent = try await memoryService.recentMemories(limit: 20)
+            check(recent.isEmpty,
+                  "cleared in-flight turn cannot recreate memory")
+        } catch {
+            fail("in-flight memory verification failed: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Scenario 16: scoped clear leaves another turn intact
+
+    static func runUnrelatedClearPreservesInflightWrite() async {
+        print("\n# Scenario: unrelated memory clear preserves in-flight persistence")
+
+        let store = VolatileMemoryStore()
+        let defaults = UserDefaults(
+            suiteName: "trios-memory-clear-scope-\(UUID().uuidString)"
+        ) ?? .standard
+        let memoryService = AgentMemoryService(
+            store: store,
+            fingerprintKey: testFingerprintKey
+        )
+        let transport = ControlledCompletionTransport()
+        let persister = InMemoryPersister()
+        let activeConversationId = UUID()
+        await persister.setCurrentConversationId(activeConversationId)
+        let viewModel = ChatViewModel(
+            transport: transport,
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: persister,
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: ModelConfigurationStore(
+                defaults: defaults,
+                environment: [:]
+            ),
+            memoryService: memoryService,
+            todoPlanner: TODOPlanner(
+                store: store,
+                preferences: defaults
+            )
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        viewModel.inputText = "Remember this memory result"
+        let sendTask = Task {
+            await viewModel.sendMessage()
+        }
+        for _ in 0..<100 {
+            if await transport.hasStarted {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+
+        do {
+            _ = try await viewModel.clearConversationMemories(
+                conversationId: UUID()
+            )
+        } catch {
+            fail("unrelated memory clear failed: \(error.localizedDescription)")
+        }
+        await transport.finish()
+        await sendTask.value
+
+        do {
+            let recent = try await memoryService.recentMemories(limit: 20)
+            check(
+                recent.contains {
+                    $0.record.conversationId == activeConversationId
+                },
+                "clearing another task cannot suppress active-task memory"
+            )
+        } catch {
+            fail("unrelated memory verification failed: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Scenario 17: clear is ordered after a started write
+
+    static func runClearWaitsForStartedMemoryWrite() async {
+        print("\n# Scenario: memory clear waits for a started write")
+
+        let store = ControlledSaveMemoryStore()
+        let defaults = UserDefaults(
+            suiteName: "trios-memory-clear-barrier-\(UUID().uuidString)"
+        ) ?? .standard
+        let memoryService = AgentMemoryService(
+            store: store,
+            fingerprintKey: testFingerprintKey
+        )
+        let transport = MockChatTransport()
+        await transport.setEvents([
+            .start(id: "memory-write-barrier"),
+            .textDelta(
+                id: "memory-write-barrier",
+                delta: "Memory write is ready."
+            ),
+            .finish(id: "memory-write-barrier")
+        ])
+        let viewModel = ChatViewModel(
+            transport: transport,
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: InMemoryPersister(),
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: ModelConfigurationStore(
+                defaults: defaults,
+                environment: [:]
+            ),
+            memoryService: memoryService,
+            todoPlanner: TODOPlanner(
+                store: store,
+                preferences: defaults
+            )
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        viewModel.inputText = "Remember this memory barrier"
+        let sendTask = Task {
+            await viewModel.sendMessage()
+        }
+        for _ in 0..<100 {
+            if await store.hasStartedSave() {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let didStartSave = await store.hasStartedSave()
+        check(didStartSave, "memory write starts before the clear request")
+
+        let clearTask = Task {
+            try await viewModel.clearCurrentConversationMemories()
+        }
+        for _ in 0..<20 {
+            await Task.yield()
+        }
+        let didStartDeletionEarly = await store.hasStartedDeletion()
+        check(
+            didStartDeletionEarly == false,
+            "canonical deletion waits for the started memory write"
+        )
+
+        await store.releaseSave()
+        do {
+            _ = try await clearTask.value
+        } catch {
+            fail("barrier memory clear failed: \(error.localizedDescription)")
+        }
+        await sendTask.value
+
+        do {
+            let recent = try await memoryService.recentMemories(limit: 20)
+            check(
+                recent.isEmpty,
+                "successful clear leaves no raced memory behind"
+            )
+        } catch {
+            fail("barrier memory verification failed: \(error.localizedDescription)")
+        }
+    }
+
+    // MARK: - Scenario 18: navigation preserves a completed turn write
+
+    static func runConversationSwitchPreservesStartedMemoryWrite() async {
+        print("\n# Scenario: conversation switch preserves completed memory")
+
+        let store = ControlledSaveMemoryStore()
+        let defaults = UserDefaults(
+            suiteName: "trios-memory-navigation-race-\(UUID().uuidString)"
+        ) ?? .standard
+        let memoryService = AgentMemoryService(
+            store: store,
+            fingerprintKey: testFingerprintKey
+        )
+        let transport = MockChatTransport()
+        await transport.setEvents([
+            .start(id: "memory-navigation-race"),
+            .textDelta(
+                id: "memory-navigation-race",
+                delta: "The completed result should remain durable."
+            ),
+            .finish(id: "memory-navigation-race")
+        ])
+        let persister = InMemoryPersister()
+        let completedConversationId = UUID()
+        await persister.setCurrentConversationId(completedConversationId)
+        let viewModel = ChatViewModel(
+            transport: transport,
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: persister,
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: ModelConfigurationStore(
+                defaults: defaults,
+                environment: [:]
+            ),
+            memoryService: memoryService,
+            todoPlanner: TODOPlanner(
+                store: store,
+                preferences: defaults
+            )
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        viewModel.inputText = "Remember this completed navigation result"
+        let sendTask = Task {
+            await viewModel.sendMessage()
+        }
+        for _ in 0..<100 {
+            if await store.hasStartedSave() {
+                break
+            }
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        let didStartSave = await store.hasStartedSave()
+        check(didStartSave, "completed turn starts its durable memory write")
+
+        let nextConversationId = UUID()
+        await viewModel.switchConversation(id: nextConversationId)
+        check(
+            viewModel.conversationId == nextConversationId,
+            "navigation reaches the next conversation while save is pending"
+        )
+
+        await store.releaseSave()
+        await sendTask.value
+
+        do {
+            let recent = try await memoryService.recentMemories(limit: 20)
+            check(
+                recent.contains {
+                    $0.record.conversationId == completedConversationId
+                },
+                "navigation preserves memory for the completed conversation"
+            )
+        } catch {
+            fail("navigation memory verification failed: \(error.localizedDescription)")
+        }
+
+        let persisted = await persister.load(
+            conversationId: completedConversationId
+        )
+        check(
+            persisted.count == 2
+                && persisted[0].role == .user
+                && persisted[1].role == .assistant
+                && persisted[1].content
+                    == "The completed result should remain durable."
+                && persisted[1].isStreaming == false,
+            "navigation preserves completed history for the original conversation"
+        )
+    }
+
+    // MARK: - Scenario 19: scroll geometry and request delivery
+
+    static func runScrollPositionPolicyAndRequestDelivery() async {
+        print("\n# Scenario: scroll policy preserves reader position")
+
+        check(
+            ChatScrollPolicy.isNearBottom(
+                bottomAnchorY: 580,
+                viewportHeight: 500,
+                threshold: 100
+            ),
+            "bottom anchor inside threshold is near bottom"
+        )
+        check(
+            !ChatScrollPolicy.isNearBottom(
+                bottomAnchorY: 780,
+                viewportHeight: 500,
+                threshold: 100
+            ),
+            "bottom anchor beyond threshold preserves reader position"
+        )
+        check(
+            ChatScrollPolicy.isNearBottom(
+                bottomAnchorY: 300,
+                viewportHeight: 500,
+                threshold: 100
+            ),
+            "short content remains near bottom"
+        )
+
+        let manager = SmoothScrollManager()
+        let initialSequence = manager.scrollRequest.sequence
+        manager.forceScroll(animated: false)
+        check(
+            manager.scrollRequest.sequence == initialSequence &+ 1,
+            "forced scroll emits a consumable request"
+        )
+        check(
+            manager.scrollRequest.animated == false,
+            "scroll request preserves its animation policy"
+        )
     }
 }

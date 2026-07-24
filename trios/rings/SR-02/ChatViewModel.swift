@@ -4,8 +4,33 @@
 import Foundation
 import SwiftUI
 
+private struct PendingAgentMemoryTurn {
+    let conversationId: UUID
+    let sourceMessageId: UUID
+    let goal: String
+    let streamGeneration: UInt64
+    let memoryWriteRevision: UInt64
+    var shouldRemember: Bool
+    var assistantMessageId: UUID?
+}
+
+private struct ActiveAgentMemoryWrite {
+    let conversationId: UUID
+    let sourceMessageId: UUID
+    let task: Task<AgentMemoryRecord?, Never>
+}
+
+private struct ConversationHistorySnapshot {
+    let conversationId: UUID
+    let messages: [ChatMessage]
+    let writeRevision: UInt64
+}
+
 @MainActor
 final class ChatViewModel: ObservableObject {
+    private static let unterminatedStreamError =
+        "Response stream ended before a terminal event"
+
     @Published var messages: [ChatMessage] = []
     @Published var state: ConversationState = .idle
     @Published var inputText: String = ""
@@ -15,15 +40,19 @@ final class ChatViewModel: ObservableObject {
     @Published var showHistory = false
     @Published var messageHistory: [String] = []  // Hotkey history (↑↓ navigation)
     @Published private(set) var tokenUsage = TokenUsageLedger()
+    @Published private(set) var recalledMemories: [AgentMemoryMatch] = []
+    @Published private(set) var memoryControlRevision: UInt64 = 0
 
     let queenStatusVM = QueenStatusViewModel()
     let modelStore: ModelConfigurationStore
+    let todoPlanner: TODOPlanner
 
     private let transport: ChatTransportProtocol
     private let healthCheck: ChatHealthCheckProtocol
     private let parser: ChatParserProtocol
     private let persister: ChatPersisterProtocol
     private let stateMachine: ConversationStateMachine
+    private let memoryService: AgentMemoryService
     let a2aClient: A2ARegistryClient?
 
     @Published private(set) var conversationId: UUID = UUID()
@@ -31,11 +60,20 @@ final class ChatViewModel: ObservableObject {
     private var a2aRouter: A2AMessageRouter?
     private var a2aStreamTask: Task<Void, Never>?
     private var healthCheckTask: Task<Void, Never>?
+    private var initializationTask: Task<Void, Never>?
     private var lastSendTime: Date = .distantPast
     private var pendingEstimatedInputTokens = 0
     private var pendingEstimatedOutput = ""
     private var pendingUsageActive = false
     private var receivedProviderUsage = false
+    private var pendingMemoryTurn: PendingAgentMemoryTurn?
+    private var activeMemoryWrites: [UUID: ActiveAgentMemoryWrite] = [:]
+    private var memoryClearCounts: [UUID: Int] = [:]
+    private var streamGeneration: UInt64 = 0
+    private var memoryWriteRevisions: [UUID: UInt64] = [:]
+    private var historyWriteRevisions: [UUID: UInt64] = [:]
+    private var historyDeletionCounts: [UUID: Int] = [:]
+    private var isConversationTransitioning = false
 
     init(
         transport: ChatTransportProtocol,
@@ -44,7 +82,9 @@ final class ChatViewModel: ObservableObject {
         persister: ChatPersisterProtocol,
         stateMachine: ConversationStateMachine,
         a2aClient: A2ARegistryClient? = nil,
-        modelStore: ModelConfigurationStore
+        modelStore: ModelConfigurationStore,
+        memoryService: AgentMemoryService,
+        todoPlanner: TODOPlanner
     ) {
         NSLog("ChatViewModel.init starting")
         self.transport = transport
@@ -54,15 +94,20 @@ final class ChatViewModel: ObservableObject {
         self.stateMachine = stateMachine
         self.a2aClient = a2aClient
         self.modelStore = modelStore
+        self.memoryService = memoryService
+        self.todoPlanner = todoPlanner
         NSLog("ChatViewModel.init properties set")
 
-        Task {
+        initializationTask = Task { [weak self] in
+            guard let self else { return }
             NSLog("ChatViewModel.init Task started")
             await setupConversationId()
             await loadHistory()
+            await todoPlanner.load(conversationId: conversationId)
             await loadConversations()
             await checkHealth()
             NSLog("ChatViewModel.init Task done")
+            initializationTask = nil
         }
         healthCheckTask = Task {
             while !Task.isCancelled {
@@ -74,11 +119,12 @@ final class ChatViewModel: ObservableObject {
     }
 
     deinit {
+        initializationTask?.cancel()
         healthCheckTask?.cancel()
     }
 
     func setupConversationId() async {
-        conversationId = persister.currentConversationId()
+        conversationId = await persister.currentConversationId()
     }
 
     func loadHistory() async {
@@ -133,15 +179,27 @@ final class ChatViewModel: ObservableObject {
     }
 
     func switchConversation(id: UUID) async {
+        await awaitInitialization()
+        guard beginConversationTransition() else { return }
+        defer { endConversationTransition() }
+        invalidateActiveStream()
+        await performConversationSwitch(id: id)
+    }
+
+    private func performConversationSwitch(id: UUID) async {
         // Cancel any in-flight stream before loading a different conversation;
         // otherwise late SSE events could corrupt the newly loaded messages.
+        await cancelPendingTurn()
         await transport.cancel()
         _ = await stateMachine.transition(to: .idle)
         state = await stateMachine.currentState()
 
+        recalledMemories = []
+        memoryControlRevision &+= 1
         conversationId = id
-        persister.setCurrentConversationId(id)
+        await persister.setCurrentConversationId(id)
         await loadHistory()
+        await todoPlanner.load(conversationId: id)
         await loadConversations()
         tokenUsage.reset()
         showHistory = false
@@ -151,8 +209,9 @@ final class ChatViewModel: ObservableObject {
         appendUser: Bool = true,
         onAccepted: (() -> Void)? = nil
     ) async {
+        await awaitInitialization()
         let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        guard !text.isEmpty, !isConversationTransitioning else { return }
 
         let now = Date()
         guard now.timeIntervalSince(lastSendTime) >= 0.5 else {
@@ -169,10 +228,19 @@ final class ChatViewModel: ObservableObject {
             messageHistory.removeFirst()
         }
 
+        let memoryGoal = memorySafeGoal(from: text)
+        let shouldRemember = isEligibleForLongTermMemory(text)
+            && !isMemoryClearInProgress(conversationId)
+        let sourceMessageId: UUID
         if appendUser {
             let userMessage = ChatMessage(role: .user, content: text)
+            sourceMessageId = userMessage.id
             messages.append(userMessage)
             rebuildCache()
+        } else if let existingUser = messages.last(where: { $0.role == .user }) {
+            sourceMessageId = existingUser.id
+        } else {
+            sourceMessageId = UUID()
         }
         inputText = ""
 
@@ -190,6 +258,34 @@ final class ChatViewModel: ObservableObject {
         NSLog("[TriosChat] state transitioned to streaming")
         onAccepted?()
 
+        streamGeneration &+= 1
+        let generation = streamGeneration
+        pendingMemoryTurn = PendingAgentMemoryTurn(
+            conversationId: conversationId,
+            sourceMessageId: sourceMessageId,
+            goal: memoryGoal,
+            streamGeneration: generation,
+            memoryWriteRevision: memoryWriteRevision(
+                for: conversationId
+            ),
+            shouldRemember: shouldRemember,
+            assistantMessageId: nil
+        )
+
+        await todoPlanner.startPlan(
+            conversationId: conversationId,
+            goal: memoryGoal
+        )
+        guard isCurrentStream(generation) else { return }
+
+        let recallRevision = memoryControlRevision
+        let recalled = await memoryService.recall(
+            for: memoryGoal,
+            limit: 3
+        )
+        guard isCurrentStream(generation) else { return }
+        recalledMemories = recallRevision == memoryControlRevision ? recalled : []
+
         // Exclude the current user message from previousConversation: the server
         // receives it separately via the `message` field, and duplicating it
         // confuses the model and the UI.
@@ -201,14 +297,21 @@ final class ChatViewModel: ObservableObject {
             message: text,
             mode: "agent",
             origin: "sidepanel",
-            userSystemPrompt: nil,
+            userSystemPrompt: memoryService.promptContext(
+                for: recalledMemories
+            ),
             previousConversation: historyForRequest,
             browserContext: nil,
             modelConfiguration: modelStore.runtimeConfiguration
         ).build() else {
             NSLog("[TriosChat] ChatRequestBuilder failed")
+            await failPendingTurn(message: "Failed to build request")
+            guard isGenerationCurrent(generation) else { return }
             _ = await stateMachine.transition(to: .error("Failed to build request"))
-            state = await stateMachine.currentState()
+            guard isGenerationCurrent(generation) else { return }
+            let currentState = await stateMachine.currentState()
+            guard isGenerationCurrent(generation) else { return }
+            state = currentState
             clearPendingUsage()
             return
         }
@@ -218,23 +321,65 @@ final class ChatViewModel: ObservableObject {
 
         do {
             let stream = try await transport.sendMessage(body: requestBody)
+            guard isCurrentStream(generation) else { return }
+            await todoPlanner.markExecutionStarted(
+                detail: "Response stream opened"
+            )
             NSLog("[TriosChat] transport stream opened")
+            var receivedTerminalEvent = false
             for await event in stream {
+                guard isCurrentStream(generation) else { break }
+                switch event {
+                case .finish, .abort, .error:
+                    receivedTerminalEvent = true
+                default:
+                    break
+                }
                 NSLog("[TriosChat] SSE event: \(event)")
-                await handleEvent(event)
+                await handleEvent(
+                    event,
+                    expectedGeneration: generation
+                )
             }
+            guard isCurrentStream(generation) else { return }
+            guard receivedTerminalEvent else {
+                finalizeAssistantStreamingState()
+                NSLog(
+                    "[TriosChat] unterminated stream: %@",
+                    Self.unterminatedStreamError
+                )
+                await applyAction(
+                    .streamError(Self.unterminatedStreamError),
+                    expectedGeneration: generation
+                )
+                return
+            }
+            await completePendingTurnIfNeeded()
+            guard isGenerationCurrent(generation) else { return }
             finalizeEstimatedUsageIfNeeded()
             NSLog("[TriosChat] stream ended normally")
             _ = await stateMachine.transition(to: .idle)
-            state = await stateMachine.currentState()
-            await saveHistory()
+            guard isGenerationCurrent(generation) else { return }
+            let currentState = await stateMachine.currentState()
+            guard isGenerationCurrent(generation) else { return }
+            state = currentState
+            await saveHistory(expectedGeneration: generation)
         } catch {
+            guard isCurrentStream(generation) else { return }
+            finalizeAssistantStreamingState()
             // Manual cancellation is not a user-visible error.
             if let urlError = error as? URLError, urlError.code == .cancelled {
+                let historySnapshot = captureHistorySnapshot()
                 NSLog("[TriosChat] stream cancelled by user")
+                await cancelPendingTurn()
+                await persistHistorySnapshot(historySnapshot)
+                guard isGenerationCurrent(generation) else { return }
                 _ = await stateMachine.transition(to: .idle)
-                state = await stateMachine.currentState()
-                await saveHistory()
+                guard isGenerationCurrent(generation) else { return }
+                let currentState = await stateMachine.currentState()
+                guard isGenerationCurrent(generation) else { return }
+                state = currentState
+                await saveHistory(expectedGeneration: generation)
                 return
             }
 
@@ -243,16 +388,29 @@ final class ChatViewModel: ObservableObject {
             let errorMsg = ChatMessage(role: .system, content: "[!] \(error.localizedDescription)")
             messages.append(errorMsg)
             rebuildCache()
+            let historySnapshot = captureHistorySnapshot()
+            await failPendingTurn(message: error.localizedDescription)
+            await persistHistorySnapshot(historySnapshot)
+            guard isGenerationCurrent(generation) else { return }
             _ = await stateMachine.transition(to: .error(error.localizedDescription))
-            state = await stateMachine.currentState()
-            await saveHistory()
+            guard isGenerationCurrent(generation) else { return }
+            let currentState = await stateMachine.currentState()
+            guard isGenerationCurrent(generation) else { return }
+            state = currentState
+            await saveHistory(expectedGeneration: generation)
         }
     }
 
     func cancelStreaming() {
+        finalizeAssistantStreamingState()
+        let historySnapshot = captureHistorySnapshot()
+        invalidateActiveStream()
         Task {
-            await transport.cancel()
+            await awaitInitialization()
+            await persistHistorySnapshot(historySnapshot)
+            await cancelPendingTurn()
             clearPendingUsage()
+            await transport.cancel()
             _ = await stateMachine.transition(to: .idle)
             state = await stateMachine.currentState()
         }
@@ -283,34 +441,114 @@ final class ChatViewModel: ObservableObject {
     }
 
     func newConversation() {
-        conversationId = UUID()
-        messages = []
-        messageCache = [:]
-        state = .idle
-        tokenUsage.reset()
-        clearPendingUsage()
+        guard beginConversationTransition() else { return }
+        let newConversationId = UUID()
+        invalidateActiveStream()
         Task {
+            await awaitInitialization()
+            await cancelPendingTurn()
             await transport.cancel()
             _ = await stateMachine.transition(to: .idle)
-            persister.setCurrentConversationId(conversationId)
+            state = await stateMachine.currentState()
+            conversationId = newConversationId
+            messages = []
+            messageCache = [:]
+            tokenUsage.reset()
+            clearPendingUsage()
+            recalledMemories = []
+            memoryControlRevision &+= 1
+            await todoPlanner.load(conversationId: newConversationId)
+            await persister.setCurrentConversationId(newConversationId)
             await loadConversations()
+            endConversationTransition()
         }
     }
 
     func deleteConversation(id: UUID) async {
+        await awaitInitialization()
+        guard beginConversationTransition() else { return }
+        defer { endConversationTransition() }
+        let retainedHistorySnapshot: ConversationHistorySnapshot?
         if id == conversationId {
+            finalizeAssistantStreamingState()
+            retainedHistorySnapshot = captureHistorySnapshot()
+            invalidateActiveStream()
+        } else {
+            retainedHistorySnapshot = nil
+        }
+        await performConversationDeletion(
+            id: id,
+            retainedHistorySnapshot: retainedHistorySnapshot
+        )
+    }
+
+    private func performConversationDeletion(
+        id: UUID,
+        retainedHistorySnapshot: ConversationHistorySnapshot?
+    ) async {
+        if id == conversationId {
+            await cancelPendingTurn()
             await transport.cancel()
             _ = await stateMachine.transition(to: .idle)
             state = await stateMachine.currentState()
-            await persister.clear(conversationId: id)
+            await waitForMemoryWrite(conversationId: id)
+            do {
+                try await todoPlanner.deleteConversationData(
+                    conversationId: id
+                )
+            } catch {
+                let message = "Conversation was not deleted because private data cleanup failed."
+                let receipt = ChatMessage(
+                    role: .system,
+                    content: "[!] \(message)"
+                )
+                messages.append(receipt)
+                rebuildCache()
+                let failureSnapshot: ConversationHistorySnapshot
+                if let retainedHistorySnapshot {
+                    failureSnapshot = ConversationHistorySnapshot(
+                        conversationId:
+                            retainedHistorySnapshot.conversationId,
+                        messages:
+                            retainedHistorySnapshot.messages + [receipt],
+                        writeRevision:
+                            retainedHistorySnapshot.writeRevision
+                    )
+                } else {
+                    finalizeAssistantStreamingState()
+                    failureSnapshot = captureHistorySnapshot()
+                }
+                await persistHistorySnapshot(failureSnapshot)
+                _ = await stateMachine.transition(to: .error(message))
+                state = await stateMachine.currentState()
+                return
+            }
+            await clearPersistedConversationHistory(conversationId: id)
             conversationId = UUID()
-            persister.setCurrentConversationId(conversationId)
+            await persister.setCurrentConversationId(conversationId)
             messages = []
             tokenUsage.reset()
             clearPendingUsage()
+            pendingMemoryTurn = nil
+            recalledMemories = []
+            memoryControlRevision &+= 1
+            advanceMemoryWriteRevision(for: id)
+            await todoPlanner.load(conversationId: conversationId)
             rebuildCache()
         } else {
-            await persister.clear(conversationId: id)
+            do {
+                await waitForMemoryWrite(conversationId: id)
+                try await todoPlanner.deleteConversationData(
+                    conversationId: id
+                )
+                await clearPersistedConversationHistory(conversationId: id)
+            } catch {
+                NSLog(
+                    "[TriosChat] conversation deletion blocked: %@",
+                    error.localizedDescription
+                )
+                return
+            }
         }
         await loadConversations()
     }
@@ -394,19 +632,40 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
-    private func handleEvent(_ event: SSEEvent) async {
+    private func handleEvent(
+        _ event: SSEEvent,
+        expectedGeneration: UInt64
+    ) async {
+        guard isCurrentStream(expectedGeneration) else { return }
         guard let action = await parser.parse(event) else { return }
-        await applyAction(action)
+        guard isCurrentStream(expectedGeneration) else { return }
+        await applyAction(
+            action,
+            expectedGeneration: expectedGeneration
+        )
     }
 
-    private func applyAction(_ action: ParserAction) async {
+    private func applyAction(
+        _ action: ParserAction,
+        expectedGeneration: UInt64
+    ) async {
+        guard isCurrentStream(expectedGeneration) else { return }
 
         switch action {
         case .appendMessage(let message):
             messages.append(message)
             rebuildCache()
+            if message.role == .assistant,
+               var pending = pendingMemoryTurn,
+               pending.streamGeneration == streamGeneration {
+                pending.assistantMessageId = message.id
+                pendingMemoryTurn = pending
+            }
             _ = await stateMachine.transition(to: .streaming(messageId: message.id))
-            state = await stateMachine.currentState()
+            guard isCurrentStream(expectedGeneration) else { return }
+            let currentState = await stateMachine.currentState()
+            guard isCurrentStream(expectedGeneration) else { return }
+            state = currentState
 
         case .appendText(let messageId, let delta):
             guard let index = messageCache[messageId] else { return }
@@ -457,6 +716,8 @@ final class ChatViewModel: ObservableObject {
             guard let index = messageCache[messageId] else { return }
             messages[index].toolCalls.append(toolCall)
             messages[index].segments.append(.toolCall(id: toolCall.id))
+            await todoPlanner.markToolActivity(name: toolCall.name)
+            guard isCurrentStream(expectedGeneration) else { return }
             objectWillChange.send()
 
         case .appendToolInput(let messageId, let toolCallId, let delta):
@@ -500,34 +761,343 @@ final class ChatViewModel: ObservableObject {
             receivedProviderUsage = true
 
         case .streamComplete:
-            if let lastIndex = messages.indices.last,
-               messages[lastIndex].role == .assistant {
-                messages[lastIndex].isStreaming = false
-            }
+            finalizeAssistantStreamingState()
             finalizeEstimatedUsageIfNeeded()
+            let historySnapshot = captureHistorySnapshot()
+            await completePendingTurnIfNeeded()
+            await persistHistorySnapshot(historySnapshot)
+            guard isGenerationCurrent(expectedGeneration) else { return }
             _ = await stateMachine.transition(to: .idle)
-            state = await stateMachine.currentState()
-            await saveHistory()
+            guard isGenerationCurrent(expectedGeneration) else { return }
+            let currentState = await stateMachine.currentState()
+            guard isGenerationCurrent(expectedGeneration) else { return }
+            state = currentState
+            await saveHistory(expectedGeneration: expectedGeneration)
 
         case .streamAborted:
-            if let lastIndex = messages.indices.last,
-               messages[lastIndex].role == .assistant {
-                messages[lastIndex].isStreaming = false
-            }
+            finalizeAssistantStreamingState()
             clearPendingUsage()
+            let historySnapshot = captureHistorySnapshot()
+            await cancelPendingTurn()
+            await persistHistorySnapshot(historySnapshot)
+            guard isGenerationCurrent(expectedGeneration) else { return }
             _ = await stateMachine.transition(to: .idle)
-            state = await stateMachine.currentState()
-            await saveHistory()
+            guard isGenerationCurrent(expectedGeneration) else { return }
+            let currentState = await stateMachine.currentState()
+            guard isGenerationCurrent(expectedGeneration) else { return }
+            state = currentState
+            await saveHistory(expectedGeneration: expectedGeneration)
 
         case .streamError(let message):
+            finalizeAssistantStreamingState()
             clearPendingUsage()
             let errorMsg = ChatMessage(role: .system, content: "[!] \(message)")
             messages.append(errorMsg)
             rebuildCache()
+            let historySnapshot = captureHistorySnapshot()
+            await failPendingTurn(message: message)
+            await persistHistorySnapshot(historySnapshot)
+            guard isGenerationCurrent(expectedGeneration) else { return }
             _ = await stateMachine.transition(to: .error(message))
-            state = await stateMachine.currentState()
-            await saveHistory()
+            guard isGenerationCurrent(expectedGeneration) else { return }
+            let currentState = await stateMachine.currentState()
+            guard isGenerationCurrent(expectedGeneration) else { return }
+            state = currentState
+            await saveHistory(expectedGeneration: expectedGeneration)
         }
+    }
+
+    func searchMemories(_ query: String) async -> [AgentMemoryMatch] {
+        let revision = memoryControlRevision
+        let matches = await memoryService.recall(for: query, limit: 20)
+        return revision == memoryControlRevision ? matches : []
+    }
+
+    func recentMemories(limit: Int = 20) async throws -> [AgentMemoryMatch] {
+        let revision = memoryControlRevision
+        let matches = try await memoryService.recentMemories(limit: limit)
+        return revision == memoryControlRevision ? matches : []
+    }
+
+    func forgetMemory(id: UUID) async throws -> Bool {
+        let deleted = try await memoryService.forgetMemory(id: id)
+        memoryControlRevision &+= 1
+        recalledMemories.removeAll { $0.record.id == id }
+        return deleted
+    }
+
+    func clearCurrentConversationMemories() async throws -> Int {
+        try await clearConversationMemories(
+            conversationId: conversationId
+        )
+    }
+
+    func clearConversationMemories(
+        conversationId targetConversationId: UUID
+    ) async throws -> Int {
+        beginMemoryClear(conversationId: targetConversationId)
+        defer {
+            endMemoryClear(conversationId: targetConversationId)
+        }
+        memoryControlRevision &+= 1
+        advanceMemoryWriteRevision(for: targetConversationId)
+        if var pending = pendingMemoryTurn,
+           pending.conversationId == targetConversationId {
+            pending.shouldRemember = false
+            pendingMemoryTurn = pending
+        }
+
+        await waitForMemoryWrite(conversationId: targetConversationId)
+        let deleted = try await memoryService.clearConversationMemories(
+            conversationId: targetConversationId
+        )
+        memoryControlRevision &+= 1
+        recalledMemories.removeAll {
+            $0.record.conversationId == targetConversationId
+        }
+        return deleted
+    }
+
+    private func completePendingTurnIfNeeded() async {
+        guard let initialPending = pendingMemoryTurn else { return }
+        await todoPlanner.completePlan()
+
+        guard let pending = pendingMemoryTurn,
+              isSamePendingTurn(pending, initialPending) else {
+            return
+        }
+        guard pending.streamGeneration == streamGeneration,
+              pending.memoryWriteRevision == memoryWriteRevision(
+                  for: pending.conversationId
+              ),
+              !isMemoryClearInProgress(pending.conversationId),
+              pending.shouldRemember,
+              let assistantMessageId = pending.assistantMessageId,
+              let assistant = messages.first(where: {
+                  $0.id == assistantMessageId && $0.role == .assistant
+              }) else {
+            clearPendingTurnIfMatching(pending)
+            return
+        }
+        let directContent = assistant.content
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let segmentContent = assistant.segments.compactMap { segment -> String? in
+            guard case .text(let text) = segment else { return nil }
+            return text
+        }
+        .joined()
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+        let result = directContent.isEmpty ? segmentContent : directContent
+        guard !result.isEmpty else {
+            clearPendingTurnIfMatching(pending)
+            return
+        }
+
+        let writeTask = Task { [memoryService] in
+            await memoryService.rememberCompletedTurn(
+                conversationId: pending.conversationId,
+                sourceMessageId: pending.sourceMessageId,
+                goal: pending.goal,
+                assistantResult: result
+            )
+        }
+        activeMemoryWrites[pending.sourceMessageId] = ActiveAgentMemoryWrite(
+            conversationId: pending.conversationId,
+            sourceMessageId: pending.sourceMessageId,
+            task: writeTask
+        )
+        let stored = await writeTask.value
+        clearActiveMemoryWriteIfMatching(
+            conversationId: pending.conversationId,
+            sourceMessageId: pending.sourceMessageId
+        )
+        let stillAllowed =
+            pending.memoryWriteRevision == memoryWriteRevision(
+                for: pending.conversationId
+            )
+            && !isMemoryClearInProgress(pending.conversationId)
+        clearPendingTurnIfMatching(pending)
+
+        if !stillAllowed, let stored {
+            do {
+                _ = try await memoryService.forgetMemory(id: stored.id)
+            } catch {
+                NSLog(
+                    "[AgentMemory] post-clear cleanup failed: %@",
+                    error.localizedDescription
+                )
+            }
+        }
+    }
+
+    private func cancelPendingTurn() async {
+        guard pendingMemoryTurn != nil else { return }
+        pendingMemoryTurn = nil
+        await todoPlanner.cancelPlan()
+    }
+
+    private func failPendingTurn(message: String) async {
+        guard pendingMemoryTurn != nil else { return }
+        pendingMemoryTurn = nil
+        await todoPlanner.failPlan(message: message)
+    }
+
+    private func invalidateActiveStream() {
+        streamGeneration &+= 1
+    }
+
+    private func isCurrentStream(_ generation: UInt64) -> Bool {
+        isGenerationCurrent(generation)
+            && pendingMemoryTurn?.streamGeneration == generation
+    }
+
+    private func isGenerationCurrent(_ generation: UInt64) -> Bool {
+        generation == streamGeneration
+    }
+
+    private func memoryWriteRevision(for conversationId: UUID) -> UInt64 {
+        memoryWriteRevisions[conversationId] ?? 0
+    }
+
+    private func advanceMemoryWriteRevision(for conversationId: UUID) {
+        memoryWriteRevisions[conversationId] =
+            memoryWriteRevision(for: conversationId) &+ 1
+    }
+
+    private func historyWriteRevision(for conversationId: UUID) -> UInt64 {
+        historyWriteRevisions[conversationId] ?? 0
+    }
+
+    private func advanceHistoryWriteRevision(for conversationId: UUID) {
+        historyWriteRevisions[conversationId] =
+            historyWriteRevision(for: conversationId) &+ 1
+    }
+
+    private func isHistoryDeletionInProgress(
+        _ conversationId: UUID
+    ) -> Bool {
+        (historyDeletionCounts[conversationId] ?? 0) > 0
+    }
+
+    private func beginHistoryDeletion(conversationId: UUID) {
+        historyDeletionCounts[conversationId, default: 0] += 1
+        advanceHistoryWriteRevision(for: conversationId)
+    }
+
+    private func endHistoryDeletion(conversationId: UUID) {
+        let remaining = (historyDeletionCounts[conversationId] ?? 1) - 1
+        if remaining > 0 {
+            historyDeletionCounts[conversationId] = remaining
+        } else {
+            historyDeletionCounts.removeValue(forKey: conversationId)
+        }
+    }
+
+    private func isMemoryClearInProgress(_ conversationId: UUID) -> Bool {
+        (memoryClearCounts[conversationId] ?? 0) > 0
+    }
+
+    private func beginMemoryClear(conversationId: UUID) {
+        memoryClearCounts[conversationId, default: 0] += 1
+    }
+
+    private func endMemoryClear(conversationId: UUID) {
+        let remaining = (memoryClearCounts[conversationId] ?? 1) - 1
+        if remaining > 0 {
+            memoryClearCounts[conversationId] = remaining
+        } else {
+            memoryClearCounts.removeValue(forKey: conversationId)
+        }
+    }
+
+    private func waitForMemoryWrite(conversationId: UUID) async {
+        let writes = activeMemoryWrites.values.filter {
+            $0.conversationId == conversationId
+        }
+        for write in writes {
+            _ = await write.task.value
+            clearActiveMemoryWriteIfMatching(
+                conversationId: write.conversationId,
+                sourceMessageId: write.sourceMessageId
+            )
+        }
+    }
+
+    private func clearActiveMemoryWriteIfMatching(
+        conversationId: UUID,
+        sourceMessageId: UUID
+    ) {
+        guard let activeMemoryWrite = activeMemoryWrites[sourceMessageId],
+              activeMemoryWrite.conversationId == conversationId,
+              activeMemoryWrite.sourceMessageId == sourceMessageId else {
+            return
+        }
+        activeMemoryWrites.removeValue(forKey: sourceMessageId)
+    }
+
+    private func isSamePendingTurn(
+        _ lhs: PendingAgentMemoryTurn,
+        _ rhs: PendingAgentMemoryTurn
+    ) -> Bool {
+        lhs.streamGeneration == rhs.streamGeneration
+            && lhs.sourceMessageId == rhs.sourceMessageId
+    }
+
+    private func clearPendingTurnIfMatching(
+        _ pending: PendingAgentMemoryTurn
+    ) {
+        guard let current = pendingMemoryTurn,
+              isSamePendingTurn(current, pending) else {
+            return
+        }
+        pendingMemoryTurn = nil
+    }
+
+    private func finalizeAssistantStreamingState() {
+        for index in messages.indices
+        where messages[index].role == .assistant
+            && messages[index].isStreaming {
+            messages[index].isStreaming = false
+        }
+    }
+
+    private func beginConversationTransition() -> Bool {
+        guard !isConversationTransitioning else { return false }
+        isConversationTransitioning = true
+        return true
+    }
+
+    private func endConversationTransition() {
+        isConversationTransitioning = false
+    }
+
+    private func awaitInitialization() async {
+        if let initializationTask {
+            await initializationTask.value
+        }
+    }
+
+    private func memorySafeGoal(from text: String) -> String {
+        let marker = "<local_attachments>"
+        let userText = text.components(separatedBy: marker).first ?? text
+        let normalized = userText
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        return normalized.isEmpty ? "Inspect attached files" : normalized
+    }
+
+    private func isEligibleForLongTermMemory(_ text: String) -> Bool {
+        let lowercased = text.lowercased()
+        let excludedMarkers = [
+            "<local_attachments>",
+            "<browser_context>",
+            "```",
+            "diff --git ",
+            "-----begin file-----",
+            "-----end file-----"
+        ]
+        return !excludedMarkers.contains(where: lowercased.contains)
     }
 
     private func beginUsageEstimate(message: String, history: [ChatMessage]) {
@@ -587,19 +1157,76 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
-    private func saveHistory() async {
-        await persister.save(messages: messages, conversationId: conversationId)
+    private func saveHistory(expectedGeneration: UInt64) async {
+        guard isGenerationCurrent(expectedGeneration) else { return }
+        let targetConversationId = conversationId
+        let snapshot = messages
+        await persister.save(
+            messages: snapshot,
+            conversationId: targetConversationId
+        )
+        guard isGenerationCurrent(expectedGeneration),
+              conversationId == targetConversationId else {
+            return
+        }
         await loadConversations()
+    }
+
+    private func captureHistorySnapshot() -> ConversationHistorySnapshot {
+        ConversationHistorySnapshot(
+            conversationId: conversationId,
+            messages: messages,
+            writeRevision: historyWriteRevision(for: conversationId)
+        )
+    }
+
+    private func persistHistorySnapshot(
+        _ snapshot: ConversationHistorySnapshot
+    ) async {
+        guard snapshot.writeRevision == historyWriteRevision(
+                  for: snapshot.conversationId
+              ),
+              !isHistoryDeletionInProgress(snapshot.conversationId) else {
+            return
+        }
+
+        await persister.save(
+            messages: snapshot.messages,
+            conversationId: snapshot.conversationId
+        )
+
+        guard snapshot.writeRevision == historyWriteRevision(
+                  for: snapshot.conversationId
+              ),
+              !isHistoryDeletionInProgress(snapshot.conversationId) else {
+            await persister.clear(conversationId: snapshot.conversationId)
+            return
+        }
+
+        if conversationId == snapshot.conversationId {
+            await loadConversations()
+        }
+    }
+
+    private func clearPersistedConversationHistory(
+        conversationId: UUID
+    ) async {
+        beginHistoryDeletion(conversationId: conversationId)
+        defer {
+            endHistoryDeletion(conversationId: conversationId)
+        }
+        await persister.clear(conversationId: conversationId)
     }
     
     // MARK: - Conversation Management
 
-    func renameConversation(_ id: UUID, to newName: String) {
+    func renameConversation(_ id: UUID, to newName: String) async {
+        let title = ConversationTitlePolicy.normalized(newName)
         if let index = conversations.firstIndex(where: { $0.id == id }) {
-            let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-            conversations[index].title = trimmed.isEmpty ? "Untitled" : trimmed
-            objectWillChange.send()
+            conversations[index].title = title
         }
+        await persister.renameConversation(id: id, title: title)
+        await loadConversations()
     }
 
     func togglePin(_ id: UUID) {
@@ -610,6 +1237,7 @@ final class ChatViewModel: ObservableObject {
     }
 
     func createNewConversation() {
+        guard beginConversationTransition() else { return }
         let newConv = ChatConversation(
             id: UUID(),
             title: "New Chat",
@@ -618,19 +1246,56 @@ final class ChatViewModel: ObservableObject {
             updatedAt: Date(),
             unreadCount: 0
         )
-        conversations.insert(newConv, at: 0)
-        conversationId = newConv.id
-        messages = []
-        objectWillChange.send()
+        invalidateActiveStream()
+        Task {
+            await awaitInitialization()
+            await cancelPendingTurn()
+            await transport.cancel()
+            _ = await stateMachine.transition(to: .idle)
+            state = await stateMachine.currentState()
+            conversations.insert(newConv, at: 0)
+            conversationId = newConv.id
+            messages = []
+            messageCache = [:]
+            tokenUsage.reset()
+            clearPendingUsage()
+            recalledMemories = []
+            memoryControlRevision &+= 1
+            objectWillChange.send()
+            await todoPlanner.load(conversationId: newConv.id)
+            await persister.setCurrentConversationId(newConv.id)
+            await loadConversations()
+            endConversationTransition()
+        }
     }
 
     func selectConversation(_ id: UUID) {
-        conversationId = id
+        guard beginConversationTransition() else { return }
+        invalidateActiveStream()
+        Task {
+            await awaitInitialization()
+            await performConversationSwitch(id: id)
+            endConversationTransition()
+        }
     }
 
     func deleteConversation(_ id: UUID) {
+        guard beginConversationTransition() else { return }
+        let retainedHistorySnapshot: ConversationHistorySnapshot?
+        if id == conversationId {
+            finalizeAssistantStreamingState()
+            retainedHistorySnapshot = captureHistorySnapshot()
+            invalidateActiveStream()
+        } else {
+            retainedHistorySnapshot = nil
+        }
         Task {
-            await deleteConversation(id: id)
+            await awaitInitialization()
+            await performConversationDeletion(
+                id: id,
+                retainedHistorySnapshot: retainedHistorySnapshot
+            )
+            endConversationTransition()
         }
     }
 }

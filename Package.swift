@@ -25,6 +25,10 @@ let package = Package(
                 "BR-OUTPUT/ChatLogic.swift",
                 "BR-OUTPUT/CladeGuard.swift",
                 "rings/SR-01/ChatEvents.swift",
+            ],
+            linkerSettings: [
+                .linkedLibrary("sqlite3"),
+                .linkedFramework("Security"),
             ]
         ),
         .testTarget(

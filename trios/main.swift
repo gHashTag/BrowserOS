@@ -595,6 +595,30 @@ struct CompositionRoot {
         let persister = ConversationPersister()
         let stateMachine = ConversationStateMachine()
         let modelStore = ModelConfigurationStore.shared
+        let memoryStore: any AgentMemoryStoreProtocol
+        do {
+            memoryStore = try MemoryStore()
+        } catch {
+            NSLog(
+                "CompositionRoot: durable memory unavailable, using volatile fallback: %@",
+                error.localizedDescription
+            )
+            memoryStore = VolatileMemoryStore()
+        }
+        let fingerprintKey = MemoryFingerprintKeyProvider.loadOrCreate()
+        if fingerprintKey == nil {
+            NSLog(
+                "CompositionRoot: Keychain recall key unavailable; long-term memory disabled"
+            )
+        }
+        let memoryService = AgentMemoryService(
+            store: memoryStore,
+            fingerprintKey: fingerprintKey
+        )
+        let todoPlanner = TODOPlanner(
+            store: memoryStore,
+            preferences: .standard
+        )
 
         let serverURL = URL(string: ProjectPaths.mcpBaseURL) ?? URL(fileURLWithPath: "/dev/null")
         let agentCard = AgentCard(
@@ -615,7 +639,9 @@ struct CompositionRoot {
             persister: persister,
             stateMachine: stateMachine,
             a2aClient: a2aClient,
-            modelStore: modelStore
+            modelStore: modelStore,
+            memoryService: memoryService,
+            todoPlanner: todoPlanner
         )
         NSLog("CompositionRoot: ChatViewModel created")
         return vm

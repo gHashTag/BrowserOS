@@ -2,10 +2,22 @@ import Foundation
 import Security
 
 /// Errors raised by KeychainSecrets.
-enum KeychainSecretsError: Error {
+enum KeychainSecretsError: LocalizedError {
     case itemNotFound(service: String, account: String)
     case invalidItemType
     case osStatus(OSStatus)
+
+    var errorDescription: String? {
+        switch self {
+        case .itemNotFound(let service, let account):
+            return "Keychain item not found for \(service)/\(account)"
+        case .invalidItemType:
+            return "Keychain item has an invalid value type"
+        case .osStatus(let status):
+            let message = SecCopyErrorMessageString(status, nil) as String?
+            return "macOS Keychain error \(status): \(message ?? "unknown error")"
+        }
+    }
 }
 
 /// Minimal Keychain wrapper for storing and retrieving small secrets such as
@@ -25,7 +37,6 @@ enum KeychainSecrets {
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecUseDataProtectionKeychain as String: true,
         ]
 
         var result: AnyObject?
@@ -54,8 +65,9 @@ enum KeychainSecrets {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+            kSecAttrAccessible as String:
+                kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
             kSecValueData as String: data,
-            kSecUseDataProtectionKeychain as String: true,
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)

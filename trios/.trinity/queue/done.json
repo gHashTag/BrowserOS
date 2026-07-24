@@ -317,5 +317,27 @@
     "finished_at": "2026-07-23T13:49:36Z",
     "verdict": "CLEAN",
     "artifact": ".trinity/specs/queen-999-menu-hotkeys.md"
+  },
+  {
+    "task_id": "AGENT-MEMORY-TODO-001",
+    "title": "Verify and implement durable agent memory with a visual TODO planner",
+    "agent": "codex",
+    "claim_id": "4C6C32D6-8454-460E-8413-FCDA9B9E85CD",
+    "status": "done",
+    "started_at": "2026-07-23T17:28:41Z",
+    "finished_at": "2026-07-23T19:53:15Z",
+    "verdict": "CLEAN_LOCAL_NOT_LANDED",
+    "artifact": ".trinity/specs/agent-memory-todo-planner.md"
+  },
+  {
+    "task_id": "MEMORY-CONTROLS-001",
+    "title": "Add transparent individual and global memory deletion controls",
+    "agent": "codex",
+    "claim_id": "2621A8A0-22B7-4E85-AA5C-3F2857AFD10C",
+    "status": "done",
+    "started_at": "2026-07-24T02:51:32Z",
+    "finished_at": "2026-07-24T07:27:00Z",
+    "verdict": "CLEAN_LOCAL_NOT_LANDED",
+    "artifact": ".trinity/specs/memory-control-center.md"
   }
 ]

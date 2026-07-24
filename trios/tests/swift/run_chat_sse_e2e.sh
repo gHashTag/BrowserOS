@@ -9,6 +9,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 OUTPUT="/tmp/trios_chat_sse_e2e_test"
 LOG_DIR="$PROJECT_DIR/.trinity/logs"
 LOG_FILE="$LOG_DIR/chat_sse_e2e_build_$(date +%s).log"
+SWIFT_TEST_OPTIMIZATION="${TRIOS_TEST_OPTIMIZATION:--Onone}"
 
 mkdir -p "$LOG_DIR"
 
@@ -40,19 +41,20 @@ PROD_FILES+=(
 
 echo "Compiling ${#PROD_FILES[@]} Swift files..."
 
-swiftc -j 1 -O -o "$OUTPUT" \
+swiftc -j 1 -disable-batch-mode "$SWIFT_TEST_OPTIMIZATION" -o "$OUTPUT" \
     -framework SwiftUI \
     -framework AppKit \
     -framework WebKit \
     -framework Combine \
     -framework Security \
+    -lsqlite3 \
     "${PROD_FILES[@]}" 2>&1 | tee "$LOG_FILE"
 
 if [ ${PIPESTATUS[0]} -eq 0 ]; then
     echo "[OK] Build successful: $OUTPUT"
     chmod +x "$OUTPUT"
     echo "Running $OUTPUT..."
-    "$OUTPUT"
+    TRIOS_DISABLE_STATUS_MONITORING=1 "$OUTPUT"
 else
     echo "[FAIL] Build failed (log: $LOG_FILE)"
     exit 1

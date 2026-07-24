@@ -69,6 +69,11 @@ final class QueenStatusViewModel: ObservableObject {
     private var logTimer: Timer?
 
     init() {
+        if ProcessInfo.processInfo.environment[
+            "TRIOS_DISABLE_STATUS_MONITORING"
+        ] == "1" {
+            return
+        }
         startTimers()
         // Defer first refresh so init doesn't block the main thread
         DispatchQueue.main.async { [weak self] in

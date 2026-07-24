@@ -286,3 +286,101 @@
   - Optional paid-provider configuration must fail at request time, never terminate a local-model session during app startup.
 - **Seal status**: BUILD_PASS, TEST_PASS, SIGNATURE_PASS, 27_ROUTE_E2E_PASS, NO_KEY_RUNTIME_PASS, BROWSEROS_HEALTH_PASS
 - **Next wave options**: queen-runtime-consumer, queen-responsive-audit, queen-action-history
+
+## 2026-07-24 AGENT-MEMORY-TODO-001 (Durable memory and visual planner)
+
+- **Issue**: Local implementation only; no GitHub issue or landing was requested.
+- **Agents**: codex creator, Agent V verifier, experience
+- **Root cause**: A narrative completion report substituted file sizes and success claims for repository evidence. The named memory, storage, planner, UI, tests, and integration did not exist.
+- **Fix pattern**: Audit first, define privacy and lifecycle invariants in a spec, write deterministic end-to-end tests, implement one shared SQLite store, keep recall data private with a Keychain HMAC key, and revalidate stream generation after every actor suspension.
+- **Files changed**: Memory store and service, TODO planner and UI, chat stream integration, composition root, Keychain wrapper, build wiring, package linkage, and the chat end-to-end harness.
+- **Tests added**: Fourteen scenarios covering schema and WAL durability, secret and pasted-content privacy, wrong-key recall failure, fuzzy deterministic recall, plan persistence and lifecycle, user-added tasks, conversation deletion, storage failure, attachment exclusion, cancellation races, stale recall, empty streams, and immediate navigation during delayed initialization.
+- **Lessons**:
+  - Completion prose is not evidence; inspect files, compile the target, run behavior, and verify the live trust boundary.
+  - Public hashes do not protect small text fragments; recall fingerprints require a secret keyed construction.
+  - A generation guard before an await is insufficient; it must be checked again after every suspension and before state assignment or persistence.
+  - macOS development builds without data-protection entitlements should use the login Keychain with an explicit device-only accessibility policy.
+- **Seal status**: SPEC_PASS, E2E_14_PASS, BUILD_97_PASS, SIGNATURE_PASS, AGENT_V_PASS, KEYCHAIN_PASS, SQLITE_V1_WAL_PASS, BROWSEROS_HEALTH_PASS, NOT_LANDED
+- **Next wave options**: memory-controls, dependency-aware-planner, developer-id-runtime
+
+## 2026-07-24 MEMORY-CONTROLS-001 (Unterminated stream fail-closed)
+
+- **Issue**: #T27-EPIC-001, local changes only.
+- **Agents**: codex creator, Agent V verifier, experience.
+- **Root cause**: `AsyncStream` exhaustion was treated as successful agent
+  completion even when no `finish`, `abort`, or `error` event arrived. A
+  truncated response could therefore complete the TODO plan and enter durable
+  memory as a successful result.
+- **Fix pattern**: Treat sequence exhaustion as transport EOF, require an
+  explicit terminal event, and route an unterminated stream through the
+  existing failure lifecycle. Preserve partial conversation history, clear the
+  streaming indicator, fail the plan, expose an error, and skip memory
+  persistence.
+- **Tests added**: One deterministic E2E scenario with five assertions for plan
+  failure, no memory, partial history preservation, stopped streaming UI, and a
+  visible error. The test failed on four assertions before the fix and all 18
+  scenarios passed afterward.
+- **Lessons**:
+  - A transport ending is not the same as a domain operation succeeding.
+  - Only authoritative terminal events may cross the durable memory boundary.
+  - A regression test should prove both negative effects and the one desired
+    retained effect, such as preserving partial history for diagnosis.
+  - Ad-hoc macOS rebuilds can trigger an explicit Keychain authorization gate;
+    never approve secret access on the user's behalf or report dependent live
+    health as passed.
+- **Runtime closeout**: The rebuilt binary was relaunched as PID 58983 after
+  the explicit Keychain decision. Production health returned HTTP 200 with CDP
+  connected; fresh E2E, accessibility inspection, and a fresh screenshot
+  passed. Agent V independently approved release.
+- **Reusable workflow**: Created and RED-GREEN forward-tested
+  `/Users/playra/.codex/skills/running-reliability-waves`; structural,
+  metadata, reference, placeholder, and ASCII validation passed.
+- **Seal status**: SPEC_PASS, TDD_RED_CONFIRMED, E2E_18_PASS, BUILD_97_PASS,
+  SIGNATURE_PASS, FRESH_RUNTIME_PASS, FRESH_UI_PASS, AGENT_V_APPROVE,
+  SKILL_VALIDATED, CLEAN_LOCAL_NOT_LANDED
+- **Next wave options**: durable-interruption-proof, typed-terminal-outcome,
+  physical-memory-erasure
+
+## 2026-07-24 TRIOS-PORTABLE-LAND-001 (Pre-landing lifecycle hardening)
+
+- **Issue**: Local full-stack landing from `feat/zai-provider` into canonical
+  `dev`; no push was requested.
+- **Agents**: codex creator, Agent V verifier, experience.
+- **Root causes**: Review found four independent classes of lifecycle risk:
+  navigation could cancel a completed memory write; scroll requests were not
+  consumed and used invalid geometry; terminal failures could leave a stale
+  streaming indicator; and late history writes could race Stop or deletion.
+- **Fix pattern**: Capture immutable terminal history before the first long
+  suspension, guard saves with monotonic write and delete revisions, finalize
+  the assistant on every terminal path, retain finalized history only when
+  private cleanup fails, and deliver throttled scrolling through an observable
+  request with separate viewport and bottom-anchor geometry.
+- **Tests added**: The executable harness now contains 22 deterministic
+  scenarios. New coverage proves navigation during memory persistence,
+  interrupted and thrown streams, explicit Stop persistence, successful and
+  failed active deletion, late-write no-resurrection, and scroll request
+  delivery. The successful-delete fixture contains real user and assistant
+  messages and checks physical record absence.
+- **Verification**: Focused E2E compiled 61 Swift files and passed all 22
+  scenarios. The full build compiled 99 application files, signed the bundle,
+  and repeated all 22 scenarios. Strict signature verification, production
+  health on port 9105, BrowserOS CDP connectivity, runtime E2E, and visual Chat
+  inspection passed. Agent V independently approved the scoped landing.
+- **Runtime gate**: A new ad-hoc signature triggered a macOS login-Keychain
+  authorization prompt for the existing memory HMAC key. The autonomous run
+  denied secret access and verified the documented fail-closed startup path.
+  Full long-term recall still requires one user-approved Keychain launch.
+- **Portable release gate**: A clean remote-only install is not yet
+  reproducible. The published Trinity revision lacks the local QueenUILib
+  integration API, and the recorded trios-mesh revision is not reachable from
+  its remote. Do not claim a portable release until both dependencies are
+  published and pinned or intentionally vendored.
+- **Reusable workflow**: The tracked specs and implementation plan preserve
+  the behavior contract, RED/GREEN evidence, review findings, and resume point.
+  The validated personal `running-reliability-waves` skill preserves the
+  recurring coordination and verification method.
+- **Seal status**: SPEC_PASS, TDD_RED_CONFIRMED, E2E_22_PASS, BUILD_99_PASS,
+  SIGNATURE_PASS, RUNTIME_9105_PASS, FRESH_UI_PASS, AGENT_V_APPROVE,
+  LOCAL_DEV_LANDING_READY, PORTABLE_RELEASE_BLOCKED
+- **Next wave options**: publish-cross-repo-release, vendor-queen-and-mesh,
+  core-only-portable-trios
