@@ -1,11 +1,13 @@
+const TRIOS_ROOT = process.env.TRIOS_ROOT || __dirname;
+
 module.exports = {
   apps: [
     {
       name: 'clade-monitor',
       script: './target/release/clade-monitor',
-      cwd: '/Users/playra/BrowserOS-full/trios',
+      cwd: TRIOS_ROOT,
       env: {
-        TRIOS_ROOT: '/Users/playra/BrowserOS-full/trios',
+        TRIOS_ROOT: TRIOS_ROOT,
         TRIOS_PORT_SOVEREIGN: '9105',
         TRIOS_PORT_A2A: '9200',
         TRIOS_PORT_CANARY: '9205',
@@ -17,9 +19,9 @@ module.exports = {
     {
       name: 'clade-dashboard',
       script: './target/release/clade-dashboard',
-      cwd: '/Users/playra/BrowserOS-full/trios',
+      cwd: TRIOS_ROOT,
       env: {
-        TRIOS_ROOT: '/Users/playra/BrowserOS-full/trios',
+        TRIOS_ROOT: TRIOS_ROOT,
         TRIOS_PORT_DASHBOARD: '9405',
         TRIOS_PORT_SOVEREIGN: '9105',
         TRIOS_PORT_CANARY: '9205',
