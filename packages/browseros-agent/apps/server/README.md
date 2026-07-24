@@ -1,5 +1,21 @@
 # BrowserOS Server
 
+> ## ⚠️ DEPRECATED — superseded by the Rust `trios-server`
+>
+> The backend has been consolidated into a single Rust entry point
+> (`trios/crates/trios-server`, axum). All domain contracts and pure logic
+> — A2A protocol, agent adapter catalog, Hermes provider map, browser
+> command contracts, persistence — now live in the Rust crates and are served
+> from `trios-server`. See `trios/docs/TS_RETIREMENT.md` for the migration map
+> and audit-finding status (P0–P4, all closed).
+>
+> This Hono/Bun server remains runnable **only** until clients are repointed
+> to `trios-server` (TS-retirement item 3, a deploy decision). The host-runtime
+> pieces that intentionally stay outside Rust — the CDP driver and
+> VM/container execution — are now driven by `trios-server` over A2A via the
+> `browser/enqueue` · `browser/poll` · `browser/result` endpoints. Do not add
+> new backend logic here; add it to the Rust crates instead.
+
 MCP server and AI agent loop powering BrowserOS browser automation. This is the core backend — it connects to Chromium via CDP, exposes 53+ MCP tools, and runs the AI agent that interprets natural language into browser actions.
 
 > **Runtime:** [Bun](https://bun.sh) · **Framework:** [Hono](https://hono.dev) · **AI:** [Vercel AI SDK](https://sdk.vercel.ai) · **License:** [AGPL-3.0](../../../../LICENSE)
