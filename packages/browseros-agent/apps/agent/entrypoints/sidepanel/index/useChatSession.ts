@@ -26,10 +26,7 @@ import { useInvalidateCredits } from '@/lib/credits/useCredits'
 import { declinedAppsStorage } from '@/lib/declined-apps/storage'
 import { useGraphqlQuery } from '@/lib/graphql/useGraphqlQuery'
 import { createDefaultBrowserOSProvider } from '@/lib/llm-providers/storage'
-import type {
-  ApprovalResponseData,
-  ChatRequestBrowserContext,
-} from '@/lib/messaging/server/buildChatRequestBody'
+import type { ChatRequestBrowserContext } from '@/lib/messaging/server/buildChatRequestBody'
 import { track } from '@/lib/metrics/track'
 import { searchActionsStorage } from '@/lib/search-actions/searchActionsStorage'
 import { selectedTextStorage } from '@/lib/selected-text/selectedTextStorage'
@@ -49,6 +46,10 @@ import {
   toolApprovalConfigStorage,
 } from '@/lib/tool-approvals/storage'
 import { selectedWorkspaceStorage } from '@/lib/workspace/workspace-storage'
+import {
+  extractCurrentStepApprovalResponses,
+  getCurrentApprovalBatchSubmissionDecision,
+} from './approval-response-helpers'
 import type { ChatMode } from './chatTypes'
 import { GetConversationWithMessagesDocument } from './graphql/chatSessionDocument'
 import { toLlmProviderConfig } from './sidepanel-chat-targets'
@@ -60,29 +61,6 @@ import {
 import { useExecutionHistoryTracker } from './useExecutionHistoryTracker'
 import { useNotifyActiveTab } from './useNotifyActiveTab'
 import { useRemoteConversationSave } from './useRemoteConversationSave'
-
-const extractApprovalResponses = (
-  messages: UIMessage[],
-): ApprovalResponseData[] | null => {
-  const lastMsg = messages[messages.length - 1]
-  if (lastMsg?.role !== 'assistant') return null
-
-  const approvals: ApprovalResponseData[] = []
-  for (const part of lastMsg.parts) {
-    const p = part as {
-      state?: string
-      approval?: { id: string; approved?: boolean; reason?: string }
-    }
-    if (p.state === 'approval-responded' && p.approval?.approved != null) {
-      approvals.push({
-        approvalId: p.approval.id,
-        approved: p.approval.approved,
-        reason: p.approval.reason,
-      })
-    }
-  }
-  return approvals.length > 0 ? approvals : null
-}
 
 const getLastMessageText = (messages: UIMessage[]) => {
   const lastMessage = messages[messages.length - 1]
@@ -405,7 +383,9 @@ export const useChatSession = (options?: ChatSessionOptions) => {
         }
 
         const approvalResponses =
-          target?.kind === 'acp' ? null : extractApprovalResponses(messages)
+          target?.kind === 'acp'
+            ? null
+            : extractCurrentStepApprovalResponses(messages)
         if (approvalResponses) {
           return buildSidepanelPreparedSendMessagesRequest({
             agentServerUrl: agentUrlRef.current ?? undefined,
@@ -440,12 +420,19 @@ export const useChatSession = (options?: ChatSessionOptions) => {
         return result
       },
     }),
-    sendAutomaticallyWhen: () => {
-      if (approvalJustRespondedRef.current) {
+    sendAutomaticallyWhen: ({ messages }) => {
+      const approvalJustResponded = approvalJustRespondedRef.current
+      if (!approvalJustResponded) return false
+
+      const decision = getCurrentApprovalBatchSubmissionDecision({
+        messages,
+        approvalJustResponded,
+        isAcpTarget: selectedChatTargetRef.current?.kind === 'acp',
+      })
+      if (decision.shouldClearApprovalSignal) {
         approvalJustRespondedRef.current = false
-        return selectedChatTargetRef.current?.kind !== 'acp'
       }
-      return false
+      return decision.shouldSubmit
     },
     onFinish: async ({ message, isAbort, isError }) => {
       await finishExecutionTask({
