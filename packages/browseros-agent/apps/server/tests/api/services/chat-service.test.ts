@@ -1,129 +1,19 @@
 import { describe, expect, it, mock } from 'bun:test'
-
-interface MockMessage {
-  id: string
-  role: 'user' | 'assistant'
-  parts: Array<{ type: 'text'; text: string }>
-}
-
-interface MockAgent {
-  toolLoopAgent: object
-  toolNames: Set<string>
-  messages: MockMessage[]
-  appendUserMessage(text: string): void
-  updateAclRules(rules: unknown): void
-  dispose(): Promise<void>
-}
-
-interface StoredSession {
-  agent: MockAgent
-  hiddenPageId?: number
-}
-
-interface StreamResponseOptions {
-  uiMessages?: MockMessage[]
-  onFinish(args: { messages: MockMessage[] }): Promise<void>
-}
-
-let agentToReturn: MockAgent | undefined
-let streamResponseHandler:
-  | ((options: StreamResponseOptions) => Promise<Response>)
-  | undefined
-
-const createAgentSpy = mock(async (config: unknown) => {
-  if (!agentToReturn) {
-    throw new Error(`No mock agent configured for ${JSON.stringify(config)}`)
-  }
-  return agentToReturn
-})
-
-const createAgentUIStreamResponseSpy = mock(
-  async (options: StreamResponseOptions) => {
-    if (!streamResponseHandler) {
-      throw new Error('No stream response handler configured')
-    }
-    return await streamResponseHandler(options)
-  },
-)
-
-const resolveLLMConfigSpy = mock(async () => ({
-  provider: 'openai',
-  model: 'gpt-5',
-  apiKey: 'test-key',
-}))
-
-mock.module('ai', () => ({
-  createAgentUIStreamResponse: createAgentUIStreamResponseSpy,
-}))
-
-mock.module('../../../src/agent/ai-sdk-agent', () => ({
-  AiSdkAgent: {
-    create: createAgentSpy,
-  },
-}))
-
-mock.module('../../../src/lib/clients/llm/config', () => ({
-  resolveLLMConfig: resolveLLMConfigSpy,
-}))
-
-mock.module('../../../src/lib/logger', () => ({
-  logger: {
-    info: mock(() => {}),
-    warn: mock(() => {}),
-    debug: mock(() => {}),
-  },
-}))
-
-const { ChatService } = await import('../../../src/api/services/chat-service')
-
-function createSessionStore() {
-  const sessions = new Map<string, StoredSession>()
-  return {
-    get(conversationId: string) {
-      return sessions.get(conversationId)
-    },
-    set(conversationId: string, session: StoredSession) {
-      sessions.set(conversationId, session)
-    },
-    remove(conversationId: string) {
-      return sessions.delete(conversationId)
-    },
-    async delete(conversationId: string) {
-      const session = sessions.get(conversationId)
-      if (!session) return false
-      await session.agent.dispose()
-      sessions.delete(conversationId)
-      return true
-    },
-    count() {
-      return sessions.size
-    },
-  }
-}
-
-function createFakeAgent() {
-  const messages: MockMessage[] = []
-  return {
-    toolLoopAgent: {},
-    toolNames: new Set<string>(),
-    messages,
-    appendUserMessage(text: string) {
-      this.messages.push({
-        id: 'user-1',
-        role: 'user',
-        parts: [{ type: 'text', text }],
-      })
-    },
-    updateAclRules: mock(() => {}),
-    dispose: mock(async () => {}),
-  }
-}
+import {
+  ChatService,
+  createAgentSpy,
+  createFakeAgent,
+  createSessionStore,
+  emptyRegistry,
+  harnessState,
+  type MockMessage,
+} from './chat-service-test-harness'
 
 describe('ChatService scheduled task hidden page lifecycle', () => {
   it('creates and cleans up a hidden page without creating a hidden window', async () => {
     const fakeAgent = createFakeAgent()
-    agentToReturn = fakeAgent
-    streamResponseHandler = async ({ onFinish, uiMessages }) => {
+    harnessState.agentToReturn = fakeAgent
+    harnessState.streamResponseHandler = async ({ onFinish, uiMessages }) => {
       await onFinish({ messages: uiMessages ?? fakeAgent.messages })
       return new Response('ok')
     }
@@ -146,7 +36,7 @@ describe('ChatService scheduled task hidden page lifecycle', () => {
       sessionStore: sessionStore as never,
       klavisRef: { handle: null },
       browser: browser as never,
-      registry: {} as never,
+      registry: emptyRegistry as never,
     })
 
     await service.processMessage(
@@ -212,6 +102,7 @@ describe('ChatService scheduled task hidden page lifecycle', () => {
 
     sessionStore.set(conversationId, {
       agent: fakeAgent,
+      executionFingerprint: 'test-session-fingerprint',
       hiddenPageId: 33,
     })
 
@@ -219,7 +110,7 @@ describe('ChatService scheduled task hidden page lifecycle', () => {
       sessionStore: sessionStore as never,
       klavisRef: { handle: null },
       browser: browser as never,
-      registry: {} as never,
+      registry: emptyRegistry as never,
     })
 
     const result = await service.deleteSession(conversationId)
@@ -231,8 +122,8 @@ describe('ChatService scheduled task hidden page lifecycle', () => {
 
   it('keeps the scheduled hidden page context when metadata lookup fails', async () => {
     const fakeAgent = createFakeAgent()
-    agentToReturn = fakeAgent
-    streamResponseHandler = async ({ onFinish, uiMessages }) => {
+    harnessState.agentToReturn = fakeAgent
+    harnessState.streamResponseHandler = async ({ onFinish, uiMessages }) => {
       await onFinish({ messages: uiMessages ?? fakeAgent.messages })
       return new Response('ok')
     }
@@ -250,7 +141,7 @@ describe('ChatService scheduled task hidden page lifecycle', () => {
       sessionStore: sessionStore as never,
       klavisRef: { handle: null },
       browser: browser as never,
-      registry: {} as never,
+      registry: emptyRegistry as never,
     })
 
     await service.processMessage(
@@ -297,9 +188,9 @@ describe('ChatService Klavis session rebuilds', () => {
   it('rebuilds a managed-app session when the shared Klavis handle appears', async () => {
     const firstAgent = createFakeAgent()
     const secondAgent = createFakeAgent()
-    agentToReturn = firstAgent
+    harnessState.agentToReturn = firstAgent
     let lastPromptUiMessages: MockMessage[] | undefined
-    streamResponseHandler = async ({ onFinish, uiMessages }) => {
+    harnessState.streamResponseHandler = async ({ onFinish, uiMessages }) => {
       lastPromptUiMessages = uiMessages
       await onFinish({ messages: uiMessages ?? [] })
       return new Response('ok')
@@ -318,7 +209,7 @@ describe('ChatService Klavis session rebuilds', () => {
       sessionStore: sessionStore as never,
       klavisRef: klavisRef as never,
       browser: browser as never,
-      registry: {} as never,
+      registry: emptyRegistry as never,
     })
     const createCallsBefore = createAgentSpy.mock.calls.length
     const conversationId = crypto.randomUUID()
@@ -340,7 +231,7 @@ describe('ChatService Klavis session rebuilds', () => {
 
     await service.processMessage(request, new AbortController().signal)
 
-    agentToReturn = secondAgent
+    harnessState.agentToReturn = secondAgent
     klavisRef.handle = {}
 
     await service.processMessage(
@@ -373,8 +264,8 @@ describe('ChatService Klavis session rebuilds', () => {
   it('does not rebuild a session with no enabled managed apps when Klavis connects', async () => {
     const firstAgent = createFakeAgent()
     const secondAgent = createFakeAgent()
-    agentToReturn = firstAgent
-    streamResponseHandler = async ({ onFinish, uiMessages }) => {
+    harnessState.agentToReturn = firstAgent
+    harnessState.streamResponseHandler = async ({ onFinish, uiMessages }) => {
       await onFinish({ messages: uiMessages ?? [] })
       return new Response('ok')
     }
@@ -392,7 +283,7 @@ describe('ChatService Klavis session rebuilds', () => {
       sessionStore: sessionStore as never,
       klavisRef: klavisRef as never,
       browser: browser as never,
-      registry: {} as never,
+      registry: emptyRegistry as never,
     })
     const createCallsBefore = createAgentSpy.mock.calls.length
     const conversationId = crypto.randomUUID()
@@ -413,7 +304,7 @@ describe('ChatService Klavis session rebuilds', () => {
 
     await service.processMessage(request, new AbortController().signal)
 
-    agentToReturn = secondAgent
+    harnessState.agentToReturn = secondAgent
     klavisRef.handle = {}
 
     await service.processMessage(
@@ -426,3 +317,7 @@ describe('ChatService Klavis session rebuilds', () => {
     expect(firstAgent.messages).toHaveLength(2)
   })
 })
+
+await import('./chat-service-fingerprint-core.cases')
+await import('./chat-service-fingerprint-rebuild.cases')
+await import('./chat-service-fingerprint-safety.cases')

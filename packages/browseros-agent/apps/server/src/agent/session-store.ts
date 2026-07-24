@@ -13,6 +13,7 @@ import type {
   ExecutionRun,
   ExecutionRunFailureReason,
 } from './execution-types'
+import type { SessionExecutionFingerprint } from './session-fingerprint'
 
 export type AcquireTurnResult =
   | { acquired: true; run: ExecutionRun }
@@ -63,6 +64,7 @@ function isApprovalMismatchError(error: unknown): boolean {
 
 export interface AgentSession {
   agent: AiSdkAgent
+  executionFingerprint: SessionExecutionFingerprint
   hiddenPageId?: number
   /** Browser context scoped to the scheduled hidden page. */
   browserContext?: BrowserContext

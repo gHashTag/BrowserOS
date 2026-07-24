@@ -41,6 +41,7 @@ function createSession(
     agent: {
       dispose,
     } as unknown as AgentSession['agent'],
+    executionFingerprint: 'test-session-fingerprint',
   }
 }
 
