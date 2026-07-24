@@ -10,6 +10,17 @@ import type { SessionExecutionFingerprint } from '../../agent/session-fingerprin
 import type { AgentSession, SessionStore } from '../../agent/session-store'
 import { logger } from '../../lib/logger'
 
+export function logInfoSafely(
+  message: string,
+  details: Record<string, unknown>,
+): void {
+  try {
+    logger.info(message, details)
+  } catch {
+    // Observability must not affect session ownership or control flow.
+  }
+}
+
 export function logWarningSafely(
   message: string,
   details: Record<string, unknown>,

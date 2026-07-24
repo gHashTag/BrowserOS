@@ -87,7 +87,9 @@ export const defaultLlmConfig = {
 export const resolveLLMConfigSpy = mock(async () => ({
   ...harnessState.resolvedLlmConfig,
 }))
-export const loggerInfoSpy = mock(() => {})
+export const loggerInfoSpy = mock(
+  (_message?: string, _details?: Record<string, unknown>) => {},
+)
 export const loggerWarnSpy = mock(() => {})
 export const emptyRegistry = {
   names: () => [] as string[],

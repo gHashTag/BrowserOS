@@ -16,7 +16,6 @@ import type { AgentSession, SessionStore } from '../../agent/session-store'
 import type { ResolvedAgentConfig } from '../../agent/types'
 import type { Browser } from '../../browser/browser'
 import { resolveLLMConfig } from '../../lib/clients/llm/config'
-import { logger } from '../../lib/logger'
 import type { ToolRegistry } from '../../tools/tool-registry'
 import type { KlavisProxyRef } from '../services/klavis/strata-proxy'
 import type { ChatRequest } from '../types'
@@ -27,6 +26,7 @@ import {
   resolveEffectiveBrowserContext,
 } from './chat-session-context'
 import {
+  logInfoSafely,
   logWarningSafely,
   rebuildSessionAtomically,
 } from './chat-session-rebuild'
@@ -129,7 +129,7 @@ export class ChatService {
         ...(mcpChanged ? ['mcp'] : []),
         ...(workspaceChanged ? ['workspace'] : []),
       ]
-      logger.info(
+      logInfoSafely(
         'Execution fingerprint changed mid-conversation, rebuilding session',
         {
           conversationId: request.conversationId,
@@ -185,7 +185,7 @@ export class ChatService {
           parts: [{ type: 'text', text: msg.content }],
         })
       }
-      logger.info('Injected previous conversation history', {
+      logInfoSafely('Injected previous conversation history', {
         conversationId: request.conversationId,
         messageCount: request.previousConversation.length,
       })
@@ -197,7 +197,7 @@ export class ChatService {
         session.agent.messages,
         request.toolApprovalResponses,
       )
-      logger.info('Applied tool approval responses', {
+      logInfoSafely('Applied tool approval responses', {
         conversationId: request.conversationId,
         count: request.toolApprovalResponses.length,
       })
@@ -263,7 +263,7 @@ export class ChatService {
             : msg,
         )
         session.agent.messages = filterValidMessages(restored)
-        logger.info('Agent execution complete', {
+        logInfoSafely('Agent execution complete', {
           conversationId: request.conversationId,
           totalMessages: restored.length,
         })
