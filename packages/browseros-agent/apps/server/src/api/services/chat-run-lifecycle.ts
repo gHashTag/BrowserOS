@@ -95,6 +95,19 @@ export function ownsChatRun(
   return sessionStore.getActiveRun(conversationId)?.runId === runId
 }
 
+export function restoreUserMessage(
+  messages: UIMessage[],
+  messageId: string | undefined,
+  content: string,
+): UIMessage[] {
+  if (!messageId) return messages
+  return messages.map((message) =>
+    message.id === messageId && message.role === 'user'
+      ? { ...message, parts: [{ type: 'text' as const, text: content }] }
+      : message,
+  )
+}
+
 function logRunMetricSafely(
   conversationId: string,
   runId: string,

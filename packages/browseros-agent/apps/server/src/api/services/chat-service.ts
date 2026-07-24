@@ -25,6 +25,7 @@ import {
   failOwnedChatRun,
   finishOwnedChatRun,
   ownsChatRun,
+  restoreUserMessage,
 } from './chat-run-lifecycle'
 import {
   buildApprovalConfigKey,
@@ -51,19 +52,6 @@ function runOnce(keys: Set<number>, key: number, action: () => void): void {
   if (keys.has(key)) return
   keys.add(key)
   action()
-}
-
-function restoreUserMessage(
-  messages: UIMessage[],
-  messageId: string | undefined,
-  content: string,
-): UIMessage[] {
-  if (!messageId) return messages
-  return messages.map((message) =>
-    message.id === messageId && message.role === 'user'
-      ? { ...message, parts: [{ type: 'text' as const, text: content }] }
-      : message,
-  )
 }
 
 function injectPreviousConversation(
@@ -282,12 +270,15 @@ export class ChatService {
       }
 
       const streamedSession = session
+      let finishCallbackConsumed = false
       return await createAgentUIStreamResponse({
         agent: streamedSession.agent.toolLoopAgent,
         uiMessages: promptUiMessages,
         abortSignal,
         consumeSseStream: consumeStream,
         onFinish: async ({ messages, isAborted, finishReason }) => {
+          if (finishCallbackConsumed) return
+          finishCallbackConsumed = true
           const restored = restoreUserMessage(
             messages,
             wrappedUserMessageId,
