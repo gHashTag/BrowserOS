@@ -7,6 +7,7 @@ import {
   createSessionStore,
   defaultLlmConfig,
   emptyRegistry,
+  finishFirstStreamAndRetainFollowing,
   harnessState,
   loggerInfoSpy,
 } from './chat-service-test-harness'
@@ -21,17 +22,10 @@ function resetHarness(): void {
   loggerInfoSpy.mockImplementation(() => {})
 }
 
-function retainSessionAfterStream(): void {
-  harnessState.streamResponseHandler = async () => {
-    harnessState.lifecycleEvents?.push('stream')
-    return new Response('ok')
-  }
-}
-
 describe('ChatService lifecycle observability isolation', () => {
   it('completes an ordinary-to-scheduled rebuild when its lifecycle info log throws', async () => {
     resetHarness()
-    retainSessionAfterStream()
+    finishFirstStreamAndRetainFollowing()
 
     const firstAgent = createFakeAgent()
     const secondAgent = createFakeAgent()

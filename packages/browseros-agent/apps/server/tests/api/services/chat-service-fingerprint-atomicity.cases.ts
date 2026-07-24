@@ -7,19 +7,13 @@ import {
   createSessionStore,
   defaultLlmConfig,
   emptyRegistry,
+  finishFirstStreamAndRetainFollowing,
   harnessState,
   loggerInfoSpy,
   loggerWarnSpy,
   type MockMessage,
   type StoredSession,
 } from './chat-service-test-harness'
-
-function retainSessionAfterStream(): void {
-  harnessState.streamResponseHandler = async () => {
-    harnessState.lifecycleEvents?.push('stream')
-    return new Response('ok')
-  }
-}
 
 function resetReplacementFailures(): void {
   harnessState.createAgentError = undefined
@@ -40,7 +34,7 @@ describe('ChatService atomic fingerprint publication', () => {
     resetReplacementFailures()
     harnessState.resolvedLlmConfig = { ...defaultLlmConfig }
     harnessState.lifecycleEvents = []
-    retainSessionAfterStream()
+    finishFirstStreamAndRetainFollowing()
 
     const firstAgent = createFakeAgent()
     const replacementAgent = createFakeAgent()
@@ -92,7 +86,7 @@ describe('ChatService atomic fingerprint publication', () => {
     resetReplacementFailures()
     harnessState.resolvedLlmConfig = { ...defaultLlmConfig }
     harnessState.lifecycleEvents = []
-    retainSessionAfterStream()
+    finishFirstStreamAndRetainFollowing()
 
     const firstAgent = createFakeAgent()
     const replacementAgent = createFakeAgent()
@@ -141,7 +135,7 @@ describe('ChatService atomic fingerprint publication', () => {
     resetReplacementFailures()
     harnessState.resolvedLlmConfig = { ...defaultLlmConfig }
     harnessState.lifecycleEvents = []
-    retainSessionAfterStream()
+    finishFirstStreamAndRetainFollowing()
 
     const firstAgent = createFakeAgent()
     firstAgent.dispose = mock(async () => {
@@ -196,7 +190,7 @@ describe('ChatService atomic fingerprint publication', () => {
     resetReplacementFailures()
     harnessState.resolvedLlmConfig = { ...defaultLlmConfig }
     harnessState.lifecycleEvents = []
-    retainSessionAfterStream()
+    finishFirstStreamAndRetainFollowing()
 
     const firstAgent = createFakeAgent()
     const replacementAgent = createFakeAgent()

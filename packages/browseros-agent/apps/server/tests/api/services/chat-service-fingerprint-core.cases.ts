@@ -101,7 +101,7 @@ describe('ChatService execution fingerprint session lifecycle', () => {
     ).toBe((createdConfigs[1] as { browserContext?: unknown }).browserContext)
   })
 
-  it('hashes the newly created hidden context and reuses that same page during a scheduled rebuild', async () => {
+  it('hashes and reuses a pre-existing hidden context during a scheduled rebuild', async () => {
     harnessState.resolvedLlmConfig = { ...defaultLlmConfig }
     harnessState.lifecycleEvents = []
     harnessState.streamResponseHandler = async () => {
@@ -138,8 +138,25 @@ describe('ChatService execution fingerprint session lifecycle', () => {
         enabledMcpServers: ['slack'],
       },
     })
-
-    await service.processMessage(request as never, new AbortController().signal)
+    // A stored scheduled session is the prerequisite under owned-turn
+    // semantics; starting a second request while its stream is open is invalid.
+    sessionStore.set(conversationId, {
+      agent: firstAgent,
+      executionFingerprint: 'existing-scheduled-fingerprint',
+      hiddenPageId: 77,
+      browserContext: {
+        windowId: 11,
+        activeTab: {
+          id: 77,
+          pageId: 77,
+          url: 'about:blank',
+          title: 'Scheduled Task',
+        },
+        enabledMcpServers: ['slack'],
+      },
+      mcpServerKey: 'klavis:pending,slack',
+      approvalConfigKey: '',
+    })
 
     harnessState.agentToReturn = secondAgent
     await service.processMessage(
@@ -176,19 +193,15 @@ describe('ChatService execution fingerprint session lifecycle', () => {
             }
           },
       )
-    expect(browser.newPage).toHaveBeenCalledTimes(1)
-    expect(browser.resolveTabIds).toHaveBeenCalledTimes(1)
-    expect(fingerprintedConfigs).toHaveLength(2)
-    expect(createdConfigs).toHaveLength(2)
+    expect(browser.newPage).not.toHaveBeenCalled()
+    expect(browser.resolveTabIds).not.toHaveBeenCalled()
+    expect(fingerprintedConfigs).toHaveLength(1)
+    expect(createdConfigs).toHaveLength(1)
     expect(fingerprintedConfigs[0]).toBe(createdConfigs[0])
-    expect(fingerprintedConfigs[1]).toBe(createdConfigs[1])
     expect(createdConfigs[0]?.browserContext).toBe(
       fingerprintedConfigs[0]?.browserContext,
     )
-    expect(createdConfigs[1]?.browserContext).toBe(
-      fingerprintedConfigs[1]?.browserContext,
-    )
-    expect(createdConfigs[1]?.browserContext).toEqual(
+    expect(createdConfigs[0]?.browserContext).toEqual(
       expect.objectContaining({
         activeTab: expect.objectContaining({ id: 77, pageId: 77 }),
         enabledMcpServers: ['github'],

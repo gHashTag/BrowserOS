@@ -133,8 +133,22 @@ describe('ChatService execution fingerprint session lifecycle', () => {
     const request = createRequest(conversationId, {
       isScheduledTask: true,
     })
-
-    await service.processMessage(request as never, new AbortController().signal)
+    // Build the prerequisite scheduled session directly. A real completed run
+    // closes its hidden page, and an open run must reject overlapping work.
+    sessionStore.set(conversationId, {
+      agent: firstAgent,
+      executionFingerprint: 'existing-scheduled-fingerprint',
+      hiddenPageId: 77,
+      browserContext: {
+        windowId: 11,
+        activeTab: {
+          id: 77,
+          pageId: 77,
+          url: 'about:blank',
+          title: 'Scheduled Task',
+        },
+      },
+    })
     const originalSession = sessionStore.get(conversationId)
     const originalMessages = structuredClone(firstAgent.messages)
     expect(originalSession?.hiddenPageId).toBe(77)
@@ -160,6 +174,6 @@ describe('ChatService execution fingerprint session lifecycle', () => {
     expect(firstAgent.messages).toEqual(originalMessages)
     expect(firstAgent.dispose).not.toHaveBeenCalled()
     expect(browser.closePage).not.toHaveBeenCalled()
-    expect(streamCalls).toBe(1)
+    expect(streamCalls).toBe(0)
   })
 })

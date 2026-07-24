@@ -32,6 +32,32 @@ export class SessionNotFoundError extends HttpAgentError {
   }
 }
 
+export class ConversationBusyError extends HttpAgentError {
+  constructor(
+    public conversationId: string,
+    public activeRunId?: string,
+  ) {
+    super(
+      `Conversation "${conversationId}" already has an active run.`,
+      409,
+      'CONVERSATION_BUSY',
+    )
+  }
+
+  override toJSON() {
+    return {
+      error: {
+        name: this.name,
+        message: this.message,
+        code: this.code,
+        statusCode: this.statusCode,
+        conversationId: this.conversationId,
+        activeRunId: this.activeRunId,
+      },
+    }
+  }
+}
+
 export class AgentExecutionError extends HttpAgentError {
   constructor(
     message: string,

@@ -8,6 +8,7 @@ import {
   createSessionStore,
   defaultLlmConfig,
   emptyRegistry,
+  finishFirstStreamAndRetainFollowing,
   harnessState,
   type MockMessage,
 } from './chat-service-test-harness'
@@ -38,7 +39,7 @@ describe('ChatService scheduled-mode fingerprint transitions', () => {
     resetReplacementFailures()
     harnessState.resolvedLlmConfig = { ...defaultLlmConfig }
     harnessState.lifecycleEvents = []
-    retainSessionAfterStream()
+    finishFirstStreamAndRetainFollowing()
 
     const firstAgent = createFakeAgent()
     const secondAgent = createFakeAgent()
@@ -145,11 +146,22 @@ describe('ChatService scheduled-mode fingerprint transitions', () => {
     const scheduledRequest = createRequest(conversationId, {
       isScheduledTask: true,
     })
-
-    await service.processMessage(
-      scheduledRequest as never,
-      new AbortController().signal,
-    )
+    // This test starts from an explicitly pre-existing scheduled session so
+    // it can isolate the visible-context rebuild without overlapping turns.
+    sessionStore.set(conversationId, {
+      agent: firstAgent,
+      executionFingerprint: 'existing-scheduled-fingerprint',
+      hiddenPageId: 77,
+      browserContext: {
+        windowId: 11,
+        activeTab: {
+          id: 77,
+          pageId: 77,
+          url: 'about:blank',
+          title: 'Scheduled Task',
+        },
+      },
+    })
 
     harnessState.agentToReturn = secondAgent
     await service.processMessage(
@@ -176,8 +188,8 @@ describe('ChatService scheduled-mode fingerprint transitions', () => {
             browserContext?: { activeTab?: { id: number; pageId?: number } }
           },
       )
-    expect(createdConfigs).toHaveLength(2)
-    expect(createdConfigs[1]?.browserContext?.activeTab).toEqual(
+    expect(createdConfigs).toHaveLength(1)
+    expect(createdConfigs[0]?.browserContext?.activeTab).toEqual(
       expect.objectContaining({ id: 9, pageId: 109 }),
     )
     expect(sessionStore.get(conversationId)).toEqual(
@@ -197,7 +209,7 @@ describe('ChatService scheduled-mode fingerprint transitions', () => {
     resetReplacementFailures()
     harnessState.resolvedLlmConfig = { ...defaultLlmConfig }
     harnessState.lifecycleEvents = []
-    retainSessionAfterStream()
+    finishFirstStreamAndRetainFollowing()
 
     const firstAgent = createFakeAgent()
     harnessState.agentToReturn = firstAgent
@@ -251,7 +263,7 @@ describe('ChatService scheduled-mode fingerprint transitions', () => {
     resetReplacementFailures()
     harnessState.resolvedLlmConfig = { ...defaultLlmConfig }
     harnessState.lifecycleEvents = []
-    retainSessionAfterStream()
+    finishFirstStreamAndRetainFollowing()
 
     const firstAgent = createFakeAgent(new Set(['old_tool']))
     const hostileToolNames = {
@@ -330,8 +342,22 @@ describe('ChatService scheduled-mode fingerprint transitions', () => {
     })
     const conversationId = crypto.randomUUID()
     const request = createRequest(conversationId, { isScheduledTask: true })
-
-    await service.processMessage(request as never, new AbortController().signal)
+    // This test starts from an explicitly pre-existing scheduled session so
+    // a failed replacement can prove it leaves that owned page untouched.
+    sessionStore.set(conversationId, {
+      agent: firstAgent,
+      executionFingerprint: 'existing-scheduled-fingerprint',
+      hiddenPageId: 79,
+      browserContext: {
+        windowId: 13,
+        activeTab: {
+          id: 79,
+          pageId: 79,
+          url: 'about:blank',
+          title: 'Scheduled Task',
+        },
+      },
+    })
     const originalSession = sessionStore.get(conversationId)
     const originalMessages = snapshotMessages(firstAgent.messages)
     harnessState.createAgentError = new Error('reverse-create-failure')
@@ -358,6 +384,6 @@ describe('ChatService scheduled-mode fingerprint transitions', () => {
     expect(firstAgent.messages).toEqual(originalMessages)
     expect(
       harnessState.lifecycleEvents?.filter((event) => event === 'stream'),
-    ).toHaveLength(1)
+    ).toHaveLength(0)
   })
 })

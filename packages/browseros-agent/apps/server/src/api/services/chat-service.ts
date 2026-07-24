@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  */
 
-import { createAgentUIStreamResponse, type UIMessage } from 'ai'
+import { consumeStream, createAgentUIStreamResponse, type UIMessage } from 'ai'
 import { AiSdkAgent, type AiSdkAgentConfig } from '../../agent/ai-sdk-agent'
 import { formatUserMessage } from '../../agent/format-message'
 import { filterValidMessages } from '../../agent/message-validation'
@@ -19,6 +19,13 @@ import { resolveLLMConfig } from '../../lib/clients/llm/config'
 import type { ToolRegistry } from '../../tools/tool-registry'
 import type { KlavisProxyRef } from '../services/klavis/strata-proxy'
 import type { ChatRequest } from '../types'
+import {
+  acquireOwnedChatRun,
+  applyToolApprovalResponses,
+  failOwnedChatRun,
+  finishOwnedChatRun,
+  ownsChatRun,
+} from './chat-run-lifecycle'
 import {
   buildApprovalConfigKey,
   buildContextChanges,
@@ -40,6 +47,45 @@ export interface ChatServiceDeps {
   aiSdkDevtoolsEnabled?: boolean
 }
 
+function runOnce(keys: Set<number>, key: number, action: () => void): void {
+  if (keys.has(key)) return
+  keys.add(key)
+  action()
+}
+
+function restoreUserMessage(
+  messages: UIMessage[],
+  messageId: string | undefined,
+  content: string,
+): UIMessage[] {
+  if (!messageId) return messages
+  return messages.map((message) =>
+    message.id === messageId && message.role === 'user'
+      ? { ...message, parts: [{ type: 'text' as const, text: content }] }
+      : message,
+  )
+}
+
+function injectPreviousConversation(
+  session: AgentSession,
+  request: ChatRequest,
+): void {
+  const previousConversation = request.previousConversation
+  if (!previousConversation?.length) return
+  for (const message of previousConversation) {
+    if (!message.content.trim()) continue
+    session.agent.messages.push({
+      id: crypto.randomUUID(),
+      role: message.role === 'assistant' ? 'assistant' : 'user',
+      parts: [{ type: 'text', text: message.content }],
+    })
+  }
+  logInfoSafely('Injected previous conversation history', {
+    conversationId: request.conversationId,
+    messageCount: previousConversation.length,
+  })
+}
+
 export class ChatService {
   constructor(private deps: ChatServiceDeps) {}
 
@@ -48,245 +94,258 @@ export class ChatService {
     abortSignal: AbortSignal,
   ): Promise<Response> {
     const { sessionStore } = this.deps
-
-    const llmConfig = await resolveLLMConfig(request, this.deps.browserosId)
-    const resolvedConfig: ResolvedAgentConfig = {
-      conversationId: request.conversationId,
-      provider: llmConfig.provider,
-      model: llmConfig.model,
-      apiKey: llmConfig.apiKey,
-      baseUrl: llmConfig.baseUrl,
-      upstreamProvider: llmConfig.upstreamProvider,
-      resourceName: llmConfig.resourceName,
-      region: llmConfig.region,
-      accessKeyId: llmConfig.accessKeyId,
-      secretAccessKey: llmConfig.secretAccessKey,
-      sessionToken: llmConfig.sessionToken,
-      accountId: llmConfig.accountId,
-      reasoningEffort: request.reasoningEffort,
-      reasoningSummary: request.reasoningSummary,
-      contextWindowSize: request.contextWindowSize,
-      userSystemPrompt: request.userSystemPrompt,
-      workingDir: request.userWorkingDir,
-      supportsImages: request.supportsImages,
-      chatMode: request.mode === 'chat',
-      isScheduledTask: request.isScheduledTask,
-      origin: request.origin,
-      declinedApps: request.declinedApps,
-      browserosId: this.deps.browserosId,
-      toolApprovalConfig: request.toolApprovalConfig,
-    }
-
+    const ownedRun = acquireOwnedChatRun(sessionStore, request)
     let session = sessionStore.get(request.conversationId)
-    let isNewSession = false
-    const contextChanges: string[] = []
-    const { browserContext, hiddenPageId, newlyCreatedHiddenPageId } =
-      await resolveEffectiveBrowserContext(this.deps.browser, request, session)
-    const aiSdkAgentConfig: AiSdkAgentConfig = {
-      resolvedConfig,
-      browser: this.deps.browser,
-      registry: this.deps.registry,
-      browserContext,
-      klavisRef: this.deps.klavisRef,
-      browserosId: this.deps.browserosId,
-      aiSdkDevtoolsEnabled: this.deps.aiSdkDevtoolsEnabled,
-      aclRules: request.aclRules,
+    let newlyCreatedHiddenPageId: number | undefined
+    let messageSnapshot: UIMessage[] | undefined
+    let ownsSessionHiddenPage = false
+    const closedPageIds = new Set<number>()
+    const clearRunEvidence = (): void => {
+      session?.agent.setEvidenceSink(undefined)
     }
-
-    let executionFingerprint: SessionExecutionFingerprint
-    try {
-      executionFingerprint = deriveSessionExecutionFingerprint(aiSdkAgentConfig)
-    } catch (error) {
-      if (newlyCreatedHiddenPageId !== undefined) {
-        this.closeHiddenPage(newlyCreatedHiddenPageId, request.conversationId)
+    const closeRunHiddenPage = (): void => {
+      const pageId =
+        (ownsSessionHiddenPage ? session?.hiddenPageId : undefined) ??
+        newlyCreatedHiddenPageId
+      if (pageId === undefined) return
+      if (session?.hiddenPageId === pageId) {
+        session.hiddenPageId = undefined
       }
-      throw error
+      runOnce(closedPageIds, pageId, () => {
+        this.closeHiddenPage(pageId, request.conversationId)
+      })
     }
 
-    // Legacy keys remain only for human-readable context-change notices.
-    const mcpServerKey = buildMcpServerKey(
-      browserContext,
-      Boolean(this.deps.klavisRef?.handle),
-    )
-    const approvalConfigKey = buildApprovalConfigKey(request.toolApprovalConfig)
-    const mcpChanged = session?.mcpServerKey !== mcpServerKey
-    const workspaceChanged = session?.workingDir !== request.userWorkingDir
-    const approvalChanged = session?.approvalConfigKey !== approvalConfigKey
-    const pendingContextChanges = session
-      ? buildContextChanges(
+    try {
+      const llmConfig = await resolveLLMConfig(request, this.deps.browserosId)
+      const resolvedConfig: ResolvedAgentConfig = {
+        conversationId: request.conversationId,
+        provider: llmConfig.provider,
+        model: llmConfig.model,
+        apiKey: llmConfig.apiKey,
+        baseUrl: llmConfig.baseUrl,
+        upstreamProvider: llmConfig.upstreamProvider,
+        resourceName: llmConfig.resourceName,
+        region: llmConfig.region,
+        accessKeyId: llmConfig.accessKeyId,
+        secretAccessKey: llmConfig.secretAccessKey,
+        sessionToken: llmConfig.sessionToken,
+        accountId: llmConfig.accountId,
+        reasoningEffort: request.reasoningEffort,
+        reasoningSummary: request.reasoningSummary,
+        contextWindowSize: request.contextWindowSize,
+        userSystemPrompt: request.userSystemPrompt,
+        workingDir: request.userWorkingDir,
+        supportsImages: request.supportsImages,
+        chatMode: request.mode === 'chat',
+        isScheduledTask: request.isScheduledTask,
+        origin: request.origin,
+        declinedApps: request.declinedApps,
+        browserosId: this.deps.browserosId,
+        toolApprovalConfig: request.toolApprovalConfig,
+      }
+      const effectiveContext = await resolveEffectiveBrowserContext(
+        this.deps.browser,
+        request,
+        session,
+      )
+      const { browserContext, hiddenPageId } = effectiveContext
+      newlyCreatedHiddenPageId = effectiveContext.newlyCreatedHiddenPageId
+      const aiSdkAgentConfig: AiSdkAgentConfig = {
+        resolvedConfig,
+        browser: this.deps.browser,
+        registry: this.deps.registry,
+        browserContext,
+        klavisRef: this.deps.klavisRef,
+        browserosId: this.deps.browserosId,
+        aiSdkDevtoolsEnabled: this.deps.aiSdkDevtoolsEnabled,
+        aclRules: request.aclRules,
+      }
+      const executionFingerprint =
+        deriveSessionExecutionFingerprint(aiSdkAgentConfig)
+
+      const mcpServerKey = buildMcpServerKey(
+        browserContext,
+        Boolean(this.deps.klavisRef?.handle),
+      )
+      const approvalConfigKey = buildApprovalConfigKey(
+        request.toolApprovalConfig,
+      )
+      const mcpChanged = session?.mcpServerKey !== mcpServerKey
+      const workspaceChanged = session?.workingDir !== request.userWorkingDir
+      const approvalChanged = session?.approvalConfigKey !== approvalConfigKey
+      const pendingContextChanges = session
+        ? buildContextChanges(
+            session,
+            request,
+            mcpServerKey,
+            mcpChanged,
+            workspaceChanged,
+          )
+        : []
+      const contextChanges: string[] = []
+
+      if (
+        !ownedRun.isApprovalContinuation &&
+        session &&
+        session.executionFingerprint !== executionFingerprint
+      ) {
+        logInfoSafely(
+          'Execution fingerprint changed mid-conversation, rebuilding session',
+          {
+            conversationId: request.conversationId,
+            previousFingerprint: session.executionFingerprint,
+            currentFingerprint: executionFingerprint,
+            changedCategories: [
+              ...(approvalChanged ? ['approval'] : []),
+              'execution-config',
+              ...(mcpChanged ? ['mcp'] : []),
+              ...(workspaceChanged ? ['workspace'] : []),
+            ],
+          },
+        )
+        session = await this.rebuildChangedSession({
           session,
           request,
+          aiSdkAgentConfig,
+          executionFingerprint,
+          hiddenPageId,
           mcpServerKey,
-          mcpChanged,
-          workspaceChanged,
-        )
-      : []
-
-    if (session && session.executionFingerprint !== executionFingerprint) {
-      const changedCategories = [
-        ...(approvalChanged ? ['approval'] : []),
-        'execution-config',
-        ...(mcpChanged ? ['mcp'] : []),
-        ...(workspaceChanged ? ['workspace'] : []),
-      ]
-      logInfoSafely(
-        'Execution fingerprint changed mid-conversation, rebuilding session',
-        {
-          conversationId: request.conversationId,
-          previousFingerprint: session.executionFingerprint,
-          currentFingerprint: executionFingerprint,
-          changedCategories,
-        },
-      )
-      session = await this.rebuildChangedSession({
-        session,
-        request,
-        aiSdkAgentConfig,
-        executionFingerprint,
-        hiddenPageId,
-        newlyCreatedHiddenPageId,
-        mcpServerKey,
-        approvalConfigKey,
-      })
-      contextChanges.push(...pendingContextChanges)
-    }
-
-    if (!session) {
-      isNewSession = true
-      let agent: AiSdkAgent
-      try {
-        agent = await AiSdkAgent.create(aiSdkAgentConfig)
-      } catch (error) {
-        if (newlyCreatedHiddenPageId !== undefined) {
-          this.closeHiddenPage(newlyCreatedHiddenPageId, request.conversationId)
-        }
-        throw error
-      }
-      session = {
-        agent,
-        executionFingerprint,
-        hiddenPageId,
-        browserContext,
-        mcpServerKey,
-        workingDir: request.userWorkingDir,
-        approvalConfigKey,
-      }
-      sessionStore.set(request.conversationId, session)
-    }
-
-    session.agent.updateAclRules(request.aclRules)
-
-    if (isNewSession && request.previousConversation?.length) {
-      for (const msg of request.previousConversation) {
-        if (!msg.content.trim()) continue
-        session.agent.messages.push({
-          id: crypto.randomUUID(),
-          role: msg.role === 'assistant' ? 'assistant' : 'user',
-          parts: [{ type: 'text', text: msg.content }],
+          approvalConfigKey,
         })
+        contextChanges.push(...pendingContextChanges)
       }
-      logInfoSafely('Injected previous conversation history', {
-        conversationId: request.conversationId,
-        messageCount: request.previousConversation.length,
-      })
-    }
 
-    // Handle tool approval responses: patch the agent's messages and re-run
-    if (request.toolApprovalResponses?.length) {
-      this.applyToolApprovalResponses(
-        session.agent.messages,
-        request.toolApprovalResponses,
-      )
-      logInfoSafely('Applied tool approval responses', {
-        conversationId: request.conversationId,
-        count: request.toolApprovalResponses.length,
-      })
-      return createAgentUIStreamResponse({
-        agent: session.agent.toolLoopAgent,
-        uiMessages: filterValidMessages(session.agent.messages),
+      let isNewSession = false
+      if (!session) {
+        isNewSession = true
+        session = {
+          agent: await AiSdkAgent.create(aiSdkAgentConfig),
+          executionFingerprint,
+          hiddenPageId,
+          browserContext,
+          mcpServerKey,
+          workingDir: request.userWorkingDir,
+          approvalConfigKey,
+        }
+        sessionStore.set(request.conversationId, session)
+      }
+      ownsSessionHiddenPage = true
+      session.agent.updateAclRules(request.aclRules)
+
+      if (isNewSession) injectPreviousConversation(session, request)
+      messageSnapshot = structuredClone(session.agent.messages)
+
+      let wrappedUserMessageId: string | undefined
+      let promptUiMessages: UIMessage[]
+      if (ownedRun.isApprovalContinuation) {
+        applyToolApprovalResponses(
+          session.agent.messages,
+          request.toolApprovalResponses ?? [],
+        )
+        promptUiMessages = filterValidMessages(session.agent.messages)
+        logInfoSafely('Applied tool approval responses', {
+          conversationId: request.conversationId,
+          count: request.toolApprovalResponses?.length ?? 0,
+        })
+      } else {
+        const userContent = formatUserMessage(
+          request.message,
+          browserContext,
+          request.selectedText,
+          request.selectedTextSource,
+        )
+        const contextPrefix =
+          contextChanges.length > 0
+            ? `${contextChanges.map((change) => `[Context: ${change}]`).join('\n')}\n\n`
+            : ''
+        wrappedUserMessageId = session.agent.appendUserMessage(
+          request.message,
+          ownedRun.userMessageId,
+        )
+        const promptUserText = contextPrefix + userContent
+        promptUiMessages = filterValidMessages(session.agent.messages).map(
+          (message) =>
+            message.id === wrappedUserMessageId && message.role === 'user'
+              ? {
+                  ...message,
+                  parts: [{ type: 'text' as const, text: promptUserText }],
+                }
+              : message,
+        )
+        session.agent.setEvidenceSink(
+          sessionStore.createEvidenceSink(
+            request.conversationId,
+            ownedRun.runId,
+          ),
+        )
+      }
+
+      const streamedSession = session
+      return await createAgentUIStreamResponse({
+        agent: streamedSession.agent.toolLoopAgent,
+        uiMessages: promptUiMessages,
         abortSignal,
-        onFinish: async ({ messages }: { messages: UIMessage[] }) => {
-          session.agent.messages = filterValidMessages(messages)
+        consumeSseStream: consumeStream,
+        onFinish: async ({ messages, isAborted, finishReason }) => {
+          const restored = restoreUserMessage(
+            messages,
+            wrappedUserMessageId,
+            request.message,
+          )
+          const result = finishOwnedChatRun({
+            sessionStore,
+            session: streamedSession,
+            conversationId: request.conversationId,
+            runId: ownedRun.runId,
+            messages: restored,
+            isAborted: Boolean(isAborted),
+            finishReason,
+            deniedByApproval: ownedRun.deniedByApproval,
+            clearEvidenceSink: clearRunEvidence,
+            closeHiddenPage: closeRunHiddenPage,
+          })
+          if (result !== 'stale') {
+            logInfoSafely('Agent execution complete', {
+              conversationId: request.conversationId,
+              totalMessages: streamedSession.agent.messages.length,
+            })
+          }
         },
       })
+    } catch (error) {
+      if (
+        messageSnapshot &&
+        session &&
+        sessionStore.get(request.conversationId) === session &&
+        ownsChatRun(sessionStore, request.conversationId, ownedRun.runId)
+      ) {
+        session.agent.messages = messageSnapshot
+      }
+      failOwnedChatRun({
+        sessionStore,
+        conversationId: request.conversationId,
+        runId: ownedRun.runId,
+        failureReason: abortSignal.aborted ? 'aborted' : 'execution-error',
+        clearEvidenceSink: clearRunEvidence,
+        closeHiddenPage: closeRunHiddenPage,
+      })
+      throw error
     }
-
-    const userContent = formatUserMessage(
-      request.message,
-      browserContext,
-      request.selectedText,
-      request.selectedTextSource,
-    )
-
-    // Prepend tool-change context when session was rebuilt mid-conversation
-    const contextPrefix =
-      contextChanges.length > 0
-        ? `${contextChanges.map((c) => `[Context: ${c}]`).join('\n')}\n\n`
-        : ''
-
-    // Persist the *raw* user text in session.agent.messages so it
-    // round-trips clean to the client's useChat state and to any
-    // future history reload. The wrapped form (browser context +
-    // <selected_text> + <USER_QUERY>) is built as a transient prompt
-    // copy below — the LLM sees it, the user-visible state never
-    // does.
-    session.agent.appendUserMessage(request.message)
-    const promptUserText = contextPrefix + userContent
-    const wrappedUserMessageId =
-      session.agent.messages[session.agent.messages.length - 1]?.id
-
-    const promptUiMessages = filterValidMessages(session.agent.messages).map(
-      (msg) =>
-        msg.id === wrappedUserMessageId && msg.role === 'user'
-          ? {
-              ...msg,
-              parts: [{ type: 'text' as const, text: promptUserText }],
-            }
-          : msg,
-    )
-
-    return createAgentUIStreamResponse({
-      agent: session.agent.toolLoopAgent,
-      uiMessages: promptUiMessages,
-      abortSignal,
-      onFinish: async ({ messages }: { messages: UIMessage[] }) => {
-        // The agent loop returns `messages` containing the prompt-
-        // wrapped user text. Restore the raw form before persisting
-        // so subsequent turns see the clean text and the client's
-        // local UIMessage matches what was originally typed.
-        const restored = messages.map((msg) =>
-          msg.id === wrappedUserMessageId && msg.role === 'user'
-            ? {
-                ...msg,
-                parts: [{ type: 'text' as const, text: request.message }],
-              }
-            : msg,
-        )
-        session.agent.messages = filterValidMessages(restored)
-        logInfoSafely('Agent execution complete', {
-          conversationId: request.conversationId,
-          totalMessages: restored.length,
-        })
-
-        if (session?.hiddenPageId !== undefined) {
-          const pageId = session.hiddenPageId
-          session.hiddenPageId = undefined
-          this.closeHiddenPage(pageId, request.conversationId)
-        }
-      },
-    })
   }
 
   async deleteSession(
     conversationId: string,
   ): Promise<{ deleted: boolean; sessionCount: number }> {
     const session = this.deps.sessionStore.get(conversationId)
-    if (session?.hiddenPageId !== undefined) {
-      const pageId = session.hiddenPageId
-      session.hiddenPageId = undefined
-      this.closeHiddenPage(pageId, conversationId)
-    }
+    const hiddenPageId = session?.hiddenPageId
     const deleted = await this.deps.sessionStore.delete(conversationId)
+    if (deleted && hiddenPageId !== undefined) {
+      if (session?.hiddenPageId === hiddenPageId) {
+        session.hiddenPageId = undefined
+      }
+      this.closeHiddenPage(hiddenPageId, conversationId)
+    }
     return { deleted, sessionCount: this.deps.sessionStore.count() }
   }
 
@@ -305,7 +364,6 @@ export class ChatService {
     aiSdkAgentConfig: AiSdkAgentConfig
     executionFingerprint: SessionExecutionFingerprint
     hiddenPageId: number | undefined
-    newlyCreatedHiddenPageId: number | undefined
     mcpServerKey: string
     approvalConfigKey: string
   }): Promise<AgentSession> {
@@ -315,69 +373,27 @@ export class ChatService {
       aiSdkAgentConfig,
       executionFingerprint,
       hiddenPageId,
-      newlyCreatedHiddenPageId,
       mcpServerKey,
       approvalConfigKey,
     } = options
     const previousHiddenPageId = session.hiddenPageId
-    try {
-      const replacement = await rebuildSessionAtomically({
-        sessionStore: this.deps.sessionStore,
-        session,
-        aiSdkAgentConfig,
-        conversationId: request.conversationId,
-        executionFingerprint,
-        hiddenPageId,
-        mcpServerKey,
-        workingDir: request.userWorkingDir,
-        approvalConfigKey,
-      })
-      if (
-        previousHiddenPageId !== undefined &&
-        previousHiddenPageId !== replacement.hiddenPageId
-      ) {
-        this.closeHiddenPage(previousHiddenPageId, request.conversationId)
-      }
-      return replacement
-    } catch (error) {
-      if (newlyCreatedHiddenPageId !== undefined) {
-        this.closeHiddenPage(newlyCreatedHiddenPageId, request.conversationId)
-      }
-      throw error
+    const replacement = await rebuildSessionAtomically({
+      sessionStore: this.deps.sessionStore,
+      session,
+      aiSdkAgentConfig,
+      conversationId: request.conversationId,
+      executionFingerprint,
+      hiddenPageId,
+      mcpServerKey,
+      workingDir: request.userWorkingDir,
+      approvalConfigKey,
+    })
+    if (
+      previousHiddenPageId !== undefined &&
+      previousHiddenPageId !== replacement.hiddenPageId
+    ) {
+      this.closeHiddenPage(previousHiddenPageId, request.conversationId)
     }
-  }
-
-  private applyToolApprovalResponses(
-    messages: UIMessage[],
-    responses: Array<{
-      approvalId: string
-      approved: boolean
-      reason?: string
-    }>,
-  ): void {
-    const responseMap = new Map(responses.map((r) => [r.approvalId, r]))
-    for (const msg of messages) {
-      if (msg.role !== 'assistant') continue
-      for (const part of msg.parts) {
-        const toolPart = part as {
-          state?: string
-          approval?: { id: string; approved?: boolean; reason?: string }
-        }
-        if (
-          toolPart.state === 'approval-requested' &&
-          toolPart.approval?.id &&
-          responseMap.has(toolPart.approval.id)
-        ) {
-          const resp = responseMap.get(toolPart.approval.id)
-          if (!resp) continue
-          toolPart.state = 'approval-responded'
-          toolPart.approval = {
-            ...toolPart.approval,
-            approved: resp.approved,
-            reason: resp.reason,
-          }
-        }
-      }
-    }
+    return replacement
   }
 }

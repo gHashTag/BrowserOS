@@ -407,12 +407,13 @@ export class AiSdkAgent {
     this._messages = msgs
   }
 
-  appendUserMessage(content: string): void {
+  appendUserMessage(content: string, id: string = crypto.randomUUID()): string {
     this._messages.push({
-      id: crypto.randomUUID(),
+      id,
       role: 'user',
       parts: [{ type: 'text', text: content }],
     })
+    return id
   }
 
   updateAclRules(rules?: AclRule[]): void {
