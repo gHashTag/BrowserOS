@@ -40,11 +40,16 @@ export const harnessState: {
   streamResponseHandler?: (options: StreamResponseOptions) => Promise<Response>
   lifecycleEvents?: string[]
   createAgentError?: Error
+  replaceSessionError?: Error
+  replaceSessionResult?: boolean
+  replaceSessionConflict?: StoredSession
   resolvedLlmConfig: {
     provider: string
     model: string
     apiKey: string
     baseUrl?: string
+    secretAccessKey?: string
+    sessionToken?: string
   }
 } = {
   resolvedLlmConfig: {
@@ -127,6 +132,27 @@ export function createSessionStore() {
     set(conversationId: string, session: StoredSession) {
       harnessState.lifecycleEvents?.push('swap')
       sessions.set(conversationId, session)
+    },
+    replace(
+      conversationId: string,
+      expectedSession: StoredSession,
+      replacement: StoredSession,
+    ) {
+      if (harnessState.replaceSessionConflict) {
+        sessions.set(conversationId, harnessState.replaceSessionConflict)
+      }
+      if (harnessState.replaceSessionError) {
+        throw harnessState.replaceSessionError
+      }
+      if (harnessState.replaceSessionResult === false) {
+        return false
+      }
+      if (sessions.get(conversationId) !== expectedSession) {
+        return false
+      }
+      harnessState.lifecycleEvents?.push('swap')
+      sessions.set(conversationId, replacement)
+      return true
     },
     remove(conversationId: string) {
       return sessions.delete(conversationId)

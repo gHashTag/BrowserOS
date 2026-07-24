@@ -16,12 +16,38 @@ export interface EffectiveBrowserContext {
   newlyCreatedHiddenPageId?: number
 }
 
+function logInfoSafely(
+  message: string,
+  details: Record<string, unknown>,
+): void {
+  try {
+    logger.info(message, details)
+  } catch {
+    // Observability must not affect hidden-page ownership.
+  }
+}
+
+function logWarningSafely(
+  message: string,
+  details: Record<string, unknown>,
+): void {
+  try {
+    logger.warn(message, details)
+  } catch {
+    // Observability must not affect hidden-page ownership.
+  }
+}
+
 export async function resolveEffectiveBrowserContext(
   browser: Browser,
   request: ChatRequest,
   session?: AgentSession,
 ): Promise<EffectiveBrowserContext> {
-  if (request.isScheduledTask && session?.browserContext) {
+  if (
+    request.isScheduledTask &&
+    session?.hiddenPageId !== undefined &&
+    session.browserContext
+  ) {
     return {
       browserContext: {
         ...session.browserContext,
@@ -40,51 +66,54 @@ export async function resolveEffectiveBrowserContext(
     return { browserContext }
   }
 
+  let hiddenPageId: number
   try {
-    const hiddenPageId = await browser.newPage('about:blank', {
+    hiddenPageId = await browser.newPage('about:blank', {
       hidden: true,
       background: true,
     })
-    let hiddenWindowId: number | undefined
-    try {
-      const hiddenPage = (await browser.listPages()).find(
-        (page) => page.pageId === hiddenPageId,
-      )
-      hiddenWindowId = hiddenPage?.windowId
-    } catch (error) {
-      logger.warn('Failed to look up hidden page metadata', {
-        conversationId: request.conversationId,
-        pageId: hiddenPageId,
-        error: error instanceof Error ? error.message : String(error),
-      })
-    }
-    browserContext = {
-      ...browserContext,
-      windowId: hiddenWindowId,
-      selectedTabs: undefined,
-      tabs: undefined,
-      activeTab: {
-        id: hiddenPageId,
-        pageId: hiddenPageId,
-        url: 'about:blank',
-        title: 'Scheduled Task',
-      },
-    }
-    logger.info('Created hidden page for scheduled task', {
-      conversationId: request.conversationId,
-      pageId: hiddenPageId,
-      windowId: hiddenWindowId,
-    })
-    return {
-      browserContext,
-      hiddenPageId,
-      newlyCreatedHiddenPageId: hiddenPageId,
-    }
   } catch (error) {
-    logger.warn('Failed to create hidden page, using default browser context', {
+    logWarningSafely('Failed to create hidden page, using default context', {
+      conversationId: request.conversationId,
       error: error instanceof Error ? error.message : String(error),
     })
     return { browserContext }
+  }
+
+  let hiddenWindowId: number | undefined
+  try {
+    const hiddenPage = (await browser.listPages()).find(
+      (page) => page.pageId === hiddenPageId,
+    )
+    hiddenWindowId = hiddenPage?.windowId
+  } catch (error) {
+    logWarningSafely('Failed to look up hidden page metadata', {
+      conversationId: request.conversationId,
+      pageId: hiddenPageId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+  browserContext = {
+    ...browserContext,
+    windowId: hiddenWindowId,
+    selectedTabs: undefined,
+    tabs: undefined,
+    activeTab: {
+      id: hiddenPageId,
+      pageId: hiddenPageId,
+      url: 'about:blank',
+      title: 'Scheduled Task',
+    },
+  }
+  logInfoSafely('Created hidden page for scheduled task', {
+    conversationId: request.conversationId,
+    pageId: hiddenPageId,
+    windowId: hiddenWindowId,
+  })
+  return {
+    browserContext,
+    hiddenPageId,
+    newlyCreatedHiddenPageId: hiddenPageId,
   }
 }
 

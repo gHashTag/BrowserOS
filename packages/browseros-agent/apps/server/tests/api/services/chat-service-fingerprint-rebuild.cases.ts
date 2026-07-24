@@ -53,8 +53,8 @@ describe('ChatService execution fingerprint session lifecycle', () => {
     expect(firstAgent.dispose).toHaveBeenCalledTimes(1)
     expect(harnessState.lifecycleEvents.slice(secondTurnEventIndex)).toEqual([
       'create',
-      'dispose',
       'swap',
+      'dispose',
       'stream',
     ])
   })
@@ -99,8 +99,8 @@ describe('ChatService execution fingerprint session lifecycle', () => {
     expect(firstAgent.dispose).toHaveBeenCalledTimes(1)
     expect(harnessState.lifecycleEvents.slice(secondTurnEventIndex)).toEqual([
       'create',
-      'dispose',
       'swap',
+      'dispose',
       'stream',
     ])
   })

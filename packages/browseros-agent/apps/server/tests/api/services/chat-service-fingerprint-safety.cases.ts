@@ -23,9 +23,18 @@ describe('ChatService execution fingerprint session lifecycle', () => {
     const newUrl = 'https://new-secret-mcp.example.test/sse'
     const oldWorkspace = '/workspace/old-secret-path'
     const newWorkspace = '/workspace/new-secret-path'
+    const oldBaseUrl = 'https://old-private-provider.example.test/v1'
+    const newBaseUrl = 'https://new-private-provider.example.test/v1'
+    const oldSecretAccessKey = 'old-secret-access-key-sentinel'
+    const newSecretAccessKey = 'new-secret-access-key-sentinel'
+    const oldSessionToken = 'old-session-token-sentinel'
+    const newSessionToken = 'new-session-token-sentinel'
     harnessState.resolvedLlmConfig = {
       ...defaultLlmConfig,
       apiKey: oldSecret,
+      baseUrl: oldBaseUrl,
+      secretAccessKey: oldSecretAccessKey,
+      sessionToken: oldSessionToken,
     }
     harnessState.lifecycleEvents = []
     streamAndPersist()
@@ -71,6 +80,9 @@ describe('ChatService execution fingerprint session lifecycle', () => {
       ...harnessState.resolvedLlmConfig,
       model: 'gpt-5.1',
       apiKey: newSecret,
+      baseUrl: newBaseUrl,
+      secretAccessKey: newSecretAccessKey,
+      sessionToken: newSessionToken,
     }
     harnessState.agentToReturn = secondAgent
     await service.processMessage(
@@ -99,8 +111,8 @@ describe('ChatService execution fingerprint session lifecycle', () => {
     expect(secondAgent.dispose).not.toHaveBeenCalled()
     expect(harnessState.lifecycleEvents.slice(secondTurnEventIndex)).toEqual([
       'create',
-      'dispose',
       'swap',
+      'dispose',
       'stream',
     ])
 
@@ -116,6 +128,12 @@ describe('ChatService execution fingerprint session lifecycle', () => {
       newUrl,
       oldWorkspace,
       newWorkspace,
+      oldBaseUrl,
+      newBaseUrl,
+      oldSecretAccessKey,
+      newSecretAccessKey,
+      oldSessionToken,
+      newSessionToken,
     ]) {
       expect(serializedLogs).not.toContain(sensitiveValue)
     }

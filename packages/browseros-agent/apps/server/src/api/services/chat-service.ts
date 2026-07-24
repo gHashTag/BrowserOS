@@ -7,10 +7,7 @@
 import { createAgentUIStreamResponse, type UIMessage } from 'ai'
 import { AiSdkAgent, type AiSdkAgentConfig } from '../../agent/ai-sdk-agent'
 import { formatUserMessage } from '../../agent/format-message'
-import {
-  filterValidMessages,
-  sanitizeMessagesForToolset,
-} from '../../agent/message-validation'
+import { filterValidMessages } from '../../agent/message-validation'
 import {
   deriveSessionExecutionFingerprint,
   type SessionExecutionFingerprint,
@@ -29,6 +26,10 @@ import {
   buildMcpServerKey,
   resolveEffectiveBrowserContext,
 } from './chat-session-context'
+import {
+  logWarningSafely,
+  rebuildSessionAtomically,
+} from './chat-session-rebuild'
 
 export interface ChatServiceDeps {
   sessionStore: SessionStore
@@ -137,15 +138,16 @@ export class ChatService {
           changedCategories,
         },
       )
-      session = await this.rebuildSession(
+      session = await this.rebuildChangedSession({
         session,
         request,
         aiSdkAgentConfig,
         executionFingerprint,
         hiddenPageId,
+        newlyCreatedHiddenPageId,
         mcpServerKey,
         approvalConfigKey,
-      )
+      })
       contextChanges.push(...pendingContextChanges)
     }
 
@@ -266,7 +268,7 @@ export class ChatService {
           totalMessages: restored.length,
         })
 
-        if (session?.hiddenPageId) {
+        if (session?.hiddenPageId !== undefined) {
           const pageId = session.hiddenPageId
           session.hiddenPageId = undefined
           this.closeHiddenPage(pageId, request.conversationId)
@@ -279,7 +281,7 @@ export class ChatService {
     conversationId: string,
   ): Promise<{ deleted: boolean; sessionCount: number }> {
     const session = this.deps.sessionStore.get(conversationId)
-    if (session?.hiddenPageId) {
+    if (session?.hiddenPageId !== undefined) {
       const pageId = session.hiddenPageId
       session.hiddenPageId = undefined
       this.closeHiddenPage(pageId, conversationId)
@@ -289,72 +291,59 @@ export class ChatService {
   }
 
   private closeHiddenPage(pageId: number, conversationId: string): void {
-    this.deps.browser.closePage(pageId).catch((error) => {
-      logger.warn('Failed to close hidden page', {
+    this.deps.browser.closePage(pageId).catch(() => {
+      logWarningSafely('Failed to close hidden page', {
         pageId,
         conversationId,
-        error: error instanceof Error ? error.message : String(error),
       })
     })
   }
 
-  private async rebuildSession(
-    session: AgentSession,
-    request: ChatRequest,
-    aiSdkAgentConfig: AiSdkAgentConfig,
-    executionFingerprint: SessionExecutionFingerprint,
-    hiddenPageId: number | undefined,
-    mcpServerKey: string,
-    approvalConfigKey: string,
-  ): Promise<AgentSession> {
-    const previousMessages = [...session.agent.messages]
-    const agent = await AiSdkAgent.create(aiSdkAgentConfig)
-    try {
-      agent.messages = sanitizeMessagesForToolset(
-        previousMessages,
-        agent.toolNames,
-      )
-    } catch (error) {
-      await this.disposeUnusedReplacement(agent, request.conversationId)
-      throw error
-    }
-
-    const newSession: AgentSession = {
-      agent,
+  private async rebuildChangedSession(options: {
+    session: AgentSession
+    request: ChatRequest
+    aiSdkAgentConfig: AiSdkAgentConfig
+    executionFingerprint: SessionExecutionFingerprint
+    hiddenPageId: number | undefined
+    newlyCreatedHiddenPageId: number | undefined
+    mcpServerKey: string
+    approvalConfigKey: string
+  }): Promise<AgentSession> {
+    const {
+      session,
+      request,
+      aiSdkAgentConfig,
       executionFingerprint,
       hiddenPageId,
-      browserContext: aiSdkAgentConfig.browserContext,
+      newlyCreatedHiddenPageId,
       mcpServerKey,
-      workingDir: request.userWorkingDir,
       approvalConfigKey,
-    }
-
+    } = options
+    const previousHiddenPageId = session.hiddenPageId
     try {
-      await session.agent.dispose()
-    } catch (error) {
-      await this.disposeUnusedReplacement(agent, request.conversationId)
-      throw error
-    }
-    try {
-      this.deps.sessionStore.set(request.conversationId, newSession)
-    } catch (error) {
-      await this.disposeUnusedReplacement(agent, request.conversationId)
-      throw error
-    }
-
-    return newSession
-  }
-
-  private async disposeUnusedReplacement(
-    agent: AiSdkAgent,
-    conversationId: string,
-  ): Promise<void> {
-    try {
-      await agent.dispose()
-    } catch {
-      logger.warn('Failed to dispose unused replacement agent', {
-        conversationId,
+      const replacement = await rebuildSessionAtomically({
+        sessionStore: this.deps.sessionStore,
+        session,
+        aiSdkAgentConfig,
+        conversationId: request.conversationId,
+        executionFingerprint,
+        hiddenPageId,
+        mcpServerKey,
+        workingDir: request.userWorkingDir,
+        approvalConfigKey,
       })
+      if (
+        previousHiddenPageId !== undefined &&
+        previousHiddenPageId !== replacement.hiddenPageId
+      ) {
+        this.closeHiddenPage(previousHiddenPageId, request.conversationId)
+      }
+      return replacement
+    } catch (error) {
+      if (newlyCreatedHiddenPageId !== undefined) {
+        this.closeHiddenPage(newlyCreatedHiddenPageId, request.conversationId)
+      }
+      throw error
     }
   }
 

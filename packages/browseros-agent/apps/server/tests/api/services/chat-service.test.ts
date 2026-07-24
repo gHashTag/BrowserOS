@@ -6,6 +6,8 @@ import {
   createSessionStore,
   emptyRegistry,
   harnessState,
+  loggerInfoSpy,
+  loggerWarnSpy,
   type MockMessage,
 } from './chat-service-test-harness'
 
@@ -19,10 +21,10 @@ describe('ChatService scheduled task hidden page lifecycle', () => {
     }
 
     const browser = {
-      newPage: mock(async () => 77),
+      newPage: mock(async () => 0),
       listPages: mock(async () => [
         {
-          pageId: 77,
+          pageId: 0,
           windowId: 11,
         },
       ]),
@@ -65,7 +67,7 @@ describe('ChatService scheduled task hidden page lifecycle', () => {
       background: true,
     })
     expect(browser.createWindow).not.toHaveBeenCalled()
-    expect(browser.closePage).toHaveBeenCalledWith(77)
+    expect(browser.closePage).toHaveBeenCalledWith(0)
     expect(browser.closeWindow).not.toHaveBeenCalled()
 
     const createArgs = createAgentSpy.mock.calls.at(-1)?.[0] as {
@@ -84,8 +86,8 @@ describe('ChatService scheduled task hidden page lifecycle', () => {
     expect(createArgs.browserContext?.windowId).toBe(11)
     expect(createArgs.browserContext?.selectedTabs).toBeUndefined()
     expect(createArgs.browserContext?.activeTab).toEqual({
-      id: 77,
-      pageId: 77,
+      id: 0,
+      pageId: 0,
       url: 'about:blank',
       title: 'Scheduled Task',
     })
@@ -103,7 +105,7 @@ describe('ChatService scheduled task hidden page lifecycle', () => {
     sessionStore.set(conversationId, {
       agent: fakeAgent,
       executionFingerprint: 'test-session-fingerprint',
-      hiddenPageId: 33,
+      hiddenPageId: 0,
     })
 
     const service = new ChatService({
@@ -116,7 +118,7 @@ describe('ChatService scheduled task hidden page lifecycle', () => {
     const result = await service.deleteSession(conversationId)
 
     expect(result).toEqual({ deleted: true, sessionCount: 0 })
-    expect(browser.closePage).toHaveBeenCalledWith(33)
+    expect(browser.closePage).toHaveBeenCalledWith(0)
     expect(fakeAgent.dispose).toHaveBeenCalledTimes(1)
   })
 
@@ -127,6 +129,9 @@ describe('ChatService scheduled task hidden page lifecycle', () => {
       await onFinish({ messages: uiMessages ?? fakeAgent.messages })
       return new Response('ok')
     }
+    loggerWarnSpy.mockImplementationOnce(() => {
+      throw new Error('metadata-log-failure')
+    })
 
     const browser = {
       newPage: mock(async () => 88),
@@ -134,7 +139,10 @@ describe('ChatService scheduled task hidden page lifecycle', () => {
         throw new Error('CDP lookup failed')
       }),
       closePage: mock(async () => {}),
-      resolveTabIds: mock(async () => new Map<number, number>()),
+      resolveTabIds: mock(
+        async (tabIds: number[]) =>
+          new Map(tabIds.map((tabId) => [tabId, tabId + 100])),
+      ),
     }
     const sessionStore = createSessionStore()
     const service = new ChatService({
@@ -181,6 +189,61 @@ describe('ChatService scheduled task hidden page lifecycle', () => {
       title: 'Scheduled Task',
     })
     expect(browser.closePage).toHaveBeenCalledWith(88)
+  })
+
+  it('keeps ownership of a hidden page when its creation log throws', async () => {
+    const fakeAgent = createFakeAgent()
+    harnessState.agentToReturn = fakeAgent
+    harnessState.streamResponseHandler = async ({ onFinish, uiMessages }) => {
+      await onFinish({ messages: uiMessages ?? fakeAgent.messages })
+      return new Response('ok')
+    }
+    loggerInfoSpy.mockImplementationOnce(() => {
+      throw new Error('creation-log-failure')
+    })
+
+    const browser = {
+      newPage: mock(async () => 92),
+      listPages: mock(async () => [{ pageId: 92, windowId: 15 }]),
+      closePage: mock(async () => {}),
+      resolveTabIds: mock(async () => new Map<number, number>()),
+    }
+    const sessionStore = createSessionStore()
+    const service = new ChatService({
+      sessionStore: sessionStore as never,
+      klavisRef: { handle: null },
+      browser: browser as never,
+      registry: emptyRegistry as never,
+    })
+
+    await service.processMessage(
+      {
+        conversationId: crypto.randomUUID(),
+        message: 'Run despite observability failure',
+        isScheduledTask: true,
+        mode: 'agent',
+        origin: 'sidepanel',
+        browserContext: {
+          activeTab: {
+            id: 3,
+            url: 'https://example.com',
+            title: 'Example',
+          },
+        },
+      } as never,
+      new AbortController().signal,
+    )
+
+    const createArgs = createAgentSpy.mock.calls.at(-1)?.[0] as {
+      browserContext?: {
+        activeTab?: { id: number; pageId: number }
+      }
+    }
+    expect(createArgs.browserContext?.activeTab).toEqual(
+      expect.objectContaining({ id: 92, pageId: 92 }),
+    )
+    expect(browser.closePage).toHaveBeenCalledTimes(1)
+    expect(browser.closePage).toHaveBeenCalledWith(92)
   })
 })
 
@@ -321,3 +384,5 @@ describe('ChatService Klavis session rebuilds', () => {
 await import('./chat-service-fingerprint-core.cases')
 await import('./chat-service-fingerprint-rebuild.cases')
 await import('./chat-service-fingerprint-safety.cases')
+await import('./chat-service-fingerprint-transitions.cases')
+await import('./chat-service-fingerprint-atomicity.cases')

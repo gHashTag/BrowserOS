@@ -96,6 +96,30 @@ export class SessionStore {
     })
   }
 
+  replace(
+    conversationId: string,
+    expectedSession: AgentSession,
+    replacement: AgentSession,
+  ): boolean {
+    if (
+      this.deletingConversations.has(conversationId) ||
+      this.sessions.get(conversationId) !== expectedSession
+    ) {
+      return false
+    }
+
+    this.sessions.set(conversationId, replacement)
+    try {
+      logger.info('Session atomically replaced in store', {
+        conversationId,
+        totalSessions: this.sessions.size,
+      })
+    } catch {
+      // Observability must not make a completed swap appear to have failed.
+    }
+    return true
+  }
+
   has(conversationId: string): boolean {
     return this.sessions.has(conversationId)
   }
