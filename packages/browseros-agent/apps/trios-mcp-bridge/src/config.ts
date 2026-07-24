@@ -32,7 +32,9 @@ export interface BridgeConfig {
 
 export const DEFAULT_CONFIG: BridgeConfig = {
   port: 9203,
-  browserosMcpUrl: 'http://127.0.0.1:9200/mcp',
+  // TS-retirement item 3: point at the consolidated Rust trios-server, which
+  // serves the MCP surface on the MCP port (9105). Was 9200 (Hono A2A).
+  browserosMcpUrl: 'http://127.0.0.1:9105/mcp',
   gitbutlerCliPath: 'but',
   gitbutlerInternal: true,
   triCliPath: 'tri',

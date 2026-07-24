@@ -61,7 +61,7 @@ Usage: bun run src/index.ts [options]
 
 Options:
   --port <number>            Bridge server port (default: 9203)
-  --browserclaw-url <url>    BrowserClaw MCP URL (default: http://127.0.0.1:9200/mcp)
+  --browserclaw-url <url>    BrowserClaw MCP URL (default: http://127.0.0.1:9105/mcp)
   --browseros-url <url>      Legacy alias for --browserclaw-url
   --gitbutler-cli <path>       GitButler CLI path (default: but)
   --tri-cli <path>             t27 CLI path (default: tri)
@@ -75,7 +75,7 @@ Options:
 
 Examples:
   bun run src/index.ts --port 9203
-  bun run src/index.ts --browserclaw-url http://127.0.0.1:9200/mcp
+  bun run src/index.ts --browserclaw-url http://127.0.0.1:9105/mcp
 `)
         process.exit(0)
         break

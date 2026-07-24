@@ -8,7 +8,7 @@ import { DEFAULT_CONFIG } from '../config.js'
 describe('BrowserClaw bridge contract', () => {
   test('keeps BrowserClaw and the TRIOS bridge on separate ports', () => {
     expect(DEFAULT_CONFIG.port).toBe(9203)
-    expect(DEFAULT_CONFIG.browserosMcpUrl).toBe('http://127.0.0.1:9200/mcp')
+    expect(DEFAULT_CONFIG.browserosMcpUrl).toBe('http://127.0.0.1:9105/mcp')
   })
 
   test('detects the current BrowserClaw tool catalog', () => {

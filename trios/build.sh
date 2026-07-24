@@ -108,7 +108,10 @@ if [ ${PIPESTATUS[0]} -eq 0 ]; then
     <key>NSHighResolutionCapable</key><true/>
     <key>TRIOS_MESH_PORT</key><string>9505</string>
     <key>TRIOS_MCP_PORT</key><string>9105</string>
-    <key>TRIOS_A2A_PORT</key><string>9200</string>
+    <!-- TS-retirement item 3: the consolidated Rust trios-server serves MCP,
+         A2A and /health on a single port. A2A is collapsed onto the MCP port
+         (9105) so the client talks to one backend process. -->
+    <key>TRIOS_A2A_PORT</key><string>9105</string>
     <key>TRIOS_CANARY_MCP_PORT</key><string>9205</string>
     <key>TRIOS_VARIANT</key><string>prod</string>
 </dict>
