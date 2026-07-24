@@ -51,12 +51,20 @@ describe('ChatService run completion cleanup', () => {
     {
       name: 'request abort',
       finish: { isAborted: true, finishReason: 'other' as const },
-      outcome: { status: 'failed', failureReason: 'aborted' },
+      outcome: {
+        status: 'failed',
+        failureReason: 'aborted',
+        effectState: 'none',
+      },
     },
     {
       name: 'stream error',
       finish: { isAborted: false, finishReason: 'error' as const },
-      outcome: { status: 'failed', failureReason: 'execution-error' },
+      outcome: {
+        status: 'failed',
+        failureReason: 'execution-error',
+        effectState: 'none',
+      },
     },
   ]) {
     it(`releases the owner and evidence sink after ${testCase.name}`, async () => {

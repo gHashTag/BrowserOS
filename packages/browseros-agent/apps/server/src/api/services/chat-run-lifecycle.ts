@@ -16,12 +16,14 @@ import { filterValidMessages } from '../../agent/message-validation'
 import type { AgentSession, SessionStore } from '../../agent/session-store'
 import { metrics } from '../../lib/metrics'
 import type { ChatRequest } from '../types'
+import { deriveFailureEffectState } from './chat-run-failure'
 
 export interface OwnedChatRun {
   readonly runId: string
   readonly userMessageId: string
   readonly isApprovalContinuation: boolean
   readonly deniedByApproval: boolean
+  readonly resumedApprovalIds?: readonly string[]
 }
 
 function busy(
@@ -61,6 +63,7 @@ export function acquireOwnedChatRun(
       userMessageId: resumed.run.userMessageId,
       isApprovalContinuation: true,
       deniedByApproval: responses.some((response) => !response.approved),
+      resumedApprovalIds: approvalIds,
     }
   }
 
@@ -87,25 +90,43 @@ export function acquireOwnedChatRun(
   }
 }
 
+export function rollbackOwnedApprovalRun(options: {
+  sessionStore: SessionStore
+  conversationId: string
+  runId: string
+  approvalIds: readonly string[]
+}): boolean {
+  const activeRun = options.sessionStore.getActiveRun(options.conversationId)
+  if (!activeRun || activeRun.runId !== options.runId) {
+    return false
+  }
+  if (activeRun.waitingFor?.kind === 'approval') {
+    const expected = [...new Set(options.approvalIds.filter(Boolean))].sort()
+    const waiting = activeRun.waitingFor.approvalIds
+    return (
+      waiting.length === expected.length &&
+      waiting.every((approvalId, index) => approvalId === expected[index])
+    )
+  }
+  try {
+    return Boolean(
+      options.sessionStore.suspendTurnForApproval(
+        options.conversationId,
+        options.runId,
+        options.approvalIds,
+      ),
+    )
+  } catch {
+    return false
+  }
+}
+
 export function ownsChatRun(
   sessionStore: SessionStore,
   conversationId: string,
   runId: string,
 ): boolean {
   return sessionStore.getActiveRun(conversationId)?.runId === runId
-}
-
-export function restoreUserMessage(
-  messages: UIMessage[],
-  messageId: string | undefined,
-  content: string,
-): UIMessage[] {
-  if (!messageId) return messages
-  return messages.map((message) =>
-    message.id === messageId && message.role === 'user'
-      ? { ...message, parts: [{ type: 'text' as const, text: content }] }
-      : message,
-  )
 }
 
 function logRunMetricSafely(
@@ -154,6 +175,7 @@ export function failOwnedChatRun(options: {
     {
       status: 'failed',
       failureReason: options.failureReason,
+      effectState: deriveFailureEffectState(activeRun.evidence),
     },
   )
   if (!finished) {
@@ -179,6 +201,7 @@ export function finishOwnedChatRun(options: {
   messages: UIMessage[]
   isAborted: boolean
   finishReason?: FinishReason
+  streamHadError?: boolean
   deniedByApproval: boolean
   clearEvidenceSink: () => void
   closeHiddenPage: () => void
@@ -206,11 +229,9 @@ export function finishOwnedChatRun(options: {
 
   let failureReason: ExecutionRunFailureReason | undefined = options.isAborted
     ? 'aborted'
-    : options.finishReason === 'error'
+    : options.streamHadError || options.finishReason === 'error'
       ? 'execution-error'
-      : options.deniedByApproval
-        ? 'denied'
-        : undefined
+      : undefined
   try {
     const persisted = filterValidMessages(options.messages)
     const pendingApprovalIds =
@@ -227,15 +248,19 @@ export function finishOwnedChatRun(options: {
   } catch {
     failureReason = 'execution-error'
   }
+  if (failureReason === undefined && options.finishReason === undefined) {
+    failureReason = 'execution-error'
+  }
+  if (failureReason === undefined && options.deniedByApproval) {
+    failureReason = 'denied'
+  }
 
   const outcome = failureReason
-    ? failureReason === 'denied'
-      ? ({
-          status: 'failed',
-          failureReason,
-          effectState: 'none',
-        } as const)
-      : ({ status: 'failed', failureReason } as const)
+    ? ({
+        status: 'failed',
+        failureReason,
+        effectState: deriveFailureEffectState(activeRun.evidence),
+      } as const)
     : ({ status: 'succeeded' } as const)
   const finished = options.sessionStore.finishTurn(
     options.conversationId,

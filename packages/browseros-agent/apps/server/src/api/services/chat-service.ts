@@ -20,12 +20,16 @@ import type { ToolRegistry } from '../../tools/tool-registry'
 import type { KlavisProxyRef } from '../services/klavis/strata-proxy'
 import type { ChatRequest } from '../types'
 import {
+  injectPreviousConversation,
+  restoreUserMessage,
+} from './chat-message-history'
+import {
   acquireOwnedChatRun,
   applyToolApprovalResponses,
   failOwnedChatRun,
   finishOwnedChatRun,
   ownsChatRun,
-  restoreUserMessage,
+  rollbackOwnedApprovalRun,
 } from './chat-run-lifecycle'
 import {
   buildApprovalConfigKey,
@@ -54,26 +58,6 @@ function runOnce(keys: Set<number>, key: number, action: () => void): void {
   action()
 }
 
-function injectPreviousConversation(
-  session: AgentSession,
-  request: ChatRequest,
-): void {
-  const previousConversation = request.previousConversation
-  if (!previousConversation?.length) return
-  for (const message of previousConversation) {
-    if (!message.content.trim()) continue
-    session.agent.messages.push({
-      id: crypto.randomUUID(),
-      role: message.role === 'assistant' ? 'assistant' : 'user',
-      parts: [{ type: 'text', text: message.content }],
-    })
-  }
-  logInfoSafely('Injected previous conversation history', {
-    conversationId: request.conversationId,
-    messageCount: previousConversation.length,
-  })
-}
-
 export class ChatService {
   constructor(private deps: ChatServiceDeps) {}
 
@@ -86,7 +70,8 @@ export class ChatService {
     let session = sessionStore.get(request.conversationId)
     let newlyCreatedHiddenPageId: number | undefined
     let messageSnapshot: UIMessage[] | undefined
-    let ownsSessionHiddenPage = false
+    let ownsSessionHiddenPage =
+      ownedRun.isApprovalContinuation && session !== undefined
     const closedPageIds = new Set<number>()
     const clearRunEvidence = (): void => {
       session?.agent.setEvidenceSink(undefined)
@@ -105,6 +90,9 @@ export class ChatService {
     }
 
     try {
+      if (ownedRun.isApprovalContinuation && session) {
+        messageSnapshot = structuredClone(session.agent.messages)
+      }
       const llmConfig = await resolveLLMConfig(request, this.deps.browserosId)
       const resolvedConfig: ResolvedAgentConfig = {
         conversationId: request.conversationId,
@@ -136,6 +124,7 @@ export class ChatService {
         this.deps.browser,
         request,
         session,
+        ownedRun.isApprovalContinuation,
       )
       const { browserContext, hiddenPageId } = effectiveContext
       newlyCreatedHiddenPageId = effectiveContext.newlyCreatedHiddenPageId
@@ -271,11 +260,16 @@ export class ChatService {
 
       const streamedSession = session
       let finishCallbackConsumed = false
+      let streamHadError = false
       return await createAgentUIStreamResponse({
         agent: streamedSession.agent.toolLoopAgent,
         uiMessages: promptUiMessages,
         abortSignal,
         consumeSseStream: consumeStream,
+        onError: () => {
+          streamHadError = true
+          return 'An error occurred.'
+        },
         onFinish: async ({ messages, isAborted, finishReason }) => {
           if (finishCallbackConsumed) return
           finishCallbackConsumed = true
@@ -292,6 +286,7 @@ export class ChatService {
             messages: restored,
             isAborted: Boolean(isAborted),
             finishReason,
+            streamHadError,
             deniedByApproval: ownedRun.deniedByApproval,
             clearEvidenceSink: clearRunEvidence,
             closeHiddenPage: closeRunHiddenPage,
@@ -305,6 +300,16 @@ export class ChatService {
         },
       })
     } catch (error) {
+      const approvalRolledBack =
+        !abortSignal.aborted &&
+        ownedRun.isApprovalContinuation &&
+        ownedRun.resumedApprovalIds !== undefined &&
+        rollbackOwnedApprovalRun({
+          sessionStore,
+          conversationId: request.conversationId,
+          runId: ownedRun.runId,
+          approvalIds: ownedRun.resumedApprovalIds,
+        })
       if (
         messageSnapshot &&
         session &&
@@ -313,14 +318,16 @@ export class ChatService {
       ) {
         session.agent.messages = messageSnapshot
       }
-      failOwnedChatRun({
-        sessionStore,
-        conversationId: request.conversationId,
-        runId: ownedRun.runId,
-        failureReason: abortSignal.aborted ? 'aborted' : 'execution-error',
-        clearEvidenceSink: clearRunEvidence,
-        closeHiddenPage: closeRunHiddenPage,
-      })
+      if (!approvalRolledBack) {
+        failOwnedChatRun({
+          sessionStore,
+          conversationId: request.conversationId,
+          runId: ownedRun.runId,
+          failureReason: abortSignal.aborted ? 'aborted' : 'execution-error',
+          clearEvidenceSink: clearRunEvidence,
+          closeHiddenPage: closeRunHiddenPage,
+        })
+      }
       throw error
     }
   }

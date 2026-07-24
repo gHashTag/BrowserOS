@@ -42,7 +42,14 @@ export async function resolveEffectiveBrowserContext(
   browser: Browser,
   request: ChatRequest,
   session?: AgentSession,
+  reuseSessionContext = false,
 ): Promise<EffectiveBrowserContext> {
+  if (reuseSessionContext && session) {
+    return {
+      browserContext: session.browserContext,
+      hiddenPageId: session.hiddenPageId,
+    }
+  }
   if (
     request.isScheduledTask &&
     session?.hiddenPageId !== undefined &&

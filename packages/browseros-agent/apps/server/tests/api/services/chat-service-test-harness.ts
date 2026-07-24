@@ -41,6 +41,7 @@ export interface StreamResponseOptions {
   consumeSseStream?: (options: {
     stream: ReadableStream<string>
   }) => PromiseLike<void> | void
+  onError?: (error: unknown) => string
   onFinish(args: {
     messages: MockMessage[]
     isContinuation?: boolean
