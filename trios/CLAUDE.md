@@ -79,6 +79,13 @@ When operating as the Trinity Agent (Queen), follow this 6-phase loop:
   menu-bar logo). `./trios_app` works but the bare binary may not resolve bundle assets.
 - **E2E:** `bash e2e/trios_e2e_flow.sh`
 - **Health:** `curl -s http://127.0.0.1:9105/health`
+- **Focused Swift unit tests (no Xcode/Queen package needed):** compile a
+  standalone `@main` test with only its sources, e.g. from `trios/`:
+  - `swiftc tests/swift/todo_list_projection_test.swift rings/SR-00/TodoListProjection.swift rings/SR-00/ChatMessage.swift rings/SR-01/A2AMessage.swift rings/SR-00/AgentIdentity.swift -o /tmp/t && /tmp/t`
+  - `swiftc tests/swift/todo_panel_policy_test.swift rings/SR-00/TodoPanelPolicy.swift rings/SR-00/ChatWorkspaceLayout.swift -o /tmp/p && /tmp/p`
+- **SwiftPM library + XCTest (CI-safe, from repo root):** `swift build` and
+  `swift test` compile `TriOSKit` (incl. `rings/SR-00`) without the Queen
+  package or signing. Exercised by `.github/workflows/trios-swift.yml` on macOS.
 - **Mesh ring:** `cargo test -p trios-mesh` (RUST-13, submodule from `gHashTag/tri-net`)
 - **Git:** branch `feat/zai-provider`, main branch is `dev`
 - **T27 pipeline:** `/t27-phi-loop` or `/t27-tri-pipeline` for spec-first work on canon files

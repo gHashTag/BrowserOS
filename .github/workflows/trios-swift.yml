@@ -1,0 +1,113 @@
+name: Trios Swift CI
+
+# Compile-and-test toolchain for the macOS `trios` app sources. Runs on an
+# Apple runner because the sources use SwiftUI/AppKit. The app keeps its
+# macOS 14 deployment target (Package.swift `.macOS(.v14)`); the runner image
+# is macos-15 because macos-14 is being deprecated (2026), and a newer runner
+# still builds for an older deployment target.
+# It is compile/test-only: no GUI is launched, no code signing is performed,
+# and no artifacts are published. The full `trios/build.sh` is intentionally
+# NOT run here because it depends on the private Trinity Queen SwiftPM package
+# (gHashTag/trinity) and ad-hoc signing of a .app bundle — see the final step.
+
+on:
+  push:
+    branches: [dev, feat/zai-provider]
+    paths:
+      - trios/**
+      - Package.swift
+      - .github/workflows/trios-swift.yml
+  pull_request:
+    branches: [dev]
+    paths:
+      - trios/**
+      - Package.swift
+      - .github/workflows/trios-swift.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trios-swift-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  swift:
+    name: Compile and test (macos-15 runner)
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log toolchain versions
+        run: |
+          echo "--- swift ---"
+          swift --version
+          echo "--- xcodebuild ---"
+          xcodebuild -version
+          echo "--- macOS SDK ---"
+          xcrun --sdk macosx --show-sdk-version
+          echo "--- active developer dir ---"
+          xcode-select -p
+
+      - name: Cache SwiftPM build
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift') }}
+          restore-keys: |
+            ${{ runner.os }}-spm-
+
+      - name: Focused standalone test — TodoListProjection
+        working-directory: trios
+        run: |
+          swiftc tests/swift/todo_list_projection_test.swift \
+            rings/SR-00/TodoListProjection.swift \
+            rings/SR-00/ChatMessage.swift \
+            rings/SR-01/A2AMessage.swift \
+            rings/SR-00/AgentIdentity.swift \
+            -o "$RUNNER_TEMP/todo_list_projection_test"
+          "$RUNNER_TEMP/todo_list_projection_test"
+
+      - name: Focused standalone test — TodoPanelPolicy
+        working-directory: trios
+        run: |
+          swiftc tests/swift/todo_panel_policy_test.swift \
+            rings/SR-00/TodoPanelPolicy.swift \
+            rings/SR-00/ChatWorkspaceLayout.swift \
+            -o "$RUNNER_TEMP/todo_panel_policy_test"
+          "$RUNNER_TEMP/todo_panel_policy_test"
+
+      - name: Existing focused test — ChatWorkspaceLayout
+        working-directory: trios
+        run: |
+          swiftc tests/swift/chat_workspace_layout_test.swift \
+            rings/SR-00/ChatWorkspaceLayout.swift \
+            -o "$RUNNER_TEMP/chat_workspace_layout_test"
+          "$RUNNER_TEMP/chat_workspace_layout_test"
+
+      - name: Existing focused test — ChatLogic
+        working-directory: trios
+        run: |
+          swiftc tests/swift/chat_logic_test.swift \
+            BR-OUTPUT/ChatLogic.swift \
+            -o "$RUNNER_TEMP/chat_logic_test"
+          "$RUNNER_TEMP/chat_logic_test"
+
+      # CI-safe project check: compiles the TriOSKit library (which includes the
+      # new rings/SR-00 sources) and runs the XCTest suite. No GUI, no signing.
+      - name: SwiftPM compile (TriOSKit)
+        run: swift build -c debug
+
+      - name: SwiftPM test (TriOSKitTests)
+        run: swift test -c debug
+
+      - name: Note — full app build is out of scope for CI
+        if: always()
+        run: |
+          echo "trios/build.sh is not run in CI: it requires the private Trinity"
+          echo "Queen SwiftPM package (TRINITY_ROOT/apps/queen) and ad-hoc"
+          echo "codesign of a .app bundle. CI covers the source compile + tests"
+          echo "that do not need those local/private dependencies."
