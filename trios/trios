@@ -1,0 +1,172 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# trios — one-command launcher for the Trinity A2A macOS app and backend.
+# Usage:
+#   ./trios              start app + backend (fast, no rebuild)
+#   ./trios --build      rebuild Swift app, then start
+#   ./trios --stop       stop app + backend services
+#   ./trios --status     show app + backend health
+#   ./trios --logs       tail PM2 logs
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="${TRIOS_ROOT:-$SCRIPT_DIR}"
+APP_BUNDLE="$PROJECT_DIR/trios.app"
+APP_BIN="$APP_BUNDLE/Contents/MacOS/trios"
+ECOSYSTEM="$PROJECT_DIR/ecosystem.config.js"
+SOVEREIGN_PORT="${TRIOS_PORT_SOVEREIGN:-9105}"
+
+usage() {
+    cat <<'EOF'
+Usage: ./trios [OPTION]
+
+Options:
+  (none)     Start backend services and open trios.app (no rebuild)
+  -b, --build   Run build.sh first, then start
+  -s, --stop    Stop trios.app and backend services
+  -S, --status  Show process and health status
+  -l, --logs    Tail backend PM2 logs
+  -h, --help    Show this help
+
+Environment:
+  TRIOS_ROOT         project directory (default: directory of this script)
+  TRIOS_PORT_SOVEREIGN  sovereign health port (default: 9105)
+
+Examples:
+  ./trios           # quick daily launch
+  ./trios --build   # after pulling code changes
+EOF
+}
+
+log() { echo "[trios] $*"; }
+
+ensure_pm2() {
+    if ! command -v pm2 >/dev/null 2>&1; then
+        log "ERROR: pm2 not found. Install with: npm install -g pm2"
+        exit 1
+    fi
+}
+
+check_app_bundle() {
+    if [ ! -d "$APP_BUNDLE" ]; then
+        log "ERROR: trios.app bundle not found at $APP_BUNDLE"
+        log "Run: ./trios --build"
+        exit 1
+    fi
+    if [ ! -x "$APP_BIN" ]; then
+        log "ERROR: binary not executable: $APP_BIN"
+        log "Run: ./trios --build"
+        exit 1
+    fi
+}
+
+build() {
+    log "Building trios..."
+    cd "$PROJECT_DIR"
+    ./build.sh
+    log "Build complete."
+}
+
+stop_all() {
+    log "Stopping trios..."
+    if command -v pm2 >/dev/null 2>&1; then
+        pm2 stop ecosystem.config.js 2>/dev/null || true
+    fi
+    pkill -9 -x trios 2>/dev/null || true
+    pkill -9 -f "Contents/MacOS/trios" 2>/dev/null || true
+    log "Stopped."
+}
+
+start_backend() {
+    ensure_pm2
+    cd "$PROJECT_DIR"
+    if [ ! -f "$ECOSYSTEM" ]; then
+        log "ERROR: ecosystem file not found: $ECOSYSTEM"
+        exit 1
+    fi
+    log "Starting backend services via PM2..."
+    pm2 start "$ECOSYSTEM" || pm2 restart "$ECOSYSTEM"
+    pm2 save 2>/dev/null || true
+}
+
+open_app() {
+    check_app_bundle
+    log "Opening trios.app..."
+    open "$APP_BUNDLE"
+}
+
+wait_for_health() {
+    local url="http://127.0.0.1:${SOVEREIGN_PORT}/health"
+    log "Waiting for sovereign health at $url ..."
+    for i in $(seq 1 30); do
+        if curl -fs "$url" >/dev/null 2>&1; then
+            local status
+            status=$(curl -fs "$url" 2>/dev/null || echo '{}')
+            log "Sovereign healthy: $status"
+            return 0
+        fi
+        sleep 1
+    done
+    log "WARNING: sovereign health check timed out after 30s"
+    log "Check: pm2 logs"
+    return 1
+}
+
+show_status() {
+    echo "=== trios processes ==="
+    pgrep -x trios && echo "trios app: running" || echo "trios app: not running"
+    echo ""
+    if command -v pm2 >/dev/null 2>&1; then
+        echo "=== PM2 services ==="
+        pm2 status
+    fi
+    echo ""
+    echo "=== Health ==="
+    curl -fs "http://127.0.0.1:${SOVEREIGN_PORT}/health" 2>/dev/null || echo "sovereign unreachable"
+}
+
+tail_logs() {
+    ensure_pm2
+    pm2 logs
+}
+
+do_start() {
+    start_backend
+    open_app
+    wait_for_health
+    log "trios is running. Press Cmd+Shift+T to open the panel."
+}
+
+main() {
+    cd "$PROJECT_DIR"
+
+    case "${1:-}" in
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        -b|--build)
+            build
+            do_start
+            ;;
+        -s|--stop)
+            stop_all
+            ;;
+        -S|--status)
+            show_status
+            ;;
+        -l|--logs)
+            tail_logs
+            ;;
+        "")
+            do_start
+            ;;
+        *)
+            echo "Unknown option: $1" >&2
+            usage >&2
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"
