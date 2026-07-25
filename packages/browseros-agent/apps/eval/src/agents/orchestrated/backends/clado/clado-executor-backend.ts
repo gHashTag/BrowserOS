@@ -1,4 +1,4 @@
-import type { ResolvedAgentConfig } from '@browseros/server/agent/types'
+import type { ResolvedAgentConfig } from '@browseros/agent-core/agent/types'
 import type {
   DelegationResult,
   ExecutorBackend,

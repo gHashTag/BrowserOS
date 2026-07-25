@@ -30,37 +30,33 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - suite: server-agent
-            command: (cd apps/server && bun run test:agent)
-            junit_path: test-results/server-agent.xml
+          - suite: agent-core-agent
+            command: (cd packages/agent-core && bun run test:agent)
+            junit_path: test-results/agent-core-agent.xml
             needs_browser: false
-          - suite: server-api
-            command: (cd apps/server && bun run test:api)
-            junit_path: test-results/server-api.xml
+          - suite: agent-core-skills
+            command: (cd packages/agent-core && bun run test:skills)
+            junit_path: test-results/agent-core-skills.xml
             needs_browser: false
-          - suite: server-skills
-            command: (cd apps/server && bun run test:skills)
-            junit_path: test-results/server-skills.xml
-            needs_browser: false
-          - suite: server-tools
-            command: (cd apps/server && bun run test:tools)
-            junit_path: test-results/server-tools.xml
+          - suite: agent-core-tools
+            command: (cd packages/agent-core && bun run test:tools)
+            junit_path: test-results/agent-core-tools.xml
             needs_browser: true
-          - suite: server-browser
-            command: (cd apps/server && bun run test:browser)
-            junit_path: test-results/server-browser.xml
+          - suite: agent-core-browser
+            command: (cd packages/agent-core && bun run test:browser)
+            junit_path: test-results/agent-core-browser.xml
             needs_browser: false
-          - suite: server-integration
-            command: (cd apps/server && bun run test:integration)
-            junit_path: test-results/server-integration.xml
+          - suite: agent-core-integration
+            command: (cd packages/agent-core && bun run test:integration)
+            junit_path: test-results/agent-core-integration.xml
             needs_browser: true
-          - suite: server-lib
-            command: (cd apps/server && bun run test:lib)
-            junit_path: test-results/server-lib.xml
+          - suite: agent-core-lib
+            command: (cd packages/agent-core && bun run test:lib)
+            junit_path: test-results/agent-core-lib.xml
             needs_browser: false
-          - suite: server-root
-            command: (cd apps/server && bun run test:root)
-            junit_path: test-results/server-root.xml
+          - suite: agent-core-root
+            command: (cd packages/agent-core && bun run test:root)
+            junit_path: test-results/agent-core-root.xml
             needs_browser: false
           - suite: agent
             command: (cd apps/agent && bun run test)
@@ -135,8 +131,8 @@ jobs:
           EOF
           chmod +x .ci/bin/browseros
 
-      - name: Create server env file
-        working-directory: packages/browseros-agent/apps/server
+      - name: Create agent-core env file
+        working-directory: packages/browseros-agent/packages/agent-core
         run: cp .env.example .env.development
 
       - name: Run ${{ matrix.suite }} tests

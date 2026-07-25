@@ -4,9 +4,12 @@ import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import type {
   RemoteSkillCatalog,
   RemoteSkillEntry,
-} from '../apps/server/src/skills/types'
+} from '../packages/agent-core/src/skills/types'
 
-const DEFAULTS_DIR = join(import.meta.dir, '../apps/server/src/skills/defaults')
+const DEFAULTS_DIR = join(
+  import.meta.dir,
+  '../packages/agent-core/src/skills/defaults',
+)
 const R2_KEY = 'skills/v1/catalog.json'
 
 function extractVersion(content: string): string {

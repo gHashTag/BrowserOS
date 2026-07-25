@@ -7,7 +7,8 @@ processes:
       restart: no
 
   server:
-    command: bun --cwd apps/server --watch start
+    # TS server retired — Rust trios-server (gHashTag/trios) is the backend.
+    command: sh -c 'cd "${TRIOS_REPO:?set TRIOS_REPO to your trios checkout}" && cargo run -p trios-server'
     availability:
       restart: always
     depends_on:

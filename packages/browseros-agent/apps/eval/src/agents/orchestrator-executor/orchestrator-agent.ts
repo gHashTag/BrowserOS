@@ -5,8 +5,8 @@
  * Uses AI SDK ToolLoopAgent — the SDK handles the turn loop automatically.
  */
 
-import { createLanguageModel } from '@browseros/server/agent/tool-loop/provider-factory'
-import type { ResolvedAgentConfig } from '@browseros/server/agent/types'
+import { createLanguageModel } from '@browseros/agent-core/agent/tool-loop/provider-factory'
+import type { ResolvedAgentConfig } from '@browseros/agent-core/agent/types'
 import { stepCountIs, ToolLoopAgent, tool } from 'ai'
 import { z } from 'zod'
 import type { ExecutorFactory, ExecutorResult } from './types'

@@ -7,7 +7,7 @@
             "request": "launch",
             "name": "Debug BrowserOS Server",
             "program": "src/index.ts",
-            "cwd": "${workspaceFolder}/apps/server",
+            "cwd": "${workspaceFolder}/packages/agent-core",
             "stopOnEntry": false,
             "watchMode": false,
             "env": {

@@ -3,9 +3,8 @@ import { writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-
+import { createR2Client, joinObjectKey, uploadFileToObject } from '../lib/r2'
 import { log } from '../log'
-import { createR2Client, joinObjectKey, uploadFileToObject } from '../server/r2'
 import { type CliUploadConfig, loadCliUploadConfig } from './config'
 
 const CDN_BASE_URL = 'https://cdn.browseros.com'

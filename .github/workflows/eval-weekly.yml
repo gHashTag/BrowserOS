@@ -7,8 +7,8 @@ on:
   push:
     branches: [main]
     paths:
-      - 'packages/browseros-agent/apps/server/src/agent/**'
-      - 'packages/browseros-agent/apps/server/src/tools/**'
+      - 'packages/browseros-agent/packages/agent-core/src/agent/**'
+      - 'packages/browseros-agent/packages/agent-core/src/tools/**'
   workflow_dispatch:
     inputs:
       config:

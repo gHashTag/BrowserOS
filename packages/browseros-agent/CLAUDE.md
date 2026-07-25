@@ -1,5 +1,10 @@
 # CLAUDE.md
 
+> **Note (wave 7, Rust consolidation):** the TypeScript HTTP server was retired.
+> The backend is the Rust `trios-server` (`gHashTag/trios`, `crates/trios-server`).
+> `packages/agent-core` keeps only the host-bound agent core (tool loop, CDP
+> browser driver, MCP tools, clients) used by `apps/eval` and dev tooling.
+
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Coding guidelines
@@ -67,7 +72,7 @@ bun run test:integration         # Run integration tests
 bun run test:sdk                 # Run SDK tests
 
 # Run a single test file
-bun --env-file=.env.development test apps/server/tests/path/to/file.test.ts
+bun --env-file=.env.development test packages/agent-core/tests/path/to/file.test.ts
 
 # Linting
 bun run lint                     # Check with Biome
@@ -90,10 +95,10 @@ bun run generate:models          # Fetches latest from models.dev/api.json
 
 This is a monorepo with three packages in `apps/`:
 
-### Server (`apps/server`)
+### Server (`packages/agent-core`)
 The main MCP server that exposes browser automation tools via HTTP/SSE.
 
-**Entry point:** `apps/server/src/index.ts` → `apps/server/src/main.ts`
+**Entry point:** `packages/agent-core/src/index.ts` → `packages/agent-core/src/main.ts`
 
 **Key components:**
 - `src/tools/` - MCP tool definitions, split into:
@@ -147,7 +152,7 @@ When creating new packages in this monorepo:
 
 ## Test Organization
 
-Tests are in `apps/server/tests/`:
+Tests are in `packages/agent-core/tests/`:
 - `tools/` - Tool tests (require BrowserOS running with CDP), plus ACL scorer tests (standalone)
 - `browser/` - Browser backend tests
 - `agent/` - Agent tests (compaction, rate limiter)
@@ -221,6 +226,6 @@ The `<target>` argument can be:
 
 ## Release gating — bundled-VM runtime migration (2026-Q2)
 
-Between the Lima server-prod-resources cutover (WS3) and the ContainerRuntime migration (WS6) landing, `resources/bin/third_party/` ships `limactl` instead of `podman`. The current OpenClaw runtime (`apps/server/src/api/services/openclaw/podman-runtime.ts`, `container-runtime.ts`) still invokes `podman`; it will fail to find the binary on builds cut from `dev`.
+Between the Lima server-prod-resources cutover (WS3) and the ContainerRuntime migration (WS6) landing, `resources/bin/third_party/` ships `limactl` instead of `podman`. The current OpenClaw runtime (`packages/agent-core/src/api/services/openclaw/podman-runtime.ts`, `container-runtime.ts`) still invokes `podman`; it will fail to find the binary on builds cut from `dev`.
 
 Do **not** cut a release branch off `dev` during this window. Track WS6 progress before any release cut. See `specs/bundled-vm-runtime-spec.md` + `specs/workstreams.md` for context.

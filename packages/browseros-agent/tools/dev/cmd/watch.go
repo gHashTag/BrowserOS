@@ -185,12 +185,18 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	// Start server
 	reservations.ReleaseServer()
 	reservations.ReleaseExtension()
+	// The TS server was retired: the backend is the Rust trios-server
+	// (gHashTag/trios). Point TRIOS_REPO at your trios checkout.
+	triosRepo := os.Getenv("TRIOS_REPO")
+	if triosRepo == "" {
+		triosRepo = root
+	}
 	procs = append(procs, proc.StartManaged(ctx, &wg, proc.ProcConfig{
 		Tag:     proc.TagServer,
-		Dir:     filepath.Join(root, "apps/server"),
-		Env:     env,
+		Dir:     triosRepo,
+		Env:     append(env, fmt.Sprintf("TRIOS_MCP_PORT=%d", p.Server)),
 		Restart: true,
-		Cmd:     []string{"bun", "--watch", "--env-file=.env.development", "src/index.ts"},
+		Cmd:     []string{"cargo", "run", "-p", "trios-server"},
 		BeforeStart: func() error {
 			return proc.KillPortAndWait(p.Server, 3*time.Second)
 		},

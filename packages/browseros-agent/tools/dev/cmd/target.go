@@ -208,8 +208,8 @@ func resolveTargetPorts(root string, explicit string) (proc.Ports, error) {
 		return parsePorts(explicit)
 	}
 	for _, path := range []string{
-		filepath.Join(root, "apps/server/.env.development"),
-		filepath.Join(root, "apps/server/.env.example"),
+		filepath.Join(root, "packages/agent-core/.env.development"),
+		filepath.Join(root, "packages/agent-core/.env.example"),
 	} {
 		ports, ok, err := readPortsFromEnvFile(path)
 		if err != nil {

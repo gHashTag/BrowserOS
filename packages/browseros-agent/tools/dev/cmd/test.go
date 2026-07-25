@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"sync"
 	"syscall"
 
@@ -104,20 +103,23 @@ func runTest(cmd *cobra.Command, args []string) error {
 	}()
 
 	env := proc.BuildEnv(p, "test")
-	serverDir := filepath.Join(root, "apps/server")
 
-	// Start server
-	proc.LogMsg(proc.TagServer, "Starting server...")
+	// The TS server was retired: the backend is the Rust trios-server
+	// (gHashTag/trios). Point TRIOS_REPO at your trios checkout.
+	triosRepo := os.Getenv("TRIOS_REPO")
+	if triosRepo == "" {
+		triosRepo = root
+	}
+	proc.LogMsg(proc.TagServer, "Starting Rust trios-server...")
 	procs = append(procs, proc.StartManaged(ctx, &wg, proc.ProcConfig{
 		Tag:     proc.TagServer,
-		Dir:     root,
-		Env:     env,
+		Dir:     triosRepo,
+		Env: append(env,
+			fmt.Sprintf("TRIOS_MCP_PORT=%d", p.Server),
+			fmt.Sprintf("TRIOS_CDP_PORT=%d", p.CDP),
+		),
 		Restart: false,
-		Cmd: []string{
-			"bun", filepath.Join(serverDir, "src/index.ts"),
-			"--cdp-port", fmt.Sprintf("%d", p.CDP),
-			"--server-port", fmt.Sprintf("%d", p.Server),
-		},
+		Cmd:     []string{"cargo", "run", "-p", "trios-server"},
 	}))
 
 	proc.LogMsg(proc.TagServer, "Waiting for server health...")

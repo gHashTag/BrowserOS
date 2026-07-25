@@ -8,9 +8,9 @@
  * and wires everything to OrchestratorAgent.
  */
 
-import type { ResolvedAgentConfig } from '@browseros/server/agent/types'
-import { Browser } from '@browseros/server/browser'
-import { CdpBackend } from '@browseros/server/browser/backends/cdp'
+import type { ResolvedAgentConfig } from '@browseros/agent-core/agent/types'
+import { Browser } from '@browseros/agent-core/browser'
+import { CdpBackend } from '@browseros/agent-core/browser/backends/cdp'
 import { CaptchaWaiter } from '../../capture/captcha-waiter'
 import { DEFAULT_TIMEOUT_MS } from '../../constants'
 import type {
