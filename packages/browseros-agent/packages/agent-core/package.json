@@ -40,6 +40,10 @@
       "types": "./src/lib/clients/gateway.ts",
       "default": "./src/lib/clients/gateway.ts"
     },
+    "./lib/clients/trios-server": {
+      "types": "./src/lib/clients/trios-server.ts",
+      "default": "./src/lib/clients/trios-server.ts"
+    },
     "./agent/tool-loop": {
       "types": "./src/agent/ai-sdk-agent.ts",
       "default": "./src/agent/ai-sdk-agent.ts"

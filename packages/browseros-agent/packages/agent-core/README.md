@@ -9,9 +9,13 @@ provider probes) and passes the shared e2e suite. See
 
 What stays here (imported by `apps/eval` and the dev tooling):
 
+- `./lib/clients/trios-server` — **the thin eval bridge** to the Rust agent
+  loop (`POST /agent/run`, `GET /agent/tools`); `apps/eval` runs goals through
+  it via the `rust-server` executor backend (wave 11)
 - `./agent`, `./agent/tool-loop`, `./agent/types` — AI-SDK tool-loop agent
-- `./browser`, `./browser/backends/cdp` — CDP browser driver
-- `./tools/registry` — MCP tool implementations
+  (**legacy eval baseline only** — production loop is Rust `/agent/run`)
+- `./browser`, `./browser/backends/cdp` — CDP browser driver (eval capture)
+- `./tools/registry` — MCP tool implementations (legacy baseline)
 - `./lib/clients/gateway` and other clients (klavis/strata included)
 - `src/skills`, `src/monitoring` — skills catalog and run observability
 

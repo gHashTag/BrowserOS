@@ -1,6 +1,6 @@
 import type { ExecutorResult } from '../orchestrator-executor/types'
 
-export type ExecutorBackendKind = 'tool-loop' | 'clado'
+export type ExecutorBackendKind = 'tool-loop' | 'clado' | 'rust-server'
 export type DelegationResult = ExecutorResult
 
 export interface ToolCallInfo {
