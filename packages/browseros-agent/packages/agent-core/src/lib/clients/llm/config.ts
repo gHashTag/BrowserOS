@@ -10,7 +10,6 @@ import { LLM_PROVIDERS, type LLMConfig } from '@browseros/shared/schemas/llm'
 import { INLINED_ENV } from '../../../env'
 import { logger } from '../../logger'
 import { fetchBrowserOSConfig, getLLMConfigFromProvider } from '../gateway'
-import { getOAuthTokenManager } from '../oauth'
 import {
   resolveMockBrowserOSConfig,
   shouldUseMockBrowserOSLLM,
@@ -75,33 +74,17 @@ interface OAuthResolveOptions {
 }
 
 async function resolveOAuthConfig(
-  config: LLMConfig,
-  browserosId: string | undefined,
+  _config: LLMConfig,
+  _browserosId: string | undefined,
   opts: OAuthResolveOptions,
 ): Promise<ResolvedLLMConfig> {
-  const tokenManager = getOAuthTokenManager()
-  if (!tokenManager || !browserosId) {
-    throw new Error(
-      `Not authenticated with ${opts.displayName}. Please login first.`,
-    )
-  }
-
-  const tokens = opts.useRefresh
-    ? await tokenManager.refreshIfExpired(opts.providerId)
-    : tokenManager.getTokens(opts.providerId)
-
-  if (!tokens) {
-    throw new Error(
-      `Not authenticated with ${opts.displayName}. Please login first.`,
-    )
-  }
-
-  return {
-    ...config,
-    model: config.model || opts.defaultModel,
-    apiKey: tokens.accessToken,
-    ...opts.extraFields?.(tokens),
-  }
+  // OAuth token management moved to the Rust trios-server (trios-store
+  // `oauth_tokens`); the in-process TS token manager was deleted with the
+  // retired TS server. Nothing ever initialized it here, so this path
+  // always threw — keep the same behavior explicitly.
+  throw new Error(
+    `Not authenticated with ${opts.displayName}. Please login first.`,
+  )
 }
 
 async function resolveBrowserOSConfig(

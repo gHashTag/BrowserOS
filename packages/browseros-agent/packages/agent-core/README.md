@@ -120,11 +120,8 @@ Notable runtime dependencies worth calling out:
 ## Directory Structure
 
 ```
-apps/server/
+packages/agent-core/
 ├── src/
-│   ├── index.ts               # Server entry point
-│   ├── main.ts                # Server initialization
-│   ├── api/                   # HTTP route handlers
 │   ├── agent/                 # Agent loop
 │   │   ├── ai-sdk-agent.ts    # Main agent implementation
 │   │   ├── provider-factory.ts# LLM provider factory
@@ -133,7 +130,7 @@ apps/server/
 │   │   ├── mcp-builder.ts     # External MCP client setup
 │   │   └── tool-adapter.ts    # MCP → AI SDK tool bridge
 │   ├── browser/               # Browser connection layer
-│   ├── tools/                 # MCP tool implementations
+│   ├── tools/                 # Tool implementations
 │   │   ├── navigation.ts
 │   │   ├── input.ts
 │   │   ├── snapshot.ts
@@ -141,13 +138,14 @@ apps/server/
 │   │   ├── filesystem/
 │   │   └── ...
 │   ├── skills/                # Skills system
-│   ├── lib/                   # Shared utilities
-│   └── rpc.ts                 # JSON-RPC type definitions
+│   └── lib/                   # Shared utilities
 ├── tests/
-│   ├── tools/                 # Tool-level tests
-│   └── server.integration.test.ts
 └── package.json
 ```
+
+> Persistence (agents, OAuth tokens, produced files) lives in the Rust
+> `trios-server` (`trios-store`, SeaORM/SQLite) — the former TS drizzle
+> layer was removed with the retired TS server.
 
 ## Development
 

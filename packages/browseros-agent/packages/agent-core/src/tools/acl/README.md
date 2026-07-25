@@ -41,10 +41,10 @@ Override the model with the `ACL_EMBEDDING_MODEL` environment variable (e.g. `AC
 ## Testing
 
 ```bash
-bun --env-file=.env.development test apps/server/tests/tools/acl-scorer.test.ts
+bun --env-file=.env.development test tests/tools/acl-scorer.test.ts
 ```
 
-Test fixtures live in `apps/server/tests/__fixtures__/acl/` (courtesy of claude code):
+Test fixtures live in `tests/__fixtures__/acl/` (courtesy of claude code):
 
 | Fixture | Tests |
 |---------|-------|

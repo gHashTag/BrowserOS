@@ -4,7 +4,6 @@
   "description": "BrowserOS agent core: tool-loop agent, CDP browser, tools registry, clients (extracted from the retired HTTP server)",
   "type": "module",
   "scripts": {
-    "db:generate": "drizzle-kit generate --config drizzle.config.ts",
     "test": "bun run test:all",
     "test:all": "bun run ./tests/__helpers__/run-test-group.ts all",
     "test:agent": "bun run ./tests/__helpers__/run-test-group.ts agent",
@@ -93,7 +92,6 @@
     "commander": "^14.0.1",
     "core-js": "3.45.1",
     "debug": "4.4.3",
-    "drizzle-orm": "^0.45.2",
     "eventsource-parser": "^3.0.0",
     "fuse.js": "^7.1.0",
     "gray-matter": "^4.0.3",
@@ -118,7 +116,6 @@
     "@types/pg": "^8.11.11",
     "@types/ws": "^8.5.13",
     "async-mutex": "^0.5.0",
-    "drizzle-kit": "^0.31.10",
     "pino-pretty": "^13.0.0",
     "puppeteer": "24.23.0",
     "sinon": "^21.0.1",

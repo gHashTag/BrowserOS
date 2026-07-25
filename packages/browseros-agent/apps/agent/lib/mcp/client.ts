@@ -7,6 +7,13 @@ export interface McpTool {
   description?: string
 }
 
+// CSP: the MV3 background disallows eval/Function, so zod must run in
+// jitless mode — permanently. Zod v4 reads the flag when a schema is
+// constructed, but sub-schemas are materialized lazily on first parse;
+// toggling jitless only around the SDK import re-enables JIT (and
+// Function-based fastpass compilation) for everything constructed later.
+z.config({ jitless: true })
+
 const MCP_CLIENT_INFO = {
   name: 'browseros-settings',
   version: '1.0.0',
@@ -30,27 +37,17 @@ let mcpSdkPromise: Promise<McpSdk> | undefined
 async function loadMcpSdk(): Promise<McpSdk> {
   if (!mcpSdkPromise) {
     mcpSdkPromise = (async () => {
-      const previousJitless = z.config().jitless
+      const [clientModule, transportModule, typesModule] = await Promise.all([
+        import('@modelcontextprotocol/sdk/client/index.js'),
+        import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
+        import('@modelcontextprotocol/sdk/types.js'),
+      ])
 
-      // Zod v4 captures JIT settings when schemas are constructed, so this has
-      // to be set before the SDK modules create their schemas.
-      z.config({ jitless: true })
-
-      try {
-        const [clientModule, transportModule, typesModule] = await Promise.all([
-          import('@modelcontextprotocol/sdk/client/index.js'),
-          import('@modelcontextprotocol/sdk/client/streamableHttp.js'),
-          import('@modelcontextprotocol/sdk/types.js'),
-        ])
-
-        return {
-          Client: clientModule.Client,
-          StreamableHTTPClientTransport:
-            transportModule.StreamableHTTPClientTransport,
-          ListToolsResultSchema: typesModule.ListToolsResultSchema,
-        }
-      } finally {
-        z.config({ jitless: previousJitless })
+      return {
+        Client: clientModule.Client,
+        StreamableHTTPClientTransport:
+          transportModule.StreamableHTTPClientTransport,
+        ListToolsResultSchema: typesModule.ListToolsResultSchema,
       }
     })()
   }
