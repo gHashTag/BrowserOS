@@ -3,7 +3,11 @@
  * Copyright 2025 BrowserOS
  *
  * Unified test environment orchestrator.
- * Ensures server + browser + extension are all ready.
+ *
+ * Ensures the browser (CDP) is ready and — when the Rust `trios-server`
+ * binary is available (TRIOS_SERVER_BIN or PATH) — the production agent
+ * server as well. The TS server surface was retired in wave 7; the Rust
+ * server is the only server this environment knows how to spawn.
  */
 import {
   type BrowserConfig,
@@ -11,8 +15,13 @@ import {
   killBrowser,
   spawnBrowser,
 } from './browser'
-import { getServerState, killServer, spawnServer } from './server'
 import { createTestRuntimePlan, type TestRuntimePlan } from './test-runtime'
+import {
+  getServerState,
+  killServer,
+  resolveTriosServerBin,
+  spawnServer,
+} from './trios-server'
 import { killProcessOnPort } from './utils'
 
 export interface TestEnvironmentConfig {
@@ -22,6 +31,7 @@ export interface TestEnvironmentConfig {
 }
 
 let runtimePlan: TestRuntimePlan | null = null
+let warnedNoServer = false
 
 function configsMatch(
   a: TestEnvironmentConfig,
@@ -35,9 +45,10 @@ function configsMatch(
 }
 
 /**
- * Ensures the full BrowserOS test environment is ready:
- * 1. Server running and healthy
- * 2. Browser running with CDP available
+ * Ensures the BrowserOS test environment is ready:
+ * 1. Browser running with CDP available
+ * 2. Rust trios-server running and healthy (when the binary is available;
+ *    otherwise browser-only, and server-dependent tests should skip)
  *
  * Reuses existing processes if already running with same config.
  */
@@ -54,14 +65,23 @@ export async function ensureBrowserOS(
     extensionPort: options?.extensionPort ?? runtimePlan.ports.extension,
   }
 
+  const serverBin = resolveTriosServerBin()
+  if (!serverBin && !warnedNoServer) {
+    warnedNoServer = true
+    console.warn(
+      'trios-server binary not found (set TRIOS_SERVER_BIN or add to PATH) — browser-only test environment.',
+    )
+  }
+
   // Fast path: already running with same config
   const serverState = getServerState()
   const browserState = getBrowserState()
+  const serverReady = serverBin ? serverState !== null : true
   if (
-    serverState &&
     browserState &&
-    configsMatch(serverState.config, config) &&
-    configsMatch(browserState.config, config)
+    serverReady &&
+    configsMatch(browserState.config, config) &&
+    (!serverState || configsMatch(serverState.config, config))
   ) {
     console.log('Reusing existing test environment')
     return config
@@ -85,8 +105,10 @@ export async function ensureBrowserOS(
   }
   await spawnBrowser(browserConfig)
 
-  // 3. Start server once CDP is available.
-  await spawnServer(config)
+  // 3. Start the Rust server once CDP is available (when binary present).
+  if (serverBin) {
+    await spawnServer(config)
+  }
 
   console.log('=== Test environment ready ===\n')
   return config

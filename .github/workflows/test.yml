@@ -42,6 +42,7 @@ jobs:
             command: (cd packages/agent-core && bun run test:tools)
             junit_path: test-results/agent-core-tools.xml
             needs_browser: true
+            needs_trios_server: true
           - suite: agent-core-browser
             command: (cd packages/agent-core && bun run test:browser)
             junit_path: test-results/agent-core-browser.xml
@@ -131,6 +132,32 @@ jobs:
           EOF
           chmod +x .ci/bin/browseros
 
+      - name: Checkout trios (Rust production server)
+        if: matrix.needs_trios_server == true
+        uses: actions/checkout@v6
+        with:
+          repository: gHashTag/trios
+          path: trios-src
+
+      - name: Rust toolchain (trios-server)
+        if: matrix.needs_trios_server == true
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache trios-server build
+        if: matrix.needs_trios_server == true
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            trios-src/target
+          key: ${{ runner.os }}-trios-server-${{ hashFiles('trios-src/Cargo.lock') }}
+
+      - name: Build trios-server
+        if: matrix.needs_trios_server == true
+        working-directory: ${{ github.workspace }}/trios-src
+        run: cargo build -p trios-server --locked
+
       - name: Create agent-core env file
         working-directory: packages/browseros-agent/packages/agent-core
         run: cp .env.example .env.development
@@ -139,6 +166,7 @@ jobs:
         id: test
         env:
           BROWSEROS_BINARY: ${{ github.workspace }}/packages/browseros-agent/.ci/bin/browseros
+          TRIOS_SERVER_BIN: ${{ matrix.needs_trios_server == true && format('{0}/trios-src/target/debug/trios-server', github.workspace) || '' }}
           BROWSEROS_TEST_HEADLESS: "true"
           BROWSEROS_TEST_EXTRA_ARGS: --no-sandbox --disable-dev-shm-usage
           BROWSEROS_JUNIT_PATH: ${{ github.workspace }}/packages/browseros-agent/${{ matrix.junit_path }}

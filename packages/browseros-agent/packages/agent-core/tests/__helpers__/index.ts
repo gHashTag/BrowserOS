@@ -3,13 +3,15 @@ export {
   ensureBrowserOS,
   type TestEnvironmentConfig,
 } from './setup'
-export type { McpContentItem, TypedCallToolResult } from './utils'
 export {
-  asToolResult,
-  html,
-  killProcessOnPort,
-  withMcpServer,
-} from './utils'
+  getServerState,
+  isServerRunning,
+  killServer,
+  resolveTriosServerBin,
+  type ServerConfig,
+  spawnServer,
+} from './trios-server'
+export { html, killProcessOnPort } from './utils'
 export {
   cleanupWithBrowser,
   type WithBrowserContext,
