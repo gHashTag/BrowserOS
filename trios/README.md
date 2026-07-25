@@ -1,3 +1,10 @@
+> [!IMPORTANT]
+> **ПЕРЕНЕСЕНО → репозиторий [gHashTag/trios](https://github.com/gHashTag/trios), каталог `apps/trios-macos/`.**
+> Каноническая копия Swift-клиента теперь живёт в репо trios (единая кодовая база:
+> Rust-бэкенд `crates/trios-server` + клиенты в `apps/`). Эта копия оставлена
+> временно из-за macOS CI workflow; после переключения CI будет удалена.
+> Новые правки вносите в репо trios.
+
 # TriOS Hotkey System 🚀
 
 **Natural Language → Automation** — AI-powered hotkey system for macOS with community marketplace.

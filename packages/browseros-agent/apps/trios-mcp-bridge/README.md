@@ -1,3 +1,8 @@
+> [!IMPORTANT]
+> **ПЕРЕНЕСЕНО → репозиторий [gHashTag/trios](https://github.com/gHashTag/trios), каталог `apps/trios-mcp-bridge/`.**
+> Мост обслуживается консолидированным Rust-сервером (`crates/trios-server`, порт 9105).
+> Эта копия оставлена временно; новые правки вносите в репо trios.
+
 # Phase 2: Vision + Context - Experience Log
 
 **Date:** 2026-04-18
