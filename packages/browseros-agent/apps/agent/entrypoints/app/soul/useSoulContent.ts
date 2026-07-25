@@ -9,9 +9,12 @@ export function useSoulContent() {
   const { data, isLoading, error, refetch } = useQuery<string, Error>({
     queryKey: [SOUL_QUERY_KEY],
     queryFn: async () => {
-      const response = await rpcClient.soul.$get()
+      const response = await rpcClient.soul.$get({})
       if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const result = await response.json()
+      // The typed Hono AppType died with the TS server (see getClient.ts),
+      // so the payload shape is asserted here — the Rust trios-server keeps
+      // the same wire contract ({ content }).
+      const result = (await response.json()) as { content?: string }
       return result.content || ''
     },
   })
