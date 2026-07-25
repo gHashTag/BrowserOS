@@ -1,8 +1,59 @@
-// AGENT-V-WAIVER: https://github.com/gHashTag/trios/issues/T27-EPIC-001
-// Reason: FULLSCREEN-CHAT-001 exposes persisted task selection to adaptive UI.
-// Follow-up: seal against .trinity/specs/fullscreen-chat-history.md.
+// AGENT-V-WAIVER: https://github.com/browseros-ai/BrowserOS/issues/2023
+// Reason: Queen direct-chat hardening  -  safety-budget enforcement, human-in-the-loop
+// confirmation, and repo-agnostic PR creation for Queen-generated proposals.
+// Follow-up: seal against .trinity/specs/queen-proposal-applier.md.
+// Previous waiver: https://github.com/gHashTag/trios/issues/T27-EPIC-001 (fullscreen chat history).
 import Foundation
 import SwiftUI
+
+/// Observable progress state for recovery export/import operations.
+@MainActor
+final class SessionRecoveryProgress: ObservableObject {
+    @Published var isActive = false
+    @Published var currentFile: String = ""
+    @Published var completedFiles: Int = 0
+    @Published var totalFiles: Int = 0
+    @Published var fractionCompleted: Double = 0
+    @Published var operation: SessionRecoveryOperation = .none
+
+    enum SessionRecoveryOperation: String {
+        case none
+        case export
+        case `import`
+    }
+
+    func start(operation: SessionRecoveryOperation, totalFiles: Int) {
+        self.operation = operation
+        self.isActive = true
+        self.totalFiles = totalFiles
+        self.completedFiles = 0
+        self.fractionCompleted = 0
+        self.currentFile = ""
+    }
+
+    func advance(file: String) {
+        self.currentFile = file
+        self.completedFiles += 1
+        if totalFiles > 0 {
+            self.fractionCompleted = Double(completedFiles) / Double(totalFiles)
+        }
+    }
+
+    func finish() {
+        self.isActive = false
+        self.fractionCompleted = 1
+        self.currentFile = ""
+    }
+
+    func reset() {
+        self.operation = .none
+        self.isActive = false
+        self.currentFile = ""
+        self.completedFiles = 0
+        self.totalFiles = 0
+        self.fractionCompleted = 0
+    }
+}
 
 private struct PendingAgentMemoryTurn {
     let conversationId: UUID
@@ -31,17 +82,18 @@ final class ChatViewModel: ObservableObject {
     private static let unterminatedStreamError =
         "Response stream ended before a terminal event"
 
-    @Published var messages: [ChatMessage] = []
+    @Published var messages: [ChatMessage] = .init()
     @Published var state: ConversationState = .idle
     @Published var inputText: String = ""
     @Published var isServerReachable: Bool = false
     @Published var isA2ARegistered: Bool = false
-    @Published var conversations: [ChatConversation] = []
+    @Published var conversations: [ChatConversation] = .init()
     @Published var showHistory = false
-    @Published var messageHistory: [String] = []  // Hotkey history (↑↓ navigation)
+    @Published var messageHistory: [String] = .init()  // Hotkey history ((up/down) navigation)
     @Published private(set) var tokenUsage = TokenUsageLedger()
     @Published private(set) var recalledMemories: [AgentMemoryMatch] = []
     @Published private(set) var memoryControlRevision: UInt64 = 0
+    @Published var recoveryProgress = SessionRecoveryProgress()
 
     let queenStatusVM = QueenStatusViewModel()
     let modelStore: ModelConfigurationStore
@@ -50,17 +102,16 @@ final class ChatViewModel: ObservableObject {
     private let transport: ChatTransportProtocol
     private let healthCheck: ChatHealthCheckProtocol
     private let parser: ChatParserProtocol
-    private let persister: ChatPersisterProtocol
+    private(set) var persister: ChatPersisterProtocol
     private let stateMachine: ConversationStateMachine
     private let memoryService: AgentMemoryService
     let a2aClient: A2ARegistryClient?
 
     @Published private(set) var conversationId: UUID = UUID()
     private var messageCache: [UUID: Int] = [:]
-    private var a2aRouter: A2AMessageRouter?
-    private var a2aStreamTask: Task<Void, Never>?
     private var healthCheckTask: Task<Void, Never>?
     private var initializationTask: Task<Void, Never>?
+    private(set) var queenBackgroundService: QueenBackgroundService?
     private var lastSendTime: Date = .distantPast
     private var pendingEstimatedInputTokens = 0
     private var pendingEstimatedOutput = ""
@@ -74,6 +125,8 @@ final class ChatViewModel: ObservableObject {
     private var historyWriteRevisions: [UUID: UInt64] = [:]
     private var historyDeletionCounts: [UUID: Int] = [:]
     private var isConversationTransitioning = false
+    private var stagedProposalIds: Set<UUID> = []
+    private var stagedProposalBranches: [UUID: String] = [:]
 
     init(
         transport: ChatTransportProtocol,
@@ -96,6 +149,8 @@ final class ChatViewModel: ObservableObject {
         self.modelStore = modelStore
         self.memoryService = memoryService
         self.todoPlanner = todoPlanner
+        self.queenBackgroundService = QueenBackgroundService.shared
+        self.queenBackgroundService?.delegate = self
         NSLog("ChatViewModel.init properties set")
 
         initializationTask = Task { [weak self] in
@@ -135,7 +190,19 @@ final class ChatViewModel: ObservableObject {
     }
 
     func loadConversations() async {
-        conversations = await persister.listAllConversations()
+        var loaded = await persister.listAllConversations()
+        if !loaded.contains(where: { $0.id == ChatConversation.trinityQueenId }) {
+            loaded.insert(.trinityQueen, at: 0)
+            // Persist an empty reserved conversation so it survives restarts.
+            await persister.save(messages: [], conversationId: ChatConversation.trinityQueenId)
+        }
+        // Ensure the reserved conversation is always pinned and has the canonical icon/title.
+        if let index = loaded.firstIndex(where: { $0.id == ChatConversation.trinityQueenId }) {
+            loaded[index].isPinned = true
+            loaded[index].icon = "crown.fill"
+            loaded[index].title = "Trinity Queen"
+        }
+        conversations = loaded
     }
 
     func sessionRecoveryConversations() async -> SessionRecoverySanitized<[SessionRecoveryConversation]> {
@@ -178,6 +245,103 @@ final class ChatViewModel: ObservableObject {
         )
     }
 
+    /// Export with progress reporting. Progress is published to
+    /// `recoveryProgress` on the main actor.
+    func exportRecoveryPackage(
+        request: SessionRecoveryPackageRequest,
+        to destinationURL: URL
+    ) async throws -> SessionRecoveryExportResult {
+        recoveryProgress.start(operation: .export, totalFiles: request.conversations.count + 1)
+        defer { recoveryProgress.finish() }
+
+        return try await Task.detached(priority: .userInitiated) {
+            try SessionRecoveryPackageWriter().write(
+                request: request,
+                to: destinationURL
+            )
+        }.value
+    }
+
+    /// Imports a Trinity recovery ZIP into the local encrypted conversation store.
+    /// The active conversation is switched to the recovered active conversation.
+    /// Duplicate handling defaults to `.skip` when no resolver is supplied.
+    func importRecoveryPackage(
+        from url: URL,
+        resolvingDuplicates resolver: ((UUID, String) async -> SessionRecoveryDuplicateResolution)? = nil
+    ) async throws -> SessionRecoveryImportSummary {
+        await awaitInitialization()
+
+        recoveryProgress.start(operation: .import, totalFiles: 1)
+        defer { recoveryProgress.finish() }
+
+        let result = try await Task.detached(priority: .userInitiated) {
+            try SessionRecoveryPackageReader.read(from: url)
+        }.value
+
+        let existing = await persister.listAllConversations()
+        let existingByID = Dictionary(uniqueKeysWithValues: existing.map { ($0.id, $0) })
+
+        var importedMessages = 0
+        var successCount = 0
+        var savedIDs: [UUID] = []
+
+        for recoveryConversation in result.conversations {
+            let id = recoveryConversation.id
+            let messages = SessionRecoverySnapshotFactory.chatMessage(from: recoveryConversation)
+            importedMessages += messages.count
+
+            let resolution: SessionRecoveryDuplicateResolution
+            if existingByID[id] != nil {
+                resolution = await resolver?(id, recoveryConversation.title) ?? .skip
+            } else {
+                resolution = .replace
+            }
+
+            let messagesToSave: [ChatMessage]
+            switch resolution {
+            case .replace:
+                messagesToSave = messages
+            case .merge:
+                let existingMessages = await persister.load(conversationId: id)
+                let existingIDs = Set(existingMessages.map { $0.id })
+                let newMessages = messages.filter { !existingIDs.contains($0.id) }
+                messagesToSave = existingMessages + newMessages
+            case .skip:
+                messagesToSave = []
+            }
+
+            guard !messagesToSave.isEmpty || resolution == .replace else {
+                continue
+            }
+
+            await persister.save(messages: messagesToSave, conversationId: id)
+            await persister.renameConversation(
+                id: id,
+                title: ConversationTitlePolicy.normalized(recoveryConversation.title)
+            )
+            savedIDs.append(id)
+            successCount += 1
+        }
+
+        let activeID = result.activeConversationID
+        if result.conversations.contains(where: { $0.id == activeID && savedIDs.contains($0.id) }) {
+            conversationId = activeID
+            await persister.setCurrentConversationId(activeID)
+            await loadHistory()
+            await todoPlanner.load(conversationId: activeID)
+        }
+        await loadConversations()
+
+        return SessionRecoveryImportSummary(
+            conversationCount: result.conversations.count,
+            successCount: successCount,
+            failureCount: result.conversations.count - successCount,
+            messageCount: importedMessages,
+            activeConversationID: activeID,
+            failedConversationIDs: []
+        )
+    }
+
     func switchConversation(id: UUID) async {
         await awaitInitialization()
         guard beginConversationTransition() else { return }
@@ -205,6 +369,19 @@ final class ChatViewModel: ObservableObject {
         showHistory = false
     }
 
+    /// Execute a Queen slash command locally, switching to the Queen conversation
+    /// if necessary so the result is visible in the chat timeline.
+    func runQueenCommand(_ text: String) async {
+        await awaitInitialization()
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.hasPrefix("/") else { return }
+        if conversationId != ChatConversation.trinityQueenId {
+            await switchConversation(id: ChatConversation.trinityQueenId)
+        }
+        let command = QueenCommandParser.parse(trimmed)
+        await executeQueenCommand(command, originalText: trimmed)
+    }
+
     func sendMessage(
         appendUser: Bool = true,
         onAccepted: (() -> Void)? = nil
@@ -220,9 +397,17 @@ final class ChatViewModel: ObservableObject {
         }
         lastSendTime = now
 
+        // Trinity Queen conversation intercepts slash commands locally.
+        if conversationId == ChatConversation.trinityQueenId, text.hasPrefix("/") {
+            let command = QueenCommandParser.parse(text)
+            inputText = ""
+            await executeQueenCommand(command, originalText: text)
+            return
+        }
+
         NSLog("[TriosChat] sendMessage start: \"\(text.prefix(40))\"")
 
-        // Save to message history for ↑↓ hotkey navigation
+        // Save to message history for (up/down) hotkey navigation
         messageHistory.append(text)
         if messageHistory.count > 50 {  // Limit history to 50 messages
             messageHistory.removeFirst()
@@ -383,16 +568,17 @@ final class ChatViewModel: ObservableObject {
                 return
             }
 
-            NSLog("[TriosChat] transport error: \(error.localizedDescription)")
+            let errorDetail = formatRequestError(error)
+            NSLog("[TriosChat] transport error: \(errorDetail)")
             clearPendingUsage()
-            let errorMsg = ChatMessage(role: .system, content: "[!] \(error.localizedDescription)")
+            let errorMsg = ChatMessage(role: .system, content: "[!] \(errorDetail)")
             messages.append(errorMsg)
             rebuildCache()
             let historySnapshot = captureHistorySnapshot()
-            await failPendingTurn(message: error.localizedDescription)
+            await failPendingTurn(message: errorDetail)
             await persistHistorySnapshot(historySnapshot)
             guard isGenerationCurrent(generation) else { return }
-            _ = await stateMachine.transition(to: .error(error.localizedDescription))
+            _ = await stateMachine.transition(to: .error(errorDetail))
             guard isGenerationCurrent(generation) else { return }
             let currentState = await stateMachine.currentState()
             guard isGenerationCurrent(generation) else { return }
@@ -431,13 +617,72 @@ final class ChatViewModel: ObservableObject {
     }
 
     func sendFeedback(messageId: UUID, isPositive: Bool) async {
-        NSLog("[TriosChat] feedback for \(messageId): \(isPositive ? "👍" : "👎")")
-        // TODO: wire to server feedback endpoint when available
+        NSLog("[TriosChat] feedback for \(messageId): \(isPositive ? "thumbs-up" : "thumbs-down")")
+
+        guard let url = URL(
+            string: "\(ProjectPaths.mcpBaseURL)/chat/\(conversationId.uuidString)/messages/\(messageId.uuidString)/feedback"
+        ) else {
+            NSLog("[TriosChat] feedback aborted: invalid URL")
+            return
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.timeoutInterval = 30
+
+        let body: [String: Bool] = ["isPositive": isPositive]
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        } catch {
+            NSLog("[TriosChat] feedback body encoding failed: \(error.localizedDescription)")
+            return
+        }
+
+        let retrier = NetworkRetrier(policy: NetworkRetryPolicy.default)
+        do {
+            let (_, response) = try await retrier.execute(
+                url: url,
+                description: "feedback POST \(url.absoluteString)"
+            ) {
+                try await URLSession.shared.data(for: request)
+            }
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                NSLog("[TriosChat] feedback server returned \(status)")
+                return
+            }
+            NSLog("[TriosChat] feedback stored on server")
+        } catch {
+            NSLog("[TriosChat] feedback request failed: \(formatRequestError(error))")
+        }
     }
 
     func checkHealth() async {
         let reachable = await healthCheck.check()
         isServerReachable = reachable
+    }
+
+    private func formatRequestError(_ error: Error) -> String {
+        if let retryError = error as? RetryError {
+            return retryError.localizedDescription
+        }
+        if let transportError = error as? TransportError {
+            return transportError.localizedDescription
+        }
+        if let a2aError = error as? A2AError {
+            return a2aError.localizedDescription
+        }
+        if let urlError = error as? URLError {
+            var parts: [String] = []
+            parts.append("URLError code \(urlError.code.rawValue): \(urlError.localizedDescription)")
+            if let failingURL = urlError.failingURL {
+                parts.append("URL: \(failingURL.absoluteString)")
+            }
+            return parts.joined(separator: " | ")
+        }
+        return error.localizedDescription
     }
 
     func newConversation() {
@@ -555,52 +800,6 @@ final class ChatViewModel: ObservableObject {
 
     // MARK: - A2A Actions
 
-    func registerA2A() async {
-        guard let client = a2aClient else { return }
-        do {
-            try await client.register()
-            await client.startHeartbeat(interval: 30)
-            startA2AStream()
-            isA2ARegistered = true
-        } catch {
-            isA2ARegistered = false
-        }
-    }
-
-    func unregisterA2A() async {
-        stopA2AStream()
-        guard let client = a2aClient else { return }
-        await client.stopHeartbeat()
-        do {
-            try await client.unregister()
-            isA2ARegistered = false
-        } catch {
-            isA2ARegistered = false
-        }
-    }
-
-    func startA2AStream() {
-        guard let client = a2aClient else { return }
-        a2aRouter = A2AMessageRouter(viewModel: self)
-        a2aStreamTask?.cancel()
-        a2aStreamTask = Task {
-            do {
-                let stream = try await client.messageStream()
-                for await message in stream {
-                    a2aRouter?.route(message)
-                }
-            } catch {
-                // Silent — stream will retry on next registration
-            }
-        }
-    }
-
-    func stopA2AStream() {
-        a2aStreamTask?.cancel()
-        a2aStreamTask = nil
-        a2aRouter = nil
-    }
-
     func updateTaskState(id: UUID, state: AgentTaskState) async {
         guard let client = a2aClient else { return }
         do {
@@ -628,7 +827,7 @@ final class ChatViewModel: ObservableObject {
         do {
             try await client.sendMessage(message)
         } catch {
-            // Silent failure — A2A is best-effort until server routes are live
+            // Silent failure  -  A2A is best-effort until server routes are live
         }
     }
 
@@ -684,7 +883,7 @@ final class ChatViewModel: ObservableObject {
 
         case .finishMessage(let messageId):
             guard let _ = messageCache[messageId] else { return }
-            // Do NOT clear isStreaming here — text may be finished but tool calls
+            // Do NOT clear isStreaming here  -  text may be finished but tool calls
             // or reasoning may still be in progress. isStreaming is cleared on
             // streamComplete / streamAborted so the reaction bar only appears
             // after the *entire* assistant turn is done.
@@ -1230,6 +1429,10 @@ final class ChatViewModel: ObservableObject {
     }
 
     func togglePin(_ id: UUID) {
+        guard id != ChatConversation.trinityQueenId else {
+            NSLog("[TriosChat] togglePin ignored for reserved Trinity Queen conversation")
+            return
+        }
         if let index = conversations.firstIndex(where: { $0.id == id }) {
             conversations[index].isPinned.toggle()
             objectWillChange.send()
@@ -1280,6 +1483,15 @@ final class ChatViewModel: ObservableObject {
     }
 
     func deleteConversation(_ id: UUID) {
+        guard id != ChatConversation.trinityQueenId else {
+            NSLog("[TriosChat] deleteConversation ignored for reserved Trinity Queen conversation")
+            Task {
+                await appendSystemMessageToQueenChat(
+                    "This conversation is the Trinity Queen direct line and cannot be deleted."
+                )
+            }
+            return
+        }
         guard beginConversationTransition() else { return }
         let retainedHistorySnapshot: ConversationHistorySnapshot?
         if id == conversationId {
@@ -1297,6 +1509,248 @@ final class ChatViewModel: ObservableObject {
             )
             endConversationTransition()
         }
+    }
+
+    private func appendSystemMessageToQueenChat(_ content: String) async {
+        let message = ChatMessage(role: .system, content: content)
+        if conversationId == ChatConversation.trinityQueenId {
+            messages.append(message)
+            rebuildCache()
+            await saveHistory(expectedGeneration: streamGeneration)
+        } else {
+            var queenMessages = await persister.load(conversationId: ChatConversation.trinityQueenId)
+            queenMessages.append(message)
+            await persister.save(messages: queenMessages, conversationId: ChatConversation.trinityQueenId)
+        }
+        await loadConversations()
+    }
+
+    // MARK: - Queen Slash Commands
+
+    private func executeQueenCommand(_ command: QueenCommand, originalText: String) async {
+        switch command {
+        case .help:
+            await appendSystemMessageToQueenChat(QueenCommandParser.helpText)
+        case .status:
+            let a2aStatus = queenBackgroundService?.isA2ARegistered ?? false
+            await appendSystemMessageToQueenChat(
+                "Server: \(isServerReachable ? "online" : "offline"). " +
+                "A2A: \(a2aStatus ? "registered" : "unregistered"). " +
+                "Conversations: \(conversations.count)."
+            )
+        case .agents:
+            await listQueenAgents()
+        case .chats:
+            await listQueenChats()
+        case .switchChat(let id):
+            await switchConversation(id: id)
+            await appendSystemMessageToQueenChat("Switched to conversation \(id.uuidString.prefix(8))")
+        case .newChat(let title):
+            if let id = await queenBackgroundService?.createChat(title: title) {
+                await switchConversation(id: id)
+                await appendSystemMessageToQueenChat("Created and switched to conversation \(id.uuidString.prefix(8))")
+            } else {
+                newConversation()
+                if let title, !title.isEmpty {
+                    await renameConversation(conversationId, to: title)
+                }
+                await appendSystemMessageToQueenChat("Created new conversation")
+            }
+        case .deleteChat(let id):
+            deleteConversation(id)
+            await appendSystemMessageToQueenChat("Deleted conversation \(id.uuidString.prefix(8))")
+        case .delegate(let agent, let task):
+            await delegateTaskToAgent(agentIdString: agent, taskDescription: task)
+        case .broadcast(let message):
+            await broadcastToAgents(message)
+        case .audit:
+            await runQueenEvolution()
+        case .memory:
+            await recallQueenMemory()
+        case .evolve:
+            await runQueenEvolution()
+        case .proposals:
+            await listQueenProposals()
+        case .evolveApply(let id, let confirmed):
+            if confirmed {
+                guard stagedProposalIds.contains(id) else {
+                    await appendSystemMessageToQueenChat(
+                        "Proposal \(id.uuidString.prefix(8)) has not been staged. Run `/apply \(id.uuidString)` first."
+                    )
+                    return
+                }
+                await applyQueenProposal(id: id, confirmed: true)
+            } else {
+                await applyQueenProposal(id: id, confirmed: false)
+            }
+        case .evolveReject(let id):
+            await rejectQueenProposal(id: id)
+        case .doctor:
+            let output = await queenStatusVM.runSkillReturningOutput(name: "/doctor")
+            await appendSystemMessageToQueenChat("`/doctor` result:\n\(output)")
+        case .tri:
+            let output = await queenStatusVM.runSkillReturningOutput(name: "/tri")
+            await appendSystemMessageToQueenChat("`/tri` result:\n\(output)")
+        case .godMode:
+            let output = await queenStatusVM.runSkillReturningOutput(name: "/god-mode")
+            await appendSystemMessageToQueenChat("`/god-mode` result:\n\(output)")
+        case .bridge:
+            let output = await queenStatusVM.runSkillReturningOutput(name: "/bridge")
+            await appendSystemMessageToQueenChat("`/bridge` result:\n\(output)")
+        case .unknown:
+            await appendSystemMessageToQueenChat("Unknown Queen command: \(originalText)\n\(QueenCommandParser.helpText)")
+        }
+    }
+
+    private func listQueenAgents() async {
+        let agents = await queenBackgroundService?.listAgents() ?? []
+        let lines = agents.map { "* \($0.id.rawValue): \($0.name)" }
+        let text = lines.isEmpty ? "No online agents discovered." : lines.joined(separator: "\n")
+        await appendSystemMessageToQueenChat("Online agents:\n\(text)")
+    }
+
+    private func listQueenChats() async {
+        let chats = await queenBackgroundService?.listChats() ?? conversations
+        let lines = chats.map { conv in
+            let pin = conv.isReserved ? "[QUEEN]" : (conv.isPinned ? "[PIN]" : "  ")
+            return "\(pin) \(conv.id.uuidString.prefix(8))  -  \(conv.title)"
+        }
+        await appendSystemMessageToQueenChat("Conversations:\n\(lines.joined(separator: "\n"))")
+    }
+
+    private func delegateTaskToAgent(agentIdString: String, taskDescription: String) async {
+        await queenBackgroundService?.delegateTask(agentId: agentIdString, description: taskDescription)
+    }
+
+    private func broadcastToAgents(_ message: String) async {
+        await queenBackgroundService?.broadcast(message: message)
+    }
+
+    private func recallQueenMemory() async {
+        let goal = "Queen self-improvement and recent system activity"
+        let matches = await memoryService.recall(for: goal, limit: 5)
+        let lines = matches.map { "* \($0.record.displayBody.prefix(120))" }
+        let text = lines.isEmpty ? "No recent memory entries found." : lines.joined(separator: "\n")
+        await appendSystemMessageToQueenChat("Recalled memory:\n\(text)")
+    }
+
+    private func runQueenEvolution() async {
+        guard let service = queenBackgroundService else {
+            await appendSystemMessageToQueenChat("Queen background service is not available.")
+            return
+        }
+        await service.runAudit()
+        if let event = service.lastAudit {
+            let proposalLines = service.proposals.filter { $0.status == .pending }.map {
+                "* \($0.id.uuidString.prefix(8))  -  \($0.targetFile): \($0.rationale.prefix(80))"
+            }
+            let proposalText = proposalLines.isEmpty ? "No pending proposals." : proposalLines.joined(separator: "\n")
+            await appendSystemMessageToQueenChat(
+                "Audit complete: \(event.findings.joined(separator: "; "))\n\nPending proposals:\n\(proposalText)"
+            )
+        }
+    }
+
+    private func listQueenProposals() async {
+        guard let service = queenBackgroundService else {
+            await appendSystemMessageToQueenChat("Queen background service is not available.")
+            return
+        }
+        let pending = service.proposals.filter { $0.status == .pending }
+        let lines = pending.map {
+            "\($0.id.uuidString)  -  \($0.targetFile)\n  Trigger: \($0.trigger)\n  Rationale: \($0.rationale.prefix(120))"
+        }
+        let text = lines.isEmpty ? "No pending proposals. Run /evolve to generate some." : lines.joined(separator: "\n\n")
+        await appendSystemMessageToQueenChat("Pending Queen proposals:\n\(text)")
+    }
+
+    private func applyQueenProposal(id: UUID, confirmed: Bool) async {
+        guard let service = queenBackgroundService else {
+            await appendSystemMessageToQueenChat("Queen background service is not available.")
+            return
+        }
+        guard let proposal = service.approveProposal(id: id) else {
+            await appendSystemMessageToQueenChat("Proposal \(id.uuidString.prefix(8)) not found or already processed.")
+            return
+        }
+
+        if !confirmed {
+            await appendSystemMessageToQueenChat(
+                "Proposal \(proposal.id.uuidString.prefix(8)) approved. Staging preview (build only)..."
+            )
+            let result = await QueenProposalApplier.shared.apply(
+                proposal,
+                projectRoot: ProjectPaths.root,
+                confirmed: false
+            )
+            if result.success, let branchName = result.branchName {
+                stagedProposalIds.insert(proposal.id)
+                stagedProposalBranches[proposal.id] = branchName
+                await appendSystemMessageToQueenChat(
+                    result.summary + "\n\nTo land this change, run `/apply \(proposal.id.uuidString) confirm`."
+                )
+            } else {
+                await appendSystemMessageToQueenChat(result.summary)
+            }
+            return
+        }
+
+        await appendSystemMessageToQueenChat(
+            "Proposal \(proposal.id.uuidString.prefix(8)) confirmed. Committing, pushing, and opening draft PR..."
+        )
+        let reuseBranch = stagedProposalBranches[proposal.id]
+        let result = await QueenProposalApplier.shared.apply(
+            proposal,
+            projectRoot: ProjectPaths.root,
+            confirmed: true,
+            reuseBranch: reuseBranch
+        )
+        stagedProposalIds.remove(proposal.id)
+        stagedProposalBranches.removeValue(forKey: proposal.id)
+        await appendSystemMessageToQueenChat(result.summary)
+    }
+
+    private func rejectQueenProposal(id: UUID) async {
+        guard let service = queenBackgroundService else {
+            await appendSystemMessageToQueenChat("Queen background service is not available.")
+            return
+        }
+        service.rejectProposal(id: id)
+        await appendSystemMessageToQueenChat("Proposal \(id.uuidString.prefix(8)) rejected and removed from pending queue.")
+    }
+}
+
+extension ChatViewModel: QueenBackgroundServiceDelegate {
+    func queenBackgroundService(
+        _ service: QueenBackgroundService,
+        didReceiveA2AMessage message: ChatMessage
+    ) {
+        guard conversationId == ChatConversation.trinityQueenId else {
+            Task {
+                await loadConversations()
+            }
+            return
+        }
+
+        // QueenBackgroundService already persisted the inbound A2A message to the
+        // persister before calling the delegate. Reload the canonical history so we
+        // never double-write the same message, then append only if the delegate
+        // message is not already present.
+        Task {
+            let history = await persister.load(conversationId: ChatConversation.trinityQueenId)
+            var updated = history
+            if !history.contains(where: { $0.id == message.id }) {
+                updated.append(message)
+                await persister.save(messages: updated, conversationId: ChatConversation.trinityQueenId)
+            }
+            messages = updated
+            rebuildCache()
+            await loadConversations()
+        }
+    }
+
+    func queenBackgroundServiceDidUpdateState(_ service: QueenBackgroundService) {
+        isA2ARegistered = service.isA2ARegistered
     }
 }
 
@@ -1362,43 +1816,21 @@ struct ChatRequestBuilder {
     func build() throws -> Data {
         var messages: [[String: Any]] = []
 
-        // System memory prompt
-        let systemContent = userSystemPrompt.map { "\(memoryPrompt)\n\($0)" } ?? memoryPrompt
+        // System memory prompt. Recalled context is explicitly marked as untrusted
+        // so the model does not treat it as a privileged instruction.
+        let systemContent: String
+        if let userSystemPrompt = userSystemPrompt, !userSystemPrompt.isEmpty {
+            systemContent = "\(memoryPrompt)\n[Recalled memory  -  verify before acting]\n\(userSystemPrompt)"
+        } else {
+            systemContent = memoryPrompt
+        }
         messages.append(["role": "system", "content": systemContent])
 
-        // Rich conversation history with segments and tool calls
+        // Conversation history: only the public message content is sent to the
+        // model. Reasoning, tool inputs/outputs, and error metadata remain in the
+        // local UI store and are not forwarded as prompt context.
         for msg in previousConversation {
-            var content = msg.content
-
-            // Append reasoning segments as visible memory
-            let reasoning = msg.segments.compactMap {
-                if case .reasoning(let text) = $0 { return text }
-                return nil
-            }
-            if !reasoning.isEmpty {
-                content += "\n\n[Internal reasoning]: " + reasoning.joined(separator: "\n")
-            }
-
-            // Append tool calls as memory
-            if !msg.toolCalls.isEmpty {
-                let tools = msg.toolCalls.map { tc in
-                    var s = "Tool: \(tc.name)(\(tc.arguments))"
-                    if let out = tc.output { s += " -> \(out)" }
-                    return s
-                }.joined(separator: "\n")
-                content += "\n\n[Tools used]:\n" + tools
-            }
-
-            // Append error segments
-            let errors = msg.segments.compactMap {
-                if case .error(let text) = $0 { return text }
-                return nil
-            }
-            if !errors.isEmpty {
-                content += "\n\n[Errors]: " + errors.joined(separator: "; ")
-            }
-
-            messages.append(["role": msg.role.rawValue, "content": content])
+            messages.append(["role": msg.role.rawValue, "content": msg.content])
         }
 
         // Current user message

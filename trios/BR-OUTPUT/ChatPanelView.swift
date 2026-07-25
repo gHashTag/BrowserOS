@@ -32,7 +32,10 @@ struct ChatPanelView: View {
     @State private var composerEditorHeight: CGFloat = 42
     @State private var showHotkeyHelp = false
     @State private var isExportingRecovery = false
+    @State private var isImportingRecovery = false
     @State private var recoveryNotice: SessionRecoveryNotice?
+    @State private var duplicateResolutions: [UUID: SessionRecoveryDuplicateResolution] = [:]
+    @State private var pendingDuplicate: SessionRecoveryDuplicateItem?
     @State private var composerAttachments: [ChatComposerAttachment] = []
     @State private var isAttachmentDropTargeted = false
     @State private var pendingAttachmentImports = 0
@@ -66,6 +69,9 @@ struct ChatPanelView: View {
         .onReceive(NotificationCenter.default.publisher(for: .exportSessionRecoveryPackage)) { _ in
             exportRecoveryPackage()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .importSessionRecoveryPackage)) { _ in
+            importRecoveryPackage()
+        }
         .onChange(of: viewModel.conversationId) {
             browserOSVM.cancelStreaming()
             browserOSVM.messages.removeAll()
@@ -78,6 +84,60 @@ struct ChatPanelView: View {
                 dismissButton: .default(Text("OK"))
             )
         }
+        .sheet(item: $pendingDuplicate) { duplicate in
+            SessionRecoveryDuplicateSheet(
+                duplicate: duplicate,
+                onResolve: { resolution in
+                    duplicateResolutions[duplicate.id] = resolution
+                    pendingDuplicate = nil
+                }
+            )
+        }
+        .overlay {
+            if viewModel.recoveryProgress.isActive {
+                recoveryProgressOverlay
+            }
+        }
+    }
+
+    private var recoveryProgressOverlay: some View {
+        VStack(spacing: 8) {
+            Spacer()
+            VStack(spacing: 10) {
+                HStack(spacing: 8) {
+                    ProgressView(
+                        value: viewModel.recoveryProgress.fractionCompleted,
+                        total: 1.0
+                    )
+                    .progressViewStyle(.linear)
+                    .frame(width: 220)
+                    Button("Cancel") {
+                        // Cancellation is co-operative; the current task will
+                        // notice `Task.isCancelled` at its next yield point.
+                        // For now we stop the UI overlay and let the operation
+                        // finish or fail on its own.
+                        viewModel.recoveryProgress.reset()
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                Text(viewModel.recoveryProgress.currentFile)
+                    .font(.system(size: 11))
+                    .foregroundColor(.grokDim)
+                    .lineLimit(1)
+            }
+            .padding(14)
+            .background(Color.grokElevated.opacity(0.92))
+            .cornerRadius(12)
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(Color.grokBorder, lineWidth: 1)
+            )
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black.opacity(0.35))
+        .ignoresSafeArea()
     }
 
     // MARK: - Unified Messages / Empty State
@@ -181,7 +241,7 @@ struct ChatPanelView: View {
         isNearBottom = true
         DispatchQueue.main.async {
             if animated {
-                // Используем smooth scroll с spring animation
+                // Use smooth scroll with spring animation
                 withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                     proxy.scrollTo(ChatScrollAnchor.bottom, anchor: .bottom)
                 }
@@ -384,6 +444,12 @@ struct ChatPanelView: View {
                 viewModel.inputText = ""
                 browserOSVM.messages.removeAll()
                 clearComposerAttachments()
+                return
+            }
+            if let slashCommand = text.split(separator: " ")
+                .map(String.init)
+                .first(where: { $0.hasPrefix("/") }) {
+                Task { await viewModel.runQueenCommand(slashCommand) }
                 return
             }
             viewModel.inputText = text
@@ -788,14 +854,26 @@ struct ChatPanelView: View {
     }
 
     private var composerRecoveryControl: some View {
-        Button(action: exportRecoveryPackage) {
+        Menu {
+            Button("Export recovery package...") {
+                exportRecoveryPackage()
+            }
+            .keyboardShortcut("e", modifiers: [.command, .shift])
+            .disabled(isExportingRecovery || isImportingRecovery)
+
+            Button("Import recovery package...") {
+                importRecoveryPackage()
+            }
+            .keyboardShortcut("i", modifiers: [.command, .shift])
+            .disabled(isExportingRecovery || isImportingRecovery)
+        } label: {
             HStack(spacing: 5) {
-                if isExportingRecovery {
+                if isExportingRecovery || isImportingRecovery {
                     ProgressView()
                         .controlSize(.small)
                         .frame(width: 12, height: 12)
                 } else {
-                    Image(systemName: "square.and.arrow.down")
+                    Image(systemName: "arrow.up.arrow.down.square")
                         .font(.system(size: 11, weight: .medium))
                 }
                 if workspaceMode == .expanded {
@@ -807,11 +885,10 @@ struct ChatPanelView: View {
             .frame(minWidth: 24)
             .frame(height: CGFloat(composerStatusMetrics.controlHeight))
         }
-        .buttonStyle(.plain)
-        .disabled(isExportingRecovery)
-        .keyboardShortcut("e", modifiers: [.command, .shift])
-        .accessibilityLabel("Export session recovery package")
-        .help("Export complete chat, context, tool history, and detailed logs")
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .accessibilityLabel("Session recovery options")
+        .help("Export or import complete chat, context, tool history, and detailed logs")
     }
 
     private var composerConnectionStatus: some View {
@@ -863,7 +940,7 @@ struct ChatPanelView: View {
         if !viewModel.isServerReachable {
             return StatusHint(
                 icon: "exclamationmark.triangle.fill",
-                text: "BrowserOS Agent offline — start it or check port \(ProjectPaths.mcpPort).",
+                text: "BrowserOS Agent offline  -  start it or check port \(ProjectPaths.mcpPort).",
                 color: .yellow
             )
         }
@@ -922,7 +999,11 @@ struct ChatPanelView: View {
             attachments: attachments
         )
 
-        if attachments.isEmpty && browserOSVM.isLikelyCommand(text) {
+        if attachments.isEmpty && text.hasPrefix("/") {
+            NSLog("[ChatPanel] routing slash command to Queen")
+            viewModel.inputText = ""
+            Task { await viewModel.runQueenCommand(text) }
+        } else if attachments.isEmpty && browserOSVM.isLikelyCommand(text) {
             NSLog("[ChatPanel] routing to BrowserOS command")
             viewModel.inputText = ""
             browserOSVM.sendMessage(text)
@@ -1014,7 +1095,7 @@ struct ChatPanelView: View {
     }
 
     private func exportRecoveryPackage() {
-        guard !isExportingRecovery else { return }
+        guard !isExportingRecovery, !isImportingRecovery else { return }
 
         let panel = NSSavePanel()
         panel.title = "Export session recovery package"
@@ -1044,12 +1125,10 @@ struct ChatPanelView: View {
             )
 
             do {
-                let result = try await Task.detached(priority: .userInitiated) {
-                    try SessionRecoveryPackageWriter().write(
-                        request: request,
-                        to: destinationURL
-                    )
-                }.value
+                let result = try await viewModel.exportRecoveryPackage(
+                    request: request,
+                    to: destinationURL
+                )
                 isExportingRecovery = false
                 NSWorkspace.shared.activateFileViewerSelecting([result.archiveURL])
                 recoveryNotice = SessionRecoveryNotice(
@@ -1060,6 +1139,60 @@ struct ChatPanelView: View {
                 isExportingRecovery = false
                 recoveryNotice = SessionRecoveryNotice(
                     title: "Export failed",
+                    message: error.localizedDescription
+                )
+            }
+        }
+    }
+
+    private func importRecoveryPackage() {
+        guard !isExportingRecovery, !isImportingRecovery else { return }
+
+        let panel = NSOpenPanel()
+        panel.title = "Import session recovery package"
+        panel.message = "Restore a previously exported Trinity recovery ZIP into TriOS."
+        panel.prompt = "Import"
+        panel.allowsMultipleSelection = false
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = [.zip]
+
+        guard panel.runModal() == .OK, let sourceURL = panel.url else { return }
+
+        isImportingRecovery = true
+        duplicateResolutions.removeAll()
+        Task {
+            do {
+                let summary = try await viewModel.importRecoveryPackage(
+                    from: sourceURL,
+                    resolvingDuplicates: { id, title in
+                        if let resolution = self.duplicateResolutions[id] {
+                            return resolution
+                        }
+                        self.pendingDuplicate = SessionRecoveryDuplicateItem(
+                            id: id,
+                            title: title
+                        )
+                        // Wait for the sheet to set a resolution.
+                        while self.duplicateResolutions[id] == nil
+                                && !Task.isCancelled {
+                            try? await Task.sleep(nanoseconds: 50_000_000)
+                        }
+                        return self.duplicateResolutions[id] ?? .skip
+                    }
+                )
+                isImportingRecovery = false
+                let failureHint = summary.failureCount > 0
+                    ? " \(summary.failureCount) failed (IDs: \(summary.failedConversationIDs.map { String($0.uuidString.prefix(8)) }.joined(separator: ", ")))."
+                    : ""
+                recoveryNotice = SessionRecoveryNotice(
+                    title: "Recovery package imported",
+                    message: "Restored \(summary.successCount) of \(summary.conversationCount) conversation(s) and \(summary.messageCount) message(s). Active conversation: \(summary.activeConversationID.uuidString.prefix(8)).\(failureHint)"
+                )
+            } catch {
+                isImportingRecovery = false
+                recoveryNotice = SessionRecoveryNotice(
+                    title: "Import failed",
                     message: error.localizedDescription
                 )
             }
@@ -1117,7 +1250,9 @@ struct ChatPanelView: View {
             triosServerReachable: viewModel.isServerReachable,
             browserOSConnected: browserOSVM.isBrowserOSConnected,
             cdpPort: "9102",
-            draft: viewModel.inputText
+            draft: viewModel.inputText,
+            encryptionScheme: "local-aes256-gcm-v1",
+            encryptionKeyPath: "~/Library/Application Support/trios/conversation.key"
         )
     }
 
@@ -1197,6 +1332,46 @@ private struct SessionRecoveryNotice: Identifiable {
     let id = UUID()
     let title: String
     let message: String
+}
+
+private struct SessionRecoveryDuplicateItem: Identifiable {
+    let id: UUID
+    let title: String
+}
+
+private struct SessionRecoveryDuplicateSheet: View {
+    let duplicate: SessionRecoveryDuplicateItem
+    let onResolve: (SessionRecoveryDuplicateResolution) -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Conversation already exists")
+                .font(.headline)
+            Text("\"\(duplicate.title)\" has the same ID as an existing conversation. What would you like to do?")
+                .font(.system(size: 13))
+                .multilineTextAlignment(.center)
+                .padding(.horizontal)
+
+            HStack(spacing: 12) {
+                Button("Replace") {
+                    onResolve(.replace)
+                }
+                .keyboardShortcut(.defaultAction)
+
+                Button("Merge") {
+                    onResolve(.merge)
+                }
+
+                Button("Skip") {
+                    onResolve(.skip)
+                }
+                .keyboardShortcut(.cancelAction)
+            }
+            .padding(.bottom)
+        }
+        .frame(width: 360)
+        .padding()
+    }
 }
 
 // MARK: - MacTextEditor (NSTextView Wrapper)
@@ -1491,11 +1666,11 @@ struct MacTextEditor: NSViewRepresentable {
         // Tooltip with hotkeys
         textView.toolTip = """
         Hotkeys:
-        ⏎ Send | ⇧⏎ New line
-        ⌘C/V/X Copy/Paste/Cut | ⌘A Select all
-        ⌘K Clear | ⌘L Focus input
-        ↑↓ History | ⎋ Escape (blur)
-        ⌘/ Show all shortcuts
+        Return Send | ShiftReturn New line
+        CmdC/V/X Copy/Paste/Cut | CmdA Select all
+        CmdK Clear | CmdL Focus input
+        Up/Down History | Esc Escape (blur)
+        Cmd/ Show all shortcuts
         """
 
         // Accessibility hints for VoiceOver
@@ -1736,7 +1911,7 @@ private struct BrowserOSMessageBubble: View {
         if cleaned.hasPrefix("[!] ") {
             cleaned = String(cleaned.dropFirst(4))
         }
-        cleaned = cleaned.replacingOccurrences(of: "⚠️ ", with: "")
+        cleaned = cleaned.replacingOccurrences(of: "Warning: ", with: "")
         return cleaned
     }
 }
