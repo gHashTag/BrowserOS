@@ -12,6 +12,7 @@ import {
   wait_for,
 } from '../../src/tools/navigation'
 import { close_window, create_window } from '../../src/tools/windows'
+import { hiddenWindowsUnsupported } from '../__helpers__/utils'
 import { withBrowser } from '../__helpers__/with-browser'
 
 function textOf(result: {
@@ -142,6 +143,10 @@ describe('navigation tools', () => {
       const result = await execute(new_hidden_page, {
         url: 'about:blank',
       })
+      if (hiddenWindowsUnsupported(result)) {
+        console.warn('skip: hidden windows unsupported on this platform')
+        return
+      }
       assert.ok(!result.isError, textOf(result))
       const data = structuredOf<{ pageId: number; hidden: boolean }>(result)
       assert.strictEqual(data.hidden, true)
@@ -155,6 +160,10 @@ describe('navigation tools', () => {
       const hiddenResult = await execute(new_hidden_page, {
         url: 'about:blank',
       })
+      if (hiddenWindowsUnsupported(hiddenResult)) {
+        console.warn('skip: hidden windows unsupported on this platform')
+        return
+      }
       const pageId = structuredOf<{ pageId: number }>(hiddenResult).pageId
 
       const showResult = await execute(show_page, { page: pageId })

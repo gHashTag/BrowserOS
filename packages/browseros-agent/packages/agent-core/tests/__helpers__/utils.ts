@@ -4,6 +4,23 @@ import { execSync } from 'node:child_process'
 // Port Management
 // =============================================================================
 
+/**
+ * True when a tool result failed because the platform cannot create hidden
+ * windows (Linux CI runs headless/Wayland Ozone; only X11/mac/win support
+ * them). Tests should treat this as "skip", not "fail".
+ */
+export function hiddenWindowsUnsupported(result: {
+  isError?: boolean
+  content: { type: string; text?: string }[]
+}): boolean {
+  if (!result.isError) return false
+  const text = result.content
+    .filter((c) => c.type === 'text')
+    .map((c) => c.text ?? '')
+    .join('\n')
+  return text.includes('Hidden windows are not yet supported')
+}
+
 export async function killProcessOnPort(port: number): Promise<void> {
   try {
     console.log(`Finding process on port ${port}...`)

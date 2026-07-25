@@ -10,6 +10,7 @@ import {
   list_windows,
   set_window_visibility,
 } from '../../src/tools/windows'
+import { hiddenWindowsUnsupported } from '../__helpers__/utils'
 import { withBrowser } from '../__helpers__/with-browser'
 
 function textOf(result: {
@@ -101,6 +102,10 @@ describe('window tools', () => {
   it('create_hidden_window creates and closes a hidden window', async () => {
     await withBrowser(async ({ execute }) => {
       const createResult = await execute(create_hidden_window, {})
+      if (hiddenWindowsUnsupported(createResult)) {
+        console.warn('skip: hidden windows unsupported on this platform')
+        return
+      }
       assert.ok(!createResult.isError, textOf(createResult))
       const windowData = structuredOf<{
         window: { windowId: number; isVisible: boolean }
