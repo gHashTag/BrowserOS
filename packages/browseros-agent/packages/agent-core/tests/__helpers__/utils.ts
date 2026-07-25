@@ -8,22 +8,31 @@ export async function killProcessOnPort(port: number): Promise<void> {
   try {
     console.log(`Finding process on port ${port}...`)
 
-    const pids = execSync(`lsof -ti :${port}`, {
+    // -sTCP:LISTEN: only match the process LISTENING on the port.
+    // A bare `lsof -ti :port` also matches connected clients — including
+    // this very test process (lingering CDP sockets after a browser
+    // shutdown) — and killing those aborts the whole test run.
+    const raw = execSync(`lsof -ti :${port} -sTCP:LISTEN`, {
       encoding: 'utf-8',
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim()
 
+    const pids = raw
+      .split('\n')
+      .map((p) => p.trim())
+      .filter((p) => p && Number(p) !== process.pid)
+      .join(' ')
+
     if (pids) {
-      const pidList = pids.replace(/\n/g, ', ')
-      console.log(`Terminating process(es) ${pidList} on port ${port}...`)
+      console.log(`Terminating process(es) ${pids} on port ${port}...`)
 
       try {
-        execSync(`kill -15 ${pids.replace(/\n/g, ' ')}`, {
+        execSync(`kill -15 ${pids}`, {
           stdio: 'ignore',
         })
         await new Promise((resolve) => setTimeout(resolve, 500))
       } catch {
-        execSync(`kill -9 ${pids.replace(/\n/g, ' ')}`, {
+        execSync(`kill -9 ${pids}`, {
           stdio: 'ignore',
         })
       }
