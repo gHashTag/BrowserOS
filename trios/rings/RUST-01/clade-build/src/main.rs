@@ -258,7 +258,7 @@ fn bundle_sqlcipher_dylib(source: &Path, dest: &Path, binary: &Path) -> Result<(
     let mut perms = fs::metadata(dest)
         .map_err(|e| format!("metadata {}: {}", dest.display(), e))?
         .permissions();
-    perms.set_readonly(false);
+    perms.set_mode(0o755);
     fs::set_permissions(dest, perms)
         .map_err(|e| format!("chmod {}: {}", dest.display(), e))?;
     run_install_name_tool(&[
