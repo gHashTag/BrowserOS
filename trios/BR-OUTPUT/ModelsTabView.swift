@@ -7,6 +7,7 @@ struct ModelsTabView: View {
     @State private var baseURLDraft = ""
     @State private var searchText = ""
     @State private var credentialMessage: String?
+    @State private var statusBadges: [String: ProviderModelStatus] = [:]
 
     var body: some View {
         ScrollView {
@@ -35,7 +36,11 @@ struct ModelsTabView: View {
             apiKeyDraft = ""
             credentialMessage = nil
             searchText = ""
+            statusBadges.removeAll()
             Task { await store.refreshModels() }
+        }
+        .onChange(of: store.modelsTabRequest) {
+            Task { await refreshStatusBadges() }
         }
     }
 
@@ -145,7 +150,10 @@ struct ModelsTabView: View {
                     .buttonStyle(.bordered)
                     .disabled(store.isDiscovering || (store.selectedProvider.requiresAPIKey && !store.hasAPIKey))
                     Button {
-                        Task { await store.refreshHealth() }
+                        Task {
+                            await store.refreshHealth()
+                            await refreshStatusBadges()
+                        }
                     } label: {
                         if store.isCheckingHealth {
                             ProgressView().controlSize(.small)
@@ -202,6 +210,15 @@ struct ModelsTabView: View {
                                         .padding(.horizontal, 5)
                                         .padding(.vertical, 1)
                                         .background(Color.red.opacity(0.12))
+                                        .clipShape(Capsule())
+                                }
+                                if let badge = statusBadge(for: model) {
+                                    Text(badge.label)
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundColor(badge.color)
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1)
+                                        .background(badge.color.opacity(0.12))
                                         .clipShape(Capsule())
                                 }
                                 Spacer()
@@ -290,6 +307,42 @@ struct ModelsTabView: View {
         guard !searchText.isEmpty else { return store.availableModels }
         return store.availableModels.filter {
             $0.localizedCaseInsensitiveContains(searchText)
+        }
+    }
+
+    private func refreshStatusBadges() async {
+        guard store.selectedProvider.hasProviderCatalog else {
+            statusBadges.removeAll()
+            return
+        }
+        var newBadges: [String: ProviderModelStatus] = [:]
+        await withTaskGroup(of: (String, ProviderModelStatus).self) { group in
+            for model in store.availableModels {
+                group.addTask {
+                    let status = await store.providerStatus(for: model)
+                    return (model, status)
+                }
+            }
+            for await (model, status) in group {
+                switch status {
+                case .disabled, .missing:
+                    newBadges[model] = status
+                case .present, .unknown:
+                    break
+                }
+            }
+        }
+        statusBadges = newBadges
+    }
+
+    private func statusBadge(for model: String) -> (label: String, color: Color)? {
+        switch statusBadges[model] {
+        case .disabled:
+            return ("disabled", .orange)
+        case .missing:
+            return ("not in catalog", .red)
+        default:
+            return nil
         }
     }
 

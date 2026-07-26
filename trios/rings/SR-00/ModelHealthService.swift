@@ -36,15 +36,18 @@ actor ModelHealthService: ModelHealthServiceProtocol {
     private let ttl: TimeInterval
     private let failureThreshold: Int
     private let session: URLSession
+    private let statusService: (any ProviderStatusServiceProtocol)?
 
     init(
         ttl: TimeInterval = 60,
         failureThreshold: Int = 2,
-        session: URLSession = URLSession.shared
+        session: URLSession = URLSession.shared,
+        statusService: (any ProviderStatusServiceProtocol)? = nil
     ) {
         self.ttl = ttl
         self.failureThreshold = max(1, failureThreshold)
         self.session = session
+        self.statusService = statusService
     }
 
     /// Probes the given model and returns its health. Cached results are returned
@@ -58,6 +61,34 @@ actor ModelHealthService: ModelHealthServiceProtocol {
         let key = cacheKey(model: model, provider: provider, baseURL: baseURL)
         if let entry = cache[key], Date().timeIntervalSince(entry.timestamp) < ttl {
             return entry.health
+        }
+
+        // Fast, free provider-native catalog check first. For Ollama the health
+        // probe already performs the equivalent /api/tags lookup, so we skip the
+        // status pre-check there to avoid duplicate work.
+        if let statusService, provider != .ollama {
+            let status = await statusService.status(
+                for: model,
+                provider: provider,
+                baseURL: baseURL,
+                apiKey: apiKey
+            )
+            switch status {
+            case .disabled:
+                let health = ModelHealth.unavailable(reason: "Model disabled by provider catalog")
+                cache[key] = CacheEntry(health: health, timestamp: Date(), failureStreak: 0)
+                return health
+            case .missing:
+                let health = ModelHealth.unavailable(reason: "Model not in provider catalog")
+                cache[key] = CacheEntry(health: health, timestamp: Date(), failureStreak: 0)
+                return health
+            case .unknown:
+                // Catalog fetch failed (auth, network). Fall through to live probe
+                // but do not cache a definitive result from the catalog signal.
+                break
+            case .present:
+                break
+            }
         }
 
         let health: ModelHealth

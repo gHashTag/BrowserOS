@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TRIOS Installation Guide — Master Document</title>
+    <style>
+        :root {
+            --primary: #FFD700;
+            --secondary: #1a1a1a;
+            --accent: #007AFF;
+            --success: #34C759;
+            --warning: #FF9500;
+            --danger: #FF3B30;
+            --bg: #ffffff;
+            --text: #1d1d1f;
+            --code-bg: #f5f5f7;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: var(--text);
+            background: var(--bg);
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        
+        header {
+            text-align: center;
+            margin-bottom: 60px;
+            padding-bottom: 40px;
+            border-bottom: 3px solid var(--primary);
+        }
+        
+        h1 {
+            font-size: 3em;
+            font-weight: 800;
+            margin-bottom: 10px;
+            background: linear-gradient(135deg, var(--secondary) 0%, #4a4a4a 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        .subtitle {
+            font-size: 1.3em;
+            color: #6e6e73;
+            margin-bottom: 20px;
+        }
+        
+        .meta {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+            flex-wrap: wrap;
+            font-size: 0.95em;
+            color: #86868b;
+        }
+        
+        .meta-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .phase {
+            background: var(--code-bg);
+            border-radius: 16px;
+            padding: 40px;
+            margin-bottom: 40px;
+            border-left: 5px solid var(--accent);
+        }
+        
+        .phase-header {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-bottom: 25px;
+        }
+        
+        .phase-number {
+            background: var(--accent);
+            color: white;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 1.4em;
+            flex-shrink: 0;
+        }
+        
+        .phase-title {
+            font-size: 1.8em;
+            font-weight: 700;
+        }
+        
+        .phase-time {
+            background: var(--primary);
+            color: var(--secondary);
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.9em;
+            margin-left: auto;
+        }
+        
+        .task-list {
+            list-style: none;
+        }
+        
+        .task {
+            background: white;
+            border-radius: 12px;
+            padding: 20px 25px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            border: 1px solid #e5e5e5;
+        }
+        
+        .task-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        
+        .task-checkbox {
+            width: 22px;
+            height: 22px;
+            border: 2px solid var(--accent);
+            border-radius: 6px;
+            flex-shrink: 0;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .task-checkbox:hover {
+            background: rgba(0, 122, 255, 0.1);
+        }
+        
+        .task-checkbox:checked {
+            background: var(--success);
+            border-color: var(--success);
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='white'%3E%3Cpath d='M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z'/%3E%3C/svg%3E");
+            background-size: 16px;
+            background-position: center;
+            background-repeat: no-repeat;
+        }
+        
+        .task-title {
+            font-weight: 600;
+            font-size: 1.1em;
+        }
+        
+        code {
+            background: var(--code-bg);
+            padding: 3px 8px;
+            border-radius: 6px;
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+            font-size: 0.9em;
+            color: #d63384;
+        }
+        
+        pre {
+            background: var(--secondary);
+            color: #f8f8f2;
+            padding: 20px;
+            border-radius: 12px;
+            overflow-x: auto;
+            margin: 15px 0;
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+            font-size: 0.9em;
+            line-height: 1.5;
+        }
+        
+        pre code {
+            background: none;
+            padding: 0;
+            color: inherit;
+        }
+        
+        .success-criteria {
+            background: linear-gradient(135deg, rgba(52, 199, 89, 0.1) 0%, rgba(52, 199, 89, 0.05) 100%);
+            border: 2px solid var(--success);
+            border-radius: 16px;
+            padding: 30px;
+            margin-top: 40px;
+        }
+        
+        .success-criteria h2 {
+            color: var(--success);
+            margin-bottom: 20px;
+            font-size: 1.6em;
+        }
+        
+        .success-list {
+            list-style: none;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 12px;
+        }
+        
+        .success-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px;
+            background: white;
+            border-radius: 8px;
+        }
+        
+        .success-icon {
+            color: var(--success);
+            font-size: 1.3em;
+        }
+        
+        .troubleshooting {
+            background: linear-gradient(135deg, rgba(255, 59, 48, 0.05) 0%, rgba(255, 59, 48, 0.02) 100%);
+            border: 2px solid var(--danger);
+            border-radius: 16px;
+            padding: 30px;
+            margin-top: 40px;
+        }
+        
+        .troubleshooting h2 {
+            color: var(--danger);
+            margin-bottom: 20px;
+            font-size: 1.6em;
+        }
+        
+        .issue {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+            border-left: 4px solid var(--danger);
+        }
+        
+        .issue-title {
+            font-weight: 700;
+            color: var(--danger);
+            margin-bottom: 10px;
+        }
+        
+        .download-links {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            margin-top: 40px;
+            flex-wrap: wrap;
+        }
+        
+        .download-btn {
+            background: var(--accent);
+            color: white;
+            padding: 15px 30px;
+            border-radius: 12px;
+            text-decoration: none;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.3s;
+            box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
+        }
+        
+        .download-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0, 122, 255, 0.4);
+        }
+        
+        .download-btn.pdf {
+            background: var(--danger);
+        }
+        
+        .download-btn.html {
+            background: var(--success);
+        }
+        
+        @media (max-width: 768px) {
+            body {
+                padding: 20px 15px;
+            }
+            
+            h1 {
+                font-size: 2em;
+            }
+            
+            .phase {
+                padding: 25px 20px;
+            }
+            
+            .phase-header {
+                flex-wrap: wrap;
+            }
+            
+            .phase-time {
+                margin-left: 0;
+                width: 100%;
+                margin-top: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🚀 TRIOS Installation Guide</h1>
+        <p class="subtitle">Complete Master Document for Installing on Another Computer</p>
+        <div class="meta">
+            <div class="meta-item">
+                <span>📅</span>
+                <span>2026-05-28</span>
+            </div>
+            <div class="meta-item">
+                <span>👤</span>
+                <span>Dmitrii Vasilev (@gHashTag)</span>
+            </div>
+            <div class="meta-item">
+                <span>⏱️</span>
+                <span>~2 hours total</span>
+            </div>
+            <div class="meta-item">
+                <span>🎯</span>
+                <span>Version 1.0.0</span>
+            </div>
+        </div>
+    </header>
+
+    <div class="phase">
+        <div class="phase-header">
+            <div class="phase-number">1</div>
+            <h2 class="phase-title">Prerequisites</h2>
+            <div class="phase-time">30 min</div>
+        </div>
+        <ul class="task-list">
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>System Requirements:</strong> macOS 14.0+, Xcode 15.0+, Swift 5.9+, Homebrew
+                    </div>
+                </div>
+                <pre><code>xcode-select --install
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"</code></pre>
+            </li>
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>Install Dependencies:</strong> Tailscale, Git
+                    </div>
+                </div>
+                <pre><code>brew install tailscale git
+tailscale --version
+git --version
+swift --version</code></pre>
+            </li>
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>Clone Repositories:</strong> BrowserOS-full + Trinity
+                    </div>
+                </div>
+                <pre><code>git clone https://github.com/gHashTag/BrowserOS-full.git
+cd BrowserOS/trios
+git clone https://github.com/gHashTag/trinity.git ~/trinity
+export TRINITY_ROOT=~/trinity</code></pre>
+            </li>
+        </ul>
+    </div>
+
+    <div class="phase">
+        <div class="phase-header">
+            <div class="phase-number">2</div>
+            <h2 class="phase-title">Build Trios</h2>
+            <div class="phase-time">15 min</div>
+        </div>
+        <ul class="task-list">
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>Set Environment Variables</strong>
+                    </div>
+                </div>
+                <pre><code>cd /path/to/BrowserOS/trios
+export TRIOS_ROOT=$(pwd)
+export TRINITY_ROOT=~/trinity</code></pre>
+            </li>
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>Run Build Script</strong>
+                    </div>
+                </div>
+                <pre><code>chmod +x build.sh
+./build.sh</code></pre>
+            </li>
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>Verify Build Artifacts</strong>
+                    </div>
+                </div>
+                <pre><code>ls -lh trios_app
+ls -lh trios.app/Contents/MacOS/trios
+ls -lh trios.app/Contents/Frameworks/libQueenUILib.dylib</code></pre>
+            </li>
+        </ul>
+    </div>
+
+    <div class="phase">
+        <div class="phase-header">
+            <div class="phase-number">3</div>
+            <h2 class="phase-title">Install Application</h2>
+            <div class="phase-time">5 min</div>
+        </div>
+        <ul class="task-list">
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>Copy to Applications Folder</strong>
+                    </div>
+                </div>
+                <pre><code>mkdir -p ~/Applications
+cp -R ./trios.app ~/Applications/</code></pre>
+            </li>
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>First Launch & Permissions</strong>
+                    </div>
+                </div>
+                <pre><code>open ~/Applications/trios.app</code></pre>
+                <p style="margin-top: 10px; color: #6e6e73;">
+                    <strong>System Settings → Privacy & Security → Accessibility:</strong> Enable for window shifting
+                </p>
+            </li>
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>Verify First Launch:</strong> Status bar icon, panel opens, Cmd+Shift+T works
+                    </div>
+                </div>
+            </li>
+        </ul>
+    </div>
+
+    <div class="phase">
+        <div class="phase-header">
+            <div class="phase-number">4</div>
+            <h2 class="phase-title">Configure Backend Services</h2>
+            <div class="phase-time">20 min</div>
+        </div>
+        <ul class="task-list">
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>Install Node.js, Bun, Rust, GitButler CLI</strong>
+                    </div>
+                </div>
+                <pre><code>brew install node@20
+curl -fsSL https://bun.sh/install | bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+cargo install but</code></pre>
+            </li>
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>Setup Trinity Services with PM2</strong>
+                    </div>
+                </div>
+                <pre><code>npm install -g pm2
+cd ~/trios
+cd browseros-mcp && bun install
+cd ../trios-bridge && bun install
+cd ../trios-server && cargo build --release</code></pre>
+            </li>
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>Start Services via PM2</strong>
+                    </div>
+                </div>
+                <pre><code>pm2 start ecosystem.config.cjs
+pm2 status</code></pre>
+            </li>
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>Verify Service Ports:</strong> 9005, 9105, 9203
+                    </div>
+                </div>
+                <pre><code>lsof -i :9005
+lsof -i :9105
+lsof -i :9203</code></pre>
+            </li>
+        </ul>
+    </div>
+
+    <div class="phase">
+        <div class="phase-header">
+            <div class="phase-number">5</div>
+            <h2 class="phase-title">Configure Tailscale (Optional)</h2>
+            <div class="phase-time">10 min</div>
+        </div>
+        <ul class="task-list">
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>Authenticate Tailscale</strong>
+                    </div>
+                </div>
+                <pre><code>tailscale up</code></pre>
+            </li>
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>Enable Funnel for Remote Access</strong>
+                    </div>
+                </div>
+                <pre><code>tailscale funnel 9105
+# Or tailnet-only:
+tailscale serve --https=443 http://127.0.0.1:9105</code></pre>
+            </li>
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>Get Your Tailscale URL & Test</strong>
+                    </div>
+                </div>
+                <pre><code>tailscale status
+curl https://&lt;your-hostname&gt;.tail01804b.ts.net/health</code></pre>
+            </li>
+        </ul>
+    </div>
+
+    <div class="phase">
+        <div class="phase-header">
+            <div class="phase-number">6</div>
+            <h2 class="phase-title">Connect MCP Clients</h2>
+            <div class="phase-time">10 min</div>
+        </div>
+        <ul class="task-list">
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>BrowserOS MCP Connection</strong>
+                    </div>
+                </div>
+                <p>Settings → Connected Apps → Add Trios Bridge at <code>http://127.0.0.1:9203/mcp</code></p>
+            </li>
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>GitButler Connection</strong>
+                    </div>
+                </div>
+                <p>Configure trios-bridge: CLI path <code>~/.cargo/bin/but</code>, mode: simple</p>
+            </li>
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>Test Tool Calls</strong>
+                    </div>
+                </div>
+                <p>From BrowserOS chat: "List files", "Show git status", "Create test commit"</p>
+            </li>
+        </ul>
+    </div>
+
+    <div class="phase">
+        <div class="phase-header">
+            <div class="phase-number">7</div>
+            <h2 class="phase-title">Verify Installation</h2>
+            <div class="phase-time">15 min</div>
+        </div>
+        <ul class="task-list">
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>Trios App Tests:</strong> Status bar, panel, shortcuts, all 5 tabs
+                    </div>
+                </div>
+            </li>
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>Backend Service Health Checks</strong>
+                    </div>
+                </div>
+                <pre><code>curl http://127.0.0.1:9005/health
+curl http://127.0.0.1:9105/health
+curl http://127.0.0.1:9203/health</code></pre>
+            </li>
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>End-to-End Test:</strong> Send message, verify SSE streaming, check persistence
+                    </div>
+                </div>
+            </li>
+        </ul>
+    </div>
+
+    <div class="phase">
+        <div class="phase-header">
+            <div class="phase-number">8</div>
+            <h2 class="phase-title">Post-Installation Configuration</h2>
+            <div class="phase-time">10 min</div>
+        </div>
+        <ul class="task-list">
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>Auto-Launch on Login</strong>
+                    </div>
+                </div>
+                <pre><code>osascript -e 'tell application "System Events" to make login item at end with properties {path:"/Applications/trios.app", hidden:false}'</code></pre>
+            </li>
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>PM2 Auto-Start on Boot</strong>
+                    </div>
+                </div>
+                <pre><code>pm2 startup
+pm2 save</code></pre>
+            </li>
+            <li class="task">
+                <div class="task-header">
+                    <div class="task-checkbox"></div>
+                    <div class="task-title">
+                        <strong>Configure Environment Variables in ~/.zshrc</strong>
+                    </div>
+                </div>
+                <pre><code>export TRINITY_ROOT=~/trinity
+export TRIOS_ROOT=~/BrowserOS/trios
+export TRIOS_MESH_PORT=9505
+export TRIOS_MCP_PORT=9105
+export TRIOS_A2A_PORT=9200</code></pre>
+            </li>
+        </ul>
+    </div>
+
+    <div class="success-criteria">
+        <h2>✅ Success Criteria</h2>
+        <ul class="success-list">
+            <li class="success-item">
+                <span class="success-icon">✓</span>
+                <span>Trios app launches and shows status bar icon</span>
+            </li>
+            <li class="success-item">
+                <span class="success-icon">✓</span>
+                <span>Panel opens with Cmd+Shift+T</span>
+            </li>
+            <li class="success-item">
+                <span class="success-icon">✓</span>
+                <span>All 5 tabs functional (Chat, Git, Terminal, Queen, Settings)</span>
+            </li>
+            <li class="success-item">
+                <span class="success-icon">✓</span>
+                <span>PM2 shows 3 services online</span>
+            </li>
+            <li class="success-item">
+                <span class="success-icon">✓</span>
+                <span>Health checks return 200 OK on ports 9005, 9105, 9203</span>
+            </li>
+            <li class="success-item">
+                <span class="success-icon">✓</span>
+                <span>Can send message and get SSE streaming response</span>
+            </li>
+            <li class="success-item">
+                <span class="success-icon">✓</span>
+                <span>Tailscale URL accessible from another device</span>
+            </li>
+            <li class="success-item">
+                <span class="success-icon">✓</span>
+                <span>GitButler commits work via Trios panel</span>
+            </li>
+        </ul>
+    </div>
+
+    <div class="troubleshooting">
+        <h2>🚨 Troubleshooting</h2>
+        <div class="issue">
+            <div class="issue-title">App won't launch</div>
+            <pre><code>log show --predicate 'process == "trios"' --last 1h
+pkill -9 trios
+open ~/Applications/trios.app</code></pre>
+        </div>
+        <div class="issue">
+            <div class="issue-title">Status bar icon missing</div>
+            <pre><code>pgrep -x trios
+killall trios
+open ~/Applications/trios.app</code></pre>
+        </div>
+        <div class="issue">
+            <div class="issue-title">Build fails with QueenUILib not found</div>
+            <pre><code>echo $TRINITY_ROOT  # Should be ~/trinity
+export TRINITY_ROOT=~/trinity</code></pre>
+        </div>
+        <div class="issue">
+            <div class="issue-title">PM2 services won't start</div>
+            <pre><code>pm2 logs trios-server --lines 50
+cd ~/trios/browseros-mcp && bun install
+pm2 restart all</code></pre>
+        </div>
+        <div class="issue">
+            <div class="issue-title">Tailscale funnel not working</div>
+            <pre><code>tailscale status
+tailscale logout
+tailscale up
+tailscale funnel 9105</code></pre>
+        </div>
+    </div>
+
+    <div class="download-links">
+        <a href="file:///Users/playra/BrowserOS/trios/INSTALL_TODO.md" class="download-btn">
+            📄 Markdown Version
+        </a>
+        <a href="file:///Users/playra/BrowserOS/trios/TRIOS_INSTALLATION_GUIDE.pdf" class="download-btn pdf">
+            📕 PDF Version
+        </a>
+        <a href="file:///Users/playra/BrowserOS/trios/INSTALLATION_GUIDE.html" class="download-btn html">
+            🌐 This HTML Version
+        </a>
+    </div>
+
+    <footer style="text-align: center; margin-top: 60px; padding-top: 40px; border-top: 2px solid #e5e5e5; color: #86868b;">
+        <p><strong>TRIOS Installation Guide v1.0.0</strong></p>
+        <p>Last Updated: 2026-05-28 | Maintained by Trinity Project (@gHashTag)</p>
+        <p style="margin-top: 10px;">
+            <a href="https://github.com/gHashTag/BrowserOS-full/issues" style="color: var(--accent);">GitHub Issues</a> • 
+            <a href="https://github.com/gHashTag/BrowserOS-full/discussions" style="color: var(--accent);">Discussions</a> • 
+            <a href="file:///Users/playra/BrowserOS/trios/docs/" style="color: var(--accent);">Documentation</a>
+        </p>
+    </footer>
+
+    <script>
+        // Make checkboxes interactive
+        document.querySelectorAll('.task-checkbox').forEach(checkbox => {
+            checkbox.addEventListener('click', function() {
+                this.classList.toggle('checked');
+            });
+        });
+    </script>
+</body>
+</html>

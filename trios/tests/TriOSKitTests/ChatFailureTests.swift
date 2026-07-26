@@ -103,6 +103,109 @@ final class ChatFailureTests: XCTestCase {
         XCTAssertEqual(store.selectedModel, next)
     }
 
+    // MARK: - Provider-native status integration
+
+    @MainActor
+    func testProviderStatusSkipsMissingModelProbe() async {
+        let defaults = UserDefaults(suiteName: "test-status-missing")!
+        defer { defaults.removePersistentDomain(forName: "test-status-missing") }
+
+        let status = MockProviderStatusService()
+        await status.setStatus(.missing, for: "claude-opus-4-5")
+
+        let health = MockModelHealthService()
+        let store = ModelConfigurationStore(
+            defaults: defaults,
+            statusService: status,
+            healthService: health
+        )
+        store.selectProvider(.anthropic)
+        store.selectModel("claude-sonnet-4-5")
+
+        _ = await store.healthStatus(for: "claude-opus-4-5")
+
+        let probeCount = await health.probeCount
+        XCTAssertEqual(probeCount, 0, "Missing catalog status should skip paid probe")
+    }
+
+    @MainActor
+    func testProviderStatusDisablesModelProbe() async {
+        let defaults = UserDefaults(suiteName: "test-status-disabled")!
+        defer { defaults.removePersistentDomain(forName: "test-status-disabled") }
+
+        let status = MockProviderStatusService()
+        await status.setStatus(.disabled, for: "claude-opus-4-5")
+
+        let health = MockModelHealthService()
+        let store = ModelConfigurationStore(
+            defaults: defaults,
+            statusService: status,
+            healthService: health
+        )
+        store.selectProvider(.anthropic)
+        store.selectModel("claude-sonnet-4-5")
+
+        let healthStatus = await store.healthStatus(for: "claude-opus-4-5")
+        if case .unavailable(let reason) = healthStatus {
+            XCTAssertTrue(reason.contains("disabled"))
+        } else {
+            XCTFail("Expected unavailable due to disabled catalog status, got \(healthStatus)")
+        }
+
+        let probeCount = await health.probeCount
+        XCTAssertEqual(probeCount, 0, "Disabled catalog status should skip paid probe")
+    }
+
+    @MainActor
+    func testOpenRouterCatalogParsing() async throws {
+        let json = [
+            "data": [
+                ["id": "openai/gpt-5.2", "disabled": false],
+                ["id": "anthropic/claude-sonnet-4.5", "disabled": true]
+            ]
+        ] as [String: Any]
+        let data = try JSONSerialization.data(withJSONObject: json)
+        let status = ProviderStatusService(ttl: 0)
+        let resultPresent = await status.status(
+            for: "openai/gpt-5.2",
+            provider: .openrouter,
+            baseURL: "https://openrouter.ai/api/v1",
+            apiKey: nil
+        )
+        let resultDisabled = await status.status(
+            for: "anthropic/claude-sonnet-4.5",
+            provider: .openrouter,
+            baseURL: "https://openrouter.ai/api/v1",
+            apiKey: nil
+        )
+        XCTAssertEqual(resultPresent, .present)
+        XCTAssertEqual(resultDisabled, .disabled)
+    }
+
+    @MainActor
+    func testStatusInvalidationResetsProviderCache() async {
+        let defaults = UserDefaults(suiteName: "test-status-invalidate")!
+        defer { defaults.removePersistentDomain(forName: "test-status-invalidate") }
+
+        let status = MockProviderStatusService()
+        await status.setStatus(.missing, for: "claude-opus-4-5")
+
+        let store = ModelConfigurationStore(
+            defaults: defaults,
+            statusService: status
+        )
+        store.selectProvider(.anthropic)
+        store.selectModel("claude-sonnet-4-5")
+
+        let before = await store.providerStatus(for: "claude-opus-4-5")
+        XCTAssertEqual(before, .missing)
+
+        await status.setStatus(.present, for: "claude-opus-4-5")
+        store.invalidateProviderStatus()
+        let after = await store.providerStatus(for: "claude-opus-4-5")
+        XCTAssertEqual(after, .present)
+    }
+
     // MARK: - Queen command parsing
 
     func testDoctorWithoutModel() {
@@ -385,6 +488,7 @@ private struct MockHealthCheck: ChatHealthCheckProtocol {
 
 private actor MockModelHealthService: ModelHealthServiceProtocol {
     private var results: [String: ModelHealth] = [:]
+    private(set) var probeCount = 0
 
     func probe(
         model: String,
@@ -392,13 +496,35 @@ private actor MockModelHealthService: ModelHealthServiceProtocol {
         baseURL: String,
         apiKey: String?
     ) async -> ModelHealth {
-        results[model] ?? .unknown(error: "not configured")
+        probeCount += 1
+        return results[model] ?? .unknown(error: "not configured")
     }
 
     func invalidate() async {}
 
     func setHealth(_ health: ModelHealth, for model: String) {
         results[model] = health
+    }
+}
+
+private actor MockProviderStatusService: ProviderStatusServiceProtocol {
+    private var results: [String: ProviderModelStatus] = [:]
+
+    func status(
+        for model: String,
+        provider: ModelProvider,
+        baseURL: String,
+        apiKey: String?
+    ) async -> ProviderModelStatus {
+        results[model] ?? .unknown(error: "not configured")
+    }
+
+    func invalidate() async {
+        results.removeAll()
+    }
+
+    func setStatus(_ status: ProviderModelStatus, for model: String) {
+        results[model] = status
     }
 }
 
@@ -447,7 +573,7 @@ private func makeChatViewModel(
     selectedModel: String = "claude-sonnet-4-5",
     healthService: any ModelHealthServiceProtocol = ModelHealthService()
 ) -> ChatViewModel {
-    let store = ModelConfigurationStore(defaults: defaults, healthService: healthService)
+    let store = ModelConfigurationStore(defaults: defaults, healthService: healthService as (any ModelHealthServiceProtocol)?)
     store.selectProvider(provider)
     store.selectModel(selectedModel)
     let memoryStore = MockAgentMemoryStore()

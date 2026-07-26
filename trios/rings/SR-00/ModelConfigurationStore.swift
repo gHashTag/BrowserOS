@@ -76,11 +76,13 @@ final class ModelConfigurationStore: ObservableObject {
     @Published private(set) var isCheckingHealth = false
     @Published private(set) var lastHealthCheckAt: Date?
     @Published var isBackgroundHealthPollingEnabled = true
+    @Published private(set) var providerStatuses: [String: ProviderModelStatus] = [:]
 
     private let defaults: UserDefaults
     private let environment: [String: String]
     private let catalogService: ModelCatalogService
     private let healthService: any ModelHealthServiceProtocol
+    private let statusService: any ProviderStatusServiceProtocol
     private var backgroundPoller: BackgroundHealthPoller?
 
     /// Exposed for tests only.
@@ -90,10 +92,12 @@ final class ModelConfigurationStore: ObservableObject {
         defaults: UserDefaults = .standard,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         catalogService: ModelCatalogService = ModelCatalogService(),
-        healthService: any ModelHealthServiceProtocol = ModelHealthService()
+        statusService: any ProviderStatusServiceProtocol = ProviderStatusService(),
+        healthService: (any ModelHealthServiceProtocol)? = nil
     ) {
         self.catalogService = catalogService
-        self.healthService = healthService
+        self.statusService = statusService
+        self.healthService = healthService ?? ModelHealthService(statusService: statusService)
         self.defaults = defaults
         self.environment = environment
 
@@ -211,7 +215,24 @@ final class ModelConfigurationStore: ObservableObject {
         unhealthyModels.removeAll()
         lastHealthCheckAt = nil
         Task { await healthService.invalidate() }
+        Task { await statusService.invalidate() }
     }
+
+    /// Returns the provider-native catalog status for a model.
+    func providerStatus(for model: String) async -> ProviderModelStatus {
+        await statusService.status(
+            for: model,
+            provider: selectedProvider,
+            baseURL: baseURL,
+            apiKey: resolvedAPIKey.isEmpty ? nil : resolvedAPIKey
+        )
+    }
+
+    /// Clears the provider-native status cache, e.g. after model refresh.
+    func invalidateProviderStatus() {
+        Task { await statusService.invalidate() }
+    }
+
 
     /// Starts the background health poller. Safe to call repeatedly.
     func startBackgroundHealthChecks(interval: TimeInterval = 60) {

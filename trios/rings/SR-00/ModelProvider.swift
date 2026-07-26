@@ -23,6 +23,16 @@ enum ModelProvider: String, CaseIterable, Codable, Identifiable {
         self != .ollama
     }
 
+    /// Providers that expose a free public catalog endpoint listing available models.
+    var hasProviderCatalog: Bool {
+        switch self {
+        case .ollama, .zai:
+            return false
+        case .openai, .anthropic, .openrouter:
+            return true
+        }
+    }
+
     var defaultBaseURL: String {
         switch self {
         case .ollama: return "http://127.0.0.1:11434/v1"
