@@ -110,7 +110,7 @@ final class ModelConfigurationStore: ObservableObject {
     /// Models that can be tried when the current selection fails, ordered by
     /// provider preference. The current model is excluded.
     var fallbackModels: [String] {
-        selectedProvider.suggestedModels.filter { $0 != selectedModel }
+        selectedProvider.fallbackModels(excluding: selectedModel)
     }
 
     /// Switches to the next suggested model in the provider's list, returning the
@@ -144,7 +144,8 @@ final class ModelConfigurationStore: ObservableObject {
             provider: selectedProvider,
             model: selectedModel,
             baseURL: baseURL,
-            apiKey: resolvedAPIKey.isEmpty ? nil : resolvedAPIKey
+            apiKey: resolvedAPIKey.isEmpty ? nil : resolvedAPIKey,
+            fallbackModels: fallbackModels
         )
     }
 

@@ -11,7 +11,7 @@ import type {
 
 const CLAUDE_CLI_MODELS = [
   'claude-sonnet-4-6',
-  'claude-opus-4-6',
+  'claude-opus-4-8',
   'claude-haiku-4-5',
 ] as const
 

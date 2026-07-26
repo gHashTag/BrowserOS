@@ -507,80 +507,49 @@ final class ChatViewModel: ObservableObject {
             return
         }
 
-        guard let requestBody = try? ChatRequestBuilder(
-            conversationId: conversationId,
-            message: text,
-            mode: "agent",
-            origin: "sidepanel",
-            userSystemPrompt: memoryService.promptContext(
-                for: recalledMemories
-            ),
-            previousConversation: historyForRequest,
-            browserContext: nil,
-            modelConfiguration: modelStore.runtimeConfiguration,
-            attachments: requestAttachments
-        ).build() else {
-            NSLog("[TriosChat] ChatRequestBuilder failed")
-            await failPendingTurn(message: "Failed to build request")
-            guard isGenerationCurrent(generation) else { return }
-            _ = await stateMachine.transition(to: .error("Failed to build request"))
-            guard isGenerationCurrent(generation) else { return }
-            let currentState = await stateMachine.currentState()
-            guard isGenerationCurrent(generation) else { return }
-            state = currentState
-            clearPendingUsage()
-            return
-        }
-        NSLog("[TriosChat] request body built, size: \(requestBody.count), attachments: \(requestAttachments.count)")
-
-        await parser.reset()
+        var didFailover = false
 
         do {
-            let stream = try await transport.sendMessage(body: requestBody)
-            guard isCurrentStream(generation) else { return }
-            await todoPlanner.markExecutionStarted(
-                detail: "Response stream opened"
+            try await executeStream(
+                generation: generation,
+                text: text,
+                memoryGoal: memoryGoal,
+                historyForRequest: historyForRequest,
+                requestAttachments: requestAttachments
             )
-            NSLog("[TriosChat] transport stream opened")
-            var receivedTerminalEvent = false
-            for await event in stream {
-                guard isCurrentStream(generation) else { break }
-                switch event {
-                case .finish, .abort, .error:
-                    receivedTerminalEvent = true
-                default:
-                    break
-                }
-                NSLog("[TriosChat] SSE event: \(event)")
-                await handleEvent(
-                    event,
-                    expectedGeneration: generation
-                )
-            }
-            guard isCurrentStream(generation) else { return }
-            guard receivedTerminalEvent else {
-                finalizeAssistantStreamingState()
-                NSLog(
-                    "[TriosChat] unterminated stream: %@",
-                    Self.unterminatedStreamError
-                )
-                await applyAction(
-                    .streamError(Self.unterminatedStreamError),
-                    expectedGeneration: generation
-                )
-                return
-            }
-            await completePendingTurnIfNeeded()
-            guard isGenerationCurrent(generation) else { return }
-            finalizeEstimatedUsageIfNeeded()
-            NSLog("[TriosChat] stream ended normally")
-            _ = await stateMachine.transition(to: .idle)
-            guard isGenerationCurrent(generation) else { return }
-            let currentState = await stateMachine.currentState()
-            guard isGenerationCurrent(generation) else { return }
-            state = currentState
-            await saveHistory(expectedGeneration: generation)
         } catch {
+            guard isCurrentStream(generation) else { return }
+            // One automatic model failover for provider-side model failures.
+            let originalModel = modelStore.selectedModel
+            if !didFailover,
+               let transportError = error as? TransportError,
+               (transportError.isModelUnavailableError || transportError.isInvalidModelError),
+               let nextModel = modelStore.selectNextModel() {
+                didFailover = true
+                finalizeAssistantStreamingState()
+                clearPendingUsage()
+                let failoverMsg = "Model `\(originalModel)` failed; retrying with `\(nextModel)`…"
+                let banner = ChatMessage(role: .system, content: "[↻] \(failoverMsg)")
+                messages.append(banner)
+                rebuildCache()
+                let historySnapshot = captureHistorySnapshot()
+                await persistHistorySnapshot(historySnapshot)
+                do {
+                    try await executeStream(
+                        generation: generation,
+                        text: text,
+                        memoryGoal: memoryGoal,
+                        historyForRequest: historyForRequest,
+                        requestAttachments: requestAttachments
+                    )
+                    return
+                } catch {
+                    // Restore the original selection so the next turn does not
+                    // silently inherit a failed fallback.
+                    modelStore.selectModel(originalModel)
+                }
+            }
+
             guard isCurrentStream(generation) else { return }
             finalizeAssistantStreamingState()
             // Manual cancellation is not a user-visible error.
@@ -616,6 +585,85 @@ final class ChatViewModel: ObservableObject {
             state = currentState
             await saveHistory(expectedGeneration: generation)
         }
+    }
+
+    /// Attempts a single streaming request. On success it finalizes the turn and
+    /// persists history. On failure it throws the underlying error so the caller
+    /// can decide whether to failover or surface the error to the user.
+    private func executeStream(
+        generation: UInt64,
+        text: String,
+        memoryGoal: String,
+        historyForRequest: [ChatMessage],
+        requestAttachments: [ChatRequestAttachment]
+    ) async throws {
+        guard isGenerationCurrent(generation) else { return }
+        guard let requestBody = try? ChatRequestBuilder(
+            conversationId: conversationId,
+            message: text,
+            mode: "agent",
+            origin: "sidepanel",
+            userSystemPrompt: memoryService.promptContext(for: recalledMemories),
+            previousConversation: historyForRequest,
+            browserContext: nil,
+            modelConfiguration: modelStore.runtimeConfiguration,
+            attachments: requestAttachments
+        ).build() else {
+            NSLog("[TriosChat] ChatRequestBuilder failed")
+            throw ChatViewModelError.requestBuildFailed
+        }
+        NSLog("[TriosChat] request body built, size: \(requestBody.count), attachments: \(requestAttachments.count)")
+
+        await parser.reset()
+
+        let stream = try await transport.sendMessage(body: requestBody)
+        guard isCurrentStream(generation) else { return }
+        await todoPlanner.markExecutionStarted(
+            detail: "Response stream opened"
+        )
+        NSLog("[TriosChat] transport stream opened")
+        var receivedTerminalEvent = false
+        for await event in stream {
+            guard isCurrentStream(generation) else { break }
+            switch event {
+            case .finish, .abort, .error:
+                receivedTerminalEvent = true
+            default:
+                break
+            }
+            NSLog("[TriosChat] SSE event: \(event)")
+            await handleEvent(
+                event,
+                expectedGeneration: generation
+            )
+        }
+        guard isCurrentStream(generation) else { return }
+        guard receivedTerminalEvent else {
+            finalizeAssistantStreamingState()
+            NSLog(
+                "[TriosChat] unterminated stream: %@",
+                Self.unterminatedStreamError
+            )
+            await applyAction(
+                .streamError(Self.unterminatedStreamError),
+                expectedGeneration: generation
+            )
+            return
+        }
+        await completePendingTurnIfNeeded()
+        guard isGenerationCurrent(generation) else { return }
+        finalizeEstimatedUsageIfNeeded()
+        NSLog("[TriosChat] stream ended normally")
+        _ = await stateMachine.transition(to: .idle)
+        guard isGenerationCurrent(generation) else { return }
+        let currentState = await stateMachine.currentState()
+        guard isGenerationCurrent(generation) else { return }
+        state = currentState
+        await saveHistory(expectedGeneration: generation)
+    }
+
+    private enum ChatViewModelError: Error {
+        case requestBuildFailed
     }
 
     func cancelStreaming() {

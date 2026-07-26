@@ -127,4 +127,164 @@ final class ChatFailureTests: XCTestCase {
         let cmd = QueenCommandParser.parse("/doctor --model")
         XCTAssertEqual(cmd, .unknown("/doctor --model"))
     }
+
+    // MARK: - Automatic model failover
+
+    @MainActor
+    func testAutoFailoverOnModelUnavailable() async {
+        let defaults = UserDefaults(suiteName: "test-failover-auto")!
+        defer { defaults.removePersistentDomain(forName: "test-failover-auto") }
+        let store = ModelConfigurationStore(defaults: defaults)
+        store.selectProvider(.anthropic)
+        store.selectModel("claude-sonnet-4-5")
+
+        let transport = MockFailingTransport(
+            firstError: TransportError.serverError(
+                statusCode: 503,
+                bodySample: "Service Unavailable",
+                url: nil
+            ),
+            successEvents: [
+                .start(id: "msg-1"),
+                .textDelta(id: "msg-1", delta: "Fallback response"),
+                .finish(id: "msg-1")
+            ]
+        )
+        let viewModel = makeChatViewModel(
+            transport: transport,
+            modelStore: store,
+            defaults: defaults
+        )
+        viewModel.inputText = "Hello"
+        await viewModel.sendMessage()
+
+        let sendCount = await transport.sendCount
+        XCTAssertEqual(sendCount, 2, "Expected initial attempt plus one failover retry")
+        XCTAssertEqual(store.selectedModel, "claude-opus-4-5")
+        let banner = viewModel.messages.first { $0.content.contains("retrying with") }
+        XCTAssertNotNil(banner)
+        let assistant = viewModel.messages.first { $0.role == .assistant }
+        XCTAssertEqual(assistant?.content, "Fallback response")
+    }
+
+    @MainActor
+    func testBalanceErrorDoesNotFailover() async {
+        let defaults = UserDefaults(suiteName: "test-failover-balance")!
+        defer { defaults.removePersistentDomain(forName: "test-failover-balance") }
+        let store = ModelConfigurationStore(defaults: defaults)
+        store.selectProvider(.anthropic)
+        store.selectModel("claude-sonnet-4-5")
+
+        let transport = MockFailingTransport(
+            firstError: TransportError.serverError(
+                statusCode: 402,
+                bodySample: "Insufficient balance",
+                url: nil
+            )
+        )
+        let viewModel = makeChatViewModel(
+            transport: transport,
+            modelStore: store,
+            defaults: defaults
+        )
+        viewModel.inputText = "Hello"
+        await viewModel.sendMessage()
+
+        let sendCount = await transport.sendCount
+        XCTAssertEqual(sendCount, 1, "Balance errors must not trigger failover")
+        XCTAssertEqual(store.selectedModel, "claude-sonnet-4-5")
+        let errorMessage = viewModel.messages.first { $0.role == .system && $0.content.contains("balance") }
+        XCTAssertNotNil(errorMessage)
+    }
+}
+
+// MARK: - ChatViewModel failover stubs
+
+private actor MockFailingTransport: ChatTransportProtocol {
+    private var firstError: Error?
+    private var successEvents: [SSEEvent]
+    private(set) var sendCount = 0
+
+    init(firstError: Error? = nil, successEvents: [SSEEvent] = []) {
+        self.firstError = firstError
+        self.successEvents = successEvents
+    }
+
+    func sendMessage(body: Data) async throws -> AsyncStream<SSEEvent> {
+        sendCount += 1
+        if sendCount == 1, let firstError = firstError {
+            throw firstError
+        }
+        let events = successEvents
+        return AsyncStream { continuation in
+            for event in events {
+                continuation.yield(event)
+            }
+            continuation.finish()
+        }
+    }
+
+    func cancel() async {}
+}
+
+private struct MockHealthCheck: ChatHealthCheckProtocol {
+    func check() async -> Bool { true }
+}
+
+private actor MockPersister: ChatPersisterProtocol {
+    private var storage: [UUID: [ChatMessage]] = [:]
+    private var currentId: UUID = UUID()
+
+    func save(messages: [ChatMessage], conversationId: UUID) async {
+        storage[conversationId] = messages
+    }
+
+    func load(conversationId: UUID) async -> [ChatMessage] {
+        storage[conversationId] ?? []
+    }
+
+    func clear(conversationId: UUID) async {
+        storage[conversationId] = nil
+    }
+
+    func renameConversation(id: UUID, title: String) async {}
+
+    func currentConversationId() async -> UUID { currentId }
+
+    func setCurrentConversationId(_ id: UUID) async { currentId = id }
+
+    func listAllConversations() async -> [ChatConversation] { [] }
+}
+
+private actor MockAgentMemoryStore: AgentMemoryStoreProtocol {
+    func saveMemory(_ record: AgentMemoryRecord) async throws {}
+    func memoryCandidates(for query: String, limit: Int) async throws -> [AgentMemoryRecord] { [] }
+    func recentMemories(limit: Int) async throws -> [AgentMemoryRecord] { [] }
+    func deleteMemory(id: UUID) async throws -> Bool { false }
+    func deleteMemories(conversationId: UUID) async throws -> Int { 0 }
+    func savePlan(_ plan: TODOPlan) async throws {}
+    func loadPlan(conversationId: UUID) async throws -> TODOPlan? { nil }
+    func deletePlan(conversationId: UUID) async throws {}
+    func deleteConversationData(conversationId: UUID) async throws {}
+}
+
+@MainActor
+private func makeChatViewModel(
+    transport: ChatTransportProtocol,
+    modelStore: ModelConfigurationStore,
+    defaults: UserDefaults
+) -> ChatViewModel {
+    let store = MockAgentMemoryStore()
+    let memoryService = AgentMemoryService(store: store)
+    let todoPlanner = TODOPlanner(store: store, preferences: defaults)
+    return ChatViewModel(
+        transport: transport,
+        healthCheck: MockHealthCheck(),
+        parser: UIMessageStreamParser(),
+        persister: MockPersister(),
+        stateMachine: ConversationStateMachine(),
+        modelStore: modelStore,
+        memoryService: memoryService,
+        todoPlanner: todoPlanner
+    )
 }

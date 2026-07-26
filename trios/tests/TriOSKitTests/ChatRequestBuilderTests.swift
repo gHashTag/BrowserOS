@@ -132,4 +132,57 @@ final class ChatRequestBuilderTests: XCTestCase {
         XCTAssertEqual(attachments?.first?["mediaType"], "image/png")
         XCTAssertEqual(attachments?.first?["dataUrl"], "data:image/png;base64,abc123")
     }
+
+    func testOpenRouterIncludesModelsArray() throws {
+        let config = ModelRuntimeConfiguration(
+            provider: .openrouter,
+            model: "openai/gpt-5.2",
+            baseURL: "https://openrouter.ai/api/v1",
+            apiKey: "test-key",
+            fallbackModels: ["anthropic/claude-sonnet-4.5", "google/gemini-2.5-flash"]
+        )
+        let builder = ChatRequestBuilder(
+            conversationId: conversationId,
+            message: "Hello",
+            mode: "chat",
+            origin: "test",
+            userSystemPrompt: nil,
+            previousConversation: [],
+            browserContext: nil,
+            modelConfiguration: config
+        )
+
+        let data = try builder.build()
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        let models = json?["models"] as? [String]
+
+        XCTAssertEqual(models?.first, "openai/gpt-5.2")
+        XCTAssertTrue(models?.contains("anthropic/claude-sonnet-4.5") ?? false)
+        XCTAssertTrue(models?.last == "google/gemini-2.5-flash")
+    }
+
+    func testNonOpenRouterOmitsModelsArray() throws {
+        let config = ModelRuntimeConfiguration(
+            provider: .anthropic,
+            model: "claude-sonnet-4-5",
+            baseURL: "https://api.anthropic.com/v1",
+            apiKey: "test-key",
+            fallbackModels: ["claude-opus-4-5"]
+        )
+        let builder = ChatRequestBuilder(
+            conversationId: conversationId,
+            message: "Hello",
+            mode: "chat",
+            origin: "test",
+            userSystemPrompt: nil,
+            previousConversation: [],
+            browserContext: nil,
+            modelConfiguration: config
+        )
+
+        let data = try builder.build()
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+
+        XCTAssertNil(json?["models"])
+    }
 }
