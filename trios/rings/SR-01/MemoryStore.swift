@@ -50,6 +50,18 @@ protocol AgentMemoryStoreProtocol: Sendable {
     func loadPlan(conversationId: UUID) async throws -> TODOPlan?
     func deletePlan(conversationId: UUID) async throws
     func deleteConversationData(conversationId: UUID) async throws
+    func saveOutcome(_ outcome: ModelOutcome) async throws
+    func outcomes(
+        for model: String,
+        provider: ModelProvider,
+        baseURL: String,
+        limit: Int
+    ) async throws -> [ModelOutcome]
+    func deleteOutcomes(
+        for model: String,
+        provider: ModelProvider,
+        baseURL: String
+    ) async throws
 }
 
 enum MemoryStoreError: LocalizedError {
@@ -80,8 +92,9 @@ actor MemoryStore: AgentMemoryStoreProtocol {
         case null
     }
 
-    private static let schemaVersionNumber = 2
+    private static let schemaVersionNumber = 3
     private static let candidateLimit = 64
+    private static let outcomeLimit = 64
     private static let transientDestructor = unsafeBitCast(
         -1,
         to: sqlite3_destructor_type.self
@@ -515,6 +528,118 @@ actor MemoryStore: AgentMemoryStoreProtocol {
         }
     }
 
+    func saveOutcome(_ outcome: ModelOutcome) async throws {
+        let database = try openDatabase()
+        try Self.withTransaction(database) {
+            try Self.execute(
+                database,
+                sql: """
+                    INSERT INTO model_outcomes (
+                        id,
+                        model,
+                        provider,
+                        base_url,
+                        success,
+                        reason,
+                        created_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                bindings: [
+                    .text(outcome.id.uuidString),
+                    .text(outcome.model),
+                    .text(outcome.provider.rawValue),
+                    .text(outcome.baseURL),
+                    .integer(outcome.success ? 1 : 0),
+                    outcome.reason.map(SQLiteValue.text) ?? .null,
+                    .double(outcome.timestamp.timeIntervalSince1970)
+                ]
+            )
+            // Keep the history bounded per model/provider/base_url tuple.
+            try Self.execute(
+                database,
+                sql: """
+                    DELETE FROM model_outcomes
+                    WHERE rowid IN (
+                        SELECT rowid FROM model_outcomes
+                        WHERE model = ? AND provider = ? AND base_url = ?
+                        ORDER BY created_at DESC
+                        LIMIT -1 OFFSET ?
+                    )
+                    """,
+                bindings: [
+                    .text(outcome.model),
+                    .text(outcome.provider.rawValue),
+                    .text(outcome.baseURL),
+                    .integer(Int64(Self.outcomeLimit))
+                ]
+            )
+        }
+    }
+
+    func outcomes(
+        for model: String,
+        provider: ModelProvider,
+        baseURL: String,
+        limit: Int
+    ) async throws -> [ModelOutcome] {
+        let database = try openDatabase()
+        let boundedLimit = max(1, min(limit, Self.outcomeLimit))
+        let statement = try Self.prepare(
+            database,
+            sql: """
+                SELECT
+                    id,
+                    model,
+                    provider,
+                    base_url,
+                    success,
+                    reason,
+                    created_at
+                FROM model_outcomes
+                WHERE model = ? AND provider = ? AND base_url = ?
+                ORDER BY created_at DESC, id ASC
+                LIMIT ?
+                """
+        )
+        defer { sqlite3_finalize(statement) }
+        try Self.bind(
+            [
+                .text(model),
+                .text(provider.rawValue),
+                .text(baseURL),
+                .integer(Int64(boundedLimit))
+            ],
+            to: statement,
+            database: database
+        )
+        var outcomes: [ModelOutcome] = []
+        while sqlite3_step(statement) == SQLITE_ROW {
+            outcomes.append(try Self.decodeOutcome(statement))
+        }
+        try Self.verifyStepCompletion(statement, database: database)
+        return outcomes
+    }
+
+    func deleteOutcomes(
+        for model: String,
+        provider: ModelProvider,
+        baseURL: String
+    ) async throws {
+        let database = try openDatabase()
+        try Self.execute(
+            database,
+            sql: """
+                DELETE FROM model_outcomes
+                WHERE model = ? AND provider = ? AND base_url = ?
+                """,
+            bindings: [
+                .text(model),
+                .text(provider.rawValue),
+                .text(baseURL)
+            ]
+        )
+    }
+
     private func openDatabase() throws -> OpaquePointer {
         guard let database else {
             throw MemoryStoreError.openFailed("the database is closed")
@@ -614,13 +739,49 @@ actor MemoryStore: AgentMemoryStoreProtocol {
                         CREATE INDEX plan_items_plan_order
                         ON plan_items(plan_id, item_order);
 
-                        PRAGMA user_version = 2;
+                        CREATE TABLE model_outcomes (
+                            id TEXT PRIMARY KEY NOT NULL,
+                            model TEXT NOT NULL,
+                            provider TEXT NOT NULL,
+                            base_url TEXT NOT NULL,
+                            success INTEGER NOT NULL,
+                            reason TEXT,
+                            created_at REAL NOT NULL
+                        );
+
+                        CREATE INDEX model_outcomes_model_provider_base_url
+                        ON model_outcomes(model, provider, base_url, created_at DESC);
+
+                        PRAGMA user_version = 3;
                         """
                 )
             }
-        } else if version == 1 {
+        } else if version == 1 || version == 2 {
             try withTransaction(database) {
-                try execute(database, sql: "PRAGMA user_version = 2")
+                if version == 1 {
+                    // v1 -> v2: table layout unchanged, just bump pragma.
+                    try execute(database, sql: "PRAGMA user_version = 2")
+                }
+                // v2 -> v3: add model_outcomes table.
+                try execute(
+                    database,
+                    sql: """
+                        CREATE TABLE IF NOT EXISTS model_outcomes (
+                            id TEXT PRIMARY KEY NOT NULL,
+                            model TEXT NOT NULL,
+                            provider TEXT NOT NULL,
+                            base_url TEXT NOT NULL,
+                            success INTEGER NOT NULL,
+                            reason TEXT,
+                            created_at REAL NOT NULL
+                        );
+
+                        CREATE INDEX IF NOT EXISTS model_outcomes_model_provider_base_url
+                        ON model_outcomes(model, provider, base_url, created_at DESC);
+
+                        PRAGMA user_version = 3;
+                        """
+                )
             }
         }
     }
@@ -747,6 +908,32 @@ actor MemoryStore: AgentMemoryStoreProtocol {
         return String(cString: text)
     }
 
+    private static func decodeOutcome(
+        _ statement: OpaquePointer
+    ) throws -> ModelOutcome {
+        guard
+            let id = uuidColumn(statement, index: 0),
+            let model = stringColumn(statement, index: 1),
+            let rawProvider = stringColumn(statement, index: 2),
+            let provider = ModelProvider(rawValue: rawProvider),
+            let baseURL = stringColumn(statement, index: 3)
+        else {
+            throw MemoryStoreError.corruptRecord("invalid outcome fields")
+        }
+        let success = sqlite3_column_int64(statement, 4) != 0
+        let reason = stringColumn(statement, index: 5)
+        let createdAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 6))
+        return ModelOutcome(
+            id: id,
+            model: model,
+            provider: provider,
+            baseURL: baseURL,
+            success: success,
+            reason: reason,
+            timestamp: createdAt
+        )
+    }
+
     private static func decodeMemory(
         _ statement: OpaquePointer
     ) throws -> AgentMemoryRecord {
@@ -862,6 +1049,11 @@ actor MemoryStore: AgentMemoryStoreProtocol {
 actor VolatileMemoryStore: AgentMemoryStoreProtocol {
     private var memories: [UUID: AgentMemoryRecord] = [:]
     private var plans: [UUID: TODOPlan] = [:]
+    private var outcomes: [String: [ModelOutcome]] = [:]
+
+    private func outcomeKey(model: String, provider: ModelProvider, baseURL: String) -> String {
+        "\(provider.rawValue)|\(baseURL)|\(model)"
+    }
 
     func saveMemory(_ record: AgentMemoryRecord) async throws {
         if let duplicate = memories.values.first(where: {
@@ -933,5 +1125,32 @@ actor VolatileMemoryStore: AgentMemoryStoreProtocol {
             $0.value.conversationId != conversationId
         }
         plans.removeValue(forKey: conversationId)
+    }
+
+    func saveOutcome(_ outcome: ModelOutcome) async throws {
+        let key = outcomeKey(model: outcome.model, provider: outcome.provider, baseURL: outcome.baseURL)
+        var list = outcomes[key] ?? []
+        list.insert(outcome, at: 0)
+        outcomes[key] = Array(list.prefix(64))
+    }
+
+    func outcomes(
+        for model: String,
+        provider: ModelProvider,
+        baseURL: String,
+        limit: Int
+    ) async throws -> [ModelOutcome] {
+        let key = outcomeKey(model: model, provider: provider, baseURL: baseURL)
+        let boundedLimit = max(1, min(limit, 64))
+        return Array((outcomes[key] ?? []).prefix(boundedLimit))
+    }
+
+    func deleteOutcomes(
+        for model: String,
+        provider: ModelProvider,
+        baseURL: String
+    ) async throws {
+        let key = outcomeKey(model: model, provider: provider, baseURL: baseURL)
+        outcomes.removeValue(forKey: key)
     }
 }

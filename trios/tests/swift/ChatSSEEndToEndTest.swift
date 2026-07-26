@@ -336,8 +336,8 @@ struct ChatSSEEndToEndTests {
                 encryptedURL: encryptedURL
             )
             let schemaVersion = await store.schemaVersion()
-            check(schemaVersion == 2,
-                  "memory database schema is version 2")
+            check(schemaVersion == 3,
+                  "memory database schema is version 3")
             let journalMode = await store.journalMode()
             check(journalMode == "wal",
                   "memory database uses WAL journal mode for SQLCipher encryption")

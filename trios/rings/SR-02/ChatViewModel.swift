@@ -522,6 +522,8 @@ final class ChatViewModel: ObservableObject {
                 historyForRequest: historyForRequest,
                 requestAttachments: requestAttachments
             )
+            let finalModel = preflightSwitched ? preflightModel : modelStore.selectedModel
+            await modelStore.recordSendOutcome(model: finalModel, success: true, reason: nil)
         } catch {
             guard isCurrentStream(generation) else { return }
             // One automatic model failover for provider-side model failures.
@@ -532,10 +534,15 @@ final class ChatViewModel: ObservableObject {
             if !didFailover,
                let transportError = error as? TransportError,
                (transportError.isModelUnavailableError || transportError.isInvalidModelError),
-               let nextModel = modelStore.selectNextModel() {
+               let nextModel = await modelStore.selectNextModel() {
                 didFailover = true
                 finalizeAssistantStreamingState()
                 clearPendingUsage()
+                await modelStore.recordSendOutcome(
+                    model: originalModel,
+                    success: false,
+                    reason: transportError.localizedDescription
+                )
                 let failoverMsg = "Model `\(originalModel)` failed; retrying with `\(nextModel)`…"
                 let banner = ChatMessage(role: .system, content: "[↻] \(failoverMsg)")
                 messages.append(banner)
@@ -550,8 +557,14 @@ final class ChatViewModel: ObservableObject {
                         historyForRequest: historyForRequest,
                         requestAttachments: requestAttachments
                     )
+                    await modelStore.recordSendOutcome(model: nextModel, success: true, reason: nil)
                     return
                 } catch {
+                    await modelStore.recordSendOutcome(
+                        model: nextModel,
+                        success: false,
+                        reason: (error as? TransportError)?.localizedDescription
+                    )
                     // Restore the original selection so the next turn does not
                     // silently inherit a failed fallback.
                     modelStore.selectModel(originalModel)
@@ -606,6 +619,7 @@ final class ChatViewModel: ObservableObject {
         requestAttachments: [ChatRequestAttachment]
     ) async throws {
         guard isGenerationCurrent(generation) else { return }
+        let runtimeConfiguration = await modelStore.runtimeConfiguration
         guard let requestBody = try? ChatRequestBuilder(
             conversationId: conversationId,
             message: text,
@@ -614,7 +628,7 @@ final class ChatViewModel: ObservableObject {
             userSystemPrompt: memoryService.promptContext(for: recalledMemories),
             previousConversation: historyForRequest,
             browserContext: nil,
-            modelConfiguration: modelStore.runtimeConfiguration,
+            modelConfiguration: runtimeConfiguration,
             attachments: requestAttachments
         ).build() else {
             NSLog("[TriosChat] ChatRequestBuilder failed")
@@ -676,7 +690,7 @@ final class ChatViewModel: ObservableObject {
         guard case .unavailable = health else { return modelStore.selectedModel }
 
         let currentModel = modelStore.selectedModel
-        guard let healthyModel = modelStore.selectFirstHealthyModel() else {
+        guard let healthyModel = await modelStore.selectFirstHealthyModel() else {
             return currentModel
         }
 

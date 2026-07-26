@@ -83,21 +83,27 @@ final class ModelConfigurationStore: ObservableObject {
     private let catalogService: ModelCatalogService
     private let healthService: any ModelHealthServiceProtocol
     private let statusService: any ProviderStatusServiceProtocol
+    private let reliabilityService: ModelReliabilityService
     private var backgroundPoller: BackgroundHealthPoller?
 
     /// Exposed for tests only.
     var backgroundPollerForTests: BackgroundHealthPoller? { backgroundPoller }
+    var reliabilityServiceForTests: ModelReliabilityService { reliabilityService }
 
     init(
         defaults: UserDefaults = .standard,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         catalogService: ModelCatalogService = ModelCatalogService(),
         statusService: any ProviderStatusServiceProtocol = ProviderStatusService(),
-        healthService: (any ModelHealthServiceProtocol)? = nil
+        healthService: (any ModelHealthServiceProtocol)? = nil,
+        reliabilityService: ModelReliabilityService? = nil
     ) {
         self.catalogService = catalogService
         self.statusService = statusService
         self.healthService = healthService ?? ModelHealthService(statusService: statusService)
+        self.reliabilityService = reliabilityService ?? ModelReliabilityService(
+            store: MemoryStoreReliabilityAdapter()
+        )
         self.defaults = defaults
         self.environment = environment
 
@@ -129,25 +135,44 @@ final class ModelConfigurationStore: ObservableObject {
 
     /// Models that can be tried when the current selection fails, ordered by
     /// provider preference. The current model is excluded.
+    /// Models that can be tried when the current selection fails. The current
+    /// model is excluded and the list is ranked by observed reliability score,
+    /// falling back to provider preference for models without history.
     var fallbackModels: [String] {
+        get async {
+            let candidates = selectedProvider.fallbackModels(excluding: selectedModel)
+            return await reliabilityService.rankedFallbacks(
+                excluding: selectedModel,
+                from: candidates,
+                provider: selectedProvider,
+                baseURL: baseURL
+            )
+        }
+    }
+
+    /// Synchronous fallback order for callers that cannot await. Prefers the
+    /// reliability-ranked order when available, otherwise falls back to the
+    /// provider's static suggestion list.
+    var fallbackModelsSync: [String] {
         selectedProvider.fallbackModels(excluding: selectedModel)
     }
 
     /// Switches to the next suggested model in the provider's list, returning the
     /// new selection. Returns `nil` if no alternative exists.
     @discardableResult
-    func selectNextModel() -> String? {
-        guard let next = fallbackModels.first else { return nil }
+    func selectNextModel() async -> String? {
+        guard let next = await fallbackModels.first else { return nil }
         selectModel(next)
         return next
     }
 
     /// Switches to the first model that is not known to be unavailable. If no
     /// healthy model is found, falls back to the provider's default model so the
-    /// user is never left with an empty selection.
+    /// user is never left with an empty selection. Models are ranked by observed
+    /// reliability score.
     @discardableResult
-    func selectFirstHealthyModel() -> String? {
-        let candidates = fallbackModels + [selectedProvider.defaultModel]
+    func selectFirstHealthyModel() async -> String? {
+        let candidates = await fallbackModels + [selectedProvider.defaultModel]
         guard let next = candidates.first(where: { !unhealthyModels.contains($0) }) else { return nil }
         selectModel(next)
         return next
@@ -155,8 +180,39 @@ final class ModelConfigurationStore: ObservableObject {
 
     /// A short user-facing hint naming a concrete fallback model, or empty.
     var fallbackSuggestion: String {
-        guard let first = fallbackModels.first else { return "" }
+        // Synchronous hint uses the static order to avoid async in SwiftUI accessors.
+        guard let first = fallbackModelsSync.first else { return "" }
         return "Suggested fallback: \(first)"
+    }
+
+    /// Returns the persisted reliability score for a model.
+    func reliability(for model: String) async -> ModelReliability {
+        await reliabilityService.reliability(
+            for: model,
+            provider: selectedProvider,
+            baseURL: baseURL
+        )
+    }
+
+    /// Records a health-probe outcome into the reliability scorecard.
+    func recordHealthOutcome(model: String, health: ModelHealth) async {
+        await reliabilityService.recordHealth(
+            model: model,
+            provider: selectedProvider,
+            baseURL: baseURL,
+            health: health
+        )
+    }
+
+    /// Records a manual send outcome into the reliability scorecard.
+    func recordSendOutcome(model: String, success: Bool, reason: String? = nil) async {
+        await reliabilityService.record(
+            model: model,
+            provider: selectedProvider,
+            baseURL: baseURL,
+            success: success,
+            reason: reason
+        )
     }
 
     /// Marks a model as unavailable (e.g. after a transport error or failed probe).
@@ -179,7 +235,8 @@ final class ModelConfigurationStore: ObservableObject {
         )
     }
 
-    /// Re-probes every known model in parallel and updates `unhealthyModels`.
+    /// Re-probes every known model in parallel, updates `unhealthyModels`, and
+    /// records each outcome in the persistent reliability scorecard.
     func refreshHealth() async {
         isCheckingHealth = true
         defer { isCheckingHealth = false }
@@ -194,6 +251,7 @@ final class ModelConfigurationStore: ObservableObject {
                 }
             }
             for await (model, health) in group {
+                await recordHealthOutcome(model: model, health: health)
                 switch health {
                 case .unavailable:
                     newUnhealthy.insert(model)
@@ -282,12 +340,26 @@ final class ModelConfigurationStore: ObservableObject {
     }
 
     var runtimeConfiguration: ModelRuntimeConfiguration {
+        get async {
+            ModelRuntimeConfiguration(
+                provider: selectedProvider,
+                model: selectedModel,
+                baseURL: baseURL,
+                apiKey: resolvedAPIKey.isEmpty ? nil : resolvedAPIKey,
+                fallbackModels: await fallbackModels
+            )
+        }
+    }
+
+    /// Synchronous runtime configuration for callers that cannot await.
+    /// Uses the static fallback order.
+    var runtimeConfigurationSync: ModelRuntimeConfiguration {
         ModelRuntimeConfiguration(
             provider: selectedProvider,
             model: selectedModel,
             baseURL: baseURL,
             apiKey: resolvedAPIKey.isEmpty ? nil : resolvedAPIKey,
-            fallbackModels: fallbackModels
+            fallbackModels: fallbackModelsSync
         )
     }
 
@@ -300,6 +372,7 @@ final class ModelConfigurationStore: ObservableObject {
         discoveredModels = []
         discoveryError = nil
         credentialRevision += 1
+        Task { await reliabilityService.reset(provider: selectedProvider, baseURL: baseURL) }
         invalidateHealth()
         restartBackgroundHealthChecks()
     }
@@ -309,6 +382,7 @@ final class ModelConfigurationStore: ObservableObject {
         guard !trimmed.isEmpty else { return }
         baseURL = trimmed
         defaults.set(trimmed, forKey: Self.baseURLKey(selectedProvider))
+        Task { await reliabilityService.reset(provider: selectedProvider, baseURL: baseURL) }
         invalidateHealth()
         restartBackgroundHealthChecks()
     }
@@ -323,6 +397,7 @@ final class ModelConfigurationStore: ObservableObject {
     func resetBaseURL() {
         baseURL = selectedProvider.defaultBaseURL
         defaults.removeObject(forKey: Self.baseURLKey(selectedProvider))
+        Task { await reliabilityService.reset(provider: selectedProvider, baseURL: baseURL) }
         invalidateHealth()
         restartBackgroundHealthChecks()
     }
@@ -332,6 +407,7 @@ final class ModelConfigurationStore: ObservableObject {
         guard !trimmed.isEmpty else { return }
         try ModelCredentialStore.save(trimmed, for: selectedProvider)
         credentialRevision += 1
+        Task { await reliabilityService.reset(provider: selectedProvider, baseURL: baseURL) }
         invalidateHealth()
         restartBackgroundHealthChecks()
     }
@@ -339,6 +415,7 @@ final class ModelConfigurationStore: ObservableObject {
     func deleteAPIKey() throws {
         try ModelCredentialStore.delete(for: selectedProvider, ignoresMissing: true)
         credentialRevision += 1
+        Task { await reliabilityService.reset(provider: selectedProvider, baseURL: baseURL) }
         invalidateHealth()
         restartBackgroundHealthChecks()
     }

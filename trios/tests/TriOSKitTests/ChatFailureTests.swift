@@ -78,26 +78,27 @@ final class ChatFailureTests: XCTestCase {
 
     // MARK: - Model fallback helpers
 
-    func testFallbackModelsExcludeCurrent() {
+    func testFallbackModelsExcludeCurrent() async {
         let defaults = UserDefaults(suiteName: "test-fallback")!
         defer { defaults.removePersistentDomain(forName: "test-fallback") }
         let store = ModelConfigurationStore(defaults: defaults)
         store.selectProvider(.anthropic)
         store.selectModel("claude-sonnet-4-5")
 
-        XCTAssertTrue(store.fallbackModels.contains("claude-opus-4-5"))
-        XCTAssertFalse(store.fallbackModels.contains("claude-sonnet-4-5"))
+        let fallbacks = await store.fallbackModels
+        XCTAssertTrue(fallbacks.contains("claude-opus-4-5"))
+        XCTAssertFalse(fallbacks.contains("claude-sonnet-4-5"))
         XCTAssertFalse(store.fallbackSuggestion.isEmpty)
     }
 
-    func testSelectNextModelAdvancesList() {
+    func testSelectNextModelAdvancesList() async {
         let defaults = UserDefaults(suiteName: "test-next-model")!
         defer { defaults.removePersistentDomain(forName: "test-next-model") }
         let store = ModelConfigurationStore(defaults: defaults)
         store.selectProvider(.anthropic)
         store.selectModel("claude-sonnet-4-5")
 
-        let next = store.selectNextModel()
+        let next = await store.selectNextModel()
         XCTAssertNotNil(next)
         XCTAssertNotEqual(next, "claude-sonnet-4-5")
         XCTAssertEqual(store.selectedModel, next)

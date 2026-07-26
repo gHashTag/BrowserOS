@@ -192,6 +192,36 @@ actor ControlledSaveMemoryStore: AgentMemoryStoreProtocol {
         deletionStarted = true
         try await base.deleteConversationData(conversationId: conversationId)
     }
+
+    func saveOutcome(_ outcome: ModelOutcome) async throws {
+        try await base.saveOutcome(outcome)
+    }
+
+    func outcomes(
+        for model: String,
+        provider: ModelProvider,
+        baseURL: String,
+        limit: Int
+    ) async throws -> [ModelOutcome] {
+        try await base.outcomes(
+            for: model,
+            provider: provider,
+            baseURL: baseURL,
+            limit: limit
+        )
+    }
+
+    func deleteOutcomes(
+        for model: String,
+        provider: ModelProvider,
+        baseURL: String
+    ) async throws {
+        try await base.deleteOutcomes(
+            for: model,
+            provider: provider,
+            baseURL: baseURL
+        )
+    }
 }
 
 actor DelayedMemoryStore: AgentMemoryStoreProtocol {
@@ -283,6 +313,36 @@ actor DelayedMemoryStore: AgentMemoryStoreProtocol {
         }
         try await base.deleteConversationData(conversationId: conversationId)
     }
+
+    func saveOutcome(_ outcome: ModelOutcome) async throws {
+        try await base.saveOutcome(outcome)
+    }
+
+    func outcomes(
+        for model: String,
+        provider: ModelProvider,
+        baseURL: String,
+        limit: Int
+    ) async throws -> [ModelOutcome] {
+        try await base.outcomes(
+            for: model,
+            provider: provider,
+            baseURL: baseURL,
+            limit: limit
+        )
+    }
+
+    func deleteOutcomes(
+        for model: String,
+        provider: ModelProvider,
+        baseURL: String
+    ) async throws {
+        try await base.deleteOutcomes(
+            for: model,
+            provider: provider,
+            baseURL: baseURL
+        )
+    }
 }
 
 private enum TestMemoryStoreFailure: LocalizedError {
@@ -332,6 +392,27 @@ actor AlwaysFailingMemoryStore: AgentMemoryStoreProtocol {
     func deleteConversationData(conversationId: UUID) async throws {
         throw TestMemoryStoreFailure.unavailable
     }
+
+    func saveOutcome(_ outcome: ModelOutcome) async throws {
+        throw TestMemoryStoreFailure.unavailable
+    }
+
+    func outcomes(
+        for model: String,
+        provider: ModelProvider,
+        baseURL: String,
+        limit: Int
+    ) async throws -> [ModelOutcome] {
+        throw TestMemoryStoreFailure.unavailable
+    }
+
+    func deleteOutcomes(
+        for model: String,
+        provider: ModelProvider,
+        baseURL: String
+    ) async throws {
+        throw TestMemoryStoreFailure.unavailable
+    }
 }
 
 actor DeleteFailingMemoryStore: AgentMemoryStoreProtocol {
@@ -374,6 +455,36 @@ actor DeleteFailingMemoryStore: AgentMemoryStoreProtocol {
 
     func deleteConversationData(conversationId: UUID) async throws {
         throw TestMemoryStoreFailure.unavailable
+    }
+
+    func saveOutcome(_ outcome: ModelOutcome) async throws {
+        try await base.saveOutcome(outcome)
+    }
+
+    func outcomes(
+        for model: String,
+        provider: ModelProvider,
+        baseURL: String,
+        limit: Int
+    ) async throws -> [ModelOutcome] {
+        try await base.outcomes(
+            for: model,
+            provider: provider,
+            baseURL: baseURL,
+            limit: limit
+        )
+    }
+
+    func deleteOutcomes(
+        for model: String,
+        provider: ModelProvider,
+        baseURL: String
+    ) async throws {
+        try await base.deleteOutcomes(
+            for: model,
+            provider: provider,
+            baseURL: baseURL
+        )
     }
 }
 
