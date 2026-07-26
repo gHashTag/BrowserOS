@@ -77,13 +77,17 @@ final class ModelConfigurationStore: ObservableObject {
 
     private let defaults: UserDefaults
     private let environment: [String: String]
-    private let catalogService = ModelCatalogService()
-    private let healthService = ModelHealthService()
+    private let catalogService: ModelCatalogService
+    private let healthService: any ModelHealthServiceProtocol
 
     init(
         defaults: UserDefaults = .standard,
-        environment: [String: String] = ProcessInfo.processInfo.environment
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        catalogService: ModelCatalogService = ModelCatalogService(),
+        healthService: any ModelHealthServiceProtocol = ModelHealthService()
     ) {
+        self.catalogService = catalogService
+        self.healthService = healthService
         self.defaults = defaults
         self.environment = environment
 

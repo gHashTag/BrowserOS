@@ -134,9 +134,6 @@ final class ChatFailureTests: XCTestCase {
     func testAutoFailoverOnModelUnavailable() async {
         let defaults = UserDefaults(suiteName: "test-failover-auto")!
         defer { defaults.removePersistentDomain(forName: "test-failover-auto") }
-        let store = ModelConfigurationStore(defaults: defaults)
-        store.selectProvider(.anthropic)
-        store.selectModel("claude-sonnet-4-5")
 
         let transport = MockFailingTransport(
             firstError: TransportError.serverError(
@@ -152,7 +149,6 @@ final class ChatFailureTests: XCTestCase {
         )
         let viewModel = makeChatViewModel(
             transport: transport,
-            modelStore: store,
             defaults: defaults
         )
         viewModel.inputText = "Hello"
@@ -160,7 +156,7 @@ final class ChatFailureTests: XCTestCase {
 
         let sendCount = await transport.sendCount
         XCTAssertEqual(sendCount, 2, "Expected initial attempt plus one failover retry")
-        XCTAssertEqual(store.selectedModel, "claude-opus-4-5")
+        XCTAssertEqual(viewModel.modelStore.selectedModel, "claude-opus-4-5")
         let banner = viewModel.messages.first { $0.content.contains("retrying with") }
         XCTAssertNotNil(banner)
         let assistant = viewModel.messages.first { $0.role == .assistant }
@@ -171,9 +167,6 @@ final class ChatFailureTests: XCTestCase {
     func testBalanceErrorDoesNotFailover() async {
         let defaults = UserDefaults(suiteName: "test-failover-balance")!
         defer { defaults.removePersistentDomain(forName: "test-failover-balance") }
-        let store = ModelConfigurationStore(defaults: defaults)
-        store.selectProvider(.anthropic)
-        store.selectModel("claude-sonnet-4-5")
 
         let transport = MockFailingTransport(
             firstError: TransportError.serverError(
@@ -184,7 +177,6 @@ final class ChatFailureTests: XCTestCase {
         )
         let viewModel = makeChatViewModel(
             transport: transport,
-            modelStore: store,
             defaults: defaults
         )
         viewModel.inputText = "Hello"
@@ -192,9 +184,105 @@ final class ChatFailureTests: XCTestCase {
 
         let sendCount = await transport.sendCount
         XCTAssertEqual(sendCount, 1, "Balance errors must not trigger failover")
-        XCTAssertEqual(store.selectedModel, "claude-sonnet-4-5")
+        XCTAssertEqual(viewModel.modelStore.selectedModel, "claude-sonnet-4-5")
         let errorMessage = viewModel.messages.first { $0.role == .system && $0.content.contains("balance") }
         XCTAssertNotNil(errorMessage)
+    }
+
+    // MARK: - Preflight health checks
+
+    @MainActor
+    func testPreflightSwitchesAwayFromUnavailableModel() async {
+        let defaults = UserDefaults(suiteName: "test-preflight-switch")!
+        defer { defaults.removePersistentDomain(forName: "test-preflight-switch") }
+
+        let health = MockModelHealthService()
+        await health.setHealth(.unavailable(reason: "probe failed"), for: "claude-sonnet-4-5")
+        await health.setHealth(.healthy, for: "claude-opus-4-5")
+
+        let transport = MockFailingTransport(
+            successEvents: [
+                .start(id: "msg-1"),
+                .textDelta(id: "msg-1", delta: "Healthy response"),
+                .finish(id: "msg-1")
+            ]
+        )
+        let viewModel = makeChatViewModel(
+            transport: transport,
+            defaults: defaults,
+            healthService: health
+        )
+        viewModel.inputText = "Hello"
+        await viewModel.sendMessage()
+
+        let sendCount = await transport.sendCount
+        XCTAssertEqual(sendCount, 1, "Preflight should avoid a failing first request")
+        XCTAssertEqual(viewModel.modelStore.selectedModel, "claude-opus-4-5")
+        let banner = viewModel.messages.first { $0.content.contains("unavailable") && $0.content.contains("switching") }
+        XCTAssertNotNil(banner)
+        let assistant = viewModel.messages.first { $0.role == .assistant }
+        XCTAssertEqual(assistant?.content, "Healthy response")
+    }
+
+    @MainActor
+    func testTransportErrorMarksModelUnhealthy() async {
+        let defaults = UserDefaults(suiteName: "test-preflight-mark")!
+        defer { defaults.removePersistentDomain(forName: "test-preflight-mark") }
+
+        let health = MockModelHealthService()
+        await health.setHealth(.healthy, for: "claude-sonnet-4-5")
+
+        let transport = MockFailingTransport(
+            firstError: TransportError.serverError(
+                statusCode: 503,
+                bodySample: "Service Unavailable",
+                url: nil
+            )
+        )
+        let viewModel = makeChatViewModel(
+            transport: transport,
+            defaults: defaults,
+            healthService: health
+        )
+        let originalModel = viewModel.modelStore.selectedModel
+        viewModel.inputText = "Hello"
+        await viewModel.sendMessage()
+
+        XCTAssertTrue(viewModel.modelStore.unhealthyModels.contains(originalModel))
+        let sendCount = await transport.sendCount
+        XCTAssertEqual(sendCount, 2, "Model-unavailable error should trigger one failover attempt")
+    }
+
+    @MainActor
+    func testHealthyModelDoesNotSwitch() async {
+        let defaults = UserDefaults(suiteName: "test-preflight-healthy")!
+        defer { defaults.removePersistentDomain(forName: "test-preflight-healthy") }
+
+        let health = MockModelHealthService()
+        await health.setHealth(.healthy, for: "claude-sonnet-4-5")
+
+        let transport = MockFailingTransport(
+            successEvents: [
+                .start(id: "msg-1"),
+                .textDelta(id: "msg-1", delta: "Original response"),
+                .finish(id: "msg-1")
+            ]
+        )
+        let viewModel = makeChatViewModel(
+            transport: transport,
+            defaults: defaults,
+            healthService: health
+        )
+        viewModel.inputText = "Hello"
+        await viewModel.sendMessage()
+
+        let sendCount = await transport.sendCount
+        XCTAssertEqual(sendCount, 1)
+        XCTAssertEqual(viewModel.modelStore.selectedModel, "claude-sonnet-4-5")
+        let banner = viewModel.messages.first { $0.content.contains("unavailable") }
+        XCTAssertNil(banner)
+        let assistant = viewModel.messages.first { $0.role == .assistant }
+        XCTAssertEqual(assistant?.content, "Original response")
     }
 }
 
@@ -229,6 +317,25 @@ private actor MockFailingTransport: ChatTransportProtocol {
 
 private struct MockHealthCheck: ChatHealthCheckProtocol {
     func check() async -> Bool { true }
+}
+
+private actor MockModelHealthService: ModelHealthServiceProtocol {
+    private var results: [String: ModelHealth] = [:]
+
+    func probe(
+        model: String,
+        provider: ModelProvider,
+        baseURL: String,
+        apiKey: String?
+    ) async -> ModelHealth {
+        results[model] ?? .unknown(error: "not configured")
+    }
+
+    func invalidate() async {}
+
+    func setHealth(_ health: ModelHealth, for model: String) async {
+        results[model] = health
+    }
 }
 
 private actor MockPersister: ChatPersisterProtocol {
@@ -271,19 +378,24 @@ private actor MockAgentMemoryStore: AgentMemoryStoreProtocol {
 @MainActor
 private func makeChatViewModel(
     transport: ChatTransportProtocol,
-    modelStore: ModelConfigurationStore,
-    defaults: UserDefaults
+    defaults: UserDefaults,
+    provider: ModelProvider = .anthropic,
+    selectedModel: String = "claude-sonnet-4-5",
+    healthService: any ModelHealthServiceProtocol = ModelHealthService()
 ) -> ChatViewModel {
-    let store = MockAgentMemoryStore()
-    let memoryService = AgentMemoryService(store: store)
-    let todoPlanner = TODOPlanner(store: store, preferences: defaults)
+    let store = ModelConfigurationStore(defaults: defaults, healthService: healthService)
+    store.selectProvider(provider)
+    store.selectModel(selectedModel)
+    let memoryStore = MockAgentMemoryStore()
+    let memoryService = AgentMemoryService(store: memoryStore)
+    let todoPlanner = TODOPlanner(store: memoryStore, preferences: defaults)
     return ChatViewModel(
         transport: transport,
         healthCheck: MockHealthCheck(),
         parser: UIMessageStreamParser(),
         persister: MockPersister(),
         stateMachine: ConversationStateMachine(),
-        modelStore: modelStore,
+        modelStore: store,
         memoryService: memoryService,
         todoPlanner: todoPlanner
     )

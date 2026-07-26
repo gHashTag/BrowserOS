@@ -7,13 +7,25 @@ enum ModelHealth: Equatable, Sendable {
     case unknown(error: String)
 }
 
+/// Abstract health probe that can be injected for testing.
+protocol ModelHealthServiceProtocol: Sendable {
+    func probe(
+        model: String,
+        provider: ModelProvider,
+        baseURL: String,
+        apiKey: String?
+    ) async -> ModelHealth
+
+    func invalidate() async
+}
+
 /// Lightweight, cached model health probe.
 ///
 /// Uses a tiny paid completion (max_tokens: 1) as the final liveness signal for
 /// cloud providers, and Ollama's free `/api/tags` list for local models. Results
 /// are cached with a TTL and require two consecutive failures before a model is
 /// marked `.unavailable`, reducing false positives from transient blips.
-actor ModelHealthService {
+actor ModelHealthService: ModelHealthServiceProtocol {
     struct CacheEntry: Equatable {
         let health: ModelHealth
         let timestamp: Date
@@ -84,7 +96,7 @@ actor ModelHealthService {
 
     /// Clears all cached health entries. Useful when the user changes the endpoint
     /// or API key.
-    func invalidate() {
+    func invalidate() async {
         cache.removeAll()
     }
 
