@@ -5,8 +5,14 @@ import { defineToolWithCategory } from './framework'
 
 const defineTriosTool = defineToolWithCategory('scripts')
 
+// Resolution order: explicit override, then TRIOS_ROOT, then the default
+// checkout location (~/BrowserOS/trios — the repo folder was renamed from
+// BrowserOS-full to BrowserOS).
 const CLI_PATH =
-  '/Users/playra/BrowserOS-full/trios/target/release/clade-improve'
+  process.env.TRIOS_CLADE_IMPROVE_PATH ??
+  (process.env.TRIOS_ROOT
+    ? `${process.env.TRIOS_ROOT}/target/release/clade-improve`
+    : '/Users/playra/BrowserOS/trios/target/release/clade-improve')
 
 // Only these subcommands may ever be invoked. Capability restriction over
 // detection: the CLI is run with execFileSync (no shell), and the arg is
