@@ -4,11 +4,12 @@ import Foundation
 struct Trinity999TabMapTests {
     static func main() {
         expect(Trinity999TabMap.petalCount == 27, "999 menu must retain 27 petals")
-        expect(Trinity999TabMap.routes.count == 6, "Six Trios workspaces must be hosted")
+        expect(Trinity999TabMap.routes.count == 7, "Seven Trios workspaces must be hosted")
         expect(Trinity999TabMap.isValid, "Hosted routes and shortcuts must be unique")
 
         expectRoute(.chat, petal: 0, realm: .razum, shortcut: 1)
         expectRoute(.models, petal: 1, realm: .razum, shortcut: 2)
+        expectRoute(.logs, petal: 2, realm: .razum, shortcut: 3)
         expectRoute(.git, petal: 14, realm: .materiya, shortcut: 6)
         expectRoute(.terminal, petal: 13, realm: .materiya, shortcut: 5)
         expectRoute(.mesh, petal: 16, realm: .materiya, shortcut: 8)

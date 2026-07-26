@@ -48,6 +48,9 @@ struct QueenTabView: View {
             hostedRoute(for: .models) {
                 ModelsTabView()
             },
+            hostedRoute(for: .logs) {
+                LogsTabView()
+            },
             hostedRoute(for: .git) {
                 GitWorkspaceView()
             },

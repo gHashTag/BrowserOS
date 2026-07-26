@@ -62,6 +62,7 @@ if [ -z "${TRIOS_INCLUDE_PROTOTYPES:-}" ]; then
         "GlassmorphismBackground.swift"
         "HotkeyBar.swift"
         "LLMClient.swift"
+        "LogsTabView.swift"
         "MenuBuilder.swift"
         "MeshAuth.swift"
         "MeshChatListView.swift"
