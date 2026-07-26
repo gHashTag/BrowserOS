@@ -24,7 +24,8 @@ actor SSETransport: ChatTransportProtocol {
             retryableURLErrorCodes: NetworkRetryPolicy.default.retryableURLErrorCodes,
             extraShouldRetry: { error in
                 if case let TransportError.serverError(statusCode, _, _) = error {
-                    return statusCode >= 500 || statusCode == 429
+                    // Do not burn retries on fatal provider/account errors.
+                    return (502...504).contains(statusCode) || statusCode == 429
                 }
                 return false
             }
@@ -210,4 +211,77 @@ enum TransportError: Error, CustomStringConvertible {
     }
 
     var localizedDescription: String { description }
+}
+
+extension TransportError {
+    /// Extracts a human-readable provider message from the response body sample.
+    /// Supports OpenRouter-style `{ error: { message: ... } }` and plain `message` fields.
+    var providerErrorMessage: String? {
+        switch self {
+        case .serverError(_, let bodySample, _):
+            guard !bodySample.isEmpty else { return nil }
+            if let data = bodySample.data(using: .utf8),
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if let errorDict = json["error"] as? [String: Any],
+                   let message = errorDict["message"] as? String, !message.isEmpty {
+                    return message
+                }
+                if let message = json["message"] as? String, !message.isEmpty {
+                    return message
+                }
+            }
+            return bodySample
+        default:
+            return nil
+        }
+    }
+
+    var isBalanceError: Bool {
+        switch self {
+        case .serverError(402, _, _): return true
+        case .serverError(let status, let body, _):
+            return status == 400 || status == 403
+                && body.localizedCaseInsensitiveContains("Insufficient balance")
+        default: return false
+        }
+    }
+
+    var isAuthError: Bool { statusCode == 401 }
+
+    var isRateLimitError: Bool { statusCode == 429 }
+
+    var isInvalidModelError: Bool {
+        switch self {
+        case .serverError(let status, let body, _):
+            return (status == 400 || status == 404 || status == 422)
+                && (body.localizedCaseInsensitiveContains("model") || body.localizedCaseInsensitiveContains("not available"))
+        default: return false
+        }
+    }
+
+    var isModelUnavailableError: Bool {
+        switch self {
+        case .serverError(502, _, _), .serverError(503, _, _), .serverError(504, _, _):
+            return true
+        case .serverError(let status, let body, _):
+            return status >= 500
+                && body.localizedCaseInsensitiveContains("no available model provider")
+        default: return false
+        }
+    }
+
+    var isRetryableServerError: Bool {
+        switch self {
+        case .serverError(429, _, _), .serverError(502, _, _), .serverError(503, _, _), .serverError(504, _, _):
+            return true
+        default: return false
+        }
+    }
+
+    private var statusCode: Int? {
+        switch self {
+        case .serverError(let status, _, _): return status
+        default: return nil
+        }
+    }
 }

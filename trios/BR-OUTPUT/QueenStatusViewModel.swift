@@ -689,9 +689,10 @@ final class QueenStatusViewModel: ObservableObject {
     /// and returns the combined output so it can be appended to the Queen chat timeline.
     /// - Parameters:
     ///   - name: The skill name (e.g. `/doctor`).
+    ///   - arguments: Extra CLI arguments placed before the skill name (e.g. `["--model", "sonnet"]`).
     ///   - timeout: Maximum seconds to wait for the process.
     /// - Returns: Captured output, plus any timeout/exit status annotations.
-    func runSkillReturningOutput(name: String, timeout: TimeInterval = 30) async -> String {
+    func runSkillReturningOutput(name: String, arguments: [String] = [], timeout: TimeInterval = 30) async -> String {
         guard Self.knownSkills.contains(name) else {
             return "Unknown Queen skill: \(name)"
         }
@@ -710,7 +711,7 @@ final class QueenStatusViewModel: ObservableObject {
             DispatchQueue.global(qos: .userInitiated).async {
                 let task = Process()
                 task.executableURL = claude
-                task.arguments = [name]
+                task.arguments = arguments + [name]
                 task.currentDirectoryURL = URL(fileURLWithPath: cwd)
                 let outPipe = Pipe()
                 let errPipe = Pipe()

@@ -107,6 +107,27 @@ final class ModelConfigurationStore: ObservableObject {
         }
     }
 
+    /// Models that can be tried when the current selection fails, ordered by
+    /// provider preference. The current model is excluded.
+    var fallbackModels: [String] {
+        selectedProvider.suggestedModels.filter { $0 != selectedModel }
+    }
+
+    /// Switches to the next suggested model in the provider's list, returning the
+    /// new selection. Returns `nil` if no alternative exists.
+    @discardableResult
+    func selectNextModel() -> String? {
+        guard let next = fallbackModels.first else { return nil }
+        selectModel(next)
+        return next
+    }
+
+    /// A short user-facing hint naming a concrete fallback model, or empty.
+    var fallbackSuggestion: String {
+        guard let first = fallbackModels.first else { return "" }
+        return "Suggested fallback: \(first)"
+    }
+
     var hasAPIKey: Bool {
         !resolvedAPIKey.isEmpty
     }

@@ -21,7 +21,7 @@ enum QueenCommand: Equatable {
     case proposals
     case evolveApply(UUID, confirmed: Bool)
     case evolveReject(UUID)
-    case doctor
+    case doctor(model: String?)
     case tri
     case godMode
     case bridge
@@ -87,7 +87,11 @@ struct QueenCommandParser {
                   let id = UUID(uuidString: idString) else { return .unknown(trimmed) }
             return .evolveReject(id)
         case "doctor", "dr":
-            return .doctor
+            if let idx = components.firstIndex(of: "--model"),
+               idx + 1 < components.count {
+                return .doctor(model: components[idx + 1])
+            }
+            return .doctor(model: nil)
         case "tri":
             return .tri
         case "god-mode", "godmode":
@@ -118,7 +122,7 @@ struct QueenCommandParser {
         /apply <uuid>        — preview/stage a pending proposal (human-in-the-loop)
         /apply <uuid> confirm — commit, push, and open a draft PR for a staged proposal
         /reject <uuid>       — reject a pending proposal
-        /doctor              — run build/dirty health check skill
+        /doctor [--model <model>] — run build/dirty health check skill (optionally pin the Claude model)
         /tri                 — run trios quick status skill
         /god-mode            — run full oversight audit skill
         /bridge              — run BrowserOS MCP bridge skill

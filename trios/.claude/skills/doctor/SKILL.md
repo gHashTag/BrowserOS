@@ -1,11 +1,15 @@
 ---
 name: doctor
 description: HEALER - diagnose trios build, heal dirty files, monitor health, manage clade snapshots and rollback. Rust-first, no .sh/.py scripts per L7 UNITY.
-argument-hint: [quick|full|scan|build|commit|clade-snapshot|clade-rollback|clade-health] [lang:ru|en]
+argument-hint: [quick|full|scan|build|commit|clade-snapshot|clade-rollback|clade-health] [--model <model>] [lang:ru|en]
+model: claude-sonnet-4-6
 allowed-tools: fs_read, fs_write, fs_edit, shell_execute, fs_list
 ---
 
 ## HEALER MODE - DIAGNOSE -> HEAL -> REPORT
+
+The default skill model is `claude-sonnet-4-6` to avoid the stale `claude-opus-4-6`
+access issue. TriOS Queen can override per-invocation with `/doctor --model <model>`.
 
 **HONESTY RULE**: Never say all good if dirty files exist. Fix or explain WHY.
 

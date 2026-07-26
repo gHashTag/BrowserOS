@@ -696,11 +696,50 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func formatRequestError(_ error: Error) -> String {
+        if let transportError = error as? TransportError {
+            let providerMsg = transportError.providerErrorMessage
+            let fallback = modelStore.fallbackSuggestion
+            switch transportError {
+            case _ where transportError.isBalanceError:
+                return [
+                    "Insufficient balance or no resource package.",
+                    providerMsg,
+                    fallback,
+                    "Pick a different model (`/doctor --model <model>`) or recharge your provider account."
+                ].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+            case _ where transportError.isAuthError:
+                return [
+                    "Authentication failed for \(modelStore.selectedProvider.displayName).",
+                    providerMsg,
+                    "Check the API key in TriOS model settings or macOS Keychain."
+                ].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+            case _ where transportError.isInvalidModelError:
+                return [
+                    "Model '\(modelStore.selectedModel)' is unavailable or invalid.",
+                    providerMsg,
+                    fallback,
+                    "Switch models or run `/doctor --model <model>`."
+                ].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+            case _ where transportError.isRateLimitError:
+                return [
+                    "Rate limit hit on \(modelStore.selectedProvider.displayName).",
+                    providerMsg,
+                    fallback,
+                    "Retrying briefly; switch to a cheaper model if it persists."
+                ].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+            case _ where transportError.isModelUnavailableError:
+                return [
+                    "Model provider temporarily unavailable.",
+                    providerMsg,
+                    fallback,
+                    "Retrying; use `/doctor --model <model>` to force a fallback."
+                ].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+            default:
+                return transportError.localizedDescription
+            }
+        }
         if let retryError = error as? RetryError {
             return retryError.localizedDescription
-        }
-        if let transportError = error as? TransportError {
-            return transportError.localizedDescription
         }
         if let a2aError = error as? A2AError {
             return a2aError.localizedDescription
@@ -1616,8 +1655,18 @@ final class ChatViewModel: ObservableObject {
             }
         case .evolveReject(let id):
             await rejectQueenProposal(id: id)
-        case .doctor:
-            let output = await queenStatusVM.runSkillReturningOutput(name: "/doctor")
+        case .doctor(let model):
+            let output: String
+            if let model = model, !model.isEmpty {
+                // Persist the requested model so the next chat turn also uses it.
+                modelStore.selectModel(model)
+                output = await queenStatusVM.runSkillReturningOutput(
+                    name: "/doctor",
+                    arguments: ["--model", model]
+                )
+            } else {
+                output = await queenStatusVM.runSkillReturningOutput(name: "/doctor")
+            }
             await appendSystemMessageToQueenChat("`/doctor` result:\n\(output)")
         case .tri:
             let output = await queenStatusVM.runSkillReturningOutput(name: "/tri")
