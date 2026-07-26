@@ -155,6 +155,22 @@ struct ModelsTabView: View {
                     }
                     .buttonStyle(.bordered)
                     .disabled(store.isCheckingHealth || (store.selectedProvider.requiresAPIKey && !store.hasAPIKey))
+                    Toggle("Auto", isOn: $store.isBackgroundHealthPollingEnabled)
+                        .toggleStyle(.switch)
+                        .help("Probe all models every 60 seconds in the background")
+                }
+
+                HStack(spacing: 6) {
+                    if let lastCheck = store.lastHealthCheckAt {
+                        Text("Last check: \(Self.format(lastCheck))")
+                            .font(.system(size: 10))
+                            .foregroundColor(.grokDim)
+                    } else {
+                        Text("Background health polling idle")
+                            .font(.system(size: 10))
+                            .foregroundColor(.grokDim)
+                    }
+                    Spacer()
                 }
 
                 if let error = store.discoveryError {
@@ -275,6 +291,12 @@ struct ModelsTabView: View {
         return store.availableModels.filter {
             $0.localizedCaseInsensitiveContains(searchText)
         }
+    }
+
+    private static func format(_ date: Date) -> String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .short
+        return formatter.localizedString(for: date, relativeTo: Date())
     }
 
     private var keyManagementURL: URL? {

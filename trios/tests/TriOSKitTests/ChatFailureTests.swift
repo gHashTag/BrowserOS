@@ -128,6 +128,70 @@ final class ChatFailureTests: XCTestCase {
         XCTAssertEqual(cmd, .unknown("/doctor --model"))
     }
 
+    // MARK: - Background health poller
+
+    @MainActor
+    func testBackgroundPollerUpdatesUnhealthyModels() async {
+        let defaults = UserDefaults(suiteName: "test-poller")!
+        defer { defaults.removePersistentDomain(forName: "test-poller") }
+
+        let health = MockModelHealthService()
+        await health.setHealth(.unavailable(reason: "probe failed"), for: "claude-opus-4-5")
+        await health.setHealth(.healthy, for: "claude-sonnet-4-5")
+
+        let store = ModelConfigurationStore(defaults: defaults, healthService: health)
+        store.selectProvider(.anthropic)
+        store.selectModel("claude-sonnet-4-5")
+        store.setBackgroundHealthPollingEnabled(false)
+
+        let poller = BackgroundHealthPoller(store: store, interval: 0.1)
+        poller.start()
+        // Wait enough for at least one 0.1s interval to fire and refresh.
+        try? await Task.sleep(nanoseconds: 250_000_000)
+        await poller.forceRefresh()
+        poller.stop()
+
+        XCTAssertTrue(store.unhealthyModels.contains("claude-opus-4-5"))
+        XCTAssertFalse(store.unhealthyModels.contains("claude-sonnet-4-5"))
+        XCTAssertNotNil(store.lastHealthCheckAt)
+    }
+
+    @MainActor
+    func testBackgroundPollerStopsAndResumes() async {
+        let defaults = UserDefaults(suiteName: "test-poller-toggle")!
+        defer { defaults.removePersistentDomain(forName: "test-poller-toggle") }
+
+        let store = ModelConfigurationStore(defaults: defaults)
+        store.setBackgroundHealthPollingEnabled(false)
+        XCTAssertNil(store.backgroundPollerForTests)
+
+        store.setBackgroundHealthPollingEnabled(true)
+        XCTAssertNotNil(store.backgroundPollerForTests)
+        XCTAssertTrue(store.backgroundPollerForTests?.isRunning == true)
+
+        store.setBackgroundHealthPollingEnabled(false)
+        XCTAssertTrue(store.backgroundPollerForTests?.isRunning == false)
+    }
+
+    @MainActor
+    func testHealthyModelRecoversFromUnhealthy() async {
+        let defaults = UserDefaults(suiteName: "test-poller-recovery")!
+        defer { defaults.removePersistentDomain(forName: "test-poller-recovery") }
+
+        let health = MockModelHealthService()
+        await health.setHealth(.unavailable(reason: "probe failed"), for: "claude-opus-4-5")
+
+        let store = ModelConfigurationStore(defaults: defaults, healthService: health)
+        store.selectProvider(.anthropic)
+        store.selectModel("claude-sonnet-4-5")
+        store.markUnhealthy("claude-opus-4-5")
+
+        await health.setHealth(.healthy, for: "claude-opus-4-5")
+        await store.refreshHealth()
+
+        XCTAssertFalse(store.unhealthyModels.contains("claude-opus-4-5"))
+    }
+
     // MARK: - Automatic model failover
 
     @MainActor
@@ -333,7 +397,7 @@ private actor MockModelHealthService: ModelHealthServiceProtocol {
 
     func invalidate() async {}
 
-    func setHealth(_ health: ModelHealth, for model: String) async {
+    func setHealth(_ health: ModelHealth, for model: String) {
         results[model] = health
     }
 }

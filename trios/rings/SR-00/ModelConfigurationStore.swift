@@ -74,11 +74,17 @@ final class ModelConfigurationStore: ObservableObject {
     @Published private(set) var modelsTabRequest = 0
     @Published private(set) var unhealthyModels: Set<String> = []
     @Published private(set) var isCheckingHealth = false
+    @Published private(set) var lastHealthCheckAt: Date?
+    @Published var isBackgroundHealthPollingEnabled = true
 
     private let defaults: UserDefaults
     private let environment: [String: String]
     private let catalogService: ModelCatalogService
     private let healthService: any ModelHealthServiceProtocol
+    private var backgroundPoller: BackgroundHealthPoller?
+
+    /// Exposed for tests only.
+    var backgroundPollerForTests: BackgroundHealthPoller? { backgroundPoller }
 
     init(
         defaults: UserDefaults = .standard,
@@ -102,6 +108,9 @@ final class ModelConfigurationStore: ObservableObject {
         baseURL = defaults.string(forKey: Self.baseURLKey(provider))
             ?? environment["TRIOS_BASE_URL"]
             ?? provider.defaultBaseURL
+
+        loadBackgroundHealthPollingPreference()
+        startBackgroundHealthChecks()
     }
 
     var availableModels: [String] {
@@ -172,6 +181,7 @@ final class ModelConfigurationStore: ObservableObject {
         defer { isCheckingHealth = false }
         let models = availableModels
         var newUnhealthy: Set<String> = []
+        var newHealthy: Set<String> = []
         await withTaskGroup(of: (String, ModelHealth).self) { group in
             for model in models {
                 group.addTask {
@@ -180,18 +190,63 @@ final class ModelConfigurationStore: ObservableObject {
                 }
             }
             for await (model, health) in group {
-                if case .unavailable = health {
+                switch health {
+                case .unavailable:
                     newUnhealthy.insert(model)
+                case .healthy:
+                    newHealthy.insert(model)
+                case .unknown:
+                    break
                 }
             }
         }
-        unhealthyModels = newUnhealthy
+        // Remove healthy models from the unhealthy set so recovery is detected.
+        unhealthyModels.formUnion(newUnhealthy)
+        unhealthyModels.subtract(newHealthy)
+        lastHealthCheckAt = Date()
     }
 
     /// Clears health cache and unhealthy flags, e.g. when endpoint/key changes.
     func invalidateHealth() {
         unhealthyModels.removeAll()
+        lastHealthCheckAt = nil
         Task { await healthService.invalidate() }
+    }
+
+    /// Starts the background health poller. Safe to call repeatedly.
+    func startBackgroundHealthChecks(interval: TimeInterval = 60) {
+        guard isBackgroundHealthPollingEnabled else { return }
+        if backgroundPoller == nil {
+            backgroundPoller = BackgroundHealthPoller(store: self, interval: interval)
+        }
+        backgroundPoller?.start()
+    }
+
+    /// Stops the background health poller.
+    func stopBackgroundHealthChecks() {
+        backgroundPoller?.stop()
+    }
+
+    /// Restarts the poller with the latest enabled flag and interval.
+    func restartBackgroundHealthChecks(interval: TimeInterval = 60) {
+        stopBackgroundHealthChecks()
+        startBackgroundHealthChecks(interval: interval)
+    }
+
+    /// Toggles background polling on/off and persists the preference.
+    func setBackgroundHealthPollingEnabled(_ enabled: Bool) {
+        isBackgroundHealthPollingEnabled = enabled
+        defaults.set(enabled, forKey: "trios.model.background-health-polling-enabled")
+        if enabled {
+            startBackgroundHealthChecks()
+        } else {
+            stopBackgroundHealthChecks()
+        }
+    }
+
+    /// Loads the persisted background polling preference.
+    private func loadBackgroundHealthPollingPreference() {
+        isBackgroundHealthPollingEnabled = defaults.object(forKey: "trios.model.background-health-polling-enabled") as? Bool ?? true
     }
 
     var hasAPIKey: Bool {
@@ -225,6 +280,7 @@ final class ModelConfigurationStore: ObservableObject {
         discoveryError = nil
         credentialRevision += 1
         invalidateHealth()
+        restartBackgroundHealthChecks()
     }
 
     func updateBaseURL(_ value: String) {
@@ -233,6 +289,7 @@ final class ModelConfigurationStore: ObservableObject {
         baseURL = trimmed
         defaults.set(trimmed, forKey: Self.baseURLKey(selectedProvider))
         invalidateHealth()
+        restartBackgroundHealthChecks()
     }
 
     func selectModel(_ model: String) {
@@ -246,6 +303,7 @@ final class ModelConfigurationStore: ObservableObject {
         baseURL = selectedProvider.defaultBaseURL
         defaults.removeObject(forKey: Self.baseURLKey(selectedProvider))
         invalidateHealth()
+        restartBackgroundHealthChecks()
     }
 
     func saveAPIKey(_ value: String) throws {
@@ -254,12 +312,14 @@ final class ModelConfigurationStore: ObservableObject {
         try ModelCredentialStore.save(trimmed, for: selectedProvider)
         credentialRevision += 1
         invalidateHealth()
+        restartBackgroundHealthChecks()
     }
 
     func deleteAPIKey() throws {
         try ModelCredentialStore.delete(for: selectedProvider, ignoresMissing: true)
         credentialRevision += 1
         invalidateHealth()
+        restartBackgroundHealthChecks()
     }
 
     func refreshModels() async {
