@@ -93,9 +93,20 @@ struct ModelsTabView: View {
                             .font(.system(size: 13, weight: .semibold, design: .monospaced))
                             .foregroundColor(.grokText)
                             .textSelection(.enabled)
-                        Text(store.selectedProvider.displayName)
-                            .font(.system(size: 10))
-                            .foregroundColor(.grokDim)
+                        HStack(spacing: 6) {
+                            Text(store.selectedProvider.displayName)
+                                .font(.system(size: 10))
+                                .foregroundColor(.grokDim)
+                            if store.unhealthyModels.contains(store.selectedModel) {
+                                Text("unavailable")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundColor(.red)
+                                    .padding(.horizontal, 5)
+                                    .padding(.vertical, 1)
+                                    .background(Color.red.opacity(0.12))
+                                    .clipShape(Capsule())
+                            }
+                        }
                     }
                     Spacer()
                 }
@@ -133,6 +144,17 @@ struct ModelsTabView: View {
                     }
                     .buttonStyle(.bordered)
                     .disabled(store.isDiscovering || (store.selectedProvider.requiresAPIKey && !store.hasAPIKey))
+                    Button {
+                        Task { await store.refreshHealth() }
+                    } label: {
+                        if store.isCheckingHealth {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Label("Health", systemImage: "stethoscope")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(store.isCheckingHealth || (store.selectedProvider.requiresAPIKey && !store.hasAPIKey))
                 }
 
                 if let error = store.discoveryError {
@@ -143,18 +165,29 @@ struct ModelsTabView: View {
 
                 LazyVStack(spacing: 5) {
                     ForEach(Array(filteredModels.prefix(100)), id: \.self) { model in
+                        let isUnhealthy = store.unhealthyModels.contains(model)
                         Button {
+                            guard !isUnhealthy || model == store.selectedModel else { return }
                             store.selectModel(model)
                             customModel = model
                         } label: {
                             HStack(spacing: 8) {
-                                Image(systemName: model == store.selectedModel ? "checkmark.circle.fill" : "circle")
-                                    .foregroundColor(model == store.selectedModel ? .green : .grokDim)
+                                Image(systemName: model == store.selectedModel ? "checkmark.circle.fill" : (isUnhealthy ? "xmark.circle.fill" : "circle"))
+                                    .foregroundColor(model == store.selectedModel ? .green : (isUnhealthy ? .red : .grokDim))
                                 Text(model)
                                     .font(.system(size: 11, design: .monospaced))
-                                    .foregroundColor(.grokText)
+                                    .foregroundColor(isUnhealthy ? .grokDim : .grokText)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
+                                if isUnhealthy {
+                                    Text("unavailable")
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .foregroundColor(.red)
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1)
+                                        .background(Color.red.opacity(0.12))
+                                        .clipShape(Capsule())
+                                }
                                 Spacer()
                             }
                             .padding(.horizontal, 10)
@@ -163,6 +196,7 @@ struct ModelsTabView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                         }
                         .buttonStyle(.plain)
+                        .disabled(isUnhealthy && model != store.selectedModel)
                     }
                 }
             }

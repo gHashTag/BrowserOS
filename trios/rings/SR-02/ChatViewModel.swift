@@ -509,6 +509,11 @@ final class ChatViewModel: ObservableObject {
 
         var didFailover = false
 
+        // Preflight health check: if the selected model is known unhealthy, switch
+        // to the first healthy fallback before burning a real request.
+        let preflightModel = await runPreflightHealthCheck(generation: generation)
+        let preflightSwitched = preflightModel != modelStore.selectedModel
+
         do {
             try await executeStream(
                 generation: generation,
@@ -521,6 +526,9 @@ final class ChatViewModel: ObservableObject {
             guard isCurrentStream(generation) else { return }
             // One automatic model failover for provider-side model failures.
             let originalModel = modelStore.selectedModel
+            // Mark the model that actually failed as unhealthy for future preflights.
+            modelStore.markUnhealthy(modelStore.selectedModel)
+
             if !didFailover,
                let transportError = error as? TransportError,
                (transportError.isModelUnavailableError || transportError.isInvalidModelError),
@@ -660,6 +668,27 @@ final class ChatViewModel: ObservableObject {
         guard isGenerationCurrent(generation) else { return }
         state = currentState
         await saveHistory(expectedGeneration: generation)
+    }
+
+    private func runPreflightHealthCheck(generation: UInt64) async -> String {
+        guard isCurrentStream(generation) else { return modelStore.selectedModel }
+        let health = await modelStore.healthStatus(for: modelStore.selectedModel)
+        guard case .unavailable = health else { return modelStore.selectedModel }
+
+        let currentModel = modelStore.selectedModel
+        guard let healthyModel = modelStore.selectFirstHealthyModel() else {
+            return currentModel
+        }
+
+        let banner = ChatMessage(
+            role: .system,
+            content: "[↻] Model `\(currentModel)` is unavailable; switching to `\(healthyModel)`…"
+        )
+        messages.append(banner)
+        rebuildCache()
+        let historySnapshot = captureHistorySnapshot()
+        await persistHistorySnapshot(historySnapshot)
+        return healthyModel
     }
 
     private enum ChatViewModelError: Error {

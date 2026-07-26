@@ -72,10 +72,13 @@ final class ModelConfigurationStore: ObservableObject {
     @Published private(set) var discoveryError: String?
     @Published private(set) var credentialRevision = 0
     @Published private(set) var modelsTabRequest = 0
+    @Published private(set) var unhealthyModels: Set<String> = []
+    @Published private(set) var isCheckingHealth = false
 
     private let defaults: UserDefaults
     private let environment: [String: String]
     private let catalogService = ModelCatalogService()
+    private let healthService = ModelHealthService()
 
     init(
         defaults: UserDefaults = .standard,
@@ -122,10 +125,69 @@ final class ModelConfigurationStore: ObservableObject {
         return next
     }
 
+    /// Switches to the first model that is not known to be unavailable. If no
+    /// healthy model is found, falls back to the provider's default model so the
+    /// user is never left with an empty selection.
+    @discardableResult
+    func selectFirstHealthyModel() -> String? {
+        let candidates = fallbackModels + [selectedProvider.defaultModel]
+        guard let next = candidates.first(where: { !unhealthyModels.contains($0) }) else { return nil }
+        selectModel(next)
+        return next
+    }
+
     /// A short user-facing hint naming a concrete fallback model, or empty.
     var fallbackSuggestion: String {
         guard let first = fallbackModels.first else { return "" }
         return "Suggested fallback: \(first)"
+    }
+
+    /// Marks a model as unavailable (e.g. after a transport error or failed probe).
+    func markUnhealthy(_ model: String) {
+        unhealthyModels.insert(model)
+    }
+
+    /// Clears the unhealthy flag for a model.
+    func markHealthy(_ model: String) {
+        unhealthyModels.remove(model)
+    }
+
+    /// Returns the cached/in-memory health status for a model by probing it.
+    func healthStatus(for model: String) async -> ModelHealth {
+        await healthService.probe(
+            model: model,
+            provider: selectedProvider,
+            baseURL: baseURL,
+            apiKey: resolvedAPIKey.isEmpty ? nil : resolvedAPIKey
+        )
+    }
+
+    /// Re-probes every known model in parallel and updates `unhealthyModels`.
+    func refreshHealth() async {
+        isCheckingHealth = true
+        defer { isCheckingHealth = false }
+        let models = availableModels
+        var newUnhealthy: Set<String> = []
+        await withTaskGroup(of: (String, ModelHealth).self) { group in
+            for model in models {
+                group.addTask {
+                    let health = await self.healthStatus(for: model)
+                    return (model, health)
+                }
+            }
+            for await (model, health) in group {
+                if case .unavailable = health {
+                    newUnhealthy.insert(model)
+                }
+            }
+        }
+        unhealthyModels = newUnhealthy
+    }
+
+    /// Clears health cache and unhealthy flags, e.g. when endpoint/key changes.
+    func invalidateHealth() {
+        unhealthyModels.removeAll()
+        Task { await healthService.invalidate() }
     }
 
     var hasAPIKey: Bool {
@@ -158,6 +220,15 @@ final class ModelConfigurationStore: ObservableObject {
         discoveredModels = []
         discoveryError = nil
         credentialRevision += 1
+        invalidateHealth()
+    }
+
+    func updateBaseURL(_ value: String) {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        baseURL = trimmed
+        defaults.set(trimmed, forKey: Self.baseURLKey(selectedProvider))
+        invalidateHealth()
     }
 
     func selectModel(_ model: String) {
@@ -167,16 +238,10 @@ final class ModelConfigurationStore: ObservableObject {
         defaults.set(trimmed, forKey: Self.modelKey(selectedProvider))
     }
 
-    func updateBaseURL(_ value: String) {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        baseURL = trimmed
-        defaults.set(trimmed, forKey: Self.baseURLKey(selectedProvider))
-    }
-
     func resetBaseURL() {
         baseURL = selectedProvider.defaultBaseURL
         defaults.removeObject(forKey: Self.baseURLKey(selectedProvider))
+        invalidateHealth()
     }
 
     func saveAPIKey(_ value: String) throws {
@@ -184,11 +249,13 @@ final class ModelConfigurationStore: ObservableObject {
         guard !trimmed.isEmpty else { return }
         try ModelCredentialStore.save(trimmed, for: selectedProvider)
         credentialRevision += 1
+        invalidateHealth()
     }
 
     func deleteAPIKey() throws {
         try ModelCredentialStore.delete(for: selectedProvider, ignoresMissing: true)
         credentialRevision += 1
+        invalidateHealth()
     }
 
     func refreshModels() async {
