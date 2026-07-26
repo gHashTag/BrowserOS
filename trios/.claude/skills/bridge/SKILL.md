@@ -43,5 +43,5 @@ curl -s http://127.0.0.1:9105/health
 curl -X POST http://127.0.0.1:9105/mcp   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 
 # Read file
-curl -X POST http://127.0.0.1:9105/mcp   -d '{"method":"tools/call","params":{"name":"fs_read","arguments":{"path":"/Users/playra/BrowserOS-full/trios/main.swift"}}}'
+curl -X POST http://127.0.0.1:9105/mcp   -d '{"method":"tools/call","params":{"name":"fs_read","arguments":{"path":"/Users/playra/BrowserOS/trios/main.swift"}}}'
 ```

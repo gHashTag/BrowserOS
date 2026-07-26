@@ -7,6 +7,10 @@ license.workspace = true
 
 description = "TRIOS Clade Promote Pipeline - full seal -> verdict -> swap -> boot probe orchestrator"
 
+[[bin]]
+name = "clade-seal"
+path = "src/seal.rs"
+
 [dependencies]
 chrono = "0.4"
 libc = "0.2"

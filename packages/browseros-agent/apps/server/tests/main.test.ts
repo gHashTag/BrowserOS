@@ -124,6 +124,7 @@ async function setupApplicationTest() {
   const runtimeModule = await import('../src/lib/agents/runtime')
   const browserosDir = await import('../src/lib/browseros-dir')
   const dbModule = await import('../src/lib/db')
+  const pgMigrateModule = await import('../src/lib/db/pg-migrate')
   const identityModule = await import('../src/lib/identity')
   const loggerModule = await import('../src/lib/logger')
   const metricsModule = await import('../src/lib/metrics')
@@ -154,6 +155,7 @@ async function setupApplicationTest() {
         db: {},
       }) as never,
   )
+  spyOn(pgMigrateModule, 'runPgMigrations').mockImplementation(async () => {})
   spyOn(identityModule.identity, 'initialize').mockImplementation(() => {})
   spyOn(identityModule.identity, 'getBrowserOSId').mockImplementation(
     () => 'browseros-id',

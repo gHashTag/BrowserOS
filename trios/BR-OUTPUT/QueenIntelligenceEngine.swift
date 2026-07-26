@@ -13,7 +13,7 @@ class QueenIntelligenceEngine: ObservableObject {
     @Published var currentPlan: QueenTaskPlan?
     @Published var isPlanning: Bool = false
     @Published var confidence: Double = 0.0
-    @Published var predictions: [QueenAction] = []
+    @Published var predictions: [QueenAction] = .init()
     
     private let taskDelegator: TaskDelegator
     private let predictiveOrchestrator: PredictiveOrchestrator

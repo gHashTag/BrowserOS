@@ -43,21 +43,45 @@ class SlackIntegration {
     /// Send message to Slack channel/user
     func send(_ message: String, to recipient: String) async -> Bool {
         guard let token = authToken else { return false }
-        
-        // Call Slack API
-        let url = "\(apiBaseUrl)/chat.postMessage"
-        var request = URLRequest(url: URL(string: url)!)
+
+        // Validate the API endpoint.
+        guard var components = URLComponents(string: "\(apiBaseUrl)/chat.postMessage"),
+              components.scheme?.lowercased() == "https",
+              let host = components.host, !host.isEmpty,
+              let url = components.url else {
+            NSLog("[SlackIntegration] Invalid API base URL: \(apiBaseUrl)")
+            return false
+        }
+
+        // Validate recipient shape (channel ID, user ID, or #channel name).
+        let trimmedRecipient = recipient.trimmingCharacters(in: .whitespacesAndNewlines)
+        let validRecipient = trimmedRecipient.count >= 1
+            && trimmedRecipient.count <= 80
+            && trimmedRecipient.range(of: "[\n\r]", options: .regularExpression) == nil
+            && trimmedRecipient.range(of: "^[#]?[A-Za-z0-9_-]+$", options: .regularExpression) != nil
+        guard validRecipient else {
+            NSLog("[SlackIntegration] Invalid recipient: \(recipient)")
+            return false
+        }
+
+        var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        
+
+        let cappedMessage = String(message.prefix(4000))
         let body: [String: Any] = [
-            "channel": recipient,
-            "text": message
+            "channel": trimmedRecipient,
+            "text": cappedMessage
         ]
-        
-        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        
+
+        do {
+            request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [])
+        } catch {
+            NSLog("[SlackIntegration] Failed to encode body: \(error)")
+            return false
+        }
+
         do {
             let (_, response) = try await URLSession.shared.data(for: request)
             guard let httpResponse = response as? HTTPURLResponse else { return false }

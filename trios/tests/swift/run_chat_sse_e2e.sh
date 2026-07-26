@@ -39,7 +39,18 @@ PROD_FILES+=(
     "$SCRIPT_DIR/ChatSSEEndToEndTest.swift"
 )
 
-echo "Compiling ${#PROD_FILES[@]} Swift files..."
+# SQLCipher is required for encrypted agent-memory I/O. Use pkg-config when
+# available; fall back to the standard Homebrew Cellar layout on Apple Silicon.
+SQLCIPHER_INCLUDE="${SQLCIPHER_INCLUDE:-$(pkg-config --variable=includedir sqlcipher 2>/dev/null)}"
+SQLCIPHER_LIB="${SQLCIPHER_LIB:-$(pkg-config --variable=libdir sqlcipher 2>/dev/null)}"
+CSQLCIPHER_MODULEMAP_DIR="$PROJECT_DIR/../Sources/CSQLCipher"
+
+if [ -z "$SQLCIPHER_INCLUDE" ] || [ -z "$SQLCIPHER_LIB" ] || [ ! -d "$SQLCIPHER_INCLUDE" ]; then
+    echo "[FAIL] SQLCipher headers not found. Install with: brew install sqlcipher"
+    exit 1
+fi
+
+echo "Compiling ${#PROD_FILES[@]} Swift files with SQLCipher..."
 
 swiftc -j 1 -disable-batch-mode "$SWIFT_TEST_OPTIMIZATION" -o "$OUTPUT" \
     -framework SwiftUI \
@@ -47,7 +58,10 @@ swiftc -j 1 -disable-batch-mode "$SWIFT_TEST_OPTIMIZATION" -o "$OUTPUT" \
     -framework WebKit \
     -framework Combine \
     -framework Security \
-    -lsqlite3 \
+    -I "$CSQLCIPHER_MODULEMAP_DIR" \
+    -I "$SQLCIPHER_INCLUDE" \
+    -L "$SQLCIPHER_LIB" \
+    -lsqlcipher \
     "${PROD_FILES[@]}" 2>&1 | tee "$LOG_FILE"
 
 if [ ${PIPESTATUS[0]} -eq 0 ]; then

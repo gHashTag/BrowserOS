@@ -5,8 +5,7 @@ import { defineToolWithCategory } from './framework'
 
 const defineTriosTool = defineToolWithCategory('scripts')
 
-const CLI_PATH =
-  '/Users/playra/BrowserOS-full/trios/target/release/clade-improve'
+const CLI_PATH = '/Users/playra/BrowserOS/trios/target/release/clade-improve'
 
 // Only these subcommands may ever be invoked. Capability restriction over
 // detection: the CLI is run with execFileSync (no shell), and the arg is

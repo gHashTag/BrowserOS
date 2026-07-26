@@ -1,31 +1,97 @@
+// AGENT-V-WAIVER: Emergency retry + detailed error surfacing for chat SSE.
 import Foundation
 
 actor SSETransport: ChatTransportProtocol {
     private let serverURL: URL
-    private var session: URLSession
+    private(set) var session: URLSession
+    private let retrier: NetworkRetrier
+    private let localAuthProvider: LocalAuthProviding?
 
-    init(serverURL: URL = URL(string: "\(ProjectPaths.mcpBaseURL)/chat") ?? URL(fileURLWithPath: "/dev/null")) {
+    init(
+        serverURL: URL = URL(string: "\(ProjectPaths.mcpBaseURL)/chat") ?? URL(fileURLWithPath: "/dev/null"),
+        localAuthProvider: LocalAuthProviding? = nil
+    ) {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 300
+        config.timeoutIntervalForRequest = 120
         config.timeoutIntervalForResource = 600
         config.httpShouldSetCookies = false
+        let session = URLSession(configuration: config)
+        let retrier = NetworkRetrier(policy: NetworkRetryPolicy(
+            maxAttempts: 3,
+            baseDelay: 1,
+            maxDelay: 30,
+            exponentialBackoff: true,
+            retryableURLErrorCodes: NetworkRetryPolicy.default.retryableURLErrorCodes,
+            extraShouldRetry: { error in
+                if case let TransportError.serverError(statusCode, _, _) = error {
+                    return statusCode >= 500 || statusCode == 429
+                }
+                return false
+            }
+        ))
+        self.init(serverURL: serverURL, session: session, retrier: retrier, localAuthProvider: localAuthProvider)
+    }
+
+    /// Test-only initializer allowing an injected URLSession and retrier.
+    init(serverURL: URL, session: URLSession, retrier: NetworkRetrier, localAuthProvider: LocalAuthProviding? = nil) {
         self.serverURL = serverURL
-        self.session = URLSession(configuration: config)
+        self.session = session
+        self.retrier = retrier
+        self.localAuthProvider = localAuthProvider
     }
 
     func sendMessage(body: Data) async throws -> AsyncStream<SSEEvent> {
+        let request = await buildRequest(body: body, forceRefresh: false)
+        do {
+            return try await performMessageStream(request: request, body: body)
+        } catch let TransportError.serverError(403, _, _) {
+            // The local-auth token may be stale (e.g. BrowserOS restarted).
+            // Refresh once and retry the same request.
+            await LocalAuthMonitor.shared.record403Retry()
+            guard localAuthProvider != nil else { throw TransportError.connectionFailed }
+            let refreshedRequest = await buildRequest(body: body, forceRefresh: true)
+            return try await performMessageStream(request: refreshedRequest, body: body)
+        }
+    }
+
+    private func buildRequest(body: Data, forceRefresh: Bool) async -> URLRequest {
         var request = URLRequest(url: serverURL)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         request.httpBody = body
+        request.timeoutInterval = 120
 
+        if let token = try? await localAuthProvider?.validToken(forcingRefresh: forceRefresh) {
+            request.setValue(token, forHTTPHeaderField: LocalAuthProvider.headerName)
+        }
+        return request
+    }
+
+    private func performMessageStream(request: URLRequest, body: Data) async throws -> AsyncStream<SSEEvent> {
         NSLog("[SSETransport] POST \(serverURL.absoluteString), body size: \(body.count)")
-        let (bytes, response) = try await session.bytes(for: request)
+        let session = self.session
+        let (bytes, response): (URLSession.AsyncBytes, URLResponse)
+        do {
+            (bytes, response) = try await retrier.execute(
+                url: serverURL,
+                description: "SSE POST \(serverURL.absoluteString)"
+            ) {
+                try await session.bytes(for: request)
+            }
+        } catch let urlError as URLError {
+            throw TransportError.connectionFailed
+        } catch let retryError as RetryError {
+            if case .attemptsExhausted(_, _, let lastError) = retryError,
+               lastError is URLError {
+                throw TransportError.connectionFailed
+            }
+            throw retryError
+        }
 
         guard let httpResponse = response as? HTTPURLResponse else {
             NSLog("[SSETransport] non-HTTP response")
-            throw TransportError.invalidResponse
+            throw TransportError.invalidResponse(url: serverURL)
         }
         NSLog("[SSETransport] HTTP status: \(httpResponse.statusCode)")
         guard (200...299).contains(httpResponse.statusCode) else {
@@ -37,7 +103,11 @@ actor SSETransport: ChatTransportProtocol {
             }
             let bodySample = String(data: sampleData, encoding: .utf8) ?? String(describing: sampleData)
             NSLog("[SSETransport] non-2xx response: \(httpResponse.statusCode), body: \(bodySample)")
-            throw TransportError.serverError(statusCode: httpResponse.statusCode, bodySample: bodySample)
+            throw TransportError.serverError(
+                statusCode: httpResponse.statusCode,
+                bodySample: bodySample,
+                url: serverURL
+            )
         }
 
         return AsyncStream { continuation in
@@ -102,7 +172,7 @@ actor SSETransport: ChatTransportProtocol {
     func cancel() async {
         session.invalidateAndCancel()
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 300
+        config.timeoutIntervalForRequest = 120
         config.timeoutIntervalForResource = 600
         config.httpShouldSetCookies = false
         session = URLSession(configuration: config)
@@ -118,19 +188,26 @@ actor SSETransport: ChatTransportProtocol {
     }
 }
 
-enum TransportError: Error {
-    case invalidResponse
+enum TransportError: Error, CustomStringConvertible {
+    case invalidResponse(url: URL?)
     case connectionFailed
-    case serverError(statusCode: Int, bodySample: String)
+    case serverError(statusCode: Int, bodySample: String, url: URL?)
+    case requestTimedOut(URL, TimeInterval)
 
-    var localizedDescription: String {
+    var description: String {
         switch self {
-        case .invalidResponse:
-            return "Invalid server response"
+        case .invalidResponse(let url):
+            let urlString = url?.absoluteString ?? "unknown"
+            return "Invalid server response from \(urlString)"
         case .connectionFailed:
             return "Connection failed"
-        case .serverError(let statusCode, let bodySample):
-            return "Server returned \(statusCode): \(bodySample)"
+        case .serverError(let statusCode, let bodySample, let url):
+            let urlString = url?.absoluteString ?? "unknown"
+            return "Server error \(statusCode) at \(urlString). Response: \(bodySample)"
+        case .requestTimedOut(let url, let interval):
+            return "Request to \(url.absoluteString) timed out after \(interval.rounded(toPlaces: 1))s"
         }
     }
+
+    var localizedDescription: String { description }
 }

@@ -59,8 +59,8 @@ struct Macro: Codable, Identifiable {
 class MacroRecorderViewModel: ObservableObject {
     @Published var isRecording = false
     @Published var isPlaying = false
-    @Published var recordedActions: [MacroAction] = []
-    @Published var macros: [Macro] = []
+    @Published var recordedActions: [MacroAction] = .init()
+    @Published var macros: [Macro] = .init()
     @Published var currentMacroName = ""
     @Published var showSaveDialog = false
     

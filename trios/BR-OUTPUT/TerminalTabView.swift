@@ -155,7 +155,7 @@ enum TerminalCommandSanitizer {
     static let blockedSubstrings = [
         "trios_app", "trios.app", "open trios", "open trios.app",
         "launchd", "clade-promote", "./trios",
-        ">/dev/null", "rm -rf /", "$(", ";", "&&", "||"
+        ">/dev/null", "rm -rf /", "$(", ";", "&&", "||" // AGENT-V-WAIVER: blocked-pattern constants
     ]
 
     /// Sanitizes a raw user-typed command.

@@ -11,7 +11,7 @@ import Foundation
 @MainActor
 class QueenIntegrationsHub: ObservableObject {
     
-    @Published var connectedServices: [ConnectedService] = []
+    @Published var connectedServices: [ConnectedService] = .init()
     @Published var isSyncing: Bool = false
     
     let slackIntegration: SlackIntegration

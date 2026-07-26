@@ -80,6 +80,7 @@
     "lodash-es": "4.17.23"
   },
   "dependencies": {
-    "@hono/mcp": "0.3.0"
+    "@hono/mcp": "0.3.0",
+    "pg": "^8.22.0"
   }
 }

@@ -27,7 +27,7 @@ else
     echo "- ❌ Trios App: NOT RUNNING — restarting..." >> "$REPORT"
     pkill -f trios_app 2>/dev/null || true
     sleep 1
-    open /Users/playra/BrowserOS-full/trios/trios.app
+    open /Users/playra/BrowserOS/trios/trios.app
     sleep 3
 fi
 

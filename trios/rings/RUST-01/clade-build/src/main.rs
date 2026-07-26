@@ -28,12 +28,30 @@ fn main() {
         variant.output.display()
     );
 
-    // Collect Swift files
+    // Collect Swift files — match build.sh: all rings, only the lean BR-OUTPUT
+    // whitelist so untracked prototypes cannot break the app build.
     let mut swift_files = vec![variant.build_root.join("main.swift")];
     collect_swift_files(&variant.build_root.join("rings"), &mut swift_files);
-    collect_swift_files(&variant.build_root.join("BR-OUTPUT"), &mut swift_files);
+    collect_lean_br_output(&variant.build_root.join("BR-OUTPUT"), &mut swift_files);
 
     let file_count = swift_files.len();
+
+    // Build Trinity QueenUILib dependency first so the trios sources can import it.
+    let queen_bin_dir = match build_queen_lib() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[FAIL] {}", e);
+            std::process::exit(1);
+        }
+    };
+    let queen_modules_dir = format!("{}/Modules", queen_bin_dir);
+
+    // SQLCipher is required for the encrypted agent-memory store. Discover the
+    // Homebrew-installed library and CSQLCipher module map (sibling to trios).
+    let sqlcipher = match resolve_sqlcipher(&variant.build_root) {
+        Ok(s) => s,
+        Err(e) => { eprintln!("[FAIL] {}", e); std::process::exit(1); }
+    };
 
     // Build
     let mut cmd = Command::new("swiftc");
@@ -47,7 +65,29 @@ fn main() {
         .arg("-framework")
         .arg("WebKit")
         .arg("-framework")
-        .arg("Combine");
+        .arg("Combine")
+        .arg("-framework")
+        .arg("Security")
+        .arg("-I")
+        .arg(&sqlcipher.csqlcipher_modulemap_dir)
+        .arg("-I")
+        .arg(&sqlcipher.include_dir)
+        .arg("-L")
+        .arg(&sqlcipher.lib_dir)
+        .arg("-lsqlcipher")
+        .arg("-I")
+        .arg(&queen_modules_dir)
+        .arg("-L")
+        .arg(&queen_bin_dir)
+        .arg("-lQueenUILib")
+        .arg("-Xlinker")
+        .arg("-rpath")
+        .arg("-Xlinker")
+        .arg("@executable_path/Frameworks")
+        .arg("-Xlinker")
+        .arg("-rpath")
+        .arg("-Xlinker")
+        .arg("@executable_path/../Frameworks");
 
     for f in &swift_files {
         cmd.arg(f);
@@ -118,6 +158,17 @@ fn main() {
         std::process::exit(1);
     }
 
+    // Bundle the SQLCipher dynamic library so the .app is runnable on its own.
+    let frameworks = variant.app_bundle.join("Contents/Frameworks");
+    if let Err(e) = fs::create_dir_all(&frameworks) {
+        eprintln!("[CladeBuild] Failed to create Frameworks dir: {}", e);
+    }
+    let bundled_dylib = frameworks.join(&sqlcipher.dylib_name);
+    if let Err(e) = bundle_sqlcipher_dylib(&sqlcipher.dylib_source, &bundled_dylib, &variant.output
+    ) {
+        eprintln!("[CladeBuild] Failed to bundle SQLCipher dylib: {}", e);
+    }
+
     println!(
         "[OK] Copied to .app bundle: {} (files={}, ports MCP={} A2A={} MESH={} CANARY={})",
         variant.app_bundle.display(),
@@ -127,6 +178,120 @@ fn main() {
         variant.mesh_port,
         variant.canary_mcp_port
     );
+}
+
+struct SQLCipherPaths {
+    include_dir: String,
+    lib_dir: String,
+    csqlcipher_modulemap_dir: String,
+    dylib_source: PathBuf,
+    dylib_name: String,
+}
+
+fn resolve_sqlcipher(build_root: &Path) -> Result<SQLCipherPaths, String> {
+    let include_dir = run_pkg_config("--variable=includedir")?;
+    let lib_dir = run_pkg_config("--variable=libdir")?;
+    let csqlcipher_modulemap_dir = build_root
+        .parent()
+        .map(|p| p.join("Sources/CSQLCipher"))
+        .ok_or_else(|| "Cannot locate Sources/CSQLCipher".to_string())?
+        .to_string_lossy()
+        .to_string();
+    let dylib_source = find_sqlcipher_dylib(&lib_dir)?;
+    Ok(SQLCipherPaths {
+        include_dir,
+        lib_dir,
+        csqlcipher_modulemap_dir,
+        dylib_source,
+        dylib_name: "libsqlcipher.dylib".to_string(),
+    })
+}
+
+fn run_pkg_config(arg: &str) -> Result<String, String> {
+    let output = Command::new("pkg-config")
+        .arg(arg)
+        .arg("sqlcipher")
+        .output()
+        .map_err(|e| format!("pkg-config failed: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "pkg-config {} sqlcipher failed: {}",
+            arg,
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    String::from_utf8(output.stdout)
+        .map(|s| s.trim().to_string())
+        .map_err(|e| format!("invalid utf8 from pkg-config: {}", e))
+}
+
+fn find_sqlcipher_dylib(lib_dir: &str) -> Result<PathBuf, String> {
+    let entries = fs::read_dir(lib_dir)
+        .map_err(|e| format!("read SQLCipher lib dir {}: {}", lib_dir, e))?;
+    for entry in entries.filter_map(|e| e.ok()) {
+        let path = entry.path();
+        let name = path.file_name().unwrap_or_default().to_string_lossy();
+        // Use the real versioned file (e.g. libsqlcipher.3.53.3.dylib), not symlinks.
+        if name.starts_with("libsqlcipher.") && name.ends_with(".dylib") {
+            if path.symlink_metadata()
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            return Ok(path);
+        }
+    }
+    Err(format!("No SQLCipher dynamic library found in {}", lib_dir))
+}
+
+fn bundle_sqlcipher_dylib(source: &Path, dest: &Path, binary: &Path) -> Result<(), String> {
+    let _ = fs::remove_file(dest);
+    fs::copy(source, dest).map_err(|e| {
+        format!(
+            "copy {} to {}: {}",
+            source.display(),
+            dest.display(),
+            e
+        )
+    })?;
+    let mut perms = fs::metadata(dest)
+        .map_err(|e| format!("metadata {}: {}", dest.display(), e))?
+        .permissions();
+    perms.set_readonly(false);
+    fs::set_permissions(dest, perms)
+        .map_err(|e| format!("chmod {}: {}", dest.display(), e))?;
+    run_install_name_tool(&[
+        "-id",
+        "@rpath/libsqlcipher.dylib",
+        dest.to_str().unwrap_or_default(),
+    ],
+    "set dylib id")?;
+    run_install_name_tool(
+        &[
+            "-change",
+            "/opt/homebrew/opt/sqlcipher/lib/libsqlcipher.dylib",
+            "@rpath/libsqlcipher.dylib",
+            binary.to_str().unwrap_or_default(),
+        ],
+        "patch binary rpath",
+    )?;
+    Ok(())
+}
+
+fn run_install_name_tool(args: &[&str], context: &str) -> Result<(), String> {
+    let output = Command::new("install_name_tool")
+        .args(args)
+        .output()
+        .map_err(|e| format!("install_name_tool {} failed: {}", context, e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "install_name_tool {}: {}",
+            context,
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    Ok(())
 }
 
 fn resolve_variant(name: &str) -> Variant {
@@ -167,6 +332,131 @@ fn collect_swift_files(dir: &Path, out: &mut Vec<PathBuf>) {
             out.push(path);
         }
     }
+}
+
+/// Only include the production BR-OUTPUT files that build.sh compiles.
+/// Untracked BR-OUTPUT prototypes must not break the app build.
+fn collect_lean_br_output(dir: &Path, out: &mut Vec<PathBuf>) {
+    const LEAN_BR_OUTPUT: &[&str] = &[
+        "A2AMessageRouter.swift",
+        "BrowserOSChatViewModel.swift",
+        "ChatLogic.swift",
+        "ChatPanelView.swift",
+        "ChatSidebarView.swift",
+        "CladeGuard.swift",
+        "FullscreenChatWorkspace.swift",
+        "GitButlerPanelView.swift",
+        "GitButlerViewModel.swift",
+        "GitHubAPIClient.swift",
+        "GitHubDashboardView.swift",
+        "GitHubModels.swift",
+        "GitWorkspaceView.swift",
+        "GlassmorphismBackground.swift",
+        "HotkeyBar.swift",
+        "LLMClient.swift",
+        "MenuBuilder.swift",
+        "MeshAuth.swift",
+        "MeshChatListView.swift",
+        "MeshChatModels.swift",
+        "MeshChatThreadView.swift",
+        "MeshChatView.swift",
+        "MeshChatViewModel.swift",
+        "MeshModels.swift",
+        "MeshStatusViewModel.swift",
+        "MeshTabView.swift",
+        "MessageBubbleView.swift",
+        "ModelsTabView.swift",
+        "ProjectPaths.swift",
+        "QueenStatusViewModel.swift",
+        "QueenTabView.swift",
+        "RecursionGuard.swift",
+        "RichTextRenderer.swift",
+        "ServerManager.swift",
+        "SessionGuard.swift",
+        "SmoothStreamingEnhancements.swift",
+        "TODOAnimations.swift",
+        "TODOListView.swift",
+        "TerminalTabView.swift",
+        "ToolCallCardView.swift",
+        "TriosMCPClient.swift",
+        "TriosTabView.swift",
+        "TriosTheme.swift",
+        "TypingIndicatorView.swift",
+        "WindowManager.swift",
+    ];
+    for name in LEAN_BR_OUTPUT {
+        let path = dir.join(name);
+        if path.is_file() {
+            out.push(path);
+        }
+    }
+}
+
+fn queen_package_root() -> Result<PathBuf, String> {
+    let project = PathBuf::from(project_dir());
+    let trinity_root = if let Ok(root) = env::var("TRINITY_ROOT") {
+        PathBuf::from(root)
+    } else {
+        let ancestor = project
+            .parent()
+            .and_then(|p| p.parent())
+            .ok_or_else(|| "Cannot derive TRINITY_ROOT from project directory; set TRINITY_ROOT".to_string())?;
+        ancestor.join("trinity")
+    };
+    let queen_pkg = trinity_root.join("apps/queen");
+    if !queen_pkg.join("Package.swift").is_file() {
+        return Err(format!(
+            "Canonical Queen package not found: {}. Set TRINITY_ROOT to the gHashTag/trinity checkout.",
+            queen_pkg.display()
+        ));
+    }
+    Ok(queen_pkg)
+}
+
+fn build_queen_lib() -> Result<String, String> {
+    let queen_pkg = queen_package_root()?;
+
+    if env::var("TRIOS_REUSE_QUEEN_BUILD").is_err() {
+        println!("[CladeBuild] Building QueenUILib at {}", queen_pkg.display());
+        let output = Command::new("swift")
+            .arg("build")
+            .arg("--package-path")
+            .arg(&queen_pkg)
+            .arg("--product")
+            .arg("QueenUILib")
+            .output()
+            .map_err(|e| format!("swift build failed to start: {}", e))?;
+        if !output.status.success() {
+            return Err(format!(
+                "QueenUILib build failed:\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+    } else {
+        println!("[CladeBuild] Reusing existing QueenUILib build");
+    }
+
+    let output = Command::new("swift")
+        .arg("build")
+        .arg("--package-path")
+        .arg(&queen_pkg)
+        .arg("--show-bin-path")
+        .output()
+        .map_err(|e| format!("swift build --show-bin-path failed to start: {}", e))?;
+    if !output.status.success() {
+        return Err(format!(
+            "swift build --show-bin-path failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        ));
+    }
+    let bin_path = String::from_utf8(output.stdout)
+        .map_err(|e| format!("invalid UTF-8 from swift build: {}", e))?;
+    let bin_path = bin_path.trim();
+    let dylib = Path::new(bin_path).join("libQueenUILib.dylib");
+    if !dylib.is_file() {
+        return Err(format!("QueenUILib was not produced: {}", dylib.display()));
+    }
+    Ok(bin_path.to_string())
 }
 
 fn capitalize(s: &str) -> String {

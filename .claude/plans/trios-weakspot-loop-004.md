@@ -1,7 +1,7 @@
 # TriOS 15m Weak-Spot Loop — Plan 004
 
 ## Trigger
-`/loop 15m` recurring audit + fix cycle for `/Users/playra/BrowserOS-full/trios`.
+`/loop 15m` recurring audit + fix cycle for `/Users/playra/BrowserOS/trios`.
 
 ## Scope this cycle
 Fix the highest-signal mesh crypto issue found in the audit: **HELLO beacon MAC uses a hardcoded global key and an AEAD tag instead of a proper MAC**. This is a P0 security bug in `trios-mesh/src/discovery.rs` that breaks the authenticated-HELLO goal and contradicts the `mesh-panic-hardening` spec.

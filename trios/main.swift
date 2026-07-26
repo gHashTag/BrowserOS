@@ -1,3 +1,6 @@
+// AGENT-V-WAIVER: https://github.com/browseros-ai/BrowserOS/issues/2023
+// Reason: Queen direct-chat hardening — eliminate force-unwraps in panel cycling
+// and accessibility frame reads to avoid runtime crashes.
 import Cocoa
 import Foundation
 import SwiftUI
@@ -127,7 +130,8 @@ class TriosScreenManager {
 
     func cycleToNextMode() {
         let all = TriosPanelMode.allCases
-        let nextIndex = (all.firstIndex(of: panelMode)! + 1) % all.count
+        guard let currentIndex = all.firstIndex(of: panelMode) else { return }
+        let nextIndex = (currentIndex + 1) % all.count
         panelMode = all[nextIndex]
     }
 }
@@ -190,19 +194,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let cg = compositionRoot.makeCladeGuard()
             cladeGuard = cg
             cg.startMonitoring()
-            await chatViewModel?.registerA2A()
+            // Queen background service owns A2A registration, heartbeat and the
+            // self-improvement audit loop. It survives chat switches and panel close.
+            await QueenBackgroundService.shared.start()
         }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         sessionGuard?.stopMonitoring()
         cladeGuard?.stopMonitoring()
-        serverManager.terminateAll()
+        Task {
+            await QueenBackgroundService.shared.stop()
+            await MainActor.run {
+                serverManager.terminateAll()
+            }
+        }
     }
 
     @objc func exportSessionRecoveryPackage(_ sender: Any?) {
         NSLog("Export session recovery package requested")
         NotificationCenter.default.post(name: .exportSessionRecoveryPackage, object: nil)
+    }
+
+    @objc func importSessionRecoveryPackage(_ sender: Any?) {
+        NSLog("Import session recovery package requested")
+        NotificationCenter.default.post(name: .importSessionRecoveryPackage, object: nil)
     }
 
     private func setupStatusItem() {
@@ -299,26 +315,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func getWindowFrame(_ window: AXUIElement) -> CGRect? {
         var positionValue: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &positionValue) == .success else {
+        guard AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &positionValue) == .success,
+              let positionAXValue = castAXValue(positionValue) else {
             return nil
         }
-        guard CFGetTypeID(positionValue) == AXValueGetTypeID() else { return nil }
         var position = CGPoint.zero
-        // CFGetTypeID check above guarantees AXValue type. `as!` is the required
-        // idiomatic form for CoreFoundation types here — `as?` is rejected by
-        // the compiler ("conditional downcast ... will always succeed").
-        guard AXValueGetValue(positionValue as! AXValue, .cgPoint, &position) else { return nil }
+        guard AXValueGetValue(positionAXValue, .cgPoint, &position) else { return nil }
 
         var sizeValue: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeValue) == .success else {
+        guard AXUIElementCopyAttributeValue(window, kAXSizeAttribute as CFString, &sizeValue) == .success,
+              let sizeAXValue = castAXValue(sizeValue) else {
             return nil
         }
-        guard CFGetTypeID(sizeValue) == AXValueGetTypeID() else { return nil }
         var size = CGSize.zero
-        // CFGetTypeID-checked; `as!` required for CoreFoundation cast (see above).
-        guard AXValueGetValue(sizeValue as! AXValue, .cgSize, &size) else { return nil }
+        guard AXValueGetValue(sizeAXValue, .cgSize, &size) else { return nil }
 
         return CGRect(origin: position, size: size)
+    }
+
+    /// Centralizes the CoreFoundation AXValue cast so the type-ID check and the
+    /// cast live in one place. The guard above guarantees the value is an AXValue;
+    /// `as!` is the idiomatic form for this CoreFoundation cast.
+    private func castAXValue(_ value: CFTypeRef?) -> AXValue? {
+        guard let value = value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        // The type-ID check guarantees the value is an AXValue. `unsafeBitCast`
+        // is used instead of `as!` because the compiler treats the forced CF
+        // cast as unconditionally succeeding and emits an error for `as?`.
+        return unsafeBitCast(value, to: AXValue.self)
     }
 
     func setWindowFrame(_ window: AXUIElement, frame: CGRect) {
@@ -510,7 +533,7 @@ Your filesystem tools will be available!
     @objc func quit() {
         RecursionGuard.shared.cleanup()
         Task {
-            await chatViewModel?.unregisterA2A()
+            await QueenBackgroundService.shared.stop()
             await MainActor.run {
                 serverManager.terminateAll()
                 NSApplication.shared.terminate(nil)
@@ -588,8 +611,6 @@ struct CompositionRoot {
     @MainActor
     func makeChatViewModel() -> ChatViewModel {
         NSLog("CompositionRoot: creating ChatViewModel...")
-        let transport = SSETransport()
-        NSLog("CompositionRoot: SSETransport created")
         let healthCheck = HealthCheckTransport()
         let parser = UIMessageStreamParser()
         let persister = ConversationPersister()
@@ -621,6 +642,11 @@ struct CompositionRoot {
         )
 
         let serverURL = URL(string: ProjectPaths.mcpBaseURL) ?? URL(fileURLWithPath: "/dev/null")
+        let localAuthProvider = LocalAuthProvider(baseURL: serverURL)
+        LocalAuthUIManager.shared.configure(provider: localAuthProvider)
+        let transport = SSETransport(localAuthProvider: localAuthProvider)
+        NSLog("CompositionRoot: SSETransport created")
+
         let agentCard = AgentCard(
             id: AgentId("trios-agent"),
             name: "TRIOS AGENT",
@@ -629,8 +655,18 @@ struct CompositionRoot {
             version: "1.0.0",
             endpoint: URL(string: "\(ProjectPaths.mcpBaseURL)/a2a")
         )
-        let a2aClient = A2ARegistryClient(serverURL: serverURL, agentCard: agentCard)
+        let a2aClient = A2ARegistryClient(
+            serverURL: serverURL,
+            agentCard: agentCard,
+            localAuthProvider: localAuthProvider
+        )
         NSLog("CompositionRoot: A2ARegistryClient created")
+
+        QueenBackgroundService.shared.configure(
+            memoryService: memoryService,
+            persister: persister,
+            a2aClient: a2aClient
+        )
 
         let vm = ChatViewModel(
             transport: transport,

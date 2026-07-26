@@ -192,17 +192,17 @@ final class RecursionGuard {
 
     // MARK: - Process Detection
 
-    /// Locates an executable by searching `PATH`. Avoids hardcoded absolute paths.
-    private func pathForExecutable(named name: String) -> String? {
-        let pathEnv = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
-        let fm = FileManager.default
-        for dir in pathEnv.split(separator: ":") {
-            let candidate = "\(dir)/\(name)"
-            if fm.isExecutableFile(atPath: candidate) {
-                return candidate
-            }
+    /// Returns a hard-coded system path for a small set of trusted process-query
+    /// tools. This prevents PATH-spoofing attacks where an attacker places a
+    /// malicious `ps`, `pgrep`, or `lsof` earlier in `PATH` and gets executed by
+    /// the singleton guard during process verification.
+    private func systemExecutablePath(named name: String) -> String? {
+        switch name {
+        case "ps": return "/bin/ps"
+        case "pgrep": return "/usr/bin/pgrep"
+        case "lsof": return "/usr/bin/lsof"
+        default: return nil
         }
-        return nil
     }
 
     /// Returns true if `pid` is a trios/trios_app process. We check both the
@@ -211,7 +211,7 @@ final class RecursionGuard {
     private func isTriosProcess(pid: pid_t) -> Bool {
         guard pid > 0 else { return false }
 
-        guard let psPath = pathForExecutable(named: "ps") else {
+        guard let psPath = systemExecutablePath(named: "ps") else {
             return false
         }
 

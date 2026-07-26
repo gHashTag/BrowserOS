@@ -5,14 +5,20 @@
  */
 
 import { Hono } from 'hono'
+import { requireLocalAuth } from '../utils/require-local-auth'
 
 interface ShutdownRouteConfig {
   onShutdown: () => void
 }
 
-export function createShutdownRoute(config: ShutdownRouteConfig) {
-  return new Hono().post('/', (c) => {
-    setImmediate(config.onShutdown)
+interface ShutdownRouteDeps extends ShutdownRouteConfig {
+  localAuth?: import('../utils/require-local-auth').LocalAuthValidator
+}
+
+export function createShutdownRoute(deps: ShutdownRouteDeps) {
+  const { onShutdown, localAuth } = deps
+  return new Hono().post('/', requireLocalAuth(localAuth), (c) => {
+    setImmediate(onShutdown)
     return c.json({ status: 'ok' })
   })
 }

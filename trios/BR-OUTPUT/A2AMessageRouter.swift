@@ -1,15 +1,40 @@
+// AGENT-V-WAIVER: browseros-ai/BrowserOS#2023
+// Reason: Input validation on inbound A2A messages (type and sender).
 import Foundation
 import SwiftUI
 
+/// Delegate that receives routed Queen messages from A2AMessageRouter.
+/// The router intentionally does not know about ChatViewModel; any UI or
+/// background service can adopt this protocol.
+@MainActor
+protocol A2AMessageRouterDelegate: AnyObject {
+    func a2aMessageRouter(
+        _ router: A2AMessageRouter,
+        didProduceQueenMessage message: ChatMessage
+    )
+}
+
+/// Routes inbound A2A events into the reserved Trinity Queen conversation.
+/// All messages are appended to the Queen chat so the user has a single,
+/// non-deletable timeline of agent activity.
 @MainActor
 final class A2AMessageRouter {
-    private weak var viewModel: ChatViewModel?
+    private weak var delegate: A2AMessageRouterDelegate?
 
-    init(viewModel: ChatViewModel) {
-        self.viewModel = viewModel
+    init(delegate: A2AMessageRouterDelegate? = nil) {
+        self.delegate = delegate
     }
 
     func route(_ message: A2AMessage) {
+        guard A2AMessageType(rawValue: message.type.rawValue) != nil else {
+            print("[A2AMessageRouter] Warning: dropping message with unknown type: \(message.type.rawValue)")
+            return
+        }
+        guard validateAgentIdentifier(message.sender.rawValue) else {
+            print("[A2AMessageRouter] Warning: dropping message with invalid sender: \(message.sender.rawValue)")
+            return
+        }
+
         switch message.type {
         case .direct, .broadcast:
             handleChatMessage(message)
@@ -22,10 +47,15 @@ final class A2AMessageRouter {
         case .addToolCall:
             handleAddToolCall(message)
         case .heartbeat:
-            break
+            handleHeartbeat(message)
         case .error:
             handleError(message)
         }
+    }
+
+    private func validateAgentIdentifier(_ value: String) -> Bool {
+        guard !value.isEmpty, value.count <= 64 else { return false }
+        return value.range(of: "^[A-Za-z0-9._-]+$", options: .regularExpression) != nil
     }
 
     private func handleChatMessage(_ message: A2AMessage) {
@@ -35,65 +65,53 @@ final class A2AMessageRouter {
             content: text,
             segments: [.text(text)]
         )
-        viewModel?.messages.append(chatMessage)
-        viewModel?.rebuildCache()
-        viewModel?.objectWillChange.send()
+        emit(chatMessage)
     }
 
     private func handleAgentTaskAssign(_ message: A2AMessage) {
         guard let task = try? JSONDecoder().decode(AgentTask.self, from: message.payload) else { return }
+        let senderName = message.sender.rawValue
         let chatMessage = ChatMessage(
             role: .assistant,
-            content: "Task assigned: \(task.title)",
-            segments: [.text("Task assigned: \(task.title)")],
+            content: "[\(senderName)] Task assigned: \(task.title)",
+            segments: [.text("[\(senderName)] Task assigned: \(task.title)")],
             task: task
         )
-        viewModel?.messages.append(chatMessage)
-        viewModel?.rebuildCache()
-        viewModel?.objectWillChange.send()
+        emit(chatMessage)
     }
 
     private func handleAgentTaskUpdate(_ message: A2AMessage) {
         guard let updatedTask = try? JSONDecoder().decode(AgentTask.self, from: message.payload) else { return }
-        guard let index = viewModel?.messages.firstIndex(where: { $0.task?.id == updatedTask.id }) else { return }
-        viewModel?.messages[index].task = updatedTask
-        viewModel?.objectWillChange.send()
+        let chatMessage = ChatMessage(
+            role: .system,
+            content: "Task \(updatedTask.id.uuidString.prefix(8)) is now \(updatedTask.state.displayName)",
+            segments: [.text("Task \(updatedTask.id.uuidString.prefix(8)) is now \(updatedTask.state.displayName)")]
+        )
+        emit(chatMessage)
     }
 
     private func handleAgentTaskResult(_ message: A2AMessage) {
         guard let task = try? JSONDecoder().decode(AgentTask.self, from: message.payload) else { return }
-        guard let index = viewModel?.messages.firstIndex(where: { $0.task?.id == task.id }) else { return }
-        viewModel?.messages[index].task = task
-        viewModel?.objectWillChange.send()
+        let resultSummary = task.result?.summary ?? "completed"
+        let chatMessage = ChatMessage(
+            role: .assistant,
+            content: "Task \(task.id.uuidString.prefix(8)) finished: \(resultSummary)",
+            segments: [.text("Task \(task.id.uuidString.prefix(8)) finished: \(resultSummary)")]
+        )
+        emit(chatMessage)
     }
 
     private func handleAddToolCall(_ message: A2AMessage) {
         guard let toolCallData = try? JSONDecoder().decode(ToolCall.self, from: message.payload) else { return }
-        
-        // Найти последнее сообщение ассистента и добавить tool call
-        guard let lastIndex = viewModel?.messages.lastIndex(where: { $0.role == .assistant }) else {
-            // Если нет сообщения ассистента, создать новое
-            let chatMessage = ChatMessage(
-                role: .assistant,
-                content: "",
-                segments: [],
-                toolCalls: [toolCallData]
-            )
-            viewModel?.messages.append(chatMessage)
-            viewModel?.rebuildCache()
-            viewModel?.objectWillChange.send()
-            return
-        }
-        
-        // Добавить tool call в существующее сообщение (исправление: заменяем весь элемент)
-        var updatedMessage = viewModel!.messages[lastIndex]
-        updatedMessage.toolCalls.append(toolCallData)
-        viewModel?.messages[lastIndex] = updatedMessage
-        _ = updatedMessage.toolCalls.count // Use updatedMessage to silence warning
-        viewModel?.rebuildCache()
-        viewModel?.objectWillChange.send()
+        let chatMessage = ChatMessage(
+            role: .assistant,
+            content: "",
+            segments: [],
+            toolCalls: [toolCallData]
+        )
+        emit(chatMessage)
     }
-    
+
     private func handleError(_ message: A2AMessage) {
         guard let text = String(data: message.payload, encoding: .utf8) else { return }
         let chatMessage = ChatMessage(
@@ -101,8 +119,21 @@ final class A2AMessageRouter {
             content: "",
             segments: [.error(text)]
         )
-        viewModel?.messages.append(chatMessage)
-        viewModel?.rebuildCache()
-        viewModel?.objectWillChange.send()
+        emit(chatMessage)
+    }
+
+    private func handleHeartbeat(_ message: A2AMessage) {
+        guard let payload = String(data: message.payload, encoding: .utf8),
+              !payload.isEmpty else { return }
+        let chatMessage = ChatMessage(
+            role: .system,
+            content: "[heartbeat] \(message.sender.rawValue): \(payload)",
+            segments: [.text("[heartbeat] \(message.sender.rawValue): \(payload)")]
+        )
+        emit(chatMessage)
+    }
+
+    private func emit(_ message: ChatMessage) {
+        delegate?.a2aMessageRouter(self, didProduceQueenMessage: message)
     }
 }

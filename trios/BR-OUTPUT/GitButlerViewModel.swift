@@ -15,7 +15,7 @@ struct VirtualBranch: Identifiable {
 /// Integrates with GitButler.app via repository state in `.git/gitbutler/`.
 @MainActor
 final class GitButlerViewModel: ObservableObject {
-    @Published var branches: [VirtualBranch] = []
+    @Published var branches: [VirtualBranch] = .init()
     @Published var consoleOutput = ""
     @Published var isApplying = false
     @Published var currentBranch = ""

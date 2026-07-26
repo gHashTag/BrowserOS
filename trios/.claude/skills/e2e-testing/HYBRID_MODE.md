@@ -34,7 +34,7 @@ Human handles:
 ### Grant Command
 ```bash
 # Run trios_app with Accessibility prompt
-cd /Users/playra/BrowserOS-full/trios
+cd /Users/playra/BrowserOS/trios
 ./trios_app
 # Then in System Settings > Privacy > Accessibility > Enable trios_app
 ```

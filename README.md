@@ -141,6 +141,25 @@ BrowserOS works with any LLM. Bring your own keys, use OAuth, or run models loca
 - [BrowserOS vs Claude Cowork](https://docs.browseros.com/comparisons/claude-cowork) — getting real work done with AI
 - [BrowserOS vs OpenClaw](https://docs.browseros.com/comparisons/openclaw) — everyday AI assistance
 
+## TRIOS — AI Desktop Agent
+
+**TRIOS** is a standalone macOS desktop application for AI assistance, integrated with BrowserOS.
+
+- **Installation Guide**: [`trios/TRIOS_MASTER_INSTALLATION_GUIDE.md`](trios/TRIOS_MASTER_INSTALLATION_GUIDE.md)
+- **Quick Start**: [`trios/QUICK_START.md`](trios/QUICK_START.md)
+- **Architecture**: [`trios/ARCHITECTURE_OVERVIEW.md`](trios/ARCHITECTURE_OVERVIEW.md)
+- **Interactive Guide**: [`trios/INSTALLATION_GUIDE.html`](trios/INSTALLATION_GUIDE.html)
+
+```bash
+# Quick install (30-45 min)
+git clone https://github.com/gHashTag/BrowserOS.git
+cd BrowserOS/trios
+./build.sh
+open ~/Applications/trios.app
+```
+
+---
+
 ## Architecture
 
 BrowserOS is a monorepo with two main subsystems: the **browser** (Chromium fork) and the **agent platform** (TypeScript/Go).

@@ -69,12 +69,17 @@ fn main() {
         return;
     }
 
-    let clade_id = args.first().map(|s| s.as_str()).unwrap_or("clade-1.0.0");
     let dry_run = args.iter().any(|a| a == "--dry-run");
+    let seal_only = args.iter().any(|a| a == "--seal-only");
+    let clade_id = args
+        .iter()
+        .find(|a| !a.starts_with("--"))
+        .map(|s| s.as_str())
+        .unwrap_or("clade-1.0.0");
 
     println!("===========================================================");
     println!("  CLADE-PROMOTE: Full Pipeline");
-    println!("  Clade: {} | Dry run: {}", clade_id, dry_run);
+    println!("  Clade: {} | Dry run: {} | Seal only: {}", clade_id, dry_run, seal_only);
     println!("===========================================================\n");
 
     // Phase 0: Safety gates
@@ -85,6 +90,27 @@ fn main() {
         std::process::exit(1);
     }
     println!("[PASS] Safety gates passed\n");
+
+    if seal_only {
+        // Seal-only mode: run the lightweight clade-seal (audit + test + clippy)
+        // without building or launching a Canary worktree.
+        println!("[Phase 1] Seal-only: running clade-seal");
+        let seal_ok = run_clade_seal();
+        if seal_ok {
+            println!("\n===========================================================");
+            println!("  [OK] SEAL ONLY - seal valid, promotion swap skipped");
+            println!("===========================================================");
+            std::process::exit(0);
+        } else {
+            println!("\n[REJECT] clade-seal FAILED");
+            if !dry_run {
+                update_budget_on_rejection();
+            } else {
+                println!("   [DRY-RUN] Would deduct budget");
+            }
+            std::process::exit(1);
+        }
+    }
 
     // Phase 1: Build Canary
     println!("[Phase 1] Cell 1 - Build Canary");
@@ -185,6 +211,23 @@ struct SealMetrics {
     screenshot_available: bool,
     e2e_passed: bool,
     log_error_count: usize,
+}
+
+/// Run the lightweight clade-seal binary (audit + test + clippy) and return
+/// whether it produced a valid seal artifact.
+fn run_clade_seal() -> bool {
+    let start = Instant::now();
+    let ok = Command::new("cargo")
+        .args(["run", "--bin", "clade-seal"])
+        .current_dir(project_dir())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    let ms = start.elapsed().as_millis();
+    println!("   {} clade-seal: {}ms", if ok { "[OK]" } else { "[FAIL]" }, ms);
+    ok
 }
 
 fn run_seal(_clade_id: &str, _dry_run: bool) -> (Vec<SealResult>, SealMetrics) {
@@ -314,6 +357,25 @@ fn run_seal(_clade_id: &str, _dry_run: bool) -> (Vec<SealResult>, SealMetrics) {
         detail: format!("{} errors", metrics.log_error_count),
     });
     println!("   {} Logs: {}", if log_ok { "[OK]" } else { "[FAIL]" }, if log_ok { "clean" } else { "errors" });
+
+    // Cell 6: clade-seal (audit + test + clippy)
+    println!("   Running clade-seal...");
+    let seal_start = Instant::now();
+    let seal_ok = Command::new("cargo")
+        .args(["run", "--bin", "clade-seal"])
+        .env("TRIOS_VARIANT", "staging")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    let seal_ms = seal_start.elapsed().as_millis();
+    results.push(SealResult {
+        cell: "Seal-6 Audit",
+        passed: seal_ok,
+        detail: format!("{}ms", seal_ms),
+    });
+    println!("   {} Audit: {}", if seal_ok { "[OK]" } else { "[FAIL]" }, if seal_ok { "seal valid" } else { "seal invalid" });
 
     (results, metrics)
 }
@@ -642,18 +704,23 @@ fn print_help() {
 clade-promote - Full promotion pipeline for Canary -> Sovereign
 
 USAGE:
-    cargo run --bin clade-promote -- [CLADE_ID] [--dry-run]
+    cargo run --bin clade-promote -- [CLADE_ID] [--dry-run] [--seal-only]
 
 PHASES:
     0. Safety gates (budget > 0, not halted)
-    1. Seal: build + health + screenshot + e2e + log scan
+    1. Seal: build + health + screenshot + e2e + log scan + clade-seal
     2. Snapshot Sovereign before swap
     3. Atomic swap: Canary binary -> Sovereign
     4. Boot probe: 10s health check
     5. Update archive, fitness, budget
 
+OPTIONS:
+    --dry-run     Run all checks without swapping or mutating state
+    --seal-only   Run the seal cells and exit without snapshot/swap/boot
+
 EXAMPLES:
     cargo run --bin clade-promote -- clade-1.1.0 --dry-run
+    cargo run --bin clade-promote -- clade-1.1.0 --seal-only
     cargo run --bin clade-promote -- clade-1.1.0
 "#);
 }

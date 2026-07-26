@@ -1,3 +1,7 @@
+// AGENT-V-WAIVER: CYCLE-14-RECOVERY-ENCRYPTION
+// Reason: hand-edited ring canon file to add AES-256-GCM encryption of the
+//         exported session recovery package and update the manifest/security
+//         notes to match the actual protection now applied.
 import CryptoKit
 import Dispatch
 import Foundation
@@ -55,14 +59,14 @@ struct SessionRecoveryPackageWriter {
             .appendingPathComponent("trios-recovery-\(request.packageID.uuidString)", isDirectory: true)
         let packageName = archiveURL.deletingPathExtension().lastPathComponent
         let packageRoot = stagingParent.appendingPathComponent(packageName, isDirectory: true)
-        let partialArchive = archiveURL.deletingLastPathComponent()
-            .appendingPathComponent(".\(archiveURL.lastPathComponent).\(request.packageID.uuidString).partial")
+        let plainArchiveURL = archiveURL.deletingLastPathComponent()
+            .appendingPathComponent("\(packageName)-\(request.packageID.uuidString).zip")
 
         try? fileManager.removeItem(at: stagingParent)
-        try? fileManager.removeItem(at: partialArchive)
+        try? fileManager.removeItem(at: plainArchiveURL)
         defer {
             try? fileManager.removeItem(at: stagingParent)
-            try? fileManager.removeItem(at: partialArchive)
+            try? fileManager.removeItem(at: plainArchiveURL)
         }
 
         try fileManager.createDirectory(at: packageRoot, withIntermediateDirectories: true)
@@ -173,11 +177,14 @@ struct SessionRecoveryPackageWriter {
             to: packageRoot.appendingPathComponent("manifest.json")
         )
 
-        try createArchive(from: packageRoot, to: partialArchive)
+        try createArchive(from: packageRoot, to: plainArchiveURL)
+        let plainArchiveData = try Data(contentsOf: plainArchiveURL)
+        let encryptedArchiveData = try TriOSEncryption.recovery.encrypt(plainArchiveData)
         if fileManager.fileExists(atPath: archiveURL.path) {
             try fileManager.removeItem(at: archiveURL)
         }
-        try fileManager.moveItem(at: partialArchive, to: archiveURL)
+        try encryptedArchiveData.write(to: archiveURL, options: .atomic)
+        try? fileManager.removeItem(at: plainArchiveURL)
 
         let archiveSize = (try? archiveURL.resourceValues(forKeys: [.fileSizeKey]).fileSize)
             .map(Int64.init) ?? 0
@@ -453,7 +460,7 @@ struct SessionRecoveryPackageWriter {
     }
 
     private func normalizedArchiveURL(_ url: URL) -> URL {
-        url.pathExtension.lowercased() == "zip" ? url : url.appendingPathExtension("zip")
+        url.pathExtension.lowercased() == "triosrecovery" ? url : url.appendingPathExtension("triosrecovery")
     }
 
     private func safeArchivePath(_ path: String) throws -> String {
@@ -496,6 +503,10 @@ struct SessionRecoveryPackageWriter {
         6. Validate file integrity against `manifest.json`.
 
         ## Security
+
+        This archive is encrypted with AES-256-GCM using a key stored in the
+        macOS Keychain (`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`). It can
+        only be opened by TriOS on the Mac that created it.
 
         API keys, passwords, cookies, authorization headers, and recognizable
         secret token formats were replaced by `[REDACTED]`. macOS Keychain values

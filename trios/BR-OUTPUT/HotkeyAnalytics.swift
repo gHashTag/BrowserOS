@@ -1,5 +1,6 @@
 import SwiftUI
 import Combine
+import CryptoKit
 
 // MARK: - HotkeyUsage Model
 
@@ -53,26 +54,74 @@ struct DailyStats: Codable, Identifiable {
 
 @MainActor
 class HotkeyAnalyticsViewModel: ObservableObject {
-    @Published var usageHistory: [HotkeyUsage] = []
-    @Published var dailyStats: [DailyStats] = []
-    @Published var suggestions: [HotkeySuggestion] = []
+    @Published var usageHistory: [HotkeyUsage] = .init()
+    @Published var dailyStats: [DailyStats] = .init()
+    @Published var suggestions: [HotkeySuggestion] = .init()
     @Published var currentContext: String = "chat"
-    
+
     private let analyticsDirectory: URL
     private var usageBuffer: [HotkeyUsage] = []
     private var contextStartTime: Date?
+    private static let encryption = TriOSEncryption(keyName: "analytics")
     
     init() {
-        let docsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        let triosDir = docsPath.appendingPathComponent("Trios", isDirectory: true)
-        let analyticsDir = triosDir.appendingPathComponent("Analytics", isDirectory: true)
-        
-        try? FileManager.default.createDirectory(at: analyticsDir, withIntermediateDirectories: true)
+        let analyticsDir = Self.makeAnalyticsDirectory()
         self.analyticsDirectory = analyticsDir
-        
+
+        migrateLegacyAnalyticsIfNeeded(to: analyticsDir)
+        try? Self.excludeFromBackup(analyticsDir)
+
         loadAnalytics()
         startContextTracking()
         generateSuggestions()
+    }
+
+    /// Returns the canonical Application Support directory for hotkey analytics.
+    /// Analytics data is excluded from Time Machine/iCloud backups because it is
+    /// ephemeral telemetry, not user content.
+    private static func makeAnalyticsDirectory() -> URL {
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let bundleDir = support.appendingPathComponent("ai.browseros.trios", isDirectory: true)
+        let analyticsDir = bundleDir.appendingPathComponent("Analytics", isDirectory: true)
+        try? FileManager.default.createDirectory(
+            at: analyticsDir,
+            withIntermediateDirectories: true,
+            attributes: [FileAttributeKey.posixPermissions: 0o700]
+        )
+        return analyticsDir
+    }
+
+    /// Marks a directory so Time Machine and iCloud backup skip it.
+    private static func excludeFromBackup(_ url: URL) throws {
+        var mutable = url
+        var value = true
+        try mutable.setResourceValue(value, forKey: .isExcludedFromBackupKey)
+    }
+
+    /// Moves analytics files from the legacy Documents/Trios/Analytics location
+    /// into the new Application Support location without duplicating content.
+    private static func migrateLegacyAnalyticsIfNeeded(to newDir: URL) {
+        let docsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let legacyDir = docsPath.appendingPathComponent("Trios", isDirectory: true)
+            .appendingPathComponent("Analytics", isDirectory: true)
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: legacyDir.path) else { return }
+
+        do {
+            let files = try fm.contentsOfDirectory(at: legacyDir, includingPropertiesForKeys: nil)
+            for file in files where file.pathExtension == "json" {
+                let destination = newDir.appendingPathComponent(file.lastPathComponent)
+                if !fm.fileExists(atPath: destination.path) {
+                    try fm.moveItem(at: file, to: destination)
+                }
+            }
+            // Remove the legacy directory only if it is now empty.
+            if try fm.contentsOfDirectory(at: legacyDir, includingPropertiesForKeys: nil).isEmpty {
+                try fm.removeItem(at: legacyDir)
+            }
+        } catch {
+            NSLog("[Analytics] Legacy migration failed: \(error)")
+        }
     }
     
     func recordUsage(hotkey: String, action: String, context: String = "chat", success: Bool = true, completionTimeMs: Double? = nil) {
@@ -127,41 +176,62 @@ class HotkeyAnalyticsViewModel: ObservableObject {
     
     private func flushBuffer() {
         guard !usageBuffer.isEmpty else { return }
-        
-        let fileURL = analyticsDirectory.appendingPathComponent("usage_\(Date().timeIntervalSince1970).json")
-        
+
+        let fileURL = analyticsDirectory.appendingPathComponent("usage_\(Date().timeIntervalSince1970).json.enc")
+
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = .prettyPrinted
             encoder.dateEncodingStrategy = .iso8601
-            let data = try encoder.encode(usageBuffer)
-            try data.write(to: fileURL)
+            let plaintext = try encoder.encode(usageBuffer)
+            let encrypted = try Self.encryption.encrypt(plaintext)
+            try encrypted.write(to: fileURL, options: [.atomic])
             usageBuffer = []
         } catch {
             NSLog("[Analytics] Flush failed: \(error)")
         }
     }
-    
+
     private func loadAnalytics() {
         guard FileManager.default.fileExists(atPath: analyticsDirectory.path) else {
             return
         }
-        
+
         do {
             let files = try FileManager.default.contentsOfDirectory(at: analyticsDirectory, includingPropertiesForKeys: nil)
-            
+
+            // Current encrypted files use the .json.enc suffix.
+            for file in files where file.pathExtension == "enc" {
+                let data = try Data(contentsOf: file)
+                let decrypted = try Self.encryption.decrypt(data)
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                let usage = try decoder.decode([HotkeyUsage].self, from: decrypted)
+                usageHistory.append(contentsOf: usage)
+            }
+
+            // Legacy plaintext files are migrated to encrypted storage and removed.
             for file in files where file.pathExtension == "json" {
                 let data = try Data(contentsOf: file)
                 let decoder = JSONDecoder()
                 decoder.dateDecodingStrategy = .iso8601
                 let usage = try decoder.decode([HotkeyUsage].self, from: data)
                 usageHistory.append(contentsOf: usage)
+                try migrateLegacyFileToEncrypted(file)
             }
-            
+
             computeDailyStats()
         } catch {
             NSLog("[Analytics] Load failed: \(error)")
         }
+    }
+
+    private func migrateLegacyFileToEncrypted(_ url: URL) throws {
+        let data = try Data(contentsOf: url)
+        let encrypted = try Self.encryption.encrypt(data)
+        let encryptedURL = url.appendingPathExtension("enc")
+        try encrypted.write(to: encryptedURL, options: [.atomic])
+        try FileManager.default.removeItem(at: url)
     }
     
     private func computeDailyStats() {

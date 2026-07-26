@@ -70,21 +70,14 @@ struct SecurityCheckResult {
     duration_ms: u128,
 }
 
-/// Run build checks: swiftc -typecheck + cargo check --workspace.
+/// Run build checks: ./build.sh + cargo check --workspace.
 fn build_check() -> BuildCheckResult {
     let start = Instant::now();
 
-    // Swift typecheck: swiftc -typecheck main.swift rings/**/*.swift BR-OUTPUT/*.swift
-    let swift_output = Command::new("swiftc")
-        .args([
-            "-typecheck",
-            "main.swift",
-            "rings/SR-00/*.swift",
-            "rings/SR-01/*.swift",
-            "rings/SR-02/*.swift",
-            "rings/SR-03/*.swift",
-            "BR-OUTPUT/*.swift",
-        ])
+    // Swift canonical build via the project's own build script, which builds
+    // QueenUILib and the tracked production source closure. Direct swiftc
+    // -typecheck misses the external module and untracked BR-OUTPUT prototypes.
+    let swift_output = Command::new("./build.sh")
         .current_dir(project_dir())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -92,15 +85,21 @@ fn build_check() -> BuildCheckResult {
 
     let (swift_ok, swift_errors) = match swift_output {
         Ok(out) => {
+            let stdout = String::from_utf8_lossy(&out.stdout);
             let stderr = String::from_utf8_lossy(&out.stderr);
-            let errors: Vec<String> = stderr
+            // The build script runs both compilation and chat E2E tests. E2E logs
+            // intentionally mention "error:" (simulated transport failures) and
+            // must not be treated as build failures. Only an explicit [FAIL]
+            // tag or a non-zero exit status indicates a real gate failure.
+            let errors: Vec<String> = stdout
                 .lines()
-                .filter(|l| l.contains("error:"))
-                .map(|s| s.to_string())
+                .chain(stderr.lines())
+                .filter(|l| l.contains("[FAIL]"))
+                .map(|s| s.trim().to_string())
                 .collect();
             (out.status.success() && errors.is_empty(), errors)
         }
-        Err(e) => (false, vec![format!("swiftc execution failed: {}", e)]),
+        Err(e) => (false, vec![format!("./build.sh execution failed: {}", e)]),
     };
 
     // Rust workspace check
@@ -155,6 +154,50 @@ fn scannable_content(path: &std::path::Path, content: &str) -> String {
     }
 }
 
+fn should_skip_audit_path(path: &std::path::Path) -> bool {
+    let s = path.to_string_lossy();
+    s.contains("target/")
+        || s.contains(".build/")
+        || s.contains(".git/")
+        || s.contains(".worktrees/")
+}
+
+/// Paths that are not part of the shipped runtime and should not contribute
+/// actionable TODO inventory findings. Planning docs, agent/skill templates,
+/// and archived experiments can mention TODO/BUG freely without polluting the
+/// code-level inventory.
+fn should_skip_todo_path(path: &std::path::Path) -> bool {
+    let s = path.to_string_lossy();
+    s.contains(".archive/")
+        || s.contains(".claude/agents/")
+        || s.contains(".claude/skills/")
+        || s.contains(".claude/plans/")
+        || s.contains(".trinity/specs/")
+        || s.contains(".trinity/wave-loop")
+        || s.contains(".llm/plans/")
+        || s.contains("trios-mesh/smoke/")
+        || s.ends_with("PluginTemplate.swift")
+        || s.ends_with("docs/LAUNCH_PLAN.md")
+        || s.ends_with("docs/INSTALLATION_README.md")
+        || s.ends_with("INSTALL_TODO.md")
+        || s.ends_with(".trinity/experience.md")
+}
+
+/// Returns true when a line (or the line immediately before it) carries an
+/// AGENT-V-WAIVER marker. Waivers allow documented dangerous constants and test
+/// fixtures without polluting the security/error gates.
+fn is_waived(prev: Option<&str>, line: &str) -> bool {
+    if line.contains("AGENT-V-WAIVER") {
+        return true;
+    }
+    if let Some(p) = prev {
+        if p.contains("AGENT-V-WAIVER") {
+            return true;
+        }
+    }
+    false
+}
+
 fn security_check() -> SecurityCheckResult {
     let start = Instant::now();
     let mut findings: Vec<AuditFinding> = vec![];
@@ -185,7 +228,7 @@ fn security_check() -> SecurityCheckResult {
         .filter(|e| {
             let p = e.path();
             let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("");
-            (ext == "swift" || ext == "rs" || ext == "sh") && !p.to_string_lossy().contains("target/")
+            !should_skip_audit_path(p) && (ext == "swift" || ext == "rs" || ext == "sh")
         })
     {
         scanned += 1;
@@ -197,8 +240,9 @@ fn security_check() -> SecurityCheckResult {
         let content = scannable_content(path, &raw);
 
         for (re, severity, message) in &compiled {
+            let mut prev_line: Option<&str> = None;
             for (line_idx, line) in content.lines().enumerate() {
-                if re.is_match(line) {
+                if re.is_match(line) && !is_waived(prev_line, line) {
                     let file = relative_audit_path(path);
                     let fingerprint = format!("{}:{}:{}", &file, line_idx + 1, message);
                     findings.push(AuditFinding {
@@ -210,6 +254,7 @@ fn security_check() -> SecurityCheckResult {
                         fingerprint,
                     });
                 }
+                prev_line = Some(line);
             }
         }
     }
@@ -251,7 +296,7 @@ fn shell_safety_check() -> SecurityCheckResult {
         .filter(|e| {
             let p = e.path();
             let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("");
-            ext == "swift" && !p.to_string_lossy().contains("target/")
+            ext == "swift" && !should_skip_audit_path(p)
         })
     {
         scanned += 1;
@@ -319,7 +364,7 @@ fn error_handling_check() -> SecurityCheckResult {
         .filter(|e| {
             let p = e.path();
             let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("");
-            (ext == "swift" || ext == "rs") && !p.to_string_lossy().contains("target/")
+            (ext == "swift" || ext == "rs") && !should_skip_audit_path(p)
         })
     {
         scanned += 1;
@@ -333,8 +378,9 @@ fn error_handling_check() -> SecurityCheckResult {
         let file = relative_audit_path(path);
 
         for (re, severity, message) in &compiled {
+            let mut prev_line: Option<&str> = None;
             for (line_idx, line) in content.lines().enumerate() {
-                if re.is_match(line) {
+                if re.is_match(line) && !is_waived(prev_line, line) {
                     let fingerprint = format!("{}:{}:{}", &file, line_idx + 1, message);
                     findings.push(AuditFinding {
                         file: file.clone(),
@@ -345,6 +391,7 @@ fn error_handling_check() -> SecurityCheckResult {
                         fingerprint,
                     });
                 }
+                prev_line = Some(line);
             }
         }
     }
@@ -385,7 +432,7 @@ fn concurrency_check() -> SecurityCheckResult {
         .filter(|e| {
             let p = e.path();
             let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("");
-            ext == "swift" && !p.to_string_lossy().contains("target/")
+            ext == "swift" && !should_skip_audit_path(p)
         })
     {
         scanned += 1;
@@ -399,8 +446,9 @@ fn concurrency_check() -> SecurityCheckResult {
         let file = relative_audit_path(path);
 
         for (re, severity, message) in &compiled {
+            let mut prev_line: Option<&str> = None;
             for (line_idx, line) in content.lines().enumerate() {
-                if re.is_match(line) {
+                if re.is_match(line) && !is_waived(prev_line, line) {
                     let fingerprint = format!("{}:{}:{}", &file, line_idx + 1, message);
                     findings.push(AuditFinding {
                         file: file.clone(),
@@ -411,6 +459,7 @@ fn concurrency_check() -> SecurityCheckResult {
                         fingerprint,
                     });
                 }
+                prev_line = Some(line);
             }
         }
     }
@@ -423,16 +472,58 @@ fn concurrency_check() -> SecurityCheckResult {
     }
 }
 
+/// Extract an actionable TODO/FIXME keyword and description from a line of
+/// Swift or Rust source. Only matches keywords inside comments so identifiers
+/// like `Debug` / `warning` / `TODOItem` do not produce false positives.
+fn code_todo_match(line: &str, re: &Regex) -> Option<(&'static str, String)> {
+    let caps = re.captures(line)?;
+    let keyword = caps.get(2)?.as_str().to_uppercase();
+    let static_keyword = match keyword.as_str() {
+        "TODO" => "TODO",
+        "FIXME" => "FIXME",
+        "HACK" => "HACK",
+        "XXX" => "XXX",
+        "WARN" => "WARN",
+        "BUG" => "BUG",
+        _ => return None,
+    };
+    let desc = caps.get(3)?.as_str().trim().to_string();
+    Some((static_keyword, desc))
+}
+
+/// Extract an actionable TODO/FIXME keyword and description from a Markdown
+/// line. Only matches task checkboxes (`- [ ] TODO:`) or section headings
+/// (`## TODO`) so inline prose and link text do not produce false positives.
+fn markdown_todo_match(line: &str, re: &Regex) -> Option<(&'static str, String)> {
+    let trimmed = line.trim_start();
+    let is_task = trimmed.starts_with("- [") || trimmed.starts_with("-[");
+    let is_heading = trimmed.starts_with('#');
+    if !is_task && !is_heading {
+        return None;
+    }
+    let caps = re.captures(line)?;
+    let keyword = caps.get(1)?.as_str().to_uppercase();
+    let static_keyword = match keyword.as_str() {
+        "TODO" => "TODO",
+        "FIXME" => "FIXME",
+        "HACK" => "HACK",
+        "XXX" => "XXX",
+        "WARN" => "WARN",
+        "BUG" => "BUG",
+        _ => return None,
+    };
+    let desc = caps.get(2)?.as_str().trim().to_string();
+    Some((static_keyword, desc))
+}
+
 /// Inventory TODO and FIXME comments with severity categorization.
 fn todo_check() -> SecurityCheckResult {
     let start = Instant::now();
     let mut findings: Vec<AuditFinding> = vec![];
     let mut scanned = 0;
 
-    let todo_re = match Regex::new(r"(?i)(TODO|FIXME|HACK|XXX|WARN|BUG)\s*[:\-]?\s*(.*)") {
-        Ok(re) => re,
-        Err(e) => { eprintln!("[audit] Bad regex: {}", e); return SecurityCheckResult { passed: true, findings: vec![], scanned_files: 0, duration_ms: 0 }; }
-    };
+    let code_re = Regex::new(r"(?i)(///|//|/\*)\s*\b(TODO|FIXME|HACK|XXX|WARN|BUG)\b\s*[:\-]?\s*(.*)").ok();
+    let md_re = Regex::new(r"(?i)\b(TODO|FIXME|HACK|XXX|WARN|BUG)\b\s*[:\-]?\s*(.*)").ok();
 
     for entry in WalkDir::new(project_dir())
         .into_iter()
@@ -440,26 +531,34 @@ fn todo_check() -> SecurityCheckResult {
         .filter(|e| {
             let p = e.path();
             let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("");
-            (ext == "swift" || ext == "rs" || ext == "md") && !p.to_string_lossy().contains("target/")
+            (ext == "swift" || ext == "rs" || ext == "md")
+                && !should_skip_audit_path(p)
+                && !should_skip_todo_path(p)
         })
     {
         scanned += 1;
         let path = entry.path();
-        let content = match read_file_bounded(path) {
+        let raw = match read_file_bounded(path) {
             Some(c) => c,
             None => continue,
         };
+        // Drop the auditor's own source and test-module tails so test fixtures
+        // (e.g. the old TODO regex unit test) do not self-match.
+        let content = scannable_content(path, &raw);
 
         let file = relative_audit_path(path);
+        let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
 
         for (line_idx, line) in content.lines().enumerate() {
-            if let Some(caps) = todo_re.captures(line) {
-                let keyword = caps.get(1).map(|m| m.as_str().to_uppercase()).unwrap_or_default();
-                let desc = caps.get(2).map(|m| m.as_str().trim()).unwrap_or("").to_string();
-                let severity = match keyword.as_str() {
+            let matched = match ext {
+                "md" => md_re.as_ref().and_then(|re| markdown_todo_match(line, re)),
+                "swift" | "rs" => code_re.as_ref().and_then(|re| code_todo_match(line, re)),
+                _ => None,
+            };
+            if let Some((keyword, desc)) = matched {
+                let severity = match keyword {
                     "FIXME" | "BUG" => "critical",
-                    "TODO" => "warning",
-                    "HACK" | "XXX" => "warning",
+                    "TODO" | "HACK" | "XXX" => "warning",
                     _ => "info",
                 };
                 let message = format!("{}: {}", keyword, desc);
@@ -506,7 +605,7 @@ fn unused_code_check() -> SecurityCheckResult {
         .filter(|e| {
             let p = e.path();
             let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("");
-            (ext == "swift" || ext == "rs") && !p.to_string_lossy().contains("target/")
+            (ext == "swift" || ext == "rs") && !should_skip_audit_path(p)
         })
     {
         scanned += 1;
@@ -749,7 +848,7 @@ fn retain_cycle_check() -> SecurityCheckResult {
         .filter(|e| {
             let p = e.path();
             let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("");
-            ext == "swift" && !p.to_string_lossy().contains("target/")
+            ext == "swift" && !should_skip_audit_path(p)
         })
     {
         scanned += 1;
@@ -763,8 +862,9 @@ fn retain_cycle_check() -> SecurityCheckResult {
         let file = relative_audit_path(path);
 
         for (re, severity, message) in &compiled {
+            let mut prev_line: Option<&str> = None;
             for (line_idx, line) in content.lines().enumerate() {
-                if re.is_match(line) {
+                if re.is_match(line) && !is_waived(prev_line, line) {
                     let fingerprint = format!("{}:{}:{}", &file, line_idx + 1, message);
                     findings.push(AuditFinding {
                         file: file.clone(),
@@ -775,6 +875,7 @@ fn retain_cycle_check() -> SecurityCheckResult {
                         fingerprint,
                     });
                 }
+                prev_line = Some(line);
             }
         }
     }

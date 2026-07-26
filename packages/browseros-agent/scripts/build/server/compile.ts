@@ -67,6 +67,34 @@ async function compileTarget(
   ]
   await runCommand('bun', args, env)
 
+  if (target.os === 'macos') {
+    // Bun v1.3.12 generates a corrupt LC_CODE_SIGNATURE on macOS arm64, causing
+    // the kernel to SIGKILL the binary on launch. Strip the broken signature and
+    // apply a fresh ad-hoc signature so the binary is runnable on Apple Silicon.
+    // See oven-sh/bun#29306, #29361, #29120.
+    try {
+      log.step(`Repairing code signature for ${target.id}`)
+      await runCommand(
+        'codesign',
+        ['--remove-signature', binaryPath],
+        process.env,
+      )
+      await runCommand(
+        'codesign',
+        ['--force', '--sign', '-', binaryPath],
+        process.env,
+      )
+      log.success(`Repaired code signature for ${target.id}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      log.warn(`Unable to repair code signature for ${target.id}`, {
+        error: message,
+      })
+      // Best-effort: cross-compilation environments may lack codesign. The caller
+      // (e.g. CI on Linux building for macOS) should handle notarization separately.
+    }
+  }
+
   if (target.os === 'windows') {
     if (ci) {
       log.warn('Skipping Windows exe metadata patching in CI mode')

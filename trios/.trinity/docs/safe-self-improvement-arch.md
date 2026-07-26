@@ -201,7 +201,7 @@ fn boot_probe() -> bool {
     
     // 2. Swap binary (already done in atomic_swap)
     // 3. Start new Sovereign via launchd or direct spawn
-    let child = Command::new("/Users/playra/BrowserOS-full/trios/trios_app")
+    let child = Command::new("/Users/playra/BrowserOS/trios/trios_app")
         .env("TRIOS_VARIANT", "prod")
         .spawn();
     

@@ -30,8 +30,8 @@ AGENTS.md
 
 packages/browseros/build/tools/
 
-.claude/scheduled_tasks.json
-.claude/scheduled_tasks.lock
+**/.claude/scheduled_tasks.json
+**/.claude/scheduled_tasks.lock
 
 # AI SDK DevTools traces
 .devtools/
@@ -42,3 +42,25 @@ trios/trios_app
 trios/.trinity/event_log.jsonl
 trios/.trinity/state/
 trios/.trinity/mesh_chat/
+trios/.trinity/doctor_prev.dat
+trios/.trinity/reviews/
+trios/.trinity/queue/
+trios/.trinity/queen_state.json
+
+# BrowserOS runtime state
+packages/browseros-agent/.trinity/
+packages/browseros-agent/apps/server/.trinity/
+packages/browseros-agent/trios/
+
+# Agent caches and build products
+.agents/
+.build/
+.claude/worktrees/
+Sources/
+amp
+OF
+
+# Swift direct-compile artifacts produced at repo root by build.sh / swiftc
+/*.d
+/*.o
+/*.swiftdeps

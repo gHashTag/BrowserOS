@@ -6,16 +6,18 @@ import Foundation
 import Security
 
 enum MemoryFingerprintKeyProvider {
-    private static let service = "ai.browseros.trios.agent-memory"
-    private static let account = "recall-hmac-key-v1"
+    private static let keyURL: URL = {
+        let fm = FileManager.default
+        let appSupport = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let dir = appSupport.appendingPathComponent("trios", isDirectory: true)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir.appendingPathComponent("agent-memory-hmac.key")
+    }()
 
     static func loadOrCreate() -> Data? {
-        if let encoded = try? KeychainSecrets.read(
-            service: service,
-            account: account
-        ), let existing = Data(base64Encoded: encoded),
-           existing.count == 32 {
-            return existing
+        if let data = try? Data(contentsOf: keyURL),
+           data.count == 32 {
+            return data
         }
 
         var bytes = [UInt8](repeating: 0, count: 32)
@@ -34,11 +36,11 @@ enum MemoryFingerprintKeyProvider {
         }
         let key = Data(bytes)
         do {
-            try KeychainSecrets.write(
-                service: service,
-                account: account,
-                secret: key.base64EncodedString()
-            )
+            try key.write(to: keyURL, options: .atomic)
+            var resourceValues = URLResourceValues()
+            resourceValues.isExcludedFromBackup = true
+            var mutableURL = keyURL
+            try? mutableURL.setResourceValues(resourceValues)
             return key
         } catch {
             NSLog(
@@ -77,6 +79,12 @@ struct AgentMemoryService: Sendable {
     ) {
         self.store = store
         self.fingerprintKey = fingerprintKey
+    }
+
+    /// Stores a raw memory record without redaction. Used for system-level audit
+    /// logs where the caller has already bounded the content.
+    func saveMemory(_ record: AgentMemoryRecord) async throws {
+        try await store.saveMemory(record)
     }
 
     func rememberCompletedTurn(
@@ -257,14 +265,17 @@ struct AgentMemoryService: Sendable {
         return String(collapsed.prefix(maximumLength))
     }
 
-    private static func redacted(_ text: String) -> String? {
+    internal static func redacted(_ text: String) -> String? {
         let patterns = [
             #"(?is)-----BEGIN [^\r\n]*?PRIVATE KEY-----.*?(?:-----END [^\r\n]*?PRIVATE KEY-----|\z)"#,
             #"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]{8,}"#,
+            #"(?i)\bBasic\s+[A-Za-z0-9+/=]{8,}"#,
             #"(?i)\b(?:sk|rk|pk)-[A-Za-z0-9_-]{12,}\b"#,
             #"(?i)\bgh[pousr]_[A-Za-z0-9]{20,}\b"#,
             #"\bAKIA[0-9A-Z]{16}\b"#,
             #"(?i)\b(?:api[_-]?key|access[_-]?token|auth[_-]?token|password|passwd|secret)\s*[:=]\s*["']?[^\s"',;]{6,}"#,
+            #"(?i)(?:token|jwt|key|secret|access_token|refresh_token|id_token|apikey|api-key)=([A-Za-z0-9._~+/=-]{8,})"#,
+            #"\beyJ[A-Za-z0-9_-]*\.eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\b"#,
             #"(?i)https?://[^/\s:@]+:[^/\s@]+@"#
         ]
         var current = text

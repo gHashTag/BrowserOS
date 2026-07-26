@@ -6,7 +6,7 @@
  * PostgreSQL Agent Store — persistent A2A agent registry backend.
  */
 
-import { Client } from 'pg'
+import { Pool, type QueryResult, type QueryResultRow } from 'pg'
 import { logger } from '../../../lib/logger'
 import type { A2aAgentCard } from './a2a-registry-service'
 
@@ -22,25 +22,31 @@ export interface AgentRow {
 }
 
 export class PgAgentStore {
-  private client: Client | null = null
-  private connected = false
+  private pool: Pool | null = null
 
   constructor(private dsn: string) {}
 
   async connect(): Promise<void> {
-    if (this.connected) return
-    this.client = new Client({ connectionString: this.dsn })
-    await this.client.connect()
-    this.connected = true
-    logger.info('PgAgentStore connected')
+    if (this.pool) return
+    this.pool = new Pool({
+      connectionString: this.dsn,
+      max: 10,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 10000,
+    })
+    this.pool.on('error', (err) => {
+      logger.warn('PgAgentStore pool client error', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    })
+    logger.info('PgAgentStore pool connected')
   }
 
   async disconnect(): Promise<void> {
-    if (this.client) {
-      await this.client.end().catch(() => {})
-      this.client = null
+    if (this.pool) {
+      await this.pool.end().catch(() => {})
+      this.pool = null
     }
-    this.connected = false
   }
 
   async ensureSchema(): Promise<void> {
@@ -148,18 +154,53 @@ export class PgAgentStore {
        WHERE status = 'online' AND last_heartbeat < NOW() - INTERVAL '${thresholdSeconds.toString()} seconds'
        RETURNING id`,
     )
+    // Note: thresholdSeconds is controlled internally (default 90). If exposed externally,
+    // switch to parameterized query to avoid SQL injection.
     return (rows ?? []).map((r) => r.id)
   }
 
-  private async query<T = any>(sql: string, params?: any[]): Promise<T[]> {
-    if (!this.client) throw new Error('PgAgentStore not connected')
-    const result = await this.client.query(sql, params)
+  private isRetryableDbError(err: unknown): boolean {
+    const message = err instanceof Error ? err.message : String(err)
+    return /connection terminated|connection refused|timeout|ECONNRESET|ETIMEDOUT|socket/i.test(
+      message,
+    )
+  }
+
+  private async queryWithRetry<T extends QueryResultRow = QueryResultRow>(
+    sql: string,
+    params?: unknown[],
+  ): Promise<QueryResult<T>> {
+    if (!this.pool) throw new Error('PgAgentStore not connected')
+    let lastError: unknown
+    const attempts = 3
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        return await this.pool.query<T>(sql, params)
+      } catch (err) {
+        lastError = err
+        if (!this.isRetryableDbError(err) || attempt === attempts - 1) {
+          break
+        }
+        logger.warn('PgAgentStore query failed, retrying', {
+          attempt: attempt + 1,
+          error: err instanceof Error ? err.message : String(err),
+        })
+        await new Promise((resolve) => setTimeout(resolve, 500 * 2 ** attempt))
+      }
+    }
+    throw lastError
+  }
+
+  private async query<T extends QueryResultRow = QueryResultRow>(
+    sql: string,
+    params?: unknown[],
+  ): Promise<T[]> {
+    const result = await this.queryWithRetry<T>(sql, params)
     return result.rows as T[]
   }
 
-  private async exec(sql: string, params?: any[]): Promise<number> {
-    if (!this.client) throw new Error('PgAgentStore not connected')
-    const result = await this.client.query(sql, params)
+  private async exec(sql: string, params?: unknown[]): Promise<number> {
+    const result = await this.queryWithRetry(sql, params)
     return result.rowCount ?? 0
   }
 }

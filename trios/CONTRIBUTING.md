@@ -34,8 +34,8 @@ Thank you for considering contributing! This guide helps you get started.
 ## 🛠 Development Setup
 
 ```bash
-git clone https://github.com/your-username/BrowserOS-full.git
-cd BrowserOS-full/trios
+git clone https://github.com/your-username/BrowserOS.git
+cd BrowserOS/trios
 ./build.sh
 open trios.app
 ```
@@ -137,7 +137,7 @@ swift test --enable-code-coverage
 
 ## 💬 Community
 
-- **Discussions**: https://github.com/gHashTag/BrowserOS-full/discussions
+- **Discussions**: https://github.com/gHashTag/BrowserOS/discussions
 - **Discord**: [link TBD]
 - **Twitter**: [@TrinityProject](https://twitter.com)
 

@@ -1,8 +1,9 @@
 // AGENT-V-WAIVER: https://github.com/gHashTag/trios/issues/T27-EPIC-001
-// Reason: AGENT-MEMORY-TODO-001 adds the durable memory and plan boundary.
-// Follow-up: seal against .trinity/specs/agent-memory-todo-planner.md.
+// Reason: Cycle 15 replaces the encrypted snapshot with native SQLCipher
+// page-level encryption. Follow-up: seal against
+// .trinity/specs/agent-memory-todo-planner.md.
 import Foundation
-import SQLite3
+import CSQLCipher
 
 struct AgentMemoryRecord: Identifiable, Codable, Sendable, Equatable {
     let id: UUID
@@ -79,7 +80,7 @@ actor MemoryStore: AgentMemoryStoreProtocol {
         case null
     }
 
-    private static let schemaVersionNumber = 1
+    private static let schemaVersionNumber = 2
     private static let candidateLimit = 64
     private static let transientDestructor = unsafeBitCast(
         -1,
@@ -87,34 +88,43 @@ actor MemoryStore: AgentMemoryStoreProtocol {
     )
 
     private var database: OpaquePointer?
+    private let databaseURL: URL
+    private let encryptedURL: URL
 
-    init(databaseURL: URL = MemoryStore.defaultDatabaseURL()) throws {
-        let parentURL = databaseURL.deletingLastPathComponent()
+    init(
+        databaseURL: URL = SQLCipherMemoryStore.defaultDatabaseURL(),
+        encryptedURL: URL = SQLCipherMemoryStore.defaultLegacySnapshotURL()
+    ) throws {
+        self.databaseURL = databaseURL
+        self.encryptedURL = encryptedURL
+
+        let fm = FileManager.default
+        let databaseExists = fm.fileExists(atPath: databaseURL.path)
+        let legacyExists = fm.fileExists(atPath: encryptedURL.path)
+        SQLCipherMemoryStore.debugLog(at: databaseURL, "MemoryStore init databaseExists=\(databaseExists) legacyExists=\(legacyExists)")
+
         do {
-            try FileManager.default.createDirectory(
-                at: parentURL,
-                withIntermediateDirectories: true
-            )
+            try SQLCipherMemoryStore.prepareDirectory(at: databaseURL)
         } catch {
             throw MemoryStoreError.openFailed(error.localizedDescription)
         }
 
-        var handle: OpaquePointer?
-        let flags = SQLITE_OPEN_CREATE
-            | SQLITE_OPEN_READWRITE
-            | SQLITE_OPEN_FULLMUTEX
-        let result = sqlite3_open_v2(databaseURL.path, &handle, flags, nil)
-        guard result == SQLITE_OK, let handle else {
-            let message = handle
-                .flatMap { sqlite3_errmsg($0) }
-                .map { String(cString: $0) }
-                ?? "unknown SQLite error"
-            if let handle {
-                sqlite3_close_v2(handle)
+        let handle: OpaquePointer
+        if databaseExists {
+            let isPlaintextSQLite = Self.fileStartsWithSQLiteMagic(databaseURL)
+            if isPlaintextSQLite {
+                handle = try SQLCipherMemoryStore.migratePlaintextFile(at: databaseURL)
+            } else {
+                handle = try SQLCipherMemoryStore.openEncryptedDatabase(at: databaseURL)
             }
-            throw MemoryStoreError.openFailed(message)
+        } else if legacyExists {
+            handle = try SQLCipherMemoryStore.migrateLegacySnapshot(
+                from: encryptedURL,
+                to: databaseURL
+            )
+        } else {
+            handle = try SQLCipherMemoryStore.openEncryptedDatabase(at: databaseURL)
         }
-        database = handle
 
         do {
             try Self.configure(handle)
@@ -124,24 +134,18 @@ actor MemoryStore: AgentMemoryStoreProtocol {
             database = nil
             throw error
         }
+        database = handle
     }
 
     deinit {
+        // Best-effort close; in Swift the actor deinit is synchronous.
         if let database {
             sqlite3_close_v2(database)
         }
     }
 
     static func defaultDatabaseURL() -> URL {
-        let support = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first ?? FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support", isDirectory: true)
-        return support
-            .appendingPathComponent("Trinity S3AI", isDirectory: true)
-            .appendingPathComponent("AgentMemory", isDirectory: true)
-            .appendingPathComponent("agent-memory.sqlite3")
+        SQLCipherMemoryStore.defaultDatabaseURL()
     }
 
     func schemaVersion() async -> Int {
@@ -157,7 +161,11 @@ actor MemoryStore: AgentMemoryStoreProtocol {
 
     func close() {
         guard let database else { return }
-        sqlite3_close_v2(database)
+        // Checkpoint WAL into the main database so a subsequent process or
+        // reloaded store sees a complete, consistent SQLCipher file.
+        let ck = sqlite3_exec(database, "PRAGMA wal_checkpoint(TRUNCATE)", nil, nil, nil)
+        let rc = sqlite3_close_v2(database)
+        SQLCipherMemoryStore.debugLog(at: databaseURL, "close checkpoint=\(ck) close=\(rc)")
         self.database = nil
     }
 
@@ -514,13 +522,24 @@ actor MemoryStore: AgentMemoryStoreProtocol {
         return database
     }
 
+    private static func fileStartsWithSQLiteMagic(_ url: URL) -> Bool {
+        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe),
+              data.count >= 16 else {
+            return false
+        }
+        let magic = "SQLite format 3".data(using: .utf8)!
+        return data.starts(with: magic)
+    }
+
     private static func configure(_ database: OpaquePointer) throws {
         guard sqlite3_busy_timeout(database, 5_000) == SQLITE_OK else {
             throw sqliteError(database, operation: "set busy timeout")
         }
         try execute(database, sql: "PRAGMA foreign_keys = ON")
+        // SQLCipher encrypts WAL pages, so WAL mode is safe and gives better
+        // concurrency/durability than DELETE for the encrypted MemoryStore.
         _ = try pragmaText(database, name: "journal_mode", value: "WAL")
-        try execute(database, sql: "PRAGMA synchronous = NORMAL")
+        try execute(database, sql: "PRAGMA synchronous = FULL")
     }
 
     private static func migrate(_ database: OpaquePointer) throws {
@@ -528,73 +547,81 @@ actor MemoryStore: AgentMemoryStoreProtocol {
         guard version <= schemaVersionNumber else {
             throw MemoryStoreError.unsupportedSchema(version)
         }
-        guard version == 0 else { return }
 
-        try withTransaction(database) {
-            try execute(
-                database,
-                sql: """
-                    CREATE TABLE memories (
-                        id TEXT PRIMARY KEY NOT NULL,
-                        conversation_id TEXT NOT NULL,
-                        source_message_id TEXT NOT NULL UNIQUE,
-                        body TEXT NOT NULL,
-                        created_at REAL NOT NULL
-                    );
+        // Migrate from the original schema (v1) to the current schema (v2).
+        // The only material change for v2 is the encrypted-at-rest storage;
+        // the table layout is unchanged, so a pragma bump is sufficient.
+        if version == 0 {
+            try withTransaction(database) {
+                try execute(
+                    database,
+                    sql: """
+                        CREATE TABLE memories (
+                            id TEXT PRIMARY KEY NOT NULL,
+                            conversation_id TEXT NOT NULL,
+                            source_message_id TEXT NOT NULL UNIQUE,
+                            body TEXT NOT NULL,
+                            created_at REAL NOT NULL
+                        );
 
-                    CREATE VIRTUAL TABLE memories_fts USING fts5(
-                        body,
-                        content = 'memories',
-                        content_rowid = 'rowid',
-                        tokenize = 'unicode61 remove_diacritics 2'
-                    );
+                        CREATE VIRTUAL TABLE memories_fts USING fts5(
+                            body,
+                            content = 'memories',
+                            content_rowid = 'rowid',
+                            tokenize = 'unicode61 remove_diacritics 2'
+                        );
 
-                    CREATE TRIGGER memories_after_insert
-                    AFTER INSERT ON memories BEGIN
-                        INSERT INTO memories_fts(rowid, body)
-                        VALUES (new.rowid, new.body);
-                    END;
+                        CREATE TRIGGER memories_after_insert
+                        AFTER INSERT ON memories BEGIN
+                            INSERT INTO memories_fts(rowid, body)
+                            VALUES (new.rowid, new.body);
+                        END;
 
-                    CREATE TRIGGER memories_after_delete
-                    AFTER DELETE ON memories BEGIN
-                        INSERT INTO memories_fts(memories_fts, rowid, body)
-                        VALUES ('delete', old.rowid, old.body);
-                    END;
+                        CREATE TRIGGER memories_after_delete
+                        AFTER DELETE ON memories BEGIN
+                            INSERT INTO memories_fts(memories_fts, rowid, body)
+                            VALUES ('delete', old.rowid, old.body);
+                        END;
 
-                    CREATE TRIGGER memories_after_update
-                    AFTER UPDATE ON memories BEGIN
-                        INSERT INTO memories_fts(memories_fts, rowid, body)
-                        VALUES ('delete', old.rowid, old.body);
-                        INSERT INTO memories_fts(rowid, body)
-                        VALUES (new.rowid, new.body);
-                    END;
+                        CREATE TRIGGER memories_after_update
+                        AFTER UPDATE ON memories BEGIN
+                            INSERT INTO memories_fts(memories_fts, rowid, body)
+                                VALUES ('delete', old.rowid, old.body);
+                            INSERT INTO memories_fts(rowid, body)
+                                VALUES (new.rowid, new.body);
+                        END;
 
-                    CREATE TABLE plans (
-                        id TEXT PRIMARY KEY NOT NULL,
-                        conversation_id TEXT NOT NULL UNIQUE,
-                        goal TEXT NOT NULL,
-                        state TEXT NOT NULL,
-                        created_at REAL NOT NULL,
-                        updated_at REAL NOT NULL
-                    );
+                        CREATE TABLE plans (
+                            id TEXT PRIMARY KEY NOT NULL,
+                            conversation_id TEXT NOT NULL UNIQUE,
+                            goal TEXT NOT NULL,
+                            state TEXT NOT NULL,
+                            created_at REAL NOT NULL,
+                            updated_at REAL NOT NULL
+                        );
 
-                    CREATE TABLE plan_items (
-                        id TEXT PRIMARY KEY NOT NULL,
-                        plan_id TEXT NOT NULL,
-                        title TEXT NOT NULL,
-                        detail TEXT,
-                        state TEXT NOT NULL,
-                        item_order INTEGER NOT NULL,
-                        FOREIGN KEY(plan_id) REFERENCES plans(id)
-                            ON DELETE CASCADE
-                    );
+                        CREATE TABLE plan_items (
+                            id TEXT PRIMARY KEY NOT NULL,
+                            plan_id TEXT NOT NULL,
+                            title TEXT NOT NULL,
+                            detail TEXT,
+                            state TEXT NOT NULL,
+                            item_order INTEGER NOT NULL,
+                            FOREIGN KEY(plan_id) REFERENCES plans(id)
+                                ON DELETE CASCADE
+                        );
 
-                    CREATE INDEX plan_items_plan_order
-                    ON plan_items(plan_id, item_order);
+                        CREATE INDEX plan_items_plan_order
+                        ON plan_items(plan_id, item_order);
 
-                    PRAGMA user_version = 1;
-                    """
-            )
+                        PRAGMA user_version = 2;
+                        """
+                )
+            }
+        } else if version == 1 {
+            try withTransaction(database) {
+                try execute(database, sql: "PRAGMA user_version = 2")
+            }
         }
     }
 
@@ -771,23 +798,50 @@ actor MemoryStore: AgentMemoryStoreProtocol {
         _ = statement
     }
 
-    private static func ftsMatchExpression(for query: String) -> String? {
-        let tokens = query
-            .lowercased()
-            .unicodeScalars
-            .map { scalar -> String in
-                CharacterSet.alphanumerics.contains(scalar)
-                    ? String(scalar)
-                    : " "
+    /// Builds a safe FTS5 `MATCH` expression from a free-text user query.
+    ///
+    /// Only lowercase alphanumeric tokens are kept; all FTS5 syntax characters
+    /// (quotes, `NEAR`, `NOT`, `^`, `*`, etc.) are stripped by tokenization.
+    /// Each token is wrapped in double quotes with a trailing `*` for prefix
+    /// matching and joined with `OR`. Token count and length are capped to
+    /// prevent oversized or adversarial expressions.
+    static func ftsMatchExpression(for query: String) -> String? {
+        let maxTokens = 12
+        let maxTokenLength = 40
+        let minTokenLength = 2
+
+        var tokens: [String] = []
+        var current = ""
+
+        for scalar in query.lowercased().unicodeScalars {
+            if CharacterSet.alphanumerics.contains(scalar) {
+                current.append(String(scalar))
+                if current.count > maxTokenLength {
+                    // Truncate oversize token and flush it if long enough.
+                    let trimmed = String(current.prefix(maxTokenLength))
+                    if trimmed.count >= minTokenLength {
+                        tokens.append(trimmed)
+                    }
+                    current = ""
+                    if tokens.count >= maxTokens { break }
+                }
+            } else {
+                if current.count >= minTokenLength, current.count <= maxTokenLength {
+                    tokens.append(current)
+                }
+                current = ""
+                if tokens.count >= maxTokens { break }
             }
-            .joined()
-            .split(whereSeparator: \.isWhitespace)
-            .map(String.init)
-            .filter { !$0.isEmpty }
-            .prefix(12)
+        }
+
+        // Flush final token.
+        if current.count >= minTokenLength, current.count <= maxTokenLength, tokens.count < maxTokens {
+            tokens.append(current)
+        }
+
         guard !tokens.isEmpty else { return nil }
         return tokens
-            .map { "\"\($0.replacingOccurrences(of: "\"", with: "\"\""))\"*" }
+            .map { "\"\($0)\"*" }
             .joined(separator: " OR ")
     }
 

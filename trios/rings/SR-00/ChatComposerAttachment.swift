@@ -12,6 +12,7 @@ struct ChatComposerAttachment: Identifiable, Equatable, Sendable {
     let kind: ChatComposerAttachmentKind
     let byteCount: Int64
     let mediaType: String?
+    let isEncrypted: Bool
 
     init(
         id: UUID = UUID(),
@@ -19,7 +20,8 @@ struct ChatComposerAttachment: Identifiable, Equatable, Sendable {
         displayName: String,
         kind: ChatComposerAttachmentKind,
         byteCount: Int64,
-        mediaType: String?
+        mediaType: String?,
+        isEncrypted: Bool = false
     ) {
         self.id = id
         self.url = url.standardizedFileURL
@@ -27,6 +29,7 @@ struct ChatComposerAttachment: Identifiable, Equatable, Sendable {
         self.kind = kind
         self.byteCount = byteCount
         self.mediaType = mediaType
+        self.isEncrypted = isEncrypted
     }
 }
 
@@ -121,5 +124,15 @@ enum ChatComposerAttachmentPolicy {
             return Character(String(scalar))
         }
         return String(cleanedScalars).replacingOccurrences(of: "  ", with: " ")
+    }
+}
+
+extension ChatComposerAttachment {
+    /// Reads the on-disk bytes and decrypts them if the attachment was persisted
+    /// encrypted. Plaintext legacy files pass through unchanged.
+    func loadDecryptedData() throws -> Data {
+        let sealed = try Data(contentsOf: url)
+        guard isEncrypted else { return sealed }
+        return try TriOSEncryption.attachments.decrypt(sealed)
     }
 }

@@ -2,7 +2,7 @@
 
 ### Enable Accessibility (Required)
 1. System Settings > Privacy & Security > Accessibility
-2. Add /Users/playra/BrowserOS-full/trios/trios_app
+2. Add /Users/playra/BrowserOS/trios/trios_app
 3. Enable checkbox
 4. Restart trios_app
 

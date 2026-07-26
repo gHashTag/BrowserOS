@@ -17,14 +17,35 @@ struct ChatConversation: Identifiable, Codable, Equatable {
     var icon: String
     let updatedAt: Date
     var unreadCount: Int
-    
-    init(id: UUID, title: String, isPinned: Bool = false, icon: String = "message.fill", updatedAt: Date = Date(), unreadCount: Int = 0) {
+    var isReserved: Bool
+
+    init(id: UUID, title: String, isPinned: Bool = false, icon: String = "message.fill", updatedAt: Date = Date(), unreadCount: Int = 0, isReserved: Bool = false) {
         self.id = id
         self.title = title
         self.isPinned = isPinned
         self.icon = icon
         self.updatedAt = updatedAt
         self.unreadCount = unreadCount
+        self.isReserved = isReserved
+    }
+}
+
+extension ChatConversation {
+    /// Stable sentinel for the Trinity Queen direct-line conversation.
+    /// Derived from a deterministic UUIDv5 namespace so it never collide with
+    /// random user-created conversations.
+    static let trinityQueenId = UUID(uuidString: "E621E1F8-C36C-495A-93FC-0C247A3E6E5F")!
+
+    static var trinityQueen: ChatConversation {
+        ChatConversation(
+            id: trinityQueenId,
+            title: "Trinity Queen",
+            isPinned: true,
+            icon: "crown.fill",
+            updatedAt: Date(),
+            unreadCount: 0,
+            isReserved: true
+        )
     }
 }
 

@@ -1,7 +1,7 @@
 # TriOS 15m Weak-Spot Loop — Plan 002
 
 ## Trigger
-`/loop 15m` recurring audit + fix cycle for `/Users/playra/BrowserOS-full/trios`.
+`/loop 15m` recurring audit + fix cycle for `/Users/playra/BrowserOS/trios`.
 
 ## Scope this cycle
 Build the Swift Package Manager infrastructure that the project is missing, and fix the broken SSE E2E script that tests the chat runtime.

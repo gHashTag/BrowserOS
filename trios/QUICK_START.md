@@ -123,7 +123,7 @@ Quick verification (5 min):
 **Full Guide**: `TRIOS_MASTER_INSTALLATION_GUIDE.md`  
 **HTML Version**: `INSTALLATION_GUIDE.html` (interactive)  
 **PDF Version**: `TRIOS_INSTALLATION_GUIDE.pdf`  
-**GitHub**: https://github.com/gHashTag/BrowserOS-full/issues
+**GitHub**: https://github.com/gHashTag/BrowserOS/issues
 
 ---
 

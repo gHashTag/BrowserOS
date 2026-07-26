@@ -7,10 +7,13 @@ import SwiftUI
 final class TriosMCPClient: ObservableObject {
     private let serverURL: URL
     private let session: URLSession
+    private let retrier: NetworkRetrier
 
     @Published var isConnected = false
     @Published var lastError: String?
     @Published var browserState = BrowserState()
+
+    private var localAuthToken: String?
 
     init(serverURL: URL = URL(string: ProjectPaths.mcpBaseURL) ?? URL(fileURLWithPath: "/dev/null")) {
         self.serverURL = serverURL
@@ -18,6 +21,57 @@ final class TriosMCPClient: ObservableObject {
         config.timeoutIntervalForRequest = 30
         config.timeoutIntervalForResource = 300
         self.session = URLSession(configuration: config)
+        self.retrier = NetworkRetrier(policy: NetworkRetryPolicy(
+            maxAttempts: 3,
+            baseDelay: 1,
+            maxDelay: 15,
+            exponentialBackoff: true,
+            retryableURLErrorCodes: NetworkRetryPolicy.default.retryableURLErrorCodes,
+            extraShouldRetry: { error in
+                if case let MCPError.serverError(statusCode, _) = error {
+                    return statusCode >= 500 || statusCode == 429
+                }
+                return false
+            }
+        ))
+    }
+
+    // MARK: - Local Authorization
+
+    /// Fetches the server-issued local authorization token from the trusted
+    /// loopback endpoint. The token is required by high-impact routes such as
+    /// agent/skill creation and shutdown.
+    func fetchLocalAuthToken() async {
+        guard let url = URL(string: "\(serverURL.absoluteString)/auth/local-token") else { return }
+        do {
+            let (data, response) = try await session.data(from: url)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { return }
+            struct TokenResponse: Decodable { let token: String }
+            let decoded = try JSONDecoder().decode(TokenResponse.self, from: data)
+            localAuthToken = decoded.token
+        } catch {
+            NSLog("[TriosMCPClient] Failed to fetch local auth token: \(error.localizedDescription)")
+        }
+    }
+
+    /// Returns a request with the local authorization header attached when a token
+    /// has been obtained. Callers should `fetchLocalAuthToken()` first.
+    func requestWithLocalAuth(
+        url: URL,
+        method: String = "POST",
+        body: Data? = nil,
+        contentType: String? = "application/json"
+    ) -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        if let contentType = contentType {
+            request.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        }
+        if let token = localAuthToken {
+            request.setValue(token, forHTTPHeaderField: "X-TriOS-Local-Auth")
+        }
+        request.httpBody = body
+        return request
     }
 
     // MARK: - Health
@@ -25,10 +79,24 @@ final class TriosMCPClient: ObservableObject {
     func checkHealth() async -> Bool {
         guard let url = URL(string: "\(serverURL.absoluteString)/health") else { return false }
         do {
-            let (_, response) = try await session.data(from: url)
+            let session = self.session
+            let (_, response) = try await retrier.execute(
+                url: url,
+                description: "MCP health check"
+            ) {
+                try await session.data(from: url)
+            }
             let ok = (response as? HTTPURLResponse)?.statusCode == 200
             isConnected = ok
             return ok
+        } catch let urlError as URLError {
+            lastError = MCPError.networkError(urlError).localizedDescription
+            isConnected = false
+            return false
+        } catch let retryError as RetryError {
+            lastError = MCPError.networkError(retryError).localizedDescription
+            isConnected = false
+            return false
         } catch {
             lastError = error.localizedDescription
             isConnected = false
@@ -44,6 +112,7 @@ final class TriosMCPClient: ObservableObject {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
+        let requestId = Int.random(in: 1...999999)
         let body: [String: Any] = [
             "jsonrpc": "2.0",
             "method": "tools/call",
@@ -51,24 +120,51 @@ final class TriosMCPClient: ObservableObject {
                 "name": name,
                 "arguments": arguments
             ],
-            "id": Int.random(in: 1...999999)
+            "id": requestId
         ]
 
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.timeoutInterval = 120
+        let networkRequest = request
 
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 else {
-            throw MCPError.serverError
+        do {
+            let session = self.session
+            let decoded = try await retrier.execute(
+                url: url,
+                description: "MCP tools/call \(name)"
+            ) {
+                let (data, response) = try await session.data(for: networkRequest)
+                guard let httpResponse = response as? HTTPURLResponse else {
+                    throw MCPError.invalidResponse
+                }
+                guard httpResponse.statusCode == 200 else {
+                    let bodySample = String(data: data, encoding: .utf8)
+                    throw MCPError.serverError(statusCode: httpResponse.statusCode, body: bodySample)
+                }
+                return try JSONDecoder().decode(MCPResponse.self, from: data)
+            }
+            guard decoded.id == requestId else {
+                throw MCPError.invalidResponse
+            }
+            if let error = decoded.error {
+                throw MCPError.toolError("MCP error \(error.code): \(error.message)")
+            }
+            if let result = decoded.result, result.isError == true {
+                throw MCPError.toolError("Tool returned an error")
+            }
+            return decoded
+        } catch let urlError as URLError {
+            let mapped = MCPError.networkError(urlError)
+            lastError = mapped.localizedDescription
+            throw mapped
+        } catch let retryError as RetryError {
+            let mapped = MCPError.networkError(retryError)
+            lastError = mapped.localizedDescription
+            throw mapped
+        } catch {
+            lastError = error.localizedDescription
+            throw error
         }
-
-        let decoded = try JSONDecoder().decode(MCPResponse.self, from: data)
-        if let error = decoded.error {
-            throw MCPError.toolError("MCP error \(error.code): \(error.message)")
-        }
-        if let result = decoded.result, result.isError == true {
-            throw MCPError.toolError("Tool returned an error")
-        }
-        return decoded
     }
 
     // MARK: - Filesystem Tools
@@ -99,7 +195,13 @@ final class TriosMCPClient: ObservableObject {
             "description": description
         ]
         let response = try await callTool(name: "filesystem_bash", arguments: args)
-        return response.textContent ?? ""
+        guard let text = response.textContent else {
+            throw MCPError.toolError("Shell command returned no output")
+        }
+        if let error = response.error {
+            throw MCPError.toolError("Shell command failed: \(error.message)")
+        }
+        return text
     }
 
     // MARK: - Browser Tools
@@ -217,20 +319,28 @@ struct MCPErrorDetail: Codable {
 
 enum MCPError: Error, LocalizedError {
     case invalidURL
-    case serverError
+    case serverError(statusCode: Int, body: String?)
     case noData
     case invalidResponse
     case toolNotFound
     case toolError(String)
+    case networkError(Error)
 
     var errorDescription: String? {
         switch self {
         case .invalidURL: return "Invalid server URL"
-        case .serverError: return "HTTP request failed"
+        case .serverError(let statusCode, let body):
+            var parts = ["MCP HTTP request failed with status \(statusCode)"]
+            if let body = body, !body.isEmpty {
+                parts.append("response: \(body)")
+            }
+            return parts.joined(separator: ". ")
         case .noData: return "No data received"
         case .invalidResponse: return "Invalid server response"
         case .toolNotFound: return "MCP tool not found"
         case .toolError(let message): return message
+        case .networkError(let error):
+            return "MCP network error: \(error.localizedDescription)"
         }
     }
 }

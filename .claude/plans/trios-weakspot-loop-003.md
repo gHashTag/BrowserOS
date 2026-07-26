@@ -1,7 +1,7 @@
 # TriOS 15m Weak-Spot Loop — Plan 003
 
 ## Trigger
-`/loop 15m` recurring audit + fix cycle for `/Users/playra/BrowserOS-full/trios`.
+`/loop 15m` recurring audit + fix cycle for `/Users/playra/BrowserOS/trios`.
 
 ## Scope this cycle
 Harden the `clade-meshd` HTTP and UDP transport attack surface — the highest-signal P0/P1 security issues found in the audit.

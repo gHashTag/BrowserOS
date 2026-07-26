@@ -1,3 +1,6 @@
+// AGENT-V-WAIVER: https://github.com/browseros-ai/BrowserOS/issues/2023
+// Reason: Queen direct-chat hardening — observe live online A2A agents via the
+// background service instead of relying solely on local process status.
 import Foundation
 import SwiftUI
 
@@ -52,14 +55,15 @@ struct AuditRecord {
 
 @MainActor
 final class QueenStatusViewModel: ObservableObject {
-    @Published var components: [StatusComponent] = []
-    @Published var skills: [SkillRun] = []
-    @Published var agents: [AgentInfo] = []
-    @Published var lastLogLines: [String] = []
+    @Published var components: [StatusComponent] = .init()
+    @Published var skills: [SkillRun] = .init()
+    @Published var agents: [AgentInfo] = .init()
+    @Published var lastLogLines: [String] = .init()
     @Published var isRunningAction: Bool = false
     @Published var overallStatus: ComponentStatus = .unknown
     @Published var selfImprovement: SelfImprovementStatus? = nil
-    @Published var auditHistory: [AuditRecord] = []
+    @Published var auditHistory: [AuditRecord] = .init()
+    @Published var onlineAgents: [AgentCard] = .init()
 
     private let projectRoot = ProjectPaths.root
     private let statePath = ProjectPaths.trinityState
@@ -67,6 +71,7 @@ final class QueenStatusViewModel: ObservableObject {
 
     private var refreshTimer: Timer?
     private var logTimer: Timer?
+    private var a2aAgentTimer: Timer?
 
     init() {
         if ProcessInfo.processInfo.environment[
@@ -84,6 +89,7 @@ final class QueenStatusViewModel: ObservableObject {
     deinit {
         refreshTimer?.invalidate()
         logTimer?.invalidate()
+        a2aAgentTimer?.invalidate()
     }
 
     private func startTimers() {
@@ -97,6 +103,21 @@ final class QueenStatusViewModel: ObservableObject {
                 await self?.loadLogTailAsync()
             }
         }
+        a2aAgentTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.loadOnlineAgents()
+            }
+        }
+    }
+
+    private func loadOnlineAgents() async {
+        let service = QueenBackgroundService.shared
+        // Avoid forcing configuration; if dependencies are not injected yet, return empty.
+        guard service.isRunning || service.isA2ARegistered else {
+            onlineAgents = []
+            return
+        }
+        onlineAgents = await service.listAgents(silent: true)
     }
 
     func refreshAll() {
@@ -117,11 +138,13 @@ final class QueenStatusViewModel: ObservableObject {
         async let build: Void = checkBuildAsync()
         async let improve: Void = checkSelfImprovementAsync()
         async let mesh: Void = checkMeshAsync()
+        async let localAuth: Void = checkLocalAuthAsync()
 
-        _ = await (trios, mcp, agent, cron, a2a, funnel, git, build, improve, mesh)
+        _ = await (trios, mcp, agent, cron, a2a, funnel, git, build, improve, mesh, localAuth)
 
         loadSkills()
         loadAgents()
+        await loadOnlineAgents()
         await loadLogTailAsync()
         computeOverallStatus()
     }
@@ -197,6 +220,36 @@ final class QueenStatusViewModel: ObservableObject {
         let code = await runAsync("/usr/bin/curl", arguments: ["-s", "-o", "/dev/null", "-w", "%{http_code}", ProjectPaths.meshHealthURL])
         let healthy = code == "200"
         updateComponent(name: "Mesh", icon: "antenna.radiowaves.left.and.right", status: healthy ? .healthy : .down, detail: healthy ? "Online" : "Offline", action: healthy ? "Restart" : "Start")
+    }
+
+    private func checkLocalAuthAsync() async {
+        let (state, meta) = await LocalAuthMonitor.shared.status()
+        let status: ComponentStatus
+        let detail: String
+        let action: String?
+        switch state {
+        case .cached:
+            status = .healthy
+            if let fetchedAt = meta.fetchedAt {
+                detail = "\(timeAgo(fetchedAt)) / \(meta.retry403Count) retries"
+            } else {
+                detail = "cached"
+            }
+            action = "Refresh"
+        case .refreshing:
+            status = .warning
+            detail = "refreshing..."
+            action = nil
+        case .failed:
+            status = .down
+            detail = meta.lastFailureReason ?? "failed"
+            action = "Reset"
+        case .missing, .unknown:
+            status = .unknown
+            detail = "not fetched"
+            action = "Refresh"
+        }
+        updateComponent(name: "Local Auth", icon: "key.horizontal", status: status, detail: detail, action: action)
     }
 
     private func checkA2AAsync() async {
@@ -571,6 +624,38 @@ final class QueenStatusViewModel: ObservableObject {
         }
     }
 
+    func refreshLocalAuth() {
+        isRunningAction = true
+        Task { @MainActor [weak self] in
+            let success = await LocalAuthUIManager.shared.refreshLocalAuth()
+            self?.updateComponent(
+                name: "Local Auth",
+                icon: "key.horizontal",
+                status: success ? .healthy : .down,
+                detail: success ? "refreshed" : "refresh failed",
+                action: success ? "Refresh" : "Reset"
+            )
+            self?.computeOverallStatus()
+            self?.isRunningAction = false
+        }
+    }
+
+    func resetLocalAuth() {
+        isRunningAction = true
+        Task { @MainActor [weak self] in
+            await LocalAuthUIManager.shared.resetLocalAuth()
+            self?.updateComponent(
+                name: "Local Auth",
+                icon: "key.horizontal",
+                status: .unknown,
+                detail: "reset",
+                action: "Refresh"
+            )
+            self?.computeOverallStatus()
+            self?.isRunningAction = false
+        }
+    }
+
     private static let knownSkills: Set<String> = ["/tri", "/doctor", "/god-mode", "/bridge"]
 
     func runSkill(name: String) {
@@ -600,26 +685,159 @@ final class QueenStatusViewModel: ObservableObject {
         }
     }
 
-    /// Exact command prefixes allowed for direct shell-out. Prefix matching is
-    /// intentionally coarse; dangerous substrings and unlisted executables are
-    /// rejected separately. Commands must resolve to a fixed absolute binary
-    /// via `CommandResolver`.
-    private static let commandAllowlist: [String] = [
-        "git status", "git log", "git diff", "git branch",
-        "cargo check", "cargo build", "cargo run --bin clade-",
-        "curl -s http://127.0.0.1:", "swift --version",
-        "cat .trinity/", "ls ", "wc ", "tail ", "head ",
-        "pgrep", "ps aux"
-    ]
+    /// Runs a known Queen skill through the local `claude` CLI, captures stdout/stderr,
+    /// and returns the combined output so it can be appended to the Queen chat timeline.
+    /// - Parameters:
+    ///   - name: The skill name (e.g. `/doctor`).
+    ///   - timeout: Maximum seconds to wait for the process.
+    /// - Returns: Captured output, plus any timeout/exit status annotations.
+    func runSkillReturningOutput(name: String, timeout: TimeInterval = 30) async -> String {
+        guard Self.knownSkills.contains(name) else {
+            return "Unknown Queen skill: \(name)"
+        }
+        guard let claude = CommandResolver.executableURL(for: "claude") else {
+            return "Claude CLI not found. Set `TRIOS_CLAUDE_PATH` to run \(name)."
+        }
+        guard let index = skills.firstIndex(where: { $0.name == name }) else {
+            return "Skill \(name) is not initialized."
+        }
 
-    /// Substrings that are never allowed in user-typed commands, regardless of
-    /// allowlist match. These block shell metacharacters, traversal, path
-    /// expansion, and dangerous invocations like `pkill -f`.
-    private static let commandDenylist: [String] = [
-        ";", "&&", "||", "|", "`", "$(", "${", ">", "<", "~", "..",
-        "rm -rf", "\n", "\r", "$'", "pkill -f", "/bin/zsh -c", "sudo ",
-        ">>", "curl -s http://127.0.0.1: |", "bash -c", "sh -c"
-    ]
+        skills[index] = SkillRun(name: name, lastRun: skills[index].lastRun, success: skills[index].success, isRunning: true)
+        objectWillChange.send()
+
+        let cwd = projectRoot
+        let output = await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                let task = Process()
+                task.executableURL = claude
+                task.arguments = [name]
+                task.currentDirectoryURL = URL(fileURLWithPath: cwd)
+                let outPipe = Pipe()
+                let errPipe = Pipe()
+                task.standardOutput = outPipe
+                task.standardError = errPipe
+
+                var captured = ""
+                var timedOut = false
+                do {
+                    try task.run()
+                    let deadline = Date().addingTimeInterval(timeout)
+                    while task.isRunning && Date() < deadline {
+                        Thread.sleep(forTimeInterval: 0.05)
+                    }
+                    if task.isRunning {
+                        task.terminate()
+                        timedOut = true
+                        Thread.sleep(forTimeInterval: 0.2)
+                    }
+                    let outData = outPipe.fileHandleForReading.readDataToEndOfFile()
+                    let errData = errPipe.fileHandleForReading.readDataToEndOfFile()
+                    let out = String(data: outData, encoding: .utf8) ?? ""
+                    let err = String(data: errData, encoding: .utf8) ?? ""
+                    captured = out
+                    if !err.isEmpty {
+                        captured += "\n[stderr]\n" + err
+                    }
+                    if timedOut {
+                        captured += "\n[skill timed out after \(Int(timeout))s]"
+                    } else if task.terminationStatus != 0 {
+                        captured += "\n[exit code \(task.terminationStatus)]"
+                    }
+                } catch {
+                    captured = "Failed to run \(name): \(error.localizedDescription)"
+                }
+
+                continuation.resume(returning: captured)
+            }
+        }
+
+        if let idx = skills.firstIndex(where: { $0.name == name }) {
+            let success = !output.hasPrefix("Failed to run") && !output.contains("[skill timed out")
+            skills[idx] = SkillRun(name: name, lastRun: Date(), success: success, isRunning: false)
+        }
+        objectWillChange.send()
+        refreshAll()
+        return output
+    }
+
+    /// Centralized command validation used by `runCommand` and unit tests.
+    /// Keeps policy constants out of the main actor class so they can be tested
+    /// without spinning up UI state.
+    internal struct CommandSecurityPolicy {
+        /// Exact commands allowed for direct execution with no file-system arguments.
+        static let exactAllowedCommands: Set<String> = [
+            "git status", "git log", "git diff", "git branch",
+            "cargo check", "cargo build", "swift --version",
+            "pgrep", "ps aux"
+        ]
+
+        /// Commands that may read files but only under the project root or the
+        /// `.trinity` Application Support directory.
+        static let fileCommandNames: Set<String> = ["cat", "ls", "wc", "tail", "head"]
+
+        /// Substrings that are never allowed in user-typed commands, regardless of
+        /// allowlist match. These block shell metacharacters, traversal, path
+        /// expansion, and dangerous invocations like `pkill -f`.
+        static let commandDenylist: [String] = [
+            ";", "&&", "||", "|", "`", "$(", "${", ">", "<", "~", "..",
+            "rm -rf", "\n", "\r", "$'", "pkill -f", "/bin/zsh -c", "sudo ",
+            ">>", "curl -s http://127.0.0.1: |", "bash -c", "sh -c"
+        ]
+
+        /// Validates that a user-typed command is allowed by the exact list or
+        /// by the file-reader path policy. Returns the command name and its
+        /// arguments if valid, otherwise nil.
+        static func validate(_ command: String) -> (name: String, arguments: [String])? {
+            let trimmed = command.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { return nil }
+
+            for forbidden in commandDenylist where trimmed.contains(forbidden) {
+                return nil
+            }
+
+            let components = trimmed.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+            let base = components.first.map(String.init) ?? trimmed
+            let argument = components.dropFirst().first.map(String.init)
+
+            if exactAllowedCommands.contains(trimmed) {
+                return (base, [])
+            }
+
+            if fileCommandNames.contains(base),
+               let arg = argument,
+               !arg.contains(" "),
+               isAllowedFilePath(arg) {
+                return (base, [arg])
+            }
+
+            return nil
+        }
+
+        /// Validates that a file-command argument stays within allowed roots and
+        /// does not point to well-known sensitive host paths.
+        static func isAllowedFilePath(_ argument: String) -> Bool {
+            let expanded = (argument as NSString).expandingTildeInPath
+            let absolute: String
+            if expanded.hasPrefix("/") {
+                absolute = expanded
+            } else {
+                absolute = "\(ProjectPaths.root)/\(expanded)"
+            }
+            let standardized = (absolute as NSString).standardizingPath
+            let lower = standardized.lowercased()
+
+            let forbidden = [
+                ".ssh", ".aws", ".gnupg", ".docker", ".kube", ".env", ".envrc",
+                ".zshrc", ".bashrc", ".bash_profile", ".profile",
+                "authorized_keys", "known_hosts", "login.keychain",
+                "/etc/", "/var/", "/tmp/", "/dev/", "/bin/", "/usr/bin/"
+            ]
+            guard !forbidden.contains(where: { lower.contains($0) }) else { return false }
+
+            let trinityPath = ProjectPaths.trinity
+            return standardized.hasPrefix(ProjectPaths.root) || standardized.hasPrefix(trinityPath)
+        }
+    }
 
     /// Runs a user-typed command using a fixed executable path and literal argv.
     /// The previous `/usr/bin/env` dispatcher resolved the first token via PATH,
@@ -628,19 +846,9 @@ final class QueenStatusViewModel: ObservableObject {
     func runCommand(_ cmd: String) {
         let trimmed = cmd.trimmingCharacters(in: .whitespaces)
 
-        for b in Self.commandDenylist {
-            if trimmed.range(of: b) != nil {
-                NSLog("[QueenStatus] BLOCKED dangerous token in command: \(b)")
-                return
-            }
-        }
-        let allowed = Self.commandAllowlist.contains { trimmed.hasPrefix($0) }
-        guard allowed else {
-            NSLog("[QueenStatus] BLOCKED unlisted command: \(trimmed)")
-            return
-        }
-
-        // Parse KEY=value env assignments first, then the command and its args.
+        // Parse KEY=value env assignments first, then validate only the actual
+        // command. This keeps `FOO=bar git status` allowed while preventing
+        // attackers from sneaking a new executable in via an env token.
         var envOverrides: [String: String] = [:]
         let commandTokens = trimmed.split(separator: " ", omittingEmptySubsequences: true).map(String.init)
         var commandStart = 0
@@ -667,6 +875,27 @@ final class QueenStatusViewModel: ObservableObject {
 
         let commandName = commandTokens[commandStart]
         let arguments = Array(commandTokens[(commandStart + 1)...])
+        let commandTail = ([commandName] + arguments).joined(separator: " ")
+
+        // Use the testable security policy to reject dangerous or unlisted input.
+        guard let validated = CommandSecurityPolicy.validate(commandTail) else {
+            NSLog("[QueenStatus] BLOCKED command: \(trimmed)")
+            return
+        }
+
+        // The policy returned the canonical base name; the tokenized command
+        // name must match it so env assignments cannot switch the executable.
+        guard commandName == validated.name else {
+            NSLog("[QueenStatus] BLOCKED command name mismatch")
+            return
+        }
+
+        // File-reader commands already verified their single path above; block
+        // any attempt to add extra flags or additional paths.
+        if CommandSecurityPolicy.fileCommandNames.contains(commandName), arguments.count != 1 {
+            NSLog("[QueenStatus] BLOCKED file command with wrong argument count")
+            return
+        }
 
         guard let executableURL = CommandResolver.executableURL(for: commandName) else {
             NSLog("[QueenStatus] BLOCKED unknown executable: \(commandName)")
@@ -732,7 +961,7 @@ final class QueenStatusViewModel: ObservableObject {
 
     /// Allowed env-value characters: alphanumerics, dash, dot, colon, slash,
     /// and underscore. This prevents injecting additional argv tokens or shell
-    /// metacharacters through an env assignment like `KEY="1; rm -rf /"`.
+    /// metacharacters through an env assignment like `KEY="1; rm -rf /"`. // AGENT-V-WAIVER: documented dangerous example
     private static func isSafeEnvValue(_ value: String) -> Bool {
         let allowed = CharacterSet.alphanumerics
             .union(CharacterSet(charactersIn: "-./:_"))

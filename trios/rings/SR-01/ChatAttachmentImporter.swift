@@ -120,7 +120,9 @@ struct ChatAttachmentImporter {
         }
     }
 
-    private func persistImageData(_ data: Data, typeIdentifier: String) throws -> ChatComposerAttachment {
+
+    // Internal for testing. Callers should use `load(provider:completion:)`.
+    internal func persistImageData(_ data: Data, typeIdentifier: String) throws -> ChatComposerAttachment {
         guard let baseURL = fileManager.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
@@ -131,25 +133,49 @@ struct ChatAttachmentImporter {
         let directory = baseURL
             .appendingPathComponent("Trinity S3AI", isDirectory: true)
             .appendingPathComponent("Attachments", isDirectory: true)
+
         do {
-            try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+            try fileManager.createDirectory(
+                at: directory,
+                withIntermediateDirectories: true,
+                attributes: [FileAttributeKey.posixPermissions: 0o700]
+            )
+            try Self.excludeFromBackup(directory)
+
             let type = UTType(typeIdentifier)
             let extensionName = type?.preferredFilenameExtension ?? "png"
             let fileName = "image-\(UUID().uuidString.lowercased()).\(extensionName)"
             let destination = directory.appendingPathComponent(fileName)
-            try data.write(to: destination, options: [.atomic])
+
+            // Validate that the destination stays inside the attachment base
+            // directory and does not traverse symlinks into sensitive paths.
+            try SafeFilePath.validateWritePath(
+                candidate: destination,
+                baseURL: directory
+            )
+
+            let encrypted = try TriOSEncryption.attachments.encrypt(data)
+            try encrypted.write(to: destination, options: [.atomic])
             return ChatComposerAttachment(
                 url: destination,
                 displayName: fileName,
                 kind: .image,
-                byteCount: Int64(data.count),
-                mediaType: type?.preferredMIMEType
+                byteCount: Int64(encrypted.count),
+                mediaType: type?.preferredMIMEType,
+                isEncrypted: true
             )
         } catch let error as ChatAttachmentImportError {
             throw error
         } catch {
             throw ChatAttachmentImportError.persistenceFailed
         }
+    }
+
+    private static func excludeFromBackup(_ url: URL) throws {
+        var mutable = url
+        var resourceValues = URLResourceValues()
+        resourceValues.isExcludedFromBackup = true
+        try mutable.setResourceValues(resourceValues)
     }
 
     private func fileURL(from item: NSSecureCoding?) -> URL? {

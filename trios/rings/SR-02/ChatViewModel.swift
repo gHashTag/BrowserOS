@@ -384,6 +384,7 @@ final class ChatViewModel: ObservableObject {
 
     func sendMessage(
         appendUser: Bool = true,
+        imageAttachments: [ChatComposerAttachment] = [],
         onAccepted: (() -> Void)? = nil
     ) async {
         await awaitInitialization()
@@ -477,6 +478,35 @@ final class ChatViewModel: ObservableObject {
         let historyForRequest = Array(messages.dropLast())
         beginUsageEstimate(message: text, history: historyForRequest)
 
+        let requestAttachments: [ChatRequestAttachment]
+        do {
+            requestAttachments = try imageAttachments.compactMap { attachment in
+                guard attachment.kind == .image,
+                      let mediaType = attachment.mediaType,
+                      !mediaType.isEmpty else {
+                    return nil
+                }
+                let decrypted = try attachment.loadDecryptedData()
+                let base64 = decrypted.base64EncodedString()
+                return ChatRequestAttachment(
+                    kind: "image",
+                    mediaType: mediaType,
+                    dataURL: "data:\(mediaType);base64,\(base64)"
+                )
+            }
+        } catch {
+            NSLog("[TriosChat] failed to decrypt image attachments: \(error.localizedDescription)")
+            await failPendingTurn(message: "Failed to read image attachment")
+            guard isGenerationCurrent(generation) else { return }
+            _ = await stateMachine.transition(to: .error("Failed to read image attachment"))
+            guard isGenerationCurrent(generation) else { return }
+            let currentState = await stateMachine.currentState()
+            guard isGenerationCurrent(generation) else { return }
+            state = currentState
+            clearPendingUsage()
+            return
+        }
+
         guard let requestBody = try? ChatRequestBuilder(
             conversationId: conversationId,
             message: text,
@@ -487,7 +517,8 @@ final class ChatViewModel: ObservableObject {
             ),
             previousConversation: historyForRequest,
             browserContext: nil,
-            modelConfiguration: modelStore.runtimeConfiguration
+            modelConfiguration: modelStore.runtimeConfiguration,
+            attachments: requestAttachments
         ).build() else {
             NSLog("[TriosChat] ChatRequestBuilder failed")
             await failPendingTurn(message: "Failed to build request")
@@ -500,7 +531,7 @@ final class ChatViewModel: ObservableObject {
             clearPendingUsage()
             return
         }
-        NSLog("[TriosChat] request body built, size: \(requestBody.count)")
+        NSLog("[TriosChat] request body built, size: \(requestBody.count), attachments: \(requestAttachments.count)")
 
         await parser.reset()
 
@@ -1754,6 +1785,12 @@ extension ChatViewModel: QueenBackgroundServiceDelegate {
     }
 }
 
+struct ChatRequestAttachment: Equatable, Sendable {
+    let kind: String
+    let mediaType: String
+    let dataURL: String
+}
+
 struct ChatRequestBuilder {
     let conversationId: UUID
     let message: String
@@ -1763,6 +1800,7 @@ struct ChatRequestBuilder {
     let previousConversation: [ChatMessage]
     let browserContext: BrowserContext?
     let modelConfiguration: ModelRuntimeConfiguration?
+    let attachments: [ChatRequestAttachment]?
 
     init(
         conversationId: UUID,
@@ -1772,7 +1810,8 @@ struct ChatRequestBuilder {
         userSystemPrompt: String?,
         previousConversation: [ChatMessage],
         browserContext: BrowserContext?,
-        modelConfiguration: ModelRuntimeConfiguration? = nil
+        modelConfiguration: ModelRuntimeConfiguration? = nil,
+        attachments: [ChatRequestAttachment]? = nil
     ) {
         self.conversationId = conversationId
         self.message = message
@@ -1782,6 +1821,7 @@ struct ChatRequestBuilder {
         self.previousConversation = previousConversation
         self.browserContext = browserContext
         self.modelConfiguration = modelConfiguration
+        self.attachments = attachments
     }
 
     private var memoryPrompt: String {
@@ -1850,6 +1890,16 @@ struct ChatRequestBuilder {
             "userWorkingDir": homeDir
         ]
         runtimeConfiguration.apply(to: &body)
+
+        if let attachments = attachments, !attachments.isEmpty {
+            body["attachments"] = attachments.map { attachment in
+                [
+                    "kind": attachment.kind,
+                    "mediaType": attachment.mediaType,
+                    "dataUrl": attachment.dataURL
+                ]
+            }
+        }
 
         // Flatten history for backward-compatible servers.
         // Server-side validators for the legacy previousConversation field only

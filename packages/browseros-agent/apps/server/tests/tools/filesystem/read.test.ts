@@ -108,20 +108,24 @@ describe('filesystem_read', () => {
     expect(result.text).toContain('absolute')
   })
 
-  it('errors when a read would exceed the line limit', async () => {
+  it('clamps oversized reads to the line limit with a continuation hint', async () => {
     const manyLines = Array.from(
       { length: MAX_READ_LINES + 50 },
       (_, i) => `line ${i + 1}`,
     ).join('\n')
     await writeFile(join(tmpDir, 'large.txt'), manyLines)
     const result = await exec({ path: 'large.txt' })
-    expect(result.isError).toBe(true)
-    expect(result.text).toContain(`${MAX_READ_LINES}-line limit`)
+    expect(result.isError).toBeUndefined()
+    expect(result.text).toContain(`1 | line 1`)
+    expect(result.text).toContain(`500 | line 500`)
+    expect(result.text).not.toContain(`501 | line 501`)
+    expect(result.text).toContain('more lines in file')
+    expect(result.text).toContain('offset=501')
   })
 
-  it('errors when the requested limit exceeds the maximum allowed lines', async () => {
+  it('clamps an explicit limit larger than the maximum to the maximum', async () => {
     const manyLines = Array.from(
-      { length: 50 },
+      { length: MAX_READ_LINES + 50 },
       (_, i) => `line ${i + 1}`,
     ).join('\n')
     await writeFile(join(tmpDir, 'limited.txt'), manyLines)
@@ -129,8 +133,10 @@ describe('filesystem_read', () => {
       path: 'limited.txt',
       limit: MAX_READ_LINES + 1,
     })
-    expect(result.isError).toBe(true)
-    expect(result.text).toContain(`at most ${MAX_READ_LINES} lines`)
+    expect(result.isError).toBeUndefined()
+    expect(result.text).toContain(`1 | line 1`)
+    expect(result.text).toContain(`500 | line 500`)
+    expect(result.text).not.toContain(`501 | line 501`)
   })
 
   it('errors when limit is zero', async () => {

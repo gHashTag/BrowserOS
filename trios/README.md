@@ -47,8 +47,8 @@ open trios.app
 
 ### From Source
 ```bash
-git clone https://github.com/gHashTag/BrowserOS-full.git
-cd BrowserOS-full/trios
+git clone https://github.com/gHashTag/BrowserOS.git
+cd BrowserOS/trios
 ./build.sh
 ```
 
@@ -118,9 +118,9 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ## 📬 Contact
 
-- **GitHub**: https://github.com/gHashTag/BrowserOS-full
-- **Issues**: https://github.com/gHashTag/BrowserOS-full/issues
-- **Discussions**: https://github.com/gHashTag/BrowserOS-full/discussions
+- **GitHub**: https://github.com/gHashTag/BrowserOS
+- **Issues**: https://github.com/gHashTag/BrowserOS/issues
+- **Discussions**: https://github.com/gHashTag/BrowserOS/discussions
 
 ---
 

@@ -3,6 +3,7 @@ import SwiftUI
 
 extension Notification.Name {
     static let exportSessionRecoveryPackage = Notification.Name("trios.exportSessionRecoveryPackage")
+    static let importSessionRecoveryPackage = Notification.Name("trios.importSessionRecoveryPackage")
 }
 
 @MainActor
@@ -35,6 +36,15 @@ enum ApplicationMenuInstaller {
         recoveryItem.keyEquivalentModifierMask = [.command, .shift]
         recoveryItem.target = delegate
         menu.addItem(recoveryItem)
+
+        let importItem = NSMenuItem(
+            title: "Import Session Recovery Package...",
+            action: #selector(AppDelegate.importSessionRecoveryPackage(_:)),
+            keyEquivalent: "i"
+        )
+        importItem.keyEquivalentModifierMask = [.command, .shift]
+        importItem.target = delegate
+        menu.addItem(importItem)
         menu.addItem(.separator())
 
         let hideItem = NSMenuItem(

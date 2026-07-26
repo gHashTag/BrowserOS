@@ -1,7 +1,7 @@
 # Portable root resolution specification
 
 ## Scope
-Remove every hardcoded `/Users/playra/BrowserOS-full/trios` fallback from Rust rings and Swift `BR-OUTPUT/ProjectPaths.swift`. Centralize root resolution in `trios-config::project_dir()` and make all rings derive project paths from that single source of truth.
+Remove every hardcoded `/Users/playra/BrowserOS/trios` fallback from Rust rings and Swift `BR-OUTPUT/ProjectPaths.swift`. Centralize root resolution in `trios-config::project_dir()` and make all rings derive project paths from that single source of truth.
 
 ## Invariants
 1. No Rust ring or Swift file may contain the literal `/Users/playra/` path as a fallback.

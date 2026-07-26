@@ -58,7 +58,7 @@ changes already present in the worktree.
 
 ## Verification
 
-Run from `/Users/playra/BrowserOS-full/trios`:
+Run from `/Users/playra/BrowserOS/trios`:
 
 ```text
 swiftc -parse-as-library rings/SR-00/MarkdownBlockParser.swift tests/swift/markdown_block_parser_test.swift -o /private/tmp/markdown_block_parser_test

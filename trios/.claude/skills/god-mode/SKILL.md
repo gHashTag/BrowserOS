@@ -13,8 +13,8 @@ No ad-hoc .sh/.py scripts. Use MCP tools or tri CLI only.
 ## Swarm Status (via MCP tools)
 
 ```
-shell_execute: "ls /Users/playra/BrowserOS-full/trios/.claude/agents/*.md 2>/dev/null | wc -l"
-shell_execute: "ls /Users/playra/BrowserOS-full/trios/.claude/skills/*/SKILL.md 2>/dev/null | wc -l"
+shell_execute: "ls /Users/playra/BrowserOS/trios/.claude/agents/*.md 2>/dev/null | wc -l"
+shell_execute: "ls /Users/playra/BrowserOS/trios/.claude/skills/*/SKILL.md 2>/dev/null | wc -l"
 shell_execute: "curl -s http://127.0.0.1:9105/health"
 ```
 
@@ -23,8 +23,8 @@ shell_execute: "pgrep -la trios_app 2>/dev/null || echo trios_app: not running"
 shell_execute: "curl -s http://127.0.0.1:9105/health | head -c 50 || echo MCP: DOWN"
 
 ## Git Activity
-shell_execute: "cd /Users/playra/BrowserOS-full/trios && git log --oneline -10 --all --graph"
-shell_execute: "cd /Users/playra/BrowserOS-full/trios && git branch -a | head -10"
+shell_execute: "cd /Users/playra/BrowserOS/trios && git log --oneline -10 --all --graph"
+shell_execute: "cd /Users/playra/BrowserOS/trios && git branch -a | head -10"
 
 ## Rule Violations
 - Dirty .swift files without commit -> WARNING

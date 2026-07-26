@@ -1,3 +1,7 @@
+// AGENT-V-WAIVER: CYCLE-14-RECOVERY-ENCRYPTION
+// Reason: hand-edited ring canon file to add AES-256-GCM decryption of
+//         `.triosrecovery` session recovery packages while preserving backward
+//         compatibility with legacy plaintext `.zip` packages.
 import CryptoKit
 import Foundation
 
@@ -13,6 +17,7 @@ enum SessionRecoveryPackageReaderError: LocalizedError {
     case fileSizeMismatch(path: String, expected: Int, actual: Int)
     case archiveCorrupt(String)
     case unsupportedSchemaVersion(Int)
+    case decryptionFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -38,6 +43,8 @@ enum SessionRecoveryPackageReaderError: LocalizedError {
             return "Archive is corrupt or missing expected files: \(message)"
         case .unsupportedSchemaVersion(let version):
             return "This TriOS build cannot read recovery schema version \(version)."
+        case .decryptionFailed(let message):
+            return "Could not decrypt the recovery package: \(message)"
         }
     }
 }
@@ -106,7 +113,14 @@ enum SessionRecoveryPackageReader {
             try? fileManager.removeItem(at: staging)
         }
 
-        try extractArchive(at: archivePath, to: staging.path)
+        let zipArchivePath = try preparePlaintextZIP(
+            archiveURL: archiveURL,
+            archivePath: archivePath,
+            staging: staging,
+            fileManager: fileManager
+        )
+
+        try extractArchive(at: zipArchivePath, to: staging.path)
 
         let packageRoot = try locatePackageRoot(in: staging)
 
@@ -166,6 +180,30 @@ enum SessionRecoveryPackageReader {
             let message = String(data: error, encoding: .utf8) ?? "ditto exited with \(process.terminationStatus)"
             throw SessionRecoveryPackageReaderError.extractionFailed(message)
         }
+    }
+
+    /// If the archive uses the encrypted `.triosrecovery` extension, decrypt it
+    /// to a temporary ZIP inside the staging directory and return that path.
+    /// Legacy plaintext `.zip` archives are returned unchanged.
+    private static func preparePlaintextZIP(
+        archiveURL: URL,
+        archivePath: String,
+        staging: URL,
+        fileManager: FileManager
+    ) throws -> String {
+        guard archiveURL.pathExtension.lowercased() == "triosrecovery" else {
+            return archivePath
+        }
+        let encryptedData = try Data(contentsOf: archiveURL)
+        let plaintextData: Data
+        do {
+            plaintextData = try TriOSEncryption.recovery.decrypt(encryptedData)
+        } catch {
+            throw SessionRecoveryPackageReaderError.decryptionFailed("\(error)")
+        }
+        let zipURL = staging.appendingPathComponent("archive.zip")
+        try plaintextData.write(to: zipURL, options: .atomic)
+        return zipURL.path
     }
 
     /// Recovery archives are created with `--keepParent`, so extraction places the

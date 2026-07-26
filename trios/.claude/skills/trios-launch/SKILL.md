@@ -2,7 +2,7 @@
 
 ### Launch trios_app
 1. Open terminal
-2. Run: `cd /Users/playra/BrowserOS-full/trios && ./trios_app`
+2. Run: `cd /Users/playra/BrowserOS/trios && ./trios_app`
 3. Click black triangle icon in status bar
 
 ### Or via .app bundle

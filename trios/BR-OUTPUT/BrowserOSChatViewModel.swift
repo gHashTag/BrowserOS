@@ -5,11 +5,11 @@ import Combine
 @MainActor
 class BrowserOSChatViewModel: ObservableObject {
     
-    @Published var messages: [BrowserOSChatMessage] = []
+    @Published var messages: [BrowserOSChatMessage] = .init()
     @Published var isStreaming: Bool = false
     @Published var isBrowserOSConnected: Bool = false
     @Published var queenStatus: QueenStatus = .idle
-    @Published var toolCalls: [ToolCallRecord] = []
+    @Published var toolCalls: [ToolCallRecord] = .init()
     
     @Published var currentPageId: Int? = nil
     @Published var inputText: String = ""

@@ -8,6 +8,7 @@ import {
   listSkills,
   updateSkill,
 } from '../../skills/service'
+import { requireLocalAuth } from '../utils/require-local-auth'
 
 const CreateSkillSchema = z.object({
   name: z.string().min(1).max(100),
@@ -22,7 +23,11 @@ const UpdateSkillSchema = z.object({
   enabled: z.boolean().optional(),
 })
 
-export function createSkillsRoutes() {
+interface SkillsRouteDeps {
+  localAuth?: import('../utils/require-local-auth').LocalAuthValidator
+}
+
+export function createSkillsRoutes(deps: SkillsRouteDeps = {}) {
   return new Hono()
     .get('/', async (c) => {
       const skills = await listSkills()
@@ -33,15 +38,20 @@ export function createSkillsRoutes() {
       if (!skill) return c.json({ error: 'Skill not found' }, 404)
       return c.json({ skill })
     })
-    .post('/', zValidator('json', CreateSkillSchema), async (c) => {
-      try {
-        const skill = await createSkill(c.req.valid('json'))
-        return c.json({ skill }, 201)
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Failed to create'
-        return c.json({ error: msg }, 400)
-      }
-    })
+    .post(
+      '/',
+      requireLocalAuth(deps.localAuth),
+      zValidator('json', CreateSkillSchema),
+      async (c) => {
+        try {
+          const skill = await createSkill(c.req.valid('json'))
+          return c.json({ skill }, 201)
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Failed to create'
+          return c.json({ error: msg }, 400)
+        }
+      },
+    )
     .put('/:id', zValidator('json', UpdateSkillSchema), async (c) => {
       try {
         const skill = await updateSkill(c.req.param('id'), c.req.valid('json'))

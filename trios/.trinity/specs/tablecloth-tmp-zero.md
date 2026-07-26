@@ -56,7 +56,7 @@ Eliminate the last `/tmp` usage in workspace Rust ring source, replace remaining
 
 - `cargo test --workspace --all-features` passes (all rings).
 - `cargo clippy --workspace --all-targets --all-features` is clean.
-- `cargo run --bin tmp-zero-gate -- /Users/playra/BrowserOS-full/trios` reports OK.
+- `cargo run --bin tmp-zero-gate -- /Users/playra/BrowserOS/trios` reports OK.
 - `./build.sh` passes.
 - ASCII scan of changed files is clean.
 

@@ -29,6 +29,15 @@ function getBaseUrl(): string {
   return `http://127.0.0.1:${config.serverPort}`
 }
 
+async function getLocalAuthToken(): Promise<string> {
+  const response = await fetch(`${getBaseUrl()}/auth/local-token`)
+  if (!response.ok) {
+    throw new Error(`Failed to fetch local auth token: ${response.status}`)
+  }
+  const json = (await response.json()) as { token: string }
+  return json.token
+}
+
 describe('HTTP Server Integration Tests', () => {
   beforeAll(async () => {
     config = await ensureBrowserOS()
@@ -159,11 +168,13 @@ describe('HTTP Server Integration Tests', () => {
       'streams a mocked chat response for BrowserOS provider requests in test mode',
       async () => {
         const conversationId = crypto.randomUUID()
+        const localAuthToken = await getLocalAuthToken()
 
         const response = await fetch(`${getBaseUrl()}/chat`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'X-TriOS-Local-Auth': localAuthToken,
           },
           body: JSON.stringify({
             conversationId,
@@ -224,10 +235,12 @@ describe('HTTP Server Integration Tests', () => {
     )
 
     it('returns 400 for invalid chat request', async () => {
+      const localAuthToken = await getLocalAuthToken()
       const response = await fetch(`${getBaseUrl()}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-TriOS-Local-Auth': localAuthToken,
         },
         body: JSON.stringify({
           message: 'Hello',
@@ -238,6 +251,27 @@ describe('HTTP Server Integration Tests', () => {
         response.status,
         400,
         'Should return 400 for invalid request',
+      )
+    })
+
+    it('returns 403 for chat request without local auth token', async () => {
+      const response = await fetch(`${getBaseUrl()}/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          conversationId: crypto.randomUUID(),
+          message: 'Hello',
+          provider: 'browseros',
+          model: 'claude-sonnet-4-20250514',
+        }),
+      })
+
+      assert.strictEqual(
+        response.status,
+        403,
+        'Should return 403 without local auth token',
       )
     })
 

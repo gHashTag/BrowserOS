@@ -14,7 +14,7 @@
 
 ### P0 -- Critical shell-safety and portability
 - [x] Replace `TerminalTabView.runCommand` shell invocation with tokenized `Process()` and strict command allowlist.
-- [x] Remove hardcoded `/Users/playra/BrowserOS-full/trios` from `clade-build`.
+- [x] Remove hardcoded `/Users/playra/BrowserOS/trios` from `clade-build`.
 - [x] Remove hardcoded paths and non-ASCII markers from `build.sh`.
 - [x] Move clade-build logs from `/tmp` to `.trinity/logs/`.
 

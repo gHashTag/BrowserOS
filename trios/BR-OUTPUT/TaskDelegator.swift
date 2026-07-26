@@ -10,8 +10,8 @@ import Foundation
 /// TaskDelegator - Routes tasks to appropriate sub-chats
 class TaskDelegator {
     
-    @Published var activeDelegations: [ChatDelegation] = []
-    @Published var completedDelegations: [ChatDelegation] = []
+    @Published var activeDelegations: [ChatDelegation] = .init()
+    @Published var completedDelegations: [ChatDelegation] = .init()
     
     private let chatRegistry: ChatRegistry
     

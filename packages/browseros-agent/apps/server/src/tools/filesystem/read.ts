@@ -39,28 +39,17 @@ function getSelectedLines(
     throw new Error('filesystem_read limit must be greater than 0.')
   }
 
-  if (limit !== undefined && limit > MAX_READ_LINES) {
-    throw new Error(
-      `filesystem_read accepts at most ${MAX_READ_LINES} lines per call. Retry with a smaller limit.`,
-    )
-  }
+  // Clamp to the maximum so agents do not fail entire turns when a skill or
+  // user request touches a large file. The continuation hint in the result
+  // tells the caller how to paginate.
+  const effectiveLimit =
+    limit === undefined ? MAX_READ_LINES : Math.min(limit, MAX_READ_LINES)
 
   const remaining = allLines.slice(startIdx)
-  if (limit !== undefined && limit < remaining.length) {
-    return remaining.slice(0, limit)
+  if (effectiveLimit < remaining.length) {
+    return remaining.slice(0, effectiveLimit)
   }
   return remaining
-}
-
-function validateSelectedRange(selected: string[], startIdx: number): void {
-  const startLineNum = startIdx + 1
-  const endLineNum = startIdx + selected.length
-
-  if (selected.length > MAX_READ_LINES) {
-    throw new Error(
-      `Requested lines ${startLineNum}-${endLineNum} exceed the ${MAX_READ_LINES}-line limit for filesystem_read. Retry with offset and limit=${MAX_READ_LINES} or smaller.`,
-    )
-  }
 }
 
 function formatReadResult(args: {
@@ -80,7 +69,7 @@ function formatReadResult(args: {
     .join('\n')
 
   let text = numbered
-  if (args.limit && endLineNum < args.totalLines) {
+  if (endLineNum < args.totalLines) {
     text += `\n\n(${args.totalLines - endLineNum} more lines in file. Use offset=${endLineNum + 1} to continue reading.)`
   } else if (args.startIdx > 0) {
     text += `\n\n(Showing lines ${startLineNum}-${endLineNum} of ${args.totalLines})`
@@ -135,7 +124,6 @@ export function createReadTool(cwd: string) {
         }
 
         const selected = getSelectedLines(allLines, startIdx, params.limit)
-        validateSelectedRange(selected, startIdx)
         return formatReadResult({
           selected,
           startIdx,

@@ -203,8 +203,8 @@ struct GitHubDashboardView: View {
 
 @MainActor
 class GitHubDashboardViewModel: ObservableObject {
-    @Published var repos: [GitHubRepo] = []
-    @Published var issues: [GitHubIssue] = []
+    @Published var repos: [GitHubRepo] = .init()
+    @Published var issues: [GitHubIssue] = .init()
     @Published var issueState = "all"
     @Published var isLoading = false
     @Published var errorMessage: String?

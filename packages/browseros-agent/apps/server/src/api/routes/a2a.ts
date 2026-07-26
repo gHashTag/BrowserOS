@@ -19,9 +19,11 @@ import type {
   A2aTask,
 } from '../services/a2a/a2a-registry-service'
 import type { Env } from '../types'
+import { requireLocalAuth } from '../utils/require-local-auth'
 
 interface A2aRouteDeps {
   service: A2aRegistryService
+  localAuth?: import('../utils/require-local-auth').LocalAuthValidator
 }
 
 function normalizePayloadForSwift(msg: A2aMessage): A2aMessage {
@@ -42,8 +44,30 @@ function normalizePayloadForSwift(msg: A2aMessage): A2aMessage {
 export function createA2aRoutes(deps: A2aRouteDeps) {
   const { service } = deps
 
+  // Per-agent ring buffer for SSE replay (Last-Event-ID support).
+  const messageBuffers = new Map<string, { id: number; payload: string }[]>()
+  const nextEventIds = new Map<string, number>()
+
+  function bufferMessage(agentId: string, normalized: A2aMessage): number {
+    let buffer = messageBuffers.get(agentId)
+    if (!buffer) {
+      buffer = []
+      messageBuffers.set(agentId, buffer)
+    }
+
+    const id = nextEventIds.get(agentId) ?? 0
+    nextEventIds.set(agentId, id + 1)
+    buffer.push({ id, payload: JSON.stringify(normalized) })
+
+    if (buffer.length > 100) {
+      buffer.shift()
+    }
+
+    return id
+  }
+
   return new Hono<Env>()
-    .post('/register', async (c) => {
+    .post('/register', requireLocalAuth(deps.localAuth), async (c) => {
       const body = (await c.req.json()) as A2aAgentCard
       if (!body?.id || !body?.name) {
         return c.json({ error: 'Missing agent id or name' }, 400)
@@ -87,7 +111,7 @@ export function createA2aRoutes(deps: A2aRouteDeps) {
       })
     })
 
-    .post('/message', async (c) => {
+    .post('/message', requireLocalAuth(deps.localAuth), async (c) => {
       const body = (await c.req.json()) as A2aMessage
       if (!body?.id || !body?.sender || !body?.type) {
         return c.json({ error: 'Invalid message' }, 400)
@@ -127,21 +151,53 @@ export function createA2aRoutes(deps: A2aRouteDeps) {
       c.header('Cache-Control', 'no-cache')
       c.header('Connection', 'keep-alive')
 
+      const lastEventIdHeader = c.req.header('Last-Event-ID')
+      const lastEventId =
+        lastEventIdHeader !== undefined ? parseInt(lastEventIdHeader, 10) : null
+
       return stream(c, async (s) => {
         const encoder = new TextEncoder()
+        const pendingDuringReplay: A2aMessage[] = []
+        let replaying = true
+
+        const sendMessage = (msg: A2aMessage) => {
+          const normalized = normalizePayloadForSwift(msg)
+          const id = bufferMessage(agentId, normalized)
+          s.write(
+            encoder.encode(
+              `id: ${id}\ndata: ${JSON.stringify(normalized)}\n\n`,
+            ),
+          ).catch(() => {})
+        }
 
         service.subscribe(agentId, (msg) => {
-          // Swift A2AMessage.payload is Data and decodes from a base64 string.
-          // Normalize task/object payloads so the SSE message is self-describing.
-          const normalized = normalizePayloadForSwift(msg)
-          s.write(
-            encoder.encode(`data: ${JSON.stringify(normalized)}\n\n`),
-          ).catch(() => {})
+          if (replaying) {
+            pendingDuringReplay.push(msg)
+            return
+          }
+          sendMessage(msg)
         })
+
+        // Replay buffered events newer than the client's Last-Event-ID.
+        if (lastEventId !== null && !Number.isNaN(lastEventId)) {
+          const buffer = messageBuffers.get(agentId) ?? []
+          for (const entry of buffer) {
+            if (entry.id > lastEventId) {
+              s.write(
+                encoder.encode(`id: ${entry.id}\ndata: ${entry.payload}\n\n`),
+              ).catch(() => {})
+            }
+          }
+        }
+
+        replaying = false
+        for (const msg of pendingDuringReplay) {
+          sendMessage(msg)
+        }
 
         try {
           while (true) {
-            await s.write(encoder.encode(':keep-alive\n\n'))
+            await s.write(encoder.encode(':heartbeat\n\n'))
             await new Promise((r) => setTimeout(r, 30_000))
           }
         } catch {

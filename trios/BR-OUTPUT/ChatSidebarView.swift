@@ -103,7 +103,14 @@ struct ChatSidebarView: View {
     }
     
     private var pinnedConversations: [ChatConversation] {
-        viewModel.conversations.filter { $0.isPinned }
+        viewModel.conversations
+            .filter { $0.isPinned }
+            .sorted {
+                // Trinity Queen is always first among pinned conversations.
+                if $0.isReserved { return true }
+                if $1.isReserved { return false }
+                return $0.updatedAt > $1.updatedAt
+            }
     }
     
     private var filteredConversations: [ChatConversation] {
@@ -118,17 +125,21 @@ struct ChatSidebarView: View {
     private func conversationRow(_ conversation: ChatConversation) -> some View {
         let messages = viewModel.sidebarMessages(for: conversation.id)
         let last = messages.last
-        
+
         return HStack(spacing: 10) {
-            // Pin indicator
-            if conversation.isPinned {
+            // Pin indicator (or crown for reserved Trinity Queen)
+            if conversation.isReserved {
+                Image(systemName: "crown.fill")
+                    .font(.system(size: 8))
+                    .foregroundColor(.orange)
+            } else if conversation.isPinned {
                 Image(systemName: "pin.fill")
                     .font(.system(size: 8))
                     .foregroundColor(.orange)
             }
-            
+
             avatar(for: conversation)
-            
+
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
                     if editingConversationId == conversation.id {
@@ -198,17 +209,19 @@ struct ChatSidebarView: View {
         Button(action: { startEditing(conversation) }) {
             Label("Rename", systemImage: "pencil")
         }
-        
-        Button(action: { togglePin(conversation) }) {
-            Label(conversation.isPinned ? "Unpin" : "Pin", systemImage: conversation.isPinned ? "pin.slash" : "pin")
-        }
-        
-        Divider()
-        
-        Button(role: .destructive) {
-            viewModel.deleteConversation(conversation.id)
-        } label: {
-            Label("Delete", systemImage: "trash")
+
+        if !conversation.isReserved {
+            Button(action: { togglePin(conversation) }) {
+                Label(conversation.isPinned ? "Unpin" : "Pin", systemImage: conversation.isPinned ? "pin.slash" : "pin")
+            }
+
+            Divider()
+
+            Button(role: .destructive) {
+                viewModel.deleteConversation(conversation.id)
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
         }
     }
     
@@ -249,11 +262,15 @@ struct ChatSidebarView: View {
     private func avatar(for conversation: ChatConversation) -> some View {
         ZStack {
             Circle()
-                .fill(Color.grokElevated.opacity(0.5))
+                .fill(
+                    conversation.isReserved
+                        ? Color.orange.opacity(0.2)
+                        : Color.grokElevated.opacity(0.5)
+                )
                 .frame(width: 36, height: 36)
             Image(systemName: conversation.icon)
                 .font(.system(size: 14))
-                .foregroundColor(.grokAccent)
+                .foregroundColor(conversation.isReserved ? .orange : .grokAccent)
         }
     }
     
@@ -310,5 +327,10 @@ extension ChatViewModel {
     func sidebarMessages(for conversationId: UUID) -> [ChatMessage] {
         // Sidebar-specific message preview; return empty until wired to persister.
         return []
+    }
+
+    /// Human-readable role label for the Trinity Queen reserved conversation.
+    var reservedQueenLabel: String {
+        "Trinity Queen"
     }
 }

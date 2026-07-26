@@ -55,8 +55,8 @@ class NLHotkeyCreatorViewModel: ObservableObject {
     @Published var parsedIntent: NLIntent?
     @Published var suggestedShortcut: String?
     @Published var confidenceScore: Double = 0.0
-    @Published var alternativeShortcuts: [String] = []
-    @Published var requestHistory: [NLHotkeyRequest] = []
+    @Published var alternativeShortcuts: [String] = .init()
+    @Published var requestHistory: [NLHotkeyRequest] = .init()
     @Published var showConfirmation = false
     
     private let tagger = NLTagger(tagSchemes: [.lexicalClass])

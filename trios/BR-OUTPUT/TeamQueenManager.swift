@@ -12,8 +12,8 @@ import SwiftUI
 @MainActor
 class TeamQueenManager: ObservableObject {
     
-    @Published var teamMembers: [TeamMember] = []
-    @Published var activeSessions: [TeamSession] = []
+    @Published var teamMembers: [TeamMember] = .init()
+    @Published var activeSessions: [TeamSession] = .init()
     @Published var currentRole: QueenRole = .member
     
     private let permissionsManager: QueenPermissions

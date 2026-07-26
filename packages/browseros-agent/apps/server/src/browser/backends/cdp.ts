@@ -4,7 +4,6 @@ import {
   type RawSend,
 } from '@browseros/cdp-protocol/create-api'
 import type { ProtocolApi } from '@browseros/cdp-protocol/protocol-api'
-import { EXIT_CODES } from '@browseros/shared/constants/exit-codes'
 import { CDP_LIMITS } from '@browseros/shared/constants/limits'
 import { TIMEOUTS } from '@browseros/shared/constants/timeouts'
 import { logger } from '../../lib/logger'
@@ -340,10 +339,10 @@ class CdpBackend implements ICdpBackend {
     }
 
     if (this.exitOnReconnectFailure) {
-      logger.error(
-        `CDP reconnection failed after ${maxRetries} attempts, exiting for restart`,
+      logger.warn(
+        `CDP reconnection failed after ${maxRetries} attempts; staying alive for diagnostics`,
       )
-      process.exit(EXIT_CODES.GENERAL_ERROR)
+      return false
     }
     logger.error(`CDP reconnection failed after ${maxRetries} attempts`)
     return false

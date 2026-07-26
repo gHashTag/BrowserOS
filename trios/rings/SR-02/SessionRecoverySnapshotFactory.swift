@@ -15,6 +15,57 @@ enum SessionRecoverySnapshotFactory {
         )
     }
 
+    static func chatMessage(from recovery: SessionRecoveryConversation) -> [ChatMessage] {
+        recovery.messages.map(chatMessage)
+    }
+
+    static func chatMessage(from recovery: SessionRecoveryMessage) -> ChatMessage {
+        ChatMessage(
+            id: recovery.id,
+            role: chatRole(from: recovery.role),
+            content: recovery.content,
+            segments: recovery.segments.compactMap(chatSegment),
+            timestamp: recovery.timestamp,
+            isStreaming: recovery.isStreaming,
+            toolCalls: recovery.toolCalls.map(chatToolCall),
+            task: recovery.task.map(chatTask)
+        )
+    }
+
+    static func chatRole(from role: String) -> ChatRole {
+        switch role.lowercased() {
+        case "user": return .user
+        case "assistant": return .assistant
+        case "system": return .system
+        case "tool": return .tool
+        default: return .system
+        }
+    }
+
+    static func chatToolCall(from recovery: SessionRecoveryToolCall) -> ToolCall {
+        ToolCall(
+            id: recovery.id,
+            name: recovery.name,
+            arguments: recovery.arguments,
+            output: recovery.output,
+            isComplete: recovery.isComplete
+        )
+    }
+
+    static func chatTask(from recovery: SessionRecoveryTask) -> AgentTask {
+        AgentTask(
+            id: recovery.id,
+            title: recovery.title,
+            description: recovery.description,
+            state: AgentTaskState(rawValue: recovery.state) ?? .pending,
+            priority: AgentTaskPriority(rawValue: recovery.priority) ?? .medium,
+            assignee: AgentId(recovery.assignee),
+            createdAt: recovery.createdAt,
+            updatedAt: recovery.updatedAt,
+            result: nil
+        )
+    }
+
     static func message(_ message: ChatMessage) -> SessionRecoveryMessage {
         SessionRecoveryMessage(
             id: message.id,
@@ -34,6 +85,31 @@ enum SessionRecoverySnapshotFactory {
             },
             task: message.task.map(task)
         )
+    }
+
+    static func chatSegment(from recovery: SessionRecoverySegment) -> MessageSegment? {
+        switch recovery.kind {
+        case "text":
+            return .text(recovery.text ?? "")
+        case "reasoning":
+            return .reasoning(recovery.text ?? "")
+        case "toolCall":
+            return .toolCall(id: recovery.toolCallID ?? "")
+        case "toolInput":
+            return .toolInput(
+                name: recovery.name ?? "",
+                arguments: recovery.arguments ?? ""
+            )
+        case "toolOutput":
+            return .toolOutput(
+                name: recovery.name ?? "",
+                result: recovery.result ?? ""
+            )
+        case "error":
+            return .error(recovery.text ?? "")
+        default:
+            return nil
+        }
     }
 
     private static func segment(_ segment: MessageSegment) -> SessionRecoverySegment {

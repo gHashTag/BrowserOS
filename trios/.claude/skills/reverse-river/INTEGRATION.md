@@ -13,7 +13,7 @@ Tab("BrowserOS", systemImage: "globe") {
 
 ### Step 2: Build
 ```bash
-cd /Users/playra/BrowserOS-full/trios
+cd /Users/playra/BrowserOS/trios
 swiftc -O -o trios_app \
   -framework SwiftUI -framework AppKit -framework WebKit -framework Combine \
   main.swift rings/SR-00/*.swift rings/SR-01/*.swift rings/SR-02/*.swift rings/SR-03/*.swift BR-OUTPUT/*.swift

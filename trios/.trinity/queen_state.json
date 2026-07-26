@@ -66,14 +66,14 @@
     {
       "tool": "shell_execute",
       "args": {
-        "command": "cd /Users/playra/BrowserOS-full/trios && git add -A && git commit -m chore: auto-commit || true"
+        "command": "cd /Users/playra/BrowserOS/trios && git add -A && git commit -m chore: auto-commit || true"
       },
       "reason": "11 dirty"
     },
     {
       "tool": "fs_write",
       "args": {
-        "path": "/Users/playra/BrowserOS-full/trios/.trinity/queen_alive.txt",
+        "path": "/Users/playra/BrowserOS/trios/.trinity/queen_alive.txt",
         "content": "Queen alive at 2026-05-25 00:07:21.860694"
       },
       "reason": "Alive marker"
@@ -83,14 +83,14 @@
     {
       "tool": "shell_execute",
       "args": {
-        "command": "cd /Users/playra/BrowserOS-full/trios && git add -A && git commit -m chore: auto-commit || true"
+        "command": "cd /Users/playra/BrowserOS/trios && git add -A && git commit -m chore: auto-commit || true"
       },
       "reason": "11 dirty"
     },
     {
       "tool": "fs_write",
       "args": {
-        "path": "/Users/playra/BrowserOS-full/trios/.trinity/queen_alive.txt",
+        "path": "/Users/playra/BrowserOS/trios/.trinity/queen_alive.txt",
         "content": "Queen alive at 2026-05-25 00:07:21.860694"
       },
       "reason": "Alive marker"

@@ -35,7 +35,7 @@ Recurring T27 Wave-loop macro invocation (8th wave in this session).
 - BUILD_PASS: `./build.sh`
 - TEST_PASS: `cargo test --workspace --all-features`
 - CLIPPY_PASS: `cargo clippy --workspace --all-targets --all-features`
-- TMP_ZERO_PASS: `cargo run --bin tmp-zero-gate -- /Users/playra/BrowserOS-full/trios`
+- TMP_ZERO_PASS: `cargo run --bin tmp-zero-gate -- /Users/playra/BrowserOS/trios`
 - ASCII_PASS: manual scan of changed files
 
 ## Seal status

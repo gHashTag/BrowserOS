@@ -295,7 +295,7 @@ From `/Users/playra/t27`:
 
 #### 8.4 Memory files
 - Save project memory: `trios-t27-automation-roadmap.md`.
-- Update `~/.claude/projects/-Users-playra-BrowserOS-full/memory/MEMORY.md` index.
+- Update `~/.claude/projects/-Users-playra-BrowserOS/memory/MEMORY.md` index.
 
 ---
 

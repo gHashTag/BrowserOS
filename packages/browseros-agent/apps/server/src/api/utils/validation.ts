@@ -21,3 +21,11 @@ export const SessionIdParamSchema = z.object({
 export const ConversationIdParamSchema = z.object({
   conversationId: z.string().uuid(),
 })
+
+export const MessageIdParamSchema = z.object({
+  messageId: z.string().uuid(),
+})
+
+export const FeedbackBodySchema = z.object({
+  isPositive: z.boolean(),
+})

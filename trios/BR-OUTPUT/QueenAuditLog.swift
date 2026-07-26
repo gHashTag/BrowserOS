@@ -10,7 +10,7 @@ import Foundation
 /// QueenAuditLog - Records all Queen actions for compliance
 class QueenAuditLog: ObservableObject {
     
-    @Published var logs: [AuditLogEntry] = []
+    @Published var logs: [AuditLogEntry] = .init()
     @Published var isRecording: Bool = true
     
     private let maxEntries: Int = 1000

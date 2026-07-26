@@ -107,13 +107,13 @@ struct CommunityMacro: Codable, Identifiable {
 
 @MainActor
 class MarketplaceViewModel: ObservableObject {
-    @Published var macros: [CommunityMacro] = []
-    @Published var featuredMacros: [CommunityMacro] = []
+    @Published var macros: [CommunityMacro] = .init()
+    @Published var featuredMacros: [CommunityMacro] = .init()
     @Published var isLoading = false
     @Published var searchQuery = ""
     @Published var selectedCategory = "All"
     @Published var categories: [String] = ["All", "Productivity", "Development", "Research", "Communication", "Design"]
-    @Published var downloadedMacros: [CommunityMacro] = []
+    @Published var downloadedMacros: [CommunityMacro] = .init()
     @Published var userRating: [UUID: Double] = [:]
     
     private let apiBaseURL = "https://huggingface.co/api/trios-macros"

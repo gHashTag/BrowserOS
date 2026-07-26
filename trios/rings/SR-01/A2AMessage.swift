@@ -38,10 +38,27 @@ struct AgentTask: Codable, Identifiable, Sendable, Equatable {
     let assignee: AgentId
     let createdAt: String
     var updatedAt: String
+    var result: AgentTaskResult?
+}
+
+struct AgentTaskResult: Codable, Sendable, Equatable {
+    let summary: String
+    let output: String?
 }
 
 enum AgentTaskState: String, Codable, Sendable {
     case pending, assigned, inProgress, completed, failed, cancelled
+
+    var displayName: String {
+        switch self {
+        case .pending: return "pending"
+        case .assigned: return "assigned"
+        case .inProgress: return "in progress"
+        case .completed: return "completed"
+        case .failed: return "failed"
+        case .cancelled: return "cancelled"
+        }
+    }
 }
 
 enum AgentTaskPriority: Int, Codable, Sendable, Comparable {

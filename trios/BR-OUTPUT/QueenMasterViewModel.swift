@@ -14,7 +14,7 @@ class QueenMasterViewModel: ObservableObject {
     
     @Published var isActive: Bool = false
     @Published var currentPlan: QueenTaskPlan?
-    @Published var activeChats: [ChatInfo] = []
+    @Published var activeChats: [ChatInfo] = .init()
     @Published var globalContext: QueenContext = QueenContext(
         activeChats: 0,
         recentActions: [],

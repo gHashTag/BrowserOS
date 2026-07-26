@@ -42,7 +42,7 @@ actor GitHubAPIClient {
     private func request(_ endpoint: String) throws -> URLRequest {
         let token = try token()
         guard let url = URL(string: baseURL + endpoint) else {
-            throw URLError(.badURL)
+            throw GitHubAPIError.badURL(endpoint: endpoint)
         }
         var request = URLRequest(url: url)
         request.setValue("application/vnd.github.v3+json", forHTTPHeaderField: "Accept")
@@ -69,7 +69,7 @@ actor GitHubAPIClient {
 
     private func encodedRepoPath(repo: String, suffix: String) throws -> String {
         guard let encoded = repo.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
-            throw URLError(.badURL)
+            throw GitHubAPIError.badURL(endpoint: "/repos/gHashTag/\(repo)\(suffix)")
         }
         return "/repos/gHashTag/\(encoded)\(suffix)"
     }
@@ -114,9 +114,13 @@ actor GitHubAPIClient {
     }
 
     func fetchTriNetSnapshot() async throws -> TriNetRepositorySnapshot {
-        let repositoryRequest = try request("/repos/gHashTag/tri-net")
-        let pullRequest = try request("/repos/gHashTag/tri-net/pulls/89")
-        let commitsRequest = try request("/repos/gHashTag/tri-net/commits?sha=main&per_page=12")
+        let repositoryEndpoint = "/repos/gHashTag/tri-net"
+        let pullEndpoint = "/repos/gHashTag/tri-net/pulls/89"
+        let commitsEndpoint = "/repos/gHashTag/tri-net/commits?sha=main&per_page=12"
+
+        let repositoryRequest = try request(repositoryEndpoint)
+        let pullRequest = try request(pullEndpoint)
+        let commitsRequest = try request(commitsEndpoint)
 
         async let repositoryResponse = URLSession.shared.data(for: repositoryRequest)
         async let pullResponse = URLSession.shared.data(for: pullRequest)
@@ -127,23 +131,22 @@ actor GitHubAPIClient {
             pullResponse,
             commitsResponse
         )
-        try validate(repositoryPair.1)
-        try validate(pullPair.1)
-        try validate(commitsPair.1)
+        try validate(repositoryPair.1, endpoint: repositoryEndpoint)
+        try validate(pullPair.1, endpoint: pullEndpoint)
+        try validate(commitsPair.1, endpoint: commitsEndpoint)
 
         let decoder = JSONDecoder()
         let repository = try decoder.decode(TriNetRepositoryPayload.self, from: repositoryPair.0)
         let pull = try decoder.decode(TriNetPullRequestPayload.self, from: pullPair.0)
         let commits = try decoder.decode([TriNetCommitPayload].self, from: commitsPair.0)
         guard let mainCommit = commits.first else {
-            throw URLError(.cannotParseResponse)
+            throw GitHubAPIError.cannotParseResponse(endpoint: commitsEndpoint)
         }
 
-        let compareRequest = try request(
-            "/repos/gHashTag/tri-net/compare/\(pull.merge_commit_sha)...\(repository.default_branch)"
-        )
+        let compareEndpoint = "/repos/gHashTag/tri-net/compare/\(pull.merge_commit_sha)...\(repository.default_branch)"
+        let compareRequest = try request(compareEndpoint)
         let (compareData, compareResponse) = try await URLSession.shared.data(for: compareRequest)
-        try validate(compareResponse)
+        try validate(compareResponse, endpoint: compareEndpoint)
         let comparison = try decoder.decode(TriNetComparePayload.self, from: compareData)
 
         return TriNetRepositorySnapshot(
@@ -173,21 +176,30 @@ actor GitHubAPIClient {
         )
     }
 
-    private func validate(_ response: URLResponse) throws {
+    private func validate(_ response: URLResponse, endpoint: String) throws {
         guard let http = response as? HTTPURLResponse,
               (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
+            throw GitHubAPIError.badServerResponse(endpoint: endpoint)
         }
     }
 }
 
 enum GitHubAPIError: Error, LocalizedError {
     case missingToken
+    case badURL(endpoint: String)
+    case badServerResponse(endpoint: String)
+    case cannotParseResponse(endpoint: String)
 
     var errorDescription: String? {
         switch self {
         case .missingToken:
             return "GitHub token not found in Keychain. Store it with GitHubAPIClient.storeToken(_:) or in Keychain item 'ai.browseros.trios' / 'github-token'."
+        case .badURL(let endpoint):
+            return "Invalid GitHub URL for endpoint \(endpoint)"
+        case .badServerResponse(let endpoint):
+            return "Unexpected GitHub response for endpoint \(endpoint)"
+        case .cannotParseResponse(let endpoint):
+            return "Could not parse GitHub response for endpoint \(endpoint)"
         }
     }
 }

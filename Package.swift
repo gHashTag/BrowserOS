@@ -8,8 +8,14 @@ let package = Package(
         .library(name: "TriOSKit", targets: ["TriOSKit"]),
     ],
     targets: [
+        .systemLibrary(
+            name: "CSQLCipher",
+            pkgConfig: "sqlcipher",
+            providers: [.brew(["sqlcipher"])]
+        ),
         .target(
             name: "TriOSKit",
+            dependencies: ["CSQLCipher"],
             path: "trios",
             sources: [
                 "rings/SR-00",
@@ -27,8 +33,9 @@ let package = Package(
                 "rings/SR-01/ChatEvents.swift",
             ],
             linkerSettings: [
-                .linkedLibrary("sqlite3"),
+                .linkedLibrary("sqlcipher"),
                 .linkedFramework("Security"),
+                .linkedFramework("CryptoKit"),
             ]
         ),
         .testTarget(

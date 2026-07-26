@@ -16,10 +16,10 @@ allowed-tools: fs_read, fs_write, fs_edit, shell_execute, fs_list
 ### Step 1: DIAGNOSE (via MCP tools)
 
 ```
-shell_execute: "cd /Users/playra/BrowserOS-full/trios && git status --porcelain | wc -l"
+shell_execute: "cd /Users/playra/BrowserOS/trios && git status --porcelain | wc -l"
 shell_execute: "curl -s http://127.0.0.1:9105/health"
-shell_execute: "cd /Users/playra/BrowserOS-full/trios && cargo run --bin clade-build 2>&1 | tail -5"
-fs_read: "/Users/playra/BrowserOS-full/trios/.trinity/doctor_prev.dat"
+shell_execute: "cd /Users/playra/BrowserOS/trios && cargo run --bin clade-build 2>&1 | tail -5"
+fs_read: "/Users/playra/BrowserOS/trios/.trinity/doctor_prev.dat"
 ```
 
 ### Step 2: HEAL
@@ -27,14 +27,14 @@ fs_read: "/Users/playra/BrowserOS-full/trios/.trinity/doctor_prev.dat"
 **2a. Build broken?** -> fs_read errors, fs_edit fix, shell_execute rebuild with `cargo run --bin clade-build`
 **2b. Dirty .swift?** -> Commit via shell_execute:
 ```
-shell_execute: "cd /Users/playra/BrowserOS-full/trios && git add -A && git commit -m ring-NNN-fix: desc (Closes #N)"
+shell_execute: "cd /Users/playra/BrowserOS/trios && git add -A && git commit -m ring-NNN-fix: desc (Closes #N)"
 ```
 **2c. Dirty state?** -> Batch commit via shell_execute
 **2d. Build script stale?** -> fs_edit rings/RUST-01/clade-build/src/main.rs
 
 ### Step 3: VERIFY
 ```
-shell_execute: "cd /Users/playra/BrowserOS-full/trios && git status --porcelain && git log --oneline -3"
+shell_execute: "cd /Users/playra/BrowserOS/trios && git status --porcelain && git log --oneline -3"
 ```
 
 ### Step 4: SNAPSHOT
@@ -62,8 +62,8 @@ Check Sovereign + Canary health, snapshot status, safety budget.
 ```
 shell_execute: "curl -s http://127.0.0.1:9105/health"
 shell_execute: "curl -s http://127.0.0.1:9205/health"
-fs_read: "/Users/playra/BrowserOS-full/trios/.trinity/state/safety_budget.json"
-shell_execute: "ls -lt /Users/playra/BrowserOS-full/trios/.trinity/snapshots/ | head -5"
+fs_read: "/Users/playra/BrowserOS/trios/.trinity/state/safety_budget.json"
+shell_execute: "ls -lt /Users/playra/BrowserOS/trios/.trinity/snapshots/ | head -5"
 ```
 
 ## Trinity Compliance

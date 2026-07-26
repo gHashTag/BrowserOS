@@ -122,9 +122,29 @@ else
     done < <(find "$PROJECT_DIR/BR-OUTPUT" -name "*.swift" | sort)
 fi
 
-echo "Compiling ${#SWIFT_FILES[@]} Swift files..."
+# SQLCipher is required for encrypted agent-memory I/O. Use pkg-config when
+# available; fall back to the standard Homebrew Cellar layout on Apple Silicon.
+SQLCIPHER_INCLUDE="${SQLCIPHER_INCLUDE:-$(pkg-config --variable=includedir sqlcipher 2>/dev/null)}"
+SQLCIPHER_LIB="${SQLCIPHER_LIB:-$(pkg-config --variable=libdir sqlcipher 2>/dev/null)}"
+CSQLCIPHER_MODULEMAP_DIR="$PROJECT_DIR/../Sources/CSQLCipher"
+SQLCIPHER_DYLIB_NAME="libsqlcipher.dylib"
 
-# Build with swiftc
+if [ -z "$SQLCIPHER_INCLUDE" ] || [ -z "$SQLCIPHER_LIB" ] || [ ! -d "$SQLCIPHER_INCLUDE" ]; then
+    echo "[FAIL] SQLCipher headers not found. Install with: brew install sqlcipher"
+    exit 1
+fi
+
+SQLCIPHER_DYLIB=$(find "$SQLCIPHER_LIB" -maxdepth 1 -type f -name 'libsqlcipher.*.dylib' | head -n1)
+if [ -z "$SQLCIPHER_DYLIB" ] || [ ! -f "$SQLCIPHER_DYLIB" ]; then
+    echo "[FAIL] SQLCipher dynamic library not found in $SQLCIPHER_LIB"
+    exit 1
+fi
+
+echo "Compiling ${#SWIFT_FILES[@]} Swift files with SQLCipher..."
+
+# Build with swiftc. CSQLCipher.modulemap re-exports the SQLCipher sqlite3 API
+# and links -lsqlcipher; we still pass the include/L paths for the C headers
+# and runtime library resolution.
 swiftc -j 1 \
     -disable-batch-mode \
     "$SWIFT_OPTIMIZATION" \
@@ -134,7 +154,10 @@ swiftc -j 1 \
     -framework WebKit \
     -framework Combine \
     -framework Security \
-    -lsqlite3 \
+    -I "$CSQLCIPHER_MODULEMAP_DIR" \
+    -I "$SQLCIPHER_INCLUDE" \
+    -L "$SQLCIPHER_LIB" \
+    -lsqlcipher \
     -I "$QUEEN_BIN_DIR/Modules" \
     -L "$QUEEN_BIN_DIR" \
     -lQueenUILib \
@@ -152,6 +175,11 @@ if [ ${PIPESTATUS[0]} -eq 0 ]; then
     STANDALONE_FRAMEWORKS="$PROJECT_DIR/Frameworks"
     mkdir -p "$STANDALONE_FRAMEWORKS"
     cp "$QUEEN_DYLIB" "$STANDALONE_FRAMEWORKS/libQueenUILib.dylib"
+    rm -f "$STANDALONE_FRAMEWORKS/$SQLCIPHER_DYLIB_NAME"
+    cp -L "$SQLCIPHER_DYLIB" "$STANDALONE_FRAMEWORKS/$SQLCIPHER_DYLIB_NAME"
+    chmod +w "$STANDALONE_FRAMEWORKS/$SQLCIPHER_DYLIB_NAME"
+    install_name_tool -id "@rpath/$SQLCIPHER_DYLIB_NAME" \
+        "$STANDALONE_FRAMEWORKS/$SQLCIPHER_DYLIB_NAME"
 
     # Ensure .app bundle structure and a correct Info.plist. A missing or
     # stale plist disables macOS single-instance activation by bundle ID and is a
@@ -188,6 +216,13 @@ EOF
     # Copy to .app bundle
     cp "$OUTPUT" "$MACOS_DIR/trios"
     cp "$QUEEN_DYLIB" "$FRAMEWORKS_DIR/libQueenUILib.dylib"
+    rm -f "$FRAMEWORKS_DIR/$SQLCIPHER_DYLIB_NAME"
+    cp -L "$SQLCIPHER_DYLIB" "$FRAMEWORKS_DIR/$SQLCIPHER_DYLIB_NAME"
+    chmod +w "$FRAMEWORKS_DIR/$SQLCIPHER_DYLIB_NAME"
+    install_name_tool -id "@rpath/$SQLCIPHER_DYLIB_NAME" \
+        "$FRAMEWORKS_DIR/$SQLCIPHER_DYLIB_NAME"
+    install_name_tool -change "/opt/homebrew/opt/sqlcipher/lib/$SQLCIPHER_DYLIB_NAME" \
+        "@rpath/$SQLCIPHER_DYLIB_NAME" "$MACOS_DIR/trios"
     # Replacing any file inside a signed bundle invalidates its signature and
     # macOS terminates the app in dyld before main() runs. Apply an ad-hoc
     # development signature after the bundle is complete.

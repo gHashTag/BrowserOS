@@ -7,7 +7,7 @@ import SwiftUI
 /// HTTP bridge and local cache for the trios mesh chat UI.
 @MainActor
 final class MeshChatViewModel: ObservableObject {
-    @Published var conversations: [MeshConversation] = []
+    @Published var conversations: [MeshConversation] = .init()
     @Published var messages: [UInt32: [MeshChatMessage]] = [:]
     @Published var selectedPeer: UInt32?
     @Published var composerText: String = ""

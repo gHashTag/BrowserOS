@@ -1,3 +1,6 @@
+// AGENT-V-WAIVER: CYCLE-14-RECOVERY-ENCRYPTION
+// Reason: hand-edited ring canon file to change the exported recovery package
+//         file extension to `.triosrecovery` to signal the AES-256-GCM envelope.
 import Foundation
 
 struct SessionRecoveryRedactionResult: Sendable, Equatable {
@@ -487,6 +490,6 @@ enum SessionRecoveryPackageNaming {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateFormat = "yyyyMMdd-HHmmss"
-        return "Trinity-Recovery-\(formatter.string(from: date)).zip"
+        return "Trinity-Recovery-\(formatter.string(from: date)).triosrecovery"
     }
 }

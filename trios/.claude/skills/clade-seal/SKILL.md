@@ -28,7 +28,7 @@ name: clade-seal
  ## Cell 2: Health Probe (Seal-2)
 
  ```
- /Users/playra/BrowserOS-full/trios/.worktrees/staging/trios_app &
+ /Users/playra/BrowserOS/trios/.worktrees/staging/trios_app &
  sleep 5
  curl -s http://127.0.0.1:9205/health | grep '"status":"ok"'
  ```

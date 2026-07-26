@@ -27,10 +27,10 @@ struct VoiceCommand: Codable, Identifiable {
 class VoiceCommandHandlerViewModel: ObservableObject {
     @Published var isListening = false
     @Published var currentTranscript = ""
-    @Published var recognizedCommands: [VoiceCommand] = []
+    @Published var recognizedCommands: [VoiceCommand] = .init()
     @Published var authorizationStatus: SFSpeechRecognizerAuthorizationStatus = .notDetermined
     @Published var lastError: String?
-    @Published var supportedLanguages: [String] = []
+    @Published var supportedLanguages: [String] = .init()
     
     private var speechRecognizer: SFSpeechRecognizer?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?

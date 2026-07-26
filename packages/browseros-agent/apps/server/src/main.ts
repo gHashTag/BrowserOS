@@ -13,7 +13,6 @@ import path from 'node:path'
 import { EXIT_CODES } from '@browseros/shared/constants/exit-codes'
 import { createHttpServer } from './api/server'
 import {
-  configureOpenClawService,
   configureVmRuntime,
   getOpenClawService,
 } from './api/services/openclaw/openclaw-service'
@@ -34,7 +33,8 @@ import {
   removeServerConfigSync,
   writeServerConfig,
 } from './lib/browseros-dir'
-import { initializeDb } from './lib/db'
+import { closeDb, initializeDb } from './lib/db'
+import { runPgMigrations } from './lib/db/pg-migrate'
 import { identity } from './lib/identity'
 import { logger } from './lib/logger'
 import { metrics } from './lib/metrics'
@@ -52,6 +52,13 @@ import { VERSION } from './version'
 
 export class Application {
   private config: ServerConfig
+  private httpServer: Awaited<ReturnType<typeof createHttpServer>> | null = null
+  private a2aService:
+    | Awaited<ReturnType<typeof createHttpServer>>['a2aService']
+    | null = null
+  private taskQueueService:
+    | Awaited<ReturnType<typeof createHttpServer>>['taskQueueService']
+    | null = null
 
   constructor(config: ServerConfig) {
     this.config = config
@@ -65,10 +72,16 @@ export class Application {
     })
 
     const resourcesDir = path.resolve(this.config.resourcesDir)
-    configureVmRuntime({ resourcesDir })
     configureClaudeRuntime()
     configureCodexRuntime()
-    await this.initCoreServices()
+    try {
+      await this.initCoreServices()
+    } catch (err) {
+      logger.warn('Core service initialization failed, continuing', {
+        error: err instanceof Error ? err.message : String(err),
+      })
+    }
+    await runPgMigrations()
 
     if (!this.config.cdpPort) {
       logger.error('CDP port is required (--cdp-port)')
@@ -89,7 +102,7 @@ export class Application {
     logger.info(`Loaded ${registry.names().length} unified tools`)
 
     try {
-      await createHttpServer({
+      this.httpServer = await createHttpServer({
         port: this.config.serverPort,
         host: '127.0.0.1',
         version: VERSION,
@@ -103,8 +116,13 @@ export class Application {
 
         onShutdown: () => this.stop('shutdown-endpoint'),
       })
+      this.a2aService = this.httpServer.a2aService
+      this.taskQueueService = this.httpServer.taskQueueService
     } catch (error) {
-      this.handleStartupError('HTTP server', this.config.serverPort, error)
+      logger.warn('HTTP server failed to start, continuing without it', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+      this.httpServer = null
     }
 
     try {
@@ -122,13 +140,6 @@ export class Application {
       })
     }
 
-    logger.info(
-      `HTTP server listening on http://127.0.0.1:${this.config.serverPort}`,
-    )
-    logger.info(
-      `Health endpoint: http://127.0.0.1:${this.config.serverPort}/health`,
-    )
-
     this.logStartupSummary()
     startSkillSync()
 
@@ -138,10 +149,15 @@ export class Application {
     // handles async throws inside auto-start. Wrap both in try/catch so the
     // process keeps running even when OpenClaw can't initialize at all.
     try {
-      const openClawService = configureOpenClawService({
-        browserosServerPort: this.config.serverPort,
-        resourcesDir,
-      })
+      const openClawService = configureVmRuntime({ resourcesDir })
+      // The service may expose configure synchronously (production) or be a
+      // minimal stub in tests. Guard the call so tests don't trigger a spurious
+      // best-effort warning when the method is absent.
+      if (typeof openClawService.configure === 'function') {
+        openClawService.configure({
+          browserosServerPort: this.config.serverPort,
+        })
+      }
       void openClawService.prewarm().catch((err) =>
         logger.warn('OpenClaw prewarm failed', {
           error: err instanceof Error ? err.message : String(err),
@@ -163,7 +179,7 @@ export class Application {
     metrics.log('http_server.started', { version: VERSION })
   }
 
-  stop(reason?: string): void {
+  async stop(reason?: string): Promise<void> {
     logger.info('Shutting down server...', { reason })
     stopSkillSync()
     getOpenClawService()
@@ -173,6 +189,26 @@ export class Application {
       ?.executeAction({ type: 'stop' })
       .catch(() => {})
     removeServerConfigSync()
+
+    // Best-effort cleanup of DB and background services with a hard ceiling so
+    // Chromium-triggered shutdowns do not hang waiting for a stuck connection.
+    const drain = async () => {
+      try {
+        closeDb()
+      } catch {
+        // Ignore close errors during shutdown.
+      }
+      if (this.a2aService) {
+        this.a2aService.destroy()
+      }
+      if (this.taskQueueService) {
+        await this.taskQueueService.shutdown()
+      }
+    }
+
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => setTimeout(resolve, ms))
+    await Promise.race([drain(), sleep(2000)])
 
     // Immediate exit without graceful shutdown. Chromium may kill us on update/restart,
     // and we need to free the port instantly so the HTTP port doesn't keep switching.
@@ -282,7 +318,14 @@ export class Application {
   private logStartupSummary(): void {
     logger.info('')
     logger.info('Services running:')
-    logger.info(`  HTTP Server: http://127.0.0.1:${this.config.serverPort}`)
+    if (this.httpServer?.server) {
+      logger.info(`  HTTP Server: http://127.0.0.1:${this.config.serverPort}`)
+      logger.info(
+        `  Health endpoint: http://127.0.0.1:${this.config.serverPort}/health`,
+      )
+    } else {
+      logger.info('  HTTP server unavailable')
+    }
     logger.info('')
   }
 }

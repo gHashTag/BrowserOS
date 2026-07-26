@@ -620,7 +620,8 @@ struct ChatPanelView: View {
 
     @ViewBuilder
     private func attachmentPreview(_ attachment: ChatComposerAttachment) -> some View {
-        if attachment.kind == .image, let image = NSImage(contentsOf: attachment.url) {
+        let imageData = try? attachment.loadDecryptedData()
+        if attachment.kind == .image, let data = imageData, let image = NSImage(data: data) {
             Image(nsImage: image)
                 .resizable()
                 .scaledToFill()
@@ -994,10 +995,17 @@ struct ChatPanelView: View {
 
         guard !text.isEmpty || !attachments.isEmpty else { return }
 
-        let outboundMessage = ChatComposerAttachmentPolicy.outboundMessage(
-            userText: text,
-            attachments: attachments
-        )
+        let imageAttachments = attachments.filter { $0.kind == .image }
+        let fileAttachments = attachments.filter { $0.kind == .file }
+
+        // Image attachments travel as encrypted structured payloads; only file
+        // attachments still need a local-path block for server-side reading.
+        let displayText = fileAttachments.isEmpty
+            ? text
+            : ChatComposerAttachmentPolicy.outboundMessage(
+                userText: text,
+                attachments: fileAttachments
+            )
 
         if attachments.isEmpty && text.hasPrefix("/") {
             NSLog("[ChatPanel] routing slash command to Queen")
@@ -1009,11 +1017,14 @@ struct ChatPanelView: View {
             browserOSVM.sendMessage(text)
         } else {
             NSLog("[ChatPanel] routing to ChatViewModel.sendMessage")
-            viewModel.inputText = outboundMessage
+            viewModel.inputText = displayText
             Task {
-                await viewModel.sendMessage(onAccepted: {
-                    clearComposerAttachments()
-                })
+                await viewModel.sendMessage(
+                    imageAttachments: imageAttachments,
+                    onAccepted: {
+                        clearComposerAttachments()
+                    }
+                )
             }
         }
     }

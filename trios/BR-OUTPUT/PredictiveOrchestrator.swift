@@ -10,7 +10,7 @@ import Foundation
 /// PredictiveOrchestrator - Predicts user's next actions
 class PredictiveOrchestrator {
     
-    @Published var predictions: [QueenAction] = []
+    @Published var predictions: [QueenAction] = .init()
     @Published var isPredicting: Bool = false
     
     private let historyAnalyzer: HistoryAnalyzer

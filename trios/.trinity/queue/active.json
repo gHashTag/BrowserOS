@@ -1,1 +1,11 @@
-[]
+[
+  {
+    "claim_id": "C1937525-1E3D-4A88-939C-5CFF074E7443",
+    "owner": "claude",
+    "priority": "P1",
+    "started_at": "2026-07-26T03:10:31Z",
+    "status": "active",
+    "task_id": "TRIOS-PORTABLE-LAND-001",
+    "title": "Preserve agent work, document portable installation, and land verified TriOS work"
+  }
+]

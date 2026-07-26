@@ -25,12 +25,8 @@ enum KeychainSecretsError: LocalizedError {
 /// generic-password class. macOS Keychain is the canonical trust boundary for
 /// TriOS credentials; env-variable fallbacks are intentionally absent.
 enum KeychainSecrets {
-    /// Read an existing generic-password secret.
-    /// - Parameters:
-    ///   - service: Typically a reverse-DNS identifier, e.g. "ai.browseros.trios".
-    ///   - account: A short identifier for the credential, e.g. "github-token".
-    /// - Returns: The UTF-8 string value stored in the keychain.
-    static func read(service: String, account: String) throws -> String {
+    /// Read an existing generic-password secret as raw bytes.
+    static func readData(service: String, account: String) throws -> Data {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -47,20 +43,24 @@ enum KeychainSecrets {
             }
             throw KeychainSecretsError.osStatus(status)
         }
-        guard let data = result as? Data,
-              let value = String(data: data, encoding: .utf8) else {
+        guard let data = result as? Data else {
+            throw KeychainSecretsError.invalidItemType
+        }
+        return data
+    }
+
+    /// Read an existing generic-password secret as a UTF-8 string.
+    static func read(service: String, account: String) throws -> String {
+        let data = try readData(service: service, account: account)
+        guard let value = String(data: data, encoding: .utf8) else {
             throw KeychainSecretsError.invalidItemType
         }
         return value
     }
 
-    /// Store or overwrite a generic-password secret. Replaces an existing item
+    /// Store or overwrite raw generic-password data. Replaces an existing item
     /// with the same (service, account) pair.
-    static func write(service: String, account: String, secret: String) throws {
-        guard let data = secret.data(using: .utf8) else {
-            throw KeychainSecretsError.invalidItemType
-        }
-
+    static func writeData(service: String, account: String, data: Data) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -89,6 +89,14 @@ enum KeychainSecrets {
         } else if status != errSecSuccess {
             throw KeychainSecretsError.osStatus(status)
         }
+    }
+
+    /// Store or overwrite a generic-password secret string.
+    static func write(service: String, account: String, secret: String) throws {
+        guard let data = secret.data(using: .utf8) else {
+            throw KeychainSecretsError.invalidItemType
+        }
+        try writeData(service: service, account: account, data: data)
     }
 
     /// Delete a stored secret.

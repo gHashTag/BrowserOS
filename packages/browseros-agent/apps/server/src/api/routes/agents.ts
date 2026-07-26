@@ -48,6 +48,7 @@ import {
 } from '../services/agents/agent-harness-service'
 import type { FilePreview } from '../services/openclaw/file-preview'
 import type { Env } from '../types'
+import { requireLocalAuth } from '../utils/require-local-auth'
 import { resolveBrowserContextPageIds } from '../utils/resolve-browser-context-page-ids'
 
 type AgentRouteService = {
@@ -119,6 +120,7 @@ type AgentRouteService = {
 
 type AgentRouteDeps = {
   service?: AgentRouteService
+  localAuth?: import('../utils/require-local-auth').LocalAuthValidator
   browser?: Pick<Browser, 'resolveTabIds'>
   browserosServerPort?: number
   /**
@@ -191,7 +193,7 @@ export function createAgentRoutes(deps: AgentRouteDeps = {}) {
         ])
         return c.json({ agents, gateway })
       })
-      .post('/', async (c) => {
+      .post('/', requireLocalAuth(deps.localAuth), async (c) => {
         const parsed = await parseCreateAgentBody(c)
         if ('error' in parsed) return c.json({ error: parsed.error }, 400)
         try {

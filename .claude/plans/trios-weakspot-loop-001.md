@@ -1,7 +1,7 @@
 # TriOS 15m Weak-Spot Loop — Plan 001
 
 ## Trigger
-`/loop 15m` recurring audit + fix cycle for `/Users/playra/BrowserOS-full/trios`.
+`/loop 15m` recurring audit + fix cycle for `/Users/playra/BrowserOS/trios`.
 
 ## Scope this cycle
 Fix the highest-signal, lowest-risk blockers discovered by the audit:

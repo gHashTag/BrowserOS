@@ -18,10 +18,10 @@ Check arguments for mode:
 Quick trios health check via MCP tools:
 
 ```
-shell_execute: command = "test -f /Users/playra/BrowserOS-full/trios/trios_app && echo OK || echo MISSING"
+shell_execute: command = "test -f /Users/playra/BrowserOS/trios/trios_app && echo OK || echo MISSING"
 shell_execute: command = "curl -s http://127.0.0.1:9105/health"
-shell_execute: command = "ls /Users/playra/BrowserOS-full/trios/.claude/agents/*.md 2>/dev/null | wc -l"
-shell_execute: command = "ls /Users/playra/BrowserOS-full/trios/.claude/skills/*/SKILL.md 2>/dev/null | wc -l"
+shell_execute: command = "ls /Users/playra/BrowserOS/trios/.claude/agents/*.md 2>/dev/null | wc -l"
+shell_execute: command = "ls /Users/playra/BrowserOS/trios/.claude/skills/*/SKILL.md 2>/dev/null | wc -l"
 ```
 
 ## Full Mode

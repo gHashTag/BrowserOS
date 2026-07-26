@@ -10,9 +10,9 @@ import SwiftUI
 @MainActor
 final class MeshStatusViewModel: ObservableObject {
     @Published var nodeId: UInt32 = 0
-    @Published var neighbors: [MeshNeighbor] = []
-    @Published var routes: [MeshRoute] = []
-    @Published var sessions: [MeshSession] = []
+    @Published var neighbors: [MeshNeighbor] = .init()
+    @Published var routes: [MeshRoute] = .init()
+    @Published var sessions: [MeshSession] = .init()
     @Published var metrics: MeshMetrics = MeshMetrics(link_loss_to_reroute_ms: nil, node_off_to_reroute_ms: nil)
     @Published var isReachable = false
     @Published var lastError: String?

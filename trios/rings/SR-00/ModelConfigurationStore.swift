@@ -189,11 +189,42 @@ final class ModelConfigurationStore: ObservableObject {
         modelsTabRequest += 1
     }
 
-    /// Returns the API key stored in macOS Keychain, or an empty string.
-    /// Cloud-provider API keys are NEVER read from environment variables;
-    /// this prevents accidental exfiltration via `.env` files or shell history.
+    /// Returns the API key from macOS Keychain, the `~/.trios/config.json` file,
+    /// or an environment fallback, in that order. The file fallback lets the app
+    /// work across rebuilds without prompting for keychain access.
     private var resolvedAPIKey: String {
-        ModelCredentialStore.read(for: selectedProvider) ?? ""
+        if let keychain = ModelCredentialStore.read(for: selectedProvider), !keychain.isEmpty {
+            return keychain
+        }
+        if let fileKey = Self.apiKeyFromConfigFile(for: selectedProvider), !fileKey.isEmpty {
+            return fileKey
+        }
+        let envVar = Self.providerEnvironmentKey(selectedProvider)
+        return environment[envVar] ?? ""
+    }
+
+    private static func triosConfigURL() -> URL {
+        let home = ProcessInfo.processInfo.environment["HOME"] ?? "/Users/playra"
+        return URL(fileURLWithPath: home).appendingPathComponent(".trios/config.json")
+    }
+
+    private static func apiKeyFromConfigFile(for provider: ModelProvider) -> String? {
+        let url = triosConfigURL()
+        guard let data = try? Data(contentsOf: url),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
+            return nil
+        }
+        return json[providerEnvironmentKey(provider)]
+    }
+
+    private static func providerEnvironmentKey(_ provider: ModelProvider) -> String {
+        switch provider {
+        case .openai: return "TRIOS_OPENAI_API_KEY"
+        case .anthropic: return "TRIOS_ANTHROPIC_API_KEY"
+        case .openrouter: return "TRIOS_OPENROUTER_API_KEY"
+        case .zai: return "TRIOS_ZAI_API_KEY"
+        case .ollama: return "TRIOS_OLLAMA_API_KEY"
+        }
     }
 
     private static func modelKey(_ provider: ModelProvider) -> String {

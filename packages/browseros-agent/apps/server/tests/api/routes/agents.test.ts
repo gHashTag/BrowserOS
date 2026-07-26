@@ -7,6 +7,8 @@ import { describe, expect, it } from 'bun:test'
 import { AGENT_HARNESS_LIMITS } from '@browseros/shared/constants/limits'
 import { Hono } from 'hono'
 import { createAgentRoutes } from '../../../src/api/routes/agents'
+import { LocalAuthService } from '../../../src/api/services/local-auth-service'
+import { LOCAL_AUTH_HEADER } from '../../../src/api/utils/require-local-auth'
 import {
   type ActiveTurnInfo,
   TurnRegistry,
@@ -20,7 +22,10 @@ describe('createAgentRoutes', () => {
     const route = createMountedRoutes(agents)
     const created = await route.request('/agents', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        [LOCAL_AUTH_HEADER]: 'valid-for-tests',
+      },
       body: JSON.stringify({
         name: 'Review bot',
         adapter: 'codex',
@@ -620,7 +625,10 @@ describe('createAgentRoutes', () => {
     const route = createMountedRoutes([])
     const response = await route.request('/agents', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        [LOCAL_AUTH_HEADER]: 'valid-for-tests',
+      },
       body: JSON.stringify({
         name: 'a'.repeat(AGENT_HARNESS_LIMITS.AGENT_NAME_MAX_CHARS + 1),
         adapter: 'codex',
@@ -632,17 +640,65 @@ describe('createAgentRoutes', () => {
       error: `Name must be ${AGENT_HARNESS_LIMITS.AGENT_NAME_MAX_CHARS} characters or fewer`,
     })
   })
+
+  it('requires local authorization for creation', async () => {
+    const localAuth = new LocalAuthService({ dbPath: ':memory:' })
+    localAuth.issueInitialTokens()
+    const route = createMountedRoutes([], { localAuth })
+
+    const missing = await route.request('/agents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'x', adapter: 'codex' }),
+    })
+    expect(missing.status).toBe(403)
+    expect(await missing.json()).toEqual({
+      error: 'Local authorization required',
+    })
+
+    const invalid = await route.request('/agents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [LOCAL_AUTH_HEADER]: 'bad-token',
+      },
+      body: JSON.stringify({ name: 'x', adapter: 'codex' }),
+    })
+    expect(invalid.status).toBe(403)
+    expect(await invalid.json()).toEqual({
+      error: 'Local authorization required',
+    })
+
+    const valid = await route.request('/agents', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        [LOCAL_AUTH_HEADER]: localAuth.getToken(),
+      },
+      body: JSON.stringify({ name: 'Allowed bot', adapter: 'codex' }),
+    })
+    expect(valid.status).toBe(200)
+  })
 })
+
+const alwaysAllowLocalAuth = {
+  validate: () => true,
+} as unknown as LocalAuthService
 
 function createMountedRoutes(
   agents: AgentDefinition[],
   deps: {
     browser?: { resolveTabIds(tabIds: number[]): Promise<Map<number, number>> }
+    localAuth?: LocalAuthService
   } = {},
 ) {
   return new Hono().route(
     '/agents',
-    createAgentRoutes({ service: createFakeService(agents), ...deps }),
+    createAgentRoutes({
+      service: createFakeService(agents),
+      localAuth: deps.localAuth ?? alwaysAllowLocalAuth,
+      ...deps,
+    }),
   )
 }
 

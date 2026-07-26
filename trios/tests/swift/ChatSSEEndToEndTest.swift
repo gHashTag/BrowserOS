@@ -325,18 +325,22 @@ struct ChatSSEEndToEndTests {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("trios-memory-\(UUID().uuidString)", isDirectory: true)
         let databaseURL = directory.appendingPathComponent("agent-memory.sqlite3")
+        let encryptedURL = directory.appendingPathComponent("agent-memory.sqlite3.enc")
         let suiteName = "trios-memory-planner-\(UUID().uuidString)"
         let preferences = UserDefaults(suiteName: suiteName) ?? .standard
         preferences.removePersistentDomain(forName: suiteName)
 
         do {
-            let store = try MemoryStore(databaseURL: databaseURL)
+            let store = try MemoryStore(
+                databaseURL: databaseURL,
+                encryptedURL: encryptedURL
+            )
             let schemaVersion = await store.schemaVersion()
-            check(schemaVersion == 1,
-                  "memory database schema is version 1")
+            check(schemaVersion == 2,
+                  "memory database schema is version 2")
             let journalMode = await store.journalMode()
             check(journalMode == "wal",
-                  "memory database uses WAL mode")
+                  "memory database uses WAL journal mode for SQLCipher encryption")
 
             let memoryService = AgentMemoryService(
                 store: store,
@@ -464,7 +468,10 @@ struct ChatSSEEndToEndTests {
 
             await store.close()
 
-            let reloadedStore = try MemoryStore(databaseURL: databaseURL)
+            let reloadedStore = try MemoryStore(
+                databaseURL: databaseURL,
+                encryptedURL: encryptedURL
+            )
             let reloadedPlan = try await reloadedStore.loadPlan(
                 conversationId: conversationId
             )
@@ -658,10 +665,11 @@ struct ChatSSEEndToEndTests {
                   "conversation deletion removes scoped memories")
             await reloadedStore.close()
         } catch {
-            fail("durable memory setup failed: \(error.localizedDescription)")
+            fail("durable memory setup failed: \(error.localizedDescription) [directory: \(directory.path)]")
         }
 
-        try? FileManager.default.removeItem(at: directory)
+        // Intentionally leave directory for SQLCipher forensic inspection.
+        // try? FileManager.default.removeItem(at: directory)
         preferences.removePersistentDomain(forName: suiteName)
     }
 

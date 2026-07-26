@@ -47,7 +47,7 @@ class AIMacroGeneratorViewModel: ObservableObject {
     @Published var naturalLanguageInput = ""
     @Published var isGenerating = false
     @Published var generatedMacro: AIMacroDefinition?
-    @Published var generationSteps: [String] = []
+    @Published var generationSteps: [String] = .init()
     @Published var currentStep = 0
     @Published var showPreview = false
     
