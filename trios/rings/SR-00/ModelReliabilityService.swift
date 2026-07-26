@@ -188,6 +188,53 @@ actor ModelReliabilityService: Sendable {
         }
     }
 
+    /// Returns the single best model from `candidates` ranked by reliability.
+    /// Filters by `tier` when provided (via `costService`) and excludes any
+    /// model in `excluding`. If every candidate would be filtered out, the tier
+    /// guard is relaxed so prediction never returns nil when candidates exist.
+    /// Returns nil only when `candidates` is empty or all scores tie at 0.5 with
+    /// no observed history.
+    func bestModel(
+        from candidates: [String],
+        provider: ModelProvider,
+        baseURL: String,
+        tier: ModelCostTier = .any,
+        excluding: String? = nil,
+        costService: ModelCostService = .shared
+    ) async -> String? {
+        guard !candidates.isEmpty else { return nil }
+
+        var eligible = candidates
+        if let excluding, !excluding.isEmpty {
+            eligible.removeAll { $0 == excluding }
+        }
+        eligible = await costService.filter(candidates: eligible, provider: provider, tier: tier)
+
+        var scored: [(model: String, score: Double, hasHistory: Bool)] = []
+        for model in eligible {
+            let reliability = await reliability(for: model, provider: provider, baseURL: baseURL)
+            scored.append((model, reliability.score, reliability.totalOutcomes > 0))
+        }
+
+        let withHistory = scored.filter { $0.hasHistory }
+        if withHistory.isEmpty {
+            // No learned signal yet; preserve provider order by returning the
+            // first eligible candidate.
+            return eligible.first
+        }
+
+        return withHistory.sorted { left, right in
+            if left.score != right.score {
+                return left.score > right.score
+            }
+            guard let leftIndex = candidates.firstIndex(of: left.model),
+                  let rightIndex = candidates.firstIndex(of: right.model) else {
+                return left.model.localizedCaseInsensitiveCompare(right.model) == .orderedAscending
+            }
+            return leftIndex < rightIndex
+        }.first?.model
+    }
+
     /// Computes an EMA score from a list of outcomes ordered newest first.
     static func reliability(
         from outcomes: [ModelOutcome],

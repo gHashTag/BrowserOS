@@ -134,6 +134,12 @@ final class TriOSEncryption {
     }
 
     private func loadOrCreateSymmetricKey() throws -> SymmetricKey {
+        // E2E/test bypass: avoid keychain permission dialogs in non-signed test
+        // binaries by using a volatile file-based key instead.
+        if ProcessInfo.processInfo.environment["TRIOS_E2E_DISABLE_KEYCHAIN"] == "1" {
+            return try loadOrCreateTestKey()
+        }
+
         if let keyName {
             if let key = try? KeychainSymmetricKeyStore.read(keyName: keyName) {
                 return key
@@ -168,6 +174,40 @@ final class TriOSEncryption {
             var resourceValues = URLResourceValues()
             resourceValues.isExcludedFromBackup = true
             var mutableURL = keyURL
+            try? mutableURL.setResourceValues(resourceValues)
+        } catch {
+            throw TriOSEncryptionError.keyGenerationFailure
+        }
+        return key
+    }
+
+    /// Returns a volatile 256-bit key stored in a temporary file. Used during
+    /// end-to-end tests to avoid keychain permission dialogs from unsigned
+    /// test binaries. The key is unique per (keyName, process) and is discarded
+    /// when the process exits.
+    private func loadOrCreateTestKey() throws -> SymmetricKey {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("trios-e2e-keys", isDirectory: true)
+        try? FileManager.default.createDirectory(
+            at: tempDir,
+            withIntermediateDirectories: true
+        )
+        let testKeyURL = tempDir.appendingPathComponent(
+            "\(keyName ?? "default").key"
+        )
+
+        if let data = try? Data(contentsOf: testKeyURL),
+           data.count == 32 {
+            return SymmetricKey(data: data)
+        }
+
+        let key = SymmetricKey(size: .bits256)
+        let bytes = key.withUnsafeBytes { Data($0) }
+        do {
+            try bytes.write(to: testKeyURL, options: .atomic)
+            var resourceValues = URLResourceValues()
+            resourceValues.isExcludedFromBackup = true
+            var mutableURL = testKeyURL
             try? mutableURL.setResourceValues(resourceValues)
         } catch {
             throw TriOSEncryptionError.keyGenerationFailure

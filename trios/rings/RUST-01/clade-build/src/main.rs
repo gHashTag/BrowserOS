@@ -354,6 +354,7 @@ fn collect_lean_br_output(dir: &Path, out: &mut Vec<PathBuf>) {
         "GlassmorphismBackground.swift",
         "HotkeyBar.swift",
         "LLMClient.swift",
+        "LogsTabView.swift",
         "MenuBuilder.swift",
         "MeshAuth.swift",
         "MeshChatListView.swift",

@@ -15,6 +15,7 @@ struct ModelsTabView: View {
                 header
                 providerSection
                 activeModelSection
+                smartSelectionSection
                 catalogSection
                 credentialSection
                 connectionSection
@@ -82,6 +83,49 @@ struct ModelsTabView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    private var smartSelectionSection: some View {
+        modelSection(
+            title: "Smart model selection",
+            subtitle: store.isPredictiveSelectionEnabled
+                ? (store.predictiveSelectionReason ?? "TriOS will pick the best eligible model automatically.")
+                : "Let TriOS choose the best model using reliability history and cost preferences."
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                Toggle("Enable smart selection", isOn: $store.isPredictiveSelectionEnabled)
+                    .toggleStyle(.switch)
+
+                if store.isPredictiveSelectionEnabled {
+                    HStack(spacing: 10) {
+                        Text("Cost tier:")
+                            .font(.system(size: 12))
+                            .foregroundColor(.grokText)
+                        Picker("Cost tier", selection: $store.preferredCostTier) {
+                            ForEach(ModelCostTier.allCases) { tier in
+                                Text(tier.displayName).tag(tier)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 280)
+                        Spacer()
+                        Button {
+                            Task { await store.selectBestModel() }
+                        } label: {
+                            Label("Pick best now", systemImage: "wand.and.stars")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(store.availableModels.count <= 1)
+                    }
+
+                    if let reason = store.predictiveSelectionReason {
+                        Text(reason)
+                            .font(.system(size: 10))
+                            .foregroundColor(.grokDim)
+                    }
                 }
             }
         }

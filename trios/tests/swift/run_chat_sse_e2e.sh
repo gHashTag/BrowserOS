@@ -68,7 +68,7 @@ if [ ${PIPESTATUS[0]} -eq 0 ]; then
     echo "[OK] Build successful: $OUTPUT"
     chmod +x "$OUTPUT"
     echo "Running $OUTPUT..."
-    TRIOS_DISABLE_STATUS_MONITORING=1 "$OUTPUT"
+    TRIOS_DISABLE_STATUS_MONITORING=1 TRIOS_E2E_DISABLE_KEYCHAIN=1 "$OUTPUT"
 else
     echo "[FAIL] Build failed (log: $LOG_FILE)"
     exit 1

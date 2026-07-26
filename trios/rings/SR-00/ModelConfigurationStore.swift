@@ -77,6 +77,9 @@ final class ModelConfigurationStore: ObservableObject {
     @Published private(set) var lastHealthCheckAt: Date?
     @Published var isBackgroundHealthPollingEnabled = true
     @Published private(set) var providerStatuses: [String: ProviderModelStatus] = [:]
+    @Published var isPredictiveSelectionEnabled: Bool = false
+    @Published var preferredCostTier: ModelCostTier = .any
+    @Published private(set) var predictiveSelectionReason: String?
 
     private let defaults: UserDefaults
     private let environment: [String: String]
@@ -84,6 +87,7 @@ final class ModelConfigurationStore: ObservableObject {
     private let healthService: any ModelHealthServiceProtocol
     private let statusService: any ProviderStatusServiceProtocol
     private let reliabilityService: ModelReliabilityService
+    private let costService: ModelCostService
     private var backgroundPoller: BackgroundHealthPoller?
 
     /// Exposed for tests only.
@@ -96,7 +100,8 @@ final class ModelConfigurationStore: ObservableObject {
         catalogService: ModelCatalogService = ModelCatalogService(),
         statusService: any ProviderStatusServiceProtocol = ProviderStatusService(),
         healthService: (any ModelHealthServiceProtocol)? = nil,
-        reliabilityService: ModelReliabilityService? = nil
+        reliabilityService: ModelReliabilityService? = nil,
+        costService: ModelCostService = .shared
     ) {
         self.catalogService = catalogService
         self.statusService = statusService
@@ -104,6 +109,7 @@ final class ModelConfigurationStore: ObservableObject {
         self.reliabilityService = reliabilityService ?? ModelReliabilityService(
             store: MemoryStoreReliabilityAdapter()
         )
+        self.costService = costService
         self.defaults = defaults
         self.environment = environment
 
@@ -118,9 +124,20 @@ final class ModelConfigurationStore: ObservableObject {
         baseURL = defaults.string(forKey: Self.baseURLKey(provider))
             ?? environment["TRIOS_BASE_URL"]
             ?? provider.defaultBaseURL
+        isPredictiveSelectionEnabled = defaults.object(forKey: Self.predictiveSelectionEnabledKey) as? Bool ?? false
+        preferredCostTier = ModelCostTier(
+            rawValue: defaults.string(forKey: Self.preferredCostTierKey) ?? ""
+        ) ?? .any
+        predictiveSelectionReason = nil
 
         loadBackgroundHealthPollingPreference()
         startBackgroundHealthChecks()
+
+        if isPredictiveSelectionEnabled {
+            Task { [weak self] in
+                await self?.applyPredictiveSelection(reason: "Enabled at launch")
+            }
+        }
     }
 
     var availableModels: [String] {
@@ -372,9 +389,15 @@ final class ModelConfigurationStore: ObservableObject {
         discoveredModels = []
         discoveryError = nil
         credentialRevision += 1
+        predictiveSelectionReason = nil
         Task { await reliabilityService.reset(provider: selectedProvider, baseURL: baseURL) }
         invalidateHealth()
         restartBackgroundHealthChecks()
+        if isPredictiveSelectionEnabled {
+            Task { [weak self] in
+                await self?.applyPredictiveSelection(reason: "Provider switched to \(provider.displayName)")
+            }
+        }
     }
 
     func updateBaseURL(_ value: String) {
@@ -382,9 +405,15 @@ final class ModelConfigurationStore: ObservableObject {
         guard !trimmed.isEmpty else { return }
         baseURL = trimmed
         defaults.set(trimmed, forKey: Self.baseURLKey(selectedProvider))
+        predictiveSelectionReason = nil
         Task { await reliabilityService.reset(provider: selectedProvider, baseURL: baseURL) }
         invalidateHealth()
         restartBackgroundHealthChecks()
+        if isPredictiveSelectionEnabled {
+            Task { [weak self] in
+                await self?.applyPredictiveSelection(reason: "Endpoint updated")
+            }
+        }
     }
 
     func selectModel(_ model: String) {
@@ -397,9 +426,15 @@ final class ModelConfigurationStore: ObservableObject {
     func resetBaseURL() {
         baseURL = selectedProvider.defaultBaseURL
         defaults.removeObject(forKey: Self.baseURLKey(selectedProvider))
+        predictiveSelectionReason = nil
         Task { await reliabilityService.reset(provider: selectedProvider, baseURL: baseURL) }
         invalidateHealth()
         restartBackgroundHealthChecks()
+        if isPredictiveSelectionEnabled {
+            Task { [weak self] in
+                await self?.applyPredictiveSelection(reason: "Endpoint reset to default")
+            }
+        }
     }
 
     func saveAPIKey(_ value: String) throws {
@@ -407,17 +442,91 @@ final class ModelConfigurationStore: ObservableObject {
         guard !trimmed.isEmpty else { return }
         try ModelCredentialStore.save(trimmed, for: selectedProvider)
         credentialRevision += 1
+        predictiveSelectionReason = nil
         Task { await reliabilityService.reset(provider: selectedProvider, baseURL: baseURL) }
         invalidateHealth()
         restartBackgroundHealthChecks()
+        if isPredictiveSelectionEnabled {
+            Task { [weak self] in
+                await self?.applyPredictiveSelection(reason: "API key updated")
+            }
+        }
     }
 
     func deleteAPIKey() throws {
         try ModelCredentialStore.delete(for: selectedProvider, ignoresMissing: true)
         credentialRevision += 1
+        predictiveSelectionReason = nil
         Task { await reliabilityService.reset(provider: selectedProvider, baseURL: baseURL) }
         invalidateHealth()
         restartBackgroundHealthChecks()
+        if isPredictiveSelectionEnabled {
+            Task { [weak self] in
+                await self?.applyPredictiveSelection(reason: "API key removed")
+            }
+        }
+    }
+
+    /// Enables or disables predictive model selection and persists the choice.
+    func setPredictiveSelectionEnabled(_ enabled: Bool) {
+        isPredictiveSelectionEnabled = enabled
+        defaults.set(enabled, forKey: Self.predictiveSelectionEnabledKey)
+        if enabled {
+            Task { [weak self] in
+                await self?.applyPredictiveSelection(reason: "Smart selection turned on")
+            }
+        } else {
+            predictiveSelectionReason = nil
+        }
+    }
+
+    /// Sets the preferred cost tier and re-runs predictive selection if enabled.
+    func setPreferredCostTier(_ tier: ModelCostTier) {
+        preferredCostTier = tier
+        defaults.set(tier.rawValue, forKey: Self.preferredCostTierKey)
+        if isPredictiveSelectionEnabled {
+            Task { [weak self] in
+                await self?.applyPredictiveSelection(
+                    reason: "Cost preference set to \(tier.displayName)"
+                )
+            }
+        }
+    }
+
+    /// Manually triggers one predictive selection cycle.
+    @discardableResult
+    func selectBestModel() async -> String? {
+        guard isPredictiveSelectionEnabled else { return nil }
+        return await applyPredictiveSelection(reason: "Manual smart pick")
+    }
+
+    /// Picks the best eligible model using reliability history and the preferred
+    /// cost tier, then updates the active selection and records the reason.
+    @discardableResult
+    private func applyPredictiveSelection(reason: String) async -> String? {
+        let candidates = discoveredModels.isEmpty
+            ? selectedProvider.suggestedModels
+            : discoveredModels
+        guard let best = await reliabilityService.bestModel(
+            from: candidates,
+            provider: selectedProvider,
+            baseURL: baseURL,
+            tier: preferredCostTier,
+            excluding: selectedModel,
+            costService: costService
+        ) else {
+            predictiveSelectionReason = nil
+            return nil
+        }
+        guard best != selectedModel else {
+            predictiveSelectionReason = "Already using the best match: \(best)"
+            return best
+        }
+        await MainActor.run {
+            selectModel(best)
+            predictiveSelectionReason = reason + " → \(best)"
+        }
+        return best
     }
 
     func refreshModels() async {
@@ -484,5 +593,13 @@ final class ModelConfigurationStore: ObservableObject {
 
     private static func baseURLKey(_ provider: ModelProvider) -> String {
         "trios.model.\(provider.rawValue).base-url"
+    }
+
+    private static var predictiveSelectionEnabledKey: String {
+        "trios.model.predictive-selection-enabled"
+    }
+
+    private static var preferredCostTierKey: String {
+        "trios.model.preferred-cost-tier"
     }
 }

@@ -140,4 +140,73 @@ final class ModelReliabilityServiceTests: XCTestCase {
         let reliability = await limitedService.reliability(for: "m", provider: provider, baseURL: baseURL)
         XCTAssertEqual(reliability.totalOutcomes, 3)
     }
+
+    func testBestModelRanksByReliability() async {
+        let provider = ModelProvider.anthropic
+        let baseURL = "https://api.anthropic.com"
+        await service.record(model: "claude-opus-4-5", provider: provider, baseURL: baseURL, success: true, reason: nil)
+        await service.record(model: "claude-opus-4-5", provider: provider, baseURL: baseURL, success: true, reason: nil)
+        await service.record(model: "claude-haiku-4-5", provider: provider, baseURL: baseURL, success: false, reason: nil)
+
+        let best = await service.bestModel(
+            from: ["claude-haiku-4-5", "claude-opus-4-5"],
+            provider: provider,
+            baseURL: baseURL
+        )
+        XCTAssertEqual(best, "claude-opus-4-5")
+    }
+
+    func testBestModelExcludesCurrentModel() async {
+        let provider = ModelProvider.anthropic
+        let baseURL = "https://api.anthropic.com"
+        await service.record(model: "claude-opus-4-5", provider: provider, baseURL: baseURL, success: true, reason: nil)
+
+        let best = await service.bestModel(
+            from: ["claude-opus-4-5"],
+            provider: provider,
+            baseURL: baseURL,
+            excluding: "claude-opus-4-5"
+        )
+        XCTAssertNil(best)
+    }
+
+    func testBestModelFallsBackToProviderOrderWithoutHistory() async {
+        let provider = ModelProvider.anthropic
+        let baseURL = "https://api.anthropic.com"
+        let best = await service.bestModel(
+            from: ["claude-opus-4-5", "claude-sonnet-4-5"],
+            provider: provider,
+            baseURL: baseURL
+        )
+        XCTAssertEqual(best, "claude-opus-4-5")
+    }
+
+    func testBestModelRespectsCostTier() async {
+        let provider = ModelProvider.openai
+        let baseURL = "https://api.openai.com"
+        await service.record(model: "gpt-4o", provider: provider, baseURL: baseURL, success: true, reason: nil)
+        await service.record(model: "gpt-4o-mini", provider: provider, baseURL: baseURL, success: true, reason: nil)
+
+        let best = await service.bestModel(
+            from: ["gpt-4o", "gpt-4o-mini"],
+            provider: provider,
+            baseURL: baseURL,
+            tier: .cheap
+        )
+        XCTAssertEqual(best, "gpt-4o-mini")
+    }
+
+    func testBestModelRelaxesTierFilterWhenNoMatch() async {
+        let provider = ModelProvider.openai
+        let baseURL = "https://api.openai.com"
+        await service.record(model: "gpt-4o", provider: provider, baseURL: baseURL, success: true, reason: nil)
+
+        let best = await service.bestModel(
+            from: ["gpt-4o"],
+            provider: provider,
+            baseURL: baseURL,
+            tier: .free
+        )
+        XCTAssertEqual(best, "gpt-4o")
+    }
 }
