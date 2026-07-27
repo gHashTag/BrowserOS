@@ -1,5 +1,27 @@
 [
   {
+    "agent": "claude",
+    "artifact": ".claude/plans/trios-cycle33-pre-send-routing-by-output-budget-report.md",
+    "claim_id": "PRE-SEND-OUTPUT-ROUTE-033",
+    "finished_at": "2026-07-27T09:35:00Z",
+    "started_at": "2026-07-27T08:55:00Z",
+    "status": "done",
+    "task_id": "PRE-SEND-OUTPUT-ROUTE-033",
+    "title": "Pre-send routing by output budget: route to a candidate whose maxOutputTokens honors the requested budget",
+    "verdict": "CLEAN"
+  },
+  {
+    "agent": "claude",
+    "artifact": ".claude/plans/trios-cycle29-streaming-context-watchdog-hardening-loop-029-report.md",
+    "claim_id": "claim-STREAMING-WATCHDOG-HARDEN-029",
+    "finished_at": "2026-07-27T17:05:00Z",
+    "started_at": "2026-07-27T04:00:00Z",
+    "status": "done",
+    "task_id": "STREAMING-WATCHDOG-HARDEN-029",
+    "title": "Harden Cycle 28 streaming context watchdog pause/continuation/outcome behavior",
+    "verdict": "CLEAN"
+  },
+  {
     "agent": "t27-creator",
     "artifact": "/Users/playra/EVOLUTION_PLAN_TRINITY_v1.md",
     "claim_id": "C279B862-3180-4F00-98EF-C691B0CB3445",
@@ -363,6 +385,20 @@
     "status": "done",
     "task_id": "TRIOS-PORTABLE-LAND-001",
     "title": "Preserve agent work, document portable installation, and land verified TriOS work",
+    "verdict": "CLEAN"
+  },
+  {
+    "agent": "clade-monitor",
+    "artifact": null,
+    "claim_id": "deep-audit-2026-07-26-19fa093f785-3556",
+    "finished_at": "2026-07-26T22:37:59.559740+00:00",
+    "graph_node": "deep_audit",
+    "priority": "P1",
+    "spec_path": ".trinity/state/github.json",
+    "started_at": "2026-07-26T22:37:59.557158+00:00",
+    "status": "clean",
+    "task_id": "deep-audit-2026-07-26",
+    "title": "24h deep audit + cross-repo report",
     "verdict": "CLEAN"
   }
 ]

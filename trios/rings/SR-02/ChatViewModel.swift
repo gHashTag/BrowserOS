@@ -94,6 +94,15 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var recalledMemories: [AgentMemoryMatch] = []
     @Published private(set) var memoryControlRevision: UInt64 = 0
     @Published var recoveryProgress = SessionRecoveryProgress()
+    @Published var contextUtilizationPercent: Double?
+    @Published var contextRoutingLabel: String?
+    @Published var requestError: String?
+    @Published var streamingContextDecision: StreamingContextDecision?
+    @Published var isStreamPausedForContext: Bool = false
+    @Published var streamingContextWarning: String?
+    @Published var streamingContextPauseLabel: String?
+    @Published var canContinueOnLargerModel: Bool = false
+    @Published var canSummarizeStreamSoFar: Bool = false
 
     let queenStatusVM = QueenStatusViewModel()
     let modelStore: ModelConfigurationStore
@@ -117,6 +126,8 @@ final class ChatViewModel: ObservableObject {
     private var pendingEstimatedOutput = ""
     private var pendingUsageActive = false
     private var receivedProviderUsage = false
+    private var contextWatchdog = StreamingContextWatchdog.shared
+    private var activeStreamTask: Task<Void, Never>?
     private var pendingMemoryTurn: PendingAgentMemoryTurn?
     private var activeMemoryWrites: [UUID: ActiveAgentMemoryWrite] = [:]
     private var memoryClearCounts: [UUID: Int] = [:]
@@ -360,6 +371,12 @@ final class ChatViewModel: ObservableObject {
 
         recalledMemories = []
         memoryControlRevision &+= 1
+        streamingContextWarning = nil
+        streamingContextPauseLabel = nil
+        streamingContextDecision = nil
+        isStreamPausedForContext = false
+        canContinueOnLargerModel = false
+        canSummarizeStreamSoFar = false
         conversationId = id
         await persister.setCurrentConversationId(id)
         await loadHistory()
@@ -383,12 +400,13 @@ final class ChatViewModel: ObservableObject {
     }
 
     func sendMessage(
+        text customText: String? = nil,
         appendUser: Bool = true,
         imageAttachments: [ChatComposerAttachment] = [],
         onAccepted: (() -> Void)? = nil
     ) async {
         await awaitInitialization()
-        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = (customText ?? inputText).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isConversationTransitioning else { return }
 
         let now = Date()
@@ -397,6 +415,15 @@ final class ChatViewModel: ObservableObject {
             return
         }
         lastSendTime = now
+        contextUtilizationPercent = nil
+        contextRoutingLabel = nil
+        requestError = nil
+        streamingContextWarning = nil
+        streamingContextPauseLabel = nil
+        streamingContextDecision = nil
+        isStreamPausedForContext = false
+        canContinueOnLargerModel = false
+        canSummarizeStreamSoFar = false
 
         // Trinity Queen conversation intercepts slash commands locally.
         if conversationId == ChatConversation.trinityQueenId, text.hasPrefix("/") {
@@ -472,10 +499,12 @@ final class ChatViewModel: ObservableObject {
         guard isCurrentStream(generation) else { return }
         recalledMemories = recallRevision == memoryControlRevision ? recalled : []
 
-        // Exclude the current user message from previousConversation: the server
+        // Exclude only the current user message from previousConversation: the server
         // receives it separately via the `message` field, and duplicating it
-        // confuses the model and the UI.
-        let historyForRequest = Array(messages.dropLast())
+        // confuses the model and the UI. When continuing from a paused stream,
+        // the current user message is not the last message, so a simple dropLast()
+        // would incorrectly drop the partial assistant response (INV-9).
+        var historyForRequest = messages.filter { $0.id != sourceMessageId }
         beginUsageEstimate(message: text, history: historyForRequest)
 
         let requestAttachments: [ChatRequestAttachment]
@@ -509,27 +538,200 @@ final class ChatViewModel: ObservableObject {
 
         var didFailover = false
 
+        // Capture the initial selection before any automatic switching. This is
+        // what we restore to if a failover fails.
+        let initialProvider = modelStore.selectedProvider
+        let initialBaseURL = modelStore.baseURL
+        let initialModel = modelStore.selectedModel
+
         // Preflight health check: if the selected model is known unhealthy, switch
         // to the first healthy fallback before burning a real request.
         let preflightModel = await runPreflightHealthCheck(generation: generation)
         let preflightSwitched = preflightModel != modelStore.selectedModel
 
+        // Predictive warmup cache: if a fresh (or recently-stale) background
+        // winner is available, apply it immediately without paying probe latency
+        // on the send path. A stale winner triggers a coalesced background
+        // refresh for future sends.
+        var warmupSwitched = false
+        var warmupServedStale = false
+        var warmupCandidate: CrossProviderModelCandidate?
+        if modelStore.isAdaptiveProviderWarmupEnabled,
+           modelStore.isPredictiveWarmupEnabled,
+           let selection = await modelStore.cachedOrStaleWarmupWinner(
+               tier: modelStore.preferredCostTier,
+               strictQuotaGating: modelStore.isStrictQuotaGatingEnabled,
+               maxStaleness: modelStore.predictiveWarmupMaxStaleness
+           ) {
+            let current = CrossProviderModelCandidate(
+                provider: modelStore.selectedProvider,
+                baseURL: modelStore.baseURL,
+                model: modelStore.selectedModel
+            )
+            if selection.winner.selected != current {
+                warmupCandidate = selection.winner.selected
+                warmupServedStale = selection.isStale
+                modelStore.applySelection(
+                    provider: selection.winner.selected.provider,
+                    baseURL: selection.winner.selected.baseURL,
+                    model: selection.winner.selected.model
+                )
+                warmupSwitched = true
+                let prefix = selection.isStale ? "[↻ stale]" : "[↻]"
+                let banner = ChatMessage(role: .system, content: "\(prefix) \(selection.winner.reason)")
+                messages.append(banner)
+                rebuildCache()
+                let historySnapshot = captureHistorySnapshot()
+                await persistHistorySnapshot(historySnapshot)
+            }
+            if selection.isStale {
+                modelStore.refreshWarmupCacheInBackground()
+            }
+        }
+
+        // Adaptive provider warmup: race lightweight probes across eligible
+        // providers and switch to the best live candidate before the real send.
+        if !warmupSwitched && modelStore.isAdaptiveProviderWarmupEnabled {
+            let warmupResult = await modelStore.runAdaptiveWarmup()
+            warmupSwitched = warmupResult.didSwitch
+            if warmupSwitched {
+                let banner = ChatMessage(role: .system, content: "[↻] \(warmupResult.reason)")
+                messages.append(banner)
+                rebuildCache()
+                let historySnapshot = captureHistorySnapshot()
+                await persistHistorySnapshot(historySnapshot)
+            }
+        }
+
+        var activeProvider = modelStore.selectedProvider
+        var activeBaseURL = modelStore.baseURL
+        var activeModel = modelStore.selectedModel
+
+        let systemPrompt = memoryService.promptContext(for: recalledMemories)
+        let currentMessage = ChatMessage(role: .user, content: text)
+        let routingDecision = await modelStore.resolveContextRoutingDecision(
+            conversationId: conversationId,
+            messages: historyForRequest,
+            currentMessage: currentMessage,
+            systemPrompt: systemPrompt,
+            requestedOutputTokens: modelStore.requestedOutputTokens,
+            candidates: modelStore.warmupCandidates()
+        )
+
+        // Re-estimate input tokens after any routing/trimming so the stream
+        // watchdog and the utilization badge see the actual request, not the
+        // pre-routing estimate (Cycle 31 learned-limit sync).
+        let resolvedHistory: [ChatMessage]
+        switch routingDecision {
+        case .trimHistory(let policy):
+            resolvedHistory = await ChatRequestSizer.shared.trimmedMessages(
+                from: historyForRequest,
+                policy: policy
+            )
+        default:
+            resolvedHistory = historyForRequest
+        }
+        let resolvedInputEstimate = TokenEstimator.estimate(
+            messages: resolvedHistory,
+            systemPrompt: systemPrompt
+        ) + TokenEstimator.estimate(currentMessage.content)
+        pendingEstimatedInputTokens = resolvedInputEstimate
+
+        switch routingDecision {
+        case .useCurrent:
+            contextRoutingLabel = nil
+        case .routeTo(let candidate):
+            let reason = modelStore.lastContextRoutingReason ?? "routed to \(candidate.model)"
+            modelStore.applyContextRoutedSelection(
+                candidate: candidate,
+                reason: reason
+            )
+            activeProvider = candidate.provider
+            activeBaseURL = candidate.baseURL
+            activeModel = candidate.model
+            contextRoutingLabel = reason
+        case .trimHistory(let policy):
+            historyForRequest = await ChatRequestSizer.shared.trimmedMessages(
+                from: historyForRequest,
+                policy: policy
+            )
+            contextRoutingLabel = "trimmed \(policy.droppedMessageCount) turns"
+        case .tooLargeEvenEmpty:
+            let errorMessage = "This message is too long for every available model's context window."
+            requestError = errorMessage
+            contextRoutingLabel = "too large to send"
+            contextUtilizationPercent = await modelStore.contextWindowUtilizationPercent(
+                for: activeModel,
+                provider: activeProvider,
+                baseURL: activeBaseURL
+            )
+            _ = await stateMachine.transition(to: .error(errorMessage))
+            state = await stateMachine.currentState()
+            await saveHistory(expectedGeneration: generation)
+            return
+        }
+
+        contextUtilizationPercent = await modelStore.contextWindowUtilizationPercent(
+            for: activeModel,
+            provider: activeProvider,
+            baseURL: activeBaseURL
+        )
+
+        let streamStart = Date()
         do {
-            try await executeStream(
+            let latency = try await executeStream(
                 generation: generation,
                 text: text,
                 memoryGoal: memoryGoal,
                 historyForRequest: historyForRequest,
-                requestAttachments: requestAttachments
+                requestAttachments: requestAttachments,
+                activeProvider: activeProvider,
+                activeBaseURL: activeBaseURL,
+                activeModel: activeModel
             )
-            let finalModel = preflightSwitched ? preflightModel : modelStore.selectedModel
-            await modelStore.recordSendOutcome(model: finalModel, success: true, reason: nil)
+            let didPause = latency.didPauseForContext
+            await modelStore.recordSendOutcome(
+                model: activeModel,
+                provider: activeProvider,
+                baseURL: activeBaseURL,
+                success: !didPause,
+                reason: didPause ? "context limit" : nil,
+                latencyMs: latency.totalMs,
+                timeToFirstTokenMs: latency.timeToFirstTokenMs,
+                observedOutputTokens: latency.observedOutputTokens,
+                observedTotalTokens: latency.observedTotalTokens,
+                finishReason: latency.finishReason
+            )
+            await modelStore.recordCircuitBreakerSuccess(provider: activeProvider, baseURL: activeBaseURL)
+            if let warmupCandidate, !didPause {
+                await modelStore.recordCachedWinnerOutcome(success: true, candidate: warmupCandidate)
+            }
         } catch {
             guard isCurrentStream(generation) else { return }
+            let isCancellation = (error as? URLError)?.code == .cancelled
+            if let warmupCandidate, !isCancellation {
+                let failureKind = (error as? TransportError)?.circuitBreakerFailureKind
+                await modelStore.recordCachedWinnerOutcome(
+                    success: false,
+                    candidate: warmupCandidate,
+                    kind: failureKind
+                )
+            }
+            let failureMs = Int(max(0, Date().timeIntervalSince(streamStart) * 1000))
             // One automatic model failover for provider-side model failures.
-            let originalModel = modelStore.selectedModel
-            // Mark the model that actually failed as unhealthy for future preflights.
-            modelStore.markUnhealthy(modelStore.selectedModel)
+            // Mark the (provider, baseURL, model) tuple that failed as unhealthy so
+            // the same model on another provider is not wrongly skipped.
+            modelStore.markUnhealthy(provider: activeProvider, baseURL: activeBaseURL, model: activeModel)
+
+            if let transportError = error as? TransportError,
+               transportError.isEligibleForCrossProviderFailover {
+                await modelStore.recordCircuitBreakerFailure(
+                    provider: activeProvider,
+                    baseURL: activeBaseURL,
+                    model: activeModel,
+                    transportError: transportError
+                )
+            }
 
             if !didFailover,
                let transportError = error as? TransportError,
@@ -539,36 +741,145 @@ final class ChatViewModel: ObservableObject {
                 finalizeAssistantStreamingState()
                 clearPendingUsage()
                 await modelStore.recordSendOutcome(
-                    model: originalModel,
+                    model: activeModel,
+                    provider: activeProvider,
+                    baseURL: activeBaseURL,
                     success: false,
-                    reason: transportError.localizedDescription
+                    reason: transportError.localizedDescription,
+                    latencyMs: failureMs,
+                    observedOutputTokens: nil,
+                    observedTotalTokens: nil,
+                    finishReason: nil
                 )
-                let failoverMsg = "Model `\(originalModel)` failed; retrying with `\(nextModel)`…"
+                let failoverMsg = "Model `\(activeModel)` failed; retrying with `\(nextModel)`…"
+                let banner = ChatMessage(role: .system, content: "[↻] \(failoverMsg)")
+                messages.append(banner)
+                rebuildCache()
+                let historySnapshot = captureHistorySnapshot()
+                await persistHistorySnapshot(historySnapshot)
+                let failoverStreamStart = Date()
+                do {
+                    let latency = try await executeStream(
+                        generation: generation,
+                        text: text,
+                        memoryGoal: memoryGoal,
+                        historyForRequest: historyForRequest,
+                        requestAttachments: requestAttachments,
+                        activeProvider: activeProvider,
+                        activeBaseURL: activeBaseURL,
+                        activeModel: nextModel
+                    )
+                    await modelStore.recordSendOutcome(
+                        model: nextModel,
+                        provider: activeProvider,
+                        baseURL: activeBaseURL,
+                        success: true,
+                        reason: nil,
+                        latencyMs: latency.totalMs,
+                        timeToFirstTokenMs: latency.timeToFirstTokenMs,
+                        observedOutputTokens: latency.observedOutputTokens,
+                        observedTotalTokens: latency.observedTotalTokens,
+                        finishReason: latency.finishReason
+                    )
+                    await modelStore.recordCircuitBreakerSuccess(provider: activeProvider, baseURL: activeBaseURL)
+                    return
+                } catch {
+                    let failoverFailureMs = Int(max(0, Date().timeIntervalSince(failoverStreamStart) * 1000))
+                    await modelStore.recordSendOutcome(
+                        model: nextModel,
+                        provider: activeProvider,
+                        baseURL: activeBaseURL,
+                        success: false,
+                        reason: (error as? TransportError)?.localizedDescription,
+                        latencyMs: failoverFailureMs,
+                        observedOutputTokens: nil,
+                        observedTotalTokens: nil,
+                        finishReason: nil
+                    )
+                    // Restore the original selection so the next turn does not
+                    // silently inherit a failed fallback.
+                    modelStore.restoreSelection(provider: initialProvider, baseURL: initialBaseURL, model: initialModel)
+                }
+            }
+
+            // Cross-provider failover: if the same-provider fallback failed (or was
+            // not possible), try one other eligible provider before giving up.
+            if modelStore.isCrossProviderFailoverEnabled,
+               let transportError = error as? TransportError,
+               transportError.isEligibleForCrossProviderFailover,
+               let candidate = await modelStore.selectFirstHealthyCrossProviderModel() {
+                let crossStreamStart = Date()
+                let failoverMsg = "Provider `\(activeProvider.displayName)` failed; switching to `\(candidate.provider.displayName)/\(candidate.model)`…"
                 let banner = ChatMessage(role: .system, content: "[↻] \(failoverMsg)")
                 messages.append(banner)
                 rebuildCache()
                 let historySnapshot = captureHistorySnapshot()
                 await persistHistorySnapshot(historySnapshot)
                 do {
-                    try await executeStream(
+                    let latency = try await executeStream(
                         generation: generation,
                         text: text,
                         memoryGoal: memoryGoal,
                         historyForRequest: historyForRequest,
-                        requestAttachments: requestAttachments
+                        requestAttachments: requestAttachments,
+                        activeProvider: candidate.provider,
+                        activeBaseURL: candidate.baseURL,
+                        activeModel: candidate.model
                     )
-                    await modelStore.recordSendOutcome(model: nextModel, success: true, reason: nil)
+                    await modelStore.recordSendOutcome(
+                        model: candidate.model,
+                        provider: candidate.provider,
+                        baseURL: candidate.baseURL,
+                        success: true,
+                        reason: nil,
+                        latencyMs: latency.totalMs,
+                        timeToFirstTokenMs: latency.timeToFirstTokenMs,
+                        observedOutputTokens: latency.observedOutputTokens,
+                        observedTotalTokens: latency.observedTotalTokens,
+                        finishReason: latency.finishReason
+                    )
+                    await modelStore.recordCircuitBreakerSuccess(provider: candidate.provider, baseURL: candidate.baseURL)
                     return
                 } catch {
+                    let crossFailureMs = Int(max(0, Date().timeIntervalSince(crossStreamStart) * 1000))
                     await modelStore.recordSendOutcome(
-                        model: nextModel,
+                        model: candidate.model,
+                        provider: candidate.provider,
+                        baseURL: candidate.baseURL,
                         success: false,
-                        reason: (error as? TransportError)?.localizedDescription
+                        reason: (error as? TransportError)?.localizedDescription,
+                        latencyMs: crossFailureMs,
+                        observedOutputTokens: nil,
+                        observedTotalTokens: nil,
+                        finishReason: nil
                     )
-                    // Restore the original selection so the next turn does not
-                    // silently inherit a failed fallback.
-                    modelStore.selectModel(originalModel)
+                    if let transportError = error as? TransportError,
+                       transportError.isEligibleForCrossProviderFailover {
+                        await modelStore.recordCircuitBreakerFailure(
+                            provider: candidate.provider,
+                            baseURL: candidate.baseURL,
+                            model: candidate.model,
+                            transportError: transportError
+                        )
+                    }
+                    // Revert to the original provider so the next turn does not
+                    // silently stay on a failed cross-provider candidate.
+                    modelStore.restoreSelection(provider: initialProvider, baseURL: initialBaseURL, model: initialModel)
                 }
+            }
+
+            if !didFailover {
+                await modelStore.recordSendOutcome(
+                    model: activeModel,
+                    provider: activeProvider,
+                    baseURL: activeBaseURL,
+                    success: false,
+                    reason: (error as? TransportError)?.localizedDescription,
+                    latencyMs: failureMs,
+                    observedOutputTokens: nil,
+                    observedTotalTokens: nil,
+                    finishReason: nil
+                )
             }
 
             guard isCurrentStream(generation) else { return }
@@ -608,17 +919,41 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Latency measurements for a completed stream.
+    private struct StreamLatency {
+        let totalMs: Int
+        let timeToFirstTokenMs: Int?
+        /// True when the stream paused because it hit the context/output limit;
+        /// the caller must record this as a non-success outcome.
+        let didPauseForContext: Bool
+        /// Observed output tokens if a usage event arrived; used for limit learning.
+        let observedOutputTokens: Int?
+        /// Observed total tokens if a usage event arrived; used for limit learning.
+        let observedTotalTokens: Int?
+        /// Provider `finish_reason` from the terminal SSE event.
+        let finishReason: String?
+    }
+
     /// Attempts a single streaming request. On success it finalizes the turn and
-    /// persists history. On failure it throws the underlying error so the caller
-    /// can decide whether to failover or surface the error to the user.
+    /// persists history and returns request latency measurements. On failure it
+    /// throws the underlying error so the caller can decide whether to failover
+    /// or surface the error to the user.
     private func executeStream(
         generation: UInt64,
         text: String,
         memoryGoal: String,
         historyForRequest: [ChatMessage],
-        requestAttachments: [ChatRequestAttachment]
-    ) async throws {
-        guard isGenerationCurrent(generation) else { return }
+        requestAttachments: [ChatRequestAttachment],
+        activeProvider: ModelProvider,
+        activeBaseURL: String,
+        activeModel: String
+    ) async throws -> StreamLatency {
+        guard isGenerationCurrent(generation) else {
+            return StreamLatency(totalMs: 0, timeToFirstTokenMs: nil, didPauseForContext: false,
+                observedOutputTokens: nil,
+                observedTotalTokens: nil,
+                finishReason: nil)
+        }
         let runtimeConfiguration = await modelStore.runtimeConfiguration
         guard let requestBody = try? ChatRequestBuilder(
             conversationId: conversationId,
@@ -638,28 +973,105 @@ final class ChatViewModel: ObservableObject {
 
         await parser.reset()
 
+        let isWatchdogEnabled = modelStore.isStreamingContextWatchdogEnabled
+        if isWatchdogEnabled {
+            let profile = await ModelContextService.shared.profile(
+                for: activeModel,
+                provider: activeProvider,
+                baseURL: activeBaseURL
+            )
+            await contextWatchdog.beginStream(
+                modelProfile: profile,
+                estimatedInputTokens: pendingEstimatedInputTokens,
+                margin: modelStore.contextWindowMargin
+            )
+        }
+
+        let streamStart = Date()
         let stream = try await transport.sendMessage(body: requestBody)
-        guard isCurrentStream(generation) else { return }
+        var timeToFirstTokenMs: Int? = nil
+        guard isCurrentStream(generation) else {
+            if isWatchdogEnabled { await contextWatchdog.endStream() }
+            return StreamLatency(
+                totalMs: Int(max(0, Date().timeIntervalSince(streamStart) * 1000)),
+                timeToFirstTokenMs: nil,
+                didPauseForContext: false,
+                observedOutputTokens: nil,
+                observedTotalTokens: nil,
+                finishReason: nil
+            )
+        }
         await todoPlanner.markExecutionStarted(
             detail: "Response stream opened"
         )
         NSLog("[TriosChat] transport stream opened")
         var receivedTerminalEvent = false
+        var streamFinishReason: String? = nil
+        var observedOutputTokens: Int? = nil
+        var observedTotalTokens: Int? = nil
         for await event in stream {
             guard isCurrentStream(generation) else { break }
+            if timeToFirstTokenMs == nil, event.isFirstToken {
+                timeToFirstTokenMs = Int(max(0, Date().timeIntervalSince(streamStart) * 1000))
+            }
             switch event {
-            case .finish, .abort, .error:
+            case .finish(_, let reason):
                 receivedTerminalEvent = true
+                streamFinishReason = reason
+            case .abort, .error:
+                receivedTerminalEvent = true
+            case .usage(let inputTokens, let outputTokens, let totalTokens):
+                if outputTokens > 0 {
+                    observedOutputTokens = outputTokens
+                }
+                let resolvedTotal = totalTokens > 0
+                    ? totalTokens
+                    : (inputTokens + outputTokens > 0 ? inputTokens + outputTokens : 0)
+                if resolvedTotal > 0 {
+                    observedTotalTokens = resolvedTotal
+                }
             default:
                 break
             }
             NSLog("[TriosChat] SSE event: \(event)")
+            // Apply the delta to messages BEFORE checking the watchdog so the
+            // final delta that triggers the limit is preserved in the partial
+            // response (INV-2, INV-9).
             await handleEvent(
                 event,
                 expectedGeneration: generation
             )
+            let decision = await feedWatchdog(event: event)
+            switch decision {
+            case .ok:
+                break
+            case .approachingLimit(let remaining, let kind):
+                showApproachingContextLimitWarning(remaining: remaining, kind: kind)
+            case .limitReached(let partialText, let suggestedAction):
+                await pauseStreamForContextLimit(
+                    generation: generation,
+                    partialText: partialText,
+                    suggestedAction: suggestedAction
+                )
+                await contextWatchdog.endStream()
+                let tokens = await contextWatchdog.estimatedTokens()
+                return StreamLatency(
+                    totalMs: Int(max(0, Date().timeIntervalSince(streamStart) * 1000)),
+                    timeToFirstTokenMs: timeToFirstTokenMs,
+                    didPauseForContext: true,
+                    observedOutputTokens: tokens.output,
+                    observedTotalTokens: tokens.input + tokens.output,
+                    finishReason: streamFinishReason
+                )
+            }
         }
-        guard isCurrentStream(generation) else { return }
+        let totalMs = Int(max(0, Date().timeIntervalSince(streamStart) * 1000))
+        guard isCurrentStream(generation) else {
+            return StreamLatency(totalMs: totalMs, timeToFirstTokenMs: timeToFirstTokenMs, didPauseForContext: false,
+                observedOutputTokens: nil,
+                observedTotalTokens: nil,
+                finishReason: nil)
+        }
         guard receivedTerminalEvent else {
             finalizeAssistantStreamingState()
             NSLog(
@@ -670,24 +1082,51 @@ final class ChatViewModel: ObservableObject {
                 .streamError(Self.unterminatedStreamError),
                 expectedGeneration: generation
             )
-            return
+            return StreamLatency(totalMs: totalMs, timeToFirstTokenMs: timeToFirstTokenMs, didPauseForContext: false,
+                observedOutputTokens: nil,
+                observedTotalTokens: nil,
+                finishReason: nil)
         }
         await completePendingTurnIfNeeded()
-        guard isGenerationCurrent(generation) else { return }
+        if isWatchdogEnabled { await contextWatchdog.endStream() }
+        guard isGenerationCurrent(generation) else {
+            return StreamLatency(totalMs: totalMs, timeToFirstTokenMs: timeToFirstTokenMs, didPauseForContext: false,
+                observedOutputTokens: nil,
+                observedTotalTokens: nil,
+                finishReason: nil)
+        }
         finalizeEstimatedUsageIfNeeded()
         NSLog("[TriosChat] stream ended normally")
         _ = await stateMachine.transition(to: .idle)
-        guard isGenerationCurrent(generation) else { return }
+        guard isGenerationCurrent(generation) else {
+            return StreamLatency(totalMs: totalMs, timeToFirstTokenMs: timeToFirstTokenMs, didPauseForContext: false,
+                observedOutputTokens: nil,
+                observedTotalTokens: nil,
+                finishReason: nil)
+        }
         let currentState = await stateMachine.currentState()
-        guard isGenerationCurrent(generation) else { return }
+        guard isGenerationCurrent(generation) else {
+            return StreamLatency(totalMs: totalMs, timeToFirstTokenMs: timeToFirstTokenMs, didPauseForContext: false,
+                observedOutputTokens: nil,
+                observedTotalTokens: nil,
+                finishReason: nil)
+        }
         state = currentState
         await saveHistory(expectedGeneration: generation)
+        return StreamLatency(
+            totalMs: totalMs,
+            timeToFirstTokenMs: timeToFirstTokenMs,
+            didPauseForContext: false,
+            observedOutputTokens: observedOutputTokens,
+            observedTotalTokens: observedTotalTokens,
+            finishReason: streamFinishReason
+        )
     }
 
     private func runPreflightHealthCheck(generation: UInt64) async -> String {
         guard isCurrentStream(generation) else { return modelStore.selectedModel }
-        let health = await modelStore.healthStatus(for: modelStore.selectedModel)
-        guard case .unavailable = health else { return modelStore.selectedModel }
+        let result = await modelStore.healthStatus(for: modelStore.selectedModel)
+        guard case .unavailable = result.health else { return modelStore.selectedModel }
 
         let currentModel = modelStore.selectedModel
         guard let healthyModel = await modelStore.selectFirstHealthyModel() else {
@@ -713,6 +1152,12 @@ final class ChatViewModel: ObservableObject {
         finalizeAssistantStreamingState()
         let historySnapshot = captureHistorySnapshot()
         invalidateActiveStream()
+        streamingContextWarning = nil
+        streamingContextPauseLabel = nil
+        streamingContextDecision = nil
+        isStreamPausedForContext = false
+        canContinueOnLargerModel = false
+        canSummarizeStreamSoFar = false
         Task {
             await awaitInitialization()
             await persistHistorySnapshot(historySnapshot)
@@ -735,7 +1180,7 @@ final class ChatViewModel: ObservableObject {
         rebuildCache()
         inputText = userText
         // Re-send the existing user message without appending a duplicate.
-        await sendMessage(appendUser: false)
+        await sendMessage(text: userText, appendUser: false)
     }
 
     func sendFeedback(messageId: UUID, isPositive: Bool) async {
@@ -762,12 +1207,13 @@ final class ChatViewModel: ObservableObject {
         }
 
         let retrier = NetworkRetrier(policy: NetworkRetryPolicy.default)
+        let feedbackRequest = request
         do {
             let (_, response) = try await retrier.execute(
                 url: url,
                 description: "feedback POST \(url.absoluteString)"
             ) {
-                try await URLSession.shared.data(for: request)
+                try await URLSession.shared.data(for: feedbackRequest)
             }
             guard let httpResponse = response as? HTTPURLResponse,
                   (200...299).contains(httpResponse.statusCode) else {
@@ -803,6 +1249,12 @@ final class ChatViewModel: ObservableObject {
                     "Authentication failed for \(modelStore.selectedProvider.displayName).",
                     providerMsg,
                     "Check the API key in TriOS model settings or macOS Keychain."
+                ].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+            case _ where transportError.isContextLengthError:
+                return [
+                    "The conversation is too long for \(modelStore.selectedModel).",
+                    providerMsg,
+                    "Start a new chat or reduce context via `/doctor --context`."
                 ].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
             case _ where transportError.isInvalidModelError:
                 return [
@@ -850,6 +1302,12 @@ final class ChatViewModel: ObservableObject {
         guard beginConversationTransition() else { return }
         let newConversationId = UUID()
         invalidateActiveStream()
+        streamingContextWarning = nil
+        streamingContextPauseLabel = nil
+        streamingContextDecision = nil
+        isStreamPausedForContext = false
+        canContinueOnLargerModel = false
+        canSummarizeStreamSoFar = false
         Task {
             await awaitInitialization()
             await cancelPendingTurn()
@@ -1165,6 +1623,173 @@ final class ChatViewModel: ObservableObject {
             state = currentState
             await saveHistory(expectedGeneration: expectedGeneration)
         }
+    }
+
+    /// Feeds text/reasoning deltas to the context watchdog and returns its
+    /// decision. Non-content events leave the watchdog unchanged.
+    private func feedWatchdog(event: SSEEvent) async -> StreamingContextDecision {
+        switch event {
+        case .textDelta(_, let delta),
+             .reasoningDelta(_, let delta):
+            return await contextWatchdog.append(deltaText: delta)
+        default:
+            return .ok
+        }
+    }
+
+    /// Shows a transient warning when the response approaches a limit.
+    /// The warning is not persisted as a history message (INV-10).
+    private func showApproachingContextLimitWarning(
+        remaining: Int,
+        kind: StreamingContextLimitKind
+    ) {
+        let kindText = kind == .outputTokens ? "output" : "context"
+        streamingContextWarning = "Response is approaching the \(kindText) limit (~\(remaining) tokens remaining)."
+        streamingContextDecision = .approachingLimit(remainingTokens: remaining, kind: kind)
+    }
+
+    /// Pauses the current stream and transitions to a state where the user must
+    /// choose how to continue after a context limit is reached.
+    private func pauseStreamForContextLimit(
+        generation: UInt64,
+        partialText: String,
+        suggestedAction: StreamingContextSuggestedAction
+    ) async {
+        // The caller already verified this generation is current. Do NOT re-check
+        // after invalidating the stream, because invalidateActiveStream bumps
+        // streamGeneration and would make the guard fail (INV-8).
+        invalidateActiveStream()
+        finalizeAssistantStreamingState()
+        await transport.cancel()
+        await completePendingTurnIfNeeded()
+
+        let messageId = latestAssistantMessageId() ?? UUID()
+        _ = await stateMachine.transition(to: .awaitingContextDecision(
+            messageId: messageId,
+            partialText: partialText
+        ))
+        let currentState = await stateMachine.currentState()
+        state = currentState
+        isStreamPausedForContext = true
+        streamingContextDecision = .limitReached(
+            partialText: partialText,
+            suggestedAction: suggestedAction
+        )
+        streamingContextPauseLabel = contextLimitPauseLabel(for: suggestedAction)
+        updateContextActionAvailability(suggestedAction: suggestedAction, partialText: partialText)
+        // Save the paused state directly; do not use saveHistory(expectedGeneration:)
+        // because invalidateActiveStream has bumped streamGeneration.
+        let snapshot = captureHistorySnapshot()
+        await persistHistorySnapshot(snapshot)
+    }
+
+    /// Returns a user-facing label describing which limit was hit.
+    private func contextLimitPauseLabel(
+        for suggestedAction: StreamingContextSuggestedAction
+    ) -> String {
+        switch suggestedAction {
+        case .continueOnLargerModel:
+            return "Response reached the output limit. Continue on a larger model?"
+        case .summarizeSoFar:
+            return "Response reached the context limit. Summarize and continue?"
+        case .stopHere:
+            return "Response reached the context limit."
+        }
+    }
+
+    /// Updates the availability flags for the context-limit action bar based on
+    /// the suggested action and the current partial text.
+    private func updateContextActionAvailability(
+        suggestedAction: StreamingContextSuggestedAction,
+        partialText: String
+    ) {
+        let trimmedPartial = partialText.trimmingCharacters(in: .whitespacesAndNewlines)
+        canSummarizeStreamSoFar = !trimmedPartial.isEmpty && trimmedPartial.count >= 32
+        switch suggestedAction {
+        case .continueOnLargerModel:
+            canContinueOnLargerModel = true
+        default:
+            canContinueOnLargerModel = false
+        }
+    }
+
+    /// Returns the UUID of the most recent assistant message, if any.
+    private func latestAssistantMessageId() -> UUID? {
+        guard let last = messages.last(where: { $0.role == .assistant }) else { return nil }
+        return last.id
+    }
+
+    /// User chose to continue the partial response on a larger model.
+    func continueStreamOnLargerModel(_ candidate: CrossProviderModelCandidate? = nil) async {
+        guard case .awaitingContextDecision = await stateMachine.currentState() else { return }
+        let chosenCandidate: CrossProviderModelCandidate
+        if let candidate = candidate {
+            chosenCandidate = candidate
+        } else {
+            let continuationOutputTokens = await modelStore.effectiveRequestedOutputTokens(
+                for: modelStore.selectedModel,
+                provider: modelStore.selectedProvider,
+                baseURL: modelStore.baseURL
+            ) ?? 1024
+            guard let largerCandidate = await modelStore.selectLargerModelCandidate(
+                estimatedInput: pendingEstimatedInputTokens,
+                outputTokens: continuationOutputTokens
+            ) else { return }
+            chosenCandidate = largerCandidate
+        }
+        modelStore.applyContextRoutedSelection(
+            candidate: chosenCandidate,
+            reason: "continued on larger model \(chosenCandidate.model)"
+        )
+        contextRoutingLabel = "continued on \(chosenCandidate.model)"
+        isStreamPausedForContext = false
+        streamingContextDecision = nil
+        streamingContextWarning = nil
+        canContinueOnLargerModel = false
+        canSummarizeStreamSoFar = false
+        _ = await stateMachine.transition(to: .idle)
+        state = await stateMachine.currentState()
+
+        guard let lastUserMessage = messages.last(where: { $0.role == .user })?.content else { return }
+        await sendMessage(text: lastUserMessage, appendUser: false)
+    }
+
+    /// User chose to summarize the partial response so far.
+    func summarizeStreamSoFar() async {
+        guard case .awaitingContextDecision(let messageId, _) = await stateMachine.currentState() else { return }
+        guard let index = messageCache[messageId] else { return }
+        let partial = messages[index].content
+        let summaryPrompt = "Summarize the following assistant response so far in 2-3 sentences, preserving key facts:\n\n\"\"\"\n\(partial)\n\"\"\""
+
+        isStreamPausedForContext = false
+        streamingContextDecision = nil
+        streamingContextWarning = nil
+        canContinueOnLargerModel = false
+        canSummarizeStreamSoFar = false
+        _ = await stateMachine.transition(to: .idle)
+        state = await stateMachine.currentState()
+
+        await sendMessage(text: summaryPrompt, appendUser: true)
+    }
+
+    /// User chose to keep the partial response and stop.
+    func stopStreamAndKeepPartial() async {
+        guard case .awaitingContextDecision(let messageId, _) = await stateMachine.currentState() else { return }
+        guard let index = messageCache[messageId] else { return }
+        messages[index].isStreaming = false
+        messages[index].content += "\n\n[Response truncated by context limit]"
+        rebuildCache()
+
+        isStreamPausedForContext = false
+        streamingContextDecision = nil
+        streamingContextWarning = nil
+        canContinueOnLargerModel = false
+        canSummarizeStreamSoFar = false
+        _ = await stateMachine.transition(to: .idle)
+        state = await stateMachine.currentState()
+        let historySnapshot = captureHistorySnapshot()
+        await persistHistorySnapshot(historySnapshot)
+        await saveHistory(expectedGeneration: streamGeneration)
     }
 
     func searchMemories(_ query: String) async -> [AgentMemoryMatch] {
