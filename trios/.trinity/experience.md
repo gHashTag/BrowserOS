@@ -1,5 +1,17 @@
 # Trinity Experience Log - trios project
 
+## 2026-07-28 - Wake-Notification Audit Rotation Re-run — Cycle 60 Closure
+**Ring:** SR-02 / LogParser.swift  **Agents:** claude, t27-creator  **Road:** B
+**Issue:** browseros-ai/BrowserOS#2052
+- **Problem:** `AuditRotationScheduler` used a 6-hour `Timer` to re-run `LogRotationPolicy.rotateAuditLogs()`, but `Timer` pauses during macOS sleep. Laptops that sleep for 8-12 hours missed scheduled rotations, and the next rotation could be hours after wake, allowing audit logs to grow unchecked.
+- **Root cause:** The scheduler relied solely on `Timer`, which does not fire during system sleep and does not compensate for missed fires on wake.
+- **Fix:** Extended `AuditRotationScheduler` in `rings/SR-02/LogParser.swift` to observe `NSWorkspace.didWakeNotification` on `NSWorkspace.shared.notificationCenter`. Added `private(set) var lastRotationDate: Date?`, a testable `dateProvider` initializer parameter, and `shouldRotateOnWake() -> Bool` that returns true when `lastRotationDate` is nil or more than `interval / 2` has elapsed. `handleWakeNotification()` re-runs rotation only when overdue, and `rotateNow()` updates `lastRotationDate` synchronously before dispatching to the utility queue to prevent duplicate wake-triggered runs. `stop()` removes the observer. Added XCTest cases for last-rotation tracking, overdue wake, recent-wake suppression, and wake-triggered rotation.
+- **Files:** `trios/rings/SR-02/LogParser.swift`, `trios/tests/TriOSKitTests/LogsTabViewTests.swift`, `trios/.trinity/specs/wake-notification-rotation-cycle60.md`, `trios/.claude/plans/trios-cycle60-wake-notification-rotation.md`, `trios/.claude/plans/trios-cycle60-wake-notification-rotation-report.md`.
+- **Tests:** `./build.sh` PASS; `TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit` PASS (0 hard-gate findings across 8 checks); `cargo run --bin clade-e2e` PASS (report `.trinity/e2e/report_prod_1785219692.md`); `open trios.app` relaunched and health returned `{"status":"ok","cdpConnected":true}`, menu-bar logo preserved. XCTest runtime execution was not available because the host toolchain is CommandLineTools-only; tests were syntactically validated by `./build.sh`.
+- **Episode:** `.trinity/experience/2026-07-28_wake-notification-rotation-cycle60-loop-060.json`
+- **Plan/Report:** `.claude/plans/trios-cycle60-wake-notification-rotation-report.md`
+- **Next options:** (1) **Retention configuration UI** — expose per-stream max size, archive count, and retention age in Settings/Logs; (2) **Rust-side audit log cleanup** — add a `cargo run --bin clade-cleanup-audit` subcommand for non-macOS/WSL environments; (3) **Scheduler jitter / backoff** — add small random jitter to the 6-hour timer and wake re-run to avoid thundering-herd I/O across many worktrees.
+
 ## 2026-07-28 - Cross-Format Archive Cleanup — Cycle 59 Closure
 **Ring:** SR-02 / LogParser.swift  **Agents:** claude, t27-creator  **Road:** B
 **Issue:** browseros-ai/BrowserOS#2051

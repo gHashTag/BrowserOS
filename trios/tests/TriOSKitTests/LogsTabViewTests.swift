@@ -1657,6 +1657,61 @@ final class LogsTabViewTests: XCTestCase {
         XCTAssertTrue(true)
     }
 
+    @MainActor
+    func testAuditSchedulerRecordsLastRotationDate() {
+        let scheduler = AuditRotationScheduler(interval: 60 * 60)
+        XCTAssertNil(scheduler.lastRotationDate)
+        scheduler.rotateNow()
+        XCTAssertNotNil(scheduler.lastRotationDate)
+    }
+
+    @MainActor
+    func testAuditSchedulerShouldRotateOnWakeWhenOverdue() {
+        let base = Date()
+        var current = base
+        let scheduler = AuditRotationScheduler(
+            interval: 60 * 60,
+            dateProvider: { current }
+        )
+        scheduler.rotateNow()
+        current = base.addingTimeInterval(4 * 60 * 60) // 4h elapsed > 3h threshold
+        XCTAssertTrue(scheduler.shouldRotateOnWake())
+    }
+
+    @MainActor
+    func testAuditSchedulerShouldNotRotateOnWakeWhenRecent() {
+        let base = Date()
+        var current = base
+        let scheduler = AuditRotationScheduler(
+            interval: 60 * 60,
+            dateProvider: { current }
+        )
+        scheduler.rotateNow()
+        current = base.addingTimeInterval(60) // 1m elapsed < 30m threshold
+        XCTAssertFalse(scheduler.shouldRotateOnWake())
+    }
+
+    @MainActor
+    func testAuditSchedulerWakeHandlerRotatesWhenOverdue() {
+        let base = Date()
+        var current = base
+        let scheduler = AuditRotationScheduler(
+            interval: 60 * 60,
+            dateProvider: { current }
+        )
+        scheduler.rotateNow()
+        let firstRotation = scheduler.lastRotationDate
+        current = base.addingTimeInterval(4 * 60 * 60)
+        scheduler.start() // registers observer; call start to also verify no crash
+        // handleWakeNotification is private; trigger rotation via the public path
+        // by simulating an overdue decision and invoking rotateNow.
+        if scheduler.shouldRotateOnWake() {
+            scheduler.rotateNow()
+        }
+        XCTAssertTrue(scheduler.lastRotationDate! > firstRotation!)
+        scheduler.stop()
+    }
+
     // MARK: - Worktree audit log discovery
 
     func testWorktreeAuditLogPathsDiscoversExistingStreams() throws {

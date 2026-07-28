@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 // MARK: - Severity levels
 
@@ -870,11 +871,18 @@ final class AuditRotationScheduler {
 
     var isRunning: Bool { timer != nil }
     private var timer: Timer?
+    private var wakeObserver: NSObjectProtocol?
     private let interval: TimeInterval
     private let rotationLock = NSLock()
+    private(set) var lastRotationDate: Date?
+    private let dateProvider: () -> Date
 
-    init(interval: TimeInterval = 6 * 60 * 60) {
+    init(
+        interval: TimeInterval = 6 * 60 * 60,
+        dateProvider: @escaping () -> Date = Date.init
+    ) {
         self.interval = interval
+        self.dateProvider = dateProvider
     }
 
     func start() {
@@ -884,20 +892,44 @@ final class AuditRotationScheduler {
                 self?.rotateNow()
             }
         }
+        wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didWakeNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleWakeNotification()
+            }
+        }
     }
 
     func stop() {
         timer?.invalidate()
         timer = nil
+        if let observer = wakeObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+            wakeObserver = nil
+        }
     }
 
     func rotateNow() {
+        lastRotationDate = dateProvider()
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else { return }
             self.rotationLock.lock()
             defer { self.rotationLock.unlock() }
             LogRotationPolicy.rotateAuditLogs()
         }
+    }
+
+    func shouldRotateOnWake() -> Bool {
+        guard let last = lastRotationDate else { return true }
+        return dateProvider().timeIntervalSince(last) > interval / 2
+    }
+
+    private func handleWakeNotification() {
+        guard shouldRotateOnWake() else { return }
+        rotateNow()
     }
 }
 

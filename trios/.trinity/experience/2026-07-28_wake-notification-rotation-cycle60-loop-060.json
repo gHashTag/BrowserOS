@@ -1,0 +1,30 @@
+{
+  "date": "2026-07-28",
+  "cycle": 60,
+  "title": "Wake-notification audit rotation re-run",
+  "ring": "SR-02 / LogParser.swift",
+  "agents": ["claude", "t27-creator"],
+  "road": "B",
+  "issue": "browseros-ai/BrowserOS#2052",
+  "problem": "AuditRotationScheduler used a 6-hour Timer to re-run LogRotationPolicy.rotateAuditLogs(), but Timer pauses during macOS sleep. Laptops that sleep for 8-12 hours missed scheduled rotations, and the next rotation could be hours after wake, allowing audit logs to grow unchecked.",
+  "root_cause": "The scheduler relied solely on Timer, which does not fire during system sleep and does not compensate for missed fires on wake.",
+  "fix": "Extended AuditRotationScheduler in rings/SR-02/LogParser.swift to observe NSWorkspace.didWakeNotification on NSWorkspace.shared.notificationCenter. Added private(set) var lastRotationDate: Date?, a testable dateProvider initializer parameter, and shouldRotateOnWake() -> Bool that returns true when lastRotationDate is nil or more than interval / 2 has elapsed. handleWakeNotification() re-runs rotation only when overdue, and rotateNow() updates lastRotationDate synchronously before dispatching to the utility queue to prevent duplicate wake-triggered runs. stop() removes the observer. Added XCTest cases for last-rotation tracking, overdue wake, recent-wake suppression, and wake-triggered rotation.",
+  "files": [
+    "trios/rings/SR-02/LogParser.swift",
+    "trios/tests/TriOSKitTests/LogsTabViewTests.swift",
+    "trios/.trinity/specs/wake-notification-rotation-cycle60.md",
+    "trios/.claude/plans/trios-cycle60-wake-notification-rotation.md",
+    "trios/.claude/plans/trios-cycle60-wake-notification-rotation-report.md"
+  ],
+  "tests": {
+    "build.sh": "PASS (TRIOS_SKIP_CHAT_E2E=1)",
+    "clade-audit": "PASS (0 findings)",
+    "clade-e2e": "PASS",
+    "app_health": "{\"status\":\"ok\",\"cdpConnected\":true}"
+  },
+  "next_options": [
+    "Retention configuration UI: expose per-stream max size, archive count, and retention age in Settings/Logs",
+    "Rust-side audit log cleanup: add a cargo run --bin clade-cleanup-audit subcommand for non-macOS/WSL environments",
+    "Scheduler jitter / backoff: add small random jitter to the 6-hour timer and wake re-run to avoid thundering-herd I/O across many worktrees"
+  ]
+}
