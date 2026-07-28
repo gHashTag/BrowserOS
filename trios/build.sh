@@ -9,6 +9,15 @@ SWIFT_OPTIMIZATION="${TRIOS_SWIFT_OPTIMIZATION:--Onone}"
 LOG_DIR="$PROJECT_DIR/.trinity/logs"
 LOG_FILE="$LOG_DIR/build_$(date +%s).log"
 USER_ROOT_DIR="$(cd "$PROJECT_DIR/../.." && pwd)"
+
+# Keep only the 10 most recent per-build logs to prevent unbounded accumulation
+# of build artifacts in the live log directory.
+if command -v find >/dev/null 2>&1; then
+    find "$LOG_DIR" -maxdepth 1 -type f -name 'build_*.log' -print0 \
+        | xargs -0 ls -t 2>/dev/null \
+        | tail -n +11 \
+        | xargs -I {} rm -f {}
+fi
 TRINITY_SOURCE_ROOT="${TRINITY_ROOT:-$USER_ROOT_DIR/trinity}"
 QUEEN_PACKAGE_ROOT="$TRINITY_SOURCE_ROOT/apps/queen"
 

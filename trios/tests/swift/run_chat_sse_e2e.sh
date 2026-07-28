@@ -4,6 +4,10 @@
 
 set -euo pipefail
 
+# The SSE end-to-end test exercises ChatViewModel in-process and must not make
+# real A2A registration calls to the BrowserOS server.
+export TRIOS_SKIP_A2A_STARTUP=1
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 OUTPUT="/tmp/trios_chat_sse_e2e_test"
@@ -12,6 +16,15 @@ LOG_FILE="$LOG_DIR/chat_sse_e2e_build_$(date +%s).log"
 SWIFT_TEST_OPTIMIZATION="${TRIOS_TEST_OPTIMIZATION:--Onone}"
 
 mkdir -p "$LOG_DIR"
+
+# Keep only the 10 most recent chat_sse_e2e_build logs to prevent unbounded
+# accumulation of per-run build artifacts in the live log directory.
+if command -v find >/dev/null 2>&1; then
+    find "$LOG_DIR" -maxdepth 1 -type f -name 'chat_sse_e2e_build_*.log' -print0 \
+        | xargs -0 ls -t 2>/dev/null \
+        | tail -n +11 \
+        | xargs -I {} rm -f {}
+fi
 
 # All rings sources contain the chat protocols, parser, state machine,
 # request builder, and ChatViewModel.
