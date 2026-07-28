@@ -1,0 +1,31 @@
+{
+  "date": "2026-07-28",
+  "cycle": 56,
+  "title": "JSONL audit stream rotation and age-based retention",
+  "ring": "SR-02 / main.swift",
+  "agents": ["claude", "t27-creator"],
+  "road": "B",
+  "issue": "browseros-ai/BrowserOS#2048",
+  "problem": "Cycles 54-55 capped build/test artifact logs, but JSONL audit streams (event_log.jsonl, akashic-log.jsonl, local-auth-audit.jsonl, episodes.jsonl) were not covered. The existing LogRotationPolicy only rotated .log files loaded by the LOGS tab and had no age-based eviction for archives.",
+  "root_cause": "LogRotationPolicy was wired only inside LogParser.loadLogSources() for files shown in the LOGS tab. Audit JSONL streams are not LOGS tab sources, so they never rotated. The policy also lacked maxArchiveAgeSeconds and a daily age trigger.",
+  "fix": "Extended LogRotationPolicy with maxArchiveAgeSeconds and maxAgeBeforeRotationSeconds. Added .audit, .security, and .experience static policies. Added rotateAuditLogs() covering the four known JSONL streams. Added cleanupOldArchives(path:) to delete .archive.<ts>.zlib files older than the policy age. Wired rotateAuditLogs() into AppDelegate.applicationDidFinishLaunching and LogParser.loadLogSources. Updated cleanupArchives(of:) to sort archives by extracted timestamp. Updated LogsTabViewTests with age-rotation and age-cleanup tests.",
+  "files": [
+    "trios/rings/SR-02/LogParser.swift",
+    "trios/main.swift",
+    "trios/tests/TriOSKitTests/LogsTabViewTests.swift",
+    "trios/.trinity/specs/audit-log-rotation-cycle56.md",
+    "trios/.claude/plans/trios-cycle56-audit-log-rotation.md",
+    "trios/.claude/plans/trios-cycle56-audit-log-rotation-report.md"
+  ],
+  "tests": {
+    "build.sh": "PASS",
+    "clade-audit": "PASS (0 findings)",
+    "clade-e2e": "PASS (report .trinity/e2e/report_prod_1785214058.md)",
+    "app_health": "{\"status\":\"ok\",\"cdpConnected\":true}"
+  },
+  "next_options": [
+    "Background audit rotation timer that re-runs every 6-24h",
+    "Extend rotateAuditLogs() to also scan .worktrees/*/trios/.trinity JSONL streams",
+    "Expose per-stream retention knobs in Settings/Logs"
+  ]
+}

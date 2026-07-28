@@ -1,5 +1,17 @@
 # Trinity Experience Log - trios project
 
+## 2026-07-28 - JSONL Audit Stream Rotation and Age-Based Retention — Cycle 56 Closure
+**Ring:** SR-02 / main.swift  **Agents:** claude, t27-creator  **Road:** B
+**Issue:** browseros-ai/BrowserOS#2048
+- **Problem:** Cycles 54-55 capped build/test artifact logs, but JSONL audit streams (`event_log.jsonl`, `akashic-log.jsonl`, `local-auth-audit.jsonl`, `episodes.jsonl`) were not covered. The existing `LogRotationPolicy` only rotated `.log` files loaded by the LOGS tab and had no age-based eviction for archives. `akashic-log.jsonl` was already 112K and growing.
+- **Root cause:** `LogRotationPolicy` was wired only inside `LogParser.loadLogSources()` for files shown in the LOGS tab. Audit JSONL streams are not LOGS tab sources, so they never rotated. The policy also lacked `maxArchiveAgeSeconds` and a daily age trigger.
+- **Fix:** Extended `LogRotationPolicy` with `maxArchiveAgeSeconds` and `maxAgeBeforeRotationSeconds`. Added `.audit` (1MB/5 archives/30 days/daily), `.security` (1MB/10 archives/365 days/daily), and `.experience` (5MB/5 archives/90 days/weekly) static policies. Added `rotateAuditLogs()` covering the four known JSONL audit streams. Added `cleanupOldArchives(path:)` to delete `.archive.<ts>.zlib` files older than the policy age, and updated `cleanupArchives(of:)` to sort archives by extracted timestamp. Wired `rotateAuditLogs()` into `AppDelegate.applicationDidFinishLaunching()` and `LogParser.loadLogSources()`. Updated `LogsTabViewTests` with tests for age-based rotation, age-based archive cleanup, and audit policy constants. All source files remain ASCII-only.
+- **Files:** `trios/rings/SR-02/LogParser.swift`, `trios/main.swift`, `trios/tests/TriOSKitTests/LogsTabViewTests.swift`, `trios/.trinity/specs/audit-log-rotation-cycle56.md`, `trios/.claude/plans/trios-cycle56-audit-log-rotation.md`, `trios/.claude/plans/trios-cycle56-audit-log-rotation-report.md`.
+- **Tests:** `./build.sh` PASS; `TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit` PASS (0 hard-gate findings across 8 checks); `cargo run --bin clade-e2e` PASS (report `.trinity/e2e/report_prod_1785214058.md`); `open trios.app` relaunched and health returned `{"status":"ok","cdpConnected":true}`, menu-bar logo preserved.
+- **Episode:** `.trinity/experience/2026-07-28_audit-log-rotation-cycle56-loop-056.json`
+- **Plan/Report:** `.claude/plans/trios-cycle56-audit-log-rotation-report.md`
+- **Next options:** (1) **Background audit rotation timer** — convert `rotateAuditLogs()` into an actor that re-runs every 6-24h for truly proactive cleanup; (2) **Worktree audit cleanup** — extend `rotateAuditLogs()` to also scan `.worktrees/*/trios/.trinity` JSONL streams; (3) **Retention configuration UI** — expose per-stream retention knobs in Settings/Logs.
+
 ## 2026-07-28 - Worktree Log Cleanup and Strict Artifact Retention — Cycle 55 Closure
 **Ring:** RUST-01 / scripts  **Agents:** claude  **Road:** B
 **Issue:** browseros-ai/BrowserOS#2047
