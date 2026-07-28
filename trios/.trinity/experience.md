@@ -1,5 +1,17 @@
 # Trinity Experience Log - trios project
 
+## 2026-07-28 - Background Audit Rotation Scheduler — Cycle 57 Closure
+**Ring:** SR-02 / main.swift  **Agents:** claude, t27-creator  **Road:** B
+**Issue:** browseros-ai/BrowserOS#2049
+- **Problem:** Cycle 6 rotated JSONL audit streams, but rotation only ran on app launch or LOGS-tab open. Long-running trios processes could grow `event_log.jsonl`, `akashic-log.jsonl`, `local-auth-audit.jsonl`, and `episodes.jsonl` for days or weeks.
+- **Root cause:** There was no background scheduler to re-run `LogRotationPolicy.rotateAuditLogs()` while the app was alive.
+- **Fix:** Added `AuditRotationScheduler` in `rings/SR-02/LogParser.swift`. It is a `@MainActor` singleton with a configurable 6-hour `Timer`, dispatches rotation to a `DispatchQueue.global(qos: .utility)` queue, and uses an `NSLock` to prevent overlapping runs. Wired `AuditRotationScheduler.shared.start()` in `AppDelegate.applicationDidFinishLaunching()` and `shared.stop()` in `applicationWillTerminate(_:)`. Added XCTest cases for start/stop lifecycle and repeated `rotateNow()` calls.
+- **Files:** `trios/rings/SR-02/LogParser.swift`, `trios/main.swift`, `trios/tests/TriOSKitTests/LogsTabViewTests.swift`, `trios/.trinity/specs/background-audit-rotation-cycle57.md`, `trios/.claude/plans/trios-cycle57-background-audit-rotation.md`, `trios/.claude/plans/trios-cycle57-background-audit-rotation-report.md`.
+- **Tests:** `./build.sh` PASS (with `TRIOS_SKIP_CHAT_E2E=1`); `TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit` PASS (0 hard-gate findings across 8 checks); `cargo run --bin clade-e2e` PASS (report `.trinity/e2e/report_prod_1785215729.md`); `open trios.app` relaunched and health returned `{"status":"ok","cdpConnected":true}`, menu-bar logo preserved.
+- **Episode:** `.trinity/experience/2026-07-28_background-audit-rotation-cycle57-loop-057.json`
+- **Plan/Report:** `.claude/plans/trios-cycle57-background-audit-rotation-report.md`
+- **Next options:** (1) **Worktree audit cleanup** — extend `rotateAuditLogs()` / `AuditRotationScheduler` to also rotate `.worktrees/*/trios/.trinity/*.jsonl` streams; (2) **Retention configuration UI** — expose per-stream max size, archive count, and retention age in Settings/Logs; (3) **Wake-notification re-run** — subscribe to `NSWorkspace.didWakeNotification` and re-run rotation after long sleeps.
+
 ## 2026-07-28 - JSONL Audit Stream Rotation and Age-Based Retention — Cycle 56 Closure
 **Ring:** SR-02 / main.swift  **Agents:** claude, t27-creator  **Road:** B
 **Issue:** browseros-ai/BrowserOS#2048

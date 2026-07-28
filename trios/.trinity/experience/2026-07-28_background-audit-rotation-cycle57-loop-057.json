@@ -1,0 +1,31 @@
+{
+  "date": "2026-07-28",
+  "cycle": 57,
+  "title": "Background audit rotation scheduler",
+  "ring": "SR-02 / main.swift",
+  "agents": ["claude", "t27-creator"],
+  "road": "B",
+  "issue": "browseros-ai/BrowserOS#2049",
+  "problem": "Cycle 56 rotated JSONL audit streams, but rotation only ran on app launch or LOGS-tab open. Long-running trios processes could grow event_log.jsonl, akashic-log.jsonl, local-auth-audit.jsonl, and episodes.jsonl for days or weeks.",
+  "root_cause": "There was no background scheduler to re-run LogRotationPolicy.rotateAuditLogs() while the app was alive.",
+  "fix": "Added AuditRotationScheduler in rings/SR-02/LogParser.swift. It is a @MainActor singleton with a configurable 6-hour Timer, dispatches rotation to DispatchQueue.global(qos: .utility).async, and uses an NSLock to prevent overlapping runs. Wired AuditRotationScheduler.shared.start() in AppDelegate.applicationDidFinishLaunching() and shared.stop() in applicationWillTerminate(_:). Added XCTest cases for start/stop lifecycle and repeated rotateNow() calls.",
+  "files": [
+    "trios/rings/SR-02/LogParser.swift",
+    "trios/main.swift",
+    "trios/tests/TriOSKitTests/LogsTabViewTests.swift",
+    "trios/.trinity/specs/background-audit-rotation-cycle57.md",
+    "trios/.claude/plans/trios-cycle57-background-audit-rotation.md",
+    "trios/.claude/plans/trios-cycle57-background-audit-rotation-report.md"
+  ],
+  "tests": {
+    "build.sh": "PASS (TRIOS_SKIP_CHAT_E2E=1)",
+    "clade-audit": "PASS (0 findings)",
+    "clade-e2e": "PASS",
+    "app_health": "{\"status\":\"ok\",\"cdpConnected\":true}"
+  },
+  "next_options": [
+    "Worktree audit cleanup: extend rotateAuditLogs() / AuditRotationScheduler to also rotate .worktrees/*/trios/.trinity/*.jsonl streams",
+    "Retention configuration UI: expose per-stream max size, archive count, and retention age in Settings/Logs",
+    "Wake-notification re-run: subscribe to NSWorkspace.didWakeNotification and re-run rotation after long sleeps"
+  ]
+}
