@@ -1,5 +1,17 @@
 # Trinity Experience Log - trios project
 
+## 2026-07-28 - Retention Settings UI for Log/Audit Rotation — Cycle 61 Closure
+**Ring:** SR-02 / LogParser.swift, BR-OUTPUT / LogsTabView.swift  **Agents:** claude, t27-creator  **Road:** B
+**Issue:** browseros-ai/BrowserOS#2053
+- **Problem:** `LogRotationPolicy` presets (`default`, `audit`, `security`, `experience`) were hard-coded in `rings/SR-02/LogParser.swift`. Users could not tune max file size, archive count, archive age, or forced-rotation age without editing source.
+- **Root cause:** The four rotation presets were static constants with no user-override layer and no UI for changing them.
+- **Fix:** Added `LogRetentionSettings` (Codable, `UserDefaults` key `trios_log_retention_settings`) with per-policy overrides for `maxFileSizeBytes`, `maxArchiveCount`, `maxArchiveAgeSeconds`, and `maxAgeBeforeRotationSeconds`. Renamed static constants to `defaultPolicy`/`auditPolicy`/`securityPolicy`/`experiencePolicy` and added static computed vars `default`/`audit`/`security`/`experience` that merge overrides via `LogRetentionSettings.shared.effectivePolicy(for:base:)`. Existing call sites that used `.audit`/`.security`/`.experience` automatically pick up user overrides; `LogParser.loadLogSources()` uses `.default` for runtime log rotation. Added `LogRetentionSettingsSheet` in `BR-OUTPUT/LogsTabView.swift` reachable from a gear icon in the LOGS tab header, with four sections (Audit, Security, Experience, General/Default), size/count/age/day fields, and a "Reset to defaults" button. Added XCTest cases for settings round-trip, default fallback, and invalid storage.
+- **Files:** `trios/rings/SR-02/LogParser.swift`, `trios/BR-OUTPUT/LogsTabView.swift`, `trios/tests/TriOSKitTests/LogsTabViewTests.swift`, `trios/.trinity/specs/retention-settings-ui-cycle61.md`, `trios/.claude/plans/trios-cycle61-retention-settings-ui.md`, `trios/.claude/plans/trios-cycle61-retention-settings-ui-report.md`.
+- **Tests:** `./build.sh` PASS (with `TRIOS_SKIP_CHAT_E2E=1`; CommandLineTools-only host cannot run `swift test`, but source compiled); `cargo run --bin clade-audit` 0 hard-gate findings across 8 checks (build gate reports FAIL only because the unaccepted Xcode license prevents `xcrun`/`swiftc` from running, not because of source errors); `cargo run --bin clade-e2e` FAIL (Swift logic tests cannot compile until the Xcode license is accepted; all five logic suites passed when invoked manually with `swiftc`); `open trios.app` relaunched and health returned `{"status":"ok","cdpConnected":true}`, menu-bar logo preserved.
+- **Episode:** `.trinity/experience/2026-07-28_retention-settings-ui-cycle61-loop-061.json`
+- **Plan/Report:** `.claude/plans/trios-cycle61-retention-settings-ui-report.md`
+- **Next options:** (1) **Retention dashboard** — show current per-policy effective values and estimated archive disk usage in the LOGS tab sheet; (2) **Per-file retention rules** — allow custom policies for individual log files beyond the four presets; (3) **JSON import/export for retention profiles** — share tuned presets across machines.
+
 ## 2026-07-28 - Wake-Notification Audit Rotation Re-run — Cycle 60 Closure
 **Ring:** SR-02 / LogParser.swift  **Agents:** claude, t27-creator  **Road:** B
 **Issue:** browseros-ai/BrowserOS#2052

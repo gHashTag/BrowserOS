@@ -1,3 +1,6 @@
+// AGENT-V-WAIVER: https://github.com/browseros-ai/BrowserOS/issues/2053
+// Reason: Cycle 61 retention settings sheet extends LOGS tab UI.
+// Follow-up: seal against .trinity/specs/retention-settings-ui-cycle61.md.
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -74,6 +77,9 @@ struct LogsTabView: View {
     @State private var pendingRulePreview: LogNoiseRule?
     @State private var rulePreviewCount: Int = 0
     @State private var showArtifactLogs: Bool = UserDefaults.standard.bool(forKey: "trios_logs_show_artifact_logs")
+    @State private var showingRetentionSheet = false
+    @State private var focusedSubsystems: Set<TriosLogSubsystem> = []
+    @ObservedObject private var logsNavigator = TriosLogsNavigator.shared
 
     private let maxLinesPerSource = 500
     private let liveInterval: UInt64 = 5_000_000_000
@@ -85,6 +91,7 @@ struct LogsTabView: View {
             VStack(alignment: .leading, spacing: 18) {
                 header
                 insightsBar
+                subsystemFilterBar
                 sourceFilterBar
                 sourceCards
                 timelineModePicker
@@ -100,10 +107,17 @@ struct LogsTabView: View {
         .background(Color.grokBackground.ignoresSafeArea())
         .onAppear {
             showArtifactLogs = UserDefaults.standard.bool(forKey: "trios_logs_show_artifact_logs")
+            focusedSubsystems = logsNavigator.focusedSubsystems
             loadAll()
             loadSavedSearches()
             loadRecentSearches()
             loadNoiseProfile()
+        }
+        .onChange(of: logsNavigator.openRequest) {
+            // A tab asked to see its own slice; adopt that focus and refresh so
+            // the newest in-app records are already on screen.
+            focusedSubsystems = logsNavigator.focusedSubsystems
+            loadAll()
         }
         .onChange(of: showArtifactLogs) { _, isOn in
             UserDefaults.standard.set(isOn, forKey: "trios_logs_show_artifact_logs")
@@ -152,6 +166,9 @@ struct LogsTabView: View {
                 }
             )
         }
+        .sheet(isPresented: $showingRetentionSheet) {
+            LogRetentionSettingsSheet()
+        }
         .onChange(of: isLive) { _, isOn in
             if isOn {
                 startLive()
@@ -186,6 +203,14 @@ struct LogsTabView: View {
                 }
                 .buttonStyle(.borderless)
                 .disabled(isLoading)
+                Button {
+                    showingRetentionSheet = true
+                } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 12, weight: .semibold))
+                }
+                .buttonStyle(.borderless)
+                .help("Retention settings")
             }
             HStack(spacing: 6) {
                 Text("Runtime logs from .trinity and app services.")
@@ -1146,13 +1171,75 @@ struct LogsTabView: View {
         }
     }
 
+    /// Subsystem chips for the in-app event stream. Tapping one narrows every
+    /// source at once, so a tab-scoped view and the full stream stay the same view.
+    private var subsystemFilterBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("Subsystem")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.grokMuted)
+                if !focusedSubsystems.isEmpty {
+                    Button("Show all") {
+                        focusedSubsystems = []
+                        logsNavigator.clearFocus()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.blue)
+                }
+            }
+            LogsFlowLayout(spacing: 6) {
+                ForEach(TriosLogSubsystem.allCases, id: \.rawValue) { subsystem in
+                    let isOn = focusedSubsystems.contains(subsystem)
+                    Button {
+                        if isOn {
+                            focusedSubsystems.remove(subsystem)
+                        } else {
+                            focusedSubsystems.insert(subsystem)
+                        }
+                    } label: {
+                        Text(subsystem.displayName)
+                            .font(.system(size: 10, weight: .medium))
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule().fill(isOn ? Color.blue.opacity(0.22) : Color.grokSurface)
+                            )
+                            .overlay(
+                                Capsule().stroke(isOn ? Color.blue.opacity(0.6) : Color.grokBorder)
+                            )
+                            .foregroundColor(isOn ? .blue : .grokMuted)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
     private func filteredLines(for source: LogSource) -> [ParsedLogLine] {
         let base = deduplicate ? source.lines : source.rawLines
-        let levelFiltered = base.filter { $0.level.rawValue >= minLevel.rawValue }
+        let subsystemFiltered = LogsTabView.applySubsystemFilter(base, subsystems: focusedSubsystems)
+        let levelFiltered = subsystemFiltered.filter { $0.level.rawValue >= minLevel.rawValue }
         let noiseFiltered = LogParser.filterNoise(levelFiltered, isOn: suppressNoise, profile: noiseProfile)
         guard !searchText.isEmpty else { return noiseFiltered }
         let tokens = LogParser.parseQuery(searchText)
         return noiseFiltered.filter { LogParser.matchesQuery($0, tokens: tokens, source: source) }
+    }
+
+    /// Narrows lines to the given subsystems. Lines without a subsystem tag come
+    /// from server-side sources; they are kept, because hiding them would make a
+    /// focused view silently lie about what happened.
+    static func applySubsystemFilter(
+        _ lines: [ParsedLogLine],
+        subsystems: Set<TriosLogSubsystem>
+    ) -> [ParsedLogLine] {
+        guard !subsystems.isEmpty else { return lines }
+        let wanted = Set(subsystems.map(\.rawValue))
+        return lines.filter { line in
+            guard let tag = line.metadata[LogParser.triosSubsystemMetadataKey] else { return true }
+            return wanted.contains(tag)
+        }
     }
 
     private func copyFilteredLines(_ source: LogSource) {
@@ -1800,6 +1887,234 @@ struct NoiseProfileSheet: View {
     }
 
 }
+
+// MARK: - Retention settings sheet
+
+struct LogRetentionSettingsSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var overrides: [String: LogRetentionSettings.PolicyOverride] = LogRetentionSettings.shared.overrides
+
+    private let policyNames = ["audit", "security", "experience", "default"]
+    private let policyLabels: [String: String] = [
+        "audit": "Audit",
+        "security": "Security",
+        "experience": "Experience",
+        "default": "General / Default"
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Text("Log retention")
+                    .font(.system(size: 16, weight: .bold))
+                    .foregroundColor(.grokText)
+                Spacer()
+                Button("Reset to defaults") {
+                    resetToDefaults()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                Button("Done") {
+                    dismiss()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            }
+            Text("Overrides merge with built-in defaults. Leave a field empty to keep the default.")
+                .font(.system(size: 11))
+                .foregroundColor(.grokMuted)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 14) {
+                    ForEach(policyNames, id: \.self) { name in
+                        policySection(name: name, label: policyLabels[name] ?? name)
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 420, idealWidth: 520, maxWidth: .infinity)
+        .background(Color.grokBackground.ignoresSafeArea())
+    }
+
+    private func policySection(name: String, label: String) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(label)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.grokText)
+            OptionalSizeField(title: "Max file size (MB)", bytes: overrideBinding(for: name).maxFileSizeBytes)
+            OptionalIntField(title: "Max archive count", value: overrideBinding(for: name).maxArchiveCount)
+            OptionalDaysField(title: "Archive age (days)", seconds: overrideBinding(for: name).maxArchiveAgeSeconds)
+            OptionalDaysField(title: "Rotate after (days)", seconds: overrideBinding(for: name).maxAgeBeforeRotationSeconds)
+        }
+        .padding(10)
+        .background(Color.grokSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.grokBorder)
+        }
+    }
+
+    private func overrideBinding(for name: String) -> OverrideBindings {
+        OverrideBindings(
+            maxFileSizeBytes: Binding(
+                get: { overrides[name]?.maxFileSizeBytes },
+                set: { newValue in
+                    var override = overrides[name] ?? LogRetentionSettings.PolicyOverride()
+                    override.maxFileSizeBytes = newValue
+                    overrides[name] = override
+                    saveOverride(for: name)
+                }
+            ),
+            maxArchiveCount: Binding(
+                get: { overrides[name]?.maxArchiveCount },
+                set: { newValue in
+                    var override = overrides[name] ?? LogRetentionSettings.PolicyOverride()
+                    override.maxArchiveCount = newValue
+                    overrides[name] = override
+                    saveOverride(for: name)
+                }
+            ),
+            maxArchiveAgeSeconds: Binding(
+                get: { overrides[name]?.maxArchiveAgeSeconds },
+                set: { newValue in
+                    var override = overrides[name] ?? LogRetentionSettings.PolicyOverride()
+                    override.maxArchiveAgeSeconds = newValue
+                    overrides[name] = override
+                    saveOverride(for: name)
+                }
+            ),
+            maxAgeBeforeRotationSeconds: Binding(
+                get: { overrides[name]?.maxAgeBeforeRotationSeconds },
+                set: { newValue in
+                    var override = overrides[name] ?? LogRetentionSettings.PolicyOverride()
+                    override.maxAgeBeforeRotationSeconds = newValue
+                    overrides[name] = override
+                    saveOverride(for: name)
+                }
+            )
+        )
+    }
+
+    private struct OverrideBindings {
+        let maxFileSizeBytes: Binding<UInt64?>
+        let maxArchiveCount: Binding<Int?>
+        let maxArchiveAgeSeconds: Binding<TimeInterval?>
+        let maxAgeBeforeRotationSeconds: Binding<TimeInterval?>
+    }
+
+    private func basePolicy(for name: String) -> LogRotationPolicy {
+        switch name {
+        case "default": return LogRotationPolicy.defaultPolicy
+        case "audit": return LogRotationPolicy.auditPolicy
+        case "security": return LogRotationPolicy.securityPolicy
+        case "experience": return LogRotationPolicy.experiencePolicy
+        default: return LogRotationPolicy.defaultPolicy
+        }
+    }
+
+    private func saveOverride(for name: String) {
+        let base = basePolicy(for: name)
+        let override = overrides[name] ?? LogRetentionSettings.PolicyOverride()
+        let policy = LogRotationPolicy(
+            maxFileSizeBytes: override.maxFileSizeBytes ?? base.maxFileSizeBytes,
+            maxArchiveCount: override.maxArchiveCount ?? base.maxArchiveCount,
+            keepTailLines: base.keepTailLines,
+            maxArchiveAgeSeconds: override.maxArchiveAgeSeconds ?? base.maxArchiveAgeSeconds,
+            maxAgeBeforeRotationSeconds: override.maxAgeBeforeRotationSeconds ?? base.maxAgeBeforeRotationSeconds
+        )
+        LogRetentionSettings.shared.setOverride(policy, for: name)
+    }
+
+    private func resetToDefaults() {
+        for name in policyNames {
+            LogRetentionSettings.shared.setOverride(nil, for: name)
+        }
+        overrides = LogRetentionSettings.shared.overrides
+    }
+}
+
+private struct OptionalSizeField: View {
+    let title: String
+    @Binding var bytes: UInt64?
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 11))
+                .foregroundColor(.grokText)
+                .frame(width: 150, alignment: .leading)
+            TextField("MB", text: Binding(
+                get: { bytes.map { String(Double($0) / 1_048_576.0) } ?? "" },
+                set: { newValue in
+                    if let mb = Double(newValue), mb >= 0 {
+                        bytes = UInt64(mb * 1_048_576.0)
+                    } else {
+                        bytes = nil
+                    }
+                }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 12))
+            .frame(width: 80)
+        }
+    }
+}
+
+private struct OptionalIntField: View {
+    let title: String
+    @Binding var value: Int?
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 11))
+                .foregroundColor(.grokText)
+                .frame(width: 150, alignment: .leading)
+            TextField("count", text: Binding(
+                get: { value.map { String($0) } ?? "" },
+                set: { newValue in
+                    if let parsed = Int(newValue), parsed >= 0 {
+                        value = parsed
+                    } else {
+                        value = nil
+                    }
+                }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 12))
+            .frame(width: 80)
+        }
+    }
+}
+
+private struct OptionalDaysField: View {
+    let title: String
+    @Binding var seconds: TimeInterval?
+
+    var body: some View {
+        HStack {
+            Text(title)
+                .font(.system(size: 11))
+                .foregroundColor(.grokText)
+                .frame(width: 150, alignment: .leading)
+            TextField("days", text: Binding(
+                get: { seconds.map { String($0 / (24 * 60 * 60)) } ?? "" },
+                set: { newValue in
+                    if let days = Double(newValue), days >= 0 {
+                        seconds = days * 24 * 60 * 60
+                    } else {
+                        seconds = nil
+                    }
+                }
+            ))
+            .textFieldStyle(.roundedBorder)
+            .font(.system(size: 12))
+            .frame(width: 80)
+        }
+    }
+}
+
 
 // MARK: - Flow layout for source chips
 

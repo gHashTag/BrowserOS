@@ -29,6 +29,8 @@ enum LogParserKind: String, CaseIterable, Equatable, Hashable, Sendable {
     case eventLog
     case pinoJSON
     case plainText
+    /// Newline delimited JSON emitted by `TriosLogBus` - the in-app event stream.
+    case triosApp
 }
 
 // MARK: - Source category
@@ -674,7 +676,7 @@ struct LogRotationPolicy: Sendable {
     let maxArchiveAgeSeconds: TimeInterval?
     let maxAgeBeforeRotationSeconds: TimeInterval?
 
-    static let `default` = LogRotationPolicy(
+    static let defaultPolicy = LogRotationPolicy(
         maxFileSizeBytes: 1_048_576, // 1 MB
         maxArchiveCount: 5,
         keepTailLines: 500,
@@ -682,7 +684,7 @@ struct LogRotationPolicy: Sendable {
         maxAgeBeforeRotationSeconds: nil
     )
 
-    static let audit = LogRotationPolicy(
+    static let auditPolicy = LogRotationPolicy(
         maxFileSizeBytes: 1_048_576,
         maxArchiveCount: 5,
         keepTailLines: 500,
@@ -690,7 +692,7 @@ struct LogRotationPolicy: Sendable {
         maxAgeBeforeRotationSeconds: 24 * 60 * 60
     )
 
-    static let security = LogRotationPolicy(
+    static let securityPolicy = LogRotationPolicy(
         maxFileSizeBytes: 1_048_576,
         maxArchiveCount: 10,
         keepTailLines: 500,
@@ -698,13 +700,19 @@ struct LogRotationPolicy: Sendable {
         maxAgeBeforeRotationSeconds: 24 * 60 * 60
     )
 
-    static let experience = LogRotationPolicy(
+    static let experiencePolicy = LogRotationPolicy(
         maxFileSizeBytes: 5_242_880,
         maxArchiveCount: 5,
         keepTailLines: 500,
         maxArchiveAgeSeconds: 90 * 24 * 60 * 60,
         maxAgeBeforeRotationSeconds: 7 * 24 * 60 * 60
     )
+
+    // User-tunable overrides persisted to UserDefaults.
+    static var `default`: LogRotationPolicy { LogRetentionSettings.shared.effectivePolicy(for: "default", base: defaultPolicy) }
+    static var audit: LogRotationPolicy { LogRetentionSettings.shared.effectivePolicy(for: "audit", base: auditPolicy) }
+    static var security: LogRotationPolicy { LogRetentionSettings.shared.effectivePolicy(for: "security", base: securityPolicy) }
+    static var experience: LogRotationPolicy { LogRetentionSettings.shared.effectivePolicy(for: "experience", base: experiencePolicy) }
 
     func rotateIfNeeded(path: String) {
         guard FileManager.default.fileExists(atPath: path) else { return }
@@ -856,10 +864,93 @@ struct LogRotationPolicy: Sendable {
             ("\(ProjectPaths.trinity)/events/akashic-log.jsonl", .audit),
             ("\(ProjectPaths.trinity)/state/local-auth-audit.jsonl", .security),
             ("\(ProjectPaths.trinity)/experience/episodes.jsonl", .experience),
+            (TriosLogBus.defaultPath, .audit),
         ] + worktreeAuditLogPaths(repoRoot: repoRoot)
         for item in policies {
             item.policy.rotateIfNeeded(path: item.path)
         }
+    }
+}
+
+// MARK: - Retention settings
+
+struct LogRetentionSettings: Codable {
+    struct PolicyOverride: Codable {
+        var maxFileSizeBytes: UInt64?
+        var maxArchiveCount: Int?
+        var keepTailLines: Int?
+        var maxArchiveAgeSeconds: TimeInterval?
+        var maxAgeBeforeRotationSeconds: TimeInterval?
+    }
+
+    var overrides: [String: PolicyOverride]
+
+    static var shared = LogRetentionSettings()
+    private static let userDefaultsKey = "trios_log_retention_settings"
+
+    init() {
+        if let data = UserDefaults.standard.data(forKey: LogRetentionSettings.userDefaultsKey),
+           let decoded = try? JSONDecoder().decode(LogRetentionSettings.self, from: data) {
+            self.overrides = decoded.overrides
+        } else {
+            self.overrides = [:]
+        }
+    }
+
+    func override(for name: String) -> LogRotationPolicy? {
+        guard let override = overrides[name] else { return nil }
+        let base = basePolicy(for: name)
+        return mergedPolicy(base: base, override: override)
+    }
+
+    func effectivePolicy(for name: String, base: LogRotationPolicy) -> LogRotationPolicy {
+        guard let override = overrides[name] else { return base }
+        return mergedPolicy(base: base, override: override)
+    }
+
+    mutating func setOverride(_ policy: LogRotationPolicy?, for name: String) {
+        if let policy = policy {
+            let base = basePolicy(for: name)
+            var override = PolicyOverride()
+            if policy.maxFileSizeBytes != base.maxFileSizeBytes { override.maxFileSizeBytes = policy.maxFileSizeBytes }
+            if policy.maxArchiveCount != base.maxArchiveCount { override.maxArchiveCount = policy.maxArchiveCount }
+            if policy.keepTailLines != base.keepTailLines { override.keepTailLines = policy.keepTailLines }
+            if policy.maxArchiveAgeSeconds != base.maxArchiveAgeSeconds { override.maxArchiveAgeSeconds = policy.maxArchiveAgeSeconds }
+            if policy.maxAgeBeforeRotationSeconds != base.maxAgeBeforeRotationSeconds { override.maxAgeBeforeRotationSeconds = policy.maxAgeBeforeRotationSeconds }
+            if override.maxFileSizeBytes == nil && override.maxArchiveCount == nil && override.keepTailLines == nil && override.maxArchiveAgeSeconds == nil && override.maxAgeBeforeRotationSeconds == nil {
+                overrides[name] = nil
+            } else {
+                overrides[name] = override
+            }
+        } else {
+            overrides[name] = nil
+        }
+        save()
+    }
+
+    private func basePolicy(for name: String) -> LogRotationPolicy {
+        switch name {
+        case "default": return LogRotationPolicy.defaultPolicy
+        case "audit": return LogRotationPolicy.auditPolicy
+        case "security": return LogRotationPolicy.securityPolicy
+        case "experience": return LogRotationPolicy.experiencePolicy
+        default: return LogRotationPolicy.defaultPolicy
+        }
+    }
+
+    private func mergedPolicy(base: LogRotationPolicy, override: PolicyOverride) -> LogRotationPolicy {
+        LogRotationPolicy(
+            maxFileSizeBytes: override.maxFileSizeBytes ?? base.maxFileSizeBytes,
+            maxArchiveCount: override.maxArchiveCount ?? base.maxArchiveCount,
+            keepTailLines: override.keepTailLines ?? base.keepTailLines,
+            maxArchiveAgeSeconds: override.maxArchiveAgeSeconds ?? base.maxArchiveAgeSeconds,
+            maxAgeBeforeRotationSeconds: override.maxAgeBeforeRotationSeconds ?? base.maxAgeBeforeRotationSeconds
+        )
+    }
+
+    private func save() {
+        guard let data = try? JSONEncoder().encode(self) else { return }
+        UserDefaults.standard.set(data, forKey: LogRetentionSettings.userDefaultsKey)
     }
 }
 
@@ -1008,6 +1099,7 @@ enum LogParser {
         case .eventLog: return parseEventLogLine
         case .pinoJSON: return parsePinoJSONLine
         case .plainText: return parsePlainTextLine
+        case .triosApp: return parseTriosAppLine
         }
     }
 
@@ -1047,6 +1139,19 @@ enum LogParser {
             category: .runtime,
             parser: parseEventLogLine,
             parserKind: .eventLog
+        ))
+
+        // The in-app event stream. Listed first after the Trinity event log so the
+        // app's own view of a failure sits next to the system's.
+        loaded.append(parseSource(
+            id: TriosAppLogSourceID.value,
+            name: "TriOS App Events",
+            path: TriosLogBus.defaultPath,
+            icon: "app.badge.checkmark",
+            tintName: "green",
+            category: .runtime,
+            parser: parseTriosAppLine,
+            parserKind: .triosApp
         ))
 
         loaded.append(parseSource(
@@ -1654,6 +1759,65 @@ enum LogParser {
             )
         }
         return fallbackLine(line, sourceID: sourceID)
+    }
+
+    /// Parses one `TriosLogBus` record. The bus writes its own schema, so this
+    /// never has to guess at severity or origin the way the plain-text parser does.
+    static func parseTriosAppLine(_ line: String, sourceID: String) -> ParsedLogLine {
+        guard let data = line.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return fallbackLine(line, sourceID: sourceID)
+        }
+        let level = triosAppLevel(from: json)
+        let subsystem = json["subsystem"] as? String
+        let event = json["event"] as? String
+        let message = json["message"] as? String ?? line
+        var metadata: [String: String] = [:]
+        if let subsystem {
+            metadata[triosSubsystemMetadataKey] = subsystem
+        }
+        if let attributes = json["attrs"] as? [String: Any] {
+            for (key, value) in attributes {
+                metadata[key] = String(describing: value)
+            }
+        }
+        let details = metadata.isEmpty
+            ? nil
+            : metadata
+                .sorted { $0.key < $1.key }
+                .map { "\($0.key)=\($0.value)" }
+                .joined(separator: " ")
+        return ParsedLogLine(
+            rawLine: line,
+            timestamp: json["ts"] as? String,
+            level: level,
+            sourceID: sourceID,
+            message: message,
+            event: event,
+            details: details,
+            metadata: metadata,
+            duplicateCount: 1
+        )
+    }
+
+    /// Metadata key carrying the emitting subsystem, used for per-tab filtering.
+    static let triosSubsystemMetadataKey = "subsystem"
+
+    private static func triosAppLevel(from json: [String: Any]) -> LogLevel {
+        if let number = json["severity_number"] as? Int {
+            switch number {
+            case ..<9: return .debug
+            case 9..<13: return .info
+            case 13..<17: return .warn
+            default: return .error
+            }
+        }
+        switch (json["level"] as? String)?.lowercased() {
+        case "debug": return .debug
+        case "warn": return .warn
+        case "error": return .error
+        default: return .info
+        }
     }
 
     static func parsePlainTextLine(_ line: String, sourceID: String) -> ParsedLogLine {

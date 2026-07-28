@@ -1761,6 +1761,80 @@ final class LogsTabViewTests: XCTestCase {
         XCTAssertTrue(paths.isEmpty)
     }
 
+    // MARK: - Retention settings
+
+    @MainActor
+    func testLogRetentionSettingsRoundTrip() throws {
+        let defaults = UserDefaults.standard
+        let key = "trios_log_retention_settings"
+        let previous = defaults.data(forKey: key)
+        defer {
+            if let previous = previous {
+                defaults.set(previous, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+            LogRetentionSettings.shared.overrides = [:]
+        }
+
+        var settings = LogRetentionSettings()
+        let override = LogRotationPolicy(
+            maxFileSizeBytes: 2_097_152,
+            maxArchiveCount: 3,
+            keepTailLines: 100,
+            maxArchiveAgeSeconds: 120,
+            maxAgeBeforeRotationSeconds: 60
+        )
+        settings.setOverride(override, for: "audit")
+
+        let reloaded = LogRetentionSettings()
+        let effective = reloaded.effectivePolicy(for: "audit", base: LogRotationPolicy.auditPolicy)
+        XCTAssertEqual(effective.maxFileSizeBytes, 2_097_152)
+        XCTAssertEqual(effective.maxArchiveCount, 3)
+        XCTAssertEqual(effective.maxArchiveAgeSeconds, 120)
+        XCTAssertEqual(effective.maxAgeBeforeRotationSeconds, 60)
+    }
+
+    @MainActor
+    func testLogRetentionSettingsFallsBackToDefault() throws {
+        let defaults = UserDefaults.standard
+        let key = "trios_log_retention_settings"
+        let previous = defaults.data(forKey: key)
+        defer {
+            if let previous = previous {
+                defaults.set(previous, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+            LogRetentionSettings.shared.overrides = [:]
+        }
+
+        var settings = LogRetentionSettings()
+        settings.setOverride(nil, for: "audit")
+        let effective = settings.effectivePolicy(for: "audit", base: LogRotationPolicy.auditPolicy)
+        XCTAssertEqual(effective.maxFileSizeBytes, LogRotationPolicy.auditPolicy.maxFileSizeBytes)
+        XCTAssertEqual(effective.maxArchiveCount, LogRotationPolicy.auditPolicy.maxArchiveCount)
+    }
+
+    @MainActor
+    func testLogRetentionSettingsIgnoresInvalidStorage() throws {
+        let defaults = UserDefaults.standard
+        let key = "trios_log_retention_settings"
+        let previous = defaults.data(forKey: key)
+        defer {
+            if let previous = previous {
+                defaults.set(previous, forKey: key)
+            } else {
+                defaults.removeObject(forKey: key)
+            }
+            LogRetentionSettings.shared.overrides = [:]
+        }
+
+        defaults.set(Data("not json".utf8), forKey: key)
+        let settings = LogRetentionSettings()
+        XCTAssertTrue(settings.overrides.isEmpty)
+    }
+
     // MARK: - Cross-format archive cleanup
 
     func testRotationPolicyRemovesLegacyGzArchiveByAge() throws {

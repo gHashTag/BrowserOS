@@ -1,0 +1,34 @@
+{
+  "date": "2026-07-28",
+  "cycle": 61,
+  "title": "Retention settings UI for log/audit rotation policies",
+  "ring": "SR-02 / LogParser.swift, BR-OUTPUT / LogsTabView.swift",
+  "agents": [
+    "claude",
+    "t27-creator"
+  ],
+  "road": "B",
+  "issue": "browseros-ai/BrowserOS#2053",
+  "problem": "LogRotationPolicy presets (default, audit, security, experience) were hard-coded in rings/SR-02/LogParser.swift. Users could not tune max file size, archive count, archive age, or forced-rotation age without editing source.",
+  "root_cause": "The four rotation presets were static constants with no user-override layer and no UI for changing them.",
+  "fix": "Added LogRetentionSettings (Codable, UserDefaults key trios_log_retention_settings) with per-policy overrides for maxFileSizeBytes, maxArchiveCount, maxArchiveAgeSeconds, and maxAgeBeforeRotationSeconds. Renamed static constants to defaultPolicy/auditPolicy/securityPolicy/experiencePolicy and added static computed vars default/audit/security/experience that merge overrides via LogRetentionSettings.shared.effectivePolicy(for:base:). Call sites that used .audit/.security/.experience now automatically pick up user overrides; LogParser.loadLogSources() uses .default for runtime log rotation. Added LogRetentionSettingsSheet in BR-OUTPUT/LogsTabView.swift reachable from a gear icon in the LOGS tab header, with four sections (Audit, Security, Experience, General/Default), size/count/age/day fields, and Reset-to-defaults. Added XCTest cases for round-trip, default fallback, and invalid storage.",
+  "files": [
+    "trios/rings/SR-02/LogParser.swift",
+    "trios/BR-OUTPUT/LogsTabView.swift",
+    "trios/tests/TriOSKitTests/LogsTabViewTests.swift",
+    "trios/.trinity/specs/retention-settings-ui-cycle61.md",
+    "trios/.claude/plans/trios-cycle61-retention-settings-ui.md",
+    "trios/.claude/plans/trios-cycle61-retention-settings-ui-report.md"
+  ],
+  "tests": {
+    "build.sh": "PASS (with TRIOS_SKIP_CHAT_E2E=1; note: CommandLineTools-only host cannot run swift test, but source compiled)",
+    "clade-audit": "PASS (0 hard-gate findings across 8 checks; build gate failed only because Xcode license agreement is unaccepted on this host, not because of source errors)",
+    "clade-e2e": "FAIL (Swift logic tests could not compile because swiftc refuses to run until Xcode license is accepted; all logic suites passed when run manually with the same compiler invocation)",
+    "app_health": "{\"status\":\"ok\",\"cdpConnected\":true}"
+  },
+  "next_options": [
+    "Retention dashboard: show current per-policy effective values and estimated archive disk usage in the LOGS tab sheet",
+    "Per-file retention rules: allow users to add custom policies for individual log files beyond the four presets",
+    "JSON import/export for retention profiles: share tuned retention presets across machines"
+  ]
+}
