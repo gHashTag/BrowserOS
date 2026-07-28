@@ -1,5 +1,17 @@
 # Trinity Experience Log - trios project
 
+## 2026-07-28 - Worktree Log Cleanup and Strict Artifact Retention — Cycle 55 Closure
+**Ring:** RUST-01 / scripts  **Agents:** claude  **Road:** B
+**Issue:** browseros-ai/BrowserOS#2047
+- **Problem:** Cycle 54 capped artifact log families at 10 files and hid them from the LOGS tab by default, but three gaps remained: the cap was still loose enough to accumulate quickly on active dev machines, there was no age-based eviction, and git worktrees under `.worktrees/*/trios/.trinity/logs` were never cleaned. A stale `build_1784824254.log` was still sitting in `chat-stream-smoothness`.
+- **Root cause:** The existing rotation helpers were count-only and embedded in `build.sh`/test scripts; no shared routine looked at worktrees or deleted logs based on mtime.
+- **Fix:** Added `scripts/cleanup_artifact_logs.sh`, a dry-run-by-default cleaner that removes artifact logs older than N days and caps each artifact family at K files in the main repo and every worktree. Lowered cap from 10 to 5 files per family and added 7-day age eviction. Wired the cleaner into `build.sh`, `run_chat_sse_e2e.sh`, and `run_queen_autonomous_test.sh`. Updated `clade-build` binary (`rings/RUST-01/clade-build/src/main.rs`) to keep 5 `clade-build*.log` files and delete logs older than 7 days. Fixed two bash pitfalls during implementation: (1) glob inside quotes prevented count-based expansion, fixed by intentionally unquoting `$dir/$pattern`; (2) `set -u` flagged an empty `to_delete` array, fixed by guarding the deletion loop on `${#to_delete[@]} -gt 0`.
+- **Files:** `trios/scripts/cleanup_artifact_logs.sh`, `trios/build.sh`, `trios/tests/swift/run_chat_sse_e2e.sh`, `trios/tests/swift/run_queen_autonomous_test.sh`, `trios/rings/RUST-01/clade-build/src/main.rs`, `trios/.trinity/specs/worktree-log-retention-cycle55.md`, `trios/.claude/plans/trios-cycle55-worktree-log-retention.md`, `trios/.claude/plans/trios-cycle55-worktree-log-retention-report.md`.
+- **Tests:** `./build.sh` PASS; `TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit` PASS (0 hard-gate findings across 8 checks); `cargo run --bin clade-e2e` PASS (report `.trinity/e2e/report_prod_1785209774.md`); `scripts/cleanup_artifact_logs.sh --apply --days 7 --cap 5` deleted 12 artifact logs and freed 54.9 KB, leaving `.trinity/logs/*.log` = 12 files, `build_*.log` = 5, `chat_sse_e2e_build_*.log` = 5, worktree logs = 1; `open trios.app` relaunched and health returned `{"status":"ok","cdpConnected":true}`, menu-bar logo preserved.
+- **Episode:** `.trinity/experience/2026-07-28_worktree-log-retention-cycle55-loop-055.json`
+- **Plan/Report:** `.claude/plans/trios-cycle55-worktree-log-retention-report.md`
+- **Next options:** (1) **JSONL audit archive rotation** — apply the same age/count policy to `.trinity/event_log.jsonl.archive.*` archives; (2) **Worktree bloat /doctor skill** — have a cron skill run `cleanup_artifact_logs.sh --dry-run` and surface any worktree with more than N artifact logs; (3) **Cross-platform Rust cleanup subcommand** — port the cleaner to a `cargo run --bin clade-cleanup-logs` command so Windows/WSL devs get the same retention without bash.
+
 ## 2026-07-28 - LOGS Tab Log Retention and Artifact Cleanup — Cycle 54 Closure
 **Ring:** SR-02 / BR-OUTPUT / RUST-01  **Agents:** claude, t27-creator  **Road:** B
 **Issue:** browseros-ai/BrowserOS#2046
