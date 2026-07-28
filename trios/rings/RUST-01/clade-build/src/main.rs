@@ -11,14 +11,23 @@ fn project_dir() -> String { trios_config::project_dir() }
 fn rotate_clade_build_logs(log_dir: &str, keep: usize) {
     let prefix = "clade-build";
     let suffix = ".log";
+    let max_age = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+    let now = std::time::SystemTime::now();
     let mut entries = vec![];
     let Ok(files) = fs::read_dir(log_dir) else { return };
     for entry in files.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
         if name.starts_with(prefix) && name.ends_with(suffix) {
             if let Ok(meta) = entry.metadata() {
+                let mut keep_file = true;
                 if let Ok(modified) = meta.modified() {
-                    entries.push((modified, entry.path()));
+                    if now.duration_since(modified).unwrap_or_default() > max_age {
+                        let _ = fs::remove_file(entry.path());
+                        keep_file = false;
+                    }
+                }
+                if keep_file {
+                    entries.push((meta.modified().unwrap_or(now), entry.path()));
                 }
             }
         }

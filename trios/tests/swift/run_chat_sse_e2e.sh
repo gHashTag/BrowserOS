@@ -17,12 +17,16 @@ SWIFT_TEST_OPTIMIZATION="${TRIOS_TEST_OPTIMIZATION:--Onone}"
 
 mkdir -p "$LOG_DIR"
 
-# Keep only the 10 most recent chat_sse_e2e_build logs to prevent unbounded
-# accumulation of per-run build artifacts in the live log directory.
+# Keep artifact log families small and fresh. Cap chat_sse_e2e_build logs at 5
+# and remove logs older than 7 days.
+CLEANUP_SCRIPT="$PROJECT_DIR/scripts/cleanup_artifact_logs.sh"
+if [ -x "$CLEANUP_SCRIPT" ]; then
+    "$CLEANUP_SCRIPT" --apply --days 7 --cap 5 >/dev/null 2>&1 || true
+fi
 if command -v find >/dev/null 2>&1; then
     find "$LOG_DIR" -maxdepth 1 -type f -name 'chat_sse_e2e_build_*.log' -print0 \
         | xargs -0 ls -t 2>/dev/null \
-        | tail -n +11 \
+        | tail -n +6 \
         | xargs -I {} rm -f {}
 fi
 

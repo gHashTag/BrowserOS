@@ -10,14 +10,19 @@ LOG_DIR="$PROJECT_DIR/.trinity/logs"
 LOG_FILE="$LOG_DIR/build_$(date +%s).log"
 USER_ROOT_DIR="$(cd "$PROJECT_DIR/../.." && pwd)"
 
-# Keep only the 10 most recent logs per artifact family to prevent unbounded
-# accumulation of build/test/service artifacts in the live log directory.
+# Keep artifact log families small and fresh. Inline rotation caps the main repo
+# at 5 files per family, and a shared backstop cleaner also removes logs older
+# than 7 days and scans git worktrees under .worktrees/.
+CLEANUP_SCRIPT="$SCRIPT_DIR/scripts/cleanup_artifact_logs.sh"
+if [ -x "$CLEANUP_SCRIPT" ]; then
+    "$CLEANUP_SCRIPT" --apply --days 7 --cap 5 >/dev/null 2>&1 || true
+fi
 if command -v find >/dev/null 2>&1; then
     rotate_family() {
         local pattern="$1"
         find "$LOG_DIR" -maxdepth 1 -type f -name "$pattern" -print0 \
             | xargs -0 ls -t 2>/dev/null \
-            | tail -n +11 \
+            | tail -n +6 \
             | xargs -I {} rm -f {}
     }
     rotate_family 'build_*.log'
