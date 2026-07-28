@@ -1,0 +1,30 @@
+{
+  "date": "2026-07-28",
+  "cycle": 58,
+  "title": "Worktree audit log cleanup",
+  "ring": "SR-02 / LogParser.swift",
+  "agents": ["claude", "t27-creator"],
+  "road": "B",
+  "issue": "browseros-ai/BrowserOS#2050",
+  "problem": "Cycle 57 scheduled rotation for the main repo's JSONL audit streams (event_log.jsonl, akashic-log.jsonl, local-auth-audit.jsonl, episodes.jsonl), but git worktrees under .worktrees/*/trios/.trinity were never rotated. Stale feature-branch worktrees could accumulate unbounded audit files.",
+  "root_cause": "LogRotationPolicy.rotateAuditLogs() hardcoded only the main repo .trinity paths and did not discover worktree directories.",
+  "fix": "Added LogRotationPolicy.worktreeAuditLogPaths(repoRoot:) to enumerate .worktrees/*/trios/.trinity and return the four standard JSONL streams with their policies. Extended rotateAuditLogs() to concatenate main repo paths with worktree paths and rotate each. The existing lsof writer guard protects files another trios process is writing. Added XCTest cases for worktree discovery, empty worktree roots, and worktrees without a .trinity directory.",
+  "files": [
+    "trios/rings/SR-02/LogParser.swift",
+    "trios/tests/TriOSKitTests/LogsTabViewTests.swift",
+    "trios/.trinity/specs/worktree-audit-cleanup-cycle58.md",
+    "trios/.claude/plans/trios-cycle58-worktree-audit-cleanup.md",
+    "trios/.claude/plans/trios-cycle58-worktree-audit-cleanup-report.md"
+  ],
+  "tests": {
+    "build.sh": "PASS (TRIOS_SKIP_CHAT_E2E=1)",
+    "clade-audit": "PASS (0 findings)",
+    "clade-e2e": "PASS",
+    "app_health": "{\"status\":\"ok\",\"cdpConnected\":true}"
+  },
+  "next_options": [
+    "Retention configuration UI: expose per-stream max size, archive count, and retention age in Settings/Logs",
+    "Wake-notification re-run: subscribe to NSWorkspace.didWakeNotification and re-run rotation after long sleeps",
+    "Cross-format archive cleanup: extend cleanupOldArchives(path:) to also remove legacy .gz and extensionless archives from before Cycle 56"
+  ]
+}

@@ -1,5 +1,17 @@
 # Trinity Experience Log - trios project
 
+## 2026-07-28 - Worktree Audit Log Cleanup — Cycle 58 Closure
+**Ring:** SR-02 / LogParser.swift  **Agents:** claude, t27-creator  **Road:** B
+**Issue:** browseros-ai/BrowserOS#2050
+- **Problem:** Cycle 57 scheduled rotation for the main repo's JSONL audit streams (`event_log.jsonl`, `akashic-log.jsonl`, `local-auth-audit.jsonl`, `episodes.jsonl`), but git worktrees under `.worktrees/*/trios/.trinity` were never rotated. Stale feature-branch worktrees could accumulate unbounded audit files.
+- **Root cause:** `LogRotationPolicy.rotateAuditLogs()` hardcoded only the main repo `.trinity` paths and did not discover worktree directories.
+- **Fix:** Added `LogRotationPolicy.worktreeAuditLogPaths(repoRoot:)` to enumerate `.worktrees/*/trios/.trinity` and return the four standard JSONL streams with their policies. Extended `rotateAuditLogs()` to concatenate main repo paths with worktree paths and rotate each. The existing `lsof` writer guard protects files another trios process is writing. Added XCTest cases for worktree discovery, empty worktree roots, and worktrees without a `.trinity` directory.
+- **Files:** `trios/rings/SR-02/LogParser.swift`, `trios/tests/TriOSKitTests/LogsTabViewTests.swift`, `trios/.trinity/specs/worktree-audit-cleanup-cycle58.md`, `trios/.claude/plans/trios-cycle58-worktree-audit-cleanup.md`, `trios/.claude/plans/trios-cycle58-worktree-audit-cleanup-report.md`.
+- **Tests:** `./build.sh` PASS (with `TRIOS_SKIP_CHAT_E2E=1`); `TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit` PASS (0 hard-gate findings across 8 checks); `cargo run --bin clade-e2e` PASS (report `.trinity/e2e/report_prod_1785216625.md`); `open trios.app` relaunched and health returned `{"status":"ok","cdpConnected":true}`, menu-bar logo preserved.
+- **Episode:** `.trinity/experience/2026-07-28_worktree-audit-cleanup-cycle58-loop-058.json`
+- **Plan/Report:** `.claude/plans/trios-cycle58-worktree-audit-cleanup-report.md`
+- **Next options:** (1) **Retention configuration UI** — expose per-stream max size, archive count, and retention age in Settings/Logs; (2) **Wake-notification re-run** — subscribe to `NSWorkspace.didWakeNotification` and re-run rotation after long sleeps; (3) **Cross-format archive cleanup** — extend `cleanupOldArchives(path:)` to also remove legacy `.gz` and extensionless archives from before Cycle 56.
+
 ## 2026-07-28 - Background Audit Rotation Scheduler — Cycle 57 Closure
 **Ring:** SR-02 / main.swift  **Agents:** claude, t27-creator  **Road:** B
 **Issue:** browseros-ai/BrowserOS#2049
