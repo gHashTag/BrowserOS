@@ -1,5 +1,17 @@
 # Trinity Experience Log - trios project
 
+## 2026-07-28 - LOGS Tab Log Retention and Artifact Cleanup — Cycle 54 Closure
+**Ring:** SR-02 / BR-OUTPUT / RUST-01  **Agents:** claude, t27-creator  **Road:** B
+**Issue:** browseros-ai/BrowserOS#2046
+- **Problem:** The `.trinity/logs/` directory was a flat bag of `.log` files. The LOGS tab loaded every `.log` it found, including transient build/test/service artifacts (`build_*.log`, `chat_sse_e2e_build_*.log`, `clade-build_*.log`, `queen_autonomous_test_*.log`, `*.stdout.log`, `*.stderr.log`). Users saw these as online logs even though they are offline build artifacts. A manual cleanup removed 8 legacy cycle logs and one stale archive, but no policy prevented recurrence.
+- **Root cause:** `LogSource` had no category metadata, `LogParser.loadLogSources()` enumerated every `.log` file, and there was no artifact-family retention cleanup beyond the existing `build_*.log` rotation.
+- **Fix:** Added `LogSourceCategory` enum (`runtime`, `service`, `build`, `test`, `artifact`) and `category` field on `LogSource`. Added `LogParser.category(for:)` classifier by filename patterns. Changed `loadLogSources(includeArtifacts: Bool = false)` to show only `.runtime` and `.service` sources by default. Extended `LogsTabView` with a "Show build/test logs" toggle persisted to `UserDefaults` key `trios_logs_show_artifact_logs`. Added XCTest coverage for classification and default/artifact-inclusive filtering. Added `rotate_family()` helper in `build.sh` to cap `build_*.log`, `clade-build*.log`, `queen_autonomous_test_*.log`, `*.stdout.log`, and `*.stderr.log` to 10 files each. Added rotation to `tests/swift/run_queen_autonomous_test.sh`. Added `rotate_clade_build_logs()` in `rings/RUST-01/clade-build/src/main.rs` to cap `clade-build*.log` files before writing a new one. All source files remain ASCII-only except a pre-existing em dash comment in the Rust file that was not touched.
+- **Files:** `trios/rings/SR-02/LogParser.swift`, `trios/BR-OUTPUT/LogsTabView.swift`, `trios/tests/TriOSKitTests/LogsTabViewTests.swift`, `trios/build.sh`, `trios/tests/swift/run_queen_autonomous_test.sh`, `trios/rings/RUST-01/clade-build/src/main.rs`, `trios/.trinity/specs/log-retention-cycle54.md`, `trios/.claude/plans/trios-cycle54-log-retention.md`, `trios/.claude/plans/trios-cycle54-log-retention-report.md`, `trios/.trinity/experience/2026-07-28_log-retention-cycle54-loop-054.json`.
+- **Tests:** `./build.sh` PASS; `cargo run --bin clade-build` PASS; `TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit` PASS (0 hard-gate findings across 8 checks); `cargo run --bin clade-e2e` PASS (report `.trinity/e2e/report_prod_1785209078.md`); `open trios.app` relaunched and health returned `{"status":"ok","cdpConnected":true}`, menu-bar logo preserved.
+- **Episode:** `.trinity/experience/2026-07-28_log-retention-cycle54-loop-054.json`
+- **Plan/Report:** `.claude/plans/trios-cycle54-log-retention-report.md`
+- **Next options:** (1) **Strict artifact retention** — lower caps to 5 files and add 7-day age-based eviction for artifact families; (2) **JSONL audit rotation** — apply `LogRotationPolicy` to `event_log.jsonl`, `akashic-log.jsonl`, and `episodes.jsonl` to cap audit stream growth; (3) **Worktree log cleanup** — extend artifact rotation to `.worktrees/*/trios/.trinity/logs` so stale worktrees do not accumulate transient logs.
+
 ## 2026-07-27 - LOGS Tab Noise Rule Auto-Suggest — Cycle 52 Closure
 **Ring:** SR-02 / BR-OUTPUT  **Agents:** claude, t27-creator  **Road:** B
 **Issue:** gHashTag/trios#1086

@@ -73,6 +73,7 @@ struct LogsTabView: View {
     @State private var showingNoiseProfileSheet = false
     @State private var pendingRulePreview: LogNoiseRule?
     @State private var rulePreviewCount: Int = 0
+    @State private var showArtifactLogs: Bool = UserDefaults.standard.bool(forKey: "trios_logs_show_artifact_logs")
 
     private let maxLinesPerSource = 500
     private let liveInterval: UInt64 = 5_000_000_000
@@ -98,10 +99,15 @@ struct LogsTabView: View {
         }
         .background(Color.grokBackground.ignoresSafeArea())
         .onAppear {
+            showArtifactLogs = UserDefaults.standard.bool(forKey: "trios_logs_show_artifact_logs")
             loadAll()
             loadSavedSearches()
             loadRecentSearches()
             loadNoiseProfile()
+        }
+        .onChange(of: showArtifactLogs) { _, isOn in
+            UserDefaults.standard.set(isOn, forKey: "trios_logs_show_artifact_logs")
+            loadAll()
         }
         .onDisappear {
             stopLive()
@@ -169,6 +175,11 @@ struct LogsTabView: View {
                     .foregroundColor(.grokText)
                 Spacer()
                 liveToggle
+                Toggle("Show build/test logs", isOn: $showArtifactLogs)
+                    .toggleStyle(.switch)
+                    .font(.system(size: 11))
+                    .foregroundColor(.grokMuted)
+                    .frame(width: 160)
                 Button(action: loadAll) {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 12, weight: .semibold))
@@ -1289,7 +1300,7 @@ struct LogsTabView: View {
         isLoading = true
         isFollowPaused = false
         DispatchQueue.global(qos: .userInitiated).async {
-            let loaded = LogParser.loadLogSources(maxLinesPerSource: maxLinesPerSource)
+            let loaded = LogParser.loadLogSources(includeArtifacts: showArtifactLogs, maxLinesPerSource: maxLinesPerSource)
             DispatchQueue.main.async {
                 sources = loaded
                 if selectedSourceID == nil, let first = sources.first {

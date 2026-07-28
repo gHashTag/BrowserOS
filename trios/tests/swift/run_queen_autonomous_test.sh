@@ -13,6 +13,14 @@ SWIFT_TEST_OPTIMIZATION="${TRIOS_TEST_OPTIMIZATION:--Onone}"
 
 mkdir -p "$LOG_DIR"
 
+# Keep only the 10 most recent queen autonomous test logs.
+if command -v find >/dev/null 2>&1; then
+    find "$LOG_DIR" -maxdepth 1 -type f -name 'queen_autonomous_test_*.log' -print0 \
+        | xargs -0 ls -t 2>/dev/null \
+        | tail -n +11 \
+        | xargs -I {} rm -f {}
+fi
+
 # All rings sources include the persistence, A2A, and Queen service layers.
 PROD_FILES=(
     $(find "$PROJECT_DIR/rings" -name "*.swift" | sort)

@@ -1460,4 +1460,72 @@ final class LogsTabViewTests: XCTestCase {
         XCTAssertEqual(heartbeatSuggestion?.rule.sourceIDs, ["source-a"])
         XCTAssertEqual(heartbeatSuggestion?.matchedCount, 10)
     }
+
+    // MARK: - Source category classification
+
+    func testCategoryForRuntimeFilenames() {
+        XCTAssertEqual(LogParser.category(for: "event_log.jsonl"), .runtime)
+        XCTAssertEqual(LogParser.category(for: "cron.log"), .runtime)
+        XCTAssertEqual(LogParser.category(for: "queen.log"), .runtime)
+        XCTAssertEqual(LogParser.category(for: "browseros-companion.log"), .runtime)
+    }
+
+    func testCategoryForServiceFilenames() {
+        XCTAssertEqual(LogParser.category(for: "bun.stdout.log"), .service)
+        XCTAssertEqual(LogParser.category(for: "server.stderr.log"), .service)
+    }
+
+    func testCategoryForBuildFilenames() {
+        XCTAssertEqual(LogParser.category(for: "build_1751234567.log"), .build)
+        XCTAssertEqual(LogParser.category(for: "clade-build_1751234567.log"), .build)
+        XCTAssertEqual(LogParser.category(for: "clade-build_prod.log"), .build)
+    }
+
+    func testCategoryForTestFilenames() {
+        XCTAssertEqual(LogParser.category(for: "chat_sse_e2e_build_1751234567.log"), .test)
+        XCTAssertEqual(LogParser.category(for: "queen_autonomous_test_1751234567.log"), .test)
+    }
+
+    func testCategoryForArtifactFallback() {
+        XCTAssertEqual(LogParser.category(for: "legacy-cycle8.log"), .artifact)
+        XCTAssertEqual(LogParser.category(for: "unknown_stuff.log"), .artifact)
+    }
+
+    func testLoadLogSourcesExcludesArtifactsByDefault() throws {
+        let logsDir = "\(ProjectPaths.trinity)/logs"
+        try? FileManager.default.createDirectory(atPath: logsDir, withIntermediateDirectories: true)
+        let buildFile = "\(logsDir)/build_9999999999.log"
+        let testFile = "\(logsDir)/chat_sse_e2e_build_9999999999.log"
+        let serviceFile = "\(logsDir)/bun.stdout.log"
+        try? "build artifact".write(toFile: buildFile, atomically: true, encoding: .utf8)
+        try? "test artifact".write(toFile: testFile, atomically: true, encoding: .utf8)
+        try? "service log".write(toFile: serviceFile, atomically: true, encoding: .utf8)
+        defer {
+            try? FileManager.default.removeItem(atPath: buildFile)
+            try? FileManager.default.removeItem(atPath: testFile)
+            try? FileManager.default.removeItem(atPath: serviceFile)
+        }
+
+        let sources = LogParser.loadLogSources(maxLinesPerSource: 10)
+        XCTAssertFalse(sources.contains { $0.name.hasPrefix("build_") })
+        XCTAssertFalse(sources.contains { $0.name.hasPrefix("chat_sse_e2e_build_") })
+        XCTAssertTrue(sources.contains { $0.name == "bun.stdout" })
+    }
+
+    func testLoadLogSourcesIncludesArtifactsWhenRequested() throws {
+        let logsDir = "\(ProjectPaths.trinity)/logs"
+        try? FileManager.default.createDirectory(atPath: logsDir, withIntermediateDirectories: true)
+        let buildFile = "\(logsDir)/build_8888888888.log"
+        let testFile = "\(logsDir)/queen_autonomous_test_8888888888.log"
+        try? "build artifact".write(toFile: buildFile, atomically: true, encoding: .utf8)
+        try? "test artifact".write(toFile: testFile, atomically: true, encoding: .utf8)
+        defer {
+            try? FileManager.default.removeItem(atPath: buildFile)
+            try? FileManager.default.removeItem(atPath: testFile)
+        }
+
+        let sources = LogParser.loadLogSources(includeArtifacts: true, maxLinesPerSource: 10)
+        XCTAssertTrue(sources.contains { $0.name.hasPrefix("build_") })
+        XCTAssertTrue(sources.contains { $0.name.hasPrefix("queen_autonomous_test_") })
+    }
 }

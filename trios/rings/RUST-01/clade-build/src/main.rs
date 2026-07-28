@@ -6,6 +6,29 @@ use std::process::{Command, Stdio};
 
 fn project_dir() -> String { trios_config::project_dir() }
 
+/// Keep only the `keep` most recent clade-build*.log files so the log
+/// directory does not fill with transient build artifacts.
+fn rotate_clade_build_logs(log_dir: &str, keep: usize) {
+    let prefix = "clade-build";
+    let suffix = ".log";
+    let mut entries = vec![];
+    let Ok(files) = fs::read_dir(log_dir) else { return };
+    for entry in files.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with(prefix) && name.ends_with(suffix) {
+            if let Ok(meta) = entry.metadata() {
+                if let Ok(modified) = meta.modified() {
+                    entries.push((modified, entry.path()));
+                }
+            }
+        }
+    }
+    entries.sort_by(|a, b| b.0.cmp(&a.0));
+    for (_, path) in entries.iter().skip(keep) {
+        let _ = fs::remove_file(path);
+    }
+}
+
 struct Variant {
     name: &'static str,
     output: PathBuf,
@@ -100,6 +123,7 @@ fn main() {
         Err(e) => { eprintln!("[FAIL] swiftc failed to start: {}", e); std::process::exit(1); }
     };
     let log_path = format!("{}/.trinity/logs/clade-build_{}.log", project_dir(), variant.name);
+    rotate_clade_build_logs(&format!("{}/.trinity/logs", project_dir()), 10);
     if let Err(e) = fs::write(&log_path, &output.stderr) {
         eprintln!("[build] Failed to write build log {}: {}", log_path, e);
     }

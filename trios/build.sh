@@ -10,13 +10,21 @@ LOG_DIR="$PROJECT_DIR/.trinity/logs"
 LOG_FILE="$LOG_DIR/build_$(date +%s).log"
 USER_ROOT_DIR="$(cd "$PROJECT_DIR/../.." && pwd)"
 
-# Keep only the 10 most recent per-build logs to prevent unbounded accumulation
-# of build artifacts in the live log directory.
+# Keep only the 10 most recent logs per artifact family to prevent unbounded
+# accumulation of build/test/service artifacts in the live log directory.
 if command -v find >/dev/null 2>&1; then
-    find "$LOG_DIR" -maxdepth 1 -type f -name 'build_*.log' -print0 \
-        | xargs -0 ls -t 2>/dev/null \
-        | tail -n +11 \
-        | xargs -I {} rm -f {}
+    rotate_family() {
+        local pattern="$1"
+        find "$LOG_DIR" -maxdepth 1 -type f -name "$pattern" -print0 \
+            | xargs -0 ls -t 2>/dev/null \
+            | tail -n +11 \
+            | xargs -I {} rm -f {}
+    }
+    rotate_family 'build_*.log'
+    rotate_family 'clade-build*.log'
+    rotate_family 'queen_autonomous_test_*.log'
+    rotate_family '*.stdout.log'
+    rotate_family '*.stderr.log'
 fi
 TRINITY_SOURCE_ROOT="${TRINITY_ROOT:-$USER_ROOT_DIR/trinity}"
 QUEEN_PACKAGE_ROOT="$TRINITY_SOURCE_ROOT/apps/queen"

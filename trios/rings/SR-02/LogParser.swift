@@ -30,6 +30,16 @@ enum LogParserKind: String, CaseIterable, Equatable, Hashable, Sendable {
     case plainText
 }
 
+// MARK: - Source category
+
+enum LogSourceCategory: String, CaseIterable, Equatable, Sendable {
+    case runtime
+    case service
+    case build
+    case test
+    case artifact
+}
+
 // MARK: - Parsed log line
 
 struct ParsedLogLine: Identifiable, Equatable, Sendable {
@@ -55,6 +65,7 @@ struct LogSource: Identifiable, Equatable, Sendable {
     let path: String
     let icon: String
     let tintName: String
+    let category: LogSourceCategory
     let rawLines: [ParsedLogLine]
     let lines: [ParsedLogLine]
     let parser: LogParserKind
@@ -68,6 +79,42 @@ struct LogSource: Identifiable, Equatable, Sendable {
 
     var displayName: String {
         (path as NSString).lastPathComponent
+    }
+
+    init(
+        id: String,
+        name: String,
+        path: String,
+        icon: String,
+        tintName: String,
+        category: LogSourceCategory = .runtime,
+        rawLines: [ParsedLogLine],
+        lines: [ParsedLogLine],
+        parser: LogParserKind,
+        lastReadOffset: UInt64,
+        errorCount: Int,
+        warningCount: Int,
+        duplicateGroupCount: Int,
+        totalDuplicates: Int,
+        wasCapped: Bool,
+        originalLineCount: Int
+    ) {
+        self.id = id
+        self.name = name
+        self.path = path
+        self.icon = icon
+        self.tintName = tintName
+        self.category = category
+        self.rawLines = rawLines
+        self.lines = lines
+        self.parser = parser
+        self.lastReadOffset = lastReadOffset
+        self.errorCount = errorCount
+        self.warningCount = warningCount
+        self.duplicateGroupCount = duplicateGroupCount
+        self.totalDuplicates = totalDuplicates
+        self.wasCapped = wasCapped
+        self.originalLineCount = originalLineCount
     }
 }
 
@@ -792,7 +839,24 @@ enum LogParser {
         }
     }
 
-    static func loadLogSources(maxLinesPerSource: Int = 500) -> [LogSource] {
+    static func category(for filename: String) -> LogSourceCategory {
+        let lower = filename.lowercased()
+        if lower.hasPrefix("build_") || lower.hasPrefix("clade-build_") || lower == "clade-build_prod.log" {
+            return .build
+        }
+        if lower.hasPrefix("chat_sse_e2e_build_") || lower.hasPrefix("queen_autonomous_test_") {
+            return .test
+        }
+        if lower.hasSuffix(".stdout.log") || lower.hasSuffix(".stderr.log") {
+            return .service
+        }
+        if lower.hasPrefix("event-log") || lower.hasPrefix("cron-log") || lower.hasPrefix("queen-log") || lower.contains("browseros-companion") {
+            return .runtime
+        }
+        return .artifact
+    }
+
+    static func loadLogSources(includeArtifacts: Bool = false, maxLinesPerSource: Int = 500) -> [LogSource] {
         var loaded: [LogSource] = []
 
         // Reader-side rotation: prevent unbounded growth of watched log files.
@@ -807,6 +871,7 @@ enum LogParser {
             path: ProjectPaths.trinityEventLog,
             icon: "list.bullet.rectangle",
             tintName: "blue",
+            category: .runtime,
             parser: parseEventLogLine,
             parserKind: .eventLog
         ))
@@ -817,6 +882,7 @@ enum LogParser {
             path: ProjectPaths.trinityLog,
             icon: "clock.arrow.2.circlepath",
             tintName: "purple",
+            category: .runtime,
             parser: parsePlainTextLine,
             parserKind: .plainText
         ))
@@ -828,6 +894,7 @@ enum LogParser {
                 // Rotate reader-side for every service log; lsof guard skips active writers.
                 rotation.rotateIfNeeded(path: path)
                 let name = file.replacingOccurrences(of: ".log", with: "")
+                let category = LogParser.category(for: file)
                 let isCompanion = name.contains("companion")
                 let parser: (String, String) -> ParsedLogLine = isCompanion ? parsePinoJSONLine : parsePlainTextLine
                 let kind: LogParserKind = isCompanion ? .pinoJSON : .plainText
@@ -837,6 +904,7 @@ enum LogParser {
                     path: path,
                     icon: "doc.text",
                     tintName: "grokMuted",
+                    category: category,
                     parser: parser,
                     parserKind: kind
                 ))
@@ -850,11 +918,16 @@ enum LogParser {
             path: queenLogPath,
             icon: "crown",
             tintName: "yellow",
+            category: .runtime,
             parser: parsePlainTextLine,
             parserKind: .plainText
         ))
 
-        return loaded.filter { !$0.lines.isEmpty || FileManager.default.fileExists(atPath: $0.path) }
+        let result = loaded.filter { !$0.lines.isEmpty || FileManager.default.fileExists(atPath: $0.path) }
+        guard includeArtifacts else {
+            return result.filter { $0.category == .runtime || $0.category == .service }
+        }
+        return result
     }
 
     static func parseSource(
@@ -863,6 +936,7 @@ enum LogParser {
         path: String,
         icon: String,
         tintName: String,
+        category: LogSourceCategory = .runtime,
         parser: (String, String) -> ParsedLogLine,
         parserKind: LogParserKind = .plainText,
         maxLines: Int = 500
@@ -886,6 +960,7 @@ enum LogParser {
             path: path,
             icon: icon,
             tintName: tintName,
+            category: category,
             rawLines: parsed,
             lines: deduped,
             parser: parserKind,
@@ -928,6 +1003,7 @@ enum LogParser {
                 path: source.path,
                 icon: source.icon,
                 tintName: source.tintName,
+                category: source.category,
                 parser: parser,
                 parserKind: source.parser,
                 maxLines: maxLines
@@ -958,6 +1034,7 @@ enum LogParser {
             path: source.path,
             icon: source.icon,
             tintName: source.tintName,
+            category: source.category,
             rawLines: combinedRaw,
             lines: deduped,
             parser: source.parser,

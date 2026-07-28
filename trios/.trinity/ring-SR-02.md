@@ -155,6 +155,38 @@ Rules:
 
 **When to reuse:** any rule/filter UI where users build up a personal or runbook profile from observed data — log noise, inbox filters, notification muting, error suppression, allow/block lists.
 
+### 7. Separate live runtime sources from transient build/test artifacts
+
+A log reader that treats every `.log` file as a live source will drown users in build artifacts, test harness output, and launchd stdout/stderr. Tag each source with a category and default the UI to only runtime/service logs, with an opt-in toggle for artifacts.
+
+Example from `LogParser.swift`:
+
+```swift
+enum LogSourceCategory: String, CaseIterable, Equatable, Sendable {
+    case runtime
+    case service
+    case build
+    case test
+    case artifact
+}
+
+static func loadLogSources(includeArtifacts: Bool = false, maxLinesPerSource: Int = 500) -> [LogSource] {
+    let loaded: [LogSource] = ...
+    guard includeArtifacts else {
+        return loaded.filter { $0.category == .runtime || $0.category == .service }
+    }
+    return loaded
+}
+```
+
+Rules:
+- Classify by filename pattern, not by folder, so the policy is self-describing and easy to test.
+- Default to hiding build/test artifacts from the main view.
+- Pair the UI toggle with a `UserDefaults` key so the choice persists.
+- Cap each artifact family at a small number (e.g. 10) in the scripts/binaries that produce them, so the log directory cannot grow without bound even if the app is never opened.
+
+**When to reuse:** any log/event reader, file browser, or status dashboard that ingests both live operational data and transient build/test output.
+
 ---
 
 ## Recent changes
