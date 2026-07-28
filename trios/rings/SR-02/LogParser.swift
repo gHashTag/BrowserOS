@@ -835,6 +835,45 @@ struct LogRotationPolicy: Sendable {
     }
 }
 
+// MARK: - Audit rotation scheduler
+
+@MainActor
+final class AuditRotationScheduler {
+    static let shared = AuditRotationScheduler()
+
+    var isRunning: Bool { timer != nil }
+    private var timer: Timer?
+    private let interval: TimeInterval
+    private let rotationLock = NSLock()
+
+    init(interval: TimeInterval = 6 * 60 * 60) {
+        self.interval = interval
+    }
+
+    func start() {
+        guard !isRunning else { return }
+        timer = Timer.scheduledTimer(withTimeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.rotateNow()
+            }
+        }
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+    }
+
+    func rotateNow() {
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else { return }
+            self.rotationLock.lock()
+            defer { self.rotationLock.unlock() }
+            LogRotationPolicy.rotateAuditLogs()
+        }
+    }
+}
+
 // MARK: - Recent search
 
 struct LogRecentSearch: Codable, Equatable, Identifiable, Sendable {

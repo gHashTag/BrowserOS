@@ -178,6 +178,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()
         // Rotate JSONL audit streams before anything starts writing to them.
         LogRotationPolicy.rotateAuditLogs()
+        // Re-run audit rotation periodically in the background while the app runs.
+        AuditRotationScheduler.shared.start()
         // CRITICAL: setupSidePanel MUST run synchronously before any UI interaction.
         // Previously it was in Task { @MainActor in } which meant panel was nil
         // when the user clicked the status bar icon before the task completed.
@@ -205,6 +207,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         sessionGuard?.stopMonitoring()
         cladeGuard?.stopMonitoring()
+        AuditRotationScheduler.shared.stop()
         Task {
             await QueenBackgroundService.shared.stop()
             await MainActor.run {

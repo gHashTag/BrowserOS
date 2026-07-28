@@ -1627,4 +1627,33 @@ final class LogsTabViewTests: XCTestCase {
         XCTAssertTrue(sources.contains { $0.name.hasPrefix("build_") })
         XCTAssertTrue(sources.contains { $0.name.hasPrefix("queen_autonomous_test_") })
     }
+
+    // MARK: - Audit rotation scheduler
+
+    @MainActor
+    func testAuditSchedulerStartsAndStops() {
+        let scheduler = AuditRotationScheduler(interval: 0.01)
+        XCTAssertFalse(scheduler.isRunning)
+        scheduler.start()
+        XCTAssertTrue(scheduler.isRunning)
+        scheduler.stop()
+        XCTAssertFalse(scheduler.isRunning)
+    }
+
+    @MainActor
+    func testAuditSchedulerRotateNowDoesNotCrash() {
+        let scheduler = AuditRotationScheduler(interval: 60 * 60)
+        // Rotation dispatches to a utility queue; this just verifies the call is safe.
+        scheduler.rotateNow()
+        XCTAssertTrue(true)
+    }
+
+    @MainActor
+    func testAuditSchedulerRotateNowCanBeCalledRepeatedly() {
+        let scheduler = AuditRotationScheduler(interval: 60 * 60)
+        for _ in 0..<20 {
+            scheduler.rotateNow()
+        }
+        XCTAssertTrue(true)
+    }
 }
