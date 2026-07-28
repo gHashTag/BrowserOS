@@ -1,0 +1,30 @@
+{
+  "date": "2026-07-28",
+  "cycle": 59,
+  "title": "Cross-format archive cleanup",
+  "ring": "SR-02 / LogParser.swift",
+  "agents": ["claude", "t27-creator"],
+  "road": "B",
+  "issue": "browseros-ai/BrowserOS#2051",
+  "problem": "Cycles 54-56 standardized JSONL audit archives on .archive.<timestamp>.zlib, but pre-existing .gz and extensionless .archive.<timestamp> legacy archives were ignored by cleanupOldArchives(path:) and cleanupArchives(of:), so they accumulated without age or count limits.",
+  "root_cause": "LogRotationPolicy parsed only the .zlib suffix when extracting archive timestamps, so legacy formats never matched retention rules.",
+  "fix": "Added private static let archiveSuffixes: [String?] = [\".zlib\", \".gz\", nil] and a suffix-aware archiveTimestamp(_:prefix:) helper in rings/SR-02/LogParser.swift. Updated cleanupArchives(of:) to sort and cap all recognized suffixes together by timestamp, and cleanupOldArchives(path:) to delete any recognized archive older than maxArchiveAgeSeconds. Added XCTest cases for .gz age cleanup, extensionless age cleanup, and mixed-format count caps. Current archive output remains .zlib.",
+  "files": [
+    "trios/rings/SR-02/LogParser.swift",
+    "trios/tests/TriOSKitTests/LogsTabViewTests.swift",
+    "trios/.trinity/specs/cross-format-archive-cleanup-cycle59.md",
+    "trios/.claude/plans/trios-cycle59-cross-format-archive-cleanup.md",
+    "trios/.claude/plans/trios-cycle59-cross-format-archive-cleanup-report.md"
+  ],
+  "tests": {
+    "build.sh": "PASS (TRIOS_SKIP_CHAT_E2E=1)",
+    "clade-audit": "PASS (0 findings)",
+    "clade-e2e": "PASS",
+    "app_health": "{\"status\":\"ok\",\"cdpConnected\":true}"
+  },
+  "next_options": [
+    "Wake-notification re-run: subscribe to NSWorkspace.didWakeNotification and re-run rotateAuditLogs() after long sleeps",
+    "Retention configuration UI: expose per-stream max size, archive count, and retention age in Settings/Logs",
+    "Rust-side audit log cleanup: add a cargo run --bin clade-cleanup-audit subcommand for non-macOS/WSL environments"
+  ]
+}

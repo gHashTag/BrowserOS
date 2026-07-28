@@ -1,5 +1,17 @@
 # Trinity Experience Log - trios project
 
+## 2026-07-28 - Cross-Format Archive Cleanup — Cycle 59 Closure
+**Ring:** SR-02 / LogParser.swift  **Agents:** claude, t27-creator  **Road:** B
+**Issue:** browseros-ai/BrowserOS#2051
+- **Problem:** Cycles 54-56 standardized JSONL audit archives on `.archive.<timestamp>.zlib`, but pre-existing `.gz` and extensionless `.archive.<timestamp>` legacy archives were ignored by `cleanupOldArchives(path:)` and `cleanupArchives(of:)`, so they accumulated without age or count limits.
+- **Root cause:** `LogRotationPolicy` parsed only the `.zlib` suffix when extracting archive timestamps, so legacy formats never matched retention rules.
+- **Fix:** Added `private static let archiveSuffixes: [String?] = [".zlib", ".gz", nil]` and a suffix-aware `archiveTimestamp(_:prefix:)` helper in `rings/SR-02/LogParser.swift`. Updated `cleanupArchives(of:)` to sort and cap all recognized suffixes together by timestamp, and `cleanupOldArchives(path:)` to delete any recognized archive older than `maxArchiveAgeSeconds`. Added XCTest cases for `.gz` age cleanup, extensionless age cleanup, and mixed-format count caps. Current archive output remains `.zlib`.
+- **Files:** `trios/rings/SR-02/LogParser.swift`, `trios/tests/TriOSKitTests/LogsTabViewTests.swift`, `trios/.trinity/specs/cross-format-archive-cleanup-cycle59.md`, `trios/.claude/plans/trios-cycle59-cross-format-archive-cleanup.md`, `trios/.claude/plans/trios-cycle59-cross-format-archive-cleanup-report.md`.
+- **Tests:** `./build.sh` PASS; `TRIOS_SKIP_CHAT_E2E=1 cargo run --bin clade-audit` PASS (0 hard-gate findings across 8 checks); `cargo run --bin clade-e2e` PASS (report `.trinity/e2e/report_prod_1785217521.md`); `open trios.app` relaunched and health returned `{"status":"ok","cdpConnected":true}`, menu-bar logo preserved. XCTest runtime execution was not available because the host toolchain is CommandLineTools-only; tests were syntactically validated by `./build.sh`.
+- **Episode:** `.trinity/experience/2026-07-28_cross-format-archive-cleanup-cycle59-loop-059.json`
+- **Plan/Report:** `.claude/plans/trios-cycle59-cross-format-archive-cleanup-report.md`
+- **Next options:** (1) **Wake-notification re-run** — subscribe to `NSWorkspace.didWakeNotification` and re-run `rotateAuditLogs()` after long sleeps; (2) **Retention configuration UI** — expose per-stream max size, archive count, and retention age in Settings/Logs; (3) **Rust-side audit log cleanup** — add a `cargo run --bin clade-cleanup-audit` subcommand for non-macOS/WSL environments.
+
 ## 2026-07-28 - Worktree Audit Log Cleanup — Cycle 58 Closure
 **Ring:** SR-02 / LogParser.swift  **Agents:** claude, t27-creator  **Road:** B
 **Issue:** browseros-ai/BrowserOS#2050

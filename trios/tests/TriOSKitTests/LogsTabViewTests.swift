@@ -1705,4 +1705,86 @@ final class LogsTabViewTests: XCTestCase {
         let paths = LogRotationPolicy.worktreeAuditLogPaths(repoRoot: tmp)
         XCTAssertTrue(paths.isEmpty)
     }
+
+    // MARK: - Cross-format archive cleanup
+
+    func testRotationPolicyRemovesLegacyGzArchiveByAge() throws {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        defer { try? fm.removeItem(atPath: tmpDir) }
+        try fm.createDirectory(atPath: tmpDir, withIntermediateDirectories: true)
+
+        let base = "\(tmpDir)/event_log.jsonl"
+        let oldTimestamp = Int(Date().timeIntervalSince1970 - 100_000)
+        let oldArchive = "\(base).archive.\(oldTimestamp).gz"
+        try "legacy gzip".write(toFile: oldArchive, atomically: true, encoding: .utf8)
+
+        let policy = LogRotationPolicy(
+            maxFileSizeBytes: 1_024,
+            maxArchiveCount: 5,
+            keepTailLines: 10,
+            maxArchiveAgeSeconds: 60,
+            maxAgeBeforeRotationSeconds: nil
+        )
+        policy.rotateIfNeeded(path: base)
+
+        XCTAssertFalse(fm.fileExists(atPath: oldArchive), "Legacy .gz archive older than max age should be removed")
+    }
+
+    func testRotationPolicyRemovesExtensionlessArchiveByAge() throws {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        defer { try? fm.removeItem(atPath: tmpDir) }
+        try fm.createDirectory(atPath: tmpDir, withIntermediateDirectories: true)
+
+        let base = "\(tmpDir)/event_log.jsonl"
+        let oldTimestamp = Int(Date().timeIntervalSince1970 - 100_000)
+        let oldArchive = "\(base).archive.\(oldTimestamp)"
+        try "legacy raw".write(toFile: oldArchive, atomically: true, encoding: .utf8)
+
+        let policy = LogRotationPolicy(
+            maxFileSizeBytes: 1_024,
+            maxArchiveCount: 5,
+            keepTailLines: 10,
+            maxArchiveAgeSeconds: 60,
+            maxAgeBeforeRotationSeconds: nil
+        )
+        policy.rotateIfNeeded(path: base)
+
+        XCTAssertFalse(fm.fileExists(atPath: oldArchive), "Extensionless archive older than max age should be removed")
+    }
+
+    func testRotationPolicyCapsMixedFormatArchivesByCount() throws {
+        let fm = FileManager.default
+        let tmpDir = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        defer { try? fm.removeItem(atPath: tmpDir) }
+        try fm.createDirectory(atPath: tmpDir, withIntermediateDirectories: true)
+
+        let base = "\(tmpDir)/event_log.jsonl"
+        let now = Int(Date().timeIntervalSince1970)
+        // Create 4 archives in alternating formats within the age window.
+        let archives = [
+            "\(base).archive.\(now - 10).zlib",
+            "\(base).archive.\(now - 20).gz",
+            "\(base).archive.\(now - 30)",
+            "\(base).archive.\(now - 40).zlib",
+        ]
+        for archive in archives {
+            try "data".write(toFile: archive, atomically: true, encoding: .utf8)
+        }
+
+        let policy = LogRotationPolicy(
+            maxFileSizeBytes: 1_024,
+            maxArchiveCount: 2,
+            keepTailLines: 10,
+            maxArchiveAgeSeconds: 100_000,
+            maxAgeBeforeRotationSeconds: nil
+        )
+        policy.rotateIfNeeded(path: base)
+
+        let remaining = (try? fm.contentsOfDirectory(atPath: tmpDir))?.filter { $0.hasPrefix("event_log.jsonl.archive.") } ?? []
+        XCTAssertEqual(remaining.count, 2, "Should keep only the newest 2 archives across all recognized formats")
+        XCTAssertTrue(remaining.contains { $0.hasSuffix(".archive.\(now - 10).zlib") })
+        XCTAssertTrue(remaining.contains { $0.hasSuffix(".archive.\(now - 20).gz") })
+    }
 }

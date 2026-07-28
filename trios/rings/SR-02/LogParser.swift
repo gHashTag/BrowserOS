@@ -780,13 +780,15 @@ struct LogRotationPolicy: Sendable {
         try? trimmed.write(toFile: path, atomically: true, encoding: .utf8)
     }
 
+    private static let archiveSuffixes: [String?] = [".zlib", ".gz", nil]
+
     private func cleanupArchives(of path: String) {
         let dir = (path as NSString).deletingLastPathComponent
         let base = (path as NSString).lastPathComponent
         let prefix = "\(base).archive."
         guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return }
         let archives = files
-            .filter { $0.hasPrefix(prefix) }
+            .filter { $0.hasPrefix(prefix) && LogRotationPolicy.archiveTimestamp($0, prefix: prefix) != nil }
             .sorted { lhs, rhs in
                 (LogRotationPolicy.archiveTimestamp(lhs, prefix: prefix) ?? 0) >
                 (LogRotationPolicy.archiveTimestamp(rhs, prefix: prefix) ?? 0)
@@ -802,13 +804,10 @@ struct LogRotationPolicy: Sendable {
         let dir = (path as NSString).deletingLastPathComponent
         let base = (path as NSString).lastPathComponent
         let prefix = "\(base).archive."
-        let suffix = ".zlib"
         guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return }
         let now = Date().timeIntervalSince1970
         for file in files {
-            guard file.hasPrefix(prefix), file.hasSuffix(suffix) else { continue }
-            let middle = file.dropFirst(prefix.count).dropLast(suffix.count)
-            guard let timestamp = TimeInterval(middle) else { continue }
+            guard file.hasPrefix(prefix), let timestamp = LogRotationPolicy.archiveTimestamp(file, prefix: prefix) else { continue }
             if now - timestamp > maxArchiveAgeSeconds {
                 try? FileManager.default.removeItem(atPath: "\(dir)/\(file)")
             }
@@ -816,10 +815,18 @@ struct LogRotationPolicy: Sendable {
     }
 
     private static func archiveTimestamp(_ file: String, prefix: String) -> TimeInterval? {
-        let suffix = ".zlib"
-        guard file.hasPrefix(prefix), file.hasSuffix(suffix) else { return nil }
-        let middle = file.dropFirst(prefix.count).dropLast(suffix.count)
-        return TimeInterval(middle)
+        for suffix in archiveSuffixes {
+            if let suffix = suffix {
+                guard file.hasPrefix(prefix), file.hasSuffix(suffix) else { continue }
+                let middle = file.dropFirst(prefix.count).dropLast(suffix.count)
+                if let ts = TimeInterval(middle) { return ts }
+            } else {
+                guard file.hasPrefix(prefix), !file.dropFirst(prefix.count).contains(".") else { continue }
+                let middle = file.dropFirst(prefix.count)
+                if let ts = TimeInterval(middle) { return ts }
+            }
+        }
+        return nil
     }
 
     static func worktreeAuditLogPaths(repoRoot: String) -> [(path: String, policy: LogRotationPolicy)] {
