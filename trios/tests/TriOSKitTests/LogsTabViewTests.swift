@@ -1656,4 +1656,53 @@ final class LogsTabViewTests: XCTestCase {
         }
         XCTAssertTrue(true)
     }
+
+    // MARK: - Worktree audit log discovery
+
+    func testWorktreeAuditLogPathsDiscoversExistingStreams() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        defer { try? fm.removeItem(atPath: tmp) }
+
+        let dirs = [
+            "\(tmp)/.worktrees/feature-a/trios/.trinity/events",
+            "\(tmp)/.worktrees/feature-a/trios/.trinity/state",
+            "\(tmp)/.worktrees/feature-a/trios/.trinity/experience",
+            "\(tmp)/.worktrees/feature-b/trios/.trinity/events",
+        ]
+        for d in dirs {
+            try fm.createDirectory(atPath: d, withIntermediateDirectories: true)
+        }
+
+        let paths = LogRotationPolicy.worktreeAuditLogPaths(repoRoot: tmp)
+        XCTAssertEqual(paths.count, 8)
+
+        let eventPaths = paths.filter { $0.path.hasSuffix("event_log.jsonl") }
+        XCTAssertEqual(eventPaths.count, 2)
+        XCTAssertTrue(paths.contains { $0.path.contains("feature-a") && $0.path.hasSuffix("akashic-log.jsonl") })
+        XCTAssertTrue(paths.contains { $0.path.contains("feature-b") && $0.path.hasSuffix("local-auth-audit.jsonl") })
+
+        let policies = Set(paths.map { $0.policy })
+        XCTAssertTrue(policies.contains(LogRotationPolicy.audit))
+        XCTAssertTrue(policies.contains(LogRotationPolicy.security))
+        XCTAssertTrue(policies.contains(LogRotationPolicy.experience))
+    }
+
+    func testWorktreeAuditLogPathsReturnsEmptyWhenNoWorktrees() {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        defer { try? fm.removeItem(atPath: tmp) }
+        try? fm.createDirectory(atPath: tmp, withIntermediateDirectories: true)
+        let paths = LogRotationPolicy.worktreeAuditLogPaths(repoRoot: tmp)
+        XCTAssertTrue(paths.isEmpty)
+    }
+
+    func testWorktreeAuditLogPathsIgnoresWorktreesWithoutTrinity() throws {
+        let fm = FileManager.default
+        let tmp = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        defer { try? fm.removeItem(atPath: tmp) }
+        try fm.createDirectory(atPath: "\(tmp)/.worktrees/feature-x", withIntermediateDirectories: true)
+        let paths = LogRotationPolicy.worktreeAuditLogPaths(repoRoot: tmp)
+        XCTAssertTrue(paths.isEmpty)
+    }
 }

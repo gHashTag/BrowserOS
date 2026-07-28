@@ -822,13 +822,33 @@ struct LogRotationPolicy: Sendable {
         return TimeInterval(middle)
     }
 
+    static func worktreeAuditLogPaths(repoRoot: String) -> [(path: String, policy: LogRotationPolicy)] {
+        let fm = FileManager.default
+        let worktreesRoot = "\(repoRoot)/.worktrees"
+        guard fm.fileExists(atPath: worktreesRoot),
+              let entries = try? fm.contentsOfDirectory(atPath: worktreesRoot) else {
+            return []
+        }
+        var result: [(path: String, policy: LogRotationPolicy)] = []
+        for entry in entries {
+            let trinityDir = "\(worktreesRoot)/\(entry)/trios/.trinity"
+            guard fm.fileExists(atPath: trinityDir) else { continue }
+            result.append(("\(trinityDir)/event_log.jsonl", .audit))
+            result.append(("\(trinityDir)/events/akashic-log.jsonl", .audit))
+            result.append(("\(trinityDir)/state/local-auth-audit.jsonl", .security))
+            result.append(("\(trinityDir)/experience/episodes.jsonl", .experience))
+        }
+        return result
+    }
+
     static func rotateAuditLogs() {
+        let repoRoot = ProjectPaths.root
         let policies: [(path: String, policy: LogRotationPolicy)] = [
             (ProjectPaths.trinityEventLog, .audit),
             ("\(ProjectPaths.trinity)/events/akashic-log.jsonl", .audit),
             ("\(ProjectPaths.trinity)/state/local-auth-audit.jsonl", .security),
             ("\(ProjectPaths.trinity)/experience/episodes.jsonl", .experience),
-        ]
+        ] + worktreeAuditLogPaths(repoRoot: repoRoot)
         for item in policies {
             item.policy.rotateIfNeeded(path: item.path)
         }
