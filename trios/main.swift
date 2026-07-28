@@ -176,6 +176,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ApplicationMenuInstaller.install(delegate: self)
 
         setupStatusItem()
+        // Rotate JSONL audit streams before anything starts writing to them.
+        LogRotationPolicy.rotateAuditLogs()
         // CRITICAL: setupSidePanel MUST run synchronously before any UI interaction.
         // Previously it was in Task { @MainActor in } which meant panel was nil
         // when the user clicked the status bar icon before the task completed.

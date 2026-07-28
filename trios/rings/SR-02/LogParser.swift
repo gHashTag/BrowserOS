@@ -670,25 +670,60 @@ struct LogRotationPolicy: Sendable {
     let maxFileSizeBytes: UInt64
     let maxArchiveCount: Int
     let keepTailLines: Int
+    let maxArchiveAgeSeconds: TimeInterval?
+    let maxAgeBeforeRotationSeconds: TimeInterval?
 
     static let `default` = LogRotationPolicy(
         maxFileSizeBytes: 1_048_576, // 1 MB
         maxArchiveCount: 5,
-        keepTailLines: 500
+        keepTailLines: 500,
+        maxArchiveAgeSeconds: nil,
+        maxAgeBeforeRotationSeconds: nil
+    )
+
+    static let audit = LogRotationPolicy(
+        maxFileSizeBytes: 1_048_576,
+        maxArchiveCount: 5,
+        keepTailLines: 500,
+        maxArchiveAgeSeconds: 30 * 24 * 60 * 60,
+        maxAgeBeforeRotationSeconds: 24 * 60 * 60
+    )
+
+    static let security = LogRotationPolicy(
+        maxFileSizeBytes: 1_048_576,
+        maxArchiveCount: 10,
+        keepTailLines: 500,
+        maxArchiveAgeSeconds: 365 * 24 * 60 * 60,
+        maxAgeBeforeRotationSeconds: 24 * 60 * 60
+    )
+
+    static let experience = LogRotationPolicy(
+        maxFileSizeBytes: 5_242_880,
+        maxArchiveCount: 5,
+        keepTailLines: 500,
+        maxArchiveAgeSeconds: 90 * 24 * 60 * 60,
+        maxAgeBeforeRotationSeconds: 7 * 24 * 60 * 60
     )
 
     func rotateIfNeeded(path: String) {
         guard FileManager.default.fileExists(atPath: path) else { return }
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
               let size = attrs[.size] as? UInt64,
-              size > maxFileSizeBytes else { return }
+              let mtime = attrs[.modificationDate] as? Date else { return }
+        let now = Date().timeIntervalSince1970
+        let age = now - mtime.timeIntervalSince1970
+        let shouldRotate = size > maxFileSizeBytes ||
+            (maxAgeBeforeRotationSeconds != nil && age > maxAgeBeforeRotationSeconds!)
         // Do not truncate files another process is currently writing; copy-truncate
         // without a reopen handshake can leave holes or lost records.
         guard !hasExternalWriters(path: path) else { return }
 
-        archive(path: path)
-        truncate(path: path, keepingLast: keepTailLines)
-        cleanupArchives(of: path)
+        if shouldRotate {
+            archive(path: path)
+            truncate(path: path, keepingLast: keepTailLines)
+            cleanupArchives(of: path)
+        }
+        cleanupOldArchives(path: path)
     }
 
     private func hasExternalWriters(path: String) -> Bool {
@@ -752,11 +787,50 @@ struct LogRotationPolicy: Sendable {
         guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return }
         let archives = files
             .filter { $0.hasPrefix(prefix) }
-            .sorted()
-            .reversed()
+            .sorted { lhs, rhs in
+                (LogRotationPolicy.archiveTimestamp(lhs, prefix: prefix) ?? 0) >
+                (LogRotationPolicy.archiveTimestamp(rhs, prefix: prefix) ?? 0)
+            }
             .dropFirst(maxArchiveCount)
         for old in archives {
             try? FileManager.default.removeItem(atPath: "\(dir)/\(old)")
+        }
+    }
+
+    private func cleanupOldArchives(path: String) {
+        guard let maxArchiveAgeSeconds = maxArchiveAgeSeconds else { return }
+        let dir = (path as NSString).deletingLastPathComponent
+        let base = (path as NSString).lastPathComponent
+        let prefix = "\(base).archive."
+        let suffix = ".zlib"
+        guard let files = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return }
+        let now = Date().timeIntervalSince1970
+        for file in files {
+            guard file.hasPrefix(prefix), file.hasSuffix(suffix) else { continue }
+            let middle = file.dropFirst(prefix.count).dropLast(suffix.count)
+            guard let timestamp = TimeInterval(middle) else { continue }
+            if now - timestamp > maxArchiveAgeSeconds {
+                try? FileManager.default.removeItem(atPath: "\(dir)/\(file)")
+            }
+        }
+    }
+
+    private static func archiveTimestamp(_ file: String, prefix: String) -> TimeInterval? {
+        let suffix = ".zlib"
+        guard file.hasPrefix(prefix), file.hasSuffix(suffix) else { return nil }
+        let middle = file.dropFirst(prefix.count).dropLast(suffix.count)
+        return TimeInterval(middle)
+    }
+
+    static func rotateAuditLogs() {
+        let policies: [(path: String, policy: LogRotationPolicy)] = [
+            (ProjectPaths.trinityEventLog, .audit),
+            ("\(ProjectPaths.trinity)/events/akashic-log.jsonl", .audit),
+            ("\(ProjectPaths.trinity)/state/local-auth-audit.jsonl", .security),
+            ("\(ProjectPaths.trinity)/experience/episodes.jsonl", .experience),
+        ]
+        for item in policies {
+            item.policy.rotateIfNeeded(path: item.path)
         }
     }
 }
@@ -864,6 +938,7 @@ enum LogParser {
         rotation.rotateIfNeeded(path: ProjectPaths.trinityEventLog)
         rotation.rotateIfNeeded(path: ProjectPaths.trinityLog)
         rotation.rotateIfNeeded(path: "\(ProjectPaths.trinity)/queen.log")
+        LogRotationPolicy.rotateAuditLogs()
 
         loaded.append(parseSource(
             id: "event-log",
