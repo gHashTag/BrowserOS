@@ -585,16 +585,25 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
 /// *and executed* before being added, never on the strength of a resolved
 /// source list - which is what caught the three below.
 ///
-/// `session_recovery_resilience_test` does not fail, it **hangs**. It reaches
-/// KeychainSymmetricKeyStore, and `SecItemCopyMatching` blocks on a password
-/// dialog no unattended run can answer. Wiring it on a successful compile would
-/// have frozen clade-e2e until its timeout, reporting nothing - strictly worse
-/// than the silence it was in. It needs the dev-variant secret store, which
-/// means resolving TRIOS_VARIANT for a bare test binary first.
+/// Both `session_recovery_*` suites **hang** rather than fail. They reach
+/// KeychainSymmetricKeyStore through TriOSEncryption.encrypt, and
+/// `SecItemCopyMatching` blocks on a password dialog no unattended run can
+/// answer. Wiring either on a successful compile would freeze clade-e2e until
+/// its timeout, reporting nothing - strictly worse than the silence they are in
+/// now.
 ///
-/// `session_recovery_export_test` compiles, runs, and fails on "portable
-/// filename extension". Same shape as the tab-map test: a real red assertion
-/// that was invisible while nothing ran it. Worth a cycle of its own.
+/// `session_recovery_export_test` used to fail fast instead, on a stale
+/// assertion that the package is named `.zip`. That assertion has been
+/// corrected - the product writes `.triosrecovery` and has since it started
+/// encrypting - and the reward for fixing it was execution reaching the
+/// keychain and hanging like its sibling. The red assertion was hiding the
+/// hang, not competing with it.
+///
+/// Both need the dev-variant secret store, and `TRIOS_VARIANT=dev` does not
+/// currently reach them: ProjectPaths resolves the variant from
+/// `Bundle.main.infoDictionary`, and a bare test binary has no bundle, so it
+/// falls back to prod and takes the keychain path. Letting the environment
+/// answer when there is no bundle would unblock both at once.
 ///
 /// `clade_guard_test` will not compile: CladeGuard.swift wants
 /// `ProjectPaths.root`, and something else in that suite's closure declares a

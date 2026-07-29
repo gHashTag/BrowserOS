@@ -139,7 +139,12 @@ struct SessionRecoveryExportTest {
         let date = Date(timeIntervalSince1970: 1_700_000_000)
         let name = SessionRecoveryPackageNaming.fileName(date: date)
         expect(name.hasPrefix("Trinity-Recovery-"), "portable filename prefix")
-        expect(name.hasSuffix(".zip"), "portable filename extension")
+        // Not .zip. The package stopped being a plain archive when it started
+        // being encrypted, and naming an AES-GCM blob .zip invites Archive
+        // Utility to open it and fail in a way that looks like corruption.
+        // SessionRecoveryPackageReader still reads legacy plaintext .zip files,
+        // so old packages keep working; only what we write changed.
+        expect(name.hasSuffix(".triosrecovery"), "portable filename extension")
         expect(!name.contains(":"), "portable filename excludes colon")
         expect(!name.contains(" "), "portable filename excludes spaces")
     }
