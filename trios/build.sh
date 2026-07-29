@@ -4,7 +4,31 @@ set -e
 # Derive project dir from the script location so the build is portable.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="${TRIOS_ROOT:-$SCRIPT_DIR}"
-OUTPUT="$PROJECT_DIR/trios_app"
+# Variant resolution happens before anything is written.
+#
+# The default is DEV on purpose. Every skill, cron job and agent runs a bare
+# `./build.sh`, and when that rebuilt the release bundle it overwrote the app
+# the user was actually running. Shipping has to be a deliberate act, so
+# touching trios.app now requires an explicit TRIOS_VARIANT=prod or --release.
+case "${1:-}" in
+    --release) TRIOS_VARIANT="prod" ;;
+    --dev) TRIOS_VARIANT="dev" ;;
+esac
+VARIANT="${TRIOS_VARIANT:-dev}"
+if [ "$VARIANT" != "dev" ] && [ "$VARIANT" != "prod" ]; then
+    echo "[FAIL] TRIOS_VARIANT must be 'dev' or 'prod', got '$VARIANT'"
+    exit 1
+fi
+
+# W2: per-variant binary and Frameworks, so a dev build cannot overwrite the
+# release binary or the dylibs it loads.
+if [ "$VARIANT" = "dev" ]; then
+    OUTPUT="$PROJECT_DIR/trios_dev_app"
+    STANDALONE_FRAMEWORKS="$PROJECT_DIR/Frameworks-dev"
+else
+    OUTPUT="$PROJECT_DIR/trios_app"
+    STANDALONE_FRAMEWORKS="$PROJECT_DIR/Frameworks"
+fi
 SWIFT_OPTIMIZATION="${TRIOS_SWIFT_OPTIMIZATION:--Onone}"
 LOG_DIR="$PROJECT_DIR/.trinity/logs"
 LOG_FILE="$LOG_DIR/build_$(date +%s).log"
@@ -98,11 +122,15 @@ if [ -z "${TRIOS_INCLUDE_PROTOTYPES:-}" ]; then
         "MessageBubbleView.swift"
         "ModelsTabView.swift"
         "ProjectPaths.swift"
+        "QueenCompactSupervisorBar.swift"
+        "QueenDashboardView.swift"
+        "QueenTaskStatusView.swift"
         "QueenStatusViewModel.swift"
         "QueenTabView.swift"
         "RecursionGuard.swift"
         "RichTextRenderer.swift"
         "ServerManager.swift"
+        "SkillsTabView.swift"
         "SessionGuard.swift"
         "SmoothStreamingEnhancements.swift"
         "TODOAnimations.swift"
@@ -195,7 +223,6 @@ if [ ${PIPESTATUS[0]} -eq 0 ]; then
     chmod +x "$OUTPUT"
 
     # Keep the standalone development binary runnable as well as the app bundle.
-    STANDALONE_FRAMEWORKS="$PROJECT_DIR/Frameworks"
     mkdir -p "$STANDALONE_FRAMEWORKS"
     cp "$QUEEN_DYLIB" "$STANDALONE_FRAMEWORKS/libQueenUILib.dylib"
     rm -f "$STANDALONE_FRAMEWORKS/$SQLCIPHER_DYLIB_NAME"
@@ -208,30 +235,47 @@ if [ ${PIPESTATUS[0]} -eq 0 ]; then
     # stale plist disables macOS single-instance activation by bundle ID and is a
     # known cause of recursive self-launch cascades when `open trios.app` is
     # invoked repeatedly.
-    APP_BUNDLE="$PROJECT_DIR/trios.app"
+    # Two variants can coexist. The dev build carries its own bundle id, ports
+    # and data directory, so an agent rebuilding it cannot disturb a release
+    # instance the user is actually using. TRIOS_VARIANT=dev selects it.
+    if [ "$VARIANT" = "dev" ]; then
+        APP_BUNDLE="$PROJECT_DIR/trios-dev.app"
+        BUNDLE_ID="com.browseros.trios.dev"
+        BUNDLE_NAME="TriOS Dev"
+        VARIANT_MCP_PORT="9205"
+        VARIANT_A2A_PORT="9210"
+        VARIANT_MESH_PORT="9515"
+    else
+        APP_BUNDLE="$PROJECT_DIR/trios.app"
+        BUNDLE_ID="com.browseros.trios"
+        BUNDLE_NAME="Trios"
+        VARIANT_MCP_PORT="9105"
+        VARIANT_A2A_PORT="9200"
+        VARIANT_MESH_PORT="9505"
+    fi
     MACOS_DIR="$APP_BUNDLE/Contents/MacOS"
     RESOURCES_DIR="$APP_BUNDLE/Contents/Resources"
     FRAMEWORKS_DIR="$APP_BUNDLE/Contents/Frameworks"
     PLIST="$APP_BUNDLE/Contents/Info.plist"
     mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$FRAMEWORKS_DIR"
-    cat > "$PLIST" << 'EOF'
+    cat > "$PLIST" << EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key><string>trios</string>
-    <key>CFBundleIdentifier</key><string>com.browseros.trios</string>
-    <key>CFBundleName</key><string>Trios</string>
+    <key>CFBundleIdentifier</key><string>${BUNDLE_ID}</string>
+    <key>CFBundleName</key><string>${BUNDLE_NAME}</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleVersion</key><string>1.0.0</string>
     <key>CFBundleShortVersionString</key><string>1.0.0</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
-    <key>TRIOS_MESH_PORT</key><string>9505</string>
-    <key>TRIOS_MCP_PORT</key><string>9105</string>
-    <key>TRIOS_A2A_PORT</key><string>9200</string>
+    <key>TRIOS_MESH_PORT</key><string>${VARIANT_MESH_PORT}</string>
+    <key>TRIOS_MCP_PORT</key><string>${VARIANT_MCP_PORT}</string>
+    <key>TRIOS_A2A_PORT</key><string>${VARIANT_A2A_PORT}</string>
     <key>TRIOS_CANARY_MCP_PORT</key><string>9205</string>
-    <key>TRIOS_VARIANT</key><string>prod</string>
+    <key>TRIOS_VARIANT</key><string>${VARIANT}</string>
 </dict>
 </plist>
 EOF
@@ -249,9 +293,19 @@ EOF
     # Replacing any file inside a signed bundle invalidates its signature and
     # macOS terminates the app in dyld before main() runs. Apply an ad-hoc
     # development signature after the bundle is complete.
-    codesign --force --deep --sign - "$APP_BUNDLE"
+    # An ad-hoc signature has no stable identity, so every rebuild looks like a
+    # different app to macOS and the login keychain re-prompts for every stored
+    # secret. Set TRIOS_SIGN_IDENTITY to a stable certificate to stop that;
+    # scripts/create_dev_signing_identity.sh creates a suitable self-signed one.
+    SIGN_IDENTITY="${TRIOS_SIGN_IDENTITY:--}"
+    if [ "$SIGN_IDENTITY" != "-" ] && ! security find-identity -v -p codesigning | grep -q "$SIGN_IDENTITY"; then
+        echo "[WARN] Signing identity '$SIGN_IDENTITY' not found; falling back to ad-hoc."
+        echo "[WARN] Expect repeated keychain password prompts after each rebuild."
+        SIGN_IDENTITY="-"
+    fi
+    codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
     codesign --verify --deep --strict "$APP_BUNDLE"
-    echo "[OK] Copied and signed .app bundle (bundle ID: com.browseros.trios)"
+    echo "[OK] Copied and signed $APP_BUNDLE (variant: $VARIANT, bundle ID: $BUNDLE_ID)"
 
     # The app-level memory, planner, streaming, cancellation, and persistence
     # contracts live in the existing standalone integration harness because the

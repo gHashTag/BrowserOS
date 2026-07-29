@@ -1,0 +1,17 @@
+# trios SSE cassette: a worker that writes one file and reports back.
+# Deterministic by construction - same bytes, same order, every run.
+# The effect line makes the replay write the file the recorded tool call claims
+# to have written, so the commit path is exercised rather than always seeing an
+# empty working tree.
+#effect: write docs/replay.md bee was here
+{"type":"start","messageId":"replay-1"}
+{"type":"text-start","id":"t1"}
+{"type":"text-delta","id":"t1","delta":"Creating the file now."}
+{"type":"text-end","id":"t1"}
+{"type":"tool-input-start","toolCallId":"call-1","toolName":"filesystem_write"}
+{"type":"tool-input-available","toolCallId":"call-1","input":{"path":"docs/replay.md","content":"bee was here"}}
+{"type":"tool-output-available","toolCallId":"call-1","output":{"ok":true}}
+{"type":"text-start","id":"t2"}
+{"type":"text-delta","id":"t2","delta":"Done. Created docs/replay.md with one line."}
+{"type":"text-end","id":"t2"}
+{"type":"finish","messageId":"replay-1"}

@@ -137,50 +137,70 @@ struct MessageBubbleView: View {
         }
     }
 
+    private var systemNotice: (kind: SystemNoticeKind, text: String) {
+        SystemNoticeClassifier.classify(message.content)
+    }
+
+    private var systemNoticeTint: Color {
+        switch systemNotice.kind {
+        case .success: return .green
+        case .info: return .grokMuted
+        case .warning: return .yellow
+        case .failure: return .red
+        }
+    }
+
     private var systemErrorBadge: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Image(systemName: "exclamationmark.triangle.fill")
+        let notice = systemNotice
+        let tint = systemNoticeTint
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: notice.kind.symbolName)
                     .font(.system(size: 12))
-                    .foregroundColor(.yellow)
-                Text(cleanErrorContent(message.content))
+                    .foregroundColor(tint)
+                Text(notice.text)
                     .font(.system(size: 13, weight: .medium, design: .default))
                     .foregroundColor(.grokText)
                     .textSelection(.enabled)
                     .contextMenu {
-                        Button("Copy") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(message.content, forType: .string)
-                        }
+                        Button("Copy") { copyNotice(notice.text) }
                     }
+                if notice.kind.deservesPersistentCopyButton {
+                    // A failure is exactly the text a user needs to paste
+                    // somewhere. Hiding its copy button behind hover meant the
+                    // one message worth copying was the hardest to copy.
+                    Button {
+                        copyNotice(notice.text)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 11))
+                            .foregroundColor(.grokMuted)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy this message")
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
-            .background(Color.red.opacity(0.15))
+            .background(tint.opacity(notice.kind == .info ? 0.08 : 0.15))
             .overlay(
                 RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.red.opacity(0.4), lineWidth: 1)
+                    .stroke(tint.opacity(0.4), lineWidth: 1)
             )
             .cornerRadius(10)
             .onHover { hovered in
                 isHovered = hovered
             }
 
-            // Error messages get a copy action bar too, shown on hover.
-            HoverCopyBar(content: message.content)
+            HoverCopyBar(content: notice.text)
                 .opacity(isHovered ? 1 : 0)
                 .animation(.easeInOut(duration: 0.15), value: isHovered)
         }
     }
 
-    private func cleanErrorContent(_ content: String) -> String {
-        var cleaned = content
-        if cleaned.hasPrefix("[!] ") {
-            cleaned = String(cleaned.dropFirst(4))
-        }
-        // Strip legacy emoji warning left over in persisted history.
-        cleaned = cleaned.replacingOccurrences(of: "⚠️ ", with: "")
-        return cleaned
+    private func copyNotice(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     // MARK: - Assistant Container

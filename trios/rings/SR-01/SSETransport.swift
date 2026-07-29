@@ -6,24 +6,34 @@ actor SSETransport: ChatTransportProtocol {
     private(set) var session: URLSession
     private let retrier: NetworkRetrier
     private let localAuthProvider: LocalAuthProviding?
+    /// Writes a cassette while a real stream runs, so any surprising run can
+    /// become a permanent regression test. Opt-in: a transport that always
+    /// writes to disk is a transport that fills it.
+    private let recorder: CassetteRecorder?
 
+    /// `resourceTimeout` caps the whole stream, not the gap between events.
+    /// Ten minutes suits an interactive turn a person is watching; a delegated
+    /// worker grinding through a repository routinely runs longer, and the
+    /// default silently killed one after seventeen successful tool calls. Such
+    /// callers pass their own ceiling rather than inheriting a chat's patience.
     init(
         serverURL: URL = URL(string: "\(ProjectPaths.mcpBaseURL)/chat") ?? URL(fileURLWithPath: "/dev/null"),
-        localAuthProvider: LocalAuthProviding? = nil
+        localAuthProvider: LocalAuthProviding? = nil,
+        resourceTimeout: TimeInterval = 600
     ) {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 120
-        config.timeoutIntervalForResource = 600
+        config.timeoutIntervalForResource = resourceTimeout
         config.httpShouldSetCookies = false
         let session = URLSession(configuration: config)
-        let retrier = NetworkRetrier(policy: NetworkRetryPolicy(
+        let retrier: NetworkRetrier = NetworkRetrier(policy: NetworkRetryPolicy(
             maxAttempts: 3,
             baseDelay: 1,
             maxDelay: 30,
             exponentialBackoff: true,
             retryableURLErrorCodes: NetworkRetryPolicy.default.retryableURLErrorCodes,
             extraShouldRetry: { error in
-                if case let TransportError.serverError(statusCode, _, _) = error {
+                if case let TransportError.serverError(statusCode, _, _, _) = error {
                     // Do not burn retries on fatal provider/account errors.
                     return (502...504).contains(statusCode) || statusCode == 429
                 }
@@ -39,13 +49,15 @@ actor SSETransport: ChatTransportProtocol {
         self.session = session
         self.retrier = retrier
         self.localAuthProvider = localAuthProvider
+        let path = ProcessInfo.processInfo.environment["TRIOS_RECORD_CASSETTE"] ?? ""
+        recorder = path.isEmpty ? nil : CassetteRecorder(path: path)
     }
 
     func sendMessage(body: Data) async throws -> AsyncStream<SSEEvent> {
         let request = await buildRequest(body: body, forceRefresh: false)
         do {
             return try await performMessageStream(request: request, body: body)
-        } catch let TransportError.serverError(403, _, _) {
+        } catch TransportError.serverError(403, _, _, _) {
             // The local-auth token may be stale (e.g. BrowserOS restarted).
             // Refresh once and retry the same request.
             await LocalAuthMonitor.shared.record403Retry()
@@ -80,7 +92,7 @@ actor SSETransport: ChatTransportProtocol {
             ) {
                 try await session.bytes(for: request)
             }
-        } catch let urlError as URLError {
+        } catch is URLError {
             throw TransportError.connectionFailed
         } catch let retryError as RetryError {
             if case .attemptsExhausted(_, _, let lastError) = retryError,
@@ -104,10 +116,13 @@ actor SSETransport: ChatTransportProtocol {
             }
             let bodySample = String(data: sampleData, encoding: .utf8) ?? String(describing: sampleData)
             NSLog("[SSETransport] non-2xx response: \(httpResponse.statusCode), body: \(bodySample)")
+            let retryAfter = httpResponse.value(forHTTPHeaderField: "Retry-After")
+                .flatMap { Self.parseRetryAfter($0) }
             throw TransportError.serverError(
                 statusCode: httpResponse.statusCode,
                 bodySample: bodySample,
-                url: serverURL
+                url: serverURL,
+                retryAfter: retryAfter
             )
         }
 
@@ -132,9 +147,14 @@ actor SSETransport: ChatTransportProtocol {
                             if line.hasPrefix("data: ") {
                                 let json = String(line.dropFirst(6))
                                 NSLog("[SSETransport] raw SSE line: \(json.prefix(100))")
+                                // Capture the wire bytes, not the decoded event:
+                                // a cassette of decoded events would replay
+                                // around the parser instead of through it.
+                                await recorder?.record(json)
                                 if let event = SSEEventParser.parse(line: line) {
                                     continuation.yield(event)
                                     if shouldFinish(event) {
+                                        await recorder?.flush()
                                         continuation.finish()
                                         return
                                     }
@@ -156,6 +176,7 @@ actor SSETransport: ChatTransportProtocol {
                         continuation.yield(event)
                     }
 
+                    await recorder?.flush()
                     continuation.finish()
                 } catch {
                     NSLog("[SSETransport] stream error: \(error.localizedDescription)")
@@ -187,12 +208,28 @@ actor SSETransport: ChatTransportProtocol {
             return false
         }
     }
+
+    /// Parses a `Retry-After` header value as either a numeric seconds value
+    /// or an HTTP-date (RFC 7231 §7.1.1.2). Returns the positive interval, if
+    /// any, relative to the current time.
+    static func parseRetryAfter(_ value: String) -> TimeInterval? {
+        if let seconds = TimeInterval(value), seconds > 0 {
+            return seconds
+        }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        guard let date = formatter.date(from: value) else { return nil }
+        let interval = date.timeIntervalSince(Date())
+        return interval > 0 ? interval : nil
+    }
 }
 
 enum TransportError: Error, CustomStringConvertible {
     case invalidResponse(url: URL?)
     case connectionFailed
-    case serverError(statusCode: Int, bodySample: String, url: URL?)
+    case serverError(statusCode: Int, bodySample: String, url: URL?, retryAfter: TimeInterval? = nil)
     case requestTimedOut(URL, TimeInterval)
 
     var description: String {
@@ -202,9 +239,10 @@ enum TransportError: Error, CustomStringConvertible {
             return "Invalid server response from \(urlString)"
         case .connectionFailed:
             return "Connection failed"
-        case .serverError(let statusCode, let bodySample, let url):
+        case .serverError(let statusCode, let bodySample, let url, let retryAfter):
             let urlString = url?.absoluteString ?? "unknown"
-            return "Server error \(statusCode) at \(urlString). Response: \(bodySample)"
+            let retryInfo = retryAfter.map { " (Retry-After: \($0)s)" } ?? ""
+            return "Server error \(statusCode) at \(urlString). Response: \(bodySample)\(retryInfo)"
         case .requestTimedOut(let url, let interval):
             return "Request to \(url.absoluteString) timed out after \(interval.rounded(toPlaces: 1))s"
         }
@@ -218,7 +256,7 @@ extension TransportError {
     /// Supports OpenRouter-style `{ error: { message: ... } }` and plain `message` fields.
     var providerErrorMessage: String? {
         switch self {
-        case .serverError(_, let bodySample, _):
+        case .serverError(_, let bodySample, _, _):
             guard !bodySample.isEmpty else { return nil }
             if let data = bodySample.data(using: .utf8),
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
@@ -238,32 +276,66 @@ extension TransportError {
 
     var isBalanceError: Bool {
         switch self {
-        case .serverError(402, _, _): return true
-        case .serverError(let status, let body, _):
-            return status == 400 || status == 403
-                && body.localizedCaseInsensitiveContains("Insufficient balance")
+        case .serverError(402, _, _, _): return true
+        case .serverError(let status, let body, _, _):
+            guard status == 400 || status == 403 else { return false }
+            let lower = body.lowercased()
+            return lower.contains("insufficient balance")
+                || lower.contains("balance")
+                || lower.contains("out of funds")
         default: return false
         }
     }
 
-    var isAuthError: Bool { statusCode == 401 }
+    var isAuthError: Bool {
+        switch self {
+        case .serverError(401, _, _, _): return true
+        case .serverError(403, let body, _, _):
+            guard !isBalanceError else { return false }
+            let lower = body.lowercased()
+            return lower.contains("auth")
+                || lower.contains("unauthorized")
+                || lower.contains("api key")
+                || lower.contains("incorrect key")
+                || lower.contains("invalid key")
+        default: return false
+        }
+    }
 
     var isRateLimitError: Bool { statusCode == 429 }
 
+    var isContextLengthError: Bool {
+        switch self {
+        case .serverError(413, _, _, _): return true
+        case .serverError(let status, let body, _, _):
+            guard status == 400 || status == 429 || status == 413 else { return false }
+            let lower = body.lowercased()
+            return lower.contains("context_length_exceeded")
+                || lower.contains("maximum context length")
+                || lower.contains("context length")
+                || lower.contains("context_length")
+                || lower.contains("too many tokens")
+                || lower.contains("token limit")
+        default: return false
+        }
+    }
+
     var isInvalidModelError: Bool {
         switch self {
-        case .serverError(let status, let body, _):
-            return (status == 400 || status == 404 || status == 422)
-                && (body.localizedCaseInsensitiveContains("model") || body.localizedCaseInsensitiveContains("not available"))
+        case .serverError(let status, let body, _, _):
+            guard status == 400 || status == 404 || status == 422 else { return false }
+            guard !isContextLengthError else { return false }
+            let lower = body.lowercased()
+            return lower.contains("model") || lower.contains("not available")
         default: return false
         }
     }
 
     var isModelUnavailableError: Bool {
         switch self {
-        case .serverError(502, _, _), .serverError(503, _, _), .serverError(504, _, _):
+        case .serverError(502, _, _, _), .serverError(503, _, _, _), .serverError(504, _, _, _):
             return true
-        case .serverError(let status, let body, _):
+        case .serverError(let status, let body, _, _):
             return status >= 500
                 && body.localizedCaseInsensitiveContains("no available model provider")
         default: return false
@@ -272,15 +344,43 @@ extension TransportError {
 
     var isRetryableServerError: Bool {
         switch self {
-        case .serverError(429, _, _), .serverError(502, _, _), .serverError(503, _, _), .serverError(504, _, _):
+        case .serverError(429, _, _, _), .serverError(502, _, _, _), .serverError(503, _, _, _), .serverError(504, _, _, _):
             return true
         default: return false
         }
     }
 
+    /// Errors where trying another provider is likely to help: model-level issues,
+    /// provider gateway errors, rate limits, auth/balance failures, timeouts, and
+    /// connection failures. Context-length failures are excluded because another
+    /// provider will usually reject the same long prompt.
+    var isEligibleForCrossProviderFailover: Bool {
+        guard !isContextLengthError else { return false }
+        switch self {
+        case .connectionFailed, .requestTimedOut:
+            return true
+        case .serverError:
+            return isModelUnavailableError
+                || isInvalidModelError
+                || isRateLimitError
+                || isAuthError
+                || isBalanceError
+                || isRetryableServerError
+        default:
+            return false
+        }
+    }
+
+    var retryAfter: TimeInterval? {
+        switch self {
+        case .serverError(_, _, _, let retryAfter): return retryAfter
+        default: return nil
+        }
+    }
+
     private var statusCode: Int? {
         switch self {
-        case .serverError(let status, _, _): return status
+        case .serverError(let status, _, _, _): return status
         default: return nil
         }
     }

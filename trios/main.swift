@@ -201,7 +201,117 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Queen background service owns A2A registration, heartbeat and the
             // self-improvement audit loop. It survives chat switches and panel close.
             await QueenBackgroundService.shared.start()
+            await runDelegationSelfTestIfRequested()
         }
+    }
+
+    /// Drives one real `/delegate` through the Queen and reports what the worker
+    /// did, with no window and no clicking.
+    ///
+    /// Delegation only ever runs from the chat UI, which made "the bee never
+    /// started" impossible to prove without a human at the keyboard. Set
+    /// `TRIOS_E2E_DELEGATE="owner/repo#N|worker|title"` to exercise the same
+    /// code path the UI calls and read the verdict out of the log.
+    @MainActor
+    private func runDelegationSelfTestIfRequested() async {
+        let environment = ProcessInfo.processInfo.environment
+        guard let spec = environment["TRIOS_E2E_DELEGATE"], !spec.isEmpty else { return }
+        guard let vm = chatViewModel else {
+            TriosLogBus.shared.error(.queen, "queen.selftest.failed", "No chat view model", [:])
+            return
+        }
+
+        let fields = spec.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+        guard fields.count == 3 || fields.count == 4 else {
+            TriosLogBus.shared.error(
+                .queen,
+                "queen.selftest.failed",
+                "TRIOS_E2E_DELEGATE must be 'owner/repo#N|worker|title[|paths]'",
+                ["spec": spec]
+            )
+            return
+        }
+        let issueText = fields[0]
+        let worker = fields[1]
+        let title = fields[2]
+        // A fourth field is the worker's file boundary. Without one the brief
+        // tells it to ask before editing, so a write task produces no writes.
+        let pathsFlag = fields.count == 4 && !fields[3].isEmpty ? " --paths \(fields[3])" : ""
+
+        TriosLogBus.shared.info(.queen, "queen.selftest.start", "Delegation self-test starting", ["spec": spec])
+        await vm.runQueenCommand("/delegate \(issueText) \(worker)\(pathsFlag) \(title)")
+
+        guard let issue = IssueReference.parse(issueText),
+              let task = QueenDelegationRegistry.shared.task(forIssue: issue) else {
+            TriosLogBus.shared.error(
+                .queen,
+                "queen.selftest.failed",
+                "Delegation did not register a task",
+                ["issue": issueText]
+            )
+            return
+        }
+
+        // Wait for the bee, bounded. A self-test that hangs is a self-test that
+        // gets ignored. Agent turns that edit a repository routinely run for
+        // many minutes, so the ceiling is generous and overridable.
+        let seconds = Double(environment["TRIOS_E2E_DELEGATE_TIMEOUT"] ?? "") ?? 900
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline,
+              vm.workerRunner?.isRunning(conversationId: task.conversationId) == true {
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+
+        let transcript = vm.workerRunner?.transcripts[task.conversationId] ?? []
+        let answered = transcript.contains { $0.role == .assistant && !$0.content.isEmpty }
+        let stillRunning = vm.workerRunner?.isRunning(conversationId: task.conversationId) == true
+        let tools = transcript.reduce(0) { $0 + $1.toolCalls.count }
+        let state = QueenDelegationRegistry.shared.task(forConversation: task.conversationId)?.state
+        // "No answer yet" and "no answer ever" are different verdicts; reporting
+        // a running worker as a failure is how a slow bee gets called a broken one.
+        let verdict: String
+        if answered {
+            verdict = "Worker answered"
+        } else if stillRunning {
+            verdict = "Worker still running at the \(Int(seconds))s deadline"
+        } else {
+            verdict = "Worker finished without producing assistant text"
+        }
+        let report = answered ? TriosLogBus.shared.info : TriosLogBus.shared.error
+        report(
+            .queen,
+            answered ? "queen.selftest.passed" : "queen.selftest.failed",
+            verdict,
+            [
+                "issue": issue.slug,
+                "worker": worker,
+                "messages": String(transcript.count),
+                "tools": String(tools),
+                "state": state?.rawValue ?? "unknown"
+            ]
+        )
+
+        // Prove the wake path while work is still outstanding. Running it after
+        // acceptance only ever exercised the silent branch.
+        await QueenReviewScheduler.shared.reviewNow()
+
+        // Optionally close the loop, so the review commands are exercised by the
+        // same probe rather than only by hand.
+        guard let verb = environment["TRIOS_E2E_DELEGATE_REVIEW"], !verb.isEmpty else { return }
+        await vm.runQueenCommand("/swarm")
+        let command = verb == "reject"
+            ? "/review \(issue.slug) reject probe rejection"
+            : "/accept \(issue.slug) probe acceptance"
+        await vm.runQueenCommand(command)
+        let reviewed = QueenDelegationRegistry.shared.tasks
+            .first { $0.conversationId == task.conversationId }?
+            .state
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.selftest.reviewed",
+            "Review command applied",
+            ["issue": issue.slug, "command": verb, "state": reviewed?.rawValue ?? "unknown"]
+        )
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -673,6 +783,31 @@ struct CompositionRoot {
             a2aClient: a2aClient
         )
 
+        // Each worker gets its own transport. Sharing the chat's transport would
+        // mean a conversation switch (which cancels it) also killed every bee.
+        let workerRunner = QueenWorkerRunner(
+            persister: persister,
+            modelStore: modelStore,
+            makeTransport: {
+                // A cassette replaces the provider entirely when one is named,
+                // so a swarm run is deterministic: same bytes, same order, every
+                // time. Without it a one-in-three failure costs a session to
+                // characterise, because each attempt is a different conversation
+                // with a different model on a different day.
+                if let cassette = ProcessInfo.processInfo.environment["TRIOS_REPLAY_CASSETTE"],
+                   !cassette.isEmpty {
+                    return ReplayTransport(path: cassette)
+                }
+                return SSETransport(
+                    localAuthProvider: localAuthProvider,
+                    // An hour. Nobody is watching a bee tick, and being cut off
+                    // mid-task wastes every tool call it already made.
+                    resourceTimeout: 3600
+                )
+            }
+        )
+        NSLog("CompositionRoot: QueenWorkerRunner created")
+
         let vm = ChatViewModel(
             transport: transport,
             healthCheck: healthCheck,
@@ -682,7 +817,8 @@ struct CompositionRoot {
             a2aClient: a2aClient,
             modelStore: modelStore,
             memoryService: memoryService,
-            todoPlanner: todoPlanner
+            todoPlanner: todoPlanner,
+            workerRunner: workerRunner
         )
         NSLog("CompositionRoot: ChatViewModel created")
         return vm

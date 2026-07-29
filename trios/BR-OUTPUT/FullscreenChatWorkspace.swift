@@ -16,11 +16,36 @@ struct AdaptiveChatWorkspace: View {
             )
 
             if metrics.mode == .compact {
-                ChatPanelView(
-                    viewModel: viewModel,
-                    scrollToBottomRequest: scrollToBottomRequest,
-                    workspaceMode: .compact
-                )
+                // The narrow panel is where the user actually lives. Without
+                // this the supervisor was only visible in fullscreen, so a bee
+                // could finish, wait, and be forgotten without a single pixel
+                // saying so.
+                VStack(spacing: 0) {
+                    QueenCompactSupervisorBar(
+                        registry: QueenDelegationRegistry.shared,
+                        conversationId: viewModel.conversationId,
+                        liveConversationIds: viewModel.workerRunner?.runningConversationIds ?? [],
+                        onOpenTask: { viewModel.selectConversation($0) },
+                        onOpenQueen: {
+                            viewModel.selectConversation(ChatConversation.trinityQueenId)
+                        },
+                        onAccept: { task in
+                            Task { await viewModel.runQueenCommand("/accept \(task.issue.slug)") }
+                        },
+                        onCancel: { task in
+                            Task {
+                                await viewModel.runQueenCommand(
+                                    "/cancel \(task.issue.slug) stopped from the panel"
+                                )
+                            }
+                        }
+                    )
+                    ChatPanelView(
+                        viewModel: viewModel,
+                        scrollToBottomRequest: scrollToBottomRequest,
+                        workspaceMode: .compact
+                    )
+                }
             } else {
                 ExpandedChatWorkspace(
                     viewModel: viewModel,
@@ -53,6 +78,59 @@ private struct ExpandedChatWorkspace: View {
             VStack(spacing: 0) {
                 conversationHeader
                 Divider().overlay(Color.grokBorder.opacity(0.6))
+
+                // The supervisor strip belongs to the Queen's chat only. In a
+                // worker's chat it would be noise about other people's work.
+                if viewModel.conversationId == ChatConversation.trinityQueenId {
+                    QueenDashboardView(
+                        registry: QueenDelegationRegistry.shared,
+                        liveConversationIds: viewModel.workerRunner?.runningConversationIds ?? [],
+                        onOpenTask: { viewModel.selectConversation($0) },
+                        onReview: { task in
+                            Task { await viewModel.runQueenCommand("/accept \(task.issue.slug)") }
+                        },
+                        onCancel: { task in
+                            Task {
+                                await viewModel.runQueenCommand(
+                                    "/cancel \(task.issue.slug) stopped from the swarm view"
+                                )
+                            }
+                        }
+                    )
+                } else if let task = QueenDelegationRegistry.shared.task(
+                    forConversation: viewModel.conversationId
+                ) {
+                    // A worker chat says nothing about the work without this.
+                    QueenTaskBanner(
+                        task: task,
+                        isLive: viewModel.workerRunner?.isRunning(
+                            conversationId: viewModel.conversationId
+                        ) ?? false,
+                        usage: viewModel.workerRunner?.usage(
+                            forConversation: viewModel.conversationId
+                        ),
+                        onAccept: {
+                            Task { await viewModel.runQueenCommand("/accept \(task.issue.slug)") }
+                        },
+                        onReject: {
+                            Task {
+                                await viewModel.runQueenCommand(
+                                    "/review \(task.issue.slug) reject needs another pass"
+                                )
+                            }
+                        },
+                        onCancel: {
+                            Task {
+                                await viewModel.runQueenCommand(
+                                    "/cancel \(task.issue.slug) stopped from its chat"
+                                )
+                            }
+                        },
+                        onOpenQueen: {
+                            viewModel.selectConversation(ChatConversation.trinityQueenId)
+                        }
+                    )
+                }
 
                 HStack(spacing: 0) {
                     Spacer(minLength: 24)
@@ -111,21 +189,31 @@ private struct ExpandedChatWorkspace: View {
 
 private struct TaskHistorySidebar: View {
     @ObservedObject var viewModel: ChatViewModel
+    @ObservedObject private var registry = QueenDelegationRegistry.shared
     @State private var searchText = ""
     @State private var hoveredConversationId: UUID?
     @State private var editingConversationId: UUID?
     @State private var draftTitle = ""
+    @State private var archiveExpanded = false
     @FocusState private var focusedConversationId: UUID?
     private let glassProfile = ChatGlassStyle.shared
 
     var body: some View {
         VStack(spacing: 0) {
             sidebarHeader
+
+            // The Queen sits above the task list, in her own frame. She is not a
+            // task among tasks: she is the one delegating them.
+            queenCard
+
             searchField
 
             Divider()
                 .overlay(Color.grokBorder.opacity(0.55))
                 .padding(.top, 10)
+
+            swarmSection
+            archiveSection
 
             historyContent
 
@@ -136,6 +224,189 @@ private struct TaskHistorySidebar: View {
         .task {
             await viewModel.loadConversations()
         }
+    }
+
+    /// The Queen's dedicated entry, styled to her station.
+    @ViewBuilder
+    private var queenCard: some View {
+        let queen = viewModel.conversations.first { $0.id == ChatConversation.trinityQueenId }
+        if let queen {
+            let isActive = viewModel.conversationId == queen.id
+            Button {
+                Task { await viewModel.switchConversation(id: queen.id) }
+            } label: {
+                HStack(spacing: 9) {
+                    Image(systemName: "crown.fill")
+                        .font(.system(size: 15))
+                        .foregroundColor(.yellow)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(queen.title)
+                            .font(.system(size: 13, weight: .bold))
+                            .foregroundColor(.grokText)
+                            .lineLimit(1)
+                        Text(queenSubtitle)
+                            .font(.system(size: 10))
+                            .foregroundColor(.grokMuted)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 4)
+                    if !registry.reviewQueue.isEmpty {
+                        Text("\(registry.reviewQueue.count)")
+                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Capsule().fill(Color.orange.opacity(0.22)))
+                            .foregroundColor(.orange)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.yellow.opacity(isActive ? 0.16 : 0.07))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(Color.yellow.opacity(0.32), lineWidth: 1)
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 10)
+            .padding(.top, 6)
+            .accessibilityLabel("Trinity Queen")
+            .accessibilityValue(queenSubtitle)
+        }
+    }
+
+    private var queenSubtitle: String {
+        let running = registry.running.count
+        let waiting = registry.reviewQueue.count
+        if running == 0 && waiting == 0 { return "No work delegated" }
+        var parts: [String] = []
+        if running > 0 { parts.append("\(running) working") }
+        if waiting > 0 { parts.append("\(waiting) awaiting review") }
+        return parts.joined(separator: ", ")
+    }
+
+    /// Delegated work: one chat per GitHub issue, each on its own virtual branch.
+    @ViewBuilder
+    private var swarmSection: some View {
+        // Open work only. Settled tasks move to the archive below, so the list
+        // the user scans is the list they can still act on.
+        let tasks = registry.open.sorted { $0.updatedAt > $1.updatedAt }
+        if !tasks.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 5) {
+                    Image(systemName: "point.3.connected.trianglepath.dotted")
+                        .font(.system(size: 9))
+                    Text("Swarm")
+                    Spacer()
+                    Text("\(registry.running.count)/\(QueenDelegationPolicy.maximumConcurrentWorkers)")
+                        .font(.system(size: 9, design: .monospaced))
+                }
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.grokMuted)
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+
+                ForEach(tasks) { task in
+                    taskRow(task, dimmed: false)
+                }
+
+                Divider().overlay(Color.grokBorder.opacity(0.55)).padding(.top, 6)
+            }
+        }
+    }
+
+    /// Settled work, collapsed by default.
+    ///
+    /// Accepted tasks used to sit in the swarm list forever, so after a day of
+    /// delegating the section answering "what needs me" was mostly things that
+    /// did not.
+    @ViewBuilder
+    private var archiveSection: some View {
+        let settled = registry.archived
+        if !settled.isEmpty {
+            VStack(alignment: .leading, spacing: 4) {
+                Button {
+                    archiveExpanded.toggle()
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: archiveExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 8, weight: .semibold))
+                        Image(systemName: "archivebox")
+                            .font(.system(size: 9))
+                        Text("Archive")
+                        Spacer()
+                        Text("\(settled.count)")
+                            .font(.system(size: 9, design: .monospaced))
+                    }
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.grokMuted)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if archiveExpanded {
+                    ForEach(settled.prefix(20)) { task in
+                        taskRow(task, dimmed: true)
+                    }
+                    if settled.count > 20 {
+                        Text("+\(settled.count - 20) older")
+                            .font(.system(size: 9))
+                            .foregroundColor(.grokDim)
+                            .padding(.horizontal, 12)
+                    }
+                }
+
+                Divider().overlay(Color.grokBorder.opacity(0.55)).padding(.top, 6)
+            }
+        }
+    }
+
+    private func taskRow(_ task: DelegatedTask, dimmed: Bool) -> some View {
+        let isLive = viewModel.workerRunner?.isRunning(
+            conversationId: task.conversationId
+        ) ?? false
+        return Button {
+            Task { await viewModel.switchConversation(id: task.conversationId) }
+        } label: {
+            HStack(spacing: 8) {
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(task.title)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.grokText)
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
+                        QueenTaskStatusPill(state: task.state, isLive: isLive, compact: true)
+                    }
+                    HStack(spacing: 5) {
+                        Text(task.issue.slug)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(.grokDim)
+                        if let branch = task.virtualBranch {
+                            Image(systemName: "arrow.triangle.branch")
+                                .font(.system(size: 8))
+                                .foregroundColor(.grokDim)
+                            Text(branch)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(.grokDim)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 4)
+            .opacity(dimmed ? 0.55 : 1)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("\(task.worker) on \(task.issue.slug) - \(QueenTaskStyle.label(for: task.state, isLive: isLive))")
     }
 
     private var sidebarHeader: some View {

@@ -8,6 +8,7 @@ struct QueenTabView: View {
     @ObservedObject var viewModel: ChatViewModel
     @EnvironmentObject private var modelStore: ModelConfigurationStore
     @State private var chatBottomRequest = 0
+    @ObservedObject private var logsNavigator = TriosLogsNavigator.shared
     private let embedding = TrinityQueenEmbedding.resolved()
 
     var body: some View {
@@ -25,6 +26,9 @@ struct QueenTabView: View {
         .accessibilityIdentifier("trinity-queen-embedded-root")
         .onChange(of: modelStore.modelsTabRequest) {
             open(.models)
+        }
+        .onChange(of: logsNavigator.openRequest) {
+            open(.logs)
         }
         .onReceive(
             NotificationCenter.default.publisher(for: QueenHostNavigation.didOpen)
@@ -46,10 +50,13 @@ struct QueenTabView: View {
                 )
             },
             hostedRoute(for: .models) {
-                ModelsTabView()
+                ModelsTabView(viewModel: viewModel)
             },
             hostedRoute(for: .logs) {
                 LogsTabView()
+            },
+            hostedRoute(for: .skills) {
+                SkillsTabView()
             },
             hostedRoute(for: .git) {
                 GitWorkspaceView()

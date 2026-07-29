@@ -10,6 +10,12 @@ final class WindowManager {
     private let defaultWidth: CGFloat = 400
     var onPanelToggle: ((Bool) -> Void)?
     static weak var inputFirstResponder: NSView?
+    /// The live panel, so UI that needs to resize it does not have to guess.
+    ///
+    /// `NSApplication.keyWindow` is nil whenever the panel is not focused, and
+    /// the expand toggle used it - so expanding was a one-way trip the moment
+    /// focus moved elsewhere, with no way back to the narrow panel.
+    static weak var shared: NSWindow?
 
     func setupPanel(contentView: AnyView) -> NSWindow {
         guard let screen = NSScreen.main else {
@@ -22,6 +28,7 @@ final class WindowManager {
             backing: .buffered,
             defer: false
         )
+        WindowManager.shared = panel
         panel.level = .floating
         panel.hidesOnDeactivate = false
         panel.isMovableByWindowBackground = true

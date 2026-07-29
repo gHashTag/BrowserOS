@@ -143,7 +143,7 @@ final class QueenStatusViewModel: ObservableObject {
         _ = await (trios, mcp, agent, cron, a2a, funnel, git, build, improve, mesh, localAuth)
 
         loadSkills()
-        loadAgents()
+        await loadAgents()
         await loadOnlineAgents()
         await loadLogTailAsync()
         computeOverallStatus()
@@ -278,7 +278,13 @@ final class QueenStatusViewModel: ObservableObject {
     }
 
     private func checkBuildAsync() async {
-        let result = await runAsync("/usr/bin/swiftc", arguments: ["-typecheck", "main.swift", "rings/**/*.swift", "BR-OUTPUT/*.swift"])
+        // A whole-codebase typecheck is slow by nature; bound it explicitly so a
+        // wedged compiler cannot stall the status refresh.
+        let result = await runAsync(
+            "/usr/bin/swiftc",
+            arguments: ["-typecheck", "main.swift", "rings/**/*.swift", "BR-OUTPUT/*.swift"],
+            timeout: 60
+        )
         let ok = result.trimmingCharacters(in: .whitespaces).isEmpty
         updateComponent(name: "Build", icon: "hammer", status: ok ? .healthy : .down, detail: ok ? "OK" : "Errors", action: nil)
     }
@@ -359,15 +365,18 @@ final class QueenStatusViewModel: ObservableObject {
 
     // MARK: - Agent Management
 
-    func loadAgents() {
+    /// Async so the per-agent `pgrep`/`ps` probes run off the main actor. The
+    /// previous synchronous version issued up to eight blocking subprocesses
+    /// while holding the main thread.
+    func loadAgents() async {
         let agentNames = ["clade-monitor", "clade-dashboard", "clade-meshd", "cron-queen"]
         var result: [AgentInfo] = []
         for name in agentNames {
-            let pid = Int(run("/usr/bin/pgrep", arguments: ["-x", name]))
+            let pid = Int(await runAsync("/usr/bin/pgrep", arguments: ["-x", name], timeout: 5))
             let status: ComponentStatus = pid != nil ? .healthy : .down
             let uptime: String
             if let pid = pid {
-                uptime = run("/bin/ps", arguments: ["-o", "etime=", "-p", String(pid)])
+                uptime = await runAsync("/bin/ps", arguments: ["-o", "etime=", "-p", String(pid)], timeout: 5)
             } else {
                 uptime = "-"
             }
@@ -395,8 +404,10 @@ final class QueenStatusViewModel: ObservableObject {
         isRunningAction = true
         execDirect(exe, arguments: args)
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            self?.loadAgents()
-            self?.isRunningAction = false
+            Task { @MainActor [weak self] in
+                await self?.loadAgents()
+                self?.isRunningAction = false
+            }
         }
     }
 
@@ -417,8 +428,10 @@ final class QueenStatusViewModel: ObservableObject {
             NSLog("[QueenStatus] Failed to run pkill: \(error)")
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-            self?.loadAgents()
-            self?.isRunningAction = false
+            Task { @MainActor [weak self] in
+                await self?.loadAgents()
+                self?.isRunningAction = false
+            }
         }
     }
 
@@ -433,13 +446,29 @@ final class QueenStatusViewModel: ObservableObject {
 
     // MARK: - Tokenized Process Helpers
 
-    /// Runs an executable with discrete arguments and returns trimmed stdout.
+    /// Runs an executable off the main actor and returns trimmed stdout.
     /// Never invokes a shell. All arguments are passed literally to the process.
-    private func run(_ executable: String, arguments: [String], workDir: String? = nil) -> String {
+    ///
+    /// `nonisolated static` is the whole point. This type is `@MainActor`, so an
+    /// *instance* method awaited from inside `Task.detached` hops straight back
+    /// to the main actor and blocks it. That hop froze the entire UI whenever a
+    /// probe was slow - a contended `git status` or the `swiftc -typecheck`
+    /// build check was enough to make the app show "Application Not Responding".
+    ///
+    /// The pipe is drained before waiting on exit, because a child that fills
+    /// the pipe buffer blocks forever if you wait first and read afterwards. A
+    /// watchdog terminates a child that overruns `timeout`, so no external
+    /// command can wedge status reporting again.
+    nonisolated static func runProcess(
+        _ executable: String,
+        arguments: [String],
+        workDir: String,
+        timeout: TimeInterval = 20
+    ) -> String {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: executable)
         task.arguments = arguments
-        task.currentDirectoryURL = URL(fileURLWithPath: workDir ?? projectRoot)
+        task.currentDirectoryURL = URL(fileURLWithPath: workDir)
 
         let pipe = Pipe()
         task.standardOutput = pipe
@@ -447,18 +476,44 @@ final class QueenStatusViewModel: ObservableObject {
 
         do {
             try task.run()
-            task.waitUntilExit()
         } catch {
             return ""
         }
 
+        let watchdog = DispatchWorkItem {
+            if task.isRunning {
+                task.terminate()
+            }
+        }
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout, execute: watchdog)
+
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+        watchdog.cancel()
+
         return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
     }
 
-    private func runAsync(_ executable: String, arguments: [String], workDir: String? = nil) async -> String {
-        await Task.detached {
-            await self.run(executable, arguments: arguments, workDir: workDir)
+    /// Main-actor convenience wrapper. Prefer `runAsync`; this still blocks the
+    /// caller, but the watchdog bounds how long it can.
+    private func run(_ executable: String, arguments: [String], workDir: String? = nil) -> String {
+        Self.runProcess(
+            executable,
+            arguments: arguments,
+            workDir: workDir ?? projectRoot,
+            timeout: 5
+        )
+    }
+
+    private func runAsync(
+        _ executable: String,
+        arguments: [String],
+        workDir: String? = nil,
+        timeout: TimeInterval = 20
+    ) async -> String {
+        let root = workDir ?? projectRoot
+        return await Task.detached(priority: .utility) {
+            Self.runProcess(executable, arguments: arguments, workDir: root, timeout: timeout)
         }.value
     }
 
@@ -971,7 +1026,11 @@ final class QueenStatusViewModel: ObservableObject {
 
     /// Maps allowed command names to fixed, absolute executables so we never rely
     /// on PATH resolution for the binary itself.
-    private enum CommandResolver {
+    ///
+    /// Internal rather than file-private because `SkillStore` runs skills through
+    /// the same allow-list. Two copies of a security boundary is one copy that
+    /// gets an exception added to it and nobody notices.
+    enum CommandResolver {
         static func executableURL(for name: String) -> URL? {
             switch name {
             case "git": return URL(fileURLWithPath: "/usr/bin/git")

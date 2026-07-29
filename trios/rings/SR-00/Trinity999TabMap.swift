@@ -4,6 +4,7 @@ enum Trios999Destination: String, CaseIterable, Sendable {
     case chat
     case models
     case logs
+    case skills
     case git
     case terminal
     case mesh
@@ -60,6 +61,16 @@ enum Trinity999TabMap {
             title: "Logs",
             systemImage: "doc.text.magnifyingglass",
             keyboardShortcut: 3
+        ),
+        Trios999Route(
+            destination: .skills,
+            petalIndex: 3,
+            realm: .razum,
+            worldName: "SKILLS",
+            formula: "3^3 = 27",
+            title: "Skills",
+            systemImage: "wand.and.stars",
+            keyboardShortcut: 4
         ),
         Trios999Route(
             destination: .git,

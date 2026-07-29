@@ -40,6 +40,19 @@ struct TriosTabView: View {
                     Text(TriosBranding.displayName)
                         .font(.system(size: 12, weight: .bold, design: .default))
                         .foregroundColor(.grokText)
+
+                    // Dev and release look identical, and their settings are
+                    // separate. Without this badge a model changed in one app
+                    // appears to be ignored by the other.
+                    if ProjectPaths.isDevVariant {
+                        Text("DEV")
+                            .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(Color.orange.opacity(0.25)))
+                            .foregroundColor(.orange)
+                            .help("Development build - separate settings, data and ports from the release app")
+                    }
                 }
             }
             .buttonStyle(.plain)
@@ -96,7 +109,10 @@ struct TriosTabView: View {
     }
 
     private func toggleFullScreen() {
-        guard let window = NSApplication.shared.keyWindow else { return }
+        // The panel first, `keyWindow` only as a fallback. Using keyWindow alone
+        // meant the button did nothing whenever focus had moved away, which is
+        // exactly the state you are in after expanding and clicking something.
+        guard let window = WindowManager.shared ?? NSApplication.shared.keyWindow else { return }
         window.collectionBehavior.remove(.fullScreenAuxiliary)
         window.collectionBehavior.insert(.fullScreenPrimary)
         window.toggleFullScreen(nil)

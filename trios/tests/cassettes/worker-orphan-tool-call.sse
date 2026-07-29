@@ -1,0 +1,7 @@
+# Regression cassette: a stream that dies mid tool call.
+# This is the shape that produced AI_MissingToolResultsError and poisoned a
+# conversation permanently. Replaying it proves the repair still holds.
+{"type":"start","messageId":"replay-2"}
+{"type":"tool-input-start","toolCallId":"call-orphan","toolName":"filesystem_read"}
+{"type":"tool-input-available","toolCallId":"call-orphan","input":{"path":"a.txt"}}
+{"type":"abort","messageId":"replay-2"}

@@ -3,6 +3,7 @@
 // confirmation, and repo-agnostic PR creation for Queen-generated proposals.
 // Follow-up: seal against .trinity/specs/queen-proposal-applier.md.
 // Previous waiver: https://github.com/gHashTag/trios/issues/T27-EPIC-001 (fullscreen chat history).
+import Combine
 import Foundation
 import SwiftUI
 
@@ -103,6 +104,7 @@ final class ChatViewModel: ObservableObject {
     @Published var streamingContextPauseLabel: String?
     @Published var canContinueOnLargerModel: Bool = false
     @Published var canSummarizeStreamSoFar: Bool = false
+    @Published var streamingBudgetStatus: StreamingBudgetStatus?
 
     let queenStatusVM = QueenStatusViewModel()
     let modelStore: ModelConfigurationStore
@@ -117,6 +119,9 @@ final class ChatViewModel: ObservableObject {
     let a2aClient: A2ARegistryClient?
 
     @Published private(set) var conversationId: UUID = UUID()
+    /// Per-conversation overrides for output budget and context-window margin.
+    /// `nil` values fall back to the global defaults in `ModelConfigurationStore`.
+    @Published private(set) var conversationSettings: [UUID: ConversationSettings] = [:]
     private var messageCache: [UUID: Int] = [:]
     private var healthCheckTask: Task<Void, Never>?
     private var initializationTask: Task<Void, Never>?
@@ -138,6 +143,16 @@ final class ChatViewModel: ObservableObject {
     private var isConversationTransitioning = false
     private var stagedProposalIds: Set<UUID> = []
     private var stagedProposalBranches: [UUID: String] = [:]
+    /// Runs delegated workers off to one side of the UI. Optional so tests and
+    /// the e2e harness can construct a view model without a live transport.
+    private(set) var workerRunner: QueenWorkerRunner?
+    private var workerObservation: AnyCancellable?
+    /// Working-tree snapshot taken when each worker started, so its edits can be
+    /// told apart from everything else happening in the shared checkout.
+    private var workerBaselineTrees: [UUID: String] = [:]
+    /// Observer concerns already reported, keyed by task, so a warning fires
+    /// once rather than on every streamed delta.
+    private var announcedConcerns: [UUID: Set<String>] = [:]
 
     init(
         transport: ChatTransportProtocol,
@@ -148,7 +163,8 @@ final class ChatViewModel: ObservableObject {
         a2aClient: A2ARegistryClient? = nil,
         modelStore: ModelConfigurationStore,
         memoryService: AgentMemoryService,
-        todoPlanner: TODOPlanner
+        todoPlanner: TODOPlanner,
+        workerRunner: QueenWorkerRunner? = nil
     ) {
         NSLog("ChatViewModel.init starting")
         self.transport = transport
@@ -156,13 +172,46 @@ final class ChatViewModel: ObservableObject {
         self.parser = parser
         self.persister = persister
         self.stateMachine = stateMachine
-        self.a2aClient = a2aClient
+
+        // Ensure an A2A registry client exists. In the normal app launch path no
+        // caller injects one, so create the embedded trios-agent client here with
+        // the BrowserOS loopback endpoint and local-auth provider.
+        // AGENT-V-WAIVER: QueenBackgroundService startup wiring (Agent V conditional waiver, 2026-07-27).
+        let effectiveA2AClient: A2ARegistryClient
+        if let client = a2aClient {
+            effectiveA2AClient = client
+        } else {
+            let serverURL = URL(string: ProjectPaths.mcpBaseURL) ?? URL(fileURLWithPath: "/dev/null")
+            let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0"
+            let card = AgentCard(
+                id: AgentId("trios-agent"),
+                name: "trios",
+                description: "Trinity A2A agent embedded in the trios macOS chat app",
+                capabilities: [.browserControl, .chat, .fileSystem, .shell, .git, .orchestrator],
+                version: version,
+                endpoint: nil
+            )
+            let authProvider = LocalAuthProvider(baseURL: serverURL)
+            effectiveA2AClient = A2ARegistryClient(
+                serverURL: serverURL,
+                agentCard: card,
+                localAuthProvider: authProvider
+            )
+        }
+        self.a2aClient = effectiveA2AClient
         self.modelStore = modelStore
         self.memoryService = memoryService
         self.todoPlanner = todoPlanner
         self.queenBackgroundService = QueenBackgroundService.shared
         self.queenBackgroundService?.delegate = self
+        self.queenBackgroundService?.configure(
+            memoryService: memoryService,
+            persister: persister,
+            a2aClient: effectiveA2AClient
+        )
         NSLog("ChatViewModel.init properties set")
+        self.workerRunner = workerRunner
+        configureWorkerRunner()
 
         initializationTask = Task { [weak self] in
             guard let self else { return }
@@ -172,6 +221,15 @@ final class ChatViewModel: ObservableObject {
             await todoPlanner.load(conversationId: conversationId)
             await loadConversations()
             await checkHealth()
+            let skipA2AStartup = ProcessInfo.processInfo.environment[
+                "TRIOS_SKIP_A2A_STARTUP"
+            ] == "1"
+            if let service = self.queenBackgroundService, !service.isRunning, !skipA2AStartup {
+                await service.start()
+                NSLog("ChatViewModel A2A background service started")
+            } else if skipA2AStartup {
+                NSLog("ChatViewModel A2A startup skipped (TRIOS_SKIP_A2A_STARTUP=1)")
+            }
             NSLog("ChatViewModel.init Task done")
             initializationTask = nil
         }
@@ -193,7 +251,213 @@ final class ChatViewModel: ObservableObject {
         conversationId = await persister.currentConversationId()
     }
 
+    /// The output-token budget for the current conversation, falling back to the
+    /// global store default when no per-conversation override exists.
+    var effectiveConversationOutputTokens: Int? {
+        conversationSettings[conversationId]?.requestedOutputTokens ?? modelStore.requestedOutputTokens
+    }
+
+    /// The context-window margin for the current conversation, falling back to the
+    /// global store default when no per-conversation override exists.
+    var effectiveConversationContextMargin: Double {
+        conversationSettings[conversationId]?.contextWindowMargin ?? modelStore.contextWindowMargin
+    }
+
+    /// True when the current conversation has a per-conversation output-budget override.
+    var hasConversationOutputTokensOverride: Bool {
+        conversationSettings[conversationId]?.requestedOutputTokens != nil
+    }
+
+    /// True when the current conversation has a per-conversation model/provider override.
+    var hasConversationModelOverride: Bool {
+        let settings = conversationSettings[conversationId] ?? .default
+        return settings.provider != nil || settings.model != nil || settings.baseURL != nil
+    }
+
+    /// The provider selected for this conversation, falling back to the global default.
+    var effectiveConversationProvider: ModelProvider {
+        conversationSettings[conversationId]?.provider ?? modelStore.selectedProvider
+    }
+
+    /// The model selected for this conversation, falling back to the global default.
+    var effectiveConversationModel: String {
+        conversationSettings[conversationId]?.model ?? modelStore.selectedModel
+    }
+
+    /// The base URL selected for this conversation, falling back to the global default.
+    var effectiveConversationBaseURL: String {
+        conversationSettings[conversationId]?.baseURL ?? modelStore.baseURL
+    }
+
+    /// A conversation-scoped model constraint when the current conversation has
+    /// pinned a specific (provider, baseURL, model) tuple. `nil` means routing,
+    /// warmup, and failover may consider all eligible candidates.
+    var conversationModelConstraint: ConversationModelConstraint? {
+        let settings = conversationSettings[conversationId] ?? .default
+        guard let provider = settings.provider,
+              let baseURL = settings.baseURL,
+              let model = settings.model else { return nil }
+
+        // Heal a stale host. A pin exists to keep a conversation on one provider
+        // and model; the base URL is infrastructure, not intent. When the user
+        // changes the provider's endpoint in settings, a conversation pinned to
+        // the old host keeps calling it forever - which showed up as Z.AI code
+        // 1113 on a perfectly good key long after the endpoint was corrected.
+        if provider == modelStore.selectedProvider, baseURL != modelStore.baseURL {
+            TriosLogBus.shared.warn(
+                .models,
+                "chat.pin.endpoint_healed",
+                "Pinned conversation was still using the previous endpoint",
+                ["from": baseURL, "to": modelStore.baseURL, "model": model]
+            )
+            return ConversationModelConstraint(
+                provider: provider,
+                baseURL: modelStore.baseURL,
+                model: model
+            )
+        }
+        return ConversationModelConstraint(provider: provider, baseURL: baseURL, model: model)
+    }
+
+    /// Sets (or clears) the per-conversation output-token budget and persists it.
+    func setConversationRequestedOutputTokens(_ tokens: Int?) async {
+        var settings = conversationSettings[conversationId] ?? .default
+        settings.requestedOutputTokens = tokens.map { max(0, $0) }
+        conversationSettings[conversationId] = settings
+        await persister.saveSettings(settings, conversationId: conversationId)
+    }
+
+    /// Sets the per-conversation context-window margin and persists it.
+    func setConversationContextWindowMargin(_ margin: Double) async {
+        var settings = conversationSettings[conversationId] ?? .default
+        settings.contextWindowMargin = max(0.5, min(0.95, margin))
+        conversationSettings[conversationId] = settings
+        await persister.saveSettings(settings, conversationId: conversationId)
+    }
+
+    /// Pins a provider/model/baseURL to the current conversation and persists it.
+    func setConversationModelOverride(provider: ModelProvider, baseURL: String, model: String) async {
+        var settings = conversationSettings[conversationId] ?? .default
+        settings.provider = provider
+        settings.baseURL = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        settings.model = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        conversationSettings[conversationId] = settings
+        await persister.saveSettings(settings, conversationId: conversationId)
+    }
+
+    /// Clears the per-conversation model/provider override for the current conversation.
+    func clearConversationModelOverride() async {
+        var settings = conversationSettings[conversationId] ?? .default
+        settings.provider = nil
+        settings.baseURL = nil
+        settings.model = nil
+        conversationSettings[conversationId] = settings
+        await persister.saveSettings(settings, conversationId: conversationId)
+    }
+
+    /// Clears the per-conversation output-token budget override for the current conversation.
+    func clearConversationOutputTokensOverride() async {
+        var settings = conversationSettings[conversationId] ?? .default
+        settings.requestedOutputTokens = nil
+        conversationSettings[conversationId] = settings
+        await persister.saveSettings(settings, conversationId: conversationId)
+    }
+
+    /// Loads persisted per-conversation settings when switching conversations.
+    private func loadConversationSettings() async {
+        let settings = await persister.loadSettings(conversationId: conversationId)
+        conversationSettings[conversationId] = settings
+    }
+
+    /// Pre-send context status for the current draft, computed synchronously from
+    /// the advertised model profile and the effective conversation margin.
+    var draftContextStatus: DraftContextStatus? {
+        guard !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let profile = ModelContextService.shared.advertisedProfile(
+            for: effectiveConversationModel,
+            provider: effectiveConversationProvider
+        )
+        let systemPrompt = memoryService.promptContext(for: recalledMemories)
+        return ChatRequestSizer.draftContextUtilization(
+            draft: inputText,
+            history: messages,
+            systemPrompt: systemPrompt,
+            modelProfile: profile,
+            margin: effectiveConversationContextMargin
+        )
+    }
+
+    /// Shorthand for the composer utilization badge.
+    var draftContextUtilizationPercent: Double? {
+        draftContextStatus?.utilizationPercent
+    }
+
+    /// True when the draft alone exceeds the usable context window and sending
+    /// would result in `.tooLargeEvenEmpty`.
+    var isDraftContextLimitExceeded: Bool {
+        draftContextStatus?.isTooLarge ?? false
+    }
+
+    /// The advertised profile of the model pinned to this conversation, if any.
+    /// Used for cause-specific send-button guardrails.
+    private var pinnedModelAdvertisedProfile: ModelContextProfile? {
+        guard let constraint = conversationModelConstraint else { return nil }
+        return ModelContextService.shared.advertisedProfile(
+            for: constraint.candidate.model,
+            provider: constraint.candidate.provider
+        )
+    }
+
+    /// A description of why the pinned model cannot send the current draft, if any.
+    /// Returns `nil` when there is no pin or the draft fits within both context and
+    /// output-budget limits.
+    var pinnedSendLimitReason: String? {
+        guard let constraint = conversationModelConstraint,
+              let profile = pinnedModelAdvertisedProfile else { return nil }
+        let margin = effectiveConversationContextMargin
+        let usableWindow = Int(Double(profile.maxContextTokens) * margin)
+        let draftTokens = TokenEstimator.estimate(inputText)
+        let contextExceeded = usableWindow > 0 && draftTokens > usableWindow
+
+        let requestedOutput = effectiveConversationOutputTokens ?? modelStore.requestedOutputTokens ?? 0
+        let outputExceeded = requestedOutput > 0 && requestedOutput > profile.maxOutputTokens
+
+        if contextExceeded && outputExceeded {
+            return "Pinned to \(constraint.candidate.provider.displayName) / \(constraint.candidate.model): draft exceeds \(formatCompact(usableWindow)) context window and requested \(requestedOutput) output tokens exceeds \(profile.maxOutputTokens) ceiling."
+        }
+        if contextExceeded {
+            return "Pinned to \(constraint.candidate.provider.displayName) / \(constraint.candidate.model): draft exceeds \(formatCompact(usableWindow)) context window."
+        }
+        if outputExceeded {
+            return "Pinned to \(constraint.candidate.provider.displayName) / \(constraint.candidate.model): requested \(requestedOutput) output tokens exceeds \(profile.maxOutputTokens) ceiling."
+        }
+        return nil
+    }
+
+    /// True when the pinned model cannot fit the draft or honor the requested
+    /// output budget. When false, the global default would be used or the
+    /// conversation is not pinned.
+    var isPinnedModelSendBlocked: Bool {
+        pinnedSendLimitReason != nil
+    }
+
+    private func formatCompact(_ value: Int) -> String {
+        if value >= 1_000_000 { return String(format: "%.1fM", Double(value) / 1_000_000) }
+        if value >= 1_000 { return String(format: "%.1fk", Double(value) / 1_000) }
+        return "\(value)"
+    }
+
     func loadHistory() async {
+        // A worker chat opened mid-run must show what the bee has produced so
+        // far. The persisted copy is only written at the start and end of a
+        // worker turn, so the runner's live transcript wins while it is active.
+        if let runner = workerRunner,
+           runner.isRunning(conversationId: conversationId),
+           let live = runner.transcripts[conversationId] {
+            messages = live
+            rebuildCache()
+            return
+        }
         let history = await persister.load(conversationId: conversationId)
         history.forEach { $0.isStreaming = false }
         messages = history
@@ -362,6 +626,11 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func performConversationSwitch(id: UUID) async {
+        // A turn in flight is about to be cancelled. Save what it produced to
+        // the conversation it belongs to first: clicking another chat used to
+        // destroy a nearly-finished answer with nothing left behind, which is
+        // how the Queen appeared to simply stop.
+        await preserveInterruptedTurn(reason: "you opened another chat")
         // Cancel any in-flight stream before loading a different conversation;
         // otherwise late SSE events could corrupt the newly loaded messages.
         await cancelPendingTurn()
@@ -374,6 +643,7 @@ final class ChatViewModel: ObservableObject {
         streamingContextWarning = nil
         streamingContextPauseLabel = nil
         streamingContextDecision = nil
+        streamingBudgetStatus = nil
         isStreamPausedForContext = false
         canContinueOnLargerModel = false
         canSummarizeStreamSoFar = false
@@ -381,9 +651,21 @@ final class ChatViewModel: ObservableObject {
         await persister.setCurrentConversationId(id)
         await loadHistory()
         await todoPlanner.load(conversationId: id)
+        await loadConversationSettings()
+        applyConversationModelOverrideIfNeeded()
         await loadConversations()
         tokenUsage.reset()
         showHistory = false
+    }
+
+    /// Applies a per-conversation provider/model/baseURL override without mutating
+    /// the global defaults, so switching back restores the previous selection.
+    private func applyConversationModelOverrideIfNeeded() {
+        let settings = conversationSettings[conversationId] ?? .default
+        guard let provider = settings.provider,
+              let model = settings.model,
+              let baseURL = settings.baseURL else { return }
+        modelStore.applySelection(provider: provider, baseURL: baseURL, model: model)
     }
 
     /// Execute a Queen slash command locally, switching to the Queen conversation
@@ -421,6 +703,7 @@ final class ChatViewModel: ObservableObject {
         streamingContextWarning = nil
         streamingContextPauseLabel = nil
         streamingContextDecision = nil
+        streamingBudgetStatus = nil
         isStreamPausedForContext = false
         canContinueOnLargerModel = false
         canSummarizeStreamSoFar = false
@@ -433,7 +716,15 @@ final class ChatViewModel: ObservableObject {
             return
         }
 
-        NSLog("[TriosChat] sendMessage start: \"\(text.prefix(40))\"")
+        // Log only text-derived facts here. Reading modelStore from this point in
+        // the send path perturbs the streaming turn, so provider and model are
+        // recorded by the routing and transport events instead.
+        TriosLogBus.shared.info(
+            .chat,
+            "chat.send.start",
+            "Sending a message",
+            ["chars": String(text.count)]
+        )
 
         // Save to message history for (up/down) hotkey navigation
         messageHistory.append(text)
@@ -544,20 +835,34 @@ final class ChatViewModel: ObservableObject {
         let initialBaseURL = modelStore.baseURL
         let initialModel = modelStore.selectedModel
 
+        // When a conversation model pin is active, warmup, routing, and all forms
+        // of automatic failover must stay inside the pinned boundary.
+        let constraint = conversationModelConstraint
+
         // Preflight health check: if the selected model is known unhealthy, switch
-        // to the first healthy fallback before burning a real request.
+        // to the first healthy fallback before burning a real request. When a pin
+        // is active we skip this step so we do not silently switch models.
         let preflightModel = await runPreflightHealthCheck(generation: generation)
-        let preflightSwitched = preflightModel != modelStore.selectedModel
+        // This comparison was computed but never consumed. Routing decisions are
+        // exactly what the LOGS tab needs in order to explain a surprising send.
+        if preflightModel != modelStore.selectedModel {
+            TriosLogBus.shared.info(
+                .health,
+                "chat.route.preflight_switch",
+                "Preflight health check switched the model before sending",
+                ["from": modelStore.selectedModel, "to": preflightModel]
+            )
+        }
 
         // Predictive warmup cache: if a fresh (or recently-stale) background
         // winner is available, apply it immediately without paying probe latency
         // on the send path. A stale winner triggers a coalesced background
         // refresh for future sends.
         var warmupSwitched = false
-        var warmupServedStale = false
         var warmupCandidate: CrossProviderModelCandidate?
         if modelStore.isAdaptiveProviderWarmupEnabled,
            modelStore.isPredictiveWarmupEnabled,
+           constraint == nil,
            let selection = await modelStore.cachedOrStaleWarmupWinner(
                tier: modelStore.preferredCostTier,
                strictQuotaGating: modelStore.isStrictQuotaGatingEnabled,
@@ -570,7 +875,17 @@ final class ChatViewModel: ObservableObject {
             )
             if selection.winner.selected != current {
                 warmupCandidate = selection.winner.selected
-                warmupServedStale = selection.isStale
+                TriosLogBus.shared.info(
+                    .models,
+                    "chat.route.warmup_switch",
+                    "Predictive warmup switched the routing target",
+                    [
+                        "served_stale": String(selection.isStale),
+                        "to_provider": selection.winner.selected.provider.rawValue,
+                        "to_model": selection.winner.selected.model,
+                        "reason": selection.winner.reason
+                    ]
+                )
                 modelStore.applySelection(
                     provider: selection.winner.selected.provider,
                     baseURL: selection.winner.selected.baseURL,
@@ -591,8 +906,9 @@ final class ChatViewModel: ObservableObject {
 
         // Adaptive provider warmup: race lightweight probes across eligible
         // providers and switch to the best live candidate before the real send.
+        // A conversation pin narrows the candidate set to the pinned tuple.
         if !warmupSwitched && modelStore.isAdaptiveProviderWarmupEnabled {
-            let warmupResult = await modelStore.runAdaptiveWarmup()
+            let warmupResult = await modelStore.runAdaptiveWarmup(constrainedTo: constraint)
             warmupSwitched = warmupResult.didSwitch
             if warmupSwitched {
                 let banner = ChatMessage(role: .system, content: "[↻] \(warmupResult.reason)")
@@ -614,8 +930,10 @@ final class ChatViewModel: ObservableObject {
             messages: historyForRequest,
             currentMessage: currentMessage,
             systemPrompt: systemPrompt,
-            requestedOutputTokens: modelStore.requestedOutputTokens,
-            candidates: modelStore.warmupCandidates()
+            requestedOutputTokens: effectiveConversationOutputTokens,
+            candidates: modelStore.warmupCandidates(constrainedTo: constraint),
+            margin: effectiveConversationContextMargin,
+            constrainedTo: constraint
         )
 
         // Re-estimate input tokens after any routing/trimming so the stream
@@ -733,7 +1051,10 @@ final class ChatViewModel: ObservableObject {
                 )
             }
 
+            // Same-provider model failover is disabled when a conversation pin
+            // is active because switching models would violate the pinned boundary.
             if !didFailover,
+               constraint == nil,
                let transportError = error as? TransportError,
                (transportError.isModelUnavailableError || transportError.isInvalidModelError),
                let nextModel = await modelStore.selectNextModel() {
@@ -807,7 +1128,7 @@ final class ChatViewModel: ObservableObject {
             if modelStore.isCrossProviderFailoverEnabled,
                let transportError = error as? TransportError,
                transportError.isEligibleForCrossProviderFailover,
-               let candidate = await modelStore.selectFirstHealthyCrossProviderModel() {
+               let candidate = await modelStore.selectFirstHealthyCrossProviderModel(constrainedTo: constraint) {
                 let crossStreamStart = Date()
                 let failoverMsg = "Provider `\(activeProvider.displayName)` failed; switching to `\(candidate.provider.displayName)/\(candidate.model)`…"
                 let banner = ChatMessage(role: .system, content: "[↻] \(failoverMsg)")
@@ -901,7 +1222,12 @@ final class ChatViewModel: ObservableObject {
             }
 
             let errorDetail = formatRequestError(error)
-            NSLog("[TriosChat] transport error: \(errorDetail)")
+            TriosLogBus.shared.error(
+                .chat,
+                "chat.transport.error",
+                errorDetail,
+                ["raw_error": String(describing: error).prefix(500).description]
+            )
             clearPendingUsage()
             let errorMsg = ChatMessage(role: .system, content: "[!] \(errorDetail)")
             messages.append(errorMsg)
@@ -960,7 +1286,7 @@ final class ChatViewModel: ObservableObject {
             message: text,
             mode: "agent",
             origin: "sidepanel",
-            userSystemPrompt: memoryService.promptContext(for: recalledMemories),
+            userSystemPrompt: composedSystemPrompt(),
             previousConversation: historyForRequest,
             browserContext: nil,
             modelConfiguration: runtimeConfiguration,
@@ -968,6 +1294,47 @@ final class ChatViewModel: ObservableObject {
         ).build() else {
             NSLog("[TriosChat] ChatRequestBuilder failed")
             throw ChatViewModelError.requestBuildFailed
+        }
+        // Log the target that is actually about to be called. Reading it from
+        // the built configuration - not from settings - is the point: a pinned
+        // conversation, a warmup switch, or a stale override can all send a
+        // request somewhere other than what the Models tab displays, and
+        // without this the only symptom is an opaque provider error.
+        TriosLogBus.shared.info(
+            .chat,
+            "chat.request.target",
+            "Request target resolved",
+            [
+                "provider": runtimeConfiguration.provider.rawValue,
+                "model": runtimeConfiguration.model,
+                "base_url": runtimeConfiguration.baseURL,
+                "has_key": runtimeConfiguration.apiKey == nil ? "no" : "yes",
+                "bytes": String(requestBody.count)
+            ]
+        )
+        // Log what the payload ACTUALLY carries, not what we intended to send.
+        // The previous line reported the resolved configuration, which is why a
+        // request that reached the server without provider/model/apiKey still
+        // looked correct in the log.
+        if let sent = try? JSONSerialization.jsonObject(with: requestBody) as? [String: Any] {
+            TriosLogBus.shared.info(
+                .chat,
+                "chat.request.payload",
+                "Payload fields",
+                [
+                    "provider": (sent["provider"] as? String) ?? "ABSENT",
+                    "model": (sent["model"] as? String) ?? "ABSENT",
+                    "base_url": (sent["baseUrl"] as? String) ?? "ABSENT",
+                    "api_key": sent["apiKey"] == nil ? "ABSENT" : "present",
+                    "keys": sent.keys.sorted().joined(separator: ","),
+                    // Proving the Queen can see her own skills needs evidence
+                    // from the wire, not from the code that builds it. This is
+                    // the same class of check as logging the resolved target:
+                    // the layer above can look correct while the payload is not.
+                    "system_chars": String(systemPromptCharacterCount(in: sent)),
+                    "system_skills": String(systemPromptSkillCount(in: sent))
+                ]
+            )
         }
         NSLog("[TriosChat] request body built, size: \(requestBody.count), attachments: \(requestAttachments.count)")
 
@@ -983,7 +1350,7 @@ final class ChatViewModel: ObservableObject {
             await contextWatchdog.beginStream(
                 modelProfile: profile,
                 estimatedInputTokens: pendingEstimatedInputTokens,
-                margin: modelStore.contextWindowMargin
+                margin: effectiveConversationContextMargin
             )
         }
 
@@ -1001,7 +1368,11 @@ final class ChatViewModel: ObservableObject {
                 finishReason: nil
             )
         }
-        await todoPlanner.markExecutionStarted(
+        // The answer itself is a step. Naming it means a turn with no tool calls
+        // still shows "Understand request -> Compose answer" rather than a
+        // single stalled row.
+        await todoPlanner.beginStep(
+            title: TODOPlanDeriver.title(for: .composing),
             detail: "Response stream opened"
         )
         NSLog("[TriosChat] transport stream opened")
@@ -1125,6 +1496,18 @@ final class ChatViewModel: ObservableObject {
 
     private func runPreflightHealthCheck(generation: UInt64) async -> String {
         guard isCurrentStream(generation) else { return modelStore.selectedModel }
+        // End-to-end tests exercise the chat plumbing, not the machine's model
+        // inventory. Without this guard the preflight probed whatever Ollama
+        // happened to have installed and, when the selected model was missing,
+        // appended a "[/] Model ... unavailable; switching" banner - a third
+        // message that broke "messages contains exactly user + assistant" about
+        // one run in three, depending on the probe cache.
+        guard ProcessInfo.processInfo.environment["TRIOS_E2E_DISABLE_WARMUP"] != "1" else {
+            return modelStore.selectedModel
+        }
+        // A pinned conversation model must not be silently replaced by a healthy
+        // same-provider fallback during preflight.
+        guard conversationModelConstraint == nil else { return modelStore.selectedModel }
         let result = await modelStore.healthStatus(for: modelStore.selectedModel)
         guard case .unavailable = result.health else { return modelStore.selectedModel }
 
@@ -1144,6 +1527,29 @@ final class ChatViewModel: ObservableObject {
         return healthyModel
     }
 
+    /// Length of the system message actually present in the built payload.
+    private func systemPromptCharacterCount(in body: [String: Any]) -> Int {
+        systemMessageText(in: body).count
+    }
+
+    /// How many `/skill` names survived into the payload.
+    private func systemPromptSkillCount(in body: [String: Any]) -> Int {
+        let text = systemMessageText(in: body)
+        guard !text.isEmpty else { return 0 }
+        return text
+            .components(separatedBy: .newlines)
+            .filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix("/") }
+            .count
+    }
+
+    private func systemMessageText(in body: [String: Any]) -> String {
+        guard let messages = body["messages"] as? [[String: Any]] else { return "" }
+        return messages
+            .filter { ($0["role"] as? String) == "system" }
+            .compactMap { $0["content"] as? String }
+            .joined(separator: "\n")
+    }
+
     private enum ChatViewModelError: Error {
         case requestBuildFailed
     }
@@ -1155,6 +1561,7 @@ final class ChatViewModel: ObservableObject {
         streamingContextWarning = nil
         streamingContextPauseLabel = nil
         streamingContextDecision = nil
+        streamingBudgetStatus = nil
         isStreamPausedForContext = false
         canContinueOnLargerModel = false
         canSummarizeStreamSoFar = false
@@ -1305,11 +1712,13 @@ final class ChatViewModel: ObservableObject {
         streamingContextWarning = nil
         streamingContextPauseLabel = nil
         streamingContextDecision = nil
+        streamingBudgetStatus = nil
         isStreamPausedForContext = false
         canContinueOnLargerModel = false
         canSummarizeStreamSoFar = false
         Task {
             await awaitInitialization()
+            await preserveInterruptedTurn(reason: "you started a new chat")
             await cancelPendingTurn()
             await transport.cancel()
             _ = await stateMachine.transition(to: .idle)
@@ -1549,6 +1958,11 @@ final class ChatViewModel: ObservableObject {
             guard let index = messageCache[messageId] else { return }
             if let toolIndex = messages[index].toolCalls.firstIndex(where: { $0.id == toolCallId }) {
                 messages[index].toolCalls[toolIndex].arguments = arguments
+                // Arguments are complete now, so the step can name its target.
+                await todoPlanner.refineStepTitle(
+                    toolName: messages[index].toolCalls[toolIndex].name,
+                    arguments: arguments
+                )
             }
             objectWillChange.send()
 
@@ -1626,15 +2040,49 @@ final class ChatViewModel: ObservableObject {
     }
 
     /// Feeds text/reasoning deltas to the context watchdog and returns its
-    /// decision. Non-content events leave the watchdog unchanged.
+    /// decision. Non-content events leave the watchdog unchanged. Also publishes
+    /// a live `streamingBudgetStatus` so the UI can render a progress bar.
     private func feedWatchdog(event: SSEEvent) async -> StreamingContextDecision {
+        let decision: StreamingContextDecision
         switch event {
         case .textDelta(_, let delta),
              .reasoningDelta(_, let delta):
-            return await contextWatchdog.append(deltaText: delta)
+            decision = await contextWatchdog.append(deltaText: delta)
         default:
-            return .ok
+            decision = .ok
         }
+        await refreshStreamingBudgetStatus()
+        return decision
+    }
+
+    /// Recomputes the published streaming-budget status from the watchdog.
+    private func refreshStreamingBudgetStatus() async {
+        guard let ratios = await contextWatchdog.budgetRatios() else {
+            streamingBudgetStatus = nil
+            return
+        }
+        let dominantRatio = max(ratios.outputRatio, ratios.totalRatio)
+        let limitKind: StreamingContextLimitKind = ratios.totalRatio >= ratios.outputRatio
+            ? .totalContext
+            : .outputTokens
+        let kind: StreamingBudgetStatus.Kind
+        if dominantRatio >= 0.95 {
+            kind = .critical
+        } else if dominantRatio >= 0.80 {
+            kind = .warning
+        } else {
+            kind = .safe
+        }
+        streamingBudgetStatus = StreamingBudgetStatus(
+            outputUsed: ratios.outputUsed,
+            outputCeiling: ratios.outputCeiling,
+            totalUsed: ratios.totalUsed,
+            totalCeiling: ratios.totalCeiling,
+            outputRatio: ratios.outputRatio,
+            totalRatio: ratios.totalRatio,
+            kind: kind,
+            limitKind: limitKind
+        )
     }
 
     /// Shows a transient warning when the response approaches a limit.
@@ -1722,18 +2170,22 @@ final class ChatViewModel: ObservableObject {
     /// User chose to continue the partial response on a larger model.
     func continueStreamOnLargerModel(_ candidate: CrossProviderModelCandidate? = nil) async {
         guard case .awaitingContextDecision = await stateMachine.currentState() else { return }
+        let constraint = conversationModelConstraint
         let chosenCandidate: CrossProviderModelCandidate
         if let candidate = candidate {
+            // A manually supplied candidate must still respect the conversation pin.
+            if let constraint, candidate != constraint.candidate { return }
             chosenCandidate = candidate
         } else {
             let continuationOutputTokens = await modelStore.effectiveRequestedOutputTokens(
                 for: modelStore.selectedModel,
                 provider: modelStore.selectedProvider,
                 baseURL: modelStore.baseURL
-            ) ?? 1024
+            ) ?? effectiveConversationOutputTokens ?? 1024
             guard let largerCandidate = await modelStore.selectLargerModelCandidate(
                 estimatedInput: pendingEstimatedInputTokens,
-                outputTokens: continuationOutputTokens
+                outputTokens: continuationOutputTokens,
+                constrainedTo: constraint
             ) else { return }
             chosenCandidate = largerCandidate
         }
@@ -1745,6 +2197,7 @@ final class ChatViewModel: ObservableObject {
         isStreamPausedForContext = false
         streamingContextDecision = nil
         streamingContextWarning = nil
+        streamingBudgetStatus = nil
         canContinueOnLargerModel = false
         canSummarizeStreamSoFar = false
         _ = await stateMachine.transition(to: .idle)
@@ -1764,6 +2217,7 @@ final class ChatViewModel: ObservableObject {
         isStreamPausedForContext = false
         streamingContextDecision = nil
         streamingContextWarning = nil
+        streamingBudgetStatus = nil
         canContinueOnLargerModel = false
         canSummarizeStreamSoFar = false
         _ = await stateMachine.transition(to: .idle)
@@ -1783,6 +2237,7 @@ final class ChatViewModel: ObservableObject {
         isStreamPausedForContext = false
         streamingContextDecision = nil
         streamingContextWarning = nil
+        streamingBudgetStatus = nil
         canContinueOnLargerModel = false
         canSummarizeStreamSoFar = false
         _ = await stateMachine.transition(to: .idle)
@@ -1913,6 +2368,34 @@ final class ChatViewModel: ObservableObject {
                 )
             }
         }
+    }
+
+    /// Keeps a partial answer when its turn is about to be cancelled.
+    ///
+    /// The stream itself cannot outlive the switch: the planner, the memory
+    /// turn, the usage ledger and the state machine are all single-slot and
+    /// conversation-scoped, so two live turns would corrupt each other. What
+    /// can be saved is the work already streamed, and a line saying why it
+    /// stopped - a silent void reads as a crash.
+    private func preserveInterruptedTurn(reason: String) async {
+        guard case .streaming = state else { return }
+        guard messages.contains(where: { $0.role == .assistant && $0.isStreaming }) else { return }
+
+        finalizeAssistantStreamingState()
+        messages.append(ChatMessage(
+            role: .system,
+            content: "[interrupted] This answer stopped because \(reason). "
+                + "Everything above was kept; send again to continue."
+        ))
+        rebuildCache()
+        let snapshot = captureHistorySnapshot()
+        await persistHistorySnapshot(snapshot)
+        TriosLogBus.shared.warn(
+            .chat,
+            "chat.turn.interrupted",
+            "A streaming turn was cut short",
+            ["conversation": conversationId.uuidString, "reason": reason]
+        )
     }
 
     private func cancelPendingTurn() async {
@@ -2238,6 +2721,7 @@ final class ChatViewModel: ObservableObject {
         invalidateActiveStream()
         Task {
             await awaitInitialization()
+            await preserveInterruptedTurn(reason: "you started a new chat")
             await cancelPendingTurn()
             await transport.cancel()
             _ = await stateMachine.transition(to: .idle)
@@ -2347,6 +2831,20 @@ final class ChatViewModel: ObservableObject {
             await appendSystemMessageToQueenChat("Deleted conversation \(id.uuidString.prefix(8))")
         case .delegate(let agent, let task):
             await delegateTaskToAgent(agentIdString: agent, taskDescription: task)
+        case .delegateIssue(let issue, let worker, let title, let paths, let skill):
+            await delegateIssueToWorker(
+                issue: issue,
+                worker: worker,
+                title: title,
+                paths: paths,
+                skill: skill
+            )
+        case .cancelTask(let issue, let reason):
+            await cancelDelegatedTask(issue: issue, reason: reason)
+        case .swarm:
+            await reportSwarm()
+        case .review(let issue, let decision, let note):
+            await reviewDelegatedTask(issue: issue, decision: decision, note: note)
         case .broadcast(let message):
             await broadcastToAgents(message)
         case .audit:
@@ -2393,8 +2891,17 @@ final class ChatViewModel: ObservableObject {
         case .bridge:
             let output = await queenStatusVM.runSkillReturningOutput(name: "/bridge")
             await appendSystemMessageToQueenChat("`/bridge` result:\n\(output)")
+        case .skills:
+            await reportSkills()
+        case .selfAudit:
+            await runSelfAudit()
+        case .runSkill(let command, let arguments):
+            await runQueenSkill(command: command, arguments: arguments)
         case .unknown:
-            await appendSystemMessageToQueenChat("Unknown Queen command: \(originalText)\n\(QueenCommandParser.helpText)")
+            await appendSystemMessageToQueenChat(
+                SystemNoticeClassifier.warningMarker
+                    + "I do not know `\(originalText)`.\n\(QueenCommandParser.helpText)"
+            )
         }
     }
 
@@ -2412,6 +2919,690 @@ final class ChatViewModel: ObservableObject {
             return "\(pin) \(conv.id.uuidString.prefix(8))  -  \(conv.title)"
         }
         await appendSystemMessageToQueenChat("Conversations:\n\(lines.joined(separator: "\n"))")
+    }
+
+    /// Opens a worker chat for a GitHub issue and isolates it on its own
+    /// GitButler virtual branch.
+    ///
+    /// This is the Queen's one act of creation: she does not write code, she
+    /// opens a conversation, gives it a boundary, and reviews what comes back.
+    private func delegateIssueToWorker(
+        issue: IssueReference,
+        worker: String,
+        title: String,
+        paths: [String] = [],
+        skill: String? = nil
+    ) async {
+        let registry = QueenDelegationRegistry.shared
+
+        if let existing = registry.task(forIssue: issue) {
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "\(issue.slug) is already delegated to \(existing.worker). "
+                    + "Open that chat rather than starting a second one."
+            )
+            return
+        }
+        if let reason = registry.delegationBlockReason(paths: paths) {
+            await postQueenNotice(SystemNoticeClassifier.warningMarker + "Cannot delegate: \(reason)")
+            return
+        }
+        // Refuse to *start* work past the ceiling. Stopping a bee already
+        // running would leave the repository half-edited; declining to open a
+        // new one is a decision that can be taken safely at any moment.
+        let spent = registry.spentToday()
+        if case .exhausted(let overBy) = SwarmBudget.default.verdict(spentToday: spent) {
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "I am not opening new work today. The swarm has spent about "
+                    + "\(ModelPricing.format(spent)), which is \(ModelPricing.format(overBy)) past "
+                    + "the daily ceiling. Anything already running continues."
+            )
+            return
+        }
+
+        // Create the worker's own conversation. The persister materialises a
+        // conversation the moment messages are saved against a fresh id.
+        let conversationId = UUID()
+
+        guard let task = registry.delegate(
+            issue: issue,
+            title: title,
+            worker: worker,
+            conversationId: conversationId,
+            ownedPaths: paths
+        ) else {
+            await postQueenNotice(SystemNoticeClassifier.failureMarker + (registry.lastError ?? "Delegation was refused."))
+            return
+        }
+
+        // The virtual branch is what keeps two bees off each other's files.
+        if let branch = task.virtualBranch {
+            let created = await createVirtualBranch(named: branch)
+            if !created {
+                registry.transition(taskID: task.id, to: .cancelled)
+                await postQueenNotice(
+                    SystemNoticeClassifier.failureMarker
+                        + "Could not create the virtual branch `\(branch)`; delegation rolled back."
+                )
+                return
+            }
+        }
+
+        // Brief the worker in its own chat. Deliberately a subset of context:
+        // the issue, the branch, the boundary - never the Queen's history.
+        // A named skill is handed over whole. Refused rather than silently
+        // ignored: a worker briefed without the procedure it was promised looks
+        // like it disobeyed.
+        var skillBody: String?
+        if let skill {
+            guard let descriptor = SkillStore.shared.skill(named: skill),
+                  SkillStore.shared.isEnabled(descriptor),
+                  let body = try? String(contentsOfFile: descriptor.path, encoding: .utf8) else {
+                registry.transition(taskID: task.id, to: .cancelled)
+                await postQueenNotice(
+                    SystemNoticeClassifier.warningMarker
+                        + "I did not open this one. You asked for `\(skill)` and I either do not "
+                        + "have it or it is switched off, and briefing a worker without the "
+                        + "procedure you named would look like it ignored you."
+                )
+                return
+            }
+            skillBody = body
+        }
+        let brief = QueenBriefing.text(for: task, skillBody: skillBody)
+        await persister.renameConversation(
+            id: conversationId,
+            title: "\(issue.slug) \(title)"
+        )
+        registry.transition(taskID: task.id, to: .running)
+
+        // Actually start the bee. Saving the briefing and stopping there left a
+        // chat that looked delegated and did nothing, which is worse than
+        // refusing to delegate at all.
+        guard let runner = workerRunner else {
+            registry.transition(taskID: task.id, to: .failed)
+            await postQueenNotice(
+                SystemNoticeClassifier.failureMarker
+                    + "Delegation aborted: no worker runner is configured, so \(worker) could not be started."
+            )
+            await loadConversations()
+            return
+        }
+        // Take the baseline before the bee touches anything.
+        workerBaselineTrees[conversationId] = await QueenBranchCommitter.snapshotWorkingTree()
+        runner.start(task: task, brief: brief)
+
+        await postQueenNotice(
+            SystemNoticeClassifier.successMarker
+                + "\(worker) is on \(issue.slug) now. It has its own chat and its own "
+                + "branch `\(task.virtualBranch ?? "-")`, so whatever it edits grows apart "
+                + "from your working tree until you decide otherwise. "
+                + "That puts \(registry.running.count) of "
+                + "\(QueenDelegationPolicy.maximumConcurrentWorkers) slots in use."
+        )
+        await loadConversations()
+    }
+
+    /// Creates the branch that isolates a task's edits.
+    ///
+    /// Deliberately `git branch` and not `git checkout -b`: creating the ref
+    /// must not move HEAD. The checkout is shared by the user, the build, and
+    /// every other worker, so switching it on delegation silently dragged the
+    /// whole repository onto one bee's branch - the exact conflict the branch
+    /// was supposed to prevent.
+    private func createVirtualBranch(named name: String) async -> Bool {
+        await Task.detached(priority: .utility) {
+            let existing = QueenStatusViewModel.runProcess(
+                "/usr/bin/git",
+                arguments: ["branch", "--list", name],
+                workDir: ProjectPaths.root,
+                timeout: 10
+            )
+            // Reconnecting to an existing task must not be treated as an error.
+            if existing.contains(name) { return true }
+            QueenStatusViewModel.runProcess(
+                "/usr/bin/git",
+                arguments: ["branch", name, "HEAD"],
+                workDir: ProjectPaths.root,
+                timeout: 20
+            )
+            let created = QueenStatusViewModel.runProcess(
+                "/usr/bin/git",
+                arguments: ["branch", "--list", name],
+                workDir: ProjectPaths.root,
+                timeout: 10
+            )
+            return created.contains(name)
+        }.value
+    }
+
+    // MARK: - Worker Runner
+
+    private func configureWorkerRunner() {
+        guard let runner = workerRunner else { return }
+
+        // A worker chat opened while its turn is in flight must show the live
+        // stream, not the snapshot that happened to be persisted last.
+        workerObservation = runner.$transcripts
+            .receive(on: RunLoop.main)
+            .sink { [weak self] transcripts in
+                guard let self else { return }
+                guard let live = transcripts[self.conversationId] else { return }
+                // Never fight the main send path for the same conversation.
+                guard self.workerRunner?.isRunning(conversationId: self.conversationId) == true else { return }
+                self.messages = live
+                self.rebuildCache()
+            }
+
+        runner.onModelResolved = { task, provider, model in
+            QueenDelegationRegistry.shared.recordModel(
+                taskID: task.id,
+                provider: provider,
+                model: model
+            )
+        }
+
+        // The observer reads the stream while it is still moving. The review
+        // loop is post-mortem by construction; this is the only place a bee can
+        // be stopped before it wastes the whole turn.
+        runner.onProgress = { [weak self] task, transcript in
+            self?.observeWorker(task: task, transcript: transcript)
+        }
+
+        runner.onFinish = { [weak self] task, failure, usage in
+            guard let self else { return }
+            Task { await self.handleWorkerFinished(task: task, failure: failure, usage: usage) }
+        }
+
+        // The Queen reports to herself on a timer. Wired here rather than in the
+        // composition root so the scheduler never outlives the chat it posts to.
+        // The policy asks for weights; the learner supplies them. Installed once
+        // here so `QueenDelegationPolicy` stays pure and testable without it.
+        QueenDelegationPolicy.learnedWeight = { feature in
+            MainActor.assumeIsolated { SalienceLearner.shared.weight(for: feature) }
+        }
+
+        let scheduler = QueenReviewScheduler.shared
+        scheduler.tasks = { QueenDelegationRegistry.shared.tasks }
+        scheduler.report = { [weak self] digest in
+            await self?.appendSystemMessageToQueenChat(digest)
+        }
+        // The wake is also when housekeeping happens: a supervisor that only
+        // reports, and never acts on what it sees, is a nicer log.
+        scheduler.spentToday = { QueenDelegationRegistry.shared.spentToday() }
+        scheduler.beforeReport = { [weak self] in
+            await self?.reapStalledWorkers()
+            QueenDelegationRegistry.shared.pruneArchive()
+        }
+        scheduler.start()
+    }
+
+    private func handleWorkerFinished(
+        task: DelegatedTask,
+        failure: String?,
+        usage: QueenWorkerRunner.WorkerUsage
+    ) async {
+        let registry = QueenDelegationRegistry.shared
+        registry.recordUsage(
+            taskID: task.id,
+            inputTokens: usage.inputTokens,
+            outputTokens: usage.outputTokens,
+            toolCalls: usage.toolCalls
+        )
+
+        var notice: String
+        if let failure {
+            notice = "\(task.worker) failed on \(task.issue.slug): \(failure)"
+        } else {
+            notice = "\(task.worker) finished \(task.issue.slug) and is awaiting your review."
+        }
+
+        // Attribute whatever the worker changed to its own branch. Until this
+        // runs, the branch is an empty ref and the edits sit loose in the shared
+        // working tree with nothing tying them to the issue.
+        if failure == nil, let branch = task.virtualBranch {
+            let outcome = await QueenBranchCommitter.commitWorkerChanges(
+                branch: branch,
+                baselineTree: workerBaselineTrees[task.conversationId],
+                message: "queen(\(task.issue.slug)): \(task.title)",
+                ownedPaths: task.ownedPaths
+            )
+            notice += "\n" + outcome.summary
+            registry.recordCommittedFiles(taskID: task.id, count: outcome.fileCount)
+            TriosLogBus.shared.info(
+                .queen,
+                outcome.committed ? "queen.branch.committed" : "queen.branch.empty",
+                outcome.summary,
+                ["issue": task.issue.slug, "branch": branch]
+            )
+        }
+        workerBaselineTrees[task.conversationId] = nil
+        // Transition only after the branch is tallied. Announcing
+        // `awaitingReview` first meant the wake could describe a task whose
+        // commit had not run yet and report it as having changed nothing.
+        registry.transition(taskID: task.id, to: failure == nil ? .awaitingReview : .failed)
+        // The notice belongs in the Queen's chat even when she is not the open
+        // conversation, otherwise a result reported while the user is reading a
+        // worker chat is lost.
+        await appendSystemMessageToQueenChat(notice)
+        await autoAcceptIfUnambiguous(taskID: task.id)
+        await loadConversations()
+    }
+
+    /// Closes a task the Queen can judge on her own.
+    ///
+    /// Only when the bee stayed inside an explicit boundary, actually committed
+    /// something, and cost nothing unusual. Everything else waits for a human,
+    /// because an orchestrator that rubber-stamps its own workers has no
+    /// reviewer at all. Off unless `TRIOS_QUEEN_AUTONOMY=1`.
+    private func autoAcceptIfUnambiguous(taskID: UUID) async {
+        guard ProcessInfo.processInfo.environment["TRIOS_QUEEN_AUTONOMY"] == "1" else { return }
+        let registry = QueenDelegationRegistry.shared
+        guard let task = registry.tasks.first(where: { $0.id == taskID }) else { return }
+        guard QueenDelegationPolicy.qualifiesForAutoAccept(
+            task,
+            committedFiles: task.committedFiles ?? 0
+        ) else { return }
+        guard registry.transition(taskID: task.id, to: .accepted) else { return }
+
+        await appendSystemMessageToQueenChat(
+            SystemNoticeClassifier.successMarker
+                + "I accepted \(task.issue.slug) myself. \(task.worker) stayed inside "
+                + "\(task.ownedPaths.joined(separator: ", ")) and committed "
+                + "\(task.committedFiles ?? 0) file(s)"
+                + (task.totalTokens > 0 ? " for \(task.totalTokens) tokens" : "")
+                + " - no boundary crossed, no unusual cost, so there was nothing for you "
+                + "to judge. I only close the unambiguous ones; anything that looks like a "
+                + "judgement call still waits for you. Undo with "
+                + "/review \(task.issue.slug) reject <why>."
+        )
+        registry.pruneArchive()
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.auto_accept",
+            "Accepted without a human",
+            ["issue": task.issue.slug, "files": String(task.committedFiles ?? 0)]
+        )
+    }
+
+    /// Reports a worker going wrong, once per kind of concern per task.
+    ///
+    /// Repeating the same warning on every SSE delta would bury the chat, so
+    /// each concern is announced the first time it appears and then stays quiet.
+    private func observeWorker(task: DelegatedTask, transcript: QueenWorkerTranscript) {
+        let concerns = QueenObserver.evaluate(
+            transcript: transcript,
+            ownedPaths: task.ownedPaths,
+            totalTokens: transcript.inputTokens + transcript.outputTokens
+        )
+        guard !concerns.isEmpty else { return }
+
+        var announced = announcedConcerns[task.id] ?? []
+        let fresh = concerns.filter { !announced.contains($0.kind.rawValue) }
+        guard !fresh.isEmpty else { return }
+        fresh.forEach { announced.insert($0.kind.rawValue) }
+        announcedConcerns[task.id] = announced
+
+        let body = fresh.map(\.explanation).joined(separator: "\n")
+        Task { [weak self] in
+            await self?.appendSystemMessageToQueenChat(
+                SystemNoticeClassifier.warningMarker
+                    + "Watching \(task.worker) on \(task.issue.slug):\n\(body)\n"
+                    + "Nothing is cancelled - I am telling you while it is still running, "
+                    + "because after it finishes the only choice left is whether to keep the "
+                    + "wreckage."
+            )
+        }
+        for concern in fresh {
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.observer.\(concern.kind.rawValue)",
+                concern.explanation,
+                ["issue": task.issue.slug, "worker": task.worker]
+            )
+        }
+    }
+
+    /// Cancels bees that stopped without saying so, and reports each one.
+    ///
+    /// A task stuck in `running` forever occupies a worker slot and hides real
+    /// capacity, so the swarm quietly shrinks to nothing.
+    func reapStalledWorkers(now: Date = Date()) async {
+        let registry = QueenDelegationRegistry.shared
+        let stalled = registry.stalled(now: now)
+        guard !stalled.isEmpty else { return }
+
+        for task in stalled {
+            // Only reap what has genuinely stopped. A long stream is not a stall.
+            guard workerRunner?.isRunning(conversationId: task.conversationId) != true else { continue }
+            guard registry.transition(taskID: task.id, to: .cancelled) else { continue }
+            await appendSystemMessageToQueenChat(
+                SystemNoticeClassifier.warningMarker
+                    + "I closed \(task.issue.slug). \(task.worker) had no live stream for over "
+                    + "an hour, which means the reaction stopped without producing anything - "
+                    + "it was holding a slot and giving nothing back. Its branch and chat "
+                    + "survive, so nothing is lost; re-delegate when you want another attempt."
+            )
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.worker.reaped",
+                "Cancelled a stalled worker",
+                ["issue": task.issue.slug, "worker": task.worker]
+            )
+        }
+        registry.pruneArchive()
+    }
+
+    private func postQueenNotice(_ text: String) async {
+        messages.append(ChatMessage(role: .system, content: text))
+        rebuildCache()
+        let snapshot = captureHistorySnapshot()
+        await persistHistorySnapshot(snapshot)
+    }
+
+    // MARK: - Review Loop
+
+    private func reportSwarm() async {
+        let registry = QueenDelegationRegistry.shared
+        guard !registry.tasks.isEmpty else {
+            await postQueenNotice(SystemNoticeClassifier.infoMarker
+                    + "The hive is empty. Give me an issue and a worker - "
+                    + "/delegate owner/repo#N queen-swift --paths rings/SR-02 Fix the thing - "
+                    + "and I will open it a chat and a branch of its own.")
+            return
+        }
+        let lines = registry.tasks.map { task in
+            let marker = task.state.needsQueenAttention ? "!" : " "
+            return "\(marker) \(task.issue.slug)  \(task.state.rawValue)  \(task.worker)  "
+                + "\(task.virtualBranch ?? "-")  -  \(task.title)"
+        }
+        let waiting = registry.reviewQueue.count
+        await postQueenNotice(
+            SystemNoticeClassifier.infoMarker
+                + "\(registry.running.count) of "
+                + "\(QueenDelegationPolicy.maximumConcurrentWorkers) slots busy, "
+                + "\(waiting) waiting on you.\n" + lines.joined(separator: "\n")
+        )
+    }
+
+    /// Accepts or returns a worker's result.
+    ///
+    /// Rejection re-briefs the same worker in the same chat on the same branch,
+    /// because starting a second chat for one issue is how two bees end up
+    /// fighting over the same change.
+    private func reviewDelegatedTask(
+        issue: IssueReference,
+        decision: ReviewDecision,
+        note: String
+    ) async {
+        let registry = QueenDelegationRegistry.shared
+        guard let task = registry.task(forIssue: issue) else {
+            await postQueenNotice(SystemNoticeClassifier.warningMarker + "\(issue.slug) has no open task to review.")
+            return
+        }
+        guard task.state == .awaitingReview else {
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "\(issue.slug) is \(task.state.rawValue), not awaiting review. Nothing to decide yet."
+            )
+            return
+        }
+
+        // Every decision is a labelled example: accepting means the ranking did
+        // not need to shout, sending it back means it did.
+        SalienceLearner.shared.record(task: task, neededUser: decision == .reject)
+
+        switch decision {
+        case .accept:
+            guard registry.transition(taskID: task.id, to: .accepted) else {
+                await postQueenNotice(SystemNoticeClassifier.failureMarker + (registry.lastError ?? "Could not accept \(issue.slug)."))
+                return
+            }
+            let tail = note.isEmpty ? "" : "\n\(note)"
+            await postQueenNotice(
+                SystemNoticeClassifier.successMarker
+                    + "Accepted \(issue.slug) from \(task.worker). Its work is on "
+                    + "`\(task.virtualBranch ?? "-")` and the task is archived - kept as a "
+                    + "record rather than deleted, so \"what did the swarm do today\" still "
+                    + "has an answer tomorrow.\(tail)"
+            )
+        case .reject:
+            guard !note.isEmpty else {
+                await postQueenNotice(
+                    SystemNoticeClassifier.warningMarker
+                        + "Rejecting \(issue.slug) needs a reason: /review \(issue.slug) reject <why>."
+                )
+                return
+            }
+            guard registry.transition(taskID: task.id, to: .rejected) else {
+                await postQueenNotice(SystemNoticeClassifier.failureMarker + (registry.lastError ?? "Could not reject \(issue.slug)."))
+                return
+            }
+            guard let runner = workerRunner,
+                  registry.transition(taskID: task.id, to: .running) else {
+                await postQueenNotice(
+                    SystemNoticeClassifier.failureMarker
+                        + "Rejected \(issue.slug), but the worker could not be restarted."
+                )
+                return
+            }
+            let rebrief = QueenBriefing.text(for: task)
+                + "\n\nThe Queen returned your previous attempt. Reason: \(note)"
+            workerBaselineTrees[task.conversationId] = await QueenBranchCommitter.snapshotWorkingTree()
+            runner.start(task: task, brief: rebrief)
+            await postQueenNotice(SystemNoticeClassifier.infoMarker
+                    + "Sent \(issue.slug) back to \(task.worker) with your reason: \(note). "
+                    + "Same chat, same branch - it picks up where it left off rather than "
+                    + "starting a second attempt that would fight the first one for the "
+                    + "same files.")
+        }
+        await loadConversations()
+    }
+
+    // MARK: - Self-audit
+
+    /// Reads the repository for the defect shape that keeps recurring here and
+    /// reports a ranked roadmap.
+    ///
+    /// Runs `grep` rather than asking a model, because "what should we improve"
+    /// produces plausible roadmaps and no findings, while a symbol nobody calls
+    /// is a fact.
+    func runSelfAudit() async {
+        await postQueenNotice(
+            SystemNoticeClassifier.infoMarker
+                + "Reading my own code. This takes a moment - I am counting call sites, "
+                + "not asking anyone's opinion."
+        )
+        let findings = await Task.detached(priority: .utility) {
+            Self.auditRepository(root: ProjectPaths.root)
+        }.value
+        await postQueenNotice(
+            SystemNoticeClassifier.infoMarker
+                + QueenSelfAudit.report(findings: findings, now: Date())
+        )
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.selfaudit",
+            "Self-audit complete",
+            ["findings": String(findings.count)]
+        )
+    }
+
+    /// Counts declarations against occurrences for the public surface of the
+    /// Queen's own subsystem.
+    nonisolated static func auditRepository(root: String) -> [QueenSelfAudit.Finding] {
+        // Scoped to her own organs on purpose. An audit of the whole app returns
+        // a wall of results nobody reads; an audit of the thing being changed
+        // this week returns items someone will act on.
+        let scopes = [
+            "\(root)/rings/SR-00", "\(root)/rings/SR-01",
+            "\(root)/rings/SR-02", "\(root)/BR-OUTPUT"
+        ]
+        // Types, not functions. Swift methods are named after what they do, so
+        // matching `func Queen...` matched nothing at all and the first audit
+        // reported a clean bill of health it had not earned.
+        let declarationPattern = "(struct|class|enum|actor) (Queen|Skill|Swarm)[A-Za-z0-9_]*"
+        let declared = QueenStatusViewModel.runProcess(
+            "/usr/bin/grep",
+            arguments: ["-rhoE", declarationPattern] + scopes,
+            workDir: root,
+            timeout: 30
+        )
+
+        var symbols: Set<String> = []
+        for line in declared.components(separatedBy: .newlines) {
+            guard let symbol = line.split(separator: " ").last.map(String.init),
+                  symbol.count > 3 else { continue }
+            symbols.insert(symbol)
+        }
+
+        var findings: [QueenSelfAudit.Finding] = []
+        for symbol in symbols.sorted() {
+            let uses = QueenStatusViewModel.runProcess(
+                "/usr/bin/grep",
+                arguments: ["-rhow", symbol] + scopes,
+                workDir: root,
+                timeout: 20
+            )
+            let occurrences = uses.components(separatedBy: .newlines).filter { !$0.isEmpty }.count
+            // One occurrence is the declaration itself. Two is a declaration
+            // plus a single mention, which for a type usually means only its
+            // own file refers to it.
+            guard occurrences <= 1 else { continue }
+            findings.append(QueenSelfAudit.Finding(
+                severity: .dead,
+                kind: "zero-call-sites",
+                subject: symbol,
+                explanation: "It is declared once and referenced nowhere else, so whatever "
+                    + "it does, nothing asks it to.",
+                proposal: "Either wire it to a caller or delete it - a capability with no "
+                    + "path to it is worse than an absent one, because it reads as done."
+            ))
+        }
+        return findings
+    }
+
+    // MARK: - Skills
+
+    /// Recalled memory plus, in the Queen's chat, her standing orders.
+    ///
+    /// Without this the model driving the Queen had no idea she had skills,
+    /// workers or commands: she could only run a skill if the user already knew
+    /// its exact name and typed it. A capability the agent cannot see is a
+    /// capability it does not have.
+    private func composedSystemPrompt() -> String? {
+        let memory = memoryService.promptContext(for: recalledMemories)
+        guard conversationId == ChatConversation.trinityQueenId else { return memory }
+
+        let registry = QueenDelegationRegistry.shared
+        let store = SkillStore.shared
+        let charter = QueenSystemPrompt.text(
+            skills: store.enabled,
+            disabledSkills: store.skills
+                .filter { !store.isEnabled($0) }
+                .map(\.id),
+            runningWorkers: registry.running.count,
+            awaitingReview: registry.reviewQueue.count
+        )
+        guard let memory, !memory.isEmpty else { return charter }
+        return charter + "\n\n" + memory
+    }
+
+    private func reportSkills() async {
+        let store = SkillStore.shared
+        store.reload()
+        guard !store.skills.isEmpty else {
+            await postQueenNotice(
+                SystemNoticeClassifier.infoMarker
+                    + "I have no skills installed. They live in .claude/skills/<name>/SKILL.md; "
+                    + "write one and it appears here without a rebuild."
+            )
+            return
+        }
+        // Stamped, because this listing lives in the transcript forever while
+        // the toggles behind it keep moving. An undated snapshot is read later
+        // as a standing fact - which is exactly how a switched-on skill got
+        // reported as switched off from scrollback.
+        let stamp = DateFormatter()
+        stamp.dateFormat = "HH:mm"
+        let asOf = stamp.string(from: Date())
+        let lines = store.skills.map { skill -> String in
+            let mark = store.isEnabled(skill) ? " " : "off"
+            return "\(mark) \(skill.id)  (\(skill.source.displayName))  -  \(skill.description)"
+        }
+        await postQueenNotice(
+            SystemNoticeClassifier.infoMarker
+                + "As of \(asOf): \(store.enabled.count) of \(store.skills.count) skills are available to me. "
+                + "Each one is a rehearsed procedure rather than something I improvise, which is "
+                + "why switching one off narrows what I can do rather than how well I do it. "
+                + "Manage them in the Skills tab.\n"
+                + lines.joined(separator: "\n")
+        )
+    }
+
+    private func runQueenSkill(command: String, arguments: [String]) async {
+        let store = SkillStore.shared
+        guard let skill = store.skill(named: command) else {
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "There is no skill called `\(command)`. Say /skills to see what I have."
+            )
+            return
+        }
+        guard store.isEnabled(skill) else {
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "`\(command)` is switched off in the Skills tab, so I left it alone."
+            )
+            return
+        }
+        await postQueenNotice(
+            SystemNoticeClassifier.infoMarker
+                + "Running `\(command)`: \(skill.description)"
+        )
+        let output = await store.run(command, arguments: arguments)
+        await postQueenNotice(SystemNoticeClassifier.infoMarker + "`\(command)` said:\n\(output)")
+    }
+
+    /// Stops a worker and says so.
+    ///
+    /// Exposed as a command and as a button, because the moment you want it is
+    /// the moment the observer has just told you a bee is looping - and hunting
+    /// for the right syntax then is how a wasted turn becomes a wasted ten.
+    func cancelDelegatedTask(issue: IssueReference, reason: String) async {
+        let registry = QueenDelegationRegistry.shared
+        guard let task = registry.task(forIssue: issue) else {
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker + "\(issue.slug) has no open task to stop."
+            )
+            return
+        }
+        // A cancel is the strongest label there is: it needed you badly enough
+        // that you stopped it mid-flight.
+        SalienceLearner.shared.record(task: task, neededUser: true)
+        workerRunner?.stop(conversationId: task.conversationId)
+        guard registry.transition(taskID: task.id, to: .cancelled) else {
+            await postQueenNotice(
+                SystemNoticeClassifier.failureMarker
+                    + (registry.lastError ?? "Could not stop \(issue.slug).")
+            )
+            return
+        }
+        let because = reason.isEmpty ? "" : " Reason: \(reason)."
+        await postQueenNotice(
+            SystemNoticeClassifier.warningMarker
+                + "Stopped \(task.worker) on \(issue.slug).\(because) Its chat and branch "
+                + "survive, so whatever it managed before I cut it is still there to look at. "
+                + "Re-delegate when you want another attempt."
+        )
+        TriosLogBus.shared.warn(
+            .queen,
+            "queen.worker.cancelled",
+            "Worker stopped by request",
+            ["issue": issue.slug, "worker": task.worker]
+        )
+        await loadConversations()
     }
 
     private func delegateTaskToAgent(agentIdString: String, taskDescription: String) async {
@@ -2566,6 +3757,12 @@ struct ChatRequestBuilder {
     let browserContext: BrowserContext?
     let modelConfiguration: ModelRuntimeConfiguration?
     let attachments: [ChatRequestAttachment]?
+    /// Where the agent's file tools start. `nil` means the user's home
+    /// directory, which suits a general assistant. A delegated worker must be
+    /// pointed at the repository its branch lives in: left at home, one bee
+    /// found an unrelated old checkout under ~/gitbutler and edited that
+    /// instead, so its branch here stayed empty.
+    let workingDirectory: String?
 
     init(
         conversationId: UUID,
@@ -2576,7 +3773,8 @@ struct ChatRequestBuilder {
         previousConversation: [ChatMessage],
         browserContext: BrowserContext?,
         modelConfiguration: ModelRuntimeConfiguration? = nil,
-        attachments: [ChatRequestAttachment]? = nil
+        attachments: [ChatRequestAttachment]? = nil,
+        workingDirectory: String? = nil
     ) {
         self.conversationId = conversationId
         self.message = message
@@ -2587,6 +3785,7 @@ struct ChatRequestBuilder {
         self.browserContext = browserContext
         self.modelConfiguration = modelConfiguration
         self.attachments = attachments
+        self.workingDirectory = workingDirectory
     }
 
     private var memoryPrompt: String {
@@ -2641,7 +3840,8 @@ struct ChatRequestBuilder {
         // Current user message
         messages.append(["role": "user", "content": message])
 
-        let homeDir = FileManager.default.homeDirectoryForCurrentUser.path
+        let homeDir = workingDirectory
+            ?? FileManager.default.homeDirectoryForCurrentUser.path
 
         let runtimeConfiguration = modelConfiguration ?? .environmentFallback()
 

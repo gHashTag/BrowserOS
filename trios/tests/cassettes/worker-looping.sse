@@ -1,0 +1,26 @@
+# Regression cassette: a worker stuck calling the same tool with the same
+# arguments. QueenObserver.loopThreshold is 4, so five identical calls must
+# trip the `looping` concern while the stream is still running.
+#
+# Hand-written rather than recorded because waiting for a real model to get
+# stuck is not a test, it is a vigil.
+{"type":"start","messageId":"loop-1"}
+{"type":"tool-input-start","toolCallId":"c1","toolName":"filesystem_read"}
+{"type":"tool-input-available","toolCallId":"c1","input":{"path":"same.txt"}}
+{"type":"tool-output-available","toolCallId":"c1","output":{"content":""}}
+{"type":"tool-input-start","toolCallId":"c2","toolName":"filesystem_read"}
+{"type":"tool-input-available","toolCallId":"c2","input":{"path":"same.txt"}}
+{"type":"tool-output-available","toolCallId":"c2","output":{"content":""}}
+{"type":"tool-input-start","toolCallId":"c3","toolName":"filesystem_read"}
+{"type":"tool-input-available","toolCallId":"c3","input":{"path":"same.txt"}}
+{"type":"tool-output-available","toolCallId":"c3","output":{"content":""}}
+{"type":"tool-input-start","toolCallId":"c4","toolName":"filesystem_read"}
+{"type":"tool-input-available","toolCallId":"c4","input":{"path":"same.txt"}}
+{"type":"tool-output-available","toolCallId":"c4","output":{"content":""}}
+{"type":"tool-input-start","toolCallId":"c5","toolName":"filesystem_read"}
+{"type":"tool-input-available","toolCallId":"c5","input":{"path":"same.txt"}}
+{"type":"tool-output-available","toolCallId":"c5","output":{"content":""}}
+{"type":"text-start","id":"t1"}
+{"type":"text-delta","id":"t1","delta":"Still reading the same file."}
+{"type":"text-end","id":"t1"}
+{"type":"finish","messageId":"loop-1"}

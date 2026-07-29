@@ -14,6 +14,14 @@ enum QueenCommand: Equatable {
     case newChat(String?)
     case deleteChat(UUID)
     case delegate(agent: String, task: String)
+    /// Opens a worker chat bound to a GitHub issue, on its own virtual branch.
+    case delegateIssue(issue: IssueReference, worker: String, title: String, paths: [String], skill: String?)
+    /// Shows the swarm and what is waiting on the Queen.
+    case swarm
+    /// Closes the review loop on delegated work.
+    case review(issue: IssueReference, decision: ReviewDecision, note: String)
+    /// Stops a worker that is going nowhere.
+    case cancelTask(issue: IssueReference, reason: String)
     case broadcast(String)
     case audit
     case memory
@@ -25,7 +33,19 @@ enum QueenCommand: Equatable {
     case tri
     case godMode
     case bridge
+    /// Lists what the Queen can run right now.
+    case skills
+    /// Reads her own code and reports a ranked roadmap.
+    case selfAudit
+    /// Any skill discovered from a SKILL.md file.
+    case runSkill(command: String, arguments: [String])
     case unknown(String)
+}
+
+/// What the Queen decided about a worker's result.
+enum ReviewDecision: String, Equatable {
+    case accept
+    case reject
 }
 
 /// Parses user input in the Trinity Queen conversation for slash commands.
@@ -63,9 +83,74 @@ struct QueenCommandParser {
                   id != ChatConversation.trinityQueenId else { return .unknown(trimmed) }
             return .deleteChat(id)
         case "delegate", "assign":
-            guard let agent = components.first else { return .unknown(trimmed) }
+            guard let first = components.first else { return .unknown(trimmed) }
             components.removeFirst()
-            return .delegate(agent: agent, task: components.joined(separator: " "))
+            // `/delegate owner/repo#123 worker Title` opens a worker chat bound
+            // to that issue. The older `/delegate worker task` form still works,
+            // so existing habits keep functioning.
+            if let issue = IssueReference.parse(first) {
+                let worker = components.first ?? "queen-swift"
+                if !components.isEmpty { components.removeFirst() }
+                // `--paths a,b` gives the worker an explicit boundary. Without
+                // one it is told to ask before editing shared files, which is
+                // the safe default but means it will not write anything.
+                var paths: [String] = []
+                if let flag = components.firstIndex(of: "--paths"), flag + 1 < components.count {
+                    paths = components[flag + 1]
+                        .split(separator: ",")
+                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                        .filter { !$0.isEmpty }
+                    components.removeSubrange(flag...(flag + 1))
+                }
+                // `--skill /phi-loop` hands the worker a rehearsed procedure
+                // instead of a paraphrase of one. A brief written from memory
+                // drifts from the skill it is describing; a reference cannot.
+                var skill: String?
+                if let flag = components.firstIndex(of: "--skill"), flag + 1 < components.count {
+                    skill = components[flag + 1]
+                    components.removeSubrange(flag...(flag + 1))
+                }
+                let title = components.joined(separator: " ")
+                return .delegateIssue(
+                    issue: issue,
+                    worker: worker,
+                    title: title.isEmpty ? "Work on \(issue.slug)" : title,
+                    paths: paths,
+                    skill: skill
+                )
+            }
+            return .delegate(agent: first, task: components.joined(separator: " "))
+        case "swarm", "workers", "bees":
+            return .swarm
+        case "cancel", "stop":
+            guard let first = components.first,
+                  let issue = IssueReference.parse(first) else { return .unknown(trimmed) }
+            components.removeFirst()
+            return .cancelTask(issue: issue, reason: components.joined(separator: " "))
+        case "review", "accept", "reject-task":
+            guard let first = components.first,
+                  let issue = IssueReference.parse(first) else { return .unknown(trimmed) }
+            components.removeFirst()
+            // `/accept <issue>` needs no verb; `/review <issue> accept|reject`
+            // does. Anything else is refused rather than guessed - closing a
+            // task the wrong way is not a mistake worth being helpful about.
+            let decision: ReviewDecision
+            if name == "accept" {
+                decision = .accept
+            } else if name == "reject-task" {
+                decision = .reject
+            } else if let verb = components.first.map({ $0.lowercased() }),
+                      let parsed = ReviewDecision(rawValue: verb) {
+                components.removeFirst()
+                decision = parsed
+            } else {
+                return .unknown(trimmed)
+            }
+            return .review(
+                issue: issue,
+                decision: decision,
+                note: components.joined(separator: " ")
+            )
         case "broadcast", "notify":
             return .broadcast(components.joined(separator: " "))
         case "audit":
@@ -98,8 +183,16 @@ struct QueenCommandParser {
             return .godMode
         case "bridge":
             return .bridge
+        case "skills":
+            return .skills
+        case "self-audit", "introspect", "roadmap":
+            return .selfAudit
         default:
-            return .unknown(trimmed)
+            // Anything else may be a skill on disk. The parser cannot know -
+            // the catalog is read at runtime - so it hands the name on and the
+            // handler refuses it if no such skill exists. Hardcoding the list
+            // here is what kept two dozen SKILL.md files unreachable.
+            return .runSkill(command: "/" + name, arguments: components)
         }
     }
 
@@ -114,6 +207,10 @@ struct QueenCommandParser {
         /new [title]         — create a conversation
         /delete <uuid>       — delete a conversation (not the Queen)
         /delegate <agent> <task> — assign a task to an agent
+        /delegate <owner/repo#N> <worker> [--paths a,b] <title> — open a worker chat on its own branch
+        /swarm               — show every delegated task and what awaits review
+        /accept <owner/repo#N> [note] — accept a worker's result
+        /review <owner/repo#N> reject <why> — send the work back to the same worker
         /broadcast <message> — message all online agents
         /audit               — run self-improvement audit
         /memory              — recall recent consolidated memory
