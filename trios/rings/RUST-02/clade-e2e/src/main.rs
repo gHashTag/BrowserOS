@@ -448,6 +448,121 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
             "rings/SR-00/TriosVisualTheme.swift",
         ],
     },
+    SwiftLogicSuite {
+        label: "AssistantTimelineBuilder",
+        bin: "/tmp/trios_assistant_timeline_builder_test",
+        sources: &[
+            "tests/swift/assistant_timeline_builder_test.swift",
+            "rings/SR-00/AssistantTimelineBuilder.swift",
+            "rings/SR-00/ChatMessage.swift",
+            "rings/SR-01/A2AMessage.swift",
+            "rings/SR-00/AgentIdentity.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "ChatAttachmentImporter",
+        bin: "/tmp/trios_chat_attachment_importer_test",
+        sources: &[
+            "tests/swift/chat_attachment_importer_test.swift",
+            "rings/SR-01/ChatAttachmentImporter.swift",
+            "rings/SR-00/ChatComposerAttachment.swift",
+            "rings/SR-00/SafeFilePath.swift",
+            "rings/SR-00/TriOSEncryption.swift",
+            "rings/SR-00/KeychainSymmetricKeyStore.swift",
+            "rings/SR-00/DevSecretStore.swift",
+            "BR-OUTPUT/ProjectPaths.swift",
+            "rings/SR-00/BuildVariantPolicy.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "ChatComposerAttachment",
+        bin: "/tmp/trios_chat_composer_attachment_test",
+        sources: &[
+            "tests/swift/chat_composer_attachment_test.swift",
+            "rings/SR-00/ChatComposerAttachment.swift",
+            "rings/SR-00/TriOSEncryption.swift",
+            "rings/SR-00/KeychainSymmetricKeyStore.swift",
+            "rings/SR-00/DevSecretStore.swift",
+            "BR-OUTPUT/ProjectPaths.swift",
+            "rings/SR-00/BuildVariantPolicy.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "ChatComposerStatusStyle",
+        bin: "/tmp/trios_chat_composer_status_style_test",
+        sources: &[
+            "tests/swift/chat_composer_status_style_test.swift",
+            "rings/SR-00/ChatComposerStatusStyle.swift",
+            "rings/SR-00/ChatWorkspaceLayout.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "ChatComposerStyle",
+        bin: "/tmp/trios_chat_composer_style_test",
+        sources: &[
+            "tests/swift/chat_composer_style_test.swift",
+            "rings/SR-00/ChatComposerStyle.swift",
+            "rings/SR-00/ChatWorkspaceLayout.swift",
+            "rings/SR-00/TriosVisualTheme.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "ChatGlassStyle",
+        bin: "/tmp/trios_chat_glass_style_test",
+        sources: &[
+            "tests/swift/chat_glass_style_test.swift",
+            "rings/SR-00/ChatGlassStyle.swift",
+            "rings/SR-00/ChatWorkspaceLayout.swift",
+            "rings/SR-00/TriosVisualTheme.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "ChatStatusBarStyle",
+        bin: "/tmp/trios_chat_status_bar_style_test",
+        sources: &[
+            "tests/swift/chat_status_bar_style_test.swift",
+            "rings/SR-00/ChatStatusBarStyle.swift",
+            "rings/SR-00/ChatComposerStyle.swift",
+            "rings/SR-00/ChatWorkspaceLayout.swift",
+            "rings/SR-00/TriosVisualTheme.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "CodeDiffParser",
+        bin: "/tmp/trios_code_diff_parser_test",
+        sources: &[
+            "tests/swift/code_diff_parser_test.swift",
+            "rings/SR-00/CodeDiffParser.swift",
+            "rings/SR-00/StructuredDetailParser.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "LlmClientOptionalKey",
+        bin: "/tmp/trios_llm_client_optional_key_test",
+        sources: &[
+            "tests/swift/llm_client_optional_key_test.swift",
+            "BR-OUTPUT/LLMClient.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "ModelCatalogParser",
+        bin: "/tmp/trios_model_catalog_parser_test",
+        sources: &[
+            "tests/swift/model_catalog_parser_test.swift",
+            "rings/SR-00/ModelCatalogService.swift",
+            "rings/SR-00/ModelProvider.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "RecursionGuard",
+        bin: "/tmp/trios_recursion_guard_test",
+        sources: &[
+            "tests/swift/recursion_guard_test.swift",
+            "BR-OUTPUT/RecursionGuard.swift",
+            "BR-OUTPUT/ProjectPaths.swift",
+            "rings/SR-00/BuildVariantPolicy.swift",
+        ],
+    },
 ];
 
 /// Compile and run every standalone Swift logic suite. This is the
@@ -466,32 +581,27 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
 /// of the file joining the silent others. Entries come off this list by being
 /// added to SWIFT_LOGIC_SUITES, which needs each suite's own source list.
 ///
-/// Sixteen of the original thirty are gone: every file whose subject was a
-/// single ring source, verified by compiling and running each one before wiring
-/// it, plus `trinity_999_tab_map_test`, which needed its assertion corrected
-/// first - it had outlived the Skills tab and still demanded seven workspaces.
+/// Twenty-seven of the original thirty are now wired. Every one was compiled
+/// *and executed* before being added, never on the strength of a resolved
+/// source list - which is what caught the three below.
 ///
-/// The fourteen below took more than that, in two kinds.
+/// `session_recovery_resilience_test` does not fail, it **hangs**. It reaches
+/// KeychainSymmetricKeyStore, and `SecItemCopyMatching` blocks on a password
+/// dialog no unattended run can answer. Wiring it on a successful compile would
+/// have frozen clade-e2e until its timeout, reporting nothing - strictly worse
+/// than the silence it was in. It needs the dev-variant secret store, which
+/// means resolving TRIOS_VARIANT for a bare test binary first.
 ///
-/// **Eleven need more than their obvious subject** - they pull in types from
-/// other rings, so each needs its dependencies worked out one at a time.
+/// `session_recovery_export_test` compiles, runs, and fails on "portable
+/// filename extension". Same shape as the tab-map test: a real red assertion
+/// that was invisible while nothing ran it. Worth a cycle of its own.
 ///
-/// **Three have no file named after them**: `llm_client_optional_key`,
-/// `model_catalog_parser` and `session_recovery_resilience` test something whose
-/// source is named differently, and finding it is part of wiring them.
+/// `clade_guard_test` will not compile: CladeGuard.swift wants
+/// `ProjectPaths.root`, and something else in that suite's closure declares a
+/// competing `ProjectPaths` without it. A name collision to untangle, not a
+/// missing file.
 const KNOWN_UNWIRED_SWIFT_TESTS: &[&str] = &[
-    "assistant_timeline_builder_test.swift",
-    "chat_attachment_importer_test.swift",
-    "chat_composer_attachment_test.swift",
-    "chat_composer_status_style_test.swift",
-    "chat_composer_style_test.swift",
-    "chat_glass_style_test.swift",
-    "chat_status_bar_style_test.swift",
     "clade_guard_test.swift",
-    "code_diff_parser_test.swift",
-    "llm_client_optional_key_test.swift",
-    "model_catalog_parser_test.swift",
-    "recursion_guard_test.swift",
     "session_recovery_export_test.swift",
     "session_recovery_resilience_test.swift",
 ];
