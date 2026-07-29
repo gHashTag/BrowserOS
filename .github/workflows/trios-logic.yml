@@ -1,0 +1,34 @@
+name: trios logic
+
+# The app-level cassette suite (`make cassettes`) launches the .app and needs a
+# window server plus a running agent server, so it cannot run here. The same
+# logic is covered in-process by the chat SSE harness, which is what this runs:
+# ReplayTransport, QueenObserver and SalienceLearner are exercised through their
+# real code paths with no GUI and no provider.
+on:
+  pull_request:
+    paths:
+      - 'trios/rings/**'
+      - 'trios/tests/**'
+      - 'trios/agent-server/apps/server/src/agent/**'
+      - '.github/workflows/trios-logic.yml'
+
+jobs:
+  server-units:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Orphan tool-call repair
+        working-directory: trios/agent-server
+        run: bun test apps/server/src/agent/message-validation.test.ts
+
+  swift-logic:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install SQLCipher
+        run: brew install sqlcipher
+      - name: Chat SSE, cassette replay, observer, salience learner
+        working-directory: trios
+        run: bash tests/swift/run_chat_sse_e2e.sh

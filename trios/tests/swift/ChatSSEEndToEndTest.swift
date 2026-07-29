@@ -51,6 +51,8 @@ struct ChatSSEEndToEndTests {
         await runClearWaitsForStartedMemoryWrite()
         await runConversationSwitchPreservesStartedMemoryWrite()
         await runScrollPositionPolicyAndRequestDelivery()
+        await runCassetteReplayAndObserver()
+        await runSalienceLearnsFromOutcomes()
 
         if failures == 0 {
             print("\nAll ChatSSEEndToEnd tests passed.")
@@ -73,7 +75,7 @@ struct ChatSSEEndToEndTests {
         let stateMachine = ConversationStateMachine()
 
         let testDefaults = UserDefaults(suiteName: "trios-chat-sse-e2e") ?? .standard
-        let modelStore = ModelConfigurationStore(defaults: testDefaults, environment: [:])
+        let modelStore = ModelConfigurationStore(defaults: testDefaults, environment: [:], reliabilityService: ModelReliabilityService(store: VolatileMemoryStore()))
 
         let viewModel = ChatViewModel(
             transport: transport,
@@ -100,7 +102,7 @@ struct ChatSSEEndToEndTests {
             .start(id: "msg-1"),
             .textDelta(id: "msg-1", delta: "Hi"),
             .textDelta(id: "msg-1", delta: " there"),
-            .finish(id: "msg-1")
+            .finish(id: "msg-1", reason: nil)
         ])
 
         viewModel.inputText = "hello"
@@ -159,7 +161,7 @@ struct ChatSSEEndToEndTests {
         let stateMachine = ConversationStateMachine()
 
         let testDefaults = UserDefaults(suiteName: "trios-chat-sse-cancel") ?? .standard
-        let modelStore = ModelConfigurationStore(defaults: testDefaults, environment: [:])
+        let modelStore = ModelConfigurationStore(defaults: testDefaults, environment: [:], reliabilityService: ModelReliabilityService(store: VolatileMemoryStore()))
 
         let viewModel = ChatViewModel(
             transport: transport,
@@ -213,7 +215,7 @@ struct ChatSSEEndToEndTests {
         let stateMachine = ConversationStateMachine()
 
         let testDefaults = UserDefaults(suiteName: "trios-chat-sse-dedup") ?? .standard
-        let modelStore = ModelConfigurationStore(defaults: testDefaults, environment: [:])
+        let modelStore = ModelConfigurationStore(defaults: testDefaults, environment: [:], reliabilityService: ModelReliabilityService(store: VolatileMemoryStore()))
 
         let viewModel = ChatViewModel(
             transport: transport,
@@ -336,8 +338,8 @@ struct ChatSSEEndToEndTests {
                 encryptedURL: encryptedURL
             )
             let schemaVersion = await store.schemaVersion()
-            check(schemaVersion == 3,
-                  "memory database schema is version 3")
+            check(schemaVersion == 5,
+                  "memory database schema is version 5")
             let journalMode = await store.journalMode()
             check(journalMode == "wal",
                   "memory database uses WAL journal mode for SQLCipher encryption")
@@ -445,20 +447,28 @@ struct ChatSSEEndToEndTests {
                 conversationId: conversationId,
                 goal: "Ship the verified Trinity release"
             )
-            check(planner.activePlan?.items.count == 3,
-                  "new plan has three ordered steps")
-            check(planner.activePlan?.items.map(\.order) == [0, 1, 2],
-                  "new plan steps have deterministic order")
+            // A plan now starts with the one step we can honestly claim is
+            // happening and grows with the observed work, so the old
+            // three-row template no longer applies.
+            check(planner.activePlan?.items.count == 1,
+                  "a new plan opens with a single honest step")
             check(planner.activePlan?.items.first?.state == .inProgress,
                   "understand starts while the request is prepared")
-            check(planner.activePlan?.items.dropFirst().first?.state == .pending,
-                  "execute remains pending before the stream opens")
 
-            await planner.markExecutionStarted()
+            // A tool call appends a step named after the work.
+            await planner.markToolActivity(name: "filesystem_read")
+            check(planner.activePlan?.items.count == 2,
+                  "observed work appends a step rather than filling a template")
             check(planner.activePlan?.items.first?.state == .completed,
-                  "stream start completes understand")
-            check(planner.activePlan?.items.dropFirst().first?.state == .inProgress,
-                  "stream start begins execute")
+                  "starting the next step completes the previous one")
+            check(planner.activePlan?.items.last?.state == .inProgress,
+                  "the newest step is the running one")
+            check(planner.activePlan?.items.map(\.order) == [0, 1],
+                  "appended steps keep a deterministic order")
+            check(
+                planner.activePlan?.items.filter { $0.state == .inProgress }.count == 1,
+                "exactly one step is in progress at a time"
+            )
 
             await planner.completePlan()
             check(planner.activePlan?.state == .completed,
@@ -617,10 +627,13 @@ struct ChatSSEEndToEndTests {
             await terminalPlanner.cancelPlan()
             check(terminalPlanner.activePlan?.state == .cancelled,
                   "cancelled plan reaches cancelled state")
-            check(terminalPlanner.activePlan?.items[1].state == .cancelled,
-                  "cancellation marks the active execute item")
-            check(terminalPlanner.activePlan?.progress == (1.0 / 3.0),
-                  "cancelled progress derives only from completed items")
+            // Plans are dynamic now, so assert on the item's state rather than
+            // on a fixed row index; the old items[1] assumed the retired
+            // three-step template and crashed with Index out of range.
+            check(terminalPlanner.activePlan?.items.contains { $0.state == .cancelled } == true,
+                  "cancellation marks the item that was in progress")
+            check(terminalPlanner.activePlan?.items.contains { $0.state == .inProgress } == false,
+                  "no item is left running after cancellation")
 
             let failedConversationId = UUID()
             await terminalPlanner.startPlan(
@@ -631,10 +644,10 @@ struct ChatSSEEndToEndTests {
             await terminalPlanner.failPlan(message: "Network unavailable")
             check(terminalPlanner.activePlan?.state == .failed,
                   "failed plan reaches failed state")
-            check(terminalPlanner.activePlan?.items[1].state == .failed,
-                  "failure marks the active execute item")
-            check(terminalPlanner.activePlan?.progress == (1.0 / 3.0),
-                  "failed progress derives only from completed items")
+            check(terminalPlanner.activePlan?.items.contains { $0.state == .failed } == true,
+                  "failure marks the item that was in progress")
+            check(terminalPlanner.activePlan?.items.contains { $0.state == .inProgress } == false,
+                  "no item is left running after failure")
 
             let customConversationId = UUID()
             await terminalPlanner.startPlan(
@@ -702,7 +715,8 @@ struct ChatSSEEndToEndTests {
         let stateMachine = ConversationStateMachine()
         let modelStore = ModelConfigurationStore(
             defaults: testDefaults,
-            environment: [:]
+            environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
         )
         let conversationId = UUID()
         await persister.setCurrentConversationId(conversationId)
@@ -723,7 +737,7 @@ struct ChatSSEEndToEndTests {
         await transport.setEvents([
             .start(id: "memory-msg"),
             .textDelta(id: "memory-msg", delta: "Deployment verified."),
-            .finish(id: "memory-msg")
+            .finish(id: "memory-msg", reason: nil)
         ])
         viewModel.inputText = "Use the Trinty deployment cheklist"
         await viewModel.sendMessage()
@@ -820,7 +834,8 @@ struct ChatSSEEndToEndTests {
             a2aClient: nil,
             modelStore: ModelConfigurationStore(
                 defaults: cancelDefaults,
-                environment: [:]
+                environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
             ),
             memoryService: AgentMemoryService(
                 store: cancelStore,
@@ -837,7 +852,7 @@ struct ChatSSEEndToEndTests {
         await cancelViewModel.sendMessage()
         check(cancelPlanner.activePlan?.state == .cancelled,
               "stream abort marks the plan cancelled")
-        check(cancelPlanner.activePlan?.items[1].state == .cancelled,
+        check(cancelPlanner.activePlan?.items.contains { $0.state == .cancelled } == true,
               "stream abort marks execute cancelled")
 
         let failureStore = VolatileMemoryStore()
@@ -858,7 +873,8 @@ struct ChatSSEEndToEndTests {
             a2aClient: nil,
             modelStore: ModelConfigurationStore(
                 defaults: failureDefaults,
-                environment: [:]
+                environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
             ),
             memoryService: AgentMemoryService(
                 store: failureStore,
@@ -875,7 +891,7 @@ struct ChatSSEEndToEndTests {
         await failureViewModel.sendMessage()
         check(failurePlanner.activePlan?.state == .failed,
               "stream error marks the plan failed")
-        check(failurePlanner.activePlan?.items[1].state == .failed,
+        check(failurePlanner.activePlan?.items.contains { $0.state == .failed } == true,
               "stream error marks execute failed")
         check(
             failureViewModel.messages
@@ -910,7 +926,8 @@ struct ChatSSEEndToEndTests {
             a2aClient: nil,
             modelStore: ModelConfigurationStore(
                 defaults: defaults,
-                environment: [:]
+                environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
             ),
             memoryService: memoryService,
             todoPlanner: planner
@@ -991,14 +1008,15 @@ struct ChatSSEEndToEndTests {
             a2aClient: nil,
             modelStore: ModelConfigurationStore(
                 defaults: defaults,
-                environment: [:]
+                environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
             ),
             memoryService: memoryService,
             todoPlanner: planner
         )
         try? await Task.sleep(nanoseconds: 50_000_000)
         await transport.setEvents([
-            .finish(id: "empty")
+            .finish(id: "empty", reason: nil)
         ])
         viewModel.inputText = "Brand new empty stream request"
         await viewModel.sendMessage()
@@ -1033,7 +1051,8 @@ struct ChatSSEEndToEndTests {
             a2aClient: nil,
             modelStore: ModelConfigurationStore(
                 defaults: defaults,
-                environment: [:]
+                environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
             ),
             memoryService: AgentMemoryService(
                 store: store,
@@ -1108,7 +1127,8 @@ struct ChatSSEEndToEndTests {
             a2aClient: nil,
             modelStore: ModelConfigurationStore(
                 defaults: defaults,
-                environment: [:]
+                environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
             ),
             memoryService: AgentMemoryService(
                 store: store,
@@ -1166,7 +1186,8 @@ struct ChatSSEEndToEndTests {
             a2aClient: nil,
             modelStore: ModelConfigurationStore(
                 defaults: defaults,
-                environment: [:]
+                environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
             ),
             memoryService: AgentMemoryService(
                 store: store,
@@ -1269,7 +1290,8 @@ struct ChatSSEEndToEndTests {
             a2aClient: nil,
             modelStore: ModelConfigurationStore(
                 defaults: defaults,
-                environment: [:]
+                environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
             ),
             memoryService: memoryService,
             todoPlanner: planner
@@ -1278,7 +1300,7 @@ struct ChatSSEEndToEndTests {
         await transport.setEvents([
             .start(id: "attachment-turn"),
             .textDelta(id: "attachment-turn", delta: "File reviewed."),
-            .finish(id: "attachment-turn")
+            .finish(id: "attachment-turn", reason: nil)
         ])
         viewModel.inputText = """
         Review the attached contract
@@ -1321,7 +1343,8 @@ struct ChatSSEEndToEndTests {
             a2aClient: nil,
             modelStore: ModelConfigurationStore(
                 defaults: defaults,
-                environment: [:]
+                environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
             ),
             memoryService: AgentMemoryService(
                 store: store,
@@ -1401,7 +1424,8 @@ struct ChatSSEEndToEndTests {
             a2aClient: nil,
             modelStore: ModelConfigurationStore(
                 defaults: defaults,
-                environment: [:]
+                environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
             ),
             memoryService: AgentMemoryService(
                 store: store,
@@ -1481,7 +1505,8 @@ struct ChatSSEEndToEndTests {
             a2aClient: nil,
             modelStore: ModelConfigurationStore(
                 defaults: defaults,
-                environment: [:]
+                environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
             ),
             memoryService: AgentMemoryService(
                 store: store,
@@ -1533,7 +1558,8 @@ struct ChatSSEEndToEndTests {
             a2aClient: nil,
             modelStore: ModelConfigurationStore(
                 defaults: defaults,
-                environment: [:]
+                environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
             ),
             memoryService: memoryService,
             todoPlanner: TODOPlanner(
@@ -1597,7 +1623,8 @@ struct ChatSSEEndToEndTests {
             a2aClient: nil,
             modelStore: ModelConfigurationStore(
                 defaults: defaults,
-                environment: [:]
+                environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
             ),
             memoryService: memoryService,
             todoPlanner: TODOPlanner(
@@ -1661,7 +1688,7 @@ struct ChatSSEEndToEndTests {
                 id: "memory-write-barrier",
                 delta: "Memory write is ready."
             ),
-            .finish(id: "memory-write-barrier")
+            .finish(id: "memory-write-barrier", reason: nil)
         ])
         let viewModel = ChatViewModel(
             transport: transport,
@@ -1672,7 +1699,8 @@ struct ChatSSEEndToEndTests {
             a2aClient: nil,
             modelStore: ModelConfigurationStore(
                 defaults: defaults,
-                environment: [:]
+                environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
             ),
             memoryService: memoryService,
             todoPlanner: TODOPlanner(
@@ -1746,7 +1774,7 @@ struct ChatSSEEndToEndTests {
                 id: "memory-navigation-race",
                 delta: "The completed result should remain durable."
             ),
-            .finish(id: "memory-navigation-race")
+            .finish(id: "memory-navigation-race", reason: nil)
         ])
         let persister = InMemoryPersister()
         let completedConversationId = UUID()
@@ -1760,7 +1788,8 @@ struct ChatSSEEndToEndTests {
             a2aClient: nil,
             modelStore: ModelConfigurationStore(
                 defaults: defaults,
-                environment: [:]
+                environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
             ),
             memoryService: memoryService,
             todoPlanner: TODOPlanner(
@@ -1859,6 +1888,153 @@ struct ChatSSEEndToEndTests {
         check(
             manager.scrollRequest.animated == false,
             "scroll request preserves its animation policy"
+        )
+    }
+
+    // MARK: - Scenario: cassette replay, observer, and the salience learner
+
+    /// Everything the app-level cassette suite proves, minus the app.
+    ///
+    /// The `.app` version needs a window server and a running agent server, so
+    /// it cannot run on CI. These assertions cover the same logic in-process:
+    /// same `ReplayTransport`, same `SSEEventParser`, same `QueenObserver`.
+    static func runCassetteReplayAndObserver() async {
+        print("\n# Scenario: cassette replay and observer")
+
+        let root = FileManager.default.currentDirectoryPath
+        let happyPath = "\(root)/tests/cassettes/worker-happy-path.sse"
+        let loopPath = "\(root)/tests/cassettes/worker-looping.sse"
+        let boundsPath = "\(root)/tests/cassettes/worker-out-of-bounds.sse"
+        let orphanPath = "\(root)/tests/cassettes/worker-orphan-tool-call.sse"
+
+        guard let happy = try? String(contentsOfFile: happyPath, encoding: .utf8) else {
+            check(false, "cassettes are readable from the project root")
+            return
+        }
+
+        // Replay must go through the real parser. A cassette of decoded events
+        // would test the code below the parser and skip the parser itself.
+        let events = ReplayTransport.parse(happy)
+        check(!events.isEmpty, "a cassette yields events through the real SSE parser")
+        check(
+            events.contains { if case .finish = $0 { return true } else { return false } },
+            "a happy-path cassette ends with a terminal event"
+        )
+
+        let effects = ReplayTransport.parseEffects(happy)
+        check(
+            effects.contains { $0.relativePath == "docs/replay.md" },
+            "an #effect line declares the file the recorded tool call wrote"
+        )
+
+        // The looping cassette must trip the observer. Hand-written rather than
+        // recorded: waiting for a model to get stuck is not a test.
+        var looping = QueenWorkerTranscript()
+        await applyCassette(atPath: loopPath, to: &looping)
+        let loopConcerns = QueenObserver.evaluate(
+            transcript: looping,
+            ownedPaths: ["docs"],
+            totalTokens: 0
+        )
+        check(
+            loopConcerns.contains { $0.kind == .looping },
+            "the observer notices a bee repeating one call"
+        )
+
+        var strayed = QueenWorkerTranscript()
+        await applyCassette(atPath: boundsPath, to: &strayed)
+        check(
+            QueenObserver.outOfBoundsPaths(in: strayed, ownedPaths: ["docs"])
+                .contains("rings/SR-00/NotYours.swift"),
+            "the observer notices a write outside the boundary"
+        )
+        check(
+            QueenObserver.outOfBoundsPaths(in: strayed, ownedPaths: ["rings"]).isEmpty,
+            "a write inside the boundary raises nothing"
+        )
+
+        var orphaned = QueenWorkerTranscript()
+        await applyCassette(atPath: orphanPath, to: &orphaned)
+        check(
+            orphaned.orphanedToolCallIDs == ["call-orphan"],
+            "an aborted stream names the tool call it never answered"
+        )
+    }
+
+    /// Feeds the parser the way the runner does, so the transcript under test is
+    /// built by the same path production uses.
+    static func applyCassette(atPath path: String, to transcript: inout QueenWorkerTranscript) async {
+        guard let contents = try? String(contentsOfFile: path, encoding: .utf8) else { return }
+        let parser = UIMessageStreamParser()
+        for event in ReplayTransport.parse(contents) {
+            if let action = await parser.parse(event) {
+                transcript.apply(action)
+            }
+        }
+    }
+
+    /// The learner has to actually move a weight off its prior.
+    ///
+    /// Driving this through twenty app launches proved too flaky to trust, and a
+    /// mechanism verified only by seeded data is a mechanism verified by its
+    /// author's arithmetic. This feeds the real API real outcomes.
+    static func runSalienceLearnsFromOutcomes() async {
+        print("\n# Scenario: salience learns from review outcomes")
+
+        let path = NSTemporaryDirectory() + "queen_salience_test_\(UUID().uuidString).json"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+        let learner = await SalienceLearner(storePath: path)
+
+        let issue = IssueReference(owner: "gHashTag", repo: "trios", number: 1)
+        func task(_ state: DelegatedTaskState) -> DelegatedTask {
+            DelegatedTask(
+                issue: issue,
+                title: "t",
+                worker: "queen-swift",
+                state: state,
+                committedFiles: 1
+            )
+        }
+
+        let threshold = await learner.minimumObservations
+        check(threshold >= 4, "the observation threshold is derived, not zero")
+
+        let prior = QueenSalience.Feature.failed.prior
+        let beforeAny = await learner.weight(for: .failed)
+        check(beforeAny == prior, "a feature with no evidence keeps its prior")
+
+        // One short of the threshold: still the prior. The boundary is the whole
+        // point - a weight that moves on three samples is overfitting with extra
+        // steps.
+        for _ in 0..<(threshold - 1) {
+            await learner.record(task: task(.failed), neededUser: true)
+        }
+        let justUnder = await learner.weight(for: .failed)
+        check(justUnder == prior, "one observation short of the threshold keeps the prior")
+
+        await learner.record(task: task(.failed), neededUser: true)
+        let learned = await learner.weight(for: .failed)
+        check(learned != prior, "crossing the threshold moves the weight off the prior")
+        check(
+            learned > QueenSalience.maximumWeight * 0.8,
+            "a signal that always needed the user ends up loud"
+        )
+
+        // The opposite direction has to work too, or the learner only ever
+        // confirms what it was told.
+        for _ in 0..<threshold {
+            await learner.record(task: task(.rejected), neededUser: false)
+        }
+        let quiet = await learner.weight(for: .rejected)
+        check(
+            quiet < QueenSalience.Feature.rejected.prior,
+            "a signal that never needed the user gets quieter than its prior"
+        )
+
+        let evidence = await learner.evidence(for: .failed)
+        check(
+            evidence.contains("needed you"),
+            "the learner can explain its own weight in words"
         )
     }
 }

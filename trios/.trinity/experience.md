@@ -1530,3 +1530,31 @@ written by the hand that built the detector. Now `/salience` reports it, and
 with real tallies the weights visibly diverge: `committedNothing` fell from a
 prior of 15 to a learned 8.0 (3 of 18 needed the user), `failed` from 40 to
 33.7 (15 of 17). Threshold derived as 16.
+
+## WAVE-074 - Learner proven in-process, CI, brain build blocked (2026-07-29)
+
+**The learner is proven, and not by seeded data.** Driving it through twenty app
+launches failed twice - `open` racing the single-instance flock. The right home
+was the harness that already runs headless: seven assertions feed the real
+`SalienceLearner` real outcomes and check the boundary in both directions. A
+weight one observation short of the threshold keeps its prior; crossing it moves;
+a signal that never needed the user ends up *quieter* than its prior. That last
+one matters - without it the learner could only ever confirm what it was told.
+
+Not proven: learning over days of real use. This is the mechanism, deterministic.
+
+**CI runs the logic, not the app.** `make cassettes` launches the `.app` and
+needs a window server plus an agent server, so it cannot run on a runner. The
+same code paths - `ReplayTransport`, `QueenObserver`, `SalienceLearner` - are now
+covered in-process by the chat SSE harness, plus the bun tests for the server
+repair. Fifteen new assertions, no GUI, no provider.
+
+**The Trinity brain does not build here, and now I know exactly why.**
+`build/build.brain.zig` declared a test target with no module graph, so it failed
+on the first `@import("basal_ganglia")`. Wiring all 25 modules got past that and
+into the real blocker: `perf_dashboard.zig` does `@import("basal_ganglia.zig")` -
+a *file* import - while `basal_ganglia` is also a named module, and Zig 0.16
+forbids a file belonging to two modules. Sixteen files under `src/brain/` mix the
+two styles. Fixing it means editing another repository's source mid-flight, so I
+reverted my change and left it alone. The brain-atlas skill stays a map, and it
+says so.
