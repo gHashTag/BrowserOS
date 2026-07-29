@@ -97,6 +97,7 @@ cassettes:
 		"worker-happy-path.sse:queen.branch.committed:commits the file its cassette declares" \
 		"worker-looping.sse:queen.observer.looping:notices a bee repeating one call" \
 		"worker-out-of-bounds.sse:queen.observer.outOfBounds:notices a write outside the boundary" \
+		"worker-orphan-tool-call.sse:queen.worker.orphaned_tool_calls:names a tool call the stream never answered" \
 	; do \
 		cassette=$${spec%%:*}; rest=$${spec#*:}; \
 		marker=$${rest%%:*}; label=$${rest#*:}; \

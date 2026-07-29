@@ -30,17 +30,39 @@ final class SalienceLearner {
 
     private(set) var tallies: [String: Tally] = [:]
     private let storePath: String
-    /// Below this many observations a feature keeps its prior. Learning from
-    /// three samples is not learning, it is overfitting with extra steps.
-    private let minimumObservations: Int
 
-    init(
-        storePath: String = "\(ProjectPaths.trinity)/state/queen_salience.json",
-        minimumObservations: Int = 8
-    ) {
+    init(storePath: String = "\(ProjectPaths.trinity)/state/queen_salience.json") {
         self.storePath = storePath
-        self.minimumObservations = minimumObservations
         load()
+    }
+
+    /// How many observations a feature needs before its rate replaces the prior.
+    ///
+    /// Derived rather than chosen. A rate estimated from `n` Bernoulli trials
+    /// has standard error at most `0.5 / sqrt(n)`; the estimate is worth
+    /// trusting once that error is small next to the spread the priors express.
+    /// With priors spanning 15..40 on a 40-point scale, the smallest gap worth
+    /// resolving is about 5/40 = 0.125, so the threshold is the `n` where the
+    /// error first falls below it.
+    ///
+    /// The point is not the number - it is that changing the priors moves the
+    /// threshold automatically, instead of leaving a constant behind that used
+    /// to make sense.
+    var minimumObservations: Int {
+        let smallestGap = Self.smallestPriorGap / QueenSalience.maximumWeight
+        guard smallestGap > 0 else { return 8 }
+        return max(4, Int(ceil(0.25 / (smallestGap * smallestGap))))
+    }
+
+    /// Smallest distance between two distinct priors: the finest distinction
+    /// the weights are trying to make.
+    static var smallestPriorGap: Double {
+        let priors = QueenSalience.Feature.allCases.map(\.prior).sorted()
+        var smallest = Double.greatestFiniteMagnitude
+        for (left, right) in zip(priors, priors.dropFirst()) where right > left {
+            smallest = min(smallest, right - left)
+        }
+        return smallest == .greatestFiniteMagnitude ? 0 : smallest
     }
 
     /// Records what happened to a task once the user decided.
@@ -77,7 +99,9 @@ final class SalienceLearner {
     /// Human-readable state, for the Queen to explain her own ranking.
     func evidence(for feature: QueenSalience.Feature) -> String {
         guard let tally = tallies[feature.rawValue], tally.seen >= minimumObservations else {
-            return "no evidence yet, using my starting estimate"
+            let have = tallies[feature.rawValue]?.seen ?? 0
+            return "only \(have) of the \(minimumObservations) observations I need, "
+                + "so I am still using my starting estimate"
         }
         let percent = Int((tally.rate * 100).rounded())
         return "\(tally.intervened) of \(tally.seen) needed you, about \(percent)%"

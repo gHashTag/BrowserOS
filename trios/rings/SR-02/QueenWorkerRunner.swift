@@ -167,6 +167,22 @@ final class QueenWorkerRunner: ObservableObject {
     ) async {
         publish(transcript, for: task.conversationId)
         await persister.save(messages: transcript.messages, conversationId: task.conversationId)
+        // Name the orphans. The server repairs them, but only a client-side
+        // record makes "this run produced one" assertable - and the bug they
+        // cause kills every later send on the conversation, not just this turn.
+        let orphans = transcript.orphanedToolCallIDs
+        if !orphans.isEmpty {
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.worker.orphaned_tool_calls",
+                "The stream ended with \(orphans.count) tool call(s) still unanswered",
+                [
+                    "issue": task.issue.slug,
+                    "worker": task.worker,
+                    "tool_calls": orphans.joined(separator: ",")
+                ]
+            )
+        }
         runs[task.conversationId] = nil
         runningConversationIds.remove(task.conversationId)
         TriosLogBus.shared.info(

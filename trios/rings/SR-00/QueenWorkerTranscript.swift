@@ -128,6 +128,20 @@ struct QueenWorkerTranscript {
         failure = message
     }
 
+    /// Tool calls left without a result when the stream ended.
+    ///
+    /// The client cannot repair these - the server owns the agent's history -
+    /// but it can *see* them, and seeing them is what makes the failure
+    /// testable. An orphan reaching the provider throws
+    /// `AI_MissingToolResultsError` and poisons the conversation for every
+    /// later send, so a run that produced one is a run worth naming.
+    var orphanedToolCallIDs: [String] {
+        messages
+            .flatMap(\.toolCalls)
+            .filter { !$0.isComplete }
+            .map(\.id)
+    }
+
     private mutating func finalize() {
         for index in messages.indices where messages[index].isStreaming {
             messages[index].isStreaming = false
