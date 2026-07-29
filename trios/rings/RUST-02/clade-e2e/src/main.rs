@@ -219,6 +219,7 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
             "tests/swift/trios_log_bus_test.swift",
             "tests/swift/TriosLogBusTestStubs.swift",
             "rings/SR-01/TriosLogBus.swift",
+            "rings/SR-01/TriosOTLPExporter.swift",
         ],
     },
     SwiftLogicSuite {
@@ -251,6 +252,8 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
         sources: &[
             "tests/swift/queen_delegation_test.swift",
             "rings/SR-00/QueenDelegation.swift",
+            "rings/SR-00/ModelPricing.swift",
+            "rings/SR-00/QueenSalience.swift",
         ],
     },
     SwiftLogicSuite {
@@ -313,6 +316,7 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
             "tests/swift/log_parser_trios_app_test.swift",
             "tests/swift/TriosLogBusTestStubs.swift",
             "rings/SR-01/TriosLogBus.swift",
+            "rings/SR-01/TriosOTLPExporter.swift",
             "rings/SR-02/LogParser.swift",
         ],
     },
