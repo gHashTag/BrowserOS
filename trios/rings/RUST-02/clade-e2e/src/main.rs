@@ -181,56 +181,319 @@ fn main() {
     }
 }
 
-/// Compile and run the standalone Swift logic tests (ChatLogic). This is the
+/// One standalone Swift logic suite: the test file plus the sources it needs.
+/// Each suite compiles on its own, so a suite only pulls in the ring files it
+/// actually exercises rather than the whole app.
+struct SwiftLogicSuite {
+    label: &'static str,
+    bin: &'static str,
+    sources: &'static [&'static str],
+}
+
+const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
+    SwiftLogicSuite {
+        label: "ChatLogic",
+        bin: "/tmp/trios_chat_logic_test",
+        sources: &["tests/swift/chat_logic_test.swift", "BR-OUTPUT/ChatLogic.swift"],
+    },
+    SwiftLogicSuite {
+        label: "OpenRouterCreditsParser",
+        bin: "/tmp/trios_openrouter_credits_parser_test",
+        sources: &[
+            "tests/swift/openrouter_credits_parser_test.swift",
+            "rings/SR-00/OpenRouterCreditsParser.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "ZAIErrorParser",
+        bin: "/tmp/trios_zai_error_parser_test",
+        sources: &[
+            "tests/swift/zai_error_parser_test.swift",
+            "rings/SR-00/ZAIErrorParser.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "TriosLogBus",
+        bin: "/tmp/trios_log_bus_test",
+        sources: &[
+            "tests/swift/trios_log_bus_test.swift",
+            "tests/swift/TriosLogBusTestStubs.swift",
+            "rings/SR-01/TriosLogBus.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "PlanStepNaming",
+        bin: "/tmp/trios_plan_step_naming_test",
+        sources: &[
+            "tests/swift/plan_step_naming_test.swift",
+            "rings/SR-00/PlanStepNaming.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "ReleasePromotion",
+        bin: "/tmp/trios_release_promotion_test",
+        sources: &[
+            "tests/swift/release_promotion_test.swift",
+            "rings/SR-00/ReleasePromotionPolicy.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "BuildVariant",
+        bin: "/tmp/trios_build_variant_test",
+        sources: &[
+            "tests/swift/build_variant_test.swift",
+            "rings/SR-00/BuildVariantPolicy.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "QueenDelegation",
+        bin: "/tmp/trios_queen_delegation_test",
+        sources: &[
+            "tests/swift/queen_delegation_test.swift",
+            "rings/SR-00/QueenDelegation.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "PlanNestingRevision",
+        bin: "/tmp/trios_plan_nesting_revision_test",
+        sources: &[
+            "tests/swift/plan_nesting_revision_test.swift",
+            "rings/SR-00/TODOPlanState.swift",
+            "rings/SR-00/PlanNesting.swift",
+            "rings/SR-00/PlanRevision.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "ChatPaneLayout",
+        bin: "/tmp/trios_chat_pane_layout_test",
+        sources: &[
+            "tests/swift/chat_pane_layout_test.swift",
+            "rings/SR-00/ChatPaneLayout.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "TODOPlannerState",
+        bin: "/tmp/trios_todo_planner_state_test",
+        sources: &[
+            "tests/swift/todo_planner_state_test.swift",
+            "rings/SR-00/TODOPlanState.swift",
+            "rings/SR-00/TODOPlanDeriver.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "TODOPlanDeriver",
+        bin: "/tmp/trios_todo_plan_deriver_test",
+        sources: &[
+            "tests/swift/todo_plan_deriver_test.swift",
+            "rings/SR-00/TODOPlanDeriver.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "ChatDiagnostics",
+        bin: "/tmp/trios_chat_diagnostics_test",
+        sources: &[
+            "tests/swift/chat_diagnostics_test.swift",
+            "rings/SR-00/ChatDiagnostics.swift",
+            "rings/SR-00/ZAIErrorParser.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "ModelKeyRotation",
+        bin: "/tmp/trios_model_key_rotation_test",
+        sources: &[
+            "tests/swift/model_key_rotation_test.swift",
+            "rings/SR-00/ModelKeyRotation.swift",
+            "rings/SR-00/ZAIErrorParser.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "LogParserTriosApp",
+        bin: "/tmp/trios_log_parser_app_test",
+        sources: &[
+            "tests/swift/log_parser_trios_app_test.swift",
+            "tests/swift/TriosLogBusTestStubs.swift",
+            "rings/SR-01/TriosLogBus.swift",
+            "rings/SR-02/LogParser.swift",
+        ],
+    },
+];
+
+/// Compile and run every standalone Swift logic suite. This is the
 /// L7-compliant replacement for a shell test step - invoked from Rust, no .sh.
-/// Returns true on pass; appends a line to the e2e report either way.
+/// Returns true only when all suites pass; appends a line per suite either way.
+/// Focused suites that exist on disk and are deliberately not run yet.
+///
+/// Thirty of the forty-five files under `tests/swift/` were reachable by nobody
+/// - not this list, not the Makefile, not CI. They looked like coverage and
+/// were not, which is worse than an obvious gap: three separate types were
+/// investigated as "tested but never called" when the truth was that their
+/// tests had never executed either.
+///
+/// Naming them here does not run them. It stops the set from growing quietly:
+/// add a `*_test.swift` without wiring it and `clade-e2e` now says so, instead
+/// of the file joining thirty silent others. Entries come off this list by
+/// being added to SWIFT_LOGIC_SUITES, which needs each suite's own source list.
+const KNOWN_UNWIRED_SWIFT_TESTS: &[&str] = &[
+    "assistant_action_bar_policy_test.swift",
+    "assistant_timeline_builder_test.swift",
+    "chat_attachment_importer_test.swift",
+    "chat_composer_attachment_test.swift",
+    "chat_composer_status_style_test.swift",
+    "chat_composer_style_test.swift",
+    "chat_editing_shortcut_policy_test.swift",
+    "chat_glass_style_test.swift",
+    "chat_loading_indicator_layout_test.swift",
+    "chat_scroll_restoration_policy_test.swift",
+    "chat_status_bar_style_test.swift",
+    "chat_workspace_layout_test.swift",
+    "clade_guard_test.swift",
+    "code_diff_parser_test.swift",
+    "companion_server_config_test.swift",
+    "llm_client_optional_key_test.swift",
+    "markdown_block_parser_test.swift",
+    "model_catalog_parser_test.swift",
+    "model_catalog_reconciler_test.swift",
+    "model_provider_test.swift",
+    "reasoning_presentation_policy_test.swift",
+    "recursion_guard_test.swift",
+    "session_recovery_export_test.swift",
+    "session_recovery_resilience_test.swift",
+    "structured_detail_parser_test.swift",
+    "tri_net_repository_status_test.swift",
+    "trinity_999_tab_map_test.swift",
+    "trinity_queen_embedding_test.swift",
+    "trios_branding_test.swift",
+    "trios_visual_theme_test.swift",
+];
+
+/// Fails when a focused Swift test exists that nothing runs and nothing admits
+/// to skipping.
+fn check_swift_suites_are_wired(dir: &str, report: &mut String) -> bool {
+    let test_dir = PathBuf::from(dir).join("tests/swift");
+    let entries = match fs::read_dir(&test_dir) {
+        Ok(entries) => entries,
+        Err(error) => {
+            // A check that cannot read its input must say so. Returning "no
+            // orphans found" here would be the exact failure this guard exists
+            // to catch, one level up.
+            report.push_str(&format!(
+                "\n- [FAIL] wiring check could not read {}: {error}\n",
+                test_dir.display()
+            ));
+            return false;
+        }
+    };
+
+    let mut wired: Vec<&str> = Vec::new();
+    for suite in SWIFT_LOGIC_SUITES {
+        for source in suite.sources {
+            if let Some(name) = source.strip_prefix("tests/swift/") {
+                if name.ends_with("_test.swift") {
+                    wired.push(name);
+                }
+            }
+        }
+    }
+
+    let mut orphans: Vec<String> = Vec::new();
+    let mut seen = 0usize;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.ends_with("_test.swift") {
+            continue;
+        }
+        seen += 1;
+        if wired.contains(&name.as_str()) {
+            continue;
+        }
+        if KNOWN_UNWIRED_SWIFT_TESTS.contains(&name.as_str()) {
+            continue;
+        }
+        orphans.push(name);
+    }
+
+    if seen == 0 {
+        report.push_str("\n- [FAIL] wiring check matched no test files at all\n");
+        return false;
+    }
+
+    orphans.sort();
+    if orphans.is_empty() {
+        report.push_str(&format!(
+            "\n- [OK] swift suite wiring: {} test files, {} run, {} listed as unwired\n",
+            seen,
+            wired.len(),
+            KNOWN_UNWIRED_SWIFT_TESTS.len()
+        ));
+        return true;
+    }
+
+    report.push_str(&format!(
+        "\n- [FAIL] {} swift test file(s) run by nothing and not listed as unwired: {}\n",
+        orphans.len(),
+        orphans.join(", ")
+    ));
+    false
+}
+
 fn run_swift_logic_tests(report: &mut String) -> bool {
     let dir = trios_config::project_dir();
-    let bin = "/tmp/trios_chat_logic_test";
+    let mut all_passed = check_swift_suites_are_wired(&dir, report);
+    for suite in SWIFT_LOGIC_SUITES {
+        if !run_swift_logic_suite(&dir, suite, report) {
+            all_passed = false;
+        }
+    }
+    all_passed
+}
+
+fn run_swift_logic_suite(dir: &str, suite: &SwiftLogicSuite, report: &mut String) -> bool {
+    let label = suite.label;
+    let mut args: Vec<&str> = suite.sources.to_vec();
+    args.push("-o");
+    args.push(suite.bin);
 
     let compiled = Command::new("swiftc")
-        .args([
-            "tests/swift/chat_logic_test.swift",
-            "BR-OUTPUT/ChatLogic.swift",
-            "-o",
-            bin,
-        ])
-        .current_dir(&dir)
+        .args(&args)
+        .current_dir(dir)
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .output();
 
     match compiled {
-        Ok(out) if out.status.success() => match Command::new(bin).output() {
+        Ok(out) if out.status.success() => match Command::new(suite.bin).output() {
             Ok(run) if run.status.success() => {
-                report.push_str("- [OK] Swift logic tests: passed\n");
+                report.push_str(&format!("- [OK] Swift logic tests ({}): passed\n", label));
                 true
             }
             Ok(run) => {
                 let tail = cap_body(String::from_utf8_lossy(&run.stdout).to_string());
                 report.push_str(&format!(
-                    "- [FAIL] Swift logic tests FAILED\n```\n{}\n```\n",
-                    tail
+                    "- [FAIL] Swift logic tests ({}) FAILED\n```\n{}\n```\n",
+                    label, tail
                 ));
                 false
             }
             Err(e) => {
-                report.push_str(&format!("- [FAIL] Swift logic tests: could not run ({})\n", e));
+                report.push_str(&format!(
+                    "- [FAIL] Swift logic tests ({}): could not run ({})\n",
+                    label, e
+                ));
                 false
             }
         },
         Ok(out) => {
             let tail = cap_body(String::from_utf8_lossy(&out.stderr).to_string());
             report.push_str(&format!(
-                "- [FAIL] Swift logic tests: compile failed\n```\n{}\n```\n",
-                tail
+                "- [FAIL] Swift logic tests ({}): compile failed\n```\n{}\n```\n",
+                label, tail
             ));
             false
         }
         Err(e) => {
             report.push_str(&format!(
-                "- [FAIL] Swift logic tests: swiftc unavailable ({})\n",
-                e
+                "- [FAIL] Swift logic tests ({}): swiftc unavailable ({})\n",
+                label, e
             ));
             false
         }
