@@ -170,7 +170,7 @@ enum QueenReviewDigest {
     }
 
     private static func formatted(_ tokens: Int) -> String {
-        tokens >= 1000 ? "\(tokens / 1000)k" : "\(tokens)"
+        CompactCount.format(tokens)
     }
 
     /// A worker that has been "running" for hours is far more likely to be stuck

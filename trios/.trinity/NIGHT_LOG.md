@@ -53,3 +53,26 @@ Nothing else touched. QueenBranchCommitter still has no coverage - it shells out
 to git and needs a scratch repository, which is a bigger job than this cycle
 allows and is written down rather than half-done.
 
+## Cycle 3, 2026-07-30
+
+Green first: build clean, 178 assertions, cassettes 4/4. The dead-code scan over
+168 types returned only QueenStatusBadge, which is a BR-OUTPUT draft absent from
+the build list and was already deliberately left alone last cycle. So (a) was
+clear and I moved to (b), a number printed that was never really measured.
+
+Found it in the Skills tab: `bodyCharacters / 1000` with no floor, so any skill
+under a thousand characters displayed as "0k chars". Three real skills read that
+way - chat-ux-patterns at 580, trios-launch at 637, e2e-testing at 722. A file
+that exists reported as empty, which is the same failure as "$0.00" for a
+sub-cent spend.
+
+The rule already existed in three places and the third had drifted, so it moved
+to `CompactCount` in SR-00 and the task banner and review digest now defer to
+it. Six assertions cover the boundary in both directions, including 999 and 1000.
+
+Assertions 178 to 184. Build clean, cassettes 4/4.
+
+Left alone: QueenStatusBadge again, for the same reason, and
+QueenBranchCommitter, which still needs a scratch git repository to test
+properly.
+

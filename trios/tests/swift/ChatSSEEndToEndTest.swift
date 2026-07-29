@@ -2075,6 +2075,19 @@ struct ChatSSEEndToEndTests {
         check(ModelPricing.format(0.004) == "<$0.01", "a sub-cent spend is not shown as zero")
         check(ModelPricing.format(0) == "$0.00", "no spend is shown as zero")
 
+        // CompactCount. A 580-character skill displayed as "0k chars", which
+        // reads as an empty file rather than a short one - the same failure as
+        // "$0.00" for a sub-cent spend.
+        check(CompactCount.format(580) == "580", "a small count is shown exactly, not rounded to zero")
+        check(CompactCount.format(0) == "0", "zero is zero")
+        check(CompactCount.format(999) == "999", "the last value below the threshold stays exact")
+        check(CompactCount.format(1000) == "1k", "the threshold itself abbreviates")
+        check(CompactCount.format(12_500) == "12k", "a large count abbreviates")
+        check(
+            CompactCount.format(580, unit: "chars") == "580 chars",
+            "the unit form follows the same rule"
+        )
+
         // SwarmBudget. The ceiling declines to start work; it never kills.
         let budget = SwarmBudget(dailyLimitUSD: 10)
         if case .fine = budget.verdict(spentToday: 1) {} else {

@@ -168,7 +168,7 @@ struct QueenTaskBanner: View {
     }
 
     private func formatted(_ tokens: Int) -> String {
-        tokens >= 1000 ? "\(tokens / 1000)k" : "\(tokens)"
+        CompactCount.format(tokens)
     }
 
     private func metric(_ name: String, _ value: String) -> some View {

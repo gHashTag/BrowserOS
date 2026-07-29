@@ -284,12 +284,12 @@ struct SkillsTabView: View {
                 metric("source", skill.source.displayName)
                 // A skill's body is loaded into the agent's context when it runs,
                 // so its size is a cost the user should be able to see.
-                metric("size", "\(skill.bodyCharacters / 1000)k chars")
+                metric("size", CompactCount.format(skill.bodyCharacters, unit: "chars"))
                 if isEditing {
                     // The body is loaded into the agent's context when the skill
                     // runs, so its size is a cost worth watching while editing
                     // rather than discovering afterwards.
-                    metric("draft", "\(draft.count / 1000)k chars")
+                    metric("draft", CompactCount.format(draft.count, unit: "chars"))
                 }
                 if let record = store.lastRuns[skill.id] {
                     metric(
