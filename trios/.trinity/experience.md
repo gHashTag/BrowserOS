@@ -1558,3 +1558,27 @@ forbids a file belonging to two modules. Sixteen files under `src/brain/` mix th
 two styles. Fixing it means editing another repository's source mid-flight, so I
 reverted my change and left it alone. The brain-atlas skill stays a map, and it
 says so.
+
+## WAVE-075 - Brain diagnosed, CI unverifiable, drift recorded (2026-07-29)
+
+**The brain build has three layers and only two are mine to fix.** The test
+target had no module graph; one file belonged to two modules; and the source
+targets an older Zig - `std.Thread.Mutex` and `std.time.milliTimestamp` are both
+absent in 0.16, verified against the installed stdlib. The first two fixes work
+and are recorded in `.trinity/specs/trinity-brain-build-blockers.md`. The third
+is a migration across another repository's source, so trinity's working tree was
+restored and no PR was opened there. A PR that gets a build two errors further
+is noise.
+
+**The CI workflow cannot be verified from a feature branch.** GitHub's workflow
+registry only lists files present on the default branch, and empirically no
+`pull_request` run fires for a workflow that exists only on the head - four
+pushes touching filtered paths produced only the base-branch
+`pull_request_target` jobs. The file is valid YAML and its jobs parse; whether
+it passes is unknown until it lands. Stating that beats claiming CI coverage.
+
+**Drift is recorded now.** The learner kept only current tallies, so the only
+observable was the present number - which cannot tell a signal that settled from
+one that never moved. Weights are snapshotted on change, and `/salience` reports
+movement from each starting estimate. That is what makes "leave it a week"
+answerable rather than a suggestion.
