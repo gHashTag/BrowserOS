@@ -13,6 +13,9 @@ import Foundation
 ///
 /// After FoundationDB and TigerBeetle: the value is not that the simulation is
 /// realistic, it is that it is *identical* on every run.
+///
+/// Covered in CI by the chat SSE harness rather than by `make cassettes`: the
+/// app-level suite needs a window server, this does not.
 actor ReplayTransport: ChatTransportProtocol {
     enum ReplayError: Error, CustomStringConvertible {
         case cassetteMissing(String)
