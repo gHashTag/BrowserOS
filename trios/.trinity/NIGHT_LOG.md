@@ -32,3 +32,24 @@ an improvement.
 
 Re-verified after the removal: build clean, 157 assertions, 4/4 cassettes.
 
+## Cycle 2, 2026-07-30 early
+
+Build, cassettes and harness green first. Then: six pure types had zero
+assertions between them - ModelPricing, SwarmBudget, SkillCatalog,
+QueenSystemPrompt, QueenBriefing, QueenSelfAudit. Each is a place where a wrong
+answer is expensive, and each had already gone wrong once by hand.
+
+Added 21 assertions covering exactly those failures: an unpriced model reports
+no cost rather than an average; a sub-cent spend reads as "<$0.01" rather than
+zero; a skill with no frontmatter is described by its heading rather than a
+stray bullet from mid-list; the Queen's roster says it is the enabled set and
+names the disabled ones, because given a bare list the model invented a state
+and told the user a live skill was off; a brief puts the boundary before the
+recipe; dead code outranks everything in a roadmap.
+
+Assertions went 157 to 178. Build clean, cassettes 4/4.
+
+Nothing else touched. QueenBranchCommitter still has no coverage - it shells out
+to git and needs a scratch repository, which is a bigger job than this cycle
+allows and is written down rather than half-done.
+

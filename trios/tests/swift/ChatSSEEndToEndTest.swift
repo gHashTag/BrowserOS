@@ -53,6 +53,7 @@ struct ChatSSEEndToEndTests {
         await runScrollPositionPolicyAndRequestDelivery()
         await runCassetteReplayAndObserver()
         await runSalienceLearnsFromOutcomes()
+        await runPureQueenTypes()
 
         if failures == 0 {
             print("\nAll ChatSSEEndToEnd tests passed.")
@@ -2035,6 +2036,165 @@ struct ChatSSEEndToEndTests {
         check(
             evidence.contains("needed you"),
             "the learner can explain its own weight in words"
+        )
+    }
+
+    // MARK: - Scenario: the pure Queen types nothing had asserted
+
+    /// Six types with no coverage at all, each one a place a wrong answer is
+    /// expensive: money, the skill catalogue, and what the Queen claims about
+    /// her own state. Every assertion here is a property that has already gone
+    /// wrong once in this project.
+    static func runPureQueenTypes() async {
+        print("\n# Scenario: pure Queen types")
+
+        // ModelPricing. An unknown model must stay unknown - inventing an
+        // average is how a cheap run gets cancelled as expensive.
+        check(
+            ModelPricing.estimatedCost(
+                inputTokens: 1000, outputTokens: 1000,
+                model: "some-model-nobody-listed", provider: "acme"
+            ) == nil,
+            "an unpriced model reports no cost rather than a guess"
+        )
+        check(
+            ModelPricing.estimatedCost(
+                inputTokens: 1_000_000, outputTokens: 0,
+                model: "llama3.1", provider: "ollama"
+            ) == 0,
+            "a model running on this machine costs nothing, and that is a measurement"
+        )
+        if let glm = ModelPricing.estimatedCost(
+            inputTokens: 1_000_000, outputTokens: 0, model: "glm-5.2", provider: "zai"
+        ) {
+            check(abs(glm - 0.60) < 0.001, "a point release inherits its family's price")
+        } else {
+            check(false, "glm-5.2 should match the glm-5 family by prefix")
+        }
+        // Sub-cent has to read as "something happened", not as nothing.
+        check(ModelPricing.format(0.004) == "<$0.01", "a sub-cent spend is not shown as zero")
+        check(ModelPricing.format(0) == "$0.00", "no spend is shown as zero")
+
+        // SwarmBudget. The ceiling declines to start work; it never kills.
+        let budget = SwarmBudget(dailyLimitUSD: 10)
+        if case .fine = budget.verdict(spentToday: 1) {} else {
+            check(false, "a tenth of the ceiling is fine")
+        }
+        if case .nearingLimit = budget.verdict(spentToday: 8.5) {} else {
+            check(false, "the last fifth of the ceiling warns")
+        }
+        if case .exhausted(let over) = budget.verdict(spentToday: 12) {
+            check(abs(over - 2) < 0.001, "an exhausted budget reports how far past it is")
+        } else {
+            check(false, "spending past the ceiling is exhausted")
+        }
+
+        // SkillCatalog. A parse bug silently drops a skill, which reads as the
+        // skill not existing.
+        let withFrontmatter = """
+        ---
+        name: doctor
+        description: Diagnose and heal the build.
+        ---
+
+        # Doctor
+
+        Body text.
+        """
+        let parsed = SkillCatalog.parse(
+            contents: withFrontmatter, directoryName: "ignored",
+            source: .project, path: "/tmp/x"
+        )
+        check(parsed?.id == "/doctor", "frontmatter name wins over the directory name")
+        check(
+            parsed?.description == "Diagnose and heal the build.",
+            "the declared description is used verbatim"
+        )
+
+        // No frontmatter: the heading is the author's summary, the first line is
+        // whatever happened to be at the top. Two skills read as garbage before
+        // this preference existed.
+        let headingOnly = "## Chat UI/UX Best Practices\n\n- User: right aligned\n"
+        let fallback = SkillCatalog.parse(
+            contents: headingOnly, directoryName: "chat-ux-patterns",
+            source: .project, path: "/tmp/y"
+        )
+        check(
+            fallback?.description == "Chat UI/UX Best Practices",
+            "a skill with no frontmatter is described by its heading, not a stray bullet"
+        )
+
+        let clash = [
+            SkillDescriptor(id: "/doctor", name: "doctor", description: "user copy",
+                            source: .user, path: "u", bodyCharacters: 1),
+            SkillDescriptor(id: "/doctor", name: "doctor", description: "project copy",
+                            source: .project, path: "p", bodyCharacters: 1)
+        ]
+        check(
+            SkillCatalog.deduplicate(clash).first?.description == "project copy",
+            "a project skill overrides a user skill of the same name"
+        )
+
+        // QueenSystemPrompt. Given a bare list the model invented an on/off
+        // state and told the user a live skill was disabled.
+        let skill = SkillDescriptor(
+            id: "/ascii-lint", name: "ascii-lint", description: "Keep source ASCII.",
+            source: .project, path: "p", bodyCharacters: 10
+        )
+        let allOn = QueenSystemPrompt.text(
+            skills: [skill], disabledSkills: [], runningWorkers: 0, awaitingReview: 0
+        )
+        check(allOn.contains("/ascii-lint"), "the roster names each available skill")
+        check(
+            allOn.contains("Nothing is switched off"),
+            "with nothing disabled the prompt says so, rather than leaving it to be guessed"
+        )
+        check(
+            allOn.contains("supersedes any earlier skill listing"),
+            "the roster declares itself newer than anything in the transcript"
+        )
+        let someOff = QueenSystemPrompt.text(
+            skills: [skill], disabledSkills: ["/doctor"],
+            runningWorkers: 2, awaitingReview: 1
+        )
+        check(someOff.contains("/doctor"), "disabled skills are named, not merely omitted")
+        check(
+            someOff.contains("2 worker(s) are running"),
+            "the prompt carries the live swarm counts"
+        )
+
+        // QueenBriefing. A worker briefed without the procedure it was promised
+        // looks like it disobeyed, so the body goes in verbatim and last.
+        let task = DelegatedTask(
+            issue: IssueReference(owner: "o", repo: "r", number: 1),
+            title: "t", worker: "w", ownedPaths: ["docs"]
+        )
+        let plain = QueenBriefing.text(for: task)
+        check(plain.contains("o/r#1"), "a brief names the issue it answers to")
+        check(plain.contains("docs"), "a brief states the boundary")
+        let withSkill = QueenBriefing.text(for: task, skillBody: "STEP ONE")
+        check(withSkill.contains("STEP ONE"), "a named skill is handed over verbatim")
+        check(
+            withSkill.range(of: "docs")!.lowerBound < withSkill.range(of: "STEP ONE")!.lowerBound,
+            "the boundary is read before the recipe"
+        )
+
+        // QueenSelfAudit. Unreachable code outranks everything else, because
+        // every plan downstream of a false capability is wrong.
+        let findings = [
+            QueenSelfAudit.Finding(severity: .fragile, kind: "k", subject: "b",
+                                   explanation: "e", proposal: "p"),
+            QueenSelfAudit.Finding(severity: .dead, kind: "k", subject: "a",
+                                   explanation: "e", proposal: "p")
+        ]
+        check(
+            QueenSelfAudit.roadmap(from: findings).first?.severity == .dead,
+            "dead code is ranked above everything else"
+        )
+        check(
+            QueenSelfAudit.report(findings: [], now: Date())
+                .contains("statement about my checks"),
+            "an empty audit says so about itself rather than claiming health"
         )
     }
 }
