@@ -43,7 +43,7 @@ enum ProjectPaths {
     /// actually using - which is the whole thing the two-variant split exists to
     /// prevent. Dev gets `.trinity-dev`.
     static var trinity: String {
-        isDevVariant ? "\(root)/.trinity-dev" : "\(root)/.trinity"
+        "\(root)/\(variant.dataDirectoryName)"
     }
 
     /// The release data root, regardless of the running variant. Only for
@@ -72,14 +72,37 @@ enum ProjectPaths {
         "\(browserOSAgentRoot)/apps/server/src/index.ts"
     }
 
-    /// MCP port from Info.plist (injected at build time via TRIOS_VARIANT)
+    /// MCP port from Info.plist (injected at build time via TRIOS_VARIANT).
+    ///
+    /// The fallback follows the variant rather than naming the release port,
+    /// so a bundle that somehow carried a variant but no port would still fail
+    /// away from the port the release app is listening on. Colliding there is
+    /// the one outcome the two-variant split exists to prevent.
     static var mcpPort: String {
-        Bundle.main.infoDictionary?["TRIOS_MCP_PORT"] as? String ?? "9105"
+        Bundle.main.infoDictionary?["TRIOS_MCP_PORT"] as? String ?? variant.mcpPort
     }
 
     /// A2A port from Info.plist
     static var a2aPort: String {
         Bundle.main.infoDictionary?["TRIOS_A2A_PORT"] as? String ?? "9200"
+    }
+
+    /// Which variant this process is running as.
+    ///
+    /// Resolved once, here, and every variant-dependent constant below is asked
+    /// of `BuildVariant` rather than spelled out again. Those constants used to
+    /// be written a third time in this file, beside the copies in `build.sh` and
+    /// in `BuildVariant`; only the copy nobody called was under test.
+    ///
+    /// An absent key means there is no bundle to read - a CLI or test process -
+    /// and that stays `.prod`, which is what this file has always answered.
+    /// Note this is deliberately *not* `BuildVariantPolicy.defaultVariant`:
+    /// that one is `.dev` and answers a different question, namely what an
+    /// unqualified `./build.sh` should produce. Build-time default and runtime
+    /// fallback look alike and are not the same thing.
+    static var variant: BuildVariant {
+        let raw = Bundle.main.infoDictionary?["TRIOS_VARIANT"] as? String ?? ""
+        return BuildVariant(rawValue: raw) ?? .prod
     }
 
     /// True for the development build.
@@ -88,11 +111,18 @@ enum ProjectPaths {
     /// ports and data directory, so an agent rebuilding it cannot disturb a
     /// working release instance. It also stores secrets in files rather than
     /// the Keychain - see DevSecretStore for why.
-    static var isDevVariant: Bool { buildVariant == "dev" }
+    static var isDevVariant: Bool { variant == .dev }
 
-    /// Build variant from Info.plist (prod or staging)
+    /// Build variant as a string, for callers that record or display it.
+    ///
+    /// Reports what the bundle actually said, not the variant we fell back to.
+    /// These differ only for a value `build.sh` refuses to write, and that is
+    /// exactly the case worth seeing: a session recovery export or a status line
+    /// reading `prod` for a bundle stamped something else would hide the broken
+    /// bundle instead of showing it. Behaviour follows `variant`; this field
+    /// stays a record of what was found.
     static var buildVariant: String {
-        Bundle.main.infoDictionary?["TRIOS_VARIANT"] as? String ?? "prod"
+        Bundle.main.infoDictionary?["TRIOS_VARIANT"] as? String ?? variant.rawValue
     }
 
     static var canaryMcpPort: String {
@@ -159,7 +189,5 @@ enum ProjectPaths {
             ? "\(trinityRun)/trios_dev_singleton.pid"
             : "\(trinityRun)/trios_singleton.pid"
     }
-    static var bundleIdentifier: String {
-        isDevVariant ? "com.browseros.trios.dev" : "com.browseros.trios"
-    }
+    static var bundleIdentifier: String { variant.bundleIdentifier }
 }
