@@ -18,7 +18,3 @@ struct AgentCard: Codable, Sendable {
 enum Capability: String, Codable, Sendable, CaseIterable {
     case browserControl, chat, git, shell, fileSystem, orchestrator
 }
-
-enum AgentStatus: String, Codable, Sendable {
-    case idle, busy, offline, error
-}
