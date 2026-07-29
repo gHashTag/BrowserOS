@@ -2895,6 +2895,8 @@ final class ChatViewModel: ObservableObject {
             await reportSkills()
         case .selfAudit:
             await runSelfAudit()
+        case .salience:
+            await reportSalience()
         case .runSkill(let command, let arguments):
             await runQueenSkill(command: command, arguments: arguments)
         case .unknown:
@@ -3481,6 +3483,33 @@ final class ChatViewModel: ObservableObject {
             ))
         }
         return findings
+    }
+
+    /// What the Queen has learned about which signals actually need the user.
+    ///
+    /// The learner was writing to disk with nothing reading it back out in
+    /// words - which is the same zero-call-site shape `/roadmap` exists to
+    /// catch, written by the hand that built the detector.
+    private func reportSalience() async {
+        let learner = SalienceLearner.shared
+        let lines = QueenSalience.Feature.allCases.map { feature -> String in
+            let weight = learner.weight(for: feature)
+            let source = abs(weight - feature.prior) < 0.001 ? "prior" : "learned"
+            return String(
+                format: "  %@  weight %.1f (%@, started at %.0f)  -  %@",
+                feature.rawValue, weight, source, feature.prior,
+                learner.evidence(for: feature)
+            )
+        }
+        await postQueenNotice(
+            SystemNoticeClassifier.infoMarker
+                + "How loudly each signal shouts when I order your review queue. "
+                + "A weight starts as my estimate and becomes the rate at which "
+                + "tasks carrying that signal actually needed you, once I have seen "
+                + "\(learner.minimumObservations) of them - a threshold I derive from "
+                + "how finely the estimates are trying to distinguish, not a number I "
+                + "picked.\n" + lines.joined(separator: "\n")
+        )
     }
 
     // MARK: - Skills

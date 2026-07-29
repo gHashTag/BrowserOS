@@ -10,6 +10,7 @@ import SwiftUI
 /// ChatSidebarView — Sidebar with edit name and pin functionality
 struct ChatSidebarView: View {
     @ObservedObject var viewModel: ChatViewModel
+    @ObservedObject private var registry = QueenDelegationRegistry.shared
     @State private var editingConversationId: UUID?
     @State private var editedName: String = ""
     @State private var searchText: String = ""
@@ -77,6 +78,33 @@ struct ChatSidebarView: View {
     
     private var listContent: some View {
         List {
+            // The Queen sits above everything, in her own section. She is not a
+            // conversation among conversations: she is the one delegating them,
+            // and burying her in "Pinned" understates that.
+            queenSection
+
+            // Delegated work: one chat per GitHub issue, each on its own
+            // virtual branch.
+            if !delegatedTasks.isEmpty {
+                Section {
+                    ForEach(delegatedTasks) { task in
+                        delegatedTaskRow(task)
+                    }
+                } header: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "point.3.connected.trianglepath.dotted")
+                            .font(.system(size: 9))
+                        Text("Swarm")
+                        Spacer()
+                        Text("\(registry.running.count)/\(QueenDelegationPolicy.maximumConcurrentWorkers)")
+                            .font(.system(size: 9, design: .monospaced))
+                    }
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.grokMuted)
+                    .textCase(nil)
+                }
+            }
+
             // Pinned conversations
             if !pinnedConversations.isEmpty {
                 Section {
@@ -93,7 +121,7 @@ struct ChatSidebarView: View {
             
             // Regular conversations
             Section {
-                ForEach(filteredConversations.filter { !$0.isPinned }) { conversation in
+                ForEach(filteredConversations.filter { !$0.isPinned && $0.id != ChatConversation.trinityQueenId && registry.task(forConversation: $0.id) == nil }) { conversation in
                     conversationRow(conversation)
                 }
             }
@@ -102,15 +130,130 @@ struct ChatSidebarView: View {
         .background(Color.clear)
     }
     
+    /// The Queen's own row, styled to her station: full-width, crowned, and
+    /// carrying the swarm's live counters so she is useful at a glance.
+    @ViewBuilder
+    private var queenSection: some View {
+        if let queen = viewModel.conversations.first(where: { $0.id == ChatConversation.trinityQueenId }) {
+            Section {
+                Button {
+                    Task { await viewModel.switchConversation(id: queen.id) }
+                } label: {
+                    HStack(spacing: 9) {
+                        Image(systemName: "crown.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.yellow)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(queen.title)
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(.grokText)
+                                .lineLimit(1)
+                            Text(queenSubtitle)
+                                .font(.system(size: 10))
+                                .foregroundColor(.grokMuted)
+                                .lineLimit(1)
+                        }
+                        Spacer(minLength: 4)
+                        if !registry.reviewQueue.isEmpty {
+                            // Work waiting on her decision, not just running.
+                            Text("\(registry.reviewQueue.count)")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 3)
+                                .background(Capsule().fill(Color.orange.opacity(0.22)))
+                                .foregroundColor(.orange)
+                        }
+                    }
+                    .padding(.vertical, 7)
+                    .padding(.horizontal, 9)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Color.yellow.opacity(viewModel.conversationId == queen.id ? 0.14 : 0.06))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .stroke(Color.yellow.opacity(0.30), lineWidth: 1)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
+                .accessibilityLabel("Trinity Queen")
+                .accessibilityValue(queenSubtitle)
+            }
+        }
+    }
+
+    private var queenSubtitle: String {
+        let running = registry.running.count
+        let waiting = registry.reviewQueue.count
+        if running == 0 && waiting == 0 { return "No work delegated" }
+        var parts: [String] = []
+        if running > 0 { parts.append("\(running) working") }
+        if waiting > 0 { parts.append("\(waiting) awaiting review") }
+        return parts.joined(separator: ", ")
+    }
+
+    /// One delegated task: its issue, its worker, its virtual branch.
+    private func delegatedTaskRow(_ task: DelegatedTask) -> some View {
+        Button {
+            Task { await viewModel.switchConversation(id: task.conversationId) }
+        } label: {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(color(for: task.state))
+                    .frame(width: 7, height: 7)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(task.title)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.grokText)
+                        .lineLimit(1)
+                    HStack(spacing: 5) {
+                        Text(task.issue.slug)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(.grokDim)
+                        if let branch = task.virtualBranch {
+                            Image(systemName: "arrow.triangle.branch")
+                                .font(.system(size: 8))
+                                .foregroundColor(.grokDim)
+                            Text(branch)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(.grokDim)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+                Spacer(minLength: 4)
+                Text(task.state.rawValue)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(color(for: task.state))
+            }
+            .padding(.vertical, 3)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("\(task.worker) on \(task.issue.slug)")
+    }
+
+    private func color(for state: DelegatedTaskState) -> Color {
+        switch state {
+        case .running: return .green
+        case .awaitingReview: return .orange
+        case .failed, .rejected: return .red
+        case .accepted: return .blue
+        case .queued: return .grokMuted
+        case .cancelled: return .grokDim
+        }
+    }
+
+    private var delegatedTasks: [DelegatedTask] {
+        registry.active.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
     private var pinnedConversations: [ChatConversation] {
         viewModel.conversations
-            .filter { $0.isPinned }
-            .sorted {
-                // Trinity Queen is always first among pinned conversations.
-                if $0.isReserved { return true }
-                if $1.isReserved { return false }
-                return $0.updatedAt > $1.updatedAt
-            }
+            .filter { $0.isPinned && $0.id != ChatConversation.trinityQueenId }
+            .sorted { $0.updatedAt > $1.updatedAt }
     }
     
     private var filteredConversations: [ChatConversation] {

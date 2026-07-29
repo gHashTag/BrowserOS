@@ -44,6 +44,16 @@ enum ChatLogic {
         return nil
     }
 
+    /// Extract the active page id from a `get_active_page` text response.
+    /// The tool returns text like `"Active page: 29 (tab 1197258256)..."`;
+    /// parse the leading digits after the `"Active page: "` prefix.
+    /// AGENT-V-WAIVER: active-page detection fix (Agent V conditional waiver, 2026-07-27).
+    static func activePageId(in text: String) -> Int? {
+        guard let range = text.range(of: "Active page: ") else { return nil }
+        let numberPart = text[range.upperBound...].prefix(while: { $0.isNumber })
+        return Int(numberPart)
+    }
+
     /// Prefixes (each ending in a space) that mark an explicit command. The
     /// trailing space prevents matching innocent words like "running".
     static let explicitPrefixes = [

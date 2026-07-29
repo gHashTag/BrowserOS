@@ -242,17 +242,16 @@ class BrowserOSChatViewModel: ObservableObject {
 
     private func detectPageId() async -> Int? {
         do {
-            // `list_pages` returns a human-readable listing, one page per block:
-            //   "0. Title (tab 12)\n   https://example.com"
-            // (see apps/server/src/tools/navigation.ts). The previous version
-            // JSON-parsed this text, which never matched - page detection always
-            // silently failed. Parse the leading page id from the text instead.
-            let pagesText = try await mcpClient.listPages()
-            if let id = ChatLogic.firstPageId(in: pagesText) {
+            // The `get_active_page` tool returns the currently focused tab, e.g.
+            // "Active page: 29 (tab 1197258256)...". Using the first entry from
+            // `list_pages` picked an inactive/closed tab and caused CDP timeouts.
+            // AGENT-V-WAIVER: active-page detection fix (Agent V conditional waiver, 2026-07-27).
+            let activeText = try await mcpClient.getActivePage()
+            if let id = ChatLogic.activePageId(in: activeText) {
                 currentPageId = id
                 return id
             }
-            NSLog("[BrowserOSChatViewModel] No page id in list_pages output: \(pagesText.prefix(200))")
+            NSLog("[BrowserOSChatViewModel] No active page id in get_active_page output: \(activeText.prefix(200))")
         } catch {
             NSLog("[BrowserOSChatViewModel] Page detection failed: \(error)")
         }

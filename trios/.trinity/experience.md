@@ -1265,3 +1265,268 @@
   E2E_REPORT_GENERATED, LOCAL_NOT_LANDED
 - **Next wave options**: data-at-rest-encryption-everywhere,
   clade-seal-automation, mesh-offline-sovereignty
+
+## WAVE-064 - Queen supervisor surface (2026-07-29)
+
+Delegation worked but the supervisor was invisible and every notice looked like
+an error. Four defects, all found by reading the app's own log rather than the
+code:
+
+- **`AI_MissingToolResultsError` is permanent, not transient.** One aborted turn
+  leaves a tool call with no result; the AI SDK validates the pairing before the
+  request leaves, so the conversation is dead for every later send. Repair by
+  synthesising an error result - dropping the call as well leaves the model with
+  no record of what it tried and it repeats the call forever.
+- **One badge for every system message trains the user to ignore colour.**
+  Delegation success and provider failure rendered identically. Severity now
+  comes from an inline ASCII marker, chosen over a new `ChatMessage` field
+  because conversations already on disk must not need a migration to render.
+- **Status from one source lies when a second exists.** A task can read
+  `running` in the registry after its stream died. The dashboard takes both and
+  shows the disagreement as `no stream`.
+- **A heartbeat that always fires gets muted.** `QueenReviewDigest.text` returns
+  nil when nothing is running and nothing is waiting, so the wake is silent
+  unless it has something to say.
+
+Verified: 8 server tests, 144 chat e2e assertions, one full delegate probe, and
+both branches of the wake observed in the log.
+
+## WAVE-065 - Autonomy, economics, archive, voice (2026-07-29)
+
+Closed the three options WAVE-064 offered and changed how the Queen speaks. The
+lesson worth carrying forward is smaller than the feature list:
+
+- **Do not print a number you did not measure.** The banner said "spend 0
+  tokens" when the provider emitted no usage at all, and the digest said a
+  worker "committed nothing" when its commit had simply not run yet. Both read
+  as findings about the bee; both were gaps in instrumentation. `nil` and `0`
+  are different claims and the code has to keep them apart. Same class of error
+  as reporting a build green because no FAIL line was printed.
+- **Order the write before the announcement.** `awaitingReview` was set before
+  `QueenBranchCommitter` ran, so a wake landing in between described a finished
+  task as having changed nothing. Commit, tally, then transition.
+- **`failed` is terminal but must not be archivable.** A failure nobody has
+  looked at is still work; auto-filing it is how it never gets looked at.
+- **Prose beats columns for a supervisor.** A status table is a dashboard with
+  extra steps. The reason to have a Queen is that she can say why something
+  matters - so each report now carries one analogy chosen for what it explains,
+  not for decoration.
+
+## WAVE-066 - Skills, money, nested traces, observer (2026-07-29)
+
+The headline is small and worth stating plainly: **the Queen could reach four of
+twenty-six skills**, because `knownSkills` was a hardcoded `Set` in Swift. Every
+`SKILL.md` written since was inert. The fix is not a bigger literal - it is that
+the parser stops gatekeeping from a list it cannot keep current, hands any
+unrecognised slash command to `SkillStore`, and lets the runtime catalog say yes
+or no. A registry that must be edited in code to grow is not a registry.
+
+Three more lessons:
+
+- **An unpriced model must report `nil`, not an average.** `ModelPricing` returns
+  no estimate for a model it does not know. Inventing one is how a cheap run gets
+  cancelled as expensive - the same failure as printing "0 tokens" for a
+  measurement that was never taken.
+- **A budget should decline to start work, not kill running work.** Cancelling a
+  bee mid-edit leaves the repository in a state nobody chose; refusing to open a
+  new one is safe at any instant.
+- **The observer is a pure function, not a second agent.** Looping, spinning,
+  writing out of bounds and overspending are all mechanical patterns. A
+  mechanical check cannot hallucinate the way the thing it watches can, and it
+  does not double the cost of every turn.
+
+Also: when a `SKILL.md` has no frontmatter, prefer its H1 over its first prose
+line. The heading is the author's summary; the first line is whatever happened
+to be at the top, which for two skills was a bullet from the middle of a list.
+
+## WAVE-067 - Skills in context, briefs, stop, editor (2026-07-29)
+
+The tab shipped last wave was real and the Queen still could not see a single
+skill. `SkillStore.summaryLines` had **zero call sites** - the sixth API in this
+project built and never called. A capability the agent cannot see is a
+capability it does not have, and no amount of UI fixes that.
+
+Three lessons, all about the difference between having a fact and being told it:
+
+- **Verify the wire, not the layer above it.** The fix is only believable
+  because `chat.request.payload` now logs `system_chars` and `system_skills`
+  counted out of the built body. 15386 chars and 57 skill lines is evidence;
+  "I added it to the prompt builder" is not.
+- **A prompt that omits state invites the model to invent it.** Given a roster
+  with no statement of what it was, the Queen told the user a switched-on skill
+  was off. The roster now says it is the enabled set and names the disabled
+  ones explicitly.
+- **An undated snapshot in a transcript becomes a standing fact.** A `/skills`
+  listing printed while one skill was off outranked the live roster minutes
+  later, and she quoted it back. Listings are now stamped `As of HH:MM` and the
+  charter states it supersedes scrollback. Anything point-in-time that lands in
+  a conversation needs a timestamp, or it will be read as permanent.
+
+Also: `--skill /name` hands a worker the SKILL.md body verbatim rather than a
+paraphrase, and refuses to open the task at all if the named skill is missing or
+off - a bee briefed without the procedure it was promised looks like it
+disobeyed.
+
+## WAVE-068 - The supervisor was invisible where it mattered (2026-07-29)
+
+Every piece of supervisor UI built in WAVE-064 through 067 renders only above
+`ChatWorkspaceLayout.expandedThreshold` (760pt). The side panel the user keeps
+open is 400pt. So the swarm strip, the task banner, the sidebar and the archive
+were all real, all correct, and all invisible in the one place they were needed.
+
+This is the same failure as the six zero-call-site APIs, wearing different
+clothes: the thing exists, the path to it does not. Grepping for call sites
+catches the code version; only opening the app at the size the user actually
+uses catches the layout version.
+
+`QueenCompactSupervisorBar` is the 400pt answer: one line, collapsed by default,
+silent when the hive is empty - a permanent header for an idle swarm is a
+permanent tax on the reading area.
+
+## WAVE-068 - Self-audit, brain atlas (2026-07-29)
+
+The Queen now reads her own code. `/roadmap` greps type declarations against
+references and reports what nothing calls. First real run found
+`QueenDelegationService` - the same dead service found by hand in WAVE-063 -
+ranked it first, and explained why in her own words.
+
+**The audit's own first version was wrong and reported a clean bill of health.**
+It matched `func Queen...`, but Swift methods are named after what they do; only
+types carry the prefix. It found zero declarations, and zero declarations means
+zero findings, which reads exactly like success. Fixed by matching
+`(struct|class|enum|actor) (Queen|Skill|Swarm)...`.
+
+That is worth keeping: **a check that silently matches nothing is
+indistinguishable from a check that passes.** Same family as reporting a build
+green because no FAIL line printed. Any new scanner must be run once against a
+known-bad input before its clean result is believed.
+
+Also: `.claude/skills/brain-atlas/SKILL.md` maps the Trinity S3AI brain's 23
+regions onto the trios organs that play them, and names the two with no organ -
+evolution simulation and learned salience.
+
+## WAVE-069 - Reversible expand, deterministic replay, learned salience (2026-07-29)
+
+**The expand toggle was one-way.** `toggleFullScreen` read
+`NSApplication.shared.keyWindow`, which is nil the moment focus leaves the panel.
+So expanding worked, and collapsing silently did nothing - which is how the
+compact supervisor bar went unverified for a whole wave. `WindowManager.shared`
+holds the panel; the toggle uses it and falls back to keyWindow.
+
+**Deterministic replay landed.** `ReplayTransport` reads a cassette of raw SSE
+payloads and yields them through the *real* parser, so the parser is exercised
+rather than skipped. `make delegate-probe CASSETTE=...` runs the whole swarm with
+no provider. Two runs of `worker-happy-path.sse` produced byte-identical output
+(`chars:65 tools:1`) in ~2ms per turn against 10-30s live. A one-in-three failure
+is now a fact to bisect rather than a mood to characterise.
+
+Honest limit: a cassette proves stream handling, not filesystem effects - the
+replayed tool call writes nothing, so `queen.branch.empty` is the correct result
+and not a regression.
+
+**Learned salience landed.** `QueenSalience` replaces age-only ordering in the
+review queue. Failure 40, rejection 25, unusual cost 20, empty result 15, age 1
+per hour capped at 24. The cap matters: an uncapped age term eventually drowns
+every other signal, which is the failure the weights exist to fix. Each ranking
+carries `reason(for:)` so the Queen can say why something is first - a ranking
+nobody can explain is a ranking nobody trusts.
+
+## WAVE-070 - Recording, learned weights, cassette effects (2026-07-29)
+
+Three things that turned "simulation" and "learned" from names into facts.
+
+**Recording.** `TRIOS_RECORD_CASSETTE=<path>` makes `SSETransport` write the raw
+wire payloads as it streams. Any surprising live run becomes a permanent
+regression test with one environment variable. It captures the bytes, not the
+decoded events, so a replay still goes *through* the parser rather than around
+it.
+
+**Learned weights.** `SalienceLearner` records every review outcome against the
+features the task carried. A feature's weight becomes its intervention rate once
+there are eight observations; below that it keeps the hand-picked prior.
+Laplace smoothing on the rate, because without it one unlucky task sets a
+feature to 0 or 1 forever and silences a signal permanently. Verified: one
+replay run with `/accept` wrote `committedNothing: seen 1, intervened 0`.
+
+**Cassette effects.** `#effect: write <path> <content>` lines make the replay
+write the files the recorded tool calls claim to have written, so the commit
+path - baseline diff, owned-path filter, branch update - is exercised instead of
+always seeing an empty tree and reporting "changed no files" as a pass. Paths
+are resolved against the project root and refused if they escape it: a cassette
+is checked-in data, and data that can write anywhere is a scripting language
+nobody audited. Verified: replay produced `docs/replay.md` and
+`Committed 1 file(s) to queen/1086-effect-run`, with no provider involved.
+
+The pattern across all three: a test double that skips the layer it is standing
+in for tests the code below and reports success for the code inside.
+
+## WAVE-071 - Compact bar seen, observer cassettes, suite in make check (2026-07-29)
+
+**The compact bar renders.** Four waves of supervisor UI were finally visible in
+the 400pt panel: `1 needs you - 0/4 working`, expanding to
+`Compact bar check | Needs review`. What had blocked verification was the
+one-way fullscreen toggle fixed in WAVE-069, not the layout.
+
+**The observer is provable now.** Two hand-written cassettes trip it on demand:
+`worker-looping.sse` (five identical `filesystem_read` calls -> `looping`) and
+`worker-out-of-bounds.sse` (a write to `rings/` under `PATHS=docs` ->
+`outOfBounds`). Hand-written rather than recorded because waiting for a real
+model to get stuck is not a test, it is a vigil.
+
+**`make check` runs them.** Three cassettes, ~2s each, no provider. A swarm
+regression now surfaces before the app is opened rather than after a ten-minute
+live run.
+
+The first version of the suite failed for the wrong reason: `docs/replay.md`
+survived from the previous run, so the baseline diff was empty and the commit
+assertion failed on a clean commit path. **A fixture that writes must be cleaned
+before the run, not only after** - cleaning after makes the first run of the day
+pass and every subsequent one fail, which reads as flake.
+
+## WAVE-072 - Landed, orphans named, threshold derived (2026-07-29)
+
+**Landed.** Two commits on `feat/queen-supervisor`: 51 files for the supervisor
+work, then the two follow-ups. Committed by pathspec rather than by index,
+because the index already held ~1570 staged deletions from earlier sessions that
+had nothing to do with this. `git commit -- <paths>` commits the working-tree
+content of those paths and leaves the rest of the index alone - worth knowing
+when a repository is mid-way through somebody else's change.
+
+**Orphaned tool calls are now visible on the client.** The server repairs them,
+silently, so no test could assert a run had produced one. The client cannot fix
+an orphan - the server owns the agent's history - but `orphanedToolCallIDs`
+lets it *say* so, and the cassette joined the suite. Four cassettes, ~8s, no
+provider.
+
+**The learner's threshold is derived.** It was 8 because I typed 8. It is now
+the `n` at which the standard error of a rate over Bernoulli trials
+(`0.5/sqrt(n)`) falls below the smallest gap the priors are trying to express.
+Changing a prior moves the threshold. The value matters less than the property:
+a constant that used to make sense is the most common way a heuristic rots.
+
+## WAVE-073 - Pushed, orphan proven live, learner observable (2026-07-29)
+
+**Landed and opened.** `feat/queen-supervisor` pushed, PR #5 against `dev`. The
+index damage from the previous wave's `git reset` was restored first - 1534
+staged deletions and 31 renames back where the earlier session left them.
+
+**The orphan repair is proven end to end, live.** First turn leaves a tool call
+unanswered (`queen.worker.orphaned_tool_calls`), second turn on the same
+conversation succeeds (`queen.selftest.second_turn_passed`). That is the first
+proof of the whole loop rather than of either half.
+
+**And the cassette version of that test was worthless.** I wrote it, it failed,
+and it failed for a reason I had already written down: a replay yields the same
+recorded bytes on the second turn, so a textless abort cassette produces no text
+twice and the assertion cannot tell that from a poisoned conversation. The bug
+lives in the *server's* prompt assembly, which a cassette bypasses by design.
+Removed from the suite with the reason recorded next to it. **A test double
+cannot test the layer it stands in for** - I wrote that sentence two waves ago
+and still walked into it.
+
+**`evidence(for:)` had zero call sites.** The learner wrote to disk with nothing
+reading it back in words. That is the exact shape `/roadmap` exists to catch,
+written by the hand that built the detector. Now `/salience` reports it, and
+with real tallies the weights visibly diverge: `committedNothing` fell from a
+prior of 15 to a learned 8.0 (3 of 18 needed the user), `failed` from 40 to
+33.7 (15 of 17). Threshold derived as 16.

@@ -33,6 +33,8 @@ struct TODOListView: View {
     @State private var pendingMemoryConfirmation: MemoryConfirmation?
     @State private var memorySearchGeneration = UUID()
     @State private var memoryMutationGeneration = UUID()
+    /// Expands the folded tail of completed steps.
+    @State private var showAllCompleted = false
 
     init(
         planner: TODOPlanner,
@@ -240,13 +242,51 @@ struct TODOListView: View {
         .padding(12)
     }
 
+    /// Completed steps kept visible before the rest fold away. Plans are now
+    /// as long as the work, so a finished ten-step run would otherwise bury the
+    /// one row the user actually cares about.
+    private static let visibleCompletedTail = 2
+
     private func taskList(_ items: [TODOItem]) -> some View {
-        VStack(spacing: 6) {
-            ForEach(items.sorted(by: taskSort)) { item in
-                taskRow(item)
-                    .id(item.id)
-                    .todoInsertionEffect()
-                    .todoCompletionEffect(isComplete: item.state == .completed)
+        let sorted = items.sorted(by: taskSort)
+        let completed = sorted.filter { $0.state == .completed }
+        let hiddenCount = max(0, completed.count - Self.visibleCompletedTail)
+        let hidden: Set<UUID> = (showAllCompleted || hiddenCount == 0)
+            ? []
+            : Set(completed.prefix(hiddenCount).map(\.id))
+
+        return VStack(spacing: 6) {
+            if hiddenCount > 0 {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.18)) { showAllCompleted.toggle() }
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: showAllCompleted ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 9, weight: .semibold))
+                        Text(showAllCompleted
+                             ? "Hide \(hiddenCount) completed"
+                             : "\(hiddenCount) completed")
+                            .font(.system(size: 10, weight: .medium))
+                        Spacer(minLength: 0)
+                    }
+                    .foregroundColor(.grokDim)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(showAllCompleted
+                                    ? "Hide completed steps"
+                                    : "Show \(hiddenCount) completed steps")
+            }
+
+            ForEach(sorted) { item in
+                if !hidden.contains(item.id) {
+                    taskRow(item)
+                        .id(item.id)
+                        .todoInsertionEffect()
+                        .todoCompletionEffect(isComplete: item.state == .completed)
+                }
             }
         }
         .accessibilityElement(children: .contain)
@@ -300,6 +340,8 @@ struct TODOListView: View {
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 7)
+        // Finished work loses visual weight so the single active row reads first.
+        .opacity(item.state == .completed ? 0.55 : 1)
         .background(Color.black.opacity(item.state == .inProgress ? 0.34 : 0.22))
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay {

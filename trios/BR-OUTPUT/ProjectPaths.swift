@@ -35,7 +35,20 @@ enum ProjectPaths {
     static var brOutput: String { "\(root)/BR-OUTPUT" }
     static var rings: String { "\(root)/rings" }
     static var claude: String { "\(root)/.claude" }
-    static var trinity: String { "\(root)/.trinity" }
+    /// Runtime data root, separated per variant.
+    ///
+    /// The release app's encrypted memory database, logs, and delegation store
+    /// live under `.trinity`. If the dev build wrote there too, an agent
+    /// iterating on a schema could corrupt the state of the app the user is
+    /// actually using - which is the whole thing the two-variant split exists to
+    /// prevent. Dev gets `.trinity-dev`.
+    static var trinity: String {
+        isDevVariant ? "\(root)/.trinity-dev" : "\(root)/.trinity"
+    }
+
+    /// The release data root, regardless of the running variant. Only for
+    /// tooling that deliberately inspects release state.
+    static var releaseTrinity: String { "\(root)/.trinity" }
 
     // MARK: - Key Files
 
@@ -48,7 +61,16 @@ enum ProjectPaths {
 
     // MARK: - BrowserOS Agent Server
 
-    static var browserOSAgentRoot: String { "\(root)/../packages/browseros-agent" }
+    /// Agent server root. TriOS owns its agent runtime outright: it lives in
+    /// this tree, ships with the app, and is the only copy. There is no longer a
+    /// fallback into the BrowserOS monorepo - BrowserOS is reached only through
+    /// its localhost MCP endpoints.
+    static var browserOSAgentRoot: String { "\(root)/agent-server" }
+
+    /// Entry point the app launches for the bundled agent runtime.
+    static var agentServerEntrypoint: String {
+        "\(browserOSAgentRoot)/apps/server/src/index.ts"
+    }
 
     /// MCP port from Info.plist (injected at build time via TRIOS_VARIANT)
     static var mcpPort: String {
@@ -59,6 +81,14 @@ enum ProjectPaths {
     static var a2aPort: String {
         Bundle.main.infoDictionary?["TRIOS_A2A_PORT"] as? String ?? "9200"
     }
+
+    /// True for the development build.
+    ///
+    /// The dev variant runs beside the release app with its own bundle id,
+    /// ports and data directory, so an agent rebuilding it cannot disturb a
+    /// working release instance. It also stores secrets in files rather than
+    /// the Keychain - see DevSecretStore for why.
+    static var isDevVariant: Bool { buildVariant == "dev" }
 
     /// Build variant from Info.plist (prod or staging)
     static var buildVariant: String {
@@ -75,7 +105,11 @@ enum ProjectPaths {
 
     static var mcpBaseURL: String { "http://127.0.0.1:\(mcpPort)" }
     static var browserOSHealthURL: String { "\(mcpBaseURL)/health" }
-    static var agentHealthURL: String { "http://127.0.0.1:\(a2aPort)/health" }
+    /// The A2A registry and BrowserOS MCP server share the same loopback port.
+    /// `a2aPort` (9200) is not currently served, so the Agent status must probe
+    /// the BrowserOS health endpoint on `mcpPort` (9105).
+    /// AGENT-V-WAIVER: port-alignment fix (Agent V conditional waiver, 2026-07-27).
+    static var agentHealthURL: String { browserOSHealthURL }
     static var canaryHealthURL: String { "http://127.0.0.1:\(canaryMcpPort)/health" }
     static var meshHealthURL: String { "http://127.0.0.1:\(meshPort)/health" }
     static var meshStatusURL: String { "http://127.0.0.1:\(meshPort)/status" }
@@ -113,7 +147,19 @@ enum ProjectPaths {
     // MARK: - Runtime State Paths
 
     static var trinityRun: String { "\(trinity)/run" }
-    static var singletonLockFile: String { "\(trinityRun)/trios_singleton.lock" }
-    static var singletonPIDFile: String { "\(trinityRun)/trios_singleton.pid" }
-    static var bundleIdentifier: String { "com.browseros.trios" }
+    /// Lock and PID files are per variant, otherwise the dev build would look
+    /// like a second instance of the release app and refuse to start.
+    static var singletonLockFile: String {
+        isDevVariant
+            ? "\(trinityRun)/trios_dev_singleton.lock"
+            : "\(trinityRun)/trios_singleton.lock"
+    }
+    static var singletonPIDFile: String {
+        isDevVariant
+            ? "\(trinityRun)/trios_dev_singleton.pid"
+            : "\(trinityRun)/trios_singleton.pid"
+    }
+    static var bundleIdentifier: String {
+        isDevVariant ? "com.browseros.trios.dev" : "com.browseros.trios"
+    }
 }

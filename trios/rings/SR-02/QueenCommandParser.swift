@@ -37,6 +37,8 @@ enum QueenCommand: Equatable {
     case skills
     /// Reads her own code and reports a ranked roadmap.
     case selfAudit
+    /// Shows what she has learned about which signals need the user.
+    case salience
     /// Any skill discovered from a SKILL.md file.
     case runSkill(command: String, arguments: [String])
     case unknown(String)
@@ -187,6 +189,8 @@ struct QueenCommandParser {
             return .skills
         case "self-audit", "introspect", "roadmap":
             return .selfAudit
+        case "salience", "attention", "learned":
+            return .salience
         default:
             // Anything else may be a skill on disk. The parser cannot know -
             // the catalog is read at runtime - so it hands the name on and the

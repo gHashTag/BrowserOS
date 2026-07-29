@@ -1,6 +1,6 @@
 // AGENT-V-WAIVER: https://github.com/browseros-ai/BrowserOS/issues/2053
-// Reason: Cycle 61 retention settings sheet extends LOGS tab UI.
-// Follow-up: seal against .trinity/specs/retention-settings-ui-cycle61.md.
+// Reason: Cycle 61 retention settings sheet + Cycle 62 retention dashboard extend LOGS tab UI.
+// Follow-up: seal against .trinity/specs/retention-dashboard-cycle62.md.
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -1893,6 +1893,7 @@ struct NoiseProfileSheet: View {
 struct LogRetentionSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var overrides: [String: LogRetentionSettings.PolicyOverride] = LogRetentionSettings.shared.overrides
+    @State private var snapshots: [String: LogRotationPolicy.LogRetentionSnapshot] = [:]
 
     private let policyNames = ["audit", "security", "experience", "default"]
     private let policyLabels: [String: String] = [
@@ -1925,10 +1926,23 @@ struct LogRetentionSettingsSheet: View {
                 .foregroundColor(.grokMuted)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
+                    RetentionDashboardPanel(
+                        policyNames: policyNames,
+                        policyLabels: policyLabels,
+                        snapshots: snapshots,
+                        onRefresh: refreshSnapshots,
+                        onRotateNow: {
+                            LogRotationPolicy.rotateAuditLogs()
+                            refreshSnapshots()
+                        }
+                    )
                     ForEach(policyNames, id: \.self) { name in
                         policySection(name: name, label: policyLabels[name] ?? name)
                     }
                 }
+            }
+            .onAppear {
+                refreshSnapshots()
             }
         }
         .padding(16)
@@ -2026,11 +2040,169 @@ struct LogRetentionSettingsSheet: View {
         LogRetentionSettings.shared.setOverride(policy, for: name)
     }
 
+    private func refreshSnapshots() {
+        var updated: [String: LogRotationPolicy.LogRetentionSnapshot] = [:]
+        for name in policyNames {
+            updated[name] = LogRotationPolicy.snapshot(for: name)
+        }
+        snapshots = updated
+    }
+
     private func resetToDefaults() {
         for name in policyNames {
             LogRetentionSettings.shared.setOverride(nil, for: name)
         }
         overrides = LogRetentionSettings.shared.overrides
+        refreshSnapshots()
+    }
+}
+
+// MARK: - Retention dashboard panel
+
+private struct RetentionDashboardPanel: View {
+    let policyNames: [String]
+    let policyLabels: [String: String]
+    let snapshots: [String: LogRotationPolicy.LogRetentionSnapshot]
+    let onRefresh: () -> Void
+    let onRotateNow: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Current retention state")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.grokText)
+                Spacer()
+                Button("Rotate now") {
+                    onRotateNow()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                Button("Refresh") {
+                    onRefresh()
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+
+            ForEach(policyNames, id: \.self) { name in
+                policyRow(name: name)
+            }
+
+            HStack {
+                Spacer()
+                Text(totalFootprint)
+                    .font(.system(size: 11))
+                    .foregroundColor(.grokMuted)
+            }
+        }
+        .padding(12)
+        .background(Color.grokSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Color.grokBorder)
+        }
+    }
+
+    private func policyRow(name: String) -> some View {
+        let snapshot = snapshots[name]
+        let label = policyLabels[name] ?? name
+
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(label)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.grokText)
+                Spacer()
+                Text(activeArchiveSummary(snapshot: snapshot))
+                    .font(.system(size: 11))
+                    .foregroundColor(.grokMuted)
+            }
+            if let snapshot = snapshot {
+                usageBar(snapshot: snapshot)
+                    .frame(height: 6)
+                Text(effectiveSummary(snapshot: snapshot))
+                    .font(.system(size: 10))
+                    .foregroundColor(.grokMuted)
+            }
+        }
+    }
+
+    private func usageBar(snapshot: LogRotationPolicy.LogRetentionSnapshot) -> some View {
+        let usage = Double(snapshot.totalActiveBytes + snapshot.totalArchiveBytes)
+        let capacity = Double(snapshot.effectivePolicy.maxFileSizeBytes) * Double(max(1, snapshot.effectivePolicy.maxArchiveCount))
+        let ratio = capacity > 0 ? min(1.0, usage / capacity) : 0
+        let color: Color
+        switch ratio {
+        case ..<0.5: color = .green
+        case ..<0.8: color = .orange
+        default: color = .red
+        }
+
+        return GeometryReader { geometry in
+            ZStack(alignment: .leading) {
+                Rectangle()
+                    .fill(Color.grokBorder)
+                Rectangle()
+                    .fill(color)
+                    .frame(width: geometry.size.width * CGFloat(ratio))
+            }
+        }
+        .clipShape(Capsule())
+    }
+
+    private func activeArchiveSummary(snapshot: LogRotationPolicy.LogRetentionSnapshot?) -> String {
+        guard let snapshot = snapshot else { return "--" }
+        return "\(LogRotationPolicy.formatBytes(snapshot.totalActiveBytes)) active / \(LogRotationPolicy.formatBytes(snapshot.totalArchiveBytes)) archives"
+    }
+
+    private func effectiveSummary(snapshot: LogRotationPolicy.LogRetentionSnapshot) -> String {
+        let policy = snapshot.effectivePolicy
+        let size = LogRotationPolicy.formatBytes(policy.maxFileSizeBytes)
+        let archiveAge = policy.maxArchiveAgeSeconds.map { formatDuration($0) } ?? "forever"
+        let rotateAfter = policy.maxAgeBeforeRotationSeconds.map { formatDuration($0) } ?? "never"
+        let next = formatNextRotation(snapshot.nextRotationEstimate)
+        return "Effective: \(size) x \(policy.maxArchiveCount) archives, \(archiveAge) / \(rotateAfter). Next rotation: \(next)."
+    }
+
+    private func formatNextRotation(_ estimate: LogRotationPolicy.NextRotationEstimate) -> String {
+        switch estimate {
+        case .none:
+            return "no estimate"
+        case .size(let currentBytes, let thresholdBytes):
+            let percent = thresholdBytes > 0 ? Int((Double(currentBytes) * 100) / Double(thresholdBytes)) : 0
+            return "size \(percent)%"
+        case .age(let currentAge, let thresholdAge):
+            let remaining = max(0, thresholdAge - currentAge)
+            return "\(formatDuration(remaining)) (age)"
+        case .imminent(let reason):
+            return "now (\(reason))"
+        }
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        if seconds < 60 {
+            return "\(Int(seconds))s"
+        } else if seconds < 60 * 60 {
+            return "\(Int(seconds / 60))m"
+        } else if seconds < 24 * 60 * 60 {
+            return "\(Int(seconds / (60 * 60)))h"
+        } else {
+            return "\(Int(seconds / (24 * 60 * 60)))d"
+        }
+    }
+
+    private var totalFootprint: String {
+        let total = policyNames.reduce(UInt64(0)) { sum, name in
+            guard let snapshot = snapshots[name] else { return sum }
+            return sum + snapshot.totalActiveBytes + snapshot.totalArchiveBytes
+        }
+        let fileCount = policyNames.reduce(0) { count, name in
+            guard let snapshot = snapshots[name] else { return count }
+            return count + snapshot.activePaths.count + snapshot.archives.count
+        }
+        return "Total log/audit footprint: \(LogRotationPolicy.formatBytes(total)) across \(fileCount) files."
     }
 }
 

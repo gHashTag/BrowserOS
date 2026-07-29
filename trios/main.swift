@@ -291,6 +291,41 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             ]
         )
 
+        // A second turn on the same conversation, when asked for. The orphan
+        // regression only shows itself on the *next* send: the first turn
+        // leaves a tool call unanswered, and the send after it is the one that
+        // used to throw before leaving the app. Testing one turn proves nothing
+        // about the bug.
+        if environment["TRIOS_E2E_SECOND_TURN"] == "1" {
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.selftest.second_turn",
+                "Sending a second turn on the same conversation",
+                ["issue": issue.slug]
+            )
+            vm.workerRunner?.start(
+                task: task,
+                brief: "Continue. This is the turn that fails if the previous "
+                    + "one left a tool call unanswered."
+            )
+            let secondDeadline = Date().addingTimeInterval(120)
+            while Date() < secondDeadline,
+                  vm.workerRunner?.isRunning(conversationId: task.conversationId) == true {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+            let after = vm.workerRunner?.transcripts[task.conversationId] ?? []
+            let answered = after.contains { $0.role == .assistant && !$0.content.isEmpty }
+            let report = answered ? TriosLogBus.shared.info : TriosLogBus.shared.error
+            report(
+                .queen,
+                answered ? "queen.selftest.second_turn_passed" : "queen.selftest.second_turn_failed",
+                answered
+                    ? "The conversation survived a turn that left an orphan"
+                    : "The second turn produced nothing - the orphan poisoned the conversation",
+                ["issue": issue.slug]
+            )
+        }
+
         // Prove the wake path while work is still outstanding. Running it after
         // acceptance only ever exercised the silent branch.
         await QueenReviewScheduler.shared.reviewNow()

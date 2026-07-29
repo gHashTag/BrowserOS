@@ -192,3 +192,15 @@ probably the same bug.
   `docs/replay.md`; if it survives from the previous run the baseline diff is
   empty and the commit assertion fails on a working commit path. Cleaning only
   at the end makes the first run pass and the rest fail, which reads as flake.
+
+## Added at WAVE-072
+
+- **Landed on `feat/queen-supervisor`.** Commit by pathspec (`git commit --
+  <paths>`) when the index holds someone else's staged work: it commits the
+  working-tree content of those paths only and leaves the index intact.
+- **`orphanedToolCallIDs`** on `QueenWorkerTranscript` logs
+  `queen.worker.orphaned_tool_calls`. The client cannot repair an orphan, but
+  naming it is what let the regression cassette join `make cassettes`.
+- **`SalienceLearner.minimumObservations` is derived**, not chosen: the `n`
+  where `0.5/sqrt(n)` drops below the smallest normalised gap between priors.
+  Change a prior and the threshold follows.

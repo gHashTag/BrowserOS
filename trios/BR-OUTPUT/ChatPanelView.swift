@@ -45,6 +45,7 @@ struct ChatPanelView: View {
     @StateObject private var batchUpdater = MessageBatchUpdater()
     @StateObject private var throttle = StreamingThrottle()
     private let attachmentImporter = ChatAttachmentImporter()
+    @State private var effectiveOutputCeiling: Int? = nil
 
     // Manual previous-value tracking for .onChange compatibility with the
     // swiftc-based build path, which does not consistently expose the two-arg
@@ -52,12 +53,50 @@ struct ChatPanelView: View {
     @State private var previousMessageCount = 0
     @State private var previousLastContent: String? = nil
     @State private var previousBrowserMessageCount = 0
+    /// Measured height of the planner card, so its container hugs the content
+    /// instead of leaving a gap above the composer.
+    @State private var plannerContentHeight: CGFloat = 0
 
     var body: some View {
-        VStack(spacing: 0) {
-            unifiedMessageArea
-            queenActivityFeed
-            unifiedInputBar
+        GeometryReader { pane in
+            VStack(spacing: 0) {
+                unifiedMessageArea
+                    .frame(maxHeight: .infinity)
+                // The planner is bounded and scrolls internally. Unbounded it
+                // grew with the step count and pushed the composer off-screen.
+                if let cap = ChatPaneLayout.plannerMaxHeight(paneHeight: Double(pane.size.height)) {
+                    // A ScrollView is greedy: it fills whatever height it is
+                    // offered, so capping it alone left a tall empty gap above
+                    // the composer whenever the plan was short. Measure the card
+                    // and take only the height it actually needs, up to the cap.
+                    ScrollView {
+                        queenActivityFeed
+                            .background(
+                                GeometryReader { content in
+                                    Color.clear.preference(
+                                        key: PlannerContentHeightPreferenceKey.self,
+                                        value: content.size.height
+                                    )
+                                }
+                            )
+                    }
+                    .frame(
+                        height: CGFloat(
+                            ChatPaneLayout.plannerHeight(
+                                contentHeight: Double(plannerContentHeight),
+                                cap: cap
+                            )
+                        )
+                    )
+                    .scrollDisabled(Double(plannerContentHeight) <= cap)
+                    .onPreferenceChange(PlannerContentHeightPreferenceKey.self) { height in
+                        plannerContentHeight = height
+                    }
+                }
+                // The composer keeps its space unconditionally.
+                unifiedInputBar
+                    .layoutPriority(1)
+            }
         }
         .background(Color.clear)
         .onAppear {
@@ -92,6 +131,9 @@ struct ChatPanelView: View {
                     pendingDuplicate = nil
                 }
             )
+        }
+        .task(id: effectiveOutputCeilingTaskID) {
+            await refreshEffectiveOutputCeiling()
         }
         .overlay {
             if viewModel.recoveryProgress.isActive {
@@ -174,21 +216,21 @@ struct ChatPanelView: View {
                 bottomAnchorY = anchorY
                 updateNearBottom()
             }
-            .onChange(of: scrollManager.scrollRequest) { request in
+            .onChange(of: scrollManager.scrollRequest) { _, request in
                 guard request.sequence > 0 else { return }
                 scrollToBottom(
                     using: proxy,
                     animated: request.animated
                 )
             }
-            .onChange(of: viewModel.messages.count) { newCount in
+            .onChange(of: viewModel.messages.count) { _, newCount in
                 // Scroll only when a brand-new message is appended.
                 if newCount > previousMessageCount && isNearBottom {
                     scrollManager.requestScroll(animated: true)
                 }
                 previousMessageCount = newCount
             }
-            .onChange(of: viewModel.messages.last?.content) { newContent in
+            .onChange(of: viewModel.messages.last?.content) { _, newContent in
                 // Throttled scroll during streaming: react only when the last
                 // message content actually changed.
                 if isNearBottom && newContent != previousLastContent {
@@ -196,7 +238,7 @@ struct ChatPanelView: View {
                 }
                 previousLastContent = newContent
             }
-            .onChange(of: browserOSVM.messages.count) { newCount in
+            .onChange(of: browserOSVM.messages.count) { _, newCount in
                 if newCount > previousBrowserMessageCount && isNearBottom {
                     scrollManager.requestScroll(animated: true)
                 }
@@ -500,6 +542,15 @@ struct ChatPanelView: View {
                     .foregroundColor(.orange.opacity(0.9))
                     .transition(.opacity)
                 }
+                if let status = viewModel.streamingBudgetStatus {
+                    streamingBudgetProgressBar(status)
+                }
+                if let warning = viewModel.streamingContextWarning {
+                    contextWarningBanner(warning)
+                }
+                if viewModel.isStreamPausedForContext {
+                    contextLimitActionBar
+                }
                 composerToolbar
             }
             .padding(CGFloat(composerMetrics.contentPadding))
@@ -709,6 +760,9 @@ struct ChatPanelView: View {
         HStack(spacing: CGFloat(composerStatusMetrics.itemSpacing)) {
             composerActionMenu
             composerStatusControl
+            composerContextStatus
+            composerOutputBudgetControl
+            composerDraftContextStatus
 
             if workspaceMode == .expanded {
                 composerInlineDivider
@@ -738,7 +792,30 @@ struct ChatPanelView: View {
             }
             .buttonStyle(.plain)
             .disabled(sendButtonDisabled)
-            .help(viewModel.state != .idle || browserOSVM.isStreaming ? "Stop response" : "Send message")
+            .help(sendButtonHelpText)
+
+            if isSendDisabledByPin {
+                Button {
+                    Task {
+                        await viewModel.clearConversationModelOverride()
+                        triggerSend()
+                    }
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "pin.slash")
+                            .font(.system(size: 9))
+                        Text("Clear pin & send")
+                            .font(.system(size: 10, weight: .semibold))
+                    }
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.blue.opacity(0.12))
+                    .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("Remove the per-conversation model pin and send using the global default.")
+            }
         }
         .frame(height: max(34, CGFloat(composerStatusMetrics.controlHeight)))
     }
@@ -797,6 +874,28 @@ struct ChatPanelView: View {
                 }
             }
             Divider()
+            Section("This conversation") {
+                if viewModel.hasConversationModelOverride {
+                    Button {
+                        Task { await viewModel.clearConversationModelOverride() }
+                    } label: {
+                        Label("Clear conversation pin", systemImage: "pin.slash")
+                    }
+                } else {
+                    Button {
+                        Task {
+                            await viewModel.setConversationModelOverride(
+                                provider: modelStore.selectedProvider,
+                                baseURL: modelStore.baseURL,
+                                model: modelStore.selectedModel
+                            )
+                        }
+                    } label: {
+                        Label("Pin current model to conversation", systemImage: "pin")
+                    }
+                }
+            }
+            Divider()
             Button("Refresh available models") {
                 Task { await modelStore.refreshModels() }
             }
@@ -809,6 +908,11 @@ struct ChatPanelView: View {
                 Image(systemName: "cpu")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundColor(.white.opacity(0.62))
+                if viewModel.hasConversationModelOverride {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.72))
+                }
                 Text(composerModelLabel)
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .lineLimit(1)
@@ -835,6 +939,155 @@ struct ChatPanelView: View {
             return "\(modelStore.selectedProvider.displayName) - \(modelStore.selectedModel)"
         }
         return modelStore.selectedModel
+    }
+
+    private var composerContextStatus: some View {
+        HStack(spacing: 4) {
+            if let percent = viewModel.contextUtilizationPercent {
+                Circle()
+                    .fill(contextUtilizationColor(for: percent))
+                    .frame(width: 6, height: 6)
+                Text(String(format: "%.0f%%", percent))
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundColor(contextUtilizationColor(for: percent))
+                    .lineLimit(1)
+                if let label = viewModel.contextRoutingLabel {
+                    Text(label)
+                        .font(.system(size: 9))
+                        .foregroundColor(.white.opacity(0.55))
+                        .lineLimit(1)
+                }
+            }
+        }
+        .frame(height: CGFloat(composerStatusMetrics.controlHeight))
+    }
+
+    private var composerDraftContextStatus: some View {
+        HStack(spacing: 4) {
+            if let status = viewModel.draftContextStatus {
+                Image(systemName: status.isTooLarge ? "exclamationmark.triangle.fill" : "pencil.circle")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(draftContextStatusColor(for: status.utilizationPercent))
+                Text(String(format: "%.0f%%", status.utilizationPercent))
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundColor(draftContextStatusColor(for: status.utilizationPercent))
+                    .lineLimit(1)
+            }
+        }
+        .frame(height: CGFloat(composerStatusMetrics.controlHeight))
+        .help(composerDraftContextStatusHelp)
+    }
+
+    private var composerDraftContextStatusHelp: String {
+        guard let status = viewModel.draftContextStatus else {
+            return "Estimated context utilization for the current draft"
+        }
+        let label = status.isTooLarge
+            ? "Draft alone exceeds the usable window"
+            : (status.wouldTrimToFit ? "History will be trimmed to fit" : "Draft fits within the usable window")
+        return "Estimated draft input: \(status.estimatedInputTokens) tokens / \(status.usableWindow) usable (\(String(format: "%.0f", status.utilizationPercent))%). \(label)."
+    }
+
+    private func draftContextStatusColor(for percent: Double) -> Color {
+        if percent <= 70 { return .green }
+        if percent <= 85 { return .yellow }
+        return .red
+    }
+
+    private var composerOutputBudgetControl: some View {
+        Menu {
+            Button {
+                Task { await viewModel.clearConversationOutputTokensOverride() }
+            } label: {
+                if !viewModel.hasConversationOutputTokensOverride {
+                    Label("Default budget", systemImage: "checkmark")
+                } else {
+                    Text("Default budget")
+                }
+            }
+            Divider()
+            ForEach(Self.outputBudgetPresets, id: \.self) { value in
+                Button {
+                    Task { await viewModel.setConversationRequestedOutputTokens(value) }
+                } label: {
+                    if viewModel.effectiveConversationOutputTokens == value {
+                        Label(formatCompact(value), systemImage: "checkmark")
+                    } else {
+                        Text(formatCompact(value))
+                    }
+                }
+                .disabled(effectiveOutputCeiling.map { value > $0 } ?? false)
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "waveform")
+                    .font(.system(size: 9, weight: .medium))
+                Text(composerOutputBudgetLabel)
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .lineLimit(1)
+            }
+            .font(.system(size: 9, design: .monospaced))
+            .foregroundColor(.white.opacity(0.55))
+            .frame(height: CGFloat(composerStatusMetrics.controlHeight))
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .help(composerOutputBudgetHelp)
+    }
+
+    private var composerOutputBudgetLabel: String {
+        let requested = viewModel.effectiveConversationOutputTokens
+        if let requested {
+            let formatted = formatCompact(requested)
+            if let ceiling = effectiveOutputCeiling {
+                return "\(formatted)/\(formatCompact(ceiling))"
+            }
+            return formatted
+        }
+        if let ceiling = effectiveOutputCeiling {
+            return "out ≤ \(formatCompact(ceiling))"
+        }
+        return "out budget"
+    }
+
+    private var composerOutputBudgetHelp: String {
+        let requested = viewModel.effectiveConversationOutputTokens
+        if let requested, let ceiling = effectiveOutputCeiling {
+            let scope = viewModel.hasConversationOutputTokensOverride ? "conversation" : "global"
+            return "Output budget for this \(scope) chat: \(requested) tokens (ceiling \(ceiling))"
+        }
+        return "Set per-send output-token budget for this conversation"
+    }
+
+    private static let outputBudgetPresets: [Int] = [
+        256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536
+    ]
+
+    private var effectiveOutputCeilingTaskID: String {
+        "\(modelStore.selectedProvider.rawValue)|\(modelStore.selectedModel)|\(modelStore.baseURL)"
+    }
+
+    private func refreshEffectiveOutputCeiling() async {
+        effectiveOutputCeiling = await modelStore.effectiveMaxOutputTokens(
+            for: modelStore.selectedModel,
+            provider: modelStore.selectedProvider,
+            baseURL: modelStore.baseURL
+        )
+    }
+
+    private func contextUtilizationColor(for percent: Double) -> Color {
+        if percent <= 70 { return .green }
+        if percent <= 85 { return .yellow }
+        return .red
+    }
+
+    private func formatCompact(_ value: Int) -> String {
+        if value >= 1_000_000 {
+            return String(format: "%.1fM", Double(value) / 1_000_000)
+        } else if value >= 1_000 {
+            return String(format: "%.1fk", Double(value) / 1_000)
+        }
+        return "\(value)"
     }
 
     private var composerTokenStatus: some View {
@@ -918,6 +1171,112 @@ struct ChatPanelView: View {
             .frame(width: 1, height: 14)
     }
 
+    private var contextLimitActionBar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let label = viewModel.streamingContextPauseLabel {
+                Text(label)
+                    .font(.system(size: 11))
+                    .foregroundColor(.orange.opacity(0.9))
+                    .padding(.horizontal, 2)
+            }
+            HStack(spacing: 12) {
+                Button("Continue on larger model") {
+                    Task { await viewModel.continueStreamOnLargerModel(nil) }
+                }
+                .buttonStyle(ContextLimitButtonStyle())
+                .disabled(!viewModel.canContinueOnLargerModel)
+
+                Button("Summarize so far") {
+                    Task { await viewModel.summarizeStreamSoFar() }
+                }
+                .buttonStyle(ContextLimitButtonStyle())
+                .disabled(!viewModel.canSummarizeStreamSoFar)
+
+                Button("Stop and keep partial") {
+                    Task { await viewModel.stopStreamAndKeepPartial() }
+                }
+                .buttonStyle(ContextLimitButtonStyle())
+
+                Spacer()
+            }
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func streamingBudgetProgressBar(_ status: StreamingBudgetStatus) -> some View {
+        let progressColor: Color
+        switch status.kind {
+        case .safe: progressColor = .green
+        case .warning: progressColor = .yellow
+        case .critical: progressColor = .red
+        }
+        let dominantRatio = max(status.outputRatio, status.totalRatio)
+        let label: String
+        let tooltip: String
+        if status.limitKind == .outputTokens || status.outputRatio >= status.totalRatio {
+            label = "\(formatCompact(status.outputUsed)) / \(formatCompact(status.outputCeiling)) output"
+            tooltip = "Output tokens: \(status.outputUsed) / \(status.outputCeiling). Total context: \(status.totalUsed) / \(status.totalCeiling)."
+        } else {
+            label = "\(formatCompact(status.totalUsed)) / \(formatCompact(status.totalCeiling)) context"
+            tooltip = "Total context: \(status.totalUsed) / \(status.totalCeiling). Output tokens: \(status.outputUsed) / \(status.outputCeiling)."
+        }
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Image(systemName: status.limitKind == .outputTokens ? "arrow.up.circle" : "bubble.left.and.bubble.right")
+                    .font(.system(size: 10))
+                    .foregroundColor(progressColor)
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .fill(Color.white.opacity(0.12))
+                            .frame(height: 4)
+                        RoundedRectangle(cornerRadius: 2, style: .continuous)
+                            .fill(progressColor)
+                            .frame(width: max(2, geo.size.width * CGFloat(dominantRatio)), height: 4)
+                    }
+                }
+                .frame(height: 4)
+                Text(label)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.grokDim)
+            }
+        }
+        .padding(.vertical, 2)
+        .help(tooltip)
+    }
+
+    private func contextWarningBanner(_ warning: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11))
+                .foregroundColor(.orange.opacity(0.9))
+            Text(warning)
+                .font(.system(size: 11))
+                .foregroundColor(.orange.opacity(0.9))
+                .lineLimit(2)
+            Spacer()
+        }
+        .padding(.vertical, 4)
+    }
+
+    private struct ContextLimitButtonStyle: ButtonStyle {
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.white.opacity(configuration.isPressed ? 0.7 : 0.9))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.white.opacity(configuration.isPressed ? 0.12 : 0.08))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                )
+        }
+    }
+
     private var inputPlaceholder: String {
         if !composerAttachments.isEmpty {
             return "Add instructions..."
@@ -930,7 +1289,11 @@ struct ChatPanelView: View {
 
     private var composerStatusHelp: String {
         if let hint = statusHint { return hint.text }
-        return "\(modelStore.selectedProvider.displayName) / \(modelStore.selectedModel) - \(viewModel.tokenUsage.detailText)"
+        let scope = viewModel.hasConversationModelOverride ? "Pinned to this conversation" : "Global default"
+        let constraintNote = viewModel.hasConversationModelOverride
+            ? " (warmup and failover constrained to this pin)"
+            : ""
+        return "\(scope): \(modelStore.selectedProvider.displayName) / \(modelStore.selectedModel)\(constraintNote) - \(viewModel.tokenUsage.detailText)"
     }
 
     private var isAPIKeyConfigured: Bool {
@@ -972,12 +1335,29 @@ struct ChatPanelView: View {
         return trimmed.isEmpty && composerAttachments.isEmpty ? Color.white.opacity(0.09) : .white
     }
 
+    private var sendButtonHelpText: String {
+        if viewModel.state != .idle || browserOSVM.isStreaming { return "Stop response" }
+        if let reason = viewModel.pinnedSendLimitReason {
+            return reason
+        }
+        if viewModel.isDraftContextLimitExceeded { return "Draft exceeds the usable context window" }
+        return "Send message"
+    }
+
     private var sendButtonDisabled: Bool {
         let trimmed = viewModel.inputText.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty
+        return (trimmed.isEmpty
             && composerAttachments.isEmpty
             && viewModel.state == .idle
-            && !browserOSVM.isStreaming
+            && !browserOSVM.isStreaming)
+            || viewModel.isDraftContextLimitExceeded
+            || viewModel.isPinnedModelSendBlocked
+    }
+
+    /// True when the send button is disabled specifically because the pinned model
+    /// cannot fit the draft or output budget.
+    private var isSendDisabledByPin: Bool {
+        viewModel.isPinnedModelSendBlocked
     }
 
     private func triggerSend() {
@@ -1899,13 +2279,16 @@ private struct BrowserOSMessageBubble: View {
     }
 
     private var errorBadge: some View {
-        HStack(spacing: 6) {
+        HStack(alignment: .top, spacing: 6) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 12))
                 .foregroundColor(.yellow)
             Text(BrowserOSMessageBubble.cleanErrorContent(message.content))
                 .font(.system(size: 13, weight: .medium, design: .default))
                 .foregroundColor(.grokText)
+            // The failure text is a summary; the bus holds the full record.
+            TabLogsButton(tab: .chat, compact: true)
+                .padding(.top, 1)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
@@ -2004,7 +2387,17 @@ private struct StatusDot: View {
 // MARK: - Execution Planner
 
 private extension ChatPanelView {
+    /// Renders the planner only when the turn did enough work to describe.
+    /// A one-step turn is plain chat; showing a single-row checklist is an
+    /// empty skeleton that costs vertical space and says nothing.
+    @ViewBuilder
     var queenActivityFeed: some View {
+        if viewModel.todoPlanner.shouldDisplayPlan {
+            plannerCard
+        }
+    }
+
+    var plannerCard: some View {
         TODOListView(
             planner: viewModel.todoPlanner,
             conversationId: viewModel.conversationId,
@@ -2038,4 +2431,12 @@ private struct StatusHint: Equatable {
     let icon: String
     let text: String
     let color: Color
+}
+
+/// Reports the planner card's natural height so its scroll container can hug it.
+private struct PlannerContentHeightPreferenceKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
 }

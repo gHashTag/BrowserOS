@@ -264,6 +264,13 @@ final class TriosMCPClient: ObservableObject {
         return response.textContent ?? ""
     }
 
+    /// Returns the human-readable text from the `get_active_page` tool.
+    /// AGENT-V-WAIVER: active-page detection fix (Agent V conditional waiver, 2026-07-27).
+    func getActivePage() async throws -> String {
+        let response = try await callTool(name: "get_active_page", arguments: [:])
+        return response.textContent ?? ""
+    }
+
     // MARK: - Cleanup
 
     func disconnect() {

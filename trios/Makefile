@@ -86,6 +86,15 @@ check: dev test cassettes
 # ~2s per cassette because no provider is involved, so the whole suite fits in
 # an ordinary build. Regressions in the swarm now surface before the app is
 # opened rather than after a ten-minute live run.
+#
+# What a cassette cannot test: anything the *server* does. The orphaned-tool-call
+# repair lives in the agent server's prompt assembly, so a replay bypasses the
+# exact layer holding the bug - a second replayed turn just yields the same
+# recorded bytes and proves nothing either way. That one needs a live provider:
+#
+#   make delegate-probe SECOND_TURN=1 PATHS=docs TASK="..."
+#
+# then look for queen.selftest.second_turn_passed.
 CASSETTE_DIR := $(ROOT)/tests/cassettes
 
 cassettes:
@@ -101,6 +110,7 @@ cassettes:
 	; do \
 		cassette=$${spec%%:*}; rest=$${spec#*:}; \
 		marker=$${rest%%:*}; label=$${rest#*:}; \
+		case "$$marker" in second_turn*|*second_turn*) second=1 ;; *) second= ;; esac; \
 		before=$$(wc -l < "$(LOG)" 2>/dev/null || echo 0); \
 		rm -f "$(ROOT)/.trinity-dev/state/queen_delegation.json"; \
 		: "A cassette effect writes a file; if it survives from the last run the \
@@ -110,7 +120,8 @@ cassettes:
 		git -C "$(ROOT)" branch --list 'queen/*' --format='%(refname:short)' \
 			| xargs -r -n1 git -C "$(ROOT)" branch -D >/dev/null 2>&1 || true; \
 		open --env TRIOS_E2E_DELEGATE="gHashTag/trios\#1086|queen-swift|Cassette $$cassette|docs" \
-		     --env TRIOS_REPLAY_CASSETTE="$(CASSETTE_DIR)/$$cassette" "$(DEV_APP)"; \
+		     --env TRIOS_REPLAY_CASSETTE="$(CASSETTE_DIR)/$$cassette" \
+		     --env TRIOS_E2E_SECOND_TURN="$$second" "$(DEV_APP)"; \
 		found=0; \
 		for i in $$(seq 1 20); do \
 			tail -n "+$$((before + 1))" "$(LOG)" 2>/dev/null | grep -q "$$marker" && { found=1; break; }; \
@@ -212,6 +223,9 @@ AUTONOMY ?=
 # Point at tests/cassettes/*.sse to run the swarm against a recording instead
 # of a live provider. Same bytes, same order, every run.
 CASSETTE ?=
+# Set to 1 to send a second turn on the same conversation. The orphan
+# regression only appears on the send *after* the one that caused it.
+SECOND_TURN ?=
 
 LOG := $(ROOT)/.trinity-dev/logs/trios-app.jsonl
 
@@ -228,7 +242,8 @@ delegate-probe:
 	@open --env TRIOS_E2E_DELEGATE="$(ISSUE)|$(WORKER)|$(TASK)|$(PATHS)" \
 		--env TRIOS_E2E_DELEGATE_REVIEW="$(REVIEW)" \
 		--env TRIOS_QUEEN_AUTONOMY="$(AUTONOMY)" \
-		--env TRIOS_REPLAY_CASSETTE="$(CASSETTE)" "$(DEV_APP)"
+		--env TRIOS_REPLAY_CASSETTE="$(CASSETTE)" \
+		--env TRIOS_E2E_SECOND_TURN="$(SECOND_TURN)" "$(DEV_APP)"
 	@echo "delegating $(ISSUE) to $(WORKER); waiting up to 16 min"
 	@before=$$(cat /tmp/trios_delegate_mark); \
 	for i in $$(seq 1 192); do \
