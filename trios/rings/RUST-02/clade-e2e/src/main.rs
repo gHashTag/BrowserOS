@@ -441,6 +441,15 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
         ],
     },
     SwiftLogicSuite {
+        label: "CladeGuard",
+        bin: "/tmp/trios_clade_guard_test",
+        sources: &[
+            "tests/swift/clade_guard_test.swift",
+            "BR-OUTPUT/CladeGuard.swift",
+            "rings/SR-00/SafeFilePath.swift",
+        ],
+    },
+    SwiftLogicSuite {
         label: "TriosVisualTheme",
         bin: "/tmp/trios_trios_visual_theme_test",
         sources: &[
@@ -604,12 +613,19 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
 /// is named `.zip`; corrected, and it now covers the writer's extension
 /// normalisation instead.
 ///
+/// `clade_guard_test` is gone from this list. It failed to compile because it
+/// stubs ProjectPaths - deliberately, so the suite builds from two files rather
+/// than the whole module tree - and CladeGuard had since started calling
+/// `ProjectPaths.root`, which the stub never grew. That is the standing cost of
+/// a stub: it drifts from the thing it stands in for, silently, and only a
+/// compile against the real code notices. Wired now, so the next drift breaks
+/// this suite instead of hiding in it.
+///
 /// `clade_guard_test` will not compile: CladeGuard.swift wants
 /// `ProjectPaths.root`, and something else in that suite's closure declares a
 /// competing `ProjectPaths` without it. A name collision to untangle, not a
 /// missing file.
 const KNOWN_UNWIRED_SWIFT_TESTS: &[&str] = &[
-    "clade_guard_test.swift",
     "session_recovery_export_test.swift",
     "session_recovery_resilience_test.swift",
 ];

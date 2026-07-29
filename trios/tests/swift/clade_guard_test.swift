@@ -23,6 +23,14 @@ import Foundation
 // dragging in the entire Swift module tree.
 
 enum ProjectPaths {
+    // Mirrors the real ProjectPaths' own fallback, which resolves to the
+    // working directory when there is no bundle to ask. CladeGuard started
+    // using `root` after this stub was written, and nothing objected because
+    // nothing ran this suite - a stub only stays honest while something
+    // compiles it against the code it stands in for.
+    static var root: String {
+        FileManager.default.currentDirectoryPath
+    }
     static var trinity: String {
         FileManager.default.currentDirectoryPath + "/.trinity"
     }
