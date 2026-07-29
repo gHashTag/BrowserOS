@@ -55,6 +55,7 @@ struct ChatSSEEndToEndTests {
         await runSalienceLearnsFromOutcomes()
         await runPureQueenTypes()
         await runSelfAuditFindsPlantedDeadCode()
+        await runBranchCommitterAgainstScratchRepo()
 
         if failures == 0 {
             print("\nAll ChatSSEEndToEnd tests passed.")
@@ -2274,5 +2275,99 @@ struct ChatSSEEndToEndTests {
             ChatViewModel.auditRepository(root: emptyRoot).isEmpty,
             "an empty tree yields no findings rather than erroring"
         )
+    }
+
+    // MARK: - Scenario: the branch committer, against a scratch repository
+
+    /// This is the piece that touches git, so it is the piece where a mistake
+    /// costs real work. It went untested for four cycles because its root was a
+    /// constant; making that a parameter is what let it be pointed at a
+    /// throwaway repository instead of the live checkout.
+    static func runBranchCommitterAgainstScratchRepo() async {
+        print("\n# Scenario: branch committer against a scratch repo")
+
+        let root = NSTemporaryDirectory() + "trios-git-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        try? FileManager.default.createDirectory(
+            atPath: "\(root)/docs", withIntermediateDirectories: true
+        )
+
+        func git(_ args: [String]) {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            p.arguments = args
+            p.currentDirectoryURL = URL(fileURLWithPath: root)
+            p.standardOutput = Pipe()
+            p.standardError = Pipe()
+            try? p.run()
+            p.waitUntilExit()
+        }
+        git(["init", "-q", "-b", "main"])
+        git(["config", "user.email", "t@example.com"])
+        git(["config", "user.name", "T"])
+        try? "seed\n".write(toFile: "\(root)/seed.txt", atomically: true, encoding: .utf8)
+        git(["add", "-A"])
+        git(["commit", "-q", "-m", "seed"])
+        git(["branch", "queen/1-test"])
+
+        let head = ProcessInfo.processInfo.environment["PATH"] // keep the compiler honest
+        _ = head
+
+        let baseline = await QueenBranchCommitter.snapshotWorkingTree(projectRoot: root)
+        check(baseline != nil, "a baseline snapshot is taken from a clean tree")
+
+        // The worker writes inside its boundary, and something else writes
+        // outside it at the same time.
+        try? "bee\n".write(toFile: "\(root)/docs/inside.md", atomically: true, encoding: .utf8)
+        try? "not the bee\n".write(toFile: "\(root)/outside.md", atomically: true, encoding: .utf8)
+
+        let outcome = await QueenBranchCommitter.commitWorkerChanges(
+            branch: "queen/1-test",
+            baselineTree: baseline,
+            message: "queen: test",
+            ownedPaths: ["docs"],
+            projectRoot: root
+        )
+        check(outcome.committed, "the committer records the worker's file")
+        check(outcome.fileCount == 1, "only the file inside the boundary is counted")
+        check(
+            outcome.summary.contains("docs/inside.md"),
+            "the summary names what landed"
+        )
+
+        // HEAD must not have moved - that is the whole point of the design.
+        let headBranch = Process()
+        headBranch.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        headBranch.arguments = ["branch", "--show-current"]
+        headBranch.currentDirectoryURL = URL(fileURLWithPath: root)
+        let out = Pipe(); headBranch.standardOutput = out; headBranch.standardError = Pipe()
+        try? headBranch.run()
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        headBranch.waitUntilExit()
+        let current = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        check(current == "main", "HEAD stays where it was; the branch moved, not the checkout")
+
+        // The stray file outside the boundary must still be uncommitted.
+        let status = Process()
+        status.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        status.arguments = ["status", "--short"]
+        status.currentDirectoryURL = URL(fileURLWithPath: root)
+        let sOut = Pipe(); status.standardOutput = sOut; status.standardError = Pipe()
+        try? status.run()
+        let sData = sOut.fileHandleForReading.readDataToEndOfFile()
+        status.waitUntilExit()
+        let statusText = String(data: sData, encoding: .utf8) ?? ""
+        check(
+            statusText.contains("outside.md"),
+            "a file outside the boundary is left in the working tree, not swept onto the branch"
+        )
+
+        // No baseline means refuse, rather than guess which edits were the bee's.
+        let refused = await QueenBranchCommitter.commitWorkerChanges(
+            branch: "queen/1-test", baselineTree: nil, message: "m",
+            ownedPaths: ["docs"], projectRoot: root
+        )
+        check(!refused.committed, "without a baseline the committer refuses rather than guessing")
     }
 }

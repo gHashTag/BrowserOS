@@ -25,14 +25,20 @@ enum QueenBranchCommitter {
     /// Call before the worker starts. A nil result means the baseline could not
     /// be taken, and the commit step will then refuse rather than guess which
     /// edits belong to the worker.
-    static func snapshotWorkingTree() async -> String? {
+    /// The project the worker edits. A parameter rather than a constant so the
+    /// plumbing can be exercised against a scratch repository - a committer that
+    /// can only be tested by pointing it at the real checkout is a committer
+    /// nobody tests.
+    static func snapshotWorkingTree(projectRoot: String = ProjectPaths.root) async -> String? {
         await Task.detached(priority: .utility) {
             let index = temporaryIndexPath()
             defer { try? FileManager.default.removeItem(atPath: index) }
             // `add -A` against an empty temporary index stages the whole tree
             // as it is right now, including files the user has not committed.
-            guard runGit(["add", "-A"], index: index) != nil else { return nil }
-            let tree = runGit(["write-tree"], index: index)?
+            guard runGit(["add", "-A"], index: index, projectRoot: projectRoot) != nil else {
+                return nil
+            }
+            let tree = runGit(["write-tree"], index: index, projectRoot: projectRoot)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard let tree, !tree.isEmpty else { return nil }
             return tree
@@ -44,7 +50,8 @@ enum QueenBranchCommitter {
         branch: String,
         baselineTree: String?,
         message: String,
-        ownedPaths: [String]
+        ownedPaths: [String],
+        projectRoot: String = ProjectPaths.root
     ) async -> Outcome {
         guard let baselineTree else {
             return Outcome(
@@ -56,8 +63,8 @@ enum QueenBranchCommitter {
             let index = temporaryIndexPath()
             defer { try? FileManager.default.removeItem(atPath: index) }
 
-            guard runGit(["add", "-A"], index: index) != nil,
-                  let endTree = runGit(["write-tree"], index: index)?
+            guard runGit(["add", "-A"], index: index, projectRoot: projectRoot) != nil,
+                  let endTree = runGit(["write-tree"], index: index, projectRoot: projectRoot)?
                       .trimmingCharacters(in: .whitespacesAndNewlines),
                   !endTree.isEmpty else {
                 return Outcome(committed: false, summary: "Could not snapshot the working tree.")
@@ -65,7 +72,7 @@ enum QueenBranchCommitter {
 
             let diff = runGit(
                 ["diff", "--name-only", baselineTree, endTree],
-                index: index
+                index: index, projectRoot: projectRoot
             ) ?? ""
             var changed = diff
                 .split(separator: "\n")
@@ -76,7 +83,7 @@ enum QueenBranchCommitter {
             // allowed to touch must not ride along on its branch even if
             // something else changed them while it ran.
             if !ownedPaths.isEmpty {
-                let owned = ownedPaths.map(repositoryRelative)
+                let owned = ownedPaths.map { repositoryRelative($0, projectRoot: projectRoot) }
                 changed = changed.filter { path in
                     let normalized = QueenDelegationPolicy.normalizePath(path)
                     return owned.contains { normalized == $0 || normalized.hasPrefix("\($0)/") }
@@ -89,26 +96,26 @@ enum QueenBranchCommitter {
             // Build the commit's tree from the branch tip plus only those paths,
             // so concurrent edits by other workers do not leak onto this branch.
             let branchRef = "refs/heads/\(branch)"
-            guard let parent = runGit(["rev-parse", branchRef], index: index)?
+            guard let parent = runGit(["rev-parse", branchRef], index: index, projectRoot: projectRoot)?
                 .trimmingCharacters(in: .whitespacesAndNewlines), !parent.isEmpty else {
                 return Outcome(committed: false, summary: "Branch `\(branch)` does not exist.")
             }
-            guard runGit(["read-tree", parent], index: index) != nil else {
+            guard runGit(["read-tree", parent], index: index, projectRoot: projectRoot) != nil else {
                 return Outcome(committed: false, summary: "Could not read `\(branch)` into a scratch index.")
             }
-            guard runGit(["add", "--"] + changed, index: index) != nil,
-                  let tree = runGit(["write-tree"], index: index)?
+            guard runGit(["add", "--"] + changed, index: index, projectRoot: projectRoot) != nil,
+                  let tree = runGit(["write-tree"], index: index, projectRoot: projectRoot)?
                       .trimmingCharacters(in: .whitespacesAndNewlines),
                   !tree.isEmpty else {
                 return Outcome(committed: false, summary: "Could not stage the worker's files.")
             }
             guard let commit = runGit(
                 ["commit-tree", tree, "-p", parent, "-m", message],
-                index: index
+                index: index, projectRoot: projectRoot
             )?.trimmingCharacters(in: .whitespacesAndNewlines), !commit.isEmpty else {
                 return Outcome(committed: false, summary: "Could not write the commit object.")
             }
-            guard runGit(["update-ref", branchRef, commit], index: index) != nil else {
+            guard runGit(["update-ref", branchRef, commit], index: index, projectRoot: projectRoot) != nil else {
                 return Outcome(committed: false, summary: "Could not move `\(branch)` to the new commit.")
             }
 
@@ -133,27 +140,30 @@ enum QueenBranchCommitter {
     /// prefixed with `trios/`. Running the plumbing anywhere else made
     /// `git diff --name-only` and the caller's owned paths disagree, and the
     /// worker's file was filtered out of its own commit.
-    private static var repositoryRoot: String {
+    static func repositoryRoot(projectRoot: String = ProjectPaths.root) -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = ["rev-parse", "--show-toplevel"]
-        process.currentDirectoryURL = URL(fileURLWithPath: ProjectPaths.root)
+        process.currentDirectoryURL = URL(fileURLWithPath: projectRoot)
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = Pipe()
-        guard (try? process.run()) != nil else { return ProjectPaths.root }
+        guard (try? process.run()) != nil else { return projectRoot }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         let output = String(data: data, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return output.isEmpty ? ProjectPaths.root : output
+        return output.isEmpty ? projectRoot : output
     }
 
     /// Rewrites a project-relative path (`docs`) into a repository-relative one
     /// (`trios/docs`), which is the only form git will agree with.
-    private static func repositoryRelative(_ path: String) -> String {
-        let root = repositoryRoot
-        let project = ProjectPaths.root
+    static func repositoryRelative(
+        _ path: String,
+        projectRoot: String = ProjectPaths.root
+    ) -> String {
+        let root = repositoryRoot(projectRoot: projectRoot)
+        let project = projectRoot
         guard project.hasPrefix(root), project != root else {
             return QueenDelegationPolicy.normalizePath(path)
         }
@@ -163,11 +173,15 @@ enum QueenBranchCommitter {
     }
 
     /// Returns nil on a non-zero exit so each step can refuse to continue.
-    private static func runGit(_ arguments: [String], index: String) -> String? {
+    private static func runGit(
+        _ arguments: [String],
+        index: String,
+        projectRoot: String = ProjectPaths.root
+    ) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         process.arguments = arguments
-        process.currentDirectoryURL = URL(fileURLWithPath: repositoryRoot)
+        process.currentDirectoryURL = URL(fileURLWithPath: repositoryRoot(projectRoot: projectRoot))
         var environment = ProcessInfo.processInfo.environment
         environment["GIT_INDEX_FILE"] = index
         process.environment = environment

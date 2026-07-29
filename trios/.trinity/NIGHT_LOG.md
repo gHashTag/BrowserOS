@@ -100,3 +100,26 @@ Left alone: QueenStatusBadge, and QueenBranchCommitter, whose root is not
 injectable - testing it needs a small refactor first, which is a cycle of its
 own rather than a rushed appendix to this one.
 
+## Cycle 5, 2026-07-30
+
+Green first. Then the item deferred in the last two cycles: QueenBranchCommitter
+had no coverage, because its root was a constant and the only way to run it was
+against the live checkout.
+
+Made the root a parameter and pointed it at a throwaway repository. Seven
+assertions now cover the piece that actually touches git: a baseline is taken, a
+file inside the boundary is committed while one written outside it at the same
+moment is not, the summary names what landed, HEAD stays where it was, the stray
+file is still sitting uncommitted in the working tree afterwards, and a missing
+baseline makes the committer refuse rather than guess whose edits it is looking
+at.
+
+Two runGit call sites had been left without the new root while I was threading
+it through. The compiler did not catch that - both compiled fine and would have
+silently run against the real repository. Caught by reading the diff, which is
+the argument for making the parameter required rather than defaulted; noted, not
+done, because changing the signature ripples into ChatViewModel and that is a
+cycle of its own.
+
+Assertions 188 to 195. Build clean, cassettes 4/4.
+
