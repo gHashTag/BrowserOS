@@ -320,6 +320,126 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
             "rings/SR-02/LogParser.swift",
         ],
     },
+    SwiftLogicSuite {
+        label: "AssistantActionBarPolicy",
+        bin: "/tmp/trios_assistant_action_bar_policy_test",
+        sources: &[
+            "tests/swift/assistant_action_bar_policy_test.swift",
+            "rings/SR-00/AssistantActionBarPolicy.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "ChatEditingShortcutPolicy",
+        bin: "/tmp/trios_chat_editing_shortcut_policy_test",
+        sources: &[
+            "tests/swift/chat_editing_shortcut_policy_test.swift",
+            "rings/SR-00/ChatEditingShortcutPolicy.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "ChatLoadingIndicatorLayout",
+        bin: "/tmp/trios_chat_loading_indicator_layout_test",
+        sources: &[
+            "tests/swift/chat_loading_indicator_layout_test.swift",
+            "rings/SR-00/ChatLoadingIndicatorLayout.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "ChatScrollRestorationPolicy",
+        bin: "/tmp/trios_chat_scroll_restoration_policy_test",
+        sources: &[
+            "tests/swift/chat_scroll_restoration_policy_test.swift",
+            "rings/SR-00/ChatScrollRestorationPolicy.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "ChatWorkspaceLayout",
+        bin: "/tmp/trios_chat_workspace_layout_test",
+        sources: &[
+            "tests/swift/chat_workspace_layout_test.swift",
+            "rings/SR-00/ChatWorkspaceLayout.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "CompanionServerConfig",
+        bin: "/tmp/trios_companion_server_config_test",
+        sources: &[
+            "tests/swift/companion_server_config_test.swift",
+            "rings/SR-00/CompanionServerConfig.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "MarkdownBlockParser",
+        bin: "/tmp/trios_markdown_block_parser_test",
+        sources: &[
+            "tests/swift/markdown_block_parser_test.swift",
+            "rings/SR-00/MarkdownBlockParser.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "ModelCatalogReconciler",
+        bin: "/tmp/trios_model_catalog_reconciler_test",
+        sources: &[
+            "tests/swift/model_catalog_reconciler_test.swift",
+            "rings/SR-00/ModelCatalogReconciler.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "ModelProvider",
+        bin: "/tmp/trios_model_provider_test",
+        sources: &[
+            "tests/swift/model_provider_test.swift",
+            "rings/SR-00/ModelProvider.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "ReasoningPresentationPolicy",
+        bin: "/tmp/trios_reasoning_presentation_policy_test",
+        sources: &[
+            "tests/swift/reasoning_presentation_policy_test.swift",
+            "rings/SR-00/ReasoningPresentationPolicy.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "StructuredDetailParser",
+        bin: "/tmp/trios_structured_detail_parser_test",
+        sources: &[
+            "tests/swift/structured_detail_parser_test.swift",
+            "rings/SR-00/StructuredDetailParser.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "TriNetRepositoryStatus",
+        bin: "/tmp/trios_tri_net_repository_status_test",
+        sources: &[
+            "tests/swift/tri_net_repository_status_test.swift",
+            "rings/SR-00/TriNetRepositoryStatus.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "TrinityQueenEmbedding",
+        bin: "/tmp/trios_trinity_queen_embedding_test",
+        sources: &[
+            "tests/swift/trinity_queen_embedding_test.swift",
+            "rings/SR-00/TrinityQueenEmbedding.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "TriosBranding",
+        bin: "/tmp/trios_trios_branding_test",
+        sources: &[
+            "tests/swift/trios_branding_test.swift",
+            "rings/SR-00/TriosBranding.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "TriosVisualTheme",
+        bin: "/tmp/trios_trios_visual_theme_test",
+        sources: &[
+            "tests/swift/trios_visual_theme_test.swift",
+            "rings/SR-00/TriosVisualTheme.swift",
+        ],
+    },
 ];
 
 /// Compile and run every standalone Swift logic suite. This is the
@@ -335,39 +455,42 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
 ///
 /// Naming them here does not run them. It stops the set from growing quietly:
 /// add a `*_test.swift` without wiring it and `clade-e2e` now says so, instead
-/// of the file joining thirty silent others. Entries come off this list by
-/// being added to SWIFT_LOGIC_SUITES, which needs each suite's own source list.
+/// of the file joining the silent others. Entries come off this list by being
+/// added to SWIFT_LOGIC_SUITES, which needs each suite's own source list.
+///
+/// Half of the original thirty are gone: every file whose subject was a single
+/// ring source, verified by compiling and running each one before wiring it.
+/// The fifteen below are the ones that took more than that, in three kinds.
+///
+/// **One is red, not merely unwired.** `trinity_999_tab_map_test` compiles,
+/// runs, and fails on "Seven Trios workspaces must be hosted". Either the tab
+/// map lost a workspace or the test outlived the layout it described. It is not
+/// wired because wiring a failing test turns this list into a broken build; it
+/// is called out here because it is the only entry that is a finding rather
+/// than a chore.
+///
+/// **Eleven need more than their obvious subject** - they pull in types from
+/// other rings, so each needs its dependencies worked out one at a time.
+///
+/// **Three have no file named after them**: `llm_client_optional_key`,
+/// `model_catalog_parser` and `session_recovery_resilience` test something whose
+/// source is named differently, and finding it is part of wiring them.
 const KNOWN_UNWIRED_SWIFT_TESTS: &[&str] = &[
-    "assistant_action_bar_policy_test.swift",
     "assistant_timeline_builder_test.swift",
     "chat_attachment_importer_test.swift",
     "chat_composer_attachment_test.swift",
     "chat_composer_status_style_test.swift",
     "chat_composer_style_test.swift",
-    "chat_editing_shortcut_policy_test.swift",
     "chat_glass_style_test.swift",
-    "chat_loading_indicator_layout_test.swift",
-    "chat_scroll_restoration_policy_test.swift",
     "chat_status_bar_style_test.swift",
-    "chat_workspace_layout_test.swift",
     "clade_guard_test.swift",
     "code_diff_parser_test.swift",
-    "companion_server_config_test.swift",
     "llm_client_optional_key_test.swift",
-    "markdown_block_parser_test.swift",
     "model_catalog_parser_test.swift",
-    "model_catalog_reconciler_test.swift",
-    "model_provider_test.swift",
-    "reasoning_presentation_policy_test.swift",
     "recursion_guard_test.swift",
     "session_recovery_export_test.swift",
     "session_recovery_resilience_test.swift",
-    "structured_detail_parser_test.swift",
-    "tri_net_repository_status_test.swift",
     "trinity_999_tab_map_test.swift",
-    "trinity_queen_embedding_test.swift",
-    "trios_branding_test.swift",
-    "trios_visual_theme_test.swift",
 ];
 
 /// Fails when a focused Swift test exists that nothing runs and nothing admits
