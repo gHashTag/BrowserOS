@@ -76,3 +76,27 @@ Left alone: QueenStatusBadge again, for the same reason, and
 QueenBranchCommitter, which still needs a scratch git repository to test
 properly.
 
+## Cycle 4, 2026-07-30
+
+Green first: build clean, 184 assertions, cassettes 4/4. Dead-code scan clear
+again apart from the BR-OUTPUT draft. So (c) this time - a check that silently
+matches nothing.
+
+The scanner behind /roadmap is the obvious candidate, because it has already
+done exactly that once: it looked for `func Queen...`, but Swift methods are
+named after what they do and only types carry the prefix, so it found zero
+declarations, reported zero findings, and that read as a clean bill of health.
+
+It is now run against a known-bad input. A temporary tree gets two planted
+types: one declared and referenced nowhere, one declared and genuinely used. The
+assertions require it to find the first, leave the second alone, rank the find
+as dead rather than merely noting it, and return empty on an empty tree without
+erroring. Both directions, so a scanner that stops matching cannot pass by
+being silent.
+
+Assertions 184 to 188. Build clean, cassettes 4/4.
+
+Left alone: QueenStatusBadge, and QueenBranchCommitter, whose root is not
+injectable - testing it needs a small refactor first, which is a cycle of its
+own rather than a rushed appendix to this one.
+

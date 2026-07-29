@@ -54,6 +54,7 @@ struct ChatSSEEndToEndTests {
         await runCassetteReplayAndObserver()
         await runSalienceLearnsFromOutcomes()
         await runPureQueenTypes()
+        await runSelfAuditFindsPlantedDeadCode()
 
         if failures == 0 {
             print("\nAll ChatSSEEndToEnd tests passed.")
@@ -2208,6 +2209,70 @@ struct ChatSSEEndToEndTests {
             QueenSelfAudit.report(findings: [], now: Date())
                 .contains("statement about my checks"),
             "an empty audit says so about itself rather than claiming health"
+        )
+    }
+
+    // MARK: - Scenario: the self-audit scanner actually matches
+
+    /// The scanner behind `/roadmap` once matched nothing at all and reported a
+    /// clean bill of health it had not earned - it looked for `func Queen...`,
+    /// but Swift methods are named after what they do and only types carry the
+    /// prefix. Zero declarations found means zero findings, which reads exactly
+    /// like success.
+    ///
+    /// So the scanner is run against a known-bad input. A check nobody has seen
+    /// fail is a check nobody should believe.
+    static func runSelfAuditFindsPlantedDeadCode() async {
+        print("\n# Scenario: self-audit finds planted dead code")
+
+        let root = NSTemporaryDirectory() + "trios-audit-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        let manager = FileManager.default
+        for dir in ["rings/SR-00", "rings/SR-01", "rings/SR-02", "BR-OUTPUT"] {
+            try? manager.createDirectory(
+                atPath: "\(root)/\(dir)", withIntermediateDirectories: true
+            )
+        }
+
+        // Declared once, called from nowhere.
+        try? "enum QueenGhostService {\n    static let unused = 1\n}\n"
+            .write(toFile: "\(root)/rings/SR-02/QueenGhostService.swift",
+                   atomically: true, encoding: .utf8)
+
+        // Declared once and genuinely used, so it must not be reported.
+        try? "enum QueenLiveThing {\n    static let value = 1\n}\n"
+            .write(toFile: "\(root)/rings/SR-00/QueenLiveThing.swift",
+                   atomically: true, encoding: .utf8)
+        try? "let x = QueenLiveThing.value\nlet y = QueenLiveThing.value\n"
+            .write(toFile: "\(root)/BR-OUTPUT/Caller.swift",
+                   atomically: true, encoding: .utf8)
+
+        let findings = ChatViewModel.auditRepository(root: root)
+        let subjects = Set(findings.map(\.subject))
+
+        check(
+            subjects.contains("QueenGhostService"),
+            "the scanner finds a type nothing references"
+        )
+        check(
+            !subjects.contains("QueenLiveThing"),
+            "the scanner leaves a type that is actually used alone"
+        )
+        check(
+            findings.first(where: { $0.subject == "QueenGhostService" })?.severity == .dead,
+            "an unreferenced type is ranked dead, not merely noted"
+        )
+
+        // And the empty case must still read as a statement about the checks
+        // rather than a clean bill of health.
+        let emptyRoot = NSTemporaryDirectory() + "trios-audit-empty-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: emptyRoot) }
+        try? manager.createDirectory(
+            atPath: "\(emptyRoot)/rings/SR-00", withIntermediateDirectories: true
+        )
+        check(
+            ChatViewModel.auditRepository(root: emptyRoot).isEmpty,
+            "an empty tree yields no findings rather than erroring"
         )
     }
 }
