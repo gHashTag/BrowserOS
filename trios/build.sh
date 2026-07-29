@@ -177,7 +177,29 @@ fi
 # available; fall back to the standard Homebrew Cellar layout on Apple Silicon.
 SQLCIPHER_INCLUDE="${SQLCIPHER_INCLUDE:-$(pkg-config --variable=includedir sqlcipher 2>/dev/null)}"
 SQLCIPHER_LIB="${SQLCIPHER_LIB:-$(pkg-config --variable=libdir sqlcipher 2>/dev/null)}"
-CSQLCIPHER_MODULEMAP_DIR="$PROJECT_DIR/../Sources/CSQLCipher"
+# The module map is one directory up in the BrowserOS checkout, but this app
+# also lives at apps/trios-macos in the trios monorepo, where that path resolves
+# to apps/Sources and does not exist. Search the candidates instead of assuming
+# one layout, so the build works from either checkout.
+CSQLCIPHER_MODULEMAP_DIR="${CSQLCIPHER_MODULEMAP_DIR:-}"
+if [ -z "$CSQLCIPHER_MODULEMAP_DIR" ]; then
+    for candidate in \
+        "$PROJECT_DIR/../Sources/CSQLCipher" \
+        "$PROJECT_DIR/../../Sources/CSQLCipher" \
+        "$PROJECT_DIR/Sources/CSQLCipher"
+    do
+        if [ -f "$candidate/module.modulemap" ]; then
+            CSQLCIPHER_MODULEMAP_DIR="$candidate"
+            break
+        fi
+    done
+fi
+if [ ! -f "$CSQLCIPHER_MODULEMAP_DIR/module.modulemap" ]; then
+    echo "[FAIL] CSQLCipher module map not found. Looked beside the project, one"
+    echo "       level further up, and inside it. Set CSQLCIPHER_MODULEMAP_DIR to"
+    echo "       the directory holding module.modulemap."
+    exit 1
+fi
 SQLCIPHER_DYLIB_NAME="libsqlcipher.dylib"
 
 if [ -z "$SQLCIPHER_INCLUDE" ] || [ -z "$SQLCIPHER_LIB" ] || [ ! -d "$SQLCIPHER_INCLUDE" ]; then
