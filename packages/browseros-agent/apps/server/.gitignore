@@ -1,0 +1,5 @@
+tmp-shot-*/
+tmp-upload-*/
+.devtools
+db/
+identity/
