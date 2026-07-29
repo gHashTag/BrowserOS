@@ -585,25 +585,24 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
 /// *and executed* before being added, never on the strength of a resolved
 /// source list - which is what caught the three below.
 ///
-/// Both `session_recovery_*` suites **hang** rather than fail. They reach
-/// KeychainSymmetricKeyStore through TriOSEncryption.encrypt, and
-/// `SecItemCopyMatching` blocks on a password dialog no unattended run can
-/// answer. Wiring either on a successful compile would freeze clade-e2e until
-/// its timeout, reporting nothing - strictly worse than the silence they are in
-/// now.
+/// Both `session_recovery_*` suites **hang** on the Keychain when run bare.
+/// ProjectPaths now lets the environment answer the variant question where
+/// there is no bundle, so `TRIOS_VARIANT=dev` makes them fail in about a second
+/// instead of freezing - the difference between a bug you can read and a job
+/// that reports nothing. That escape hatch is why they are diagnosable at all;
+/// it is not applied here, because forcing every suite to dev breaks
+/// RecursionGuard.
 ///
-/// `session_recovery_export_test` used to fail fast instead, on a stale
-/// assertion that the package is named `.zip`. That assertion has been
-/// corrected - the product writes `.triosrecovery` and has since it started
-/// encrypting - and the reward for fixing it was execution reaching the
-/// keychain and hanging like its sibling. The red assertion was hiding the
-/// hang, not competing with it.
+/// What they fail on is the same thing, and it is genuine. Their extraction
+/// step shells out to `ditto` against what it assumes is a plain zip, and the
+/// package has been encrypted since Cycle 14 - `ditto: Couldn't read PKZip
+/// signature`. Verifying an encrypted package means going through
+/// SessionRecoveryPackageReader, which decrypts first. That is a real rewrite of
+/// both suites' verification halves, not a source-list fix.
 ///
-/// Both need the dev-variant secret store, and `TRIOS_VARIANT=dev` does not
-/// currently reach them: ProjectPaths resolves the variant from
-/// `Bundle.main.infoDictionary`, and a bare test binary has no bundle, so it
-/// falls back to prod and takes the keychain path. Letting the environment
-/// answer when there is no bundle would unblock both at once.
+/// `session_recovery_export_test` also had a stale assertion that the package
+/// is named `.zip`; corrected, and it now covers the writer's extension
+/// normalisation instead.
 ///
 /// `clade_guard_test` will not compile: CladeGuard.swift wants
 /// `ProjectPaths.root`, and something else in that suite's closure declares a
@@ -709,6 +708,11 @@ fn run_swift_logic_suite(dir: &str, suite: &SwiftLogicSuite, report: &mut String
         .stderr(Stdio::piped())
         .output();
 
+    // Suites deliberately run with the environment as found, *not* forced to
+    // the dev variant. Forcing it looks like free insurance against the
+    // Keychain hang, and it breaks RecursionGuard, which asserts the prod
+    // singleton lock path and prod bundle identifier by name. Any future move
+    // to run suites as dev has to make that suite variant-aware first.
     match compiled {
         Ok(out) if out.status.success() => match Command::new(suite.bin).output() {
             Ok(run) if run.status.success() => {

@@ -94,15 +94,29 @@ enum ProjectPaths {
     /// be written a third time in this file, beside the copies in `build.sh` and
     /// in `BuildVariant`; only the copy nobody called was under test.
     ///
-    /// An absent key means there is no bundle to read - a CLI or test process -
-    /// and that stays `.prod`, which is what this file has always answered.
-    /// Note this is deliberately *not* `BuildVariantPolicy.defaultVariant`:
-    /// that one is `.dev` and answers a different question, namely what an
-    /// unqualified `./build.sh` should produce. Build-time default and runtime
-    /// fallback look alike and are not the same thing.
+    /// The bundle wins wherever there is one, so nothing in the environment can
+    /// move a shipped app off its own data directory or onto the release
+    /// keychain. The environment is consulted only when there is no bundle to
+    /// ask: a CLI tool, or a bare test binary.
+    ///
+    /// Without that, a standalone test binary reports `prod`, takes the Keychain
+    /// path, and blocks inside `SecItemCopyMatching` on a password dialog that
+    /// nobody is present to answer. It does not fail - it hangs, which in an
+    /// unattended run means the job dies on a timeout having reported nothing.
+    /// Two recovery suites were unrunnable for exactly this reason.
+    ///
+    /// Still `.prod` when neither answers, which is what this file has always
+    /// said. Deliberately *not* `BuildVariantPolicy.defaultVariant`: that one is
+    /// `.dev` and answers a different question, namely what an unqualified build
+    /// should produce. Build-time default and runtime fallback look alike and
+    /// are not the same thing.
     static var variant: BuildVariant {
-        let raw = Bundle.main.infoDictionary?["TRIOS_VARIANT"] as? String ?? ""
-        return BuildVariant(rawValue: raw) ?? .prod
+        if let bundled = Bundle.main.infoDictionary?["TRIOS_VARIANT"] as? String,
+           let resolved = BuildVariant(rawValue: bundled) {
+            return resolved
+        }
+        let environment = ProcessInfo.processInfo.environment["TRIOS_VARIANT"] ?? ""
+        return BuildVariant(rawValue: environment) ?? .prod
     }
 
     /// True for the development build.

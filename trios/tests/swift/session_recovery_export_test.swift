@@ -218,8 +218,20 @@ struct SessionRecoveryExportTest {
             ],
             includeSystemProcessLog: false
         )
-        let archiveURL = testRoot.appendingPathComponent("recovery.zip")
-        let result = try SessionRecoveryPackageWriter().write(request: request, to: archiveURL)
+        // Deliberately request a .zip. The writer normalises any other
+        // extension to .triosrecovery, so asking for the wrong one and checking
+        // where the file actually landed is the only way this test covers that
+        // rule - and the rule is easy to trip over, because `write` returns a
+        // result that does not carry the final URL. A caller who wants to reveal
+        // the file in Finder has to re-derive the normalisation, exactly as this
+        // test now does.
+        let requestedURL = testRoot.appendingPathComponent("recovery.zip")
+        let archiveURL = requestedURL.appendingPathExtension("triosrecovery")
+        let result = try SessionRecoveryPackageWriter().write(request: request, to: requestedURL)
+        expect(
+            !fileManager.fileExists(atPath: requestedURL.path),
+            "writer does not leave a file at the un-normalised path"
+        )
         expect(fileManager.fileExists(atPath: archiveURL.path), "archive written")
         expect(result.fileCount >= 8, "archive reports detailed files")
         expect(result.redactionCount >= 1, "archive reports log redaction")
