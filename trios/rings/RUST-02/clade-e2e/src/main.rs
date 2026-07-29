@@ -433,6 +433,14 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
         ],
     },
     SwiftLogicSuite {
+        label: "Trinity999TabMap",
+        bin: "/tmp/trios_trinity_999_tab_map_test",
+        sources: &[
+            "tests/swift/trinity_999_tab_map_test.swift",
+            "rings/SR-00/Trinity999TabMap.swift",
+        ],
+    },
+    SwiftLogicSuite {
         label: "TriosVisualTheme",
         bin: "/tmp/trios_trios_visual_theme_test",
         sources: &[
@@ -458,16 +466,12 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
 /// of the file joining the silent others. Entries come off this list by being
 /// added to SWIFT_LOGIC_SUITES, which needs each suite's own source list.
 ///
-/// Half of the original thirty are gone: every file whose subject was a single
-/// ring source, verified by compiling and running each one before wiring it.
-/// The fifteen below are the ones that took more than that, in three kinds.
+/// Sixteen of the original thirty are gone: every file whose subject was a
+/// single ring source, verified by compiling and running each one before wiring
+/// it, plus `trinity_999_tab_map_test`, which needed its assertion corrected
+/// first - it had outlived the Skills tab and still demanded seven workspaces.
 ///
-/// **One is red, not merely unwired.** `trinity_999_tab_map_test` compiles,
-/// runs, and fails on "Seven Trios workspaces must be hosted". Either the tab
-/// map lost a workspace or the test outlived the layout it described. It is not
-/// wired because wiring a failing test turns this list into a broken build; it
-/// is called out here because it is the only entry that is a finding rather
-/// than a chore.
+/// The fourteen below took more than that, in two kinds.
 ///
 /// **Eleven need more than their obvious subject** - they pull in types from
 /// other rings, so each needs its dependencies worked out one at a time.
@@ -490,7 +494,6 @@ const KNOWN_UNWIRED_SWIFT_TESTS: &[&str] = &[
     "recursion_guard_test.swift",
     "session_recovery_export_test.swift",
     "session_recovery_resilience_test.swift",
-    "trinity_999_tab_map_test.swift",
 ];
 
 /// Fails when a focused Swift test exists that nothing runs and nothing admits

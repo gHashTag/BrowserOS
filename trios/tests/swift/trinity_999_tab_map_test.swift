@@ -4,12 +4,19 @@ import Foundation
 struct Trinity999TabMapTests {
     static func main() {
         expect(Trinity999TabMap.petalCount == 27, "999 menu must retain 27 petals")
-        expect(Trinity999TabMap.routes.count == 7, "Seven Trios workspaces must be hosted")
+        // Deliberately a literal. `isValid` already checks routes against
+        // Trios999Destination.allCases, so spelling the count that way here
+        // would restate it and pass forever. The literal is the only thing that
+        // makes adding a workspace a conscious edit to this file - which is
+        // exactly the drift that left this test asserting seven after Skills
+        // became the eighth.
+        expect(Trinity999TabMap.routes.count == 8, "Eight Trios workspaces must be hosted")
         expect(Trinity999TabMap.isValid, "Hosted routes and shortcuts must be unique")
 
         expectRoute(.chat, petal: 0, realm: .razum, shortcut: 1)
         expectRoute(.models, petal: 1, realm: .razum, shortcut: 2)
         expectRoute(.logs, petal: 2, realm: .razum, shortcut: 3)
+        expectRoute(.skills, petal: 3, realm: .razum, shortcut: 4)
         expectRoute(.git, petal: 14, realm: .materiya, shortcut: 6)
         expectRoute(.terminal, petal: 13, realm: .materiya, shortcut: 5)
         expectRoute(.mesh, petal: 16, realm: .materiya, shortcut: 8)
