@@ -65,6 +65,55 @@ final class SalienceLearner {
         return smallest == .greatestFiniteMagnitude ? 0 : smallest
     }
 
+    /// A dated reading of every weight, appended when one moves.
+    ///
+    /// "Leave it a week and see" needs something to compare against in a week.
+    /// Without a trail the only observable is the current number, which cannot
+    /// distinguish a signal that has settled from one that never moved.
+    struct WeightSnapshot: Codable, Equatable {
+        let at: Date
+        let weights: [String: Double]
+        let observations: [String: Int]
+    }
+
+    /// Newest last. Capped, because a file that grows on every review is a file
+    /// that eventually costs more to read than the history is worth.
+    private(set) var history: [WeightSnapshot] = []
+    private static let historyLimit = 200
+
+    /// How far each weight has moved from where it started.
+    ///
+    /// Reported rather than the raw series: the question a week later is "did
+    /// anything change and by how much", not "what were the intermediate
+    /// values".
+    func drift() -> [(feature: QueenSalience.Feature, from: Double, to: Double, seen: Int)] {
+        QueenSalience.Feature.allCases.compactMap { feature in
+            let now = weight(for: feature)
+            let seen = tallies[feature.rawValue]?.seen ?? 0
+            guard abs(now - feature.prior) > 0.001 else { return nil }
+            return (feature, feature.prior, now, seen)
+        }
+    }
+
+    private func snapshotIfChanged() {
+        let weights = Dictionary(
+            uniqueKeysWithValues: QueenSalience.Feature.allCases.map {
+                ($0.rawValue, weight(for: $0))
+            }
+        )
+        // Only when something actually moved. A snapshot per review would fill
+        // the trail with duplicates and hide the moments that matter.
+        if let last = history.last, last.weights == weights { return }
+        history.append(WeightSnapshot(
+            at: Date(),
+            weights: weights,
+            observations: tallies.mapValues(\.seen)
+        ))
+        if history.count > Self.historyLimit {
+            history.removeFirst(history.count - Self.historyLimit)
+        }
+    }
+
     /// Records what happened to a task once the user decided.
     func record(task: DelegatedTask, neededUser: Bool, now: Date = Date()) {
         for feature in QueenSalience.features(of: task, now: now) {
@@ -73,6 +122,7 @@ final class SalienceLearner {
             if neededUser { tally.intervened += 1 }
             tallies[feature.rawValue] = tally
         }
+        snapshotIfChanged()
         persist()
         TriosLogBus.shared.debug(
             .queen,
@@ -109,12 +159,25 @@ final class SalienceLearner {
 
     // MARK: - Persistence
 
+    /// On-disk shape. Versioned by structure rather than a number: an older
+    /// file is a bare dictionary of tallies, and decoding falls back to it so a
+    /// history feature does not throw away the counts already collected.
+    private struct Stored: Codable {
+        var tallies: [String: Tally]
+        var history: [WeightSnapshot]
+    }
+
     private func load() {
-        guard let data = FileManager.default.contents(atPath: storePath),
-              let decoded = try? JSONDecoder().decode([String: Tally].self, from: data) else {
+        guard let data = FileManager.default.contents(atPath: storePath) else { return }
+        let decoder = JSONDecoder()
+        if let stored = try? decoder.decode(Stored.self, from: data) {
+            tallies = stored.tallies
+            history = stored.history
             return
         }
-        tallies = decoded
+        if let legacy = try? decoder.decode([String: Tally].self, from: data) {
+            tallies = legacy
+        }
     }
 
     private func persist() {
@@ -125,7 +188,9 @@ final class SalienceLearner {
         )
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(tallies) else { return }
+        guard let data = try? encoder.encode(
+            Stored(tallies: tallies, history: history)
+        ) else { return }
         try? data.write(to: URL(fileURLWithPath: storePath), options: .atomic)
     }
 }

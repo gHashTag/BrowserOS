@@ -3501,6 +3501,22 @@ final class ChatViewModel: ObservableObject {
                 learner.evidence(for: feature)
             )
         }
+        let drifted = learner.drift()
+        let driftLine: String
+        if drifted.isEmpty {
+            driftLine = "\n\nNothing has moved off my starting estimates yet. "
+                + "Come back after a week of real reviews and this line will say "
+                + "what changed."
+        } else {
+            let moves = drifted.map {
+                String(
+                    format: "%@ %.0f -> %.1f after %d",
+                    $0.feature.rawValue, $0.from, $0.to, $0.seen
+                )
+            }
+            driftLine = "\n\nMoved so far: " + moves.joined(separator: "; ") + "."
+        }
+
         await postQueenNotice(
             SystemNoticeClassifier.infoMarker
                 + "How loudly each signal shouts when I order your review queue. "
@@ -3508,7 +3524,7 @@ final class ChatViewModel: ObservableObject {
                 + "tasks carrying that signal actually needed you, once I have seen "
                 + "\(learner.minimumObservations) of them - a threshold I derive from "
                 + "how finely the estimates are trying to distinguish, not a number I "
-                + "picked.\n" + lines.joined(separator: "\n")
+                + "picked.\n" + lines.joined(separator: "\n") + driftLine
         )
     }
 
