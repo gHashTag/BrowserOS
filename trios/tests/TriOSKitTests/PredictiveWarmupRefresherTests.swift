@@ -28,6 +28,10 @@ private actor SlowMockHealthService: ModelHealthServiceProtocol {
     func callCount() -> Int { probeCount }
 }
 
+// @MainActor for the same reason as the scheduler suite: setUp builds a
+// ModelConfigurationStore, which is main-actor isolated, and so are the setters
+// the tests use to arrange each case.
+@MainActor
 final class PredictiveWarmupRefresherTests: XCTestCase {
     private var defaults: UserDefaults!
     private var healthService: SlowMockHealthService!
@@ -69,12 +73,16 @@ final class PredictiveWarmupRefresherTests: XCTestCase {
         async let second: Void = refresher.refresh()
         async let third: Void = refresher.refresh()
 
-        XCTAssertTrue(await refresher.isRefreshing)
+        let observed1 = await refresher.isRefreshing
+
+        XCTAssertTrue(observed1)
 
         _ = await (first, second, third)
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        XCTAssertFalse(await refresher.isRefreshing)
+        let observed2 = await refresher.isRefreshing
+
+        XCTAssertFalse(observed2)
         let count = await healthService.callCount()
         XCTAssertGreaterThan(count, 0)
     }
@@ -113,7 +121,9 @@ final class PredictiveWarmupRefresherTests: XCTestCase {
         store.refreshWarmupCacheInBackground()
         store.refreshWarmupCacheInBackground()
 
-        XCTAssertTrue(await store.isWarmupCacheRefreshing)
+        let observed3 = await store.isWarmupCacheRefreshing
+
+        XCTAssertTrue(observed3)
 
         while await store.isWarmupCacheRefreshing {
             try await Task.sleep(nanoseconds: 20_000_000)
