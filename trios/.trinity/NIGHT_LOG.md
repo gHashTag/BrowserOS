@@ -1940,3 +1940,28 @@ from one holding real work; running the cassette suite after the probe swept it
 away. Nothing was lost tonight because the commit is still reachable and the
 content was a throwaway, but that is luck rather than design, and it is the next
 cycle's work.
+
+## 2026-07-30 ~17:1x UTC - the sweep that could not tell work from scaffolding
+
+All three verifications green first, so the cycle took the item last night's
+live run exposed: `make cassettes` cleaned up with `git branch -D` over
+queen/*, which is every branch the Queen has ever created for anything, and it
+had already deleted a real delegation's committed branch. A replay always
+delegates issue 1086 titled "Cassette <file>", so the suite knows its own
+branches exactly - queen/1086-cassette-* - and narrowing to that is the fix.
+
+Narrowing on its own would have been the weaker kind of clean result, because a
+glob matching nothing leaves every branch standing and looks the same as a glob
+that works. So the suite plants queen/0-sweep-canary before the replays, named
+to look like a delegation and nothing like a cassette, and afterwards asserts
+both directions: the canary survived and no cassette branch did. I ran it with
+the old queen/* deliberately restored and watched it fail on the canary, then
+ran it as shipped and watched it report the sweep sparing work it did not
+create. A guard I have not seen fail is a guard I have not tested.
+
+Left alone deliberately: the worker still guesses the date because the
+specification asks for one and supplies none - a real gap, but in the brief
+rather than in anything destructive. Also left: no delegation has yet reached a
+pull request, which is the next real milestone and too large for one cycle. And
+the 22 XCTest errors, unchanged, still waiting on a question only the user can
+answer.
