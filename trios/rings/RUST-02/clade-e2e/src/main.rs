@@ -635,6 +635,135 @@ const KNOWN_UNWIRED_SWIFT_TESTS: &[&str] = &[
 
 /// Fails when a focused Swift test exists that nothing runs and nothing admits
 /// to skipping.
+/// BR-OUTPUT files deliberately left out of the app.
+///
+/// build.sh's LEAN_BR_OUTPUT decides what the binary contains, and both dev and
+/// release use it. A file can therefore sit in the tree looking entirely
+/// present and never be compiled - which is not a hypothetical: QueenStatusBadge
+/// rendered nothing for months partly because it was absent from that list, and
+/// a reference-count scan cannot tell "unused" from "not built".
+///
+/// These seventeen are experiments, reachable only through
+/// TRIOS_INCLUDE_PROTOTYPES=1. Naming them is what makes the difference between
+/// a prototype and a file somebody dropped by accident visible at all.
+const KNOWN_PROTOTYPE_SOURCES: &[&str] = &[
+    "AIMacroGenerator.swift",
+    "AccessibilityEnhancements.swift",
+    "AgentTaskBubbleView.swift",
+    "AnalyticsService.swift",
+    "CommunityMacroMarketplace.swift",
+    "ExtensionStoreAPI.swift",
+    "HotkeyAnalytics.swift",
+    "HotkeyPreferences.swift",
+    "MacroRecorder.swift",
+    "MessageSearchOverlay.swift",
+    "NLHotkeyCreator.swift",
+    "OnboardingFlow.swift",
+    "OpenNLParser.swift",
+    "PluginAPI.swift",
+    "SearchOverlay.swift",
+    "ToolCallFix.swift",
+    "VoiceCommandHandler.swift",
+];
+
+/// Fails when a BR-OUTPUT source is neither compiled nor declared a prototype,
+/// and when the build list names a file that no longer exists.
+fn check_br_output_is_accounted_for(dir: &str, report: &mut String) -> bool {
+    let build_sh = PathBuf::from(dir).join("build.sh");
+    let script = match fs::read_to_string(&build_sh) {
+        Ok(text) => text,
+        Err(error) => {
+            report.push_str(&format!(
+                "\n- [FAIL] build-list check could not read {}: {error}\n",
+                build_sh.display()
+            ));
+            return false;
+        }
+    };
+
+    // Everything quoted between LEAN_BR_OUTPUT=( and its closing paren.
+    let mut compiled: Vec<String> = Vec::new();
+    if let Some(start) = script.find("LEAN_BR_OUTPUT=(") {
+        let tail = &script[start..];
+        let end = tail.find("\n    )").unwrap_or(tail.len());
+        for line in tail[..end].lines() {
+            let trimmed = line.trim();
+            if let Some(name) = trimmed.strip_prefix('"').and_then(|r| r.strip_suffix('"')) {
+                if name.ends_with(".swift") {
+                    compiled.push(name.to_string());
+                }
+            }
+        }
+    }
+    if compiled.is_empty() {
+        // Parsing that silently yields nothing would pass every later check by
+        // having nothing to disagree with. That is the bug this guard exists for.
+        report.push_str("\n- [FAIL] build-list check parsed no entries from LEAN_BR_OUTPUT\n");
+        return false;
+    }
+
+    let br_output = PathBuf::from(dir).join("BR-OUTPUT");
+    let entries = match fs::read_dir(&br_output) {
+        Ok(entries) => entries,
+        Err(error) => {
+            report.push_str(&format!(
+                "\n- [FAIL] build-list check could not read {}: {error}\n",
+                br_output.display()
+            ));
+            return false;
+        }
+    };
+
+    let mut on_disk: Vec<String> = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.ends_with(".swift") {
+            on_disk.push(name);
+        }
+    }
+    if on_disk.is_empty() {
+        report.push_str("\n- [FAIL] build-list check found no Swift files in BR-OUTPUT\n");
+        return false;
+    }
+
+    let mut unaccounted: Vec<String> = on_disk
+        .iter()
+        .filter(|n| !compiled.contains(n) && !KNOWN_PROTOTYPE_SOURCES.contains(&n.as_str()))
+        .cloned()
+        .collect();
+    let mut phantom: Vec<String> = compiled
+        .iter()
+        .filter(|n| !on_disk.contains(n))
+        .cloned()
+        .collect();
+
+    unaccounted.sort();
+    phantom.sort();
+
+    if unaccounted.is_empty() && phantom.is_empty() {
+        report.push_str(&format!(
+            "\n- [OK] BR-OUTPUT accounted for: {} files, {} compiled, {} declared prototypes\n",
+            on_disk.len(),
+            compiled.len(),
+            KNOWN_PROTOTYPE_SOURCES.len()
+        ));
+        return true;
+    }
+    if !unaccounted.is_empty() {
+        report.push_str(&format!(
+            "\n- [FAIL] BR-OUTPUT file(s) neither compiled nor declared a prototype: {}\n",
+            unaccounted.join(", ")
+        ));
+    }
+    if !phantom.is_empty() {
+        report.push_str(&format!(
+            "\n- [FAIL] build.sh compiles file(s) that do not exist: {}\n",
+            phantom.join(", ")
+        ));
+    }
+    false
+}
+
 fn check_swift_suites_are_wired(dir: &str, report: &mut String) -> bool {
     let test_dir = PathBuf::from(dir).join("tests/swift");
     let entries = match fs::read_dir(&test_dir) {
@@ -706,6 +835,9 @@ fn check_swift_suites_are_wired(dir: &str, report: &mut String) -> bool {
 fn run_swift_logic_tests(report: &mut String) -> bool {
     let dir = trios_config::project_dir();
     let mut all_passed = check_swift_suites_are_wired(&dir, report);
+    if !check_br_output_is_accounted_for(&dir, report) {
+        all_passed = false;
+    }
     for suite in SWIFT_LOGIC_SUITES {
         if !run_swift_logic_suite(&dir, suite, report) {
             all_passed = false;
