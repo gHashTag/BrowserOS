@@ -2559,3 +2559,35 @@ yesterday's audit reading; the store-level output budget that can be read but
 never set; the observer's shell blind spot; the four RichTextRenderer
 deprecations; the pull request waiting on a token only the user can place; and
 the 22 XCTest errors.
+
+## 2026-07-31 ~12:0x UTC - a switch painted on the wall
+
+Verifications green first. This cycle took the second of the three uncalled
+rules the audit reported: consumeBudget. QueenProposalApplier reads the safety
+budget before it touches a file and refuses when it is inactive, and nothing
+anywhere decremented it. The budget sat at its default of ten, stayed active
+forever, and the only way to stop the Queen applying proposals was to halt her
+by hand.
+
+The reason it could not be called is worth keeping: the check is static and
+reads a file, while the decrement was an instance method on a service the
+applier never holds. Not a forgotten call so much as a call that had nowhere to
+be made from. The spend is static now, and the instance method delegates rather
+than repeating the arithmetic, because two implementations of one rule is how
+this repository has produced most of its defects.
+
+Charged after the commit succeeds rather than before it. A proposal that fails
+to commit changed nothing and should not cost an attempt, and the commit is the
+first step in that sequence walking away cannot undo. Reaching zero is logged,
+since a limit that stops things silently gets diagnosed as a hang.
+
+Five assertions run a budget to nothing in a temporary directory. Removing the
+write - which is exactly the old behaviour, a decrement nobody persisted - fails
+three, including the one that reads the value back, because the next run only
+ever sees what reached disk.
+
+Left alone deliberately: canRun in the skill store, the last of the three
+uncalled rules; the store-level output budget that can be read but never set;
+the observer's shell blind spot; the four RichTextRenderer deprecations; the
+pull request waiting on a token only the user can place; and the 22 XCTest
+errors.
