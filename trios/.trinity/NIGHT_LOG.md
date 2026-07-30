@@ -2277,3 +2277,36 @@ at the screen; the 86 never-called function candidates; the pull request waiting
 on a token only the user can place; and the 22 XCTest errors. The mutation sweep
 has covered the specification and the acceptance path so far - the observer, the
 committer and the salience learner are untouched.
+
+## 2026-07-31 ~03:0x UTC - the observer's other half, and a blind spot named
+
+Verifications green first, then mutation probes moved to the observer. Removing
+"edit" from isWriteTool left the suite and all four cassettes green: every
+fixture and every cassette calls one tool, filesystem_write, so half the
+detector's vocabulary had never been executed by anything at all.
+
+Chasing that turned up more than the gap. There is no tool named "edit" in this
+project - the vocabulary is filesystem_read, filesystem_write, filesystem_bash,
+fs_read, fs_write, fs_list, and the five matches for "Edit" in the sources are
+button labels. The branch is provision for tools we do not have, which is fine
+in itself but means the detector covers less of reality than reading it
+suggests.
+
+Less in one way that matters. filesystem_bash is neither write-named nor
+path-argumented, so a worker writing with `echo >` or `sed -i` is invisible to
+the boundary check. Nothing wrong reaches the branch, because the committer
+filters the diff against the same boundary - but the warning is lost, and the
+worker spends a turn on a file that then simply never appears with nobody
+saying why. That is now asserted as a known blind spot with the reason beside
+it, and the assertion is written to fail the day someone teaches the observer
+about shells, which is when it should be deleted.
+
+Four tool names are exercised now and the mutation fails two checks by name.
+Floor 350 to 355.
+
+Left alone deliberately: teaching the observer to read shell commands, which is
+a parser and not a cycle's work; the four RichTextRenderer deprecations; the 86
+never-called function candidates; the pull request waiting on a token only the
+user can place; and the 22 XCTest errors. The mutation sweep has now covered the
+specification, the acceptance path and the observer - the committer and the
+salience learner remain.
