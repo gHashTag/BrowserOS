@@ -2075,3 +2075,27 @@ thing to do unattended. The fifth, a discarded runProcess result in branch
 creation, is small and real and should be next. Also left, for a sixth day: the
 worker guesses the date, no delegation has reached a pull request, and the 22
 XCTest errors.
+
+## 2026-07-30 ~21:0x UTC - the warning that was not cosmetic
+
+Verifications green first, then the smallest item the new gate had made
+visible: a discarded runProcess result in createVirtualBranch. I had filed it
+as tidy-up. It was not. A failed delegation told the user the branch could not
+be created and nothing else - not that the name was taken, not that HEAD was
+unborn, not that git had been killed by the timeout - and the reason was
+sitting in the string being thrown away. The compiler had been pointing at it
+on every build for as long as the code existed.
+
+That is the case for yesterday's gate in one example: the toolchain was naming
+a real gap and nothing was listening. createVirtualBranch now returns nil or
+git's own complaint, the notice quotes it, and a silent failure says so rather
+than passing "" upward where an empty string would read as success. Ceiling
+lowered 5 to 4, and the build now sits exactly on it.
+
+Left alone deliberately: the four remaining warnings, all deprecated Text
+concatenation in RichTextRenderer. Removing them means rebuilding inline
+markdown rendering on AttributedString, which is user-visible and has no test
+covering what it draws - that one wants someone looking at the screen, not a
+green build at one in the morning. Also left, for a sixth day: the worker
+guesses the date, no delegation has reached a pull request (waiting on a GitHub
+token, which is the user's to place), and the 22 XCTest errors.
