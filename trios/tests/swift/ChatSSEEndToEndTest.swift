@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 256
+    static let minimumChecks = 267
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -67,6 +67,7 @@ struct ChatSSEEndToEndTests {
         await runScrollPositionPolicyAndRequestDelivery()
         await runCassetteReplayAndObserver()
         await runSalienceLearnsFromOutcomes()
+        await runQueenProposesEvolutionOptions()
         await runWorkerLivenessIsObservable()
         await runPullRequestOutcomeMapping()
         await runAcceptedWaitsForTheMerge()
@@ -2120,6 +2121,56 @@ struct ChatSSEEndToEndTests {
     /// view model now forwards this publisher; these checks pin the half that
     /// could silently stop being true - that the set is observable and that
     /// stopping a worker moves it.
+    /// The Queen proposes three things to do next, and does not invent a third.
+    ///
+    /// She may no longer open a chat on her own judgement, so proposing is the
+    /// only way she moves the project. That makes the honesty of the list load
+    /// bearing: padding it to three would dress an empty audit as a choice.
+    static func runQueenProposesEvolutionOptions() async {
+        print("\n# Scenario: three options, or fewer if there are fewer")
+
+        func finding(_ severity: QueenSelfAudit.Finding.Severity, _ subject: String) -> QueenSelfAudit.Finding {
+            QueenSelfAudit.Finding(
+                severity: severity, kind: "probe", subject: subject,
+                explanation: "why \(subject) matters", proposal: "do something about \(subject)"
+            )
+        }
+
+        let many = [
+            finding(.fragile, "fragile-one"),
+            finding(.dead, "dead-one"),
+            finding(.unverified, "unverified-one"),
+            finding(.dead, "dead-two"),
+        ]
+        let options = QueenEvolutionOptions.options(from: many)
+        check(options.count == 3, "four findings yield three options, not four")
+        check(options.map(\.label) == ["A", "B", "C"], "options are lettered so one can be picked in a word")
+        check(options.first?.subject.hasPrefix("dead") == true,
+              "dead code is offered first, matching how the roadmap ranks it")
+
+        // Dead code can be removed without asking what it should have done.
+        check(options.first?.needsUserDecision == false,
+              "removing something unreachable does not need a decision")
+        check(options.contains { $0.needsUserDecision },
+              "but unproven or fragile work does, and says so")
+
+        // The part that would be easy to fake.
+        let two = QueenEvolutionOptions.options(from: [finding(.dead, "only-one"), finding(.fragile, "only-two")])
+        check(two.count == 2, "two findings yield two options rather than a padded three")
+        let none = QueenEvolutionOptions.options(from: [])
+        check(none.isEmpty, "no findings yield no options")
+
+        let empty = QueenEvolutionOptions.message(for: none)
+        check(empty.contains("nothing to propose"), "an empty audit says so plainly")
+        check(empty.contains("about my checks"),
+              "and admits the silence is about the checks, not a clean bill of health")
+
+        let message = QueenEvolutionOptions.message(for: options)
+        check(message.contains("/approve"), "the message ends with the command that authorises one")
+        check(message.contains("will not open a chat"),
+              "and restates that she waits rather than starts")
+    }
+
     static func runWorkerLivenessIsObservable() async {
         print("\n# Scenario: a stopped worker stops reading as live")
 

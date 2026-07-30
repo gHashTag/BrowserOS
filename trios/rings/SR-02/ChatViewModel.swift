@@ -3604,11 +3604,19 @@ final class ChatViewModel: ObservableObject {
             SystemNoticeClassifier.infoMarker
                 + QueenSelfAudit.report(findings: findings, now: Date())
         )
+        // The audit says what is wrong; this says what she would do about it.
+        // Since she may no longer open a chat unasked, proposing is the only
+        // way she moves the project at all - without it the consent gate makes
+        // her passive rather than careful.
+        let options = QueenEvolutionOptions.options(from: findings)
+        await postQueenNotice(
+            SystemNoticeClassifier.infoMarker + QueenEvolutionOptions.message(for: options)
+        )
         TriosLogBus.shared.info(
             .queen,
             "queen.selfaudit",
             "Self-audit complete",
-            ["findings": String(findings.count)]
+            ["findings": String(findings.count), "options": String(options.count)]
         )
     }
 
