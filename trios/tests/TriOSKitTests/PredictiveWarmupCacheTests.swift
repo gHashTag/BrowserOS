@@ -15,10 +15,22 @@ final class PredictiveWarmupCacheTests: XCTestCase {
         model: String = "claude-sonnet-4-5",
         reason: String = "fastest"
     ) -> ModelWarmupResult {
-        ModelWarmupResult(
-            selected: CrossProviderModelCandidate(provider: provider, baseURL: baseURL, model: model),
-            didSwitch: true,
+        // `original` and `durationMs` are required now. Rather than pass a
+        // placeholder that contradicts the rest, the fixture describes a result
+        // where nothing was switched: selected equals original, so didSwitch is
+        // derived instead of asserted. A fixture claiming a switch it did not
+        // make is a small lie that the next reader has to disprove.
+        let candidate = CrossProviderModelCandidate(
+            provider: provider, baseURL: baseURL, model: model
+        )
+        return ModelWarmupResult(
+            selected: candidate,
+            original: candidate,
+            didSwitch: false,
             probes: [],
+            // Unread by the cache; a duration of zero would claim an
+            // instantaneous warmup rather than an unmeasured one.
+            durationMs: 1,
             reason: reason
         )
     }
@@ -64,8 +76,11 @@ final class PredictiveWarmupCacheTests: XCTestCase {
 
         await cache.invalidate()
 
-        XCTAssertNil(await cache.winner(tier: .any, strictQuotaGating: false))
-        XCTAssertNil(await cache.winner(tier: .cheap, strictQuotaGating: true))
+        let cached1 = await cache.winner(tier: .any, strictQuotaGating: false)
+
+        XCTAssertNil(cached1)
+        let cached2 = await cache.winner(tier: .cheap, strictQuotaGating: true)
+        XCTAssertNil(cached2)
     }
 
     func testInvalidateProviderBaseURLRemovesMatchingEntries() async {
@@ -77,7 +92,9 @@ final class PredictiveWarmupCacheTests: XCTestCase {
 
         await cache.invalidate(provider: .anthropic, baseURL: "https://api.anthropic.com")
 
-        XCTAssertNil(await cache.winner(tier: .any, strictQuotaGating: false))
+        let cached3 = await cache.winner(tier: .any, strictQuotaGating: false)
+
+        XCTAssertNil(cached3)
         let openaiCached = await cache.winner(tier: .cheap, strictQuotaGating: false)
         XCTAssertEqual(openaiCached?.selected.provider, .openai)
     }
@@ -103,7 +120,10 @@ final class PredictiveWarmupCacheTests: XCTestCase {
             strictQuotaGating: false,
             relativeTo: now.addingTimeInterval(5)
         )
-        XCTAssertEqual(remaining, 25, accuracy: 1)
+        // Unwrapped, not defaulted. A nil remaining time means the entry has no
+        // deadline, which is a different claim from "zero seconds left" - and
+        // defaulting would make an expiry that never got set look expired.
+        XCTAssertEqual(try XCTUnwrap(remaining), 25, accuracy: 1)
     }
 
     func testRemainingTTLReturnsNilWhenStale() async {
