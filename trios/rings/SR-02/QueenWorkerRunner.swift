@@ -225,19 +225,13 @@ final class QueenWorkerRunner: ObservableObject {
             "Do the work yourself. Do not delegate and do not open other chats."
         ]
         if let branch = task.virtualBranch {
-            // The specification carries this rule too, and for one release the
-            // two disagreed: the brief said do not check the branch out while
-            // these standing orders still said "attribute every edit to it",
-            // which is the sentence that made the first live worker run
-            // `git switch` and drag the shared checkout onto its branch. Of two
-            // documents stating one rule, the softer one wins, and standing
-            // orders are the ones an agent trusts.
-            lines.append(
-                "Your edits belong to the branch \(branch), but the Queen puts "
-                    + "them there after your turn. Do not check it out, switch "
-                    + "to it, create it, or commit anything: the checkout is "
-                    + "shared with the user and with other workers."
-            )
+            // The same sentence the specification carries, from the same
+            // source. Restating it here is what let the two drift: these
+            // standing orders kept "attribute every edit to the branch" - the
+            // wording that made the first live worker run `git switch` - after
+            // the specification had been corrected, and standing orders are the
+            // ones an agent trusts.
+            lines.append(QueenBranchPolicy.ownershipRule(branch: branch))
         }
         if task.ownedPaths.isEmpty {
             lines.append("No file boundary was set; ask before editing shared files.")

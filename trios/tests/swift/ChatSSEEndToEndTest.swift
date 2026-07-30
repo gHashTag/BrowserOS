@@ -2382,10 +2382,18 @@ struct ChatSSEEndToEndTests {
         // Naming the branch is not enough. The first live delegation ended with
         // the shared checkout standing on the worker's branch, because "every
         // edit belongs to X" reads as "go to X" and the worker obliged.
-        check(spec.contains("Do not check out"),
-              "the boundary forbids checking the branch out, not just names it")
-        check(spec.contains("shared"),
-              "and says why: the checkout belongs to everyone, not to this task")
+        // Compared against the shared source rather than a fragment. A test
+        // that greps for a phrase passes as soon as some document contains it;
+        // this one only passes while both documents carry the same sentence.
+        let rule = QueenBranchPolicy.ownershipRule(branch: "queen/21-probe")
+        check(spec.contains(rule),
+              "the boundary carries the branch rule verbatim from its one source")
+        check(rule.contains("Do not check that branch out") && rule.contains("shared"),
+              "and that rule forbids checking out and says why the checkout is not yours")
+        check(rule.contains("queen/21-probe"),
+              "the shared rule names the branch it was given")
+        check(QueenBranchPolicy.ownershipRule(branch: "queen/99-other") != rule,
+              "and is not a constant that merely looks personalised")
 
         // The case worth protecting.
         let empty = QueenTaskSpec.render(for: task(criteria: []))
@@ -2411,11 +2419,8 @@ struct ChatSSEEndToEndTests {
         // prompt over a message in the conversation, so a rule stated in both
         // places is only as strong as the weaker statement.
         let orders = QueenWorkerRunner.workerSystemPrompt(for: task(criteria: ["x"]))
-        check(orders.contains("queen/21-probe"), "the standing orders name the branch")
-        check(orders.contains("Do not check it out"),
-              "and forbid checking it out, as the specification does")
-        check(orders.contains("shared"),
-              "and give the reason, so the rule survives being paraphrased")
+        check(orders.contains(rule),
+              "the standing orders carry the identical sentence, not a paraphrase of it")
         check(!orders.contains("Attribute every edit to the branch"),
               "the wording that made a worker switch branches is gone from both places")
 

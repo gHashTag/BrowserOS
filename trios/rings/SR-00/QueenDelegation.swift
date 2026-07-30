@@ -463,6 +463,23 @@ enum QueenBranchPolicy {
     static let prefix = "queen"
     static let maximumSlugLength = 40
 
+    /// The one statement of who moves the branch and who leaves it alone.
+    ///
+    /// This sentence used to exist twice - in the specification and in the
+    /// worker's standing orders - and for one release the two disagreed. The
+    /// specification had been corrected after a live worker checked its branch
+    /// out and dragged the shared checkout with it; the standing orders still
+    /// said "attribute every edit to the branch", which is the sentence that
+    /// caused it, sitting in the place an agent trusts more. A test now catches
+    /// that disagreement, but catching is not preventing: one source cannot
+    /// disagree with itself.
+    static func ownershipRule(branch: String) -> String {
+        "Every edit belongs to `\(branch)`, and the Queen attributes them to it "
+            + "after your turn. Do not check that branch out, switch to it, "
+            + "create it, or commit anything: the checkout is shared with the "
+            + "user, with the build, and with every other worker."
+    }
+
     static func branchName(for issue: IssueReference, title: String) -> String {
         let slug = slugify(title)
         return slug.isEmpty
