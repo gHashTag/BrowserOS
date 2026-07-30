@@ -2591,3 +2591,36 @@ uncalled rules; the store-level output budget that can be read but never set;
 the observer's shell blind spot; the four RichTextRenderer deprecations; the
 pull request waiting on a token only the user can place; and the 22 XCTest
 errors.
+
+## 2026-07-31 ~13:0x UTC - the rule that was rightly ignored
+
+Verifications green first. This closes the set of three uncalled rules the
+audit reported: queenMayUse, consumeBudget and canRun. The first two were laws
+nobody enforced. The third turns out to be different, and that difference is
+the finding.
+
+canRun(_:) returned "the skill exists and is enabled" as one Bool. Both places
+that decide whether to run a skill need those apart: runQueenSkill says either
+"there is no skill called X" or "X is switched off in the Skills tab", which
+are different problems with different fixes, and delegation refuses to open a
+worker chat and has to name which happened. A single Bool destroys exactly the
+distinction its callers exist to make. Having no caller was correct - it
+answered the wrong question - so it is deleted rather than wired, with the
+reasoning left in its place, because the next reader will otherwise see two
+call sites doing the same two checks by hand and helpfully factor them back
+into it.
+
+Worth stating after three cycles of this: "declared and never called" is not
+one defect but at least two. Sometimes the caller is missing. Sometimes the
+function is, and the code around it already knows better.
+
+Four assertions now hold the distinction, which nothing protected - a missing
+skill is absent, a disabled one is present-but-off, and those are not the same
+answer. The harness has no way into the Queen's command handling, so this
+covers the primitives the messages are built from rather than the messages.
+Making isEnabled always true fails the last of them.
+
+Left alone deliberately: the store-level output budget that can be read but
+never set; the observer's shell blind spot; the four RichTextRenderer
+deprecations; the pull request waiting on a token only the user can place; and
+the 22 XCTest errors.
