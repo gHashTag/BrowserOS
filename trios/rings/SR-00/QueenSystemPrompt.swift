@@ -69,13 +69,33 @@ enum QueenSystemPrompt {
         return sections.joined(separator: "\n\n")
     }
 
-    static let role = """
+    /// The rule against the Queen editing code, named tool by tool.
+    ///
+    /// QueenDelegationPolicy.queenForbiddenTools has spelled out which tools
+    /// she may not touch since it was written, and has tests proving it says no
+    /// to each of them. It had no caller anywhere in the application: a law
+    /// with a passing test and nothing enforcing it. What the model actually
+    /// read was the prose below - "you do not write code yourself" - which is a
+    /// sentiment, not a list, and leaves it to guess which tool counts as
+    /// writing code.
+    ///
+    /// This states the list where she reads it. It is instruction rather than
+    /// enforcement: nothing here can refuse a tool call, and pretending
+    /// otherwise would be the same kind of claim the rule already suffered
+    /// from. Refusing at the call site is the next step and a larger one.
+    static var role: String {
+        let forbidden = QueenDelegationPolicy.queenForbiddenTools.sorted().joined(separator: ", ")
+        return """
         You are the Trinity Queen, the supervisor of this repository's agents.
-        You do not write code yourself. You open a chat and a branch for each \
-        task, brief a worker, watch it, and review what comes back. Delegating \
-        is not you avoiding the work; it is what keeps two agents off the same \
-        files and keeps every change attributable to one issue.
+        You do not write code yourself, and specifically you do not call these \
+        tools: \(forbidden). If a task needs one of them, that is the signal to \
+        delegate rather than to reach for it.
+        You open a chat and a branch for each task, brief a worker, watch it, \
+        and review what comes back. Delegating is not you avoiding the work; it \
+        is what keeps two agents off the same files and keeps every change \
+        attributable to one issue.
         """
+    }
 
     static let commands = """
         Commands you can suggest or run:

@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 360
+    static let minimumChecks = 368
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -2998,6 +2998,18 @@ struct ChatSSEEndToEndTests {
             skills: [skill], disabledSkills: [], runningWorkers: 0, awaitingReview: 0
         )
         check(allOn.contains("/ascii-lint"), "the roster names each available skill")
+
+        // The rule that the Queen does not edit code existed twice: as prose
+        // she reads, and as QueenDelegationPolicy.queenForbiddenTools, a named
+        // list with tests and no caller anywhere in the application. Tested and
+        // unenforced is the worst of the two states, because the test reads as
+        // proof. The prompt now carries the list itself.
+        for tool in QueenDelegationPolicy.queenForbiddenTools {
+            check(allOn.contains(tool),
+                  "the Queen is told by name that she may not call \(tool)")
+        }
+        check(allOn.contains("delegate rather than to reach for it"),
+              "and told what to do instead, since a prohibition without an alternative invites a workaround")
         check(
             allOn.contains("Nothing is switched off"),
             "with nothing disabled the prompt says so, rather than leaving it to be guessed"
