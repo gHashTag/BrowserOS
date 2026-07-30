@@ -450,6 +450,20 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
         ],
     },
     SwiftLogicSuite {
+        label: "SessionRecoveryExport",
+        bin: "/tmp/trios_session_recovery_export_test",
+        sources: &[
+            "tests/swift/session_recovery_export_test.swift",
+            "rings/SR-00/SessionRecoveryExport.swift",
+            "rings/SR-01/SessionRecoveryPackageWriter.swift",
+            "rings/SR-00/TriOSEncryption.swift",
+            "rings/SR-00/KeychainSymmetricKeyStore.swift",
+            "rings/SR-00/DevSecretStore.swift",
+            "BR-OUTPUT/ProjectPaths.swift",
+            "rings/SR-00/BuildVariantPolicy.swift",
+        ],
+    },
+    SwiftLogicSuite {
         label: "TriosVisualTheme",
         bin: "/tmp/trios_trios_visual_theme_test",
         sources: &[
@@ -626,7 +640,6 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
 /// competing `ProjectPaths` without it. A name collision to untangle, not a
 /// missing file.
 const KNOWN_UNWIRED_SWIFT_TESTS: &[&str] = &[
-    "session_recovery_export_test.swift",
     "session_recovery_resilience_test.swift",
 ];
 
@@ -711,6 +724,20 @@ fn run_swift_logic_tests(report: &mut String) -> bool {
     all_passed
 }
 
+/// Suites that must run as the dev variant, by label.
+///
+/// Anything touching TriOSEncryption reaches KeychainSymmetricKeyStore, where
+/// `SecItemCopyMatching` blocks on a password dialog no unattended run can
+/// answer - a hang, not a failure, which costs the runner's whole timeout and
+/// reports nothing about the suites queued behind it. The dev variant reads
+/// secrets from files instead.
+///
+/// Opt-in rather than applied to everything, which was tried and reverted:
+/// RecursionGuard asserts the prod singleton lock path and prod bundle
+/// identifier by name, so forcing dev globally turns a real passing suite red
+/// to rescue a different one.
+const DEV_VARIANT_SUITES: &[&str] = &["SessionRecoveryExport"];
+
 fn run_swift_logic_suite(dir: &str, suite: &SwiftLogicSuite, report: &mut String) -> bool {
     let label = suite.label;
     let mut args: Vec<&str> = suite.sources.to_vec();
@@ -724,13 +751,13 @@ fn run_swift_logic_suite(dir: &str, suite: &SwiftLogicSuite, report: &mut String
         .stderr(Stdio::piped())
         .output();
 
-    // Suites deliberately run with the environment as found, *not* forced to
-    // the dev variant. Forcing it looks like free insurance against the
-    // Keychain hang, and it breaks RecursionGuard, which asserts the prod
-    // singleton lock path and prod bundle identifier by name. Any future move
-    // to run suites as dev has to make that suite variant-aware first.
+    let mut run = Command::new(suite.bin);
+    if DEV_VARIANT_SUITES.contains(&suite.label) {
+        run.env("TRIOS_VARIANT", "dev");
+    }
+
     match compiled {
-        Ok(out) if out.status.success() => match Command::new(suite.bin).output() {
+        Ok(out) if out.status.success() => match run.output() {
             Ok(run) if run.status.success() => {
                 report.push_str(&format!("- [OK] Swift logic tests ({}): passed\n", label));
                 true

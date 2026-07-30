@@ -291,10 +291,24 @@ struct SessionRecoveryExportTest {
         }
     }
 
+    /// Decrypts the package, then unzips it.
+    ///
+    /// `ditto` reads zips, and the package stopped being one when it started
+    /// being encrypted - it fails with "Couldn't read PKZip signature", which
+    /// reads like a corrupt archive rather than an encrypted one. The decrypt
+    /// step is unconditional because the writer normalises every path it is
+    /// given to `.triosrecovery`; branching on the extension here would copy
+    /// SessionRecoveryPackageReader's rule into a second place where it could
+    /// drift, and this test has already been bitten once by exactly that.
     private static func extractArchive(_ archive: URL, to destination: URL) throws {
+        let plaintext = try TriOSEncryption.recovery.decrypt(Data(contentsOf: archive))
+        let zipURL = destination.appendingPathComponent("archive.zip")
+        try plaintext.write(to: zipURL, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: zipURL) }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-        process.arguments = ["-x", "-k", archive.path, destination.path]
+        process.arguments = ["-x", "-k", zipURL.path, destination.path]
         try process.run()
         process.waitUntilExit()
         if process.terminationStatus != 0 {
