@@ -425,31 +425,3 @@ private struct HoverCopyBar: View {
     }
 }
 
-// MARK: - Standalone Copy Action Bar
-
-private struct CopyActionBar: View {
-    let content: String
-    @State private var copied = false
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Button(action: {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(content, forType: .string)
-                copied = true
-                DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                    copied = false
-                }
-            }) {
-                Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                    .font(.system(size: 12, weight: .medium, design: .default))
-                    .foregroundColor(copied ? .grokText : .grokDim)
-            }
-            .buttonStyle(PlainButtonStyle())
-            .help("Copy")
-
-            Spacer()
-        }
-        .padding(.top, 2)
-    }
-}

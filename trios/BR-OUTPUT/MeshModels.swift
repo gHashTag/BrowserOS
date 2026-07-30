@@ -85,6 +85,3 @@ struct MeshPeerRequest: Codable {
     let peer: UInt32
 }
 
-struct MeshSimpleResponse: Codable {
-    let ok: Bool
-}

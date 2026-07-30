@@ -110,21 +110,6 @@ struct MeshConversation: Identifiable, Codable, Equatable {
     }
 }
 
-// MARK: - Peer
-
-struct MeshPeer: Identifiable, Codable, Equatable {
-    let nodeId: UInt32
-    var displayName: String?
-    var lastSeen: UInt64?
-    var signalDbm: Int?
-
-    var id: UInt32 { nodeId }
-
-    var name: String {
-        displayName ?? "Node \(nodeId)"
-    }
-}
-
 // MARK: - Requests
 
 struct MeshChatSendRequest: Codable {
@@ -157,12 +142,6 @@ struct MeshChatSendResponse: Codable {
     let queued: Bool
 }
 
-struct MeshChatReceiveResponse: Codable {
-    let id: UInt64
-    let kind: UInt8
-    let text: String?
-}
-
 struct MeshChatMessagesResponse: Codable {
     let peer: UInt32
     let messages: [MeshChatMessage]
@@ -171,12 +150,6 @@ struct MeshChatMessagesResponse: Codable {
 struct MeshChatPollResponse: Codable {
     let messages: [MeshChatMessage]
     let conversations: [MeshConversation]
-}
-
-// MARK: - Polling Helpers
-
-struct MeshChatSinceQuery: Codable {
-    var sinceId: UInt64
 }
 
 // MARK: - Date Grouping

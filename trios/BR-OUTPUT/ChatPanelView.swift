@@ -2372,25 +2372,6 @@ private struct BrowserOSToolCallCard: View {
 
 // MARK: - Status Dot
 
-private struct StatusDot: View {
-    let isOn: Bool
-    let label: String?
-    let color: Color
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Circle()
-                .fill(isOn ? color : Color.grokDim)
-                .frame(width: 6, height: 6)
-            if let label = label {
-                Text(label)
-                    .font(.system(size: 11, weight: .medium, design: .default))
-                    .foregroundColor(.grokMuted)
-            }
-        }
-    }
-}
-
 // MARK: - Execution Planner
 
 private extension ChatPanelView {
