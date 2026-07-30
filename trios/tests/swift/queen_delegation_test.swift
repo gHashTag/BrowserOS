@@ -192,6 +192,34 @@ enum QueenDelegationTests {
             !queue.contains { $0.state == .accepted },
             "accepted work leaves the queue"
         )
+
+        // Everything above is also what age-only ordering produces: 12, 14 and
+        // 11 are the oldest three in that order, so the fixture agrees with the
+        // rule it was meant to replace and cannot tell them apart. Removing the
+        // age cap from QueenSalience left every check in this project green.
+        //
+        // These two can tell. `now` is pinned so the ages are known rather than
+        // whatever the clock says.
+        let now = t0.addingTimeInterval(400 * 3600)
+        let recentFailure = task(20, .failed, updated: 399 * 3600)
+        let ancientButFine = task(21, .awaitingReview, updated: 0)
+        let ranked = QueenDelegationPolicy.reviewQueue(
+            [ancientButFine, recentFailure], now: now
+        )
+        check(
+            ranked.map(\.issue.number) == [20, 21],
+            "a failure an hour old outranks a quiet task from a fortnight ago"
+        )
+
+        // Ties break on age, so an equally salient task cannot starve. Fed
+        // newest-first, the queue must still hand back oldest-first.
+        let older = task(30, .failed, updated: 100)
+        let newer = task(31, .failed, updated: 900)
+        check(
+            QueenDelegationPolicy.reviewQueue([newer, older], now: now)
+                .map(\.issue.number) == [30, 31],
+            "and two equally loud tasks come back oldest first, not in the order they arrived"
+        )
     }
 
     static func stateMachine() {
