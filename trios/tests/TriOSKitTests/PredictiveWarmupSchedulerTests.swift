@@ -22,6 +22,10 @@ private actor MockHealthService: ModelHealthServiceProtocol {
     func callCount() -> Int { probeCount }
 }
 
+// @MainActor because ModelConfigurationStore is, and setUp builds one. The
+// alternative is hopping actors inside every test for a type that only ever
+// lives on the main actor anyway.
+@MainActor
 final class PredictiveWarmupSchedulerTests: XCTestCase {
     private var defaults: UserDefaults!
     private var healthService: MockHealthService!
@@ -66,15 +70,34 @@ final class PredictiveWarmupSchedulerTests: XCTestCase {
         XCTAssertNotNil(cached)
     }
 
+
+    /// Runs `body` with the scheduler started, and stops it either way.
+    ///
+    /// `defer { await ... }` does not compile - defer bodies cannot suspend -
+    /// and dropping the defer would leave a scheduler running whenever the
+    /// sleep below is cancelled. That is the case the defer existed for, so it
+    /// is kept rather than traded for a shorter diff.
+    private func withRunningScheduler(
+        _ scheduler: PredictiveWarmupScheduler,
+        _ body: () async throws -> Void
+    ) async throws {
+        await scheduler.start()
+        do {
+            try await body()
+        } catch {
+            await scheduler.stop()
+            throw error
+        }
+        await scheduler.stop()
+    }
+
     func testStartTriggersPeriodicRefresh() async throws {
         let scheduler = PredictiveWarmupScheduler(store: store, interval: 0.5)
-        await scheduler.start()
-        defer { await scheduler.stop() }
-
-        try await Task.sleep(nanoseconds: 600_000_000)
-
-        let count = await healthService.callCount()
-        XCTAssertGreaterThanOrEqual(count, 1)
+        try await withRunningScheduler(scheduler) {
+            try await Task.sleep(nanoseconds: 600_000_000)
+            let count = await healthService.callCount()
+            XCTAssertGreaterThanOrEqual(count, 1)
+        }
     }
 
     func testLowPowerModeSkipsRefresh() async throws {
@@ -84,32 +107,28 @@ final class PredictiveWarmupSchedulerTests: XCTestCase {
             interval: 0.2,
             isLowPowerModeEnabled: { lowPower }
         )
-        await scheduler.start()
-        defer { await scheduler.stop() }
+        try await withRunningScheduler(scheduler) {
+            try await Task.sleep(nanoseconds: 400_000_000)
+            let count = await healthService.callCount()
+            XCTAssertEqual(count, 0)
 
-        try await Task.sleep(nanoseconds: 400_000_000)
+            lowPower = false
+            await scheduler.forceRefresh()
 
-        let count = await healthService.callCount()
-        XCTAssertEqual(count, 0)
-
-        lowPower = false
-        await scheduler.forceRefresh()
-
-        let countAfter = await healthService.callCount()
-        XCTAssertGreaterThan(countAfter, 0)
+            let countAfter = await healthService.callCount()
+            XCTAssertGreaterThan(countAfter, 0)
+        }
     }
 
     func testDisabledPredictiveWarmupSkipsRefresh() async throws {
         store.setPredictiveWarmupEnabled(false)
 
         let scheduler = PredictiveWarmupScheduler(store: store, interval: 0.2)
-        await scheduler.start()
-        defer { await scheduler.stop() }
-
-        try await Task.sleep(nanoseconds: 400_000_000)
-
-        let count = await healthService.callCount()
-        XCTAssertEqual(count, 0)
+        try await withRunningScheduler(scheduler) {
+            try await Task.sleep(nanoseconds: 400_000_000)
+            let count = await healthService.callCount()
+            XCTAssertEqual(count, 0)
+        }
     }
 
     func testStopCancelsScheduledWork() async throws {
@@ -127,14 +146,13 @@ final class PredictiveWarmupSchedulerTests: XCTestCase {
 
     func testRestartChangesIntervalAndKeepsRunning() async throws {
         let scheduler = PredictiveWarmupScheduler(store: store, interval: 2)
-        await scheduler.start()
-        defer { await scheduler.stop() }
+        try await withRunningScheduler(scheduler) {
+            await scheduler.restart(interval: 0.2)
+            let before = await healthService.callCount()
+            try await Task.sleep(nanoseconds: 700_000_000)
+            let after = await healthService.callCount()
 
-        await scheduler.restart(interval: 0.2)
-        let before = await healthService.callCount()
-        try await Task.sleep(nanoseconds: 700_000_000)
-        let after = await healthService.callCount()
-
-        XCTAssertGreaterThan(after, before)
+            XCTAssertGreaterThan(after, before)
+        }
     }
 }
