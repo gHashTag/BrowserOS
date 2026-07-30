@@ -17,13 +17,13 @@ commit-msg:
 pre-commit:
   commands:
     biome-check:
-      root: "packages/browseros-agent/"
+      root: "trios/agent-server/"
       glob: "*.{js,ts,cjs,mjs,d.cts,d.mts,jsx,tsx,json,jsonc}"
       run: npx @biomejs/biome check --write --no-errors-on-unmatched --files-ignore-unknown=true --colors=off {staged_files}
       stage_fixed: true
 
     file-length:
-      root: "packages/browseros-agent/"
+      root: "trios/agent-server/"
       glob: "*.{ts,tsx}"
       exclude: "*.{test,spec,d}.ts|*.{test,spec}.tsx|**/__tests__/**|**/tests/**|**/*.generated.*"
       run: |

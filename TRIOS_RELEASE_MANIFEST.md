@@ -166,7 +166,7 @@ After the local fast-forward, `origin/dev` advanced with commits that are not in
 - plus 15 further commits ending at `74d9a0d9c`.
 
 This means the portable landing commit (`0ffca73e1` and docs commits) lives on a **local-only branch**; it cannot be pushed to `origin/dev` without a major merge/rebase because the upstream removed:
-- `packages/browseros-agent/apps/server/` (400 files)
+- `trios/agent-server/apps/server/` (400 files)
 - `trios/` Swift app + Rust rings (467 files)
 - the `trios-mesh` submodule
 - and replaced the TS server surface with `@browseros/agent-core` + Rust `trios-server`.
