@@ -2465,3 +2465,34 @@ knob can only ever be nil - but removing them touches routing, the cycle had
 already run long past its budget, and deleting a half-understood dependency at
 seven in the morning is worse than reporting it. It is the first item for the
 next cycle.
+
+## 2026-07-31 ~09:0x UTC - the measurement moves into the repository
+
+Verifications green first. Last night's finding was that the never-called
+function count was wrong and lived only in a script in my temporary directory.
+Both halves of that mattered, so this cycle moved the measurement into the
+Queen's own audit, where it uses the rule the type scan has always used: count
+the bare identifier anywhere, subtract the declarations.
+
+One pass rather than one grep per name - 208 functions against 45 types, and
+208 subprocesses is a button nobody presses twice. Scoped by filename rather
+than symbol prefix, since Swift methods are named after what they do and there
+is no `func Queen...` convention to match; Queen*, Skill* and Swarm* files are
+the same boundary the type scan draws, approached from the other side.
+
+The two assertions guarding it exist because of a mistake I made while writing
+it. I had "/usr/bin/sh", which does not exist on macOS. runProcess returns an
+empty string rather than an error, so the audit would have reported no dead
+functions whatsoever - silence reading as health, the failure this whole line
+of work is about, reintroduced by the person fixing it. Restoring the wrong
+path fails both assertions by name.
+
+Also checked by hand before believing any of it: a planted never-called
+function counts 1, and one called only through a trailing closure counts 2 -
+the exact form the old scanner could not see and the reason it called three
+live functions dead.
+
+Left alone deliberately: the store-level output budget that can be read but
+never set, which is now the audit's to report rather than mine; the observer's
+shell blind spot; the four RichTextRenderer deprecations; the pull request
+waiting on a token only the user can place; and the 22 XCTest errors.
