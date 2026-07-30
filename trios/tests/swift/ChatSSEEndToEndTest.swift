@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 373
+    static let minimumChecks = 377
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -3098,6 +3098,33 @@ struct ChatSSEEndToEndTests {
             ]
         )
         check(counts.count > 50, "the function scan finds the Queen's own methods, not nothing")
+
+        // canRun(_:) was deleted this cycle, and what it would have destroyed
+        // is worth holding: "there is no such skill" and "that skill is
+        // switched off" are different problems with different fixes, and both
+        // places that decide whether to run one say so differently. A single
+        // Bool cannot. These two primitives are what the distinction rests on.
+        let skillRoot = NSTemporaryDirectory() + "queen-skills-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: skillRoot) }
+        try? FileManager.default.createDirectory(
+            atPath: "\(skillRoot)/.claude/skills/probe", withIntermediateDirectories: true
+        )
+        try? "---\nname: probe\ndescription: A probe skill.\n---\nDo the thing."
+            .write(toFile: "\(skillRoot)/.claude/skills/probe/SKILL.md", atomically: true, encoding: .utf8)
+        let store = SkillStore(
+            projectRoot: skillRoot, home: skillRoot,
+            statePath: "\(skillRoot)/state.json"
+        )
+        check(store.skill(named: "/probe") != nil, "a skill on disk is found by name")
+        check(store.skill(named: "/nothing-like-this") == nil,
+              "and a name nobody installed is absent, which is one of the two answers")
+        guard let probe = store.skill(named: "/probe") else {
+            fail("the probe skill vanished between two lines"); return
+        }
+        check(store.isEnabled(probe), "a freshly discovered skill is on")
+        store.setEnabled(false, for: probe)
+        check(store.skill(named: "/probe") != nil && !store.isEnabled(probe),
+              "and switching it off leaves it present but disabled - the other answer, and not the same one")
 
         // The safety budget guards every autonomous mutation and, until now,
         // nothing decremented it: QueenProposalApplier read it before touching

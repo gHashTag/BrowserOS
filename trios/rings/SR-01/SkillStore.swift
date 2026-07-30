@@ -56,11 +56,21 @@ final class SkillStore: ObservableObject {
         return skills.first { $0.id == normalized }
     }
 
-    /// Whether the Queen may invoke this command right now.
-    func canRun(_ command: String) -> Bool {
-        guard let skill = skill(named: command) else { return false }
-        return isEnabled(skill)
-    }
+    // `canRun(_:)` used to sit here: skill(named:) != nil && isEnabled(...).
+    // It had no caller, and unlike the other uncalled rules found this week
+    // that was the right outcome rather than an oversight.
+    //
+    // Both places that decide whether to run a skill need to tell its two
+    // failure cases apart. runQueenSkill says "there is no skill called X" or
+    // "X is switched off in the Skills tab", which are different problems with
+    // different fixes; delegation refuses to open a chat at all and has to name
+    // which of the two happened. A predicate returning one Bool throws away
+    // exactly the distinction its callers exist to make, so adopting it would
+    // have cost the user the more useful message.
+    //
+    // Deleted rather than wired, and the reasoning kept, because the next
+    // reader will otherwise see two call sites doing the same two checks by
+    // hand and helpfully factor them back into this.
 
     /// One line per enabled skill, for the Queen's help text and her system
     /// prompt. Generated rather than written by hand so it cannot go stale.
