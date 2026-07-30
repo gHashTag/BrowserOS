@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 267
+    static let minimumChecks = 283
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -67,6 +67,7 @@ struct ChatSSEEndToEndTests {
         await runScrollPositionPolicyAndRequestDelivery()
         await runCassetteReplayAndObserver()
         await runSalienceLearnsFromOutcomes()
+        await runWorkerBriefIsASpecification()
         await runQueenProposesEvolutionOptions()
         await runWorkerLivenessIsObservable()
         await runPullRequestOutcomeMapping()
@@ -2126,6 +2127,63 @@ struct ChatSSEEndToEndTests {
     /// She may no longer open a chat on her own judgement, so proposing is the
     /// only way she moves the project. That makes the honesty of the list load
     /// bearing: padding it to three would dress an empty audit as a choice.
+    /// The worker is handed a contract, not a description.
+    ///
+    /// The old brief said what the issue was and asked for a report when done.
+    /// It never said what done meant, so a worker that stopped and a worker
+    /// that finished sent the same signal. These checks pin the sections that
+    /// make the difference, and the one case that is easy to paper over: a task
+    /// with no criteria has to say so rather than read as ordinary.
+    static func runWorkerBriefIsASpecification() async {
+        print("\n# Scenario: the brief is a specification")
+
+        guard let issue = IssueReference.parse("gHashTag/trios#21") else {
+            fail("could not build a test issue"); return
+        }
+        func task(criteria: [String], paths: [String] = ["docs"]) -> DelegatedTask {
+            DelegatedTask(
+                issue: issue, title: "Make the logs tab paginate", worker: "queen-swift",
+                ownedPaths: paths, acceptanceCriteria: criteria, virtualBranch: "queen/21-probe"
+            )
+        }
+
+        let spec = QueenTaskSpec.render(for: task(criteria: [
+            "make check passes", "the tab renders 50 rows at a time"
+        ]))
+        for section in QueenTaskSpec.sectionTitles {
+            check(spec.contains("## \(section)"), "the specification has a \(section) section")
+        }
+        check(spec.contains("1. make check passes"), "criteria are numbered so they can be answered one by one")
+        check(spec.contains("docs"), "the boundary names the paths the worker owns")
+        check(spec.contains("queen/21-probe"), "and the branch its edits belong to")
+
+        // The case worth protecting.
+        let empty = QueenTaskSpec.render(for: task(criteria: []))
+        check(empty.contains("None were set"),
+              "a task with no criteria says so instead of reading like any other")
+        check(empty.contains("not ready"),
+              "and tells the worker that saying the task is not ready is a correct outcome")
+        check(!QueenTaskSpec.isActionable(task(criteria: [])),
+              "a task without criteria is not actionable")
+        check(QueenTaskSpec.isActionable(task(criteria: ["x"])),
+              "one with criteria is")
+
+        // The brief must BE the specification, not carry one alongside prose.
+        let brief = QueenBriefing.text(for: task(criteria: ["make check passes"]))
+        check(brief.contains("## Acceptance criteria"),
+              "the brief the worker actually receives is the specification")
+        check(brief.contains("reviews against the criteria"),
+              "and says review happens against them, not against a summary")
+
+        // A skill still arrives verbatim, after the rules.
+        let withSkill = QueenBriefing.text(for: task(criteria: ["x"]), skillBody: "STEP ONE")
+        check(withSkill.contains("STEP ONE"), "a skill is still handed over verbatim")
+        if let rules = withSkill.range(of: "## Boundary"), let recipe = withSkill.range(of: "STEP ONE") {
+            check(rules.lowerBound < recipe.lowerBound,
+                  "and still comes after the boundary, so a skimming worker meets the rules first")
+        }
+    }
+
     static func runQueenProposesEvolutionOptions() async {
         print("\n# Scenario: three options, or fewer if there are fewer")
 

@@ -21,21 +21,15 @@ enum QueenBriefing {
         return text
     }
 
+    /// The brief *is* the specification now, not a summary attached to one.
+    ///
+    /// The prose version told the worker the issue, the branch and the files,
+    /// then asked it to report back when done. It never said what done meant,
+    /// which is why a worker that stopped and a worker that finished sent the
+    /// same signal. Replacing it rather than adding to it is deliberate: two
+    /// documents describing the same task drift, and the softer one wins.
     private static func core(for task: DelegatedTask) -> String {
-        var lines = [
-            "You are working on \(task.issue.slug).",
-            "Issue: \(task.issue.url)",
-            "Task: \(task.title)"
-        ]
-        if let branch = task.virtualBranch {
-            lines.append("Your virtual branch: \(branch). Every edit you make belongs to it.")
-        }
-        if task.ownedPaths.isEmpty {
-            lines.append("No file boundary was set. Ask before touching shared files.")
-        } else {
-            lines.append("You own these paths and only these: \(task.ownedPaths.joined(separator: ", ")).")
-        }
-        lines.append("Report back when done. The Queen reviews before anything lands.")
-        return lines.joined(separator: "\n")
+        QueenTaskSpec.render(for: task)
+            + "\n\nThe Queen reviews against the criteria above before anything lands."
     }
 }
