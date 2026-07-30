@@ -4,7 +4,12 @@ import Foundation
 // MARK: - TRIOS Plugin Protocol
 
 /// Core protocol that all TRIOS plugins must conform to
-@objc public protocol TRIOSPlugin {
+public protocol TRIOSPlugin {
+    /// Registry instantiates plugins from their type, so the type must be
+    /// constructible. `register` has always called `plugin.init()`; the protocol
+    /// simply never said so.
+    init()
+
     /// Unique plugin identifier (reverse DNS notation)
     static var pluginID: String { get }
     
@@ -34,6 +39,16 @@ import Foundation
     
     /// Optional: Custom UI view for plugin settings
     func settingsView() -> AnyView?
+}
+
+public extension TRIOSPlugin {
+    /// Instance-side view of the static identifier.
+    ///
+    /// `pluginID` is a static requirement, and SwiftUI's `List(_:id:)` takes a
+    /// KeyPath, which cannot reach a static member. Rather than duplicate the
+    /// id as stored state on every plugin - two things to keep in sync - this
+    /// reads it back off the instance's own type.
+    var pluginIdentifier: String { type(of: self).pluginID }
 }
 
 // MARK: - PluginContext
@@ -74,11 +89,13 @@ public class PluginContext {
 
 // MARK: - Plugin Registration
 
-public class PluginRegistry {
+public class PluginRegistry: ObservableObject {
     public static let shared = PluginRegistry()
     
     private var plugins: [String: TRIOSPlugin] = [:]
-    private var pluginConfigs: [String: PluginConfig] = [:]
+    /// Read by PluginManagerView to decide what auto-loads, so it cannot be
+    /// private; still only mutated in here.
+    public private(set) var pluginConfigs: [String: PluginConfig] = [:]
     
     public struct PluginConfig {
         let enabled: Bool
@@ -206,7 +223,7 @@ class MacroManagerProxy: MacroManagerProtocol {
     }
 }
 
-class PluginFileManager {
+public class PluginFileManager {
     func read(file: String) -> Data? {
         NSLog("[PluginAPI] File read: \(file)")
         return nil
@@ -222,7 +239,7 @@ class PluginFileManager {
     }
 }
 
-class PluginNetworkManager {
+public class PluginNetworkManager {
     func get(url: String, completion: @escaping (Result<Data, Error>) -> Void) {
         NSLog("[PluginAPI] Network GET: \(url)")
         // In production: actual network request
@@ -233,7 +250,7 @@ class PluginNetworkManager {
     }
 }
 
-class PluginAIManager {
+public class PluginAIManager {
     func infer(prompt: String, completion: @escaping (Result<String, Error>) -> Void) {
         NSLog("[PluginAPI] AI inference: \(prompt)")
         // In production: call local LLM or cloud API
@@ -241,7 +258,7 @@ class PluginAIManager {
     }
 }
 
-class PluginLogger {
+public class PluginLogger {
     func info(_ message: String) {
         NSLog("[Plugin:Info] \(message)")
     }
@@ -259,7 +276,7 @@ class PluginLogger {
     }
 }
 
-class PluginPreferences {
+public class PluginPreferences {
     func get<T>(key: String, default: T) -> T {
         return `default`
     }
@@ -271,7 +288,7 @@ class PluginPreferences {
 
 // MARK: - Example Plugin: GitHub Integration
 
-@objc class GitHubPlugin: NSObject, TRIOSPlugin {
+final class GitHubPlugin: TRIOSPlugin {
     static var pluginID: String = "com.trios.plugins.github"
     static var pluginName: String = "GitHub Integration"
     static var version: String = "1.0.0"
@@ -333,7 +350,7 @@ class PluginPreferences {
 
 // MARK: - Example Plugin: Slack Integration
 
-@objc class SlackPlugin: NSObject, TRIOSPlugin {
+final class SlackPlugin: TRIOSPlugin {
     static var pluginID: String = "com.trios.plugins.slack"
     static var pluginName: String = "Slack Integration"
     static var version: String = "1.0.0"
@@ -386,8 +403,7 @@ struct GitHubPluginSettingsView: View {
     
     var body: some View {
         Form {
-            TextField("GitHub API Token", text: $apiToken)
-                .secureTextEntry()
+            SecureField("GitHub API Token", text: $apiToken)
             
             TextField("Default Repository", text: $defaultRepo)
             
@@ -406,8 +422,7 @@ struct SlackPluginSettingsView: View {
     
     var body: some View {
         Form {
-            TextField("Slack Bot Token", text: $apiToken)
-                .secureTextEntry()
+            SecureField("Slack Bot Token", text: $apiToken)
             
             TextField("Default Channel", text: $defaultChannel)
             
@@ -467,7 +482,7 @@ struct PluginManagerView: View {
     }
     
     private var pluginList: some View {
-        List(registry.getPlugins(), id: \.pluginID) { plugin in
+        List(registry.getPlugins(), id: \.pluginIdentifier) { plugin in
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(type(of: plugin).pluginName)

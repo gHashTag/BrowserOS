@@ -662,24 +662,12 @@ const KNOWN_UNWIRED_SWIFT_TESTS: &[&str] = &[
 /// typecheck together with zero errors:
 ///   AnalyticsService, OnboardingFlow
 ///
-/// Actually broken, and the only two that are:
-///   PluginAPI       - 52 errors. Thirty of them are one bad decision: the
-///                     protocol is `@objc` while its own signatures use
-///                     `Result<Any, PluginError>`, `AnyView?` and a plain Swift
-///                     class, none representable in Objective-C. Dropping
-///                     `@objc` takes it to 22 - measured, not guessed.
-///                     The other 22 are six separate design problems, and one
-///                     settles the question: it calls
-///                     `TextField.secureTextEntry`, a UIKit API that does not
-///                     exist in macOS SwiftUI. This file was written by
-///                     pattern-matching iOS code and has never compiled once.
-///                     Finishing it is designing a plugin system - there are no
-///                     plugins and no host integration - not fixing a bug, so it
-///                     is not work an unattended cycle should start.
-///   ExtensionStoreAPI - needs a type named `PluginAPI`, which PluginAPI.swift
-///                     does not declare; it has PluginContext, PluginRegistry
-///                     and PluginError. Blocked behind the file above, and
-///                     un-blockable until someone decides that system's fate.
+/// Nothing here is broken any more. PluginAPI and ExtensionStoreAPI were the
+/// last two and both now typecheck at zero errors against the real app - the
+/// `@objc` protocol was dropped, five support types made public, two UIKit
+/// `secureTextEntry` calls replaced with SecureField, and an injected
+/// `PluginAPI` dependency that no method ever read was removed rather than
+/// guessed at. All sixteen compile.
 ///
 /// So the budget below is not a debt counter. Lowering it means deciding a
 /// feature is unwanted, or wiring one up - both judgements, neither mechanical.

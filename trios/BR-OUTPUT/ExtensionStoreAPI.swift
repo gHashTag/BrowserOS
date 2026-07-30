@@ -183,12 +183,19 @@ class ExtensionManager: ObservableObject {
     @Published var extensions: [LoadedExtension] = []
     
     private let storeAPI: ExtensionStoreAPI
-    private let pluginAPI: PluginAPI
-    
-    init(storeAPI: ExtensionStoreAPI = ExtensionStoreAPI(),
-         pluginAPI: PluginAPI = PluginAPI()) {
-        self.storeAPI = storeAPI
-        self.pluginAPI = pluginAPI
+
+    // There was a `pluginAPI: PluginAPI` here, injected and then never read -
+    // no method in this file touched it. `PluginAPI` is also not a type: that
+    // file declares PluginContext, PluginRegistry and PluginError. Rather than
+    // guess which one was meant and wire a dependency nothing uses, the field
+    // is gone. Whoever connects extensions to the plugin registry can add it
+    // back deliberately, against a type that exists.
+    // The default cannot be `ExtensionStoreAPI()` written inline: default
+    // arguments are evaluated outside the actor context, and that type is
+    // @MainActor. Built in the body instead, which is isolated, so injection
+    // still works for tests without crossing an actor boundary at the call site.
+    init(storeAPI: ExtensionStoreAPI? = nil) {
+        self.storeAPI = storeAPI ?? ExtensionStoreAPI()
     }
     
     func loadExtensions() async {
