@@ -2216,3 +2216,33 @@ someone at the screen; the 86 never-called function candidates; the pull request
 waiting on a token only the user can place; and the 22 XCTest errors. Also
 noted for a future cycle: many assertions in this harness still grep for
 substrings, and last night proved that kind passes a paraphrase.
+
+## 2026-07-31 ~01:0x UTC - a heading is not a section
+
+Verifications green first. Last night ended with the suspicion that some of
+these assertions grep for words where they should compare meaning, so this
+cycle went looking - and importantly, went looking by mutation rather than by
+reading. Reading had already told me what I wanted to hear twice this week.
+
+Two suspicions died on contact, which is worth as much as the finding.
+`spec.contains("docs")` looks like a false positive waiting to happen; deleting
+the boundary fails it, because "docs" appears nowhere else in the document. The
+shortest literals in the file are mostly assertions about a shared source's own
+content, which is the legitimate use.
+
+The real hole was the loop that walks every section of the specification and
+asserts its "## X" heading appears. Five sections, none forgotten - it reads as
+the most careful assertion in the file. I emptied Out of scope, left the
+heading, and all 342 checks stayed green. A whole instruction to the worker
+could have vanished without a word from the suite.
+
+The loop now splits on the headings and requires text underneath, which is the
+same loop asking the question it appeared to be asking, and which covers
+sections nobody has written yet. Repeating the mutation now fails exactly one
+check, by name. Floor 342 to 347.
+
+Left alone deliberately: the four RichTextRenderer deprecations, which want
+someone at the screen; the 86 never-called function candidates; the pull request
+waiting on a token only the user can place; and the 22 XCTest errors. The wider
+audit of substring assertions is not finished - mutation is the way to do it,
+one subject per cycle, and tonight covered the specification only.
