@@ -26,19 +26,45 @@ enum KeychainSecretsError: LocalizedError {
 /// TriOS credentials; env-variable fallbacks are intentionally absent.
 enum KeychainSecrets {
     /// Read an existing generic-password secret as raw bytes.
-    static func readData(service: String, account: String) throws -> Data {
-        let query: [String: Any] = [
+    /// Reads a secret.
+    ///
+    /// `allowsInteraction: false` makes macOS fail fast with
+    /// `errSecInteractionNotAllowed` instead of putting up a "enter your login
+    /// keychain password" dialog. Callers that can regenerate the secret should
+    /// use it: a re-fetchable token is not worth a modal prompt, and blocking on
+    /// one froze the app at launch.
+    static func readData(
+        service: String,
+        account: String,
+        allowsInteraction: Bool = true
+    ) throws -> Data {
+        // Dev builds never touch the Keychain; see DevSecretStore.
+        if ProjectPaths.isDevVariant {
+            guard let data = DevSecretStore.read(service: service, account: account) else {
+                throw KeychainSecretsError.itemNotFound(service: service, account: account)
+            }
+            return data
+        }
+        var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
         ]
+        if !allowsInteraction {
+            query[kSecUseAuthenticationUI as String] = kSecUseAuthenticationUISkip
+        }
 
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         guard status == errSecSuccess else {
             if status == errSecItemNotFound {
+                throw KeychainSecretsError.itemNotFound(service: service, account: account)
+            }
+            // Treat "we would have to ask the user" as absent, so the caller
+            // bootstraps a fresh secret rather than failing the request.
+            if status == errSecInteractionNotAllowed || status == errSecAuthFailed {
                 throw KeychainSecretsError.itemNotFound(service: service, account: account)
             }
             throw KeychainSecretsError.osStatus(status)
@@ -50,8 +76,16 @@ enum KeychainSecrets {
     }
 
     /// Read an existing generic-password secret as a UTF-8 string.
-    static func read(service: String, account: String) throws -> String {
-        let data = try readData(service: service, account: account)
+    static func read(
+        service: String,
+        account: String,
+        allowsInteraction: Bool = true
+    ) throws -> String {
+        let data = try readData(
+            service: service,
+            account: account,
+            allowsInteraction: allowsInteraction
+        )
         guard let value = String(data: data, encoding: .utf8) else {
             throw KeychainSecretsError.invalidItemType
         }
@@ -61,6 +95,12 @@ enum KeychainSecrets {
     /// Store or overwrite raw generic-password data. Replaces an existing item
     /// with the same (service, account) pair.
     static func writeData(service: String, account: String, data: Data) throws {
+        if ProjectPaths.isDevVariant {
+            guard DevSecretStore.write(service: service, account: account, data: data) else {
+                throw KeychainSecretsError.invalidItemType
+            }
+            return
+        }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -101,6 +141,10 @@ enum KeychainSecrets {
 
     /// Delete a stored secret.
     static func delete(service: String, account: String) throws {
+        if ProjectPaths.isDevVariant {
+            DevSecretStore.delete(service: service, account: account)
+            return
+        }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

@@ -13,50 +13,351 @@ enum ModelCredentialError: LocalizedError {
     }
 }
 
+/// One stored API key for a provider.
+///
+/// The secret itself never leaves the Keychain; this record carries only the
+/// identity and a masked preview so the UI can list, label, and delete keys
+/// individually.
+struct ModelKeyEntry: Identifiable, Equatable, Sendable {
+    let id: String
+    let provider: ModelProvider
+    let label: String
+    let maskedValue: String
+    let createdAt: Date?
+
+    /// Legacy entries were stored before multi-key support, under an account
+    /// name equal to the bare provider identifier.
+    var isLegacy: Bool { id == ModelCredentialStore.legacyEntryID }
+}
+
 enum ModelCredentialStore {
     private static let service = "com.browseros.trios.model-keys"
+    private static let accountSeparator = "#"
+    /// Identifier reserved for the pre-multi-key entry.
+    static let legacyEntryID = "legacy"
+    private static let activeKeyDefaultsPrefix = "trios.activeModelKey."
 
-    static func read(for provider: ModelProvider) -> String? {
+    // MARK: - Account encoding
+
+    private static func account(for provider: ModelProvider, entryID: String) -> String {
+        entryID == legacyEntryID
+            ? provider.rawValue
+            : "\(provider.rawValue)\(accountSeparator)\(entryID)"
+    }
+
+    /// Splits a stored account name back into provider and entry id. Returns nil
+    /// for accounts belonging to a different provider.
+    static func entryID(fromAccount account: String, provider: ModelProvider) -> String? {
+        if account == provider.rawValue { return legacyEntryID }
+        // The dev variant stores secrets as files and sanitises the account into
+        // a file name, which turns the "#" separator into "_". Accepting both
+        // spellings keeps the account round-trip lossless; without this the dev
+        // build listed no keys at all and every request went out unauthenticated.
+        for separator in [accountSeparator, "_"] {
+            let prefix = "\(provider.rawValue)\(separator)"
+            guard account.hasPrefix(prefix) else { continue }
+            let id = String(account.dropFirst(prefix.count))
+            if !id.isEmpty { return id }
+        }
+        return nil
+    }
+
+    // MARK: - Listing
+
+    /// All keys stored for a provider, oldest first. Legacy entries sort first so
+    /// the previously active key stays at the top of the list after upgrading.
+    static func list(for provider: ModelProvider) -> [ModelKeyEntry] {
+        if ProjectPaths.isDevVariant {
+            return DevSecretStore.accounts(service: service).compactMap { item in
+                guard let id = entryID(fromAccount: item.account, provider: provider) else { return nil }
+                let secret = DevSecretStore.read(service: service, account: item.account)
+                    .flatMap { String(data: $0, encoding: .utf8) } ?? ""
+                return ModelKeyEntry(
+                    id: id,
+                    provider: provider,
+                    label: defaultLabel(for: id),
+                    maskedValue: mask(secret),
+                    createdAt: item.created
+                )
+            }.sorted { ($0.createdAt ?? .distantPast) < ($1.createdAt ?? .distantPast) }
+        }
+        // Deliberately no kSecReturnData. Asking for the secret forces macOS to
+        // unlock every stored item just to draw a list, which produced one
+        // "enter your login keychain password" dialog per key. The masked
+        // preview is written to kSecAttrDescription at save time, so listing
+        // reads metadata only and never prompts.
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: provider.rawValue,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll
         ]
         var result: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let data = result as? Data else {
-            return nil
+              let items = result as? [[String: Any]] else {
+            return []
         }
-        return String(data: data, encoding: .utf8)
+
+        var entries: [ModelKeyEntry] = []
+        for item in items {
+            guard let account = item[kSecAttrAccount as String] as? String,
+                  let id = entryID(fromAccount: account, provider: provider) else {
+                continue
+            }
+            let label = item[kSecAttrLabel as String] as? String
+            // Masked preview stored as metadata; never the secret itself.
+            let masked = item[kSecAttrDescription as String] as? String
+            entries.append(
+                ModelKeyEntry(
+                    id: id,
+                    provider: provider,
+                    label: label?.isEmpty == false ? label! : defaultLabel(for: id),
+                    maskedValue: masked?.isEmpty == false ? masked! : "****",
+                    createdAt: item[kSecAttrCreationDate as String] as? Date
+                )
+            )
+        }
+        return entries.sorted { lhs, rhs in
+            if lhs.isLegacy != rhs.isLegacy { return lhs.isLegacy }
+            switch (lhs.createdAt, rhs.createdAt) {
+            case let (l?, r?): return l < r
+            case (nil, _): return false
+            case (_, nil): return true
+            }
+        }
     }
 
+    private static func defaultLabel(for entryID: String) -> String {
+        entryID == legacyEntryID ? "Imported key" : "Key \(entryID.prefix(4))"
+    }
+
+    /// Masks a secret for display: first four and last four characters only.
+    static func mask(_ secret: String) -> String {
+        guard secret.count > 8 else { return String(repeating: "*", count: max(secret.count, 3)) }
+        return "\(secret.prefix(4))...\(secret.suffix(4))"
+    }
+
+    // MARK: - Active selection
+
+    private static func activeDefaultsKey(for provider: ModelProvider) -> String {
+        "\(activeKeyDefaultsPrefix)\(provider.rawValue)"
+    }
+
+    /// Entry id currently used for requests. Falls back to the first stored key
+    /// when the recorded selection has been deleted.
+    static func activeEntryID(for provider: ModelProvider) -> String? {
+        let stored = UserDefaults.standard.string(forKey: activeDefaultsKey(for: provider))
+        let entries = list(for: provider)
+        if let stored, entries.contains(where: { $0.id == stored }) {
+            return stored
+        }
+        return entries.first?.id
+    }
+
+    static func setActiveEntryID(_ entryID: String?, for provider: ModelProvider) {
+        let key = activeDefaultsKey(for: provider)
+        if let entryID {
+            UserDefaults.standard.set(entryID, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
+    }
+
+    // MARK: - Read
+
+    /// Secret for the active key. Preserves the original single-key contract so
+    /// every existing call site keeps working unchanged.
+    static func read(for provider: ModelProvider) -> String? {
+        guard let entryID = activeEntryID(for: provider) else { return nil }
+        return read(entryID: entryID, for: provider)
+    }
+
+    /// In-process cache of resolved secrets.
+    ///
+    /// The app resolves the active key on nearly every send, health probe, and
+    /// settings render. Each of those was a fresh Keychain read, and because the
+    /// app is ad-hoc signed a rebuilt binary is a different identity to macOS -
+    /// so every read could raise another "enter your login keychain password"
+    /// dialog. Caching turns that into at most one prompt per key per launch.
+    /// Cleared whenever credentials change, so a deleted key cannot linger.
+    private static let cacheLock = NSLock()
+    private static var secretCache: [String: String] = [:]
+
+    static func read(entryID: String, for provider: ModelProvider) -> String? {
+        let cacheKey = account(for: provider, entryID: entryID)
+        if ProjectPaths.isDevVariant {
+            return DevSecretStore.read(service: service, account: cacheKey)
+                .flatMap { String(data: $0, encoding: .utf8) }
+        }
+        // Headless runs must never touch the Keychain. `kSecUseAuthenticationUISkip`
+        // below is not enough: these items live in the legacy file keychain, so
+        // the read lands in SecKeychainItemCopyContent and blocks on securityd
+        // waiting for an ACL prompt that no one can answer. That hung the chat
+        // e2e for as long as the harness was allowed to run.
+        if ProcessInfo.processInfo.environment["TRIOS_E2E_DISABLE_KEYCHAIN"] == "1" {
+            return nil
+        }
+
+        cacheLock.lock()
+        let cached = secretCache[cacheKey]
+        cacheLock.unlock()
+        if let cached { return cached }
+
+        // Never put up a password dialog from here. This runs on the main actor
+        // during view updates and sends, so a blocking prompt freezes the UI.
+        // If macOS wants approval we report "no key" and let the caller surface
+        // that, rather than hanging the app.
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: cacheKey,
+            kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip
+        ]
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecInteractionNotAllowed || status == errSecAuthFailed {
+            TriosLogBus.shared.warn(
+                .security,
+                "credentials.locked",
+                "Keychain needs approval before this API key can be read",
+                ["provider": provider.rawValue]
+            )
+            return nil
+        }
+        guard status == errSecSuccess,
+              let data = result as? Data,
+              let secret = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+
+        cacheLock.lock()
+        secretCache[cacheKey] = secret
+        cacheLock.unlock()
+        return secret
+    }
+
+    /// Drops cached secrets. Called after any mutation so the cache cannot serve
+    /// a key that no longer exists.
+    static func invalidateSecretCache() {
+        cacheLock.lock()
+        secretCache.removeAll()
+        cacheLock.unlock()
+    }
+
+    // MARK: - Write
+
+    /// Replaces every stored key for a provider with a single one. Retained for
+    /// callers that still model credentials as one-per-provider.
     static func save(_ key: String, for provider: ModelProvider) throws {
-        try delete(for: provider, ignoresMissing: true)
+        try deleteAll(for: provider, ignoresMissing: true)
+        _ = try add(key, label: "Default key", for: provider)
+    }
+
+    /// Stores an additional key alongside any existing ones and makes it active.
+    @discardableResult
+    static func add(
+        _ key: String,
+        label: String,
+        for provider: ModelProvider,
+        entryID: String = UUID().uuidString
+    ) throws -> ModelKeyEntry {
+        let trimmedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        let resolvedLabel = trimmedLabel.isEmpty ? defaultLabel(for: entryID) : trimmedLabel
         let attributes: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: provider.rawValue,
+            kSecAttrAccount as String: account(for: provider, entryID: entryID),
+            kSecAttrLabel as String: resolvedLabel,
+            // Masked preview kept as metadata so the UI can list keys without
+            // unlocking any of them.
+            kSecAttrDescription as String: mask(key),
             kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
             kSecValueData as String: Data(key.utf8)
         ]
-        let status = SecItemAdd(attributes as CFDictionary, nil)
+        if ProjectPaths.isDevVariant {
+            guard DevSecretStore.write(
+                service: service,
+                account: account(for: provider, entryID: entryID),
+                data: Data(key.utf8)
+            ) else {
+                throw ModelCredentialError.keychain(errSecIO)
+            }
+        } else {
+            let status = SecItemAdd(attributes as CFDictionary, nil)
+            guard status == errSecSuccess else {
+                throw ModelCredentialError.keychain(status)
+            }
+        }
+        setActiveEntryID(entryID, for: provider)
+        invalidateSecretCache()
+        return ModelKeyEntry(
+            id: entryID,
+            provider: provider,
+            label: resolvedLabel,
+            maskedValue: mask(key),
+            createdAt: Date()
+        )
+    }
+
+    /// Renames a stored key without touching the secret.
+    static func rename(entryID: String, to label: String, for provider: ModelProvider) throws {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account(for: provider, entryID: entryID)
+        ]
+        let updates: [String: Any] = [kSecAttrLabel as String: label]
+        let status = SecItemUpdate(query as CFDictionary, updates as CFDictionary)
         guard status == errSecSuccess else {
             throw ModelCredentialError.keychain(status)
         }
     }
 
-    static func delete(for provider: ModelProvider, ignoresMissing: Bool = false) throws {
+    // MARK: - Delete
+
+    /// Removes one key. If it was the active one, the next remaining key takes
+    /// over so the provider does not silently lose its credentials.
+    static func delete(entryID: String, for provider: ModelProvider) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: provider.rawValue
+            kSecAttrAccount as String: account(for: provider, entryID: entryID)
         ]
-        let status = SecItemDelete(query as CFDictionary)
-        guard status == errSecSuccess || (ignoresMissing && status == errSecItemNotFound) else {
-            throw ModelCredentialError.keychain(status)
+        if ProjectPaths.isDevVariant {
+            DevSecretStore.delete(service: service, account: account(for: provider, entryID: entryID))
+        } else {
+            let status = SecItemDelete(query as CFDictionary)
+            guard status == errSecSuccess || status == errSecItemNotFound else {
+                throw ModelCredentialError.keychain(status)
+            }
         }
+        invalidateSecretCache()
+        if UserDefaults.standard.string(forKey: activeDefaultsKey(for: provider)) == entryID {
+            setActiveEntryID(list(for: provider).first?.id, for: provider)
+        }
+    }
+
+    /// Removes every key for a provider.
+    static func deleteAll(for provider: ModelProvider, ignoresMissing: Bool = false) throws {
+        let entries = list(for: provider)
+        guard !entries.isEmpty else {
+            guard ignoresMissing else {
+                throw ModelCredentialError.keychain(errSecItemNotFound)
+            }
+            setActiveEntryID(nil, for: provider)
+            return
+        }
+        for entry in entries {
+            try delete(entryID: entry.id, for: provider)
+        }
+        setActiveEntryID(nil, for: provider)
+    }
+
+    /// Legacy single-key delete, preserved for existing call sites.
+    static func delete(for provider: ModelProvider, ignoresMissing: Bool = false) throws {
+        try deleteAll(for: provider, ignoresMissing: ignoresMissing)
     }
 }
 
@@ -71,6 +372,10 @@ final class ModelConfigurationStore: ObservableObject {
     @Published private(set) var isDiscovering = false
     @Published private(set) var discoveryError: String?
     @Published private(set) var credentialRevision = 0
+
+    /// Entry id served by the last rotation, so a failure is attributed to the
+    /// key that actually made the request rather than the currently active one.
+    var lastRotatedEntryID: [ModelProvider: String] = [:]
     @Published private(set) var modelsTabRequest = 0
     @Published private(set) var unhealthyModels: Set<String> = []
     @Published private(set) var isCheckingHealth = false
@@ -96,10 +401,10 @@ final class ModelConfigurationStore: ObservableObject {
 
     @Published var contextWindowMargin: Double = 0.85
     @Published var isStreamingContextWatchdogEnabled: Bool = true
-    @Published private(set) var lastContextRoutingReason: String?
-    @Published private(set) var lastContextRoutedAt: Date?
-    @Published private(set) var lastContextEstimatedInputTokens: Int?
-    @Published private(set) var lastContextRequestedOutputTokens: Int?
+    @Published var lastContextRoutingReason: String?
+    @Published var lastContextRoutedAt: Date?
+    @Published var lastContextEstimatedInputTokens: Int?
+    @Published var lastContextRequestedOutputTokens: Int?
     /// User-configured per-send output-token budget. Persisted and clamped to the
     /// effective (advertised or learned) output ceiling at request time.
     @Published var requestedOutputTokens: Int? = nil
@@ -108,22 +413,22 @@ final class ModelConfigurationStore: ObservableObject {
     /// A conservative `unhealthyModels` string set is kept for the UI.
     @Published private(set) var unhealthyTuples: Set<ModelEndpointTuple> = []
 
-    private let defaults: UserDefaults
+    let defaults: UserDefaults
     private let environment: [String: String]
     private let catalogService: ModelCatalogService
     private let healthService: any ModelHealthServiceProtocol
     private let statusService: any ProviderStatusServiceProtocol
     private let reliabilityService: ModelReliabilityService
     private let costService: ModelCostService
-    private let circuitBreaker: ProviderCircuitBreaker
-    private let quotaService: ProviderQuotaService
+    let circuitBreaker: ProviderCircuitBreaker
+    let quotaService: ProviderQuotaService
     private let warmupService: ModelWarmupService
     private let warmupCache: PredictiveWarmupCache
     private let volatilityTracker: WarmupVolatilityTracker
     private lazy var warmupRefresher: PredictiveWarmupRefresher = PredictiveWarmupRefresher(store: self)
-    private let contextService: ModelContextService
-    private let contextLimitLearner: StreamingContextLimitLearner
-    private let requestSizer: ChatRequestSizer
+    let contextService: ModelContextService
+    let contextLimitLearner: StreamingContextLimitLearner
+    let requestSizer: ChatRequestSizer
     private var backgroundPoller: BackgroundHealthPoller?
     private var predictiveScheduler: PredictiveWarmupScheduler?
 
@@ -331,7 +636,13 @@ final class ModelConfigurationStore: ObservableObject {
     /// tuple. Returns the chosen candidate or `nil` if no eligible provider is
     /// available. The selection is applied immediately and persisted.
     @discardableResult
-    func selectFirstHealthyCrossProviderModel() async -> CrossProviderModelCandidate? {
+    /// Cross-provider failover honours a conversation pin: a user who fixed a
+    /// conversation to one model must not be moved to another provider behind
+    /// their back.
+    func selectFirstHealthyCrossProviderModel(
+        constrainedTo constraint: ConversationModelConstraint? = nil
+    ) async -> CrossProviderModelCandidate? {
+        if let constraint { return constraint.candidate }
         var allowedConfigs: [(provider: ModelProvider, baseURL: String)] = []
         for config in eligibleProviderConfigurations {
             let key = ProviderEndpointKey(provider: config.provider, baseURL: config.baseURL)
@@ -470,7 +781,16 @@ final class ModelConfigurationStore: ObservableObject {
     /// Generates the candidate list for adaptive warmup from all eligible
     /// provider endpoints. The current selection is always included by the
     /// warmup service itself.
-    func warmupCandidates() -> [CrossProviderModelCandidate] {
+    /// Candidates eligible for warmup.
+    ///
+    /// A conversation pin narrows the set to the pinned tuple: warmup must not
+    /// switch a conversation the user deliberately fixed to one model.
+    func warmupCandidates(
+        constrainedTo constraint: ConversationModelConstraint? = nil
+    ) -> [CrossProviderModelCandidate] {
+        if let constraint {
+            return [constraint.candidate]
+        }
         var candidates: [CrossProviderModelCandidate] = []
         for config in eligibleProviderConfigurations {
             let models = Array(config.provider.suggestedModels.prefix(2))
@@ -489,7 +809,9 @@ final class ModelConfigurationStore: ObservableObject {
     /// applies the new selection. Returns the warmup result so callers can show
     /// a banner or log timing.
     @discardableResult
-    func runAdaptiveWarmup() async -> ModelWarmupResult {
+    func runAdaptiveWarmup(
+        constrainedTo constraint: ConversationModelConstraint? = nil
+    ) async -> ModelWarmupResult {
         let current = CrossProviderModelCandidate(
             provider: selectedProvider,
             baseURL: baseURL,
@@ -1115,17 +1437,6 @@ final class ModelConfigurationStore: ObservableObject {
         )
     }
 
-    /// Returns the user-requested output budget clamped to the effective output
-    /// ceiling for the given model tuple. `nil` means "use the default budget".
-    func effectiveRequestedOutputTokens(
-        for model: String,
-        provider: ModelProvider,
-        baseURL: String? = nil
-    ) async -> Int? {
-        guard let requested = requestedOutputTokens else { return nil }
-        let ceiling = await effectiveMaxOutputTokens(for: model, provider: provider, baseURL: baseURL)
-        return min(requested, ceiling)
-    }
 
     func selectProvider(_ provider: ModelProvider) {
         guard provider != selectedProvider else { return }
@@ -1215,6 +1526,110 @@ final class ModelConfigurationStore: ObservableObject {
             }
         }
     }
+
+
+    /// Lightweight API-key validity/balance probe.
+    /// - Parameters:
+    ///   - key: The API key to test (drafted or stored).
+    ///   - provider: The provider to probe.
+    ///   - baseURL: The endpoint URL to probe.
+    /// - Returns: Detailed validation result including HTTP status, response body,
+    ///   and a chronological log the UI can display.
+    func testAPIKey(
+        key: String,
+        provider: ModelProvider,
+        baseURL: String
+    ) async -> APIKeyValidationResult {
+        let result = await healthService.validateKey(
+            provider: provider,
+            baseURL: baseURL,
+            apiKey: key
+        )
+        await quotaService.record(provider: provider, baseURL: baseURL, quota: result.quota)
+        return result
+    }
+
+    // MARK: - Multi-key management
+
+    /// Main-actor accessor for the active key, for callers that cannot await.
+    func resolvedAPIKeySync(for provider: ModelProvider) -> String {
+        resolvedAPIKey(for: provider)
+    }
+
+    /// Every key stored for the selected provider. Reading is cheap enough to do
+    /// on demand; `credentialRevision` drives SwiftUI refreshes.
+    var storedKeys: [ModelKeyEntry] {
+        ModelCredentialStore.list(for: selectedProvider)
+    }
+
+    var activeKeyID: String? {
+        ModelCredentialStore.activeEntryID(for: selectedProvider)
+    }
+
+    /// Adds a key without disturbing the ones already stored.
+    func addAPIKey(_ value: String, label: String) throws {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        let entry = try ModelCredentialStore.add(trimmed, label: label, for: selectedProvider)
+        TriosLogBus.shared.info(
+            .models,
+            "models.key.added",
+            "Stored a new API key",
+            [
+                "provider": selectedProvider.rawValue,
+                "label": entry.label,
+                "masked": entry.maskedValue
+            ]
+        )
+        afterCredentialChange(reason: "API key added")
+    }
+
+    /// Switches which stored key signs outgoing requests.
+    func activateAPIKey(entryID: String) {
+        ModelCredentialStore.setActiveEntryID(entryID, for: selectedProvider)
+        TriosLogBus.shared.info(
+            .models,
+            "models.key.activated",
+            "Switched active API key",
+            ["provider": selectedProvider.rawValue, "entry": entryID]
+        )
+        afterCredentialChange(reason: "Active API key changed")
+    }
+
+    func renameAPIKey(entryID: String, label: String) throws {
+        let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        try ModelCredentialStore.rename(entryID: entryID, to: trimmed, for: selectedProvider)
+        credentialRevision += 1
+    }
+
+    /// Shared bookkeeping after any credential mutation: refresh dependent
+    /// state so stale reliability history cannot outlive the key that produced it.
+    private func afterCredentialChange(reason: String) {
+        credentialRevision += 1
+        predictiveSelectionReason = nil
+        Task { await reliabilityService.reset(provider: selectedProvider, baseURL: baseURL) }
+        invalidateHealth()
+        restartBackgroundHealthChecks()
+        if isPredictiveSelectionEnabled {
+            Task { [weak self] in
+                await self?.applyPredictiveSelection(reason: reason)
+            }
+        }
+    }
+
+    /// Deletes exactly one key, leaving the others in place.
+    func deleteAPIKey(entryID: String) throws {
+        try ModelCredentialStore.delete(entryID: entryID, for: selectedProvider)
+        TriosLogBus.shared.info(
+            .models,
+            "models.key.deleted",
+            "Deleted an API key",
+            ["provider": selectedProvider.rawValue, "entry": entryID]
+        )
+        afterCredentialChange(reason: "API key removed")
+    }
+
 
     /// Enables or disables predictive model selection and persists the choice.
     func setPredictiveSelectionEnabled(_ enabled: Bool) {
@@ -1428,343 +1843,24 @@ final class ModelConfigurationStore: ObservableObject {
         "trios.model.predictive-warmup-max-staleness"
     }
 
-    private static var contextWindowMarginKey: String {
-        "trios.model.context-window-margin"
-    }
 
-    private static var streamingContextWatchdogKey: String {
-        "trios.model.streaming-context-watchdog"
-    }
 
-    private static var requestedOutputTokensKey: String {
-        "trios.model.requested-output-tokens"
-    }
 
     // MARK: - Context-length-aware routing
 
-    /// Loads the persisted context-window margin, clamped to the allowed range.
-    private func loadContextWindowMargin() {
-        let stored = defaults.object(forKey: Self.contextWindowMarginKey) as? Double ?? 0.85
-        contextWindowMargin = max(0.50, min(0.95, stored))
-    }
 
-    /// Updates the safety margin and persists it.
-    func setContextWindowMargin(_ margin: Double) {
-        contextWindowMargin = max(0.50, min(0.95, margin))
-        defaults.set(contextWindowMargin, forKey: Self.contextWindowMarginKey)
-    }
 
-    /// Loads the persisted streaming context watchdog preference.
-    private func loadStreamingContextWatchdogPreference() {
-        isStreamingContextWatchdogEnabled = defaults.object(forKey: Self.streamingContextWatchdogKey) as? Bool ?? true
-    }
 
-    /// Updates the streaming context watchdog preference and persists it.
-    func setStreamingContextWatchdogEnabled(_ enabled: Bool) {
-        isStreamingContextWatchdogEnabled = enabled
-        defaults.set(enabled, forKey: Self.streamingContextWatchdogKey)
-    }
 
-    /// Loads the persisted per-send output-token budget preference.
-    private func loadRequestedOutputTokens() {
-        let stored = defaults.object(forKey: Self.requestedOutputTokensKey) as? Int
-        requestedOutputTokens = stored.map { max(0, $0) }
-    }
 
-    /// Updates the per-send output-token budget and persists it.
-    func setRequestedOutputTokens(_ tokens: Int?) {
-        requestedOutputTokens = tokens.map { max(0, $0) }
-        if let tokens {
-            defaults.set(tokens, forKey: Self.requestedOutputTokensKey)
-        } else {
-            defaults.removeObject(forKey: Self.requestedOutputTokensKey)
-        }
-    }
 
-    /// Clears the user-defined per-send output-token budget, returning to the
-    /// default (clamped) output budget.
-    func clearRequestedOutputTokens() {
-        setRequestedOutputTokens(nil)
-    }
 
-    /// Returns the effective output ceiling for a model tuple, blending the
-    /// advertised catalog with learned per-endpoint limits.
-    func effectiveMaxOutputTokens(
-        for model: String,
-        provider: ModelProvider,
-        baseURL: String? = nil
-    ) async -> Int {
-        let profile = await contextService.profile(
-            for: model,
-            provider: provider,
-            baseURL: baseURL ?? self.baseURL
-        )
-        return profile.maxOutputTokens
-    }
 
-    /// Switches the active selection to a context-routed candidate and records
-    /// the reason for UI and logs.
-    func applyContextRoutedSelection(candidate: CrossProviderModelCandidate, reason: String) {
-        applySelection(
-            provider: candidate.provider,
-            baseURL: candidate.baseURL,
-            model: candidate.model
-        )
-        lastContextRoutingReason = reason
-        lastContextRoutedAt = Date()
-    }
 
-    /// Decides whether to use the current model, route to a larger-context
-    /// healthy candidate, trim history, or refuse the request before any provider
-    /// call is made.
-    func resolveContextRoutingDecision(
-        conversationId: UUID?,
-        messages: [ChatMessage],
-        currentMessage: ChatMessage,
-        systemPrompt: String?,
-        requestedOutputTokens: Int?,
-        candidates: [CrossProviderModelCandidate]
-    ) async -> ContextRoutingDecision {
-        let currentProfile = await contextService.profile(
-            for: selectedModel,
-            provider: selectedProvider,
-            baseURL: baseURL
-        )
-        let currentSize = await requestSizer.size(
-            messages: messages,
-            currentMessage: currentMessage,
-            systemPrompt: systemPrompt,
-            modelProfile: currentProfile,
-            requestedOutputTokens: requestedOutputTokens,
-            margin: contextWindowMargin
-        )
-        lastContextEstimatedInputTokens = currentSize.estimatedInputTokens
-        lastContextRequestedOutputTokens = currentSize.requestedOutputTokens
 
-        let current = CrossProviderModelCandidate(
-            provider: selectedProvider,
-            baseURL: baseURL,
-            model: selectedModel
-        )
 
-        // If the current model fits the context window but cannot honor the full
-        // requested output budget, try to route to a model with a larger effective
-        // output ceiling before giving up and clamping the budget locally.
-        if currentSize.fitsCurrentModel,
-           let rawRequested = requestedOutputTokens,
-           rawRequested > currentProfile.maxOutputTokens {
-            let outputCandidates = await contextService.largerOutputCandidates(
-                estimatedInput: currentSize.estimatedInputTokens,
-                outputTokens: rawRequested,
-                current: current,
-                candidates: candidates,
-                margin: contextWindowMargin
-            )
-            for candidate in outputCandidates {
-                guard await isCandidateAllowed(candidate) else { continue }
-                let routedProfile = await contextService.profile(
-                    for: candidate.model,
-                    provider: candidate.provider,
-                    baseURL: candidate.baseURL
-                )
-                let routedSize = await requestSizer.size(
-                    messages: messages,
-                    currentMessage: currentMessage,
-                    systemPrompt: systemPrompt,
-                    modelProfile: routedProfile,
-                    requestedOutputTokens: requestedOutputTokens,
-                    margin: contextWindowMargin
-                )
-                guard routedSize.fitsCurrentModel else { continue }
-                lastContextEstimatedInputTokens = routedSize.estimatedInputTokens
-                lastContextRequestedOutputTokens = routedSize.requestedOutputTokens
-                lastContextRoutingReason = "routed to \(candidate.model) for output budget (\(routedProfile.maxOutputTokens) tokens)"
-                return .routeTo(candidate)
-            }
-            return .useCurrent
-        }
 
-        if currentSize.fitsCurrentModel {
-            return .useCurrent
-        }
 
-        let largerCandidates = await contextService.largerModelCandidates(
-            estimatedInput: currentSize.estimatedInputTokens,
-            outputTokens: currentSize.requestedOutputTokens,
-            current: current,
-            candidates: candidates,
-            margin: contextWindowMargin
-        )
-        for candidate in largerCandidates {
-            if await isCandidateAllowed(candidate) {
-                let routedProfile = await contextService.profile(
-                    for: candidate.model,
-                    provider: candidate.provider,
-                    baseURL: candidate.baseURL
-                )
-                let routedSize = await requestSizer.size(
-                    messages: messages,
-                    currentMessage: currentMessage,
-                    systemPrompt: systemPrompt,
-                    modelProfile: routedProfile,
-                    requestedOutputTokens: requestedOutputTokens,
-                    margin: contextWindowMargin
-                )
-                lastContextEstimatedInputTokens = routedSize.estimatedInputTokens
-                lastContextRequestedOutputTokens = routedSize.requestedOutputTokens
-                lastContextRoutingReason = "routed to \(candidate.model) for context window (\(routedProfile.maxContextTokens) tokens)"
-                return .routeTo(candidate)
-            }
-        }
 
-        let trimPolicy = await requestSizer.trim(
-            messages: messages,
-            currentMessage: currentMessage,
-            systemPrompt: systemPrompt,
-            modelProfile: currentProfile,
-            requestedOutputTokens: requestedOutputTokens,
-            margin: contextWindowMargin,
-            minRetainedTurns: 2
-        )
-        let trimmedMessages = await requestSizer.trimmedMessages(from: messages, policy: trimPolicy)
-        let trimmedSize = await requestSizer.size(
-            messages: trimmedMessages,
-            currentMessage: currentMessage,
-            systemPrompt: systemPrompt,
-            modelProfile: currentProfile,
-            requestedOutputTokens: requestedOutputTokens,
-            margin: contextWindowMargin
-        )
-        if trimmedSize.fitsCurrentModel {
-            lastContextEstimatedInputTokens = trimmedSize.estimatedInputTokens
-            lastContextRequestedOutputTokens = trimmedSize.requestedOutputTokens
-            return .trimHistory(trimPolicy)
-        }
-
-        let largestWindow = await maxAvailableWindow(
-            candidates: candidates,
-            current: current,
-            currentProfile: currentProfile
-        )
-        let largestProfile = ModelContextProfile(
-            maxContextTokens: largestWindow,
-            maxOutputTokens: currentProfile.maxOutputTokens
-        )
-        let singleMessageSize = await requestSizer.size(
-            messages: [],
-            currentMessage: currentMessage,
-            systemPrompt: systemPrompt,
-            modelProfile: largestProfile,
-            requestedOutputTokens: requestedOutputTokens,
-            margin: contextWindowMargin
-        )
-        if !singleMessageSize.fitsCurrentModel {
-            return .tooLargeEvenEmpty
-        }
-
-        // The request is larger than preferred but the current message alone
-        // fits the largest available window, so trim as aggressively as needed.
-        return .trimHistory(trimPolicy)
-    }
-
-    /// True when a candidate is healthy, its endpoint breaker allows traffic, and
-    /// quota is not depleted.
-    private func isCandidateAllowed(_ candidate: CrossProviderModelCandidate) async -> Bool {
-        guard !isUnhealthy(
-            provider: candidate.provider,
-            baseURL: candidate.baseURL,
-            model: candidate.model
-        ) else { return false }
-        let key = ProviderEndpointKey(provider: candidate.provider, baseURL: candidate.baseURL)
-        guard await circuitBreaker.canSend(to: key) else { return false }
-        let quota = await quotaService.status(for: candidate.provider, baseURL: candidate.baseURL)
-        return !quota.isDepleted
-    }
-
-    /// Largest advertised context window among the current model and all healthy,
-    /// allowed candidates. Used for the final "too large even empty" check.
-    private func maxAvailableWindow(
-        candidates: [CrossProviderModelCandidate],
-        current: CrossProviderModelCandidate,
-        currentProfile: ModelContextProfile
-    ) async -> Int {
-        var maxWindow = currentProfile.maxContextTokens
-        for candidate in candidates {
-            guard candidate != current else { continue }
-            guard await isCandidateAllowed(candidate) else { continue }
-            let profile = await contextService.profile(
-                for: candidate.model,
-                provider: candidate.provider,
-                baseURL: candidate.baseURL
-            )
-            if profile.maxContextTokens > maxWindow {
-                maxWindow = profile.maxContextTokens
-            }
-        }
-        return maxWindow
-    }
-
-    /// Returns the estimated utilization of a model's usable context window
-    /// (accounting for the configured safety margin). Used by the Models tab
-    /// badge and the composer status indicator.
-    /// Returns the learned context/output limits for a model tuple, if any.
-    func learnedLimits(
-        for model: String,
-        provider: ModelProvider,
-        baseURL: String? = nil
-    ) async -> StreamingContextLearnedLimits {
-        await contextLimitLearner.learnedLimits(
-            for: model,
-            provider: provider,
-            baseURL: baseURL ?? self.baseURL
-        )
-    }
-
-    func contextWindowUtilizationPercent(
-        for model: String,
-        provider: ModelProvider,
-        baseURL: String? = nil
-    ) async -> Double? {
-        guard let input = lastContextEstimatedInputTokens, input >= 0 else {
-            return nil
-        }
-        let output = lastContextRequestedOutputTokens ?? 0
-        let resolvedBaseURL = baseURL ?? self.baseURL
-        let profile = await contextService.profile(
-            for: model,
-            provider: provider,
-            baseURL: resolvedBaseURL
-        )
-        guard profile.maxContextTokens > 0 else { return nil }
-        let usable = Double(profile.maxContextTokens) * contextWindowMargin
-        guard usable > 0 else { return nil }
-        return Double(input + output) / usable * 100.0
-    }
-
-    /// Returns the healthiest candidate with a larger context window or output
-    /// limit than the current selection, if any. Used by the streaming context
-    /// watchdog when the user chooses to continue a paused stream on a larger
-    /// model.
-    func selectLargerModelCandidate(estimatedInput: Int, outputTokens: Int = 1024) async -> CrossProviderModelCandidate? {
-        let current = CrossProviderModelCandidate(
-            provider: selectedProvider,
-            baseURL: baseURL,
-            model: selectedModel
-        )
-        let candidates = warmupCandidates()
-        var allowed: [CrossProviderModelCandidate] = []
-        for candidate in candidates {
-            if await isCandidateAllowed(candidate) {
-                allowed.append(candidate)
-            }
-        }
-        return await contextService.largerModelCandidates(
-            estimatedInput: estimatedInput,
-            outputTokens: outputTokens,
-            current: current,
-            candidates: allowed,
-            margin: contextWindowMargin
-        ).first
-    }
 }
 

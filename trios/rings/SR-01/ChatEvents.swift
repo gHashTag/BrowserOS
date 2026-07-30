@@ -3,6 +3,7 @@ import Foundation
 enum ConversationState: Equatable {
     case idle
     case streaming(messageId: UUID)
+    case awaitingContextDecision(messageId: UUID, partialText: String)
     case error(String)
     case reconnecting(attempt: Int, maxAttempts: Int)
 }
@@ -21,11 +22,24 @@ enum SSEEvent: Equatable {
     case toolOutputAvailable(id: String, toolCallId: String, result: Data)
     case toolOutputError(id: String, toolCallId: String, error: String)
     case usage(inputTokens: Int, outputTokens: Int, totalTokens: Int)
-    case finish(id: String)
+    case finish(id: String, reason: String?)
     case abort(id: String)
     case error(id: String, message: String)
     case ping
     case unknown(data: String)
+}
+
+extension SSEEvent {
+    /// Whether this event represents the first model-generated output on the
+    /// stream. Meta events (errors, aborts, finish, usage, pings) do not count.
+    var isFirstToken: Bool {
+        switch self {
+        case .error, .abort, .finish, .usage, .ping, .unknown:
+            return false
+        default:
+            return true
+        }
+    }
 }
 
 enum ParserAction: Equatable {
@@ -48,6 +62,25 @@ enum ParserAction: Equatable {
 enum SegmentKind: Equatable {
     case text
     case reasoning
+}
+
+/// Live budget status published by ChatViewModel while a stream is active.
+/// Ratios are in the range 0...1. The kind determines the progress bar color.
+struct StreamingBudgetStatus: Equatable, Sendable {
+    enum Kind: Equatable, Sendable {
+        case safe
+        case warning
+        case critical
+    }
+
+    let outputUsed: Int
+    let outputCeiling: Int
+    let totalUsed: Int
+    let totalCeiling: Int
+    let outputRatio: Double
+    let totalRatio: Double
+    let kind: Kind
+    let limitKind: StreamingContextLimitKind
 }
 
 struct SSEEventParser {
@@ -129,7 +162,8 @@ struct SSEEventParser {
                 totalTokens: total > 0 ? total : input + output
             )
         case "finish":
-            return .finish(id: id)
+            let reason = dict["finish_reason"] as? String
+            return .finish(id: id, reason: reason)
         case "abort":
             return .abort(id: id)
         case "error":

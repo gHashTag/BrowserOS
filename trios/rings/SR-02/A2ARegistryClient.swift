@@ -277,7 +277,7 @@ actor A2ARegistryClient {
                         attempt = 0
                         for try await line in bytes.lines {
                             if Task.isCancelled { break }
-                            if let message = await self.handleSSELine(line) {
+                            if let message = self.handleSSELine(line) {
                                 continuation.yield(message)
                             }
                         }
@@ -375,26 +375,33 @@ actor A2ARegistryClient {
         body: some Encodable & Sendable
     ) async throws -> (Data, HTTPURLResponse) {
         let request = try await makeAuthorizedRequest(url: url, method: method, body: body)
-        do {
-            return try await performDataRequest(url: url, request: request)
-        } catch let A2AError.invalidResponse(403, _) {
-            await LocalAuthMonitor.shared.record403Retry()
-            let request = try await makeAuthorizedRequest(
-                url: url, method: method, body: body, forceRefresh: true
-            )
-            return try await performDataRequest(url: url, request: request)
-        }
+        let (data, http) = try await performDataRequest(url: url, request: request)
+        // `performDataRequest` RETURNS a 403 rather than throwing it, so the
+        // retry has to inspect the status. Catching A2AError.invalidResponse
+        // here never fired, which left a stale token in place forever: every
+        // A2A call answered 403 "Local authorization required" and only
+        // deleting the Keychain item by hand recovered it.
+        guard http.statusCode == 403 else { return (data, http) }
+        await LocalAuthMonitor.shared.record403Retry()
+        TriosLogBus.shared.warn(
+            .security,
+            "localauth.token.refreshed",
+            "Server rejected the local-auth token; fetching a fresh one",
+            ["url": url.lastPathComponent]
+        )
+        let retried = try await makeAuthorizedRequest(
+            url: url, method: method, body: body, forceRefresh: true
+        )
+        return try await performDataRequest(url: url, request: retried)
     }
 
     private func performAuthorizedGetRequest(url: URL) async throws -> (Data, HTTPURLResponse) {
         let request = await makeAuthorizedGetRequest(url: url)
-        do {
-            return try await performDataRequest(url: url, request: request)
-        } catch let A2AError.invalidResponse(403, _) {
-            await LocalAuthMonitor.shared.record403Retry()
-            let request = await makeAuthorizedGetRequest(url: url, forceRefresh: true)
-            return try await performDataRequest(url: url, request: request)
-        }
+        let (data, http) = try await performDataRequest(url: url, request: request)
+        guard http.statusCode == 403 else { return (data, http) }
+        await LocalAuthMonitor.shared.record403Retry()
+        let retried = await makeAuthorizedGetRequest(url: url, forceRefresh: true)
+        return try await performDataRequest(url: url, request: retried)
     }
 
     private func performDataRequest(url: URL, request: URLRequest) async throws -> (Data, HTTPURLResponse) {

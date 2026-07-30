@@ -92,7 +92,7 @@ actor MemoryStore: AgentMemoryStoreProtocol {
         case null
     }
 
-    private static let schemaVersionNumber = 3
+    private static let schemaVersionNumber = 5
     private static let candidateLimit = 64
     private static let outcomeLimit = 64
     private static let transientDestructor = unsafeBitCast(
@@ -541,8 +541,13 @@ actor MemoryStore: AgentMemoryStoreProtocol {
                         base_url,
                         success,
                         reason,
-                        created_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        created_at,
+                        latency_ms,
+                        time_to_first_token_ms,
+                        observed_output_tokens,
+                        observed_total_tokens,
+                        finish_reason
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                 bindings: [
                     .text(outcome.id.uuidString),
@@ -551,7 +556,12 @@ actor MemoryStore: AgentMemoryStoreProtocol {
                     .text(outcome.baseURL),
                     .integer(outcome.success ? 1 : 0),
                     outcome.reason.map(SQLiteValue.text) ?? .null,
-                    .double(outcome.timestamp.timeIntervalSince1970)
+                    .double(outcome.timestamp.timeIntervalSince1970),
+                    outcome.latencyMs.map { SQLiteValue.integer(Int64($0)) } ?? .null,
+                    outcome.timeToFirstTokenMs.map { SQLiteValue.integer(Int64($0)) } ?? .null,
+                    outcome.observedOutputTokens.map { SQLiteValue.integer(Int64($0)) } ?? .null,
+                    outcome.observedTotalTokens.map { SQLiteValue.integer(Int64($0)) } ?? .null,
+                    outcome.finishReason.map(SQLiteValue.text) ?? .null
                 ]
             )
             // Keep the history bounded per model/provider/base_url tuple.
@@ -594,7 +604,12 @@ actor MemoryStore: AgentMemoryStoreProtocol {
                     base_url,
                     success,
                     reason,
-                    created_at
+                    created_at,
+                    latency_ms,
+                    time_to_first_token_ms,
+                    observed_output_tokens,
+                    observed_total_tokens,
+                    finish_reason
                 FROM model_outcomes
                 WHERE model = ? AND provider = ? AND base_url = ?
                 ORDER BY created_at DESC, id ASC
@@ -746,42 +761,74 @@ actor MemoryStore: AgentMemoryStoreProtocol {
                             base_url TEXT NOT NULL,
                             success INTEGER NOT NULL,
                             reason TEXT,
-                            created_at REAL NOT NULL
+                            created_at REAL NOT NULL,
+                            latency_ms INTEGER,
+                            time_to_first_token_ms INTEGER,
+                            observed_output_tokens INTEGER,
+                            observed_total_tokens INTEGER,
+                            finish_reason TEXT
                         );
 
                         CREATE INDEX model_outcomes_model_provider_base_url
                         ON model_outcomes(model, provider, base_url, created_at DESC);
 
-                        PRAGMA user_version = 3;
+                        PRAGMA user_version = 5;
                         """
                 )
             }
-        } else if version == 1 || version == 2 {
+        } else if version == 1 || version == 2 || version == 3 {
             try withTransaction(database) {
                 if version == 1 {
                     // v1 -> v2: table layout unchanged, just bump pragma.
                     try execute(database, sql: "PRAGMA user_version = 2")
                 }
-                // v2 -> v3: add model_outcomes table.
-                try execute(
-                    database,
-                    sql: """
-                        CREATE TABLE IF NOT EXISTS model_outcomes (
-                            id TEXT PRIMARY KEY NOT NULL,
-                            model TEXT NOT NULL,
-                            provider TEXT NOT NULL,
-                            base_url TEXT NOT NULL,
-                            success INTEGER NOT NULL,
-                            reason TEXT,
-                            created_at REAL NOT NULL
-                        );
+                if version == 1 || version == 2 {
+                    // v2 -> v3: add model_outcomes table.
+                    try execute(
+                        database,
+                        sql: """
+                            CREATE TABLE IF NOT EXISTS model_outcomes (
+                                id TEXT PRIMARY KEY NOT NULL,
+                                model TEXT NOT NULL,
+                                provider TEXT NOT NULL,
+                                base_url TEXT NOT NULL,
+                                success INTEGER NOT NULL,
+                                reason TEXT,
+                                created_at REAL NOT NULL
+                            );
 
-                        CREATE INDEX IF NOT EXISTS model_outcomes_model_provider_base_url
-                        ON model_outcomes(model, provider, base_url, created_at DESC);
+                            CREATE INDEX IF NOT EXISTS model_outcomes_model_provider_base_url
+                            ON model_outcomes(model, provider, base_url, created_at DESC);
 
-                        PRAGMA user_version = 3;
-                        """
-                )
+                            PRAGMA user_version = 3;
+                            """
+                    )
+                }
+                if version == 3 {
+                    // v3 -> v4: add latency columns to model_outcomes.
+                    try execute(
+                        database,
+                        sql: """
+                            ALTER TABLE model_outcomes ADD COLUMN latency_ms INTEGER;
+                            ALTER TABLE model_outcomes ADD COLUMN time_to_first_token_ms INTEGER;
+
+                            PRAGMA user_version = 4;
+                            """
+                    )
+                }
+                if version == 4 {
+                    // v4 -> v5: add observed token / finish_reason columns.
+                    try execute(
+                        database,
+                        sql: """
+                            ALTER TABLE model_outcomes ADD COLUMN observed_output_tokens INTEGER;
+                            ALTER TABLE model_outcomes ADD COLUMN observed_total_tokens INTEGER;
+                            ALTER TABLE model_outcomes ADD COLUMN finish_reason TEXT;
+
+                            PRAGMA user_version = 5;
+                            """
+                    )
+                }
             }
         }
     }
@@ -923,6 +970,11 @@ actor MemoryStore: AgentMemoryStoreProtocol {
         let success = sqlite3_column_int64(statement, 4) != 0
         let reason = stringColumn(statement, index: 5)
         let createdAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 6))
+        let latencyMs = integerColumn(statement, index: 7).map(Int.init)
+        let timeToFirstTokenMs = integerColumn(statement, index: 8).map(Int.init)
+        let observedOutputTokens = integerColumn(statement, index: 9).map(Int.init)
+        let observedTotalTokens = integerColumn(statement, index: 10).map(Int.init)
+        let finishReason = stringColumn(statement, index: 11)
         return ModelOutcome(
             id: id,
             model: model,
@@ -930,7 +982,12 @@ actor MemoryStore: AgentMemoryStoreProtocol {
             baseURL: baseURL,
             success: success,
             reason: reason,
-            timestamp: createdAt
+            timestamp: createdAt,
+            latencyMs: latencyMs,
+            timeToFirstTokenMs: timeToFirstTokenMs,
+            observedOutputTokens: observedOutputTokens,
+            observedTotalTokens: observedTotalTokens,
+            finishReason: finishReason
         )
     }
 
@@ -972,6 +1029,16 @@ actor MemoryStore: AgentMemoryStoreProtocol {
         index: Int32
     ) -> UUID? {
         stringColumn(statement, index: index).flatMap(UUID.init(uuidString:))
+    }
+
+    private static func integerColumn(
+        _ statement: OpaquePointer,
+        index: Int32
+    ) -> Int64? {
+        guard sqlite3_column_type(statement, index) != SQLITE_NULL else {
+            return nil
+        }
+        return sqlite3_column_int64(statement, index)
     }
 
     private static func verifyStepCompletion(

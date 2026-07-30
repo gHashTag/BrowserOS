@@ -39,6 +39,9 @@ actor ModelContextService: Sendable {
                 "claude-haiku-4-5": claudeProfile
             ],
             .zai: [
+                // Conservative: same window as glm-5.1 until the learned
+                // per-endpoint limits observe the real ceiling.
+                "glm-5.2": glm128kProfile,
                 "glm-5.1": glm128kProfile,
                 "glm-5-turbo": glm128kProfile,
                 "glm-5": glm32kProfile,
@@ -55,6 +58,7 @@ actor ModelContextService: Sendable {
             "claude-sonnet-4-5": claudeProfile,
             "claude-opus-4-5": claudeProfile,
             "claude-haiku-4-5": claudeProfile,
+            "glm-5.2": glm128kProfile,
             "glm-5.1": glm128kProfile,
             "glm-5-turbo": glm128kProfile,
             "glm-5": glm32kProfile,
@@ -83,7 +87,11 @@ actor ModelContextService: Sendable {
         )
     }
 
-    private func advertisedProfile(for model: String, provider: ModelProvider) -> ModelContextProfile {
+    /// Returns the advertised (non-learned) context/output profile for a model.
+    /// Public so the composer can compute a cheap synchronous draft-utilization
+    /// indicator without blocking on the learned-limit learner.
+    /// Nonisolated because it only reads immutable `let` catalog state.
+    nonisolated func advertisedProfile(for model: String, provider: ModelProvider) -> ModelContextProfile {
         switch provider {
         case .openai, .anthropic, .zai:
             return knownProfiles[provider]?[model] ?? ModelContextProfile(

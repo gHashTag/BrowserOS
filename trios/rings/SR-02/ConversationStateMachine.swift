@@ -12,6 +12,15 @@ actor ConversationStateMachine {
         case (.streaming, .idle):
             state = newState
             reconnectAttempts = 0
+        case (.streaming, .awaitingContextDecision):
+            state = newState
+        case (.awaitingContextDecision, .idle):
+            state = newState
+            reconnectAttempts = 0
+        case (.awaitingContextDecision, .streaming):
+            state = newState
+        case (.awaitingContextDecision, .error):
+            state = newState
         case (.streaming, .error):
             state = newState
         case (.error, .idle):
@@ -50,6 +59,10 @@ actor ConversationStateMachine {
         switch (from, to) {
         case (.idle, .streaming),
              (.streaming, .idle),
+             (.streaming, .awaitingContextDecision),
+             (.awaitingContextDecision, .idle),
+             (.awaitingContextDecision, .streaming),
+             (.awaitingContextDecision, .error),
              (.streaming, .error),
              (.error, .idle),
              (.error, .streaming),     // allow retry immediately after error

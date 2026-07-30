@@ -6,9 +6,15 @@ enum TriOSEncryptionError: LocalizedError {
     case keyGenerationFailure
     case sealFailure
     case openFailure
+    /// A key is stored but cannot be read without user approval. Never treat
+    /// this as "no key" - minting a replacement would orphan existing data.
+    case keyUnavailableLocked
 
     var errorDescription: String? {
         switch self {
+        case .keyUnavailableLocked:
+            return "The encryption key is locked. Approve the Keychain prompt, "
+                + "or sign the app with a stable identity so it stops asking."
         case .keyGenerationFailure:
             return "Failed to generate an encryption key"
         case .sealFailure:
@@ -141,8 +147,21 @@ final class TriOSEncryption {
         }
 
         if let keyName {
-            if let key = try? KeychainSymmetricKeyStore.read(keyName: keyName) {
-                return key
+            // Non-interactive first. A blocking read here runs during
+            // applicationDidFinishLaunching and freezes the whole app behind a
+            // password dialog, so never let the launch path put up UI.
+            do {
+                if let key = try KeychainSymmetricKeyStore.read(
+                    keyName: keyName,
+                    allowsInteraction: false
+                ) {
+                    return key
+                }
+            } catch KeychainSymmetricKeyStoreError.interactionRequired {
+                // The key is there, we simply may not read it right now.
+                // Falling through would mint a replacement and permanently
+                // orphan the existing encrypted database, so stop here instead.
+                throw TriOSEncryptionError.keyUnavailableLocked
             }
 
             if let migrated = try? KeychainSymmetricKeyStore.migrateLegacyKeyIfNeeded(
@@ -150,6 +169,12 @@ final class TriOSEncryption {
                 fileURL: keyURL
             ) {
                 return migrated
+            }
+
+            // Only mint a new key when nothing is stored. `exists` reads
+            // attributes only, so this check itself never prompts.
+            guard !KeychainSymmetricKeyStore.exists(keyName: keyName) else {
+                throw TriOSEncryptionError.keyUnavailableLocked
             }
 
             let key = SymmetricKey(size: .bits256)

@@ -838,23 +838,29 @@ struct LogRotationPolicy: Sendable {
         return nil
     }
 
-    static func worktreeAuditLogPaths(repoRoot: String) -> [(path: String, policy: LogRotationPolicy)] {
+    private static func worktreeLogPathFamilies(repoRoot: String) -> [(path: String, family: String)] {
         let fm = FileManager.default
         let worktreesRoot = "\(repoRoot)/.worktrees"
         guard fm.fileExists(atPath: worktreesRoot),
               let entries = try? fm.contentsOfDirectory(atPath: worktreesRoot) else {
             return []
         }
-        var result: [(path: String, policy: LogRotationPolicy)] = []
+        var result: [(path: String, family: String)] = []
         for entry in entries {
             let trinityDir = "\(worktreesRoot)/\(entry)/trios/.trinity"
             guard fm.fileExists(atPath: trinityDir) else { continue }
-            result.append(("\(trinityDir)/event_log.jsonl", .audit))
-            result.append(("\(trinityDir)/events/akashic-log.jsonl", .audit))
-            result.append(("\(trinityDir)/state/local-auth-audit.jsonl", .security))
-            result.append(("\(trinityDir)/experience/episodes.jsonl", .experience))
+            result.append(("\(trinityDir)/event_log.jsonl", "audit"))
+            result.append(("\(trinityDir)/events/akashic-log.jsonl", "audit"))
+            result.append(("\(trinityDir)/state/local-auth-audit.jsonl", "security"))
+            result.append(("\(trinityDir)/experience/episodes.jsonl", "experience"))
         }
         return result
+    }
+
+    static func worktreeAuditLogPaths(repoRoot: String) -> [(path: String, policy: LogRotationPolicy)] {
+        worktreeLogPathFamilies(repoRoot: repoRoot).map { item in
+            (item.path, basePolicy(for: item.family))
+        }
     }
 
     static func rotateAuditLogs() {
@@ -870,6 +876,206 @@ struct LogRotationPolicy: Sendable {
             item.policy.rotateIfNeeded(path: item.path)
         }
     }
+
+    // MARK: - Retention dashboard snapshots
+
+    /// Estimate for when the next rotation will occur for a policy family.
+    enum NextRotationEstimate: Sendable {
+        case none
+        case size(currentBytes: UInt64, thresholdBytes: UInt64)
+        case age(currentAge: TimeInterval, thresholdAge: TimeInterval)
+        case imminent(reason: String)
+    }
+
+    /// Read-only summary of disk usage and predicted next rotation for one policy family.
+    struct LogRetentionSnapshot: Sendable {
+        let policyName: String
+        let effectivePolicy: LogRotationPolicy
+        let activePaths: [(path: String, size: UInt64)]
+        let archives: [(path: String, size: UInt64, timestamp: TimeInterval)]
+        let totalActiveBytes: UInt64
+        let totalArchiveBytes: UInt64
+        let nextRotationEstimate: NextRotationEstimate
+    }
+
+    /// Human-readable byte string, e.g. "2.4 MB".
+    static func formatBytes(_ bytes: UInt64) -> String {
+        let units = ["B", "KB", "MB", "GB", "TB"]
+        var value = Double(bytes)
+        var unitIndex = 0
+        while value >= 1024 && unitIndex < units.count - 1 {
+            value /= 1024
+            unitIndex += 1
+        }
+        if unitIndex == 0 {
+            return "\(bytes) \(units[unitIndex])"
+        }
+        return String(format: "%.1f %@", value, units[unitIndex])
+    }
+
+    /// Build a snapshot for a named policy family using the effective merged policy.
+    static func snapshot(for name: String, paths: [String]) -> LogRetentionSnapshot {
+        let base = basePolicy(for: name)
+        let policy = LogRetentionSettings.shared.effectivePolicy(for: name, base: base)
+
+        let fm = FileManager.default
+        let now = Date().timeIntervalSince1970
+
+        var activePaths: [(path: String, size: UInt64)] = []
+        var archives: [(path: String, size: UInt64, timestamp: TimeInterval)] = []
+        var totalActiveBytes: UInt64 = 0
+        var totalArchiveBytes: UInt64 = 0
+        var currentMaxAge: TimeInterval = 0
+
+        for path in paths {
+            if fm.fileExists(atPath: path),
+               let attrs = try? fm.attributesOfItem(atPath: path),
+               let size = attrs[.size] as? UInt64,
+               let mtime = attrs[.modificationDate] as? Date {
+                activePaths.append((path: path, size: size))
+                totalActiveBytes += size
+                currentMaxAge = max(currentMaxAge, now - mtime.timeIntervalSince1970)
+            }
+
+            let dir = (path as NSString).deletingLastPathComponent
+            let baseName = (path as NSString).lastPathComponent
+            let prefix = "\(baseName).archive."
+            guard let files = try? fm.contentsOfDirectory(atPath: dir) else { continue }
+            for file in files {
+                guard let timestamp = archiveTimestamp(file, prefix: prefix) else { continue }
+                let archivePath = "\(dir)/\(file)"
+                let size = (try? fm.attributesOfItem(atPath: archivePath)[.size] as? UInt64) ?? 0
+                archives.append((path: archivePath, size: size, timestamp: timestamp))
+                totalArchiveBytes += size
+            }
+        }
+
+        let estimate = nextRotationEstimate(
+            policy: policy,
+            totalActiveBytes: totalActiveBytes,
+            currentMaxAge: currentMaxAge
+        )
+
+        return LogRetentionSnapshot(
+            policyName: name,
+            effectivePolicy: policy,
+            activePaths: activePaths,
+            archives: archives,
+            totalActiveBytes: totalActiveBytes,
+            totalArchiveBytes: totalArchiveBytes,
+            nextRotationEstimate: estimate
+        )
+    }
+
+    private static func nextRotationEstimate(
+        policy: LogRotationPolicy,
+        totalActiveBytes: UInt64,
+        currentMaxAge: TimeInterval
+    ) -> NextRotationEstimate {
+        let sizeThreshold = policy.maxFileSizeBytes
+        let ageThreshold = policy.maxAgeBeforeRotationSeconds
+
+        let sizeRatio = sizeThreshold > 0 ? Double(totalActiveBytes) / Double(sizeThreshold) : 0
+        let ageRatio: Double
+        if let ageThreshold = ageThreshold, ageThreshold > 0 {
+            ageRatio = currentMaxAge / ageThreshold
+        } else {
+            ageRatio = 0
+        }
+
+        if sizeRatio >= 1 || ageRatio >= 1 {
+            var reasons: [String] = []
+            if sizeRatio >= 1 { reasons.append("size") }
+            if ageRatio >= 1 { reasons.append("age") }
+            return .imminent(reason: reasons.joined(separator: " + "))
+        }
+
+        // Pick the trigger that is closer to firing (higher ratio).
+        if ageThreshold == nil || ageRatio == 0 {
+            if sizeThreshold > 0 && totalActiveBytes > 0 {
+                return .size(currentBytes: totalActiveBytes, thresholdBytes: sizeThreshold)
+            }
+            return .none
+        }
+
+        if sizeRatio >= ageRatio {
+            return .size(currentBytes: totalActiveBytes, thresholdBytes: sizeThreshold)
+        }
+
+        return .age(currentAge: currentMaxAge, thresholdAge: ageThreshold!)
+    }
+
+    /// Convenience snapshot using the canonical path family.
+    static func snapshot(for name: String) -> LogRetentionSnapshot {
+        let paths: [String]
+        switch name {
+        case "audit": paths = auditLogPaths()
+        case "security": paths = securityLogPaths()
+        case "experience": paths = experienceLogPaths()
+        case "default": paths = defaultLogPaths()
+        default: paths = []
+        }
+        return snapshot(for: name, paths: paths)
+    }
+
+    /// Base policy before user overrides are applied.
+    private static func basePolicy(for name: String) -> LogRotationPolicy {
+        switch name {
+        case "default": return LogRotationPolicy.defaultPolicy
+        case "audit": return LogRotationPolicy.auditPolicy
+        case "security": return LogRotationPolicy.securityPolicy
+        case "experience": return LogRotationPolicy.experiencePolicy
+        default: return LogRotationPolicy.defaultPolicy
+        }
+    }
+
+    /// Canonical paths governed by the audit policy (main repo + worktrees).
+    static func auditLogPaths() -> [String] {
+        var paths = [
+            ProjectPaths.trinityEventLog,
+            "\(ProjectPaths.trinity)/events/akashic-log.jsonl",
+            TriosLogBus.defaultPath
+        ]
+        paths.append(contentsOf: worktreeLogPathFamilies(repoRoot: ProjectPaths.root)
+            .filter { $0.family == "audit" }
+            .map { $0.path })
+        return paths
+    }
+
+    /// Canonical paths governed by the security policy (main repo + worktrees).
+    static func securityLogPaths() -> [String] {
+        var paths = ["\(ProjectPaths.trinity)/state/local-auth-audit.jsonl"]
+        paths.append(contentsOf: worktreeLogPathFamilies(repoRoot: ProjectPaths.root)
+            .filter { $0.family == "security" }
+            .map { $0.path })
+        return paths
+    }
+
+    /// Canonical paths governed by the experience policy (main repo + worktrees).
+    static func experienceLogPaths() -> [String] {
+        var paths = ["\(ProjectPaths.trinity)/experience/episodes.jsonl"]
+        paths.append(contentsOf: worktreeLogPathFamilies(repoRoot: ProjectPaths.root)
+            .filter { $0.family == "experience" }
+            .map { $0.path })
+        return paths
+    }
+
+    /// Paths rotated by the default / general policy.
+    static func defaultLogPaths() -> [String] {
+        var paths = [
+            ProjectPaths.trinityLog,
+            "\(ProjectPaths.trinity)/queen.log"
+        ]
+        let logsDir = "\(ProjectPaths.trinity)/logs"
+        if let files = try? FileManager.default.contentsOfDirectory(atPath: logsDir) {
+            for file in files where file.hasSuffix(".log") {
+                paths.append("\(logsDir)/\(file)")
+            }
+        }
+        return paths
+    }
+
+
 }
 
 // MARK: - Retention settings

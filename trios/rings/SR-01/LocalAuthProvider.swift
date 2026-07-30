@@ -58,9 +58,18 @@ actor KeychainLocalAuthTokenStore: LocalAuthTokenStore {
     static let account = "browseros-local-token"
     static let refreshAccount = "browseros-local-refresh-token"
 
+    // These tokens are a cache: both are re-issued by the unauthenticated
+    // GET /auth/local-token. Reading them is therefore never worth a password
+    // prompt - if macOS wants approval we report "absent" and the provider
+    // bootstraps a fresh pair. That is what keeps chat and A2A working after a
+    // rebuild changes the app's code identity.
     func read() async throws -> String? {
         do {
-            return try KeychainSecrets.read(service: Self.service, account: Self.account)
+            return try KeychainSecrets.read(
+                service: Self.service,
+                account: Self.account,
+                allowsInteraction: false
+            )
         } catch KeychainSecretsError.itemNotFound {
             return nil
         }
@@ -80,7 +89,11 @@ actor KeychainLocalAuthTokenStore: LocalAuthTokenStore {
 
     func readRefreshToken() async throws -> String? {
         do {
-            return try KeychainSecrets.read(service: Self.service, account: Self.refreshAccount)
+            return try KeychainSecrets.read(
+                service: Self.service,
+                account: Self.refreshAccount,
+                allowsInteraction: false
+            )
         } catch KeychainSecretsError.itemNotFound {
             return nil
         }
@@ -194,11 +207,27 @@ actor LocalAuthProvider: LocalAuthProviding {
                 let (access, refresh, info, wasRefresh) = try await performRefreshOrBootstrap(
                     forceBootstrap: forceBootstrap
                 )
-                try await tokenStore.write(access)
-                try await tokenStore.writeRefreshToken(refresh)
+                // Cache before persisting. Persistence is a convenience: these
+                // tokens are re-issued by the unauthenticated /auth/local-token,
+                // so a Keychain write that fails (ACL mismatch after a rebuild)
+                // must not throw away a token we just successfully obtained.
+                // Doing the write first is what left chat and A2A stuck on
+                // HTTP 403 "Local authorization required" with a valid token in
+                // hand.
                 cachedToken = access
                 cachedRefreshToken = refresh
                 cachedInfo = info
+                do {
+                    try await tokenStore.write(access)
+                    try await tokenStore.writeRefreshToken(refresh)
+                } catch {
+                    TriosLogBus.shared.warn(
+                        .security,
+                        "localauth.persist.failed",
+                        "Could not save the local-auth token; continuing in memory",
+                        ["error": String(describing: error)]
+                    )
+                }
                 if wasRefresh {
                     await monitor.recordRefreshSuccess(
                         issuedAt: info.issuedAt,
@@ -238,12 +267,26 @@ actor LocalAuthProvider: LocalAuthProviding {
                 do {
                     let result = try await callRefreshEndpoint(refreshToken: refreshToken)
                     return (result.accessToken, result.refreshToken, result.info, true)
-                } catch let error as LocalAuthError {
-                    if case .refreshFailed(statusCode: 401) = error {
+                } catch {
+                    // Any failed refresh falls through to a full bootstrap.
+                    //
+                    // Previously only HTTP 401 did, so a server restart that
+                    // dropped the token family (or any 4xx/5xx/network blip)
+                    // left the client stranded on a stale access token: every
+                    // A2A call then answered 403 "Local authorization required"
+                    // and registration failed after five attempts, even though
+                    // GET /auth/local-token was ready to issue a working token.
+                    // Bootstrap is unauthenticated and idempotent, so retrying
+                    // it costs one request and recovers the session.
+                    if case LocalAuthError.refreshFailed(statusCode: 401) = error {
                         await monitor.recordFamilyRevoked()
-                    } else {
-                        throw error
                     }
+                    TriosLogBus.shared.warn(
+                        .security,
+                        "localauth.refresh.fallback_bootstrap",
+                        "Token refresh failed; bootstrapping a new local-auth family",
+                        ["error": String(describing: error)]
+                    )
                 }
             }
         }

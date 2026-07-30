@@ -146,7 +146,22 @@ final class QueenBackgroundService: ObservableObject {
         }
     }
 
-    private func appendQueenSystemMessage(_ content: String) async {
+    /// Identical banners already posted this session, so a restart loop cannot
+    /// stack three copies of the same warning in one transcript.
+    private var postedSystemBanners: Set<String> = []
+
+    private func appendQueenSystemMessage(_ content: String, deduplicate: Bool = false) async {
+        if deduplicate {
+            guard postedSystemBanners.insert(content).inserted else {
+                TriosLogBus.shared.debug(
+                    .queen,
+                    "queen.banner.suppressed",
+                    "Duplicate system banner suppressed",
+                    ["banner": String(content.prefix(120))]
+                )
+                return
+            }
+        }
         await postToChat(id: ChatConversation.trinityQueenId, role: .system, content: content)
     }
 
@@ -217,25 +232,75 @@ final class QueenBackgroundService: ObservableObject {
     private func registerA2A() async {
         guard let client = a2aClient else { return }
         let maxAttempts = 5
+        var lastError: Error?
         for attempt in 1...maxAttempts {
             do {
                 try await client.register()
                 await client.startHeartbeat(interval: 30)
                 startA2AStream()
                 isA2ARegistered = true
-                NSLog("[QueenBackgroundService] A2A registered on attempt \(attempt)")
+                TriosLogBus.shared.info(
+                    .a2a,
+                    "a2a.register.ok",
+                    "A2A registered",
+                    ["attempt": String(attempt)]
+                )
                 return
             } catch {
                 isA2ARegistered = false
+                lastError = error
                 let delay = min(Double(attempt) * 2.0, 30.0)
-                NSLog("[QueenBackgroundService] A2A registration failed (attempt \(attempt)/\(maxAttempts)): \(error). Retrying in \(delay)s.")
+                TriosLogBus.shared.warn(
+                    .a2a,
+                    "a2a.register.retry",
+                    "A2A registration attempt failed",
+                    [
+                        "attempt": "\(attempt)/\(maxAttempts)",
+                        "retry_in_s": String(format: "%.0f", delay),
+                        "error": String(describing: error)
+                    ]
+                )
                 if attempt < maxAttempts {
                     try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 }
             }
         }
-        let message = "A2A registration failed after \(maxAttempts) attempts; the registry may still be starting. Run `/status` to check."
-        await appendQueenSystemMessage(message)
+        let message = Self.a2aRegistrationFailureMessage(
+            attempts: maxAttempts,
+            error: lastError
+        )
+        TriosLogBus.shared.error(
+            .a2a,
+            "a2a.register.failed",
+            message,
+            ["error": lastError.map { String(describing: $0) } ?? "unknown"]
+        )
+        await appendQueenSystemMessage(message, deduplicate: true)
+    }
+
+    /// Builds a message that names the actual failure instead of always blaming
+    /// startup timing. A 403 means the registry is up and rejecting us, which is
+    /// a completely different fix from "wait for the registry".
+    static func a2aRegistrationFailureMessage(attempts: Int, error: Error?) -> String {
+        let prefix = "A2A registration failed after \(attempts) attempts."
+        guard let error else {
+            return "\(prefix) Run `/status` to check the registry."
+        }
+        if case let A2AError.invalidResponse(status, body) = error {
+            switch status {
+            case 401, 403:
+                return "\(prefix) The registry is reachable but rejected the local " +
+                    "authorization token (HTTP \(status)). Re-pair TriOS with the " +
+                    "BrowserOS Agent server; waiting will not help."
+            case 404:
+                return "\(prefix) The registry answered HTTP 404 for /a2a/register. " +
+                    "The server is running an incompatible A2A route set."
+            default:
+                let detail = body.map { ": \($0.prefix(200))" } ?? ""
+                return "\(prefix) Registry responded HTTP \(status)\(detail)."
+            }
+        }
+        return "\(prefix) \(error.localizedDescription) Run `/status` to check the registry."
     }
 
     private func unregisterA2A() async {
@@ -268,8 +333,12 @@ final class QueenBackgroundService: ObservableObject {
             while !Task.isCancelled {
                 guard self.a2aReconnectAttempt < self.maxA2AReconnectAttempts else {
                     let exhaustedMessage = "A2A stream reconnect budget exhausted. Run /status to check registry health."
-                    NSLog("[QueenBackgroundService] \(exhaustedMessage)")
-                    await self.appendQueenSystemMessage(exhaustedMessage)
+                    TriosLogBus.shared.error(
+                        .a2a,
+                        "a2a.stream.exhausted",
+                        exhaustedMessage
+                    )
+                    await self.appendQueenSystemMessage(exhaustedMessage, deduplicate: true)
                     self.isA2ARegistered = false
                     break
                 }

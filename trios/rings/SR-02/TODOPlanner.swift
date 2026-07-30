@@ -26,19 +26,27 @@ struct TODOItem: Identifiable, Codable, Sendable, Equatable {
     var detail: String?
     var state: TODOItemState
     var order: Int
+    /// Added by the user rather than derived from the agent's work.
+    ///
+    /// The agent finishing its turn says nothing about a task the user typed,
+    /// so `completePlan` must leave these alone. Decoded with a default so
+    /// plans persisted before this flag existed still load.
+    var isUserAdded: Bool = false
 
     init(
         id: UUID = UUID(),
         title: String,
         detail: String? = nil,
         state: TODOItemState = .pending,
-        order: Int
+        order: Int,
+        isUserAdded: Bool = false
     ) {
         self.id = id
         self.title = title
         self.detail = detail
         self.state = state
         self.order = order
+        self.isUserAdded = isUserAdded
     }
 }
 
@@ -92,6 +100,10 @@ final class TODOPlanner: ObservableObject {
 
     private let store: AgentMemoryStoreProtocol
     private let preferences: UserDefaults
+    /// Newest plan awaiting a coalesced write.
+    private var pendingFlush: TODOPlan?
+    private var lastPersistAt: Date?
+    private var flushTask: Task<Void, Never>?
 
     init(store: AgentMemoryStoreProtocol, preferences: UserDefaults) {
         self.store = store
@@ -116,30 +128,33 @@ final class TODOPlanner: ObservableObject {
         }
     }
 
-    func startPlan(conversationId: UUID, goal: String) async {
+    /// Opens a plan for a turn.
+    ///
+    /// Starts with the single step we can honestly claim is happening. Further
+    /// steps are appended by `beginStep`/`markToolActivity` as the agent works,
+    /// so the list length reflects the real work rather than a fixed template.
+    /// A turn that never does anything beyond answering stays at one step, and
+    /// the view hides a plan that short.
+    func startPlan(conversationId: UUID, goal: String, steps: [String] = []) async {
         let normalizedGoal = normalizedText(goal, fallback: "New request")
         let now = Date()
+        var items: [TODOItem] = [
+            TODOItem(
+                title: TODOPlanDeriver.title(for: .preparing),
+                detail: "Preparing request",
+                state: .inProgress,
+                order: 0
+            )
+        ]
+        // A caller that already knows the shape of the work can seed it.
+        for (offset, step) in steps.enumerated() {
+            guard let title = normalizedOptionalText(step) else { continue }
+            items.append(TODOItem(title: title, state: .pending, order: offset + 1))
+        }
         let plan = TODOPlan(
             conversationId: conversationId,
             goal: normalizedGoal,
-            items: [
-                TODOItem(
-                    title: "Understand request",
-                    detail: "Preparing request",
-                    state: .inProgress,
-                    order: 0
-                ),
-                TODOItem(
-                    title: "Execute task",
-                    state: .pending,
-                    order: 1
-                ),
-                TODOItem(
-                    title: "Verify result",
-                    state: .pending,
-                    order: 2
-                )
-            ],
+            items: items,
             createdAt: now,
             updatedAt: now
         )
@@ -147,39 +162,134 @@ final class TODOPlanner: ObservableObject {
         await persist(plan)
     }
 
+    /// True when the plan describes enough work to be worth showing.
+    /// Single-step turns render as plain chat instead of an empty skeleton.
+    var shouldDisplayPlan: Bool {
+        guard let plan = activePlan else { return false }
+        return PlanDisplayPolicy.shouldDisplay(
+            stepCount: plan.items.count,
+            isTerminalFailure: plan.state == .failed || plan.state == .cancelled
+        )
+    }
+
     func markExecutionStarted(detail: String? = nil) async {
         await mutatePlan { plan in
             guard plan.state == .active else {
                 return
             }
-            if !plan.items.isEmpty {
-                plan.items[0].state = .completed
-            }
-            guard let index = plan.items.indices.first(where: {
-                plan.items[$0].order == 1
-            }) else {
+            // Advance to whichever item is actually next. The previous version
+            // hardcoded order 0 and order 1, which only worked for the fixed
+            // three-step plan and silently did nothing once plans became
+            // dynamic.
+            if let currentIndex = plan.items.indices.first(where: {
+                plan.items[$0].state == .inProgress
+            }) {
+                if let detail, let normalized = self.normalizedOptionalText(detail) {
+                    plan.items[currentIndex].detail = normalized
+                }
                 return
             }
-            plan.items[index].state = .inProgress
-            if let detail {
-                let normalized = self.normalizedOptionalText(detail)
-                if normalized != nil {
-                    plan.items[index].detail = normalized
-                }
+            guard let next = self.firstPendingItemIndex(in: plan) else { return }
+            plan.items[next].state = .inProgress
+            if let detail, let normalized = self.normalizedOptionalText(detail) {
+                plan.items[next].detail = normalized
             }
         }
     }
 
-    func markToolActivity(name: String) async {
-        let toolName = normalizedText(name, fallback: "tool")
-        await markExecutionStarted(detail: "Using \(toolName)")
+    /// Records an observed tool call as a plan step.
+    ///
+    /// Steps are derived from what the agent actually does. Consecutive uses of
+    /// the same activity update the current step instead of appending a
+    /// duplicate row, so reading six files reads as one "Read files" step.
+    func markToolActivity(name: String, arguments: String? = nil) async {
+        // Name the actual target when the arguments carry one. A plan of
+        // category labels ("Read files") describes nothing the user could not
+        // have guessed; "Read ChatPanelView.swift" is the work.
+        let generic = TODOPlanDeriver.title(forTool: name)
+        let title = PlanStepNaming.title(
+            toolName: name,
+            argumentsJSON: arguments,
+            generic: generic
+        )
+        await beginStep(title: title, detail: "Using \(normalizedText(name, fallback: "tool"))")
+    }
+
+    /// Renames the running step once a tool's arguments have finished streaming.
+    ///
+    /// A tool call is announced before its arguments arrive, so the step is born
+    /// with a category name and earns a specific one a moment later. Only the
+    /// still-generic title is replaced: a step the user already saw named after
+    /// a concrete target is not renamed again.
+    func refineStepTitle(toolName: String, arguments: String?) async {
+        let generic = TODOPlanDeriver.title(forTool: toolName)
+        let specific = PlanStepNaming.title(
+            toolName: toolName,
+            argumentsJSON: arguments,
+            generic: generic
+        )
+        guard specific != generic else { return }
+        await mutatePlan { plan in
+            guard let index = plan.items.indices.first(where: {
+                plan.items[$0].state == .inProgress && plan.items[$0].title == generic
+            }) else { return }
+            plan.items[index].title = specific
+        }
+    }
+
+    /// Completes the current step and starts a named one, appending it when the
+    /// plan has not seen it yet. This is what makes the list grow with the work.
+    func beginStep(title: String, detail: String? = nil) async {
+        let stepTitle = normalizedText(title, fallback: "Step")
+        let stepDetail = detail.flatMap { normalizedOptionalText($0) }
+        await mutatePlan { plan in
+            guard plan.state == .active else { return }
+
+            // Already the active step: just refresh its detail.
+            if let currentIndex = plan.items.indices.first(where: {
+                plan.items[$0].state == .inProgress
+            }) {
+                if plan.items[currentIndex].title == stepTitle {
+                    plan.items[currentIndex].detail = stepDetail
+                    return
+                }
+                plan.items[currentIndex].state = .completed
+                plan.items[currentIndex].detail = nil
+            }
+
+            // Reuse a pending step with this title if the plan predicted it.
+            if let pending = plan.items.indices.first(where: {
+                plan.items[$0].title == stepTitle && plan.items[$0].state == .pending
+            }) {
+                plan.items[pending].state = .inProgress
+                plan.items[pending].detail = stepDetail
+                return
+            }
+
+            let nextOrder = (plan.items.map(\.order).max() ?? -1) + 1
+            plan.items.append(
+                TODOItem(
+                    title: stepTitle,
+                    detail: stepDetail,
+                    state: .inProgress,
+                    order: nextOrder
+                )
+            )
+        }
     }
 
     func completePlan() async {
         await mutatePlan { plan in
-            for index in plan.items.indices
-            where plan.items[index].order <= 2 {
+            // Complete every step, however many there are. The old version only
+            // touched orders 0-2 and left later steps stuck in progress.
+            // Complete the agent's own steps, however many there are, but never
+            // a task the user typed: the stream finishing is not evidence that
+            // the user's follow-up is done.
+            for index in plan.items.indices where plan.items[index].state != .cancelled
+                && plan.items[index].state != .failed
+                && !plan.items[index].isUserAdded {
                 plan.items[index].state = .completed
+                plan.items[index].detail = nil
             }
             self.finishIfComplete(&plan)
         }
@@ -221,7 +331,8 @@ final class TODOPlanner: ObservableObject {
                 TODOItem(
                     title: taskTitle,
                     state: hasCurrentItem ? .pending : .inProgress,
-                    order: nextOrder
+                    order: nextOrder,
+                    isUserAdded: true
                 )
             )
             plan.state = .active
@@ -321,11 +432,39 @@ final class TODOPlanner: ObservableObject {
         }
     }
 
+    /// Upper bound on steps in one plan. Overflow is folded into a counted
+    /// summary by `PlanOverflow`, which is unit-tested in SR-00.
+    static let maximumSteps = 12
+
+    private func coalesceOverflow(_ plan: inout TODOPlan) {
+        let steps = plan.items.map {
+            PlanStep(
+                id: $0.id,
+                title: $0.title,
+                detail: $0.detail,
+                state: PlanStepState(rawValue: $0.state.rawValue) ?? .pending,
+                order: $0.order
+            )
+        }
+        let folded = PlanOverflow.coalesce(steps, maximum: Self.maximumSteps)
+        guard folded.count != steps.count else { return }
+        plan.items = folded.map { step in
+            TODOItem(
+                id: step.id,
+                title: step.title,
+                detail: step.detail,
+                state: TODOItemState(rawValue: step.state.rawValue) ?? .pending,
+                order: step.order
+            )
+        }
+    }
+
     private func mutatePlan(_ mutation: (inout TODOPlan) -> Void) async {
         guard var plan = activePlan else {
             return
         }
         mutation(&plan)
+        coalesceOverflow(&plan)
         plan.items.sort { lhs, rhs in
             if lhs.order == rhs.order {
                 return lhs.id.uuidString < rhs.id.uuidString
@@ -334,6 +473,42 @@ final class TODOPlanner: ObservableObject {
         }
         plan.updatedAt = Date()
         activePlan = plan
+
+        // The in-memory plan is authoritative for the UI. Persisting every step
+        // wrote to the encrypted database once per tool call; flush on terminal
+        // states and otherwise no more than once per interval.
+        let now = Date()
+        let terminal = plan.state != .active
+        guard PlanPersistPolicy.shouldWriteNow(
+            isTerminal: terminal,
+            lastWrite: lastPersistAt,
+            now: now
+        ) else {
+            pendingFlush = plan
+            scheduleFlush()
+            return
+        }
+        pendingFlush = nil
+        lastPersistAt = now
+        await persist(plan)
+    }
+
+    private func scheduleFlush() {
+        guard flushTask == nil else { return }
+        flushTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(PlanPersistPolicy.interval * 1_000_000_000))
+            guard let self else { return }
+            self.flushTask = nil
+            await self.flushPendingPlan()
+        }
+    }
+
+    /// Writes the newest coalesced plan, if any. Also called on teardown so a
+    /// quiet period never loses the last transition.
+    func flushPendingPlan() async {
+        guard let plan = pendingFlush else { return }
+        pendingFlush = nil
+        lastPersistAt = Date()
         await persist(plan)
     }
 

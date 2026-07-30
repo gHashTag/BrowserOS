@@ -7,6 +7,7 @@ actor ConversationPersister: ChatPersisterProtocol {
     private let defaults: UserDefaults
     private let keyPrefix = "trios.conversation."
     private let titleKeyPrefix = "trios.conversationTitle."
+    private let settingsKeyPrefix = "trios.conversationSettings."
     private let currentIdKey = "trios.currentConversationId.encrypted"
     private let legacyCurrentIdKey = "trios.currentConversationId"
 
@@ -44,6 +45,29 @@ actor ConversationPersister: ChatPersisterProtocol {
         }
     }
 
+    func saveSettings(_ settings: ConversationSettings, conversationId: UUID) async {
+        let key = settingsKey(for: conversationId)
+        do {
+            let plaintext = try JSONEncoder().encode(settings)
+            let ciphertext = try ConversationEncryption.shared.encrypt(plaintext)
+            defaults.set(ciphertext, forKey: key)
+        } catch {
+            NSLog("[ConversationPersister] Failed to encrypt settings for \(conversationId): \(error)")
+        }
+    }
+
+    func loadSettings(conversationId: UUID) async -> ConversationSettings {
+        let key = settingsKey(for: conversationId)
+        guard let ciphertext = defaults.data(forKey: key) else { return .default }
+        do {
+            let plaintext = try ConversationEncryption.shared.decrypt(ciphertext)
+            return try JSONDecoder().decode(ConversationSettings.self, from: plaintext)
+        } catch {
+            NSLog("[ConversationPersister] Failed to decrypt settings for \(conversationId): \(error)")
+            return .default
+        }
+    }
+
     func clear(conversationId: UUID) async {
         guard conversationId != ChatConversation.trinityQueenId else {
             NSLog("[ConversationPersister] clear ignored for reserved Trinity Queen conversation")
@@ -52,6 +76,7 @@ actor ConversationPersister: ChatPersisterProtocol {
         let key = keyPrefix + conversationId.uuidString
         defaults.removeObject(forKey: key)
         defaults.removeObject(forKey: titleKey(for: conversationId))
+        defaults.removeObject(forKey: settingsKey(for: conversationId))
     }
 
     func renameConversation(id: UUID, title: String) async {
@@ -153,5 +178,9 @@ actor ConversationPersister: ChatPersisterProtocol {
 
     private func titleKey(for id: UUID) -> String {
         titleKeyPrefix + id.uuidString
+    }
+
+    private func settingsKey(for id: UUID) -> String {
+        settingsKeyPrefix + id.uuidString
     }
 }

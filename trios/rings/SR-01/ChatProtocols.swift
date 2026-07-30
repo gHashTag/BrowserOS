@@ -49,9 +49,45 @@ extension ChatConversation {
     }
 }
 
+/// Per-conversation overrides for output budget, context-window margin, and
+/// the preferred provider/model tuple. `nil` means "use the global default
+/// from ModelConfigurationStore".
+struct ConversationSettings: Codable, Equatable, Sendable {
+    var requestedOutputTokens: Int?
+    var contextWindowMargin: Double?
+    var provider: ModelProvider?
+    var baseURL: String?
+    var model: String?
+
+    static let `default` = ConversationSettings(
+        requestedOutputTokens: nil,
+        contextWindowMargin: nil,
+        provider: nil,
+        baseURL: nil,
+        model: nil
+    )
+}
+
+/// A constraint that limits warmup, context routing, and failover to a single
+/// pinned provider/baseURL/model tuple. Used when a conversation has an active
+/// model/provider override so automatic layers do not silently escape it.
+struct ConversationModelConstraint: Equatable, Sendable {
+    let candidate: CrossProviderModelCandidate
+
+    init(provider: ModelProvider, baseURL: String, model: String) {
+        self.candidate = CrossProviderModelCandidate(
+            provider: provider,
+            baseURL: baseURL,
+            model: model
+        )
+    }
+}
+
 protocol ChatPersisterProtocol: Sendable {
     func save(messages: [ChatMessage], conversationId: UUID) async
     func load(conversationId: UUID) async -> [ChatMessage]
+    func saveSettings(_ settings: ConversationSettings, conversationId: UUID) async
+    func loadSettings(conversationId: UUID) async -> ConversationSettings
     func clear(conversationId: UUID) async
     func renameConversation(id: UUID, title: String) async
     func currentConversationId() async -> UUID

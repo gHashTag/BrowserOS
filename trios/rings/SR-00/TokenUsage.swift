@@ -65,4 +65,18 @@ enum TokenEstimator {
         guard !text.isEmpty else { return 0 }
         return max(1, Int(ceil(Double(text.utf8.count) / 4.0)))
     }
+
+    /// Estimates the input-token cost of a message list plus an optional system
+    /// prompt. Estimates are intentionally cheap and approximate; they are used
+    /// only for routing/trimming decisions, never for billing.
+    static func estimate(messages: [ChatMessage], systemPrompt: String?) -> Int {
+        var total = 0
+        if let systemPrompt = systemPrompt, !systemPrompt.isEmpty {
+            total += estimate(systemPrompt)
+        }
+        for message in messages {
+            total += estimate(message.content)
+        }
+        return total
+    }
 }
