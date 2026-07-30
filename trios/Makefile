@@ -359,3 +359,69 @@ xctest:
 		| grep -E "^/.*error:" | grep -oE "^/[^:]*\.swift" \
 		| sort -u | wc -l | tr -d " "); \
 	echo "XCTest: $$errors distinct compile errors across $$files files (pre-existing debt)"
+
+# --- Mutation ------------------------------------------------------------
+
+# Breaks a guard on purpose and requires the suite to notice.
+#
+# Five nights of doing this by hand found five checks that could not fail: a
+# loop asserting headings and not sections, a fixture where the alphabet stood
+# in for severity, another where age stood in for salience, a detector whose
+# vocabulary was never exercised, and a refusal nothing ever asked for. Green
+# said "there is a test", which was true, and said nothing about whether the
+# test could tell.
+#
+# Kept out of `make` and out of `check`: it edits sources, and it is slow. The
+# point is that it is now a command anyone can run rather than a habit only I
+# had.
+#
+# Each entry is source@@needle@@replacement@@name. The needle must exist or the
+# mutation is reported as stale rather than silently skipped - a mutation that
+# matches nothing is the same lie as a check that matches nothing.
+#
+# Sources are backed up before the first edit and restored on any exit, kill or
+# interrupt. This target writes to tracked files, so that trap is the whole
+# safety argument for it.
+#
+# Two proven mutations are deliberately absent: the age cap and the tie-break in
+# QueenSalience are caught by a logic suite inside clade-e2e, whose exit code
+# also goes non-zero when the app or the server is down. Treating that as "the
+# mutation was caught" would be a false pass, and a mutation harness that lies
+# is worse than none.
+MUTANTS := \
+	rings/SR-00/QueenObserver.swift@@lowered.contains("write") || lowered.contains("edit")@@lowered.contains("write")@@the boundary detector forgets edit-shaped tools \
+	rings/SR-02/QueenDelegationRegistry.swift@@tasks[index].acceptanceCriteria.contains(criterion) else { return false }@@true else { return false }@@a verdict is accepted for a criterion the task never had \
+	rings/SR-00/QueenTaskSpec.swift@@lines.append(QueenBranchPolicy.ownershipRule(branch: branch))@@lines.append("")@@the specification stops telling the worker to leave the branch alone
+
+.PHONY: mutants
+mutants:
+	@backup=$$(mktemp -d); \
+	trap 'for f in $$backup/*.bak; do [ -e "$$f" ] || continue; \
+	      target=$$(cat "$$f.path"); cp "$$f" "$(ROOT)/$$target"; done; \
+	      rm -rf $$backup' EXIT INT TERM; \
+	fail=0; n=0; \
+	: "Records are separated by ~ and fields by @@. A vertical bar cannot be \
+	   the record separator: the first needle contains || and split itself in \
+	   half, which the stale check caught rather than letting it pass."; \
+	IFS='~'; for entry in $$(echo '$(MUTANTS)' | sed 's/ rings\//~rings\//g'); do \
+		unset IFS; \
+		src=$$(echo "$$entry" | awk -F'@@' '{print $$1}'); \
+		needle=$$(echo "$$entry" | awk -F'@@' '{print $$2}'); \
+		repl=$$(echo "$$entry" | awk -F'@@' '{print $$3}'); \
+		name=$$(echo "$$entry" | awk -F'@@' '{print $$4}'); \
+		n=$$((n + 1)); \
+		cp "$(ROOT)/$$src" "$$backup/$$n.bak"; echo "$$src" > "$$backup/$$n.bak.path"; \
+		if ! MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
+			'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; sys.exit(1) if o not in s else open(p,"w").write(s.replace(o,os.environ["MUT_NEW"],1))'; then \
+			echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
+			cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue; \
+		fi; \
+		if bash "$(ROOT)/tests/swift/run_chat_sse_e2e.sh" >/dev/null 2>&1; then \
+			echo "  SURVIVED - $$name"; fail=1; \
+		else \
+			echo "  ok   - caught: $$name"; \
+		fi; \
+		cp "$$backup/$$n.bak" "$(ROOT)/$$src"; \
+	done; \
+	if [ $$fail -eq 0 ]; then echo "[OK] every mutation was caught ($$n)"; \
+	else echo "[FAIL] a mutation survived or went stale"; exit 1; fi
