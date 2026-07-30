@@ -2496,3 +2496,34 @@ Left alone deliberately: the store-level output budget that can be read but
 never set, which is now the audit's to report rather than mine; the observer's
 shell blind spot; the four RichTextRenderer deprecations; the pull request
 waiting on a token only the user can place; and the 22 XCTest errors.
+
+## 2026-07-31 ~10:0x UTC - the first reading of the new instrument was a law nobody enforced
+
+Verifications green first. Last night's function scan moved into the Queen's
+audit, so this cycle took its first reading rather than reaching for a finding
+I already knew. Eight functions in her own subsystem are declared and mentioned
+nowhere else. Three of them are rules: the self-improvement service's budget
+that is never consumed, the skill store's canRun, and
+QueenDelegationPolicy.queenMayUse.
+
+That last one is the constitutional rule of the whole design - the Queen
+delegates instead of editing, so two agents never touch the same files. It is
+a named list of forbidden tools with tests asserting it refuses each of them,
+and it has no caller anywhere in the application. Tested and unenforced is the
+worst of the two states, because the passing test reads as proof. What the
+model actually read was prose: "you do not write code yourself", which leaves
+her to work out which tool counts as writing code.
+
+Her prompt now names the tools from that tested list and says what to do
+instead, since a prohibition without an alternative invites a workaround.
+Written into the code, not just here: this is instruction and not enforcement.
+Nothing at this layer can refuse a tool call, and saying otherwise would repeat
+the defect being fixed. Refusing at the call site is the next step and larger.
+
+Restoring the old prose fails seven assertions. Floor 360 to 368.
+
+Left alone deliberately: consumeBudget and canRun, the other two uncalled rules
+from the same reading, which each need their own cycle; the store-level output
+budget that can be read but never set; the observer's shell blind spot; the four
+RichTextRenderer deprecations; the pull request waiting on a token only the user
+can place; and the 22 XCTest errors.
