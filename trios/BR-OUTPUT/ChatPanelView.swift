@@ -1158,6 +1158,13 @@ struct ChatPanelView: View {
                     .font(.system(size: 9, design: .monospaced))
                     .foregroundColor(.white.opacity(0.52))
             }
+            // Start TRIOS, restart MCP and run cron had no route into the app.
+            // QueenStatusViewModel has offered them all along and the only UI
+            // that called them - this badge and the sheet it opens - was itself
+            // unreachable, so the three sat behind a door with no handle. This
+            // is the status strip the same information already lives in, so the
+            // badge costs a dot beside the two that are here.
+            QueenStatusBadge(viewModel: viewModel.queenStatusVM)
         }
         .frame(height: CGFloat(composerStatusMetrics.controlHeight))
         .help("Trinity \(viewModel.isServerReachable ? "online" : "offline"); BrowserOS \(browserOSVM.isBrowserOSConnected ? "connected" : "connecting")")

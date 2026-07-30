@@ -126,6 +126,8 @@ if [ -z "${TRIOS_INCLUDE_PROTOTYPES:-}" ]; then
         "QueenDashboardView.swift"
         "QueenTaskStatusView.swift"
         "QueenStatusViewModel.swift"
+        "QueenStatusBadge.swift"
+        "QueenQuickActionsSheet.swift"
         "QueenTabView.swift"
         "RecursionGuard.swift"
         "RichTextRenderer.swift"
