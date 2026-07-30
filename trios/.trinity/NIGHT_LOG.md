@@ -2099,3 +2099,27 @@ covering what it draws - that one wants someone looking at the screen, not a
 green build at one in the morning. Also left, for a sixth day: the worker
 guesses the date, no delegation has reached a pull request (waiting on a GitHub
 token, which is the user's to place), and the 22 XCTest errors.
+
+## 2026-07-30 ~21:5x UTC - a fact asked for and withheld
+
+Verifications green first. This cycle finally took the item that had sat in
+"left alone deliberately" for six days, which is long enough that the habit
+itself was becoming the problem. The first live delegation was asked for a
+paragraph "and the date", wrote 2025 during 2026, and marked the criterion met.
+That is not carelessness on the worker's part - it has no clock, and something
+guessing cannot know it guessed wrong. The specification asked for a fact and
+withheld it, and no amount of reviewing the worker's output would have found
+that; only asking why it was wrong would.
+
+The intent section now says "Today is 2026-07-30." before anything else is
+read. The date arrives as a parameter rather than a Date() call inside the
+renderer, because reading the clock in there would make every assertion about
+this text expire overnight, and a test that only passes on the day it was
+written gets deleted by whoever it wakes at 2am. I removed the line and watched
+both new assertions fail before believing them. Floor 332 to 334.
+
+Left alone deliberately: the four RichTextRenderer deprecations, which need
+someone watching the screen; the 86 never-called function candidates, mostly
+framework callbacks; and no delegation has yet reached a pull request, which
+waits on a GitHub token that is the user's to place. The 22 XCTest errors are
+unchanged and still waiting on a question only the user can answer.
