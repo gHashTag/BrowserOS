@@ -215,14 +215,19 @@ final class StreamingContextWatchdogIntegrationTests: XCTestCase {
         viewModel.inputText = "Hello"
         await viewModel.sendMessage()
 
+        // ModelReliability used to be an enum with `.known(score, samples,
+        // lastReason)`. It is a struct now, and `lastReason` is gone entirely -
+        // the service no longer records why the last outcome went the way it
+        // did, anywhere. So the assertion about "context limit" is not moved,
+        // it is dropped, and dropping it is the honest reading: the information
+        // it checked does not exist to be checked.
         let reliability = await viewModel.modelStore.reliability(for: "test-unknown-model")
-        if case .known(let score, let samples, let lastReason) = reliability {
-            XCTAssertEqual(samples, 1)
-            XCTAssertEqual(lastReason, "context limit")
-            XCTAssertLessThan(score, 1.0, "Context-limit pause must not be scored as success")
-        } else {
-            XCTFail("Expected known reliability after one sample")
-        }
+        XCTAssertEqual(reliability.totalOutcomes, 1, "one send produces one recorded outcome")
+        // The assertion this test was really about, and the one still possible.
+        XCTAssertLessThan(
+            reliability.score, 1.0,
+            "a context-limit pause must not be scored as a success"
+        )
     }
 }
 
@@ -349,6 +354,11 @@ private actor MockWatchdogPersister: ChatPersisterProtocol {
     func currentConversationId() async -> UUID { UUID() }
     func setCurrentConversationId(_ id: UUID) async {}
     func listAllConversations() async -> [ChatConversation] { [] }
+    // Inert like the rest of this double. The suite exercises the watchdog, not
+    // persistence, so recording settings nobody reads would add a capability
+    // with no caller rather than coverage.
+    func saveSettings(_ settings: ConversationSettings, conversationId: UUID) async {}
+    func loadSettings(conversationId: UUID) async -> ConversationSettings { ConversationSettings() }
 }
 
 private actor MockWatchdogMemoryStore: AgentMemoryStoreProtocol {
@@ -361,6 +371,14 @@ private actor MockWatchdogMemoryStore: AgentMemoryStoreProtocol {
     func loadPlan(conversationId: UUID) async throws -> TODOPlan? { nil }
     func deletePlan(conversationId: UUID) async throws {}
     func deleteConversationData(conversationId: UUID) async throws {}
+    func saveOutcome(_ outcome: ModelOutcome) async throws {}
+    func outcomes(
+        for model: String,
+        provider: ModelProvider,
+        baseURL: String,
+        limit: Int
+    ) async throws -> [ModelOutcome] { [] }
+    func deleteOutcomes(for model: String, provider: ModelProvider, baseURL: String) async throws {}
 }
 
 @MainActor

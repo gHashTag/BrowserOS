@@ -310,10 +310,19 @@ EOF
     # different app to macOS and the login keychain re-prompts for every stored
     # secret. Set TRIOS_SIGN_IDENTITY to a stable certificate to stop that;
     # scripts/create_dev_signing_identity.sh creates a suitable self-signed one.
-    SIGN_IDENTITY="${TRIOS_SIGN_IDENTITY:--}"
-    if [ "$SIGN_IDENTITY" != "-" ] && ! security find-identity -v -p codesigning | grep -q "$SIGN_IDENTITY"; then
+    # Default to the local development identity when one exists. Requiring an
+    # environment variable meant the remedy was documented but never applied:
+    # every plain ./build.sh fell back to ad-hoc and the prompts came back.
+    SIGN_IDENTITY="${TRIOS_SIGN_IDENTITY:-TriOS Development}"
+    # Deliberately not `find-identity -v`. A self-signed development
+    # certificate is untrusted, so -v ("valid identities only") lists zero and
+    # this guard would reject an identity that codesign signs and verifies
+    # perfectly well - a check that silently matches nothing and costs the user
+    # a password dialog per secret.
+    if [ "$SIGN_IDENTITY" != "-" ] && ! security find-identity -p codesigning | grep -q "$SIGN_IDENTITY"; then
         echo "[WARN] Signing identity '$SIGN_IDENTITY' not found; falling back to ad-hoc."
         echo "[WARN] Expect repeated keychain password prompts after each rebuild."
+        echo "[WARN] Create one once with: bash scripts/create_dev_signing_identity.sh"
         SIGN_IDENTITY="-"
     fi
     codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
