@@ -138,6 +138,20 @@ final class QueenProposalApplier {
             )
         }
 
+        // The commit is the first thing here that cannot be undone by walking
+        // away, so it is what the budget pays for. Charged after the commit
+        // rather than before, because a proposal that fails to commit changed
+        // nothing and should not cost the Queen an attempt.
+        let remaining = QueenSelfImprovementService.consumeBudget(amount: 1.0, projectRoot: projectRoot)
+        if let remaining, !remaining.isActive {
+            TriosLogBus.shared.error(
+                .queen,
+                "queen.budget.exhausted",
+                "The safety budget reached zero; no further proposals will apply",
+                ["proposal": String(proposal.id.uuidString.prefix(8))]
+            )
+        }
+
         let pushResult = runShell("git", arguments: ["push", "-u", "origin", branchName], cwd: projectRoot)
         guard pushResult.exitCode == 0 else {
             return ApplicationResult(

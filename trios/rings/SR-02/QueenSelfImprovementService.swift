@@ -205,10 +205,37 @@ final class QueenSelfImprovementService: ObservableObject {
 
     /// Decrements the safety budget after a mutating action is approved.
     func consumeBudget(amount: Double) -> Bool {
-        guard var budget = loadBudget(), budget.isActive else { return false }
+        Self.consumeBudget(amount: amount) != nil
+    }
+
+    /// Spends part of the safety budget, returning what is left, or nil when
+    /// there was nothing to spend.
+    ///
+    /// Static because the check that guards autonomous mutation is static:
+    /// QueenProposalApplier reads loadBudget() before touching a file, and had
+    /// no way to reach the instance method that decrements it. So the budget
+    /// was a gate reading a number nothing ever reduced - it stayed at its
+    /// default of ten and stayed active forever, and the only way to stop the
+    /// Queen was to halt her by hand. A safety budget that cannot run out is a
+    /// switch painted on the wall.
+    ///
+    /// The instance method above delegates rather than repeating the
+    /// arithmetic, because two implementations of one rule is how this
+    /// repository has produced most of its defects.
+    @discardableResult
+    static func consumeBudget(
+        amount: Double,
+        projectRoot: String = ProjectPaths.root
+    ) -> QueenSafetyBudget? {
+        guard var budget = loadBudget(projectRoot: projectRoot), budget.isActive else { return nil }
         budget.budget = max(0, budget.budget - amount)
-        saveBudget(budget)
-        return budget.isActive
+        let url = URL(fileURLWithPath: "\(projectRoot)/.trinity/state/safety_budget.json")
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+        )
+        guard let data = try? JSONEncoder().encode(budget),
+              (try? data.write(to: url, options: [.atomic])) != nil else { return nil }
+        return budget
     }
 
     /// Approves a proposal by ID, returning the updated proposal.

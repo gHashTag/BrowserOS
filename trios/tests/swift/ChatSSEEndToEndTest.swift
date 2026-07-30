@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 368
+    static let minimumChecks = 373
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -3098,6 +3098,34 @@ struct ChatSSEEndToEndTests {
             ]
         )
         check(counts.count > 50, "the function scan finds the Queen's own methods, not nothing")
+
+        // The safety budget guards every autonomous mutation and, until now,
+        // nothing decremented it: QueenProposalApplier read it before touching
+        // a file and there was no reachable way to spend it, so it sat at its
+        // default forever. A budget that cannot run out is a switch painted on
+        // the wall.
+        let budgetRoot = NSTemporaryDirectory() + "queen-budget-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: budgetRoot) }
+        try? FileManager.default.createDirectory(
+            atPath: "\(budgetRoot)/.trinity/state", withIntermediateDirectories: true
+        )
+        let start = QueenSelfImprovementService.loadBudget(projectRoot: budgetRoot)?.budget ?? 0
+        check(start > 0, "a fresh checkout starts with something to spend")
+        let after = QueenSelfImprovementService.consumeBudget(amount: 1.0, projectRoot: budgetRoot)
+        check(after?.budget == start - 1, "spending reduces it, rather than reporting a number nothing changed")
+        check(
+            QueenSelfImprovementService.loadBudget(projectRoot: budgetRoot)?.budget == start - 1,
+            "and the reduction survives being read back, which is the only part the next run sees"
+        )
+        for _ in 0..<Int(start) { _ = QueenSelfImprovementService.consumeBudget(amount: 1.0, projectRoot: budgetRoot) }
+        check(
+            QueenSelfImprovementService.loadBudget(projectRoot: budgetRoot)?.isActive == false,
+            "and it runs out, which is the whole point of having one"
+        )
+        check(
+            QueenSelfImprovementService.consumeBudget(amount: 1.0, projectRoot: budgetRoot) == nil,
+            "spending past empty refuses instead of going negative"
+        )
         check(counts["ownershipRule"] ?? 0 >= 2,
               "and counts a method that is called, not only declared")
     }
