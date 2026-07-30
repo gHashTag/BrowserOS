@@ -1865,3 +1865,29 @@ onward. I had relaunched what was on disk instead of rebuilding, and my own
 manual ad-hoc re-sign is what caused the dialogs in the first place. Rebuilt
 prod (23.9 MB -> 26.2 MB), relaunched, clade-e2e green at 49 checks with app and
 server up. Also finished StreamingContextWatchdogIntegrationTests, 25 -> 22.
+
+## 2026-07-30 23:4x - six types the app compiles and never calls
+
+All three verifications green before touching anything, so the cycle went to
+dead code. A scan of every type declared under rings/ and BR-OUTPUT/ returned
+twenty-two with a single occurrence. Before believing that, I planted a known
+dead type and confirmed the scanner reported it, then checked the file list and
+found it had been missing four Swift files at the repository root - a scan is
+only as honest as the set of files it reads, and an incomplete set reports
+absence that is not there.
+
+Sixteen of the twenty-two live in BR-OUTPUT prototypes the build skips on
+purpose, already covered by the prototype budget. Six are compiled into the
+shipped app: two private SwiftUI views unused even inside their own file, and
+four from the mesh chat surface. Those four each said something rather than
+merely sitting there - MeshChatSinceQuery duplicates the since_id query item
+the poller already builds, MeshPeer models a peer the code always handles as a
+bare UInt32, MeshChatReceiveResponse describes a body receiveFrame()
+deliberately throws away because refresh() re-reads the truth, and
+MeshSimpleResponse is an {ok: Bool} nobody decodes. 77 lines gone, all three
+verifications green afterwards.
+
+Left alone deliberately: the sixteen prototype types, because the build already
+excludes them and deleting drafts is not this loop's job; and the twenty-two
+remaining XCTest compile errors, which are a separate thread waiting on whether
+ChatFailureTests still describes behaviour anyone wants.
