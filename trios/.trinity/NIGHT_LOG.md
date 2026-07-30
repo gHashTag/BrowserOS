@@ -1965,3 +1965,29 @@ rather than in anything destructive. Also left: no delegation has yet reached a
 pull request, which is the next real milestone and too large for one cycle. And
 the 22 XCTest errors, unchanged, still waiting on a question only the user can
 answer.
+
+## 2026-07-30 ~17:5x UTC - three bugs in the half of the client nobody called
+
+Verifications green first. The cycle took the finding from last night's
+decomposition: the pull-request path had never executed, and had accumulated
+three defects that could only survive in code nothing runs. The owner was
+hardcoded into every path while the Queen passed "owner/repo", so the URL named
+the account twice. Two callers omitted the leading slash on their suffix, so
+"pulls/7/merge" fused with the repository name. And the percent-encoding used
+.urlPathAllowed, which permits "/" and therefore protected against neither.
+
+Rather than three patches, the path now has one pure builder in rings/SR-00
+that takes a bare name or an explicit owner/repo, refuses a two-slash
+repository and a suffix without its slash, and encodes each component with the
+separator removed from the allowed set. Eight assertions cover it. I ran them
+against the old construction before trusting them and watched three fail, one
+per defect - the two that still passed were guarding conditions the downgrade
+did not remove, which is itself worth knowing.
+
+Left alone deliberately: the tri-net snapshot and the account repository list
+still name gHashTag inline, because those are one feature pointed at one known
+repository rather than a client that cannot address another. Also left: the
+worker still guesses the date, no delegation has yet reached a pull request -
+that now needs a GitHub token, which is the user's to place and not mine - and
+the 22 XCTest errors are untouched for a fourth day, still waiting on a
+question only the user can answer.
