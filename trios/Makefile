@@ -56,21 +56,21 @@ help:
 # fired. Counted unique so one warning in a header included many times is one
 # warning.
 #
-# Application sources only. Test warnings come from swift test, which compiles
-# incrementally, so their number depends on what happened to be cached - a first
-# attempt at this gate counted them and swung between 17 and 30 across two
-# consecutive runs. A gate that fires at random gets switched off, so it counts
-# only what build.sh compiles in full every time.
+# Only the app compile, which is why the log is cut at "Copied and signed"
+# rather than filtered by path. Everything after that line is a test build, and
+# test builds are incremental: they report only what they happened to recompile,
+# so counting them made this swing between 17 and 30 on consecutive runs. A gate
+# that fires at random is a gate someone switches off.
 #
-# Two consecutive runs then agreed at 5. An earlier log showed 7, two of them in
-# HotkeyAnalytics, and I could neither reproduce nor explain that - so the
-# ceiling is 7, not 5. Setting it to the best number seen once would claim a
-# stability that has not been demonstrated, and the first spurious failure would
-# be the end of the check. The note below asks for it to be lowered as the debt
-# is paid down; that is where the ratchet actually lives.
+# Filtering by path was the obvious fix and the wrong one. Package.swift
+# compiles several BR-OUTPUT files, HotkeyAnalytics among them, so a cache miss
+# in swift test emitted warnings whose paths are application paths - which is
+# the whole of the unexplained "7" an earlier version of this comment recorded
+# as a mystery and used to justify a slack ceiling. Cutting at the end of the
+# app build removes the guesswork: two consecutive runs report exactly 5.
 #
 # Uses /usr/bin/grep deliberately: this shell has grep shadowed by a function.
-WARNING_CEILING := 7
+WARNING_CEILING := 5
 
 dev:
 	@TRIOS_VARIANT=dev "$(ROOT)/build.sh" > /tmp/trios_build_dev.log 2>&1; \
@@ -78,12 +78,13 @@ dev:
 		echo "[OK] dev app built"; \
 		grep -q "swift test failed" /tmp/trios_build_dev.log && \
 			echo "[NOTE] XCTest suite still broken (pre-existing); run 'make xctest' for detail"; \
-		warnings=$$(/usr/bin/grep -oE "^/[^:]+\.swift:[0-9]+:[0-9]+: warning: " /tmp/trios_build_dev.log 2>/dev/null \
-			| sort -u | /usr/bin/grep -vE "/tests/" | wc -l | tr -d ' '); \
+		warnings=$$(awk '/Copied and signed/{exit} {print}' /tmp/trios_build_dev.log 2>/dev/null \
+			| /usr/bin/grep -oE "^/[^:]+\.swift:[0-9]+:[0-9]+: warning: " | sort -u | wc -l | tr -d ' '); \
 		if [ "$$warnings" -gt $(WARNING_CEILING) ]; then \
 			echo "[FAIL] $$warnings compiler warnings; the ceiling is $(WARNING_CEILING)."; \
-			/usr/bin/grep -oE "^/[^:]+\.swift:[0-9]+:[0-9]+: warning: .*" /tmp/trios_build_dev.log \
-				| sort -u | /usr/bin/grep -vE "/tests/" | sed 's|$(ROOT)/||' | head -25; \
+			awk '/Copied and signed/{exit} {print}' /tmp/trios_build_dev.log \
+				| /usr/bin/grep -oE "^/[^:]+\.swift:[0-9]+:[0-9]+: warning: .*" \
+				| sort -u | sed 's|$(ROOT)/||' | head -25; \
 			exit 1; \
 		elif [ "$$warnings" -lt $(WARNING_CEILING) ]; then \
 			echo "[NOTE] $$warnings warnings, under the ceiling of $(WARNING_CEILING)."; \
