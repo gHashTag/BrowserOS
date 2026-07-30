@@ -2019,3 +2019,32 @@ conformances from real dead functions is its own cycle. Also left: the worker
 still guesses the date, no delegation has reached a pull request - that now
 waits on a GitHub token, which is the user's to place - and the 22 XCTest
 errors are unchanged for a fourth day.
+
+## 2026-07-30 ~19:2x UTC - asking the compiler instead of grep
+
+Verifications green first. Last night's conclusion was that this repository
+measures itself with regular expressions and three of them lied this week, so
+the cycle went looking for a signal the toolchain produces rather than one I
+write. The build already emits compiler warnings and make discarded them: five
+in application sources, four deprecated Text concatenations and one discarded
+runProcess result in the code that creates a worker's branch.
+
+The gate now counts unique warnings and fails above a ceiling. Getting to a
+number worth gating on took two corrections, both of them the same mistake the
+check exists to prevent. The first count included the test harness and swung
+between 17 and 30 across two consecutive runs, because swift test compiles
+incrementally and reports only what it rebuilt - a gate that fires at random is
+a gate someone switches off. Narrowed to what build.sh compiles in full, two
+runs agree at five.
+
+The second is admitted rather than solved. An earlier log showed seven, two of
+them in HotkeyAnalytics, and I could not reproduce it. So the ceiling is seven,
+not five: setting it to the best number seen once would be claiming a stability
+I have not shown, and the first spurious failure would end the check. When the
+count is under the ceiling the build says so and asks for it to be lowered.
+
+Left alone deliberately: the five warnings themselves, including the discarded
+runProcess result, which is a real if harmless signal and belongs to its own
+cycle now that it is visible. Also left, for a fifth day: the worker guesses the
+date, no delegation has reached a pull request - that waits on a GitHub token,
+which is the user's to place - and the 22 XCTest errors.
