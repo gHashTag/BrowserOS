@@ -121,29 +121,3 @@ struct UnifiedTriosGlassBackground: View {
         .accessibilityHidden(true)
     }
 }
-
-struct GlassmorphismCard<Content: View>: View {
-    let cornerRadius: CGFloat
-    let content: Content
-
-    init(cornerRadius: CGFloat = 16, @ViewBuilder content: () -> Content) {
-        self.cornerRadius = cornerRadius
-        self.content = content()
-    }
-
-    var body: some View {
-        content
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: cornerRadius)
-                    .fill(Color.grokSurface)
-                    .background(
-                        GlassmorphismBackground(material: .popover, blending: .withinWindow, cornerRadius: cornerRadius)
-                    )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: cornerRadius)
-                    .stroke(Color.grokBorder, lineWidth: 1)
-            )
-    }
-}
