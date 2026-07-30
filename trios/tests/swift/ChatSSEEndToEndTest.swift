@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 350
+    static let minimumChecks = 355
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -1987,6 +1987,47 @@ struct ChatSSEEndToEndTests {
         check(
             QueenObserver.outOfBoundsPaths(in: strayed, ownedPaths: ["rings"]).isEmpty,
             "a write inside the boundary raises nothing"
+        )
+
+        // Every fixture above and every cassette calls the same tool,
+        // filesystem_write. Removing "edit" from isWriteTool entirely left the
+        // suite and all four cassettes green, so half the detector's vocabulary
+        // was never exercised by anything.
+        func transcript(tool: String, path: String) -> QueenWorkerTranscript {
+            QueenWorkerTranscript(seed: [
+                ChatMessage(role: .assistant, content: "", toolCalls: [
+                    ToolCall(id: "1", name: tool,
+                             arguments: "{\"path\":\"\(path)\"}", output: nil, isComplete: true)
+                ])
+            ])
+        }
+        for tool in ["filesystem_write", "fs_write", "file_edit", "MultiEdit"] {
+            check(
+                QueenObserver.outOfBoundsPaths(
+                    in: transcript(tool: tool, path: "rings/SR-00/NotYours.swift"),
+                    ownedPaths: ["docs"]
+                ) == ["rings/SR-00/NotYours.swift"],
+                "a stray write through \(tool) is seen"
+            )
+        }
+
+        // A blind spot, asserted so it is a known one rather than a discovery.
+        //
+        // filesystem_bash is neither write-named nor path-argumented, so a
+        // worker that writes with `echo >` or `sed -i` is invisible here. The
+        // committer still refuses to put those files on the branch - it filters
+        // the diff against the same boundary - so nothing wrong lands. What is
+        // lost is the warning: the worker spends its turn, and the file simply
+        // never appears, with no one saying why.
+        //
+        // This assertion fails the day someone teaches the observer about
+        // shells, which is the right moment to delete it.
+        check(
+            QueenObserver.outOfBoundsPaths(
+                in: transcript(tool: "filesystem_bash", path: "rings/SR-00/NotYours.swift"),
+                ownedPaths: ["docs"]
+            ).isEmpty,
+            "a stray write through the shell is NOT seen - the committer catches it, the observer cannot"
         )
 
         var orphaned = QueenWorkerTranscript()
