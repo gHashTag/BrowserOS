@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 342
+    static let minimumChecks = 347
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -2362,8 +2362,24 @@ struct ChatSSEEndToEndTests {
         let spec = QueenTaskSpec.render(for: task(criteria: [
             "make check passes", "the tab renders 50 rows at a time"
         ]))
-        for section in QueenTaskSpec.sectionTitles {
-            check(spec.contains("## \(section)"), "the specification has a \(section) section")
+        // A heading is not a section. This loop used to assert only that each
+        // "## X" appeared, which reads as thorough - all five, none forgotten -
+        // and passes with every one of them empty. Emptying Out of scope
+        // entirely left all 342 checks green, so the specification could have
+        // lost a whole instruction to the worker without a word from the suite.
+        //
+        // Splitting on the headings and requiring text underneath is the same
+        // loop asking the question it looked like it was asking, and it covers
+        // sections nobody has written yet.
+        let sectionBodies = QueenTaskSpec.sectionTitles.map { title -> (String, String) in
+            guard let start = spec.range(of: "## \(title)") else { return (title, "") }
+            let rest = spec[start.upperBound...]
+            let end = rest.range(of: "\n## ")?.lowerBound ?? rest.endIndex
+            return (title, String(rest[..<end]).trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        for (title, body) in sectionBodies {
+            check(spec.contains("## \(title)"), "the specification has a \(title) section")
+            check(!body.isEmpty, "and the \(title) section says something under its heading")
         }
         check(spec.contains("1. make check passes"), "criteria are numbered so they can be answered one by one")
         // A worker has no clock, and the first live delegation proved it: asked
