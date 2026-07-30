@@ -101,7 +101,7 @@ cassettes:
 	@pkill -x trios-dev 2>/dev/null || true
 	@pkill -f "trios-dev.app/Contents/MacOS" 2>/dev/null || true
 	@sleep 2
-	@fail=0; \
+	@fail=0; covered=""; \
 	for spec in \
 		"worker-happy-path.sse:queen.branch.committed:commits the file its cassette declares" \
 		"worker-looping.sse:queen.observer.looping:notices a bee repeating one call" \
@@ -109,6 +109,7 @@ cassettes:
 		"worker-orphan-tool-call.sse:queen.worker.orphaned_tool_calls:names a tool call the stream never answered" \
 	; do \
 		cassette=$${spec%%:*}; rest=$${spec#*:}; \
+		covered="$$covered $$cassette"; \
 		marker=$${rest%%:*}; label=$${rest#*:}; \
 		case "$$marker" in second_turn*|*second_turn*) second=1 ;; *) second= ;; esac; \
 		before=$$(wc -l < "$(LOG)" 2>/dev/null || echo 0); \
@@ -135,7 +136,20 @@ cassettes:
 	done; \
 	git -C "$(ROOT)" branch --list 'queen/*' --format='%(refname:short)' | xargs -r -n1 git -C "$(ROOT)" branch -D >/dev/null 2>&1; \
 	rm -f "$(ROOT)/docs/replay.md"; \
-	if [ $$fail -eq 0 ]; then echo "[OK] cassette suite passed"; else echo "[FAIL] cassette suite"; exit 1; fi
+	: "A cassette nothing runs is not coverage. Deleting a spec above leaves \
+	   its .sse file on disk and the suite still says passed, which is the \
+	   same silence an unwired test file used to sit in."; \
+	present=0; \
+	for f in "$(CASSETTE_DIR)"/*.sse; do \
+		[ -e "$$f" ] || continue; \
+		present=$$((present + 1)); base=$$(basename "$$f"); \
+		case " $$covered " in \
+			*" $$base "*) ;; \
+			*) echo "  FAIL - $$base has no spec in this target, so nothing replays it"; fail=1 ;; \
+		esac; \
+	done; \
+	if [ $$present -eq 0 ]; then echo "  FAIL - no cassettes found in $(CASSETTE_DIR)"; fail=1; fi; \
+	if [ $$fail -eq 0 ]; then echo "[OK] cassette suite passed ($$present cassettes)"; else echo "[FAIL] cassette suite"; exit 1; fi
 
 # --- Running ------------------------------------------------------------
 
