@@ -2048,3 +2048,30 @@ runProcess result, which is a real if harmless signal and belongs to its own
 cycle now that it is visible. Also left, for a fifth day: the worker guesses the
 date, no delegation has reached a pull request - that waits on a GitHub token,
 which is the user's to place - and the 22 XCTest errors.
+
+## 2026-07-30 ~20:1x UTC - the mystery in yesterday's ceiling had a cause
+
+Verifications green first. Yesterday's warning gate shipped with a ceiling of 7
+against an observed 5 and a comment saying I could not explain the gap. That is
+not a ratchet. Slack justified by a mystery is a number nobody lowers, because
+lowering it risks a failure no one understands, so the check quietly becomes
+permission for the debt it was meant to reduce.
+
+The cause: Package.swift compiles several BR-OUTPUT files, HotkeyAnalytics
+among them, so when swift test misses its cache it emits warnings whose paths
+are application paths. Filtering by path - the obvious fix, and the one I used -
+could never separate them. Those two were the whole of the seven.
+
+The log is now cut at "Copied and signed", the last line of the app build. My
+first attempt cut at "Running swift test" and was still wrong, because the chat
+integration harness compiles before that line rather than after; the gate failed
+on harness warnings and told me so. Two runs now report exactly 5, the ceiling
+is 5, and a planted unused-value warning trips it.
+
+Left alone deliberately: the five warnings themselves. Four are deprecated Text
+concatenation in RichTextRenderer, and replacing them means rebuilding inline
+markdown rendering on AttributedString - user-visible, untested, and not a
+thing to do unattended. The fifth, a discarded runProcess result in branch
+creation, is small and real and should be next. Also left, for a sixth day: the
+worker guesses the date, no delegation has reached a pull request, and the 22
+XCTest errors.
