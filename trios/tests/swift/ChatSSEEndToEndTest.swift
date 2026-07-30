@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 213
+    static let minimumChecks = 221
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -67,6 +67,7 @@ struct ChatSSEEndToEndTests {
         await runScrollPositionPolicyAndRequestDelivery()
         await runCassetteReplayAndObserver()
         await runSalienceLearnsFromOutcomes()
+        await runMergedIsNotTheSameAsClosed()
         await runStalledWorkerIsResumedBeforeCancelled()
         await runQueenTaskLifecycleCloses()
         await runPureQueenTypes()
@@ -2084,6 +2085,56 @@ struct ChatSSEEndToEndTests {
     /// task, which is "unfinished" relabelled as "abandoned" - it looks like a
     /// decision and teaches nobody anything. These checks pin both halves: that
     /// a restart happens, and that restarting is bounded.
+    /// A merged pull request and an abandoned one must not decode to the same
+    /// answer.
+    ///
+    /// GitHub reports `state` as only "open" or "closed", so a task archived on
+    /// `state == "closed"` would file away work whose changes never landed. The
+    /// delegation spec turns on this distinction: the chat closes when the forge
+    /// says merged, which is a fact, rather than when review said yes, which is
+    /// an opinion. Decoded from the shapes the API actually returns.
+    static func runMergedIsNotTheSameAsClosed() async {
+        print("\n# Scenario: merged and closed are different answers")
+
+        func decode(_ json: String, _ label: String) -> GitHubPullRequest? {
+            guard let pr = try? JSONDecoder().decode(GitHubPullRequest.self, from: Data(json.utf8)) else {
+                fail("could not decode \(label)")
+                return nil
+            }
+            return pr
+        }
+
+        let base = #""id":1,"number":7,"title":"t","html_url":"u","head":null,"base":null"#
+
+        if let merged = decode("{\(base),\"state\":\"closed\",\"merged\":true,\"merged_at\":\"2026-07-30T00:00:00Z\"}", "a merged PR") {
+            check(merged.isMerged, "a merged pull request reads as merged")
+            check(!merged.isClosedUnmerged, "and is not mistaken for abandoned work")
+        }
+
+        if let abandoned = decode("{\(base),\"state\":\"closed\",\"merged\":false,\"merged_at\":null}", "a closed unmerged PR") {
+            check(!abandoned.isMerged, "a closed pull request that never merged does not read as merged")
+            check(abandoned.isClosedUnmerged, "it reads as abandoned, so the task can go back to the queue")
+            check(abandoned.state == "closed", "even though its state is the same word as the merged one")
+        }
+
+        // List endpoints omit both fields. Absent must mean "nobody asked",
+        // never "no" - guessing false here would archive nothing, guessing true
+        // would archive everything.
+        if let unasked = decode("{\(base),\"state\":\"open\"}", "a PR from a list endpoint") {
+            check(!unasked.isMerged, "an open pull request has not merged")
+            check(!unasked.isClosedUnmerged, "and an open one is not abandoned either")
+        }
+
+        // The trap this exists to close.
+        if let merged = decode("{\(base),\"state\":\"closed\",\"merged\":true,\"merged_at\":null}", "merged without a timestamp"),
+           let abandoned = decode("{\(base),\"state\":\"closed\",\"merged\":false,\"merged_at\":null}", "abandoned") {
+            check(
+                merged.isMerged != abandoned.isMerged,
+                "two pull requests with identical state disagree about whether work landed"
+            )
+        }
+    }
+
     static func runStalledWorkerIsResumedBeforeCancelled() async {
         print("\n# Scenario: a silent worker gets restarted, not written off")
 
