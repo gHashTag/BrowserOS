@@ -1991,3 +1991,31 @@ worker still guesses the date, no delegation has yet reached a pull request -
 that now needs a GitHub token, which is the user's to place and not mine - and
 the 22 XCTest errors are untouched for a fourth day, still waiting on a
 question only the user can answer.
+
+## 2026-07-30 ~18:3x UTC - the canary that was not like the birds
+
+Verifications green first. The plan was to point the type scanner at functions
+instead, and the scan was wrong before it was useful. Matching a call as
+`name(` under `grep -w` cannot match when a word character follows the paren,
+so `createPR(repo:` was invisible while the same name at a line end was not.
+The scanner said 148 functions were never called; corrected, it says 86, and
+most of those are framework callbacks nothing in our code is supposed to call.
+
+The part worth remembering is that my canary passed. It had an empty parameter
+list, nothing followed its paren, and it matched - so a broken instrument
+reported itself healthy. A canary that does not resemble the population it
+stands in for proves nothing, which is exactly the failure mode it exists to
+rule out. I only caught it because a name I knew to be called, createPR, was in
+the results.
+
+What the corrected scan then found was the same shape this project keeps
+producing: QueenSelfAudit.deadSymbols states the "one occurrence means dead"
+rule and has assertions, and had no caller, while auditRepository applied the
+identical rule inline where nothing checked it. The audit now hands its
+occurrence map to deadSymbols. One rule, one place, and the place with tests.
+
+Left alone deliberately: the 86 candidates, because separating protocol
+conformances from real dead functions is its own cycle. Also left: the worker
+still guesses the date, no delegation has reached a pull request - that now
+waits on a GitHub token, which is the user's to place - and the 22 XCTest
+errors are unchanged for a fourth day.
