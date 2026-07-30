@@ -646,6 +646,10 @@ const KNOWN_UNWIRED_SWIFT_TESTS: &[&str] = &[
 /// These seventeen are experiments, reachable only through
 /// TRIOS_INCLUDE_PROTOTYPES=1. Naming them is what makes the difference between
 /// a prototype and a file somebody dropped by accident visible at all.
+/// Ceiling on the list below. Lower it as prototypes are resolved; raising it is
+/// an edit someone has to defend, which is the whole point of a budget.
+const PROTOTYPE_BUDGET: usize = 17;
+
 const KNOWN_PROTOTYPE_SOURCES: &[&str] = &[
     "AIMacroGenerator.swift",
     "AccessibilityEnhancements.swift",
@@ -737,10 +741,32 @@ fn check_br_output_is_accounted_for(dir: &str, report: &mut String) -> bool {
         .cloned()
         .collect();
 
+    // A suppression that is no longer needed is worse than none: it reads as a
+    // considered decision while describing a file that has moved on. Clippy's
+    // `expect` warns on exactly this, and without it a baseline only ever grows
+    // - the entry outlives the reason for it and nobody learns.
+    let mut stale: Vec<String> = KNOWN_PROTOTYPE_SOURCES
+        .iter()
+        .filter(|n| !on_disk.contains(&n.to_string()))
+        .map(|n| format!("{n} (no longer exists)"))
+        .collect();
+    stale.extend(
+        KNOWN_PROTOTYPE_SOURCES
+            .iter()
+            .filter(|n| compiled.contains(&n.to_string()))
+            .map(|n| format!("{n} (now compiled, so no longer a prototype)")),
+    );
+
     unaccounted.sort();
     phantom.sort();
+    stale.sort();
 
-    if unaccounted.is_empty() && phantom.is_empty() {
+    // The list may shrink freely and may not grow. Without a ceiling the
+    // cheapest way to silence this guard is to add a name to it, which turns a
+    // failure into a record of a rule we stopped enforcing.
+    let over_budget = KNOWN_PROTOTYPE_SOURCES.len() > PROTOTYPE_BUDGET;
+
+    if unaccounted.is_empty() && phantom.is_empty() && stale.is_empty() && !over_budget {
         report.push_str(&format!(
             "\n- [OK] BR-OUTPUT accounted for: {} files, {} compiled, {} declared prototypes\n",
             on_disk.len(),
@@ -759,6 +785,19 @@ fn check_br_output_is_accounted_for(dir: &str, report: &mut String) -> bool {
         report.push_str(&format!(
             "\n- [FAIL] build.sh compiles file(s) that do not exist: {}\n",
             phantom.join(", ")
+        ));
+    }
+    if !stale.is_empty() {
+        report.push_str(&format!(
+            "\n- [FAIL] prototype exemption(s) no longer needed, delete them: {}\n",
+            stale.join(", ")
+        ));
+    }
+    if over_budget {
+        report.push_str(&format!(
+            "\n- [FAIL] {} prototype exemptions, budget is {}. This list may shrink, not grow.\n",
+            KNOWN_PROTOTYPE_SOURCES.len(),
+            PROTOTYPE_BUDGET
         ));
     }
     false
@@ -792,6 +831,7 @@ fn check_swift_suites_are_wired(dir: &str, report: &mut String) -> bool {
     }
 
     let mut orphans: Vec<String> = Vec::new();
+    let mut present: Vec<String> = Vec::new();
     let mut seen = 0usize;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
@@ -799,6 +839,7 @@ fn check_swift_suites_are_wired(dir: &str, report: &mut String) -> bool {
             continue;
         }
         seen += 1;
+        present.push(name.clone());
         if wired.contains(&name.as_str()) {
             continue;
         }
@@ -813,7 +854,29 @@ fn check_swift_suites_are_wired(dir: &str, report: &mut String) -> bool {
         return false;
     }
 
+    // Same rule as the prototype list: an exemption naming a file that is gone,
+    // or one that is now wired, has stopped describing anything true.
+    let mut stale: Vec<String> = KNOWN_UNWIRED_SWIFT_TESTS
+        .iter()
+        .filter(|n| !present.contains(&n.to_string()))
+        .map(|n| format!("{n} (no longer exists)"))
+        .collect();
+    stale.extend(
+        KNOWN_UNWIRED_SWIFT_TESTS
+            .iter()
+            .filter(|n| wired.contains(&&***n))
+            .map(|n| format!("{n} (now wired)")),
+    );
+
     orphans.sort();
+    stale.sort();
+    if !stale.is_empty() {
+        report.push_str(&format!(
+            "\n- [FAIL] unwired exemption(s) no longer needed, delete them: {}\n",
+            stale.join(", ")
+        ));
+        return false;
+    }
     if orphans.is_empty() {
         report.push_str(&format!(
             "\n- [OK] swift suite wiring: {} test files, {} run, {} listed as unwired\n",
