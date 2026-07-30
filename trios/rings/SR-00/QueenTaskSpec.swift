@@ -34,12 +34,29 @@ enum QueenTaskSpec {
 
     static var sectionTitles: [String] { Section.allCases.map(\.rawValue) }
 
-    static func render(for task: DelegatedTask) -> String {
+    /// Formats a date the way a specification should state one: unambiguous,
+    /// no locale, no weekday to be clever about.
+    static func dateStamp(_ date: Date) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
+    }
+
+    /// `today` is a parameter so the rendering stays testable. Reading the
+    /// clock inside would make every assertion about this text expire.
+    static func render(for task: DelegatedTask, today: Date = Date()) -> String {
         var lines: [String] = ["# Specification: \(task.issue.slug)", ""]
 
         lines.append(Section.intent.heading)
         lines.append(task.title)
         lines.append("Issue: \(task.issue.url)")
+        // A worker has no clock. Asked for the date, the first live delegation
+        // wrote 2025 in 2026 and marked the criterion met, which is the honest
+        // behaviour of something guessing: it cannot know it is wrong. Asking
+        // for a fact and withholding it is the specification's defect, not the
+        // worker's.
+        lines.append("Today is \(dateStamp(today)).")
         lines.append("")
 
         lines.append(Section.acceptanceCriteria.heading)
