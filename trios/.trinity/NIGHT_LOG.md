@@ -2153,3 +2153,33 @@ watched three fail before believing them. Floor 334 to 338.
 Left alone deliberately: the four RichTextRenderer deprecations, which want
 someone at the screen; the 86 never-called function candidates; the pull request
 that still waits on a token only the user can place; and the 22 XCTest errors.
+
+## 2026-07-30 ~23:3x UTC - catching a disagreement is not preventing one
+
+Verifications green first, then the direct continuation of last night: the
+branch rule was stated in two independently written sentences, and last night I
+made them agree and added assertions. Assertions notice a disagreement after
+somebody writes it. For a rule whose failure mode is the entire repository
+moving onto one worker's branch, that is the weaker guarantee available, so the
+sentence now lives once in QueenBranchPolicy.ownershipRule, beside branchName
+which already owns what a branch is called, and both documents ask for it.
+
+The assertions changed shape and that turned out to matter more than the
+refactor. They used to grep for phrases - "Do not check it out", "shared" -
+which passes the moment any sentence contains those words. They now compare
+verbatim against the shared source. To see whether that was a real improvement
+or a nicer-looking one, I replaced the standing orders with a paraphrase
+containing every phrase the old test looked for. The old assertions would have
+passed it; the new one fails.
+
+The check floor did its job unprompted. Folding five fragment assertions into
+three tripped the minimum - coverage was being removed, which is exactly what
+it is there to notice. I added what was actually missing rather than lowering
+it: that the shared rule interpolates the branch it is handed and is not a
+constant that merely looks personalised. Ran clade-e2e too, since
+QueenDelegation.swift has its own logic suite with its own source list, and
+that is the file I added to.
+
+Left alone deliberately: the four RichTextRenderer deprecations, still wanting
+someone at the screen; the 86 never-called function candidates; the pull request
+waiting on a token only the user can place; and the 22 XCTest errors.
