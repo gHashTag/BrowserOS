@@ -3771,6 +3771,56 @@ final class ChatViewModel: ObservableObject {
         )
     }
 
+    /// How often each function declared in the Queen's own files is mentioned
+    /// anywhere in her subsystem.
+    ///
+    /// Scoped by filename rather than by symbol prefix, because Swift methods
+    /// are named after what they do and no `func Queen...` convention exists to
+    /// match on. Files called Queen*, Skill* or Swarm* are the same "her own
+    /// organs" boundary the type scan uses, arrived at from the other side.
+    nonisolated static func functionOccurrences(
+        root: String,
+        scopes: [String]
+    ) -> [String: Int] {
+        let declared = QueenStatusViewModel.runProcess(
+            "/bin/sh",
+            arguments: [
+                "-c",
+                "grep -rhoE 'func [a-z][A-Za-z0-9_]*' "
+                    + "\(root)/rings/SR-00/Queen*.swift \(root)/rings/SR-01/Skill*.swift "
+                    + "\(root)/rings/SR-02/Queen*.swift \(root)/BR-OUTPUT/Queen*.swift "
+                    + "2>/dev/null | sed 's/func //' | sort -u"
+            ],
+            workDir: root,
+            timeout: 30
+        )
+        // Three characters or fewer are too common to count honestly - `id`
+        // appears everywhere and means nothing here.
+        let names = declared
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.count > 3 }
+        guard !names.isEmpty else { return [:] }
+
+        let uses = QueenStatusViewModel.runProcess(
+            "/usr/bin/grep",
+            arguments: ["-rhowE", names.joined(separator: "|")] + scopes,
+            workDir: root,
+            timeout: 120
+        )
+        var counts: [String: Int] = [:]
+        // Every declared name starts at zero, so one that appears nowhere is
+        // reported rather than missing from the dictionary entirely - absent
+        // and zero are different answers and this one must be zero.
+        for name in names { counts[name] = 0 }
+        for line in uses.components(separatedBy: .newlines) {
+            let word = line.trimmingCharacters(in: .whitespaces)
+            guard counts[word] != nil else { continue }
+            counts[word, default: 0] += 1
+        }
+        return counts
+    }
+
     /// Counts declarations against occurrences for the public surface of the
     /// Queen's own subsystem.
     nonisolated static func auditRepository(root: String) -> [QueenSelfAudit.Finding] {
@@ -3812,6 +3862,19 @@ final class ChatViewModel: ObservableObject {
             )
             occurrences[symbol] = uses.components(separatedBy: .newlines).filter { !$0.isEmpty }.count
         }
+
+        // Functions as well as types now, in one pass rather than one grep per
+        // name: there are 208 of them against 45 types, and 208 subprocesses is
+        // a button nobody presses twice.
+        //
+        // Counting a bare word rather than `name(` is the whole reason this is
+        // trustworthy. A scan I kept privately for a week matched only calls
+        // written with a parenthesis, so it missed `plan { ... }` written as a
+        // trailing closure and `Button(action: copyDiff)` written as a value -
+        // both everyday Swift - and called three live functions dead. This
+        // counts the identifier wherever it appears, which is what the type
+        // scan above has always done.
+        occurrences.merge(Self.functionOccurrences(root: root, scopes: scopes)) { a, _ in a }
 
         // The ranking rule lives in QueenSelfAudit.deadSymbols, which has tests
         // and, until now, no caller: this function counted occurrences and then

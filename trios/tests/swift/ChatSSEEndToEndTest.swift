@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 358
+    static let minimumChecks = 360
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -3071,6 +3071,23 @@ struct ChatSSEEndToEndTests {
                 .contains("statement about my checks"),
             "an empty audit says so about itself rather than claiming health"
         )
+
+        // The function half of the audit shells out, and a wrong path there
+        // returns an empty string rather than an error - I shipped
+        // "/usr/bin/sh" for a few minutes, which does not exist on macOS, and
+        // the effect would have been an audit reporting no dead functions at
+        // all. Silence that reads as health is the exact failure this file
+        // exists to prevent, so the scan is required to find something.
+        let counts = ChatViewModel.functionOccurrences(
+            root: ProjectPaths.root,
+            scopes: [
+                "\(ProjectPaths.root)/rings/SR-00", "\(ProjectPaths.root)/rings/SR-01",
+                "\(ProjectPaths.root)/rings/SR-02", "\(ProjectPaths.root)/BR-OUTPUT"
+            ]
+        )
+        check(counts.count > 50, "the function scan finds the Queen's own methods, not nothing")
+        check(counts["ownershipRule"] ?? 0 >= 2,
+              "and counts a method that is called, not only declared")
     }
 
     // MARK: - Scenario: the self-audit scanner actually matches
