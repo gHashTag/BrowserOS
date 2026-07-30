@@ -76,8 +76,12 @@ struct SessionRecoveryResilienceTest {
             ],
             includeSystemProcessLog: false
         )
-        let archiveURL = testRoot.appendingPathComponent("recovery.zip")
-        let result = try SessionRecoveryPackageWriter().write(request: request, to: archiveURL)
+        let requestedURL = testRoot.appendingPathComponent("recovery.zip")
+        // The writer normalises whatever it is handed to .triosrecovery and its
+        // result does not report where the file landed, so the caller has to
+        // apply the same rule to find it.
+        let archiveURL = requestedURL.appendingPathExtension("triosrecovery")
+        let result = try SessionRecoveryPackageWriter().write(request: request, to: requestedURL)
         expect(result.fileCount > 0, "archive produced files")
 
         let extracted = testRoot.appendingPathComponent("extracted", isDirectory: true)
@@ -228,8 +232,9 @@ struct SessionRecoveryResilienceTest {
             logSources: [SessionRecoveryLogSource(url: logRoot, archivePath: "logs/test")],
             includeSystemProcessLog: false
         )
-        let archiveURL = testRoot.appendingPathComponent("large.zip")
-        _ = try SessionRecoveryPackageWriter().write(request: request, to: archiveURL)
+        let requestedURL = testRoot.appendingPathComponent("large.zip")
+        let archiveURL = requestedURL.appendingPathExtension("triosrecovery")
+        _ = try SessionRecoveryPackageWriter().write(request: request, to: requestedURL)
 
         let extracted = testRoot.appendingPathComponent("extracted", isDirectory: true)
         try fileManager.createDirectory(at: extracted, withIntermediateDirectories: true)
@@ -241,10 +246,22 @@ struct SessionRecoveryResilienceTest {
         expect(note.contains("exceeds"), "omitted note explains size limit")
     }
 
+    /// Decrypts a writer-produced package, then unzips it.
+    ///
+    /// Only ever called on writer output, which is always encrypted, so the
+    /// decrypt is unconditional. `createArchive` below deliberately builds
+    /// plaintext zips for the legacy-format tests, and those go straight to
+    /// SessionRecoveryPackageReader rather than through here - that path is how
+    /// backward compatibility with pre-encryption packages stays covered.
     private static func extractArchive(_ archive: URL, to destination: URL) throws {
+        let plaintext = try TriOSEncryption.recovery.decrypt(Data(contentsOf: archive))
+        let zipURL = destination.appendingPathComponent("archive.zip")
+        try plaintext.write(to: zipURL, options: .atomic)
+        defer { try? FileManager.default.removeItem(at: zipURL) }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-        process.arguments = ["-x", "-k", archive.path, destination.path]
+        process.arguments = ["-x", "-k", zipURL.path, destination.path]
         try process.run()
         process.waitUntilExit()
         if process.terminationStatus != 0 {

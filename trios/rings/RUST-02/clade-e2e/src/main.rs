@@ -464,6 +464,21 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
         ],
     },
     SwiftLogicSuite {
+        label: "SessionRecoveryResilience",
+        bin: "/tmp/trios_session_recovery_resilience_test",
+        sources: &[
+            "tests/swift/session_recovery_resilience_test.swift",
+            "rings/SR-00/SessionRecoveryExport.swift",
+            "rings/SR-01/SessionRecoveryPackageReader.swift",
+            "rings/SR-01/SessionRecoveryPackageWriter.swift",
+            "rings/SR-00/TriOSEncryption.swift",
+            "rings/SR-00/KeychainSymmetricKeyStore.swift",
+            "rings/SR-00/DevSecretStore.swift",
+            "BR-OUTPUT/ProjectPaths.swift",
+            "rings/SR-00/BuildVariantPolicy.swift",
+        ],
+    },
+    SwiftLogicSuite {
         label: "TriosVisualTheme",
         bin: "/tmp/trios_trios_visual_theme_test",
         sources: &[
@@ -591,56 +606,31 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
 /// Compile and run every standalone Swift logic suite. This is the
 /// L7-compliant replacement for a shell test step - invoked from Rust, no .sh.
 /// Returns true only when all suites pass; appends a line per suite either way.
-/// Focused suites that exist on disk and are deliberately not run yet.
+/// Focused suites that exist on disk and are deliberately not run.
 ///
-/// Thirty of the forty-five files under `tests/swift/` were reachable by nobody
-/// - not this list, not the Makefile, not CI. They looked like coverage and
-/// were not, which is worse than an obvious gap: three separate types were
-/// investigated as "tested but never called" when the truth was that their
-/// tests had never executed either.
+/// Empty, and that is the point of keeping it. Thirty of the forty-five files
+/// under `tests/swift/` were once reachable by nobody - not this list, not the
+/// Makefile, not CI. They looked like coverage and were not, which is worse
+/// than an obvious gap: three separate types were investigated as "tested but
+/// never called" when the truth was that their tests had never executed either.
 ///
-/// Naming them here does not run them. It stops the set from growing quietly:
-/// add a `*_test.swift` without wiring it and `clade-e2e` now says so, instead
-/// of the file joining the silent others. Entries come off this list by being
-/// added to SWIFT_LOGIC_SUITES, which needs each suite's own source list.
+/// All forty-five run now. This list stays because the guard below reads it:
+/// add a `*_test.swift` without wiring it and clade-e2e names the file instead
+/// of letting it join a silent majority. An empty allowlist is the strongest
+/// state it can be in - every future orphan is a failure, not an entry.
 ///
-/// Twenty-seven of the original thirty are now wired. Every one was compiled
-/// *and executed* before being added, never on the strength of a resolved
-/// source list - which is what caught the three below.
+/// What the thirty cost, for whoever reads this before adding a suite. None was
+/// merely unwired. One asserted seven workspaces after Skills made eight; one
+/// demanded a `.zip` name the product stopped writing when packages became
+/// encrypted; one stubbed ProjectPaths and never grew the member CladeGuard
+/// started calling; two shelled out to `ditto` against ciphertext; two hung on
+/// the Keychain rather than failing, which would have frozen this runner had
+/// they been wired on a successful compile. A suite nothing executes does not
+/// hold one bug, it accumulates a stack of them, each hidden behind the last.
 ///
-/// Both `session_recovery_*` suites **hang** on the Keychain when run bare.
-/// ProjectPaths now lets the environment answer the variant question where
-/// there is no bundle, so `TRIOS_VARIANT=dev` makes them fail in about a second
-/// instead of freezing - the difference between a bug you can read and a job
-/// that reports nothing. That escape hatch is why they are diagnosable at all;
-/// it is not applied here, because forcing every suite to dev breaks
-/// RecursionGuard.
-///
-/// What they fail on is the same thing, and it is genuine. Their extraction
-/// step shells out to `ditto` against what it assumes is a plain zip, and the
-/// package has been encrypted since Cycle 14 - `ditto: Couldn't read PKZip
-/// signature`. Verifying an encrypted package means going through
-/// SessionRecoveryPackageReader, which decrypts first. That is a real rewrite of
-/// both suites' verification halves, not a source-list fix.
-///
-/// `session_recovery_export_test` also had a stale assertion that the package
-/// is named `.zip`; corrected, and it now covers the writer's extension
-/// normalisation instead.
-///
-/// `clade_guard_test` is gone from this list. It failed to compile because it
-/// stubs ProjectPaths - deliberately, so the suite builds from two files rather
-/// than the whole module tree - and CladeGuard had since started calling
-/// `ProjectPaths.root`, which the stub never grew. That is the standing cost of
-/// a stub: it drifts from the thing it stands in for, silently, and only a
-/// compile against the real code notices. Wired now, so the next drift breaks
-/// this suite instead of hiding in it.
-///
-/// `clade_guard_test` will not compile: CladeGuard.swift wants
-/// `ProjectPaths.root`, and something else in that suite's closure declares a
-/// competing `ProjectPaths` without it. A name collision to untangle, not a
-/// missing file.
+/// So: compile *and run* a candidate before adding it. Every one of those was
+/// found by running, none by reading.
 const KNOWN_UNWIRED_SWIFT_TESTS: &[&str] = &[
-    "session_recovery_resilience_test.swift",
 ];
 
 /// Fails when a focused Swift test exists that nothing runs and nothing admits
@@ -736,7 +726,8 @@ fn run_swift_logic_tests(report: &mut String) -> bool {
 /// RecursionGuard asserts the prod singleton lock path and prod bundle
 /// identifier by name, so forcing dev globally turns a real passing suite red
 /// to rescue a different one.
-const DEV_VARIANT_SUITES: &[&str] = &["SessionRecoveryExport"];
+const DEV_VARIANT_SUITES: &[&str] =
+    &["SessionRecoveryExport", "SessionRecoveryResilience"];
 
 fn run_swift_logic_suite(dir: &str, suite: &SwiftLogicSuite, report: &mut String) -> bool {
     let label = suite.label;
