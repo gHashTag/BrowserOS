@@ -147,6 +147,7 @@ final class ChatViewModel: ObservableObject {
     /// the e2e harness can construct a view model without a live transport.
     private(set) var workerRunner: QueenWorkerRunner?
     private var workerObservation: AnyCancellable?
+    private var workerLivenessObservation: AnyCancellable?
     /// Working-tree snapshot taken when each worker started, so its edits can be
     /// told apart from everything else happening in the shared checkout.
     private var workerBaselineTrees: [UUID: String] = [:]
@@ -3088,6 +3089,17 @@ final class ChatViewModel: ObservableObject {
 
         // A worker chat opened while its turn is in flight must show the live
         // stream, not the snapshot that happened to be persisted last.
+        // The status pills read `runningConversationIds` through this view model,
+        // and a worker finishing changes that set without touching anything the
+        // views observe. It is @Published, but publishing to nobody: the runner
+        // is held as a plain property here and no view subscribes to it. So a
+        // bee that stopped kept its green "Working" pill until some unrelated
+        // change forced a redraw - the supervisor surface confidently reporting
+        // a worker that was not there.
+        workerLivenessObservation = runner.$runningConversationIds
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+
         workerObservation = runner.$transcripts
             .receive(on: RunLoop.main)
             .sink { [weak self] transcripts in

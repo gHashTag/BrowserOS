@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 253
+    static let minimumChecks = 256
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -67,6 +67,7 @@ struct ChatSSEEndToEndTests {
         await runScrollPositionPolicyAndRequestDelivery()
         await runCassetteReplayAndObserver()
         await runSalienceLearnsFromOutcomes()
+        await runWorkerLivenessIsObservable()
         await runPullRequestOutcomeMapping()
         await runAcceptedWaitsForTheMerge()
         await runPullRequestRefusals()
@@ -2110,6 +2111,49 @@ struct ChatSSEEndToEndTests {
     /// request waiting forever for one - so both halves are pinned here.
     /// The forge's answer maps to one of three actions, and an unreachable
     /// forge maps to none of them.
+    /// The signal the supervisor pills depend on actually fires.
+    ///
+    /// `runningConversationIds` is @Published, but until this cycle nothing
+    /// subscribed to it: the runner is held as a plain property on the view
+    /// model and no view observes the runner. A worker that stopped kept its
+    /// green "Working" pill until some unrelated change forced a redraw. The
+    /// view model now forwards this publisher; these checks pin the half that
+    /// could silently stop being true - that the set is observable and that
+    /// stopping a worker moves it.
+    static func runWorkerLivenessIsObservable() async {
+        print("\n# Scenario: a stopped worker stops reading as live")
+
+        let runner = QueenWorkerRunner(
+            persister: InMemoryPersister(),
+            modelStore: ModelConfigurationStore(
+                defaults: UserDefaults(suiteName: "liveness-\(UUID().uuidString)")!,
+                environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
+            ),
+            makeTransport: { MockChatTransport() }
+        )
+        let conversation = UUID()
+
+        var notifications = 0
+        let subscription = runner.$runningConversationIds.sink { _ in notifications += 1 }
+        defer { subscription.cancel() }
+        let baseline = notifications
+
+        check(!runner.isRunning(conversationId: conversation),
+              "a conversation nobody started is not live")
+
+        runner.stop(conversationId: conversation)
+        check(notifications > baseline,
+              "changing the live set notifies subscribers, so a pill can be redrawn")
+        check(!runner.isRunning(conversationId: conversation),
+              "and the stopped conversation is not live afterwards")
+
+        // The rule that consumes this lives in QueenTaskStyle, a SwiftUI file
+        // outside this suite's sources. Pulling a view into a logic suite to
+        // reach it would be a bad trade, so it stays unproved here and is named
+        // rather than quietly skipped.
+    }
+
     static func runPullRequestOutcomeMapping() async {
         print("\n# Scenario: reading what the forge actually said")
 
