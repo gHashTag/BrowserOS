@@ -1,0 +1,19 @@
+{
+  "name": "@browseros/build-tools",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "BrowserOS release artifact producer",
+  "scripts": {
+    "upload": "bun run scripts/upload-to-r2.ts",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.933.0",
+    "@browseros/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.3"
+  }
+}

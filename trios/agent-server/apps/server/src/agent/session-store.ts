@@ -1,0 +1,73 @@
+import type { BrowserContext } from '@browseros/shared/schemas/browser-context'
+import { logger } from '../lib/logger'
+import type { AiSdkAgent } from './ai-sdk-agent'
+
+export interface AgentSession {
+  agent: AiSdkAgent
+  hiddenPageId?: number
+  /** Browser context scoped to the scheduled hidden page. */
+  browserContext?: BrowserContext
+  /** MCP server names used when the session was created, for change detection. */
+  mcpServerKey?: string
+  /** Workspace directory when the session was created, for change detection. */
+  workingDir?: string
+  /** Tool approval category key for change detection. */
+  approvalConfigKey?: string
+  /**
+   * Provider, model and base URL the session was built with.
+   *
+   * Sessions are cached per conversation, so without this a conversation kept
+   * running on whatever model it was first created with - a user who switched
+   * models in the UI saw every new request still go to the old provider, and
+   * the only cure was restarting the server.
+   */
+  modelKey?: string
+}
+
+export class SessionStore {
+  private sessions = new Map<string, AgentSession>()
+
+  get(conversationId: string): AgentSession | undefined {
+    return this.sessions.get(conversationId)
+  }
+
+  set(conversationId: string, session: AgentSession): void {
+    this.sessions.set(conversationId, session)
+    logger.info('Session added to store', {
+      conversationId,
+      totalSessions: this.sessions.size,
+    })
+  }
+
+  has(conversationId: string): boolean {
+    return this.sessions.has(conversationId)
+  }
+
+  remove(conversationId: string): boolean {
+    const existed = this.sessions.delete(conversationId)
+    if (existed) {
+      logger.info('Session removed from store (without dispose)', {
+        conversationId,
+        remainingSessions: this.sessions.size,
+      })
+    }
+    return existed
+  }
+
+  async delete(conversationId: string): Promise<boolean> {
+    const session = this.sessions.get(conversationId)
+    if (!session) return false
+
+    await session.agent.dispose()
+    this.sessions.delete(conversationId)
+    logger.info('Session deleted', {
+      conversationId,
+      remainingSessions: this.sessions.size,
+    })
+    return true
+  }
+
+  count(): number {
+    return this.sessions.size
+  }
+}
