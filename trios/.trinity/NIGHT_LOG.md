@@ -1891,3 +1891,27 @@ Left alone deliberately: the sixteen prototype types, because the build already
 excludes them and deleting drafts is not this loop's job; and the twenty-two
 remaining XCTest compile errors, which are a separate thread waiting on whether
 ChatFailureTests still describes behaviour anyone wants.
+
+## 2026-07-30 ~16:4x UTC - the first live delegation, and what it cost
+
+All three verifications green, so the cycle went to the one thing measurement
+kept pointing at: no `pullRequestNumber` has ever been written to disk and
+`make delegate-probe` had never been run. The whole spec-to-merge chain was
+proven in pieces and never once end to end. It ran tonight, scoped to docs, and
+worked - branch created, worker started on zai/glm-5.2, eight tool calls, its
+own acceptance table, one file committed to the branch, 71 seconds.
+
+It also produced a defect within those 71 seconds that no unit test could have
+found: the shared checkout was left standing on the worker's branch. Neither
+createVirtualBranch nor QueenBranchCommitter moved HEAD - both avoid it on
+purpose and both carry comments saying why. The worker moved it, because its
+brief said "Every edit belongs to `queen/1-...`" and a capable agent reads that
+as somewhere to go. The protection lived in the plumbing and was missing from
+the only sentence the worker reads. The boundary now forbids checking out,
+switching, creating or committing, and says the checkout is shared; two
+assertions hold the wording and the harness floor went 314 -> 324.
+
+Left alone deliberately: the same run wrote 2025-07-30 into a file that asked
+for the date, because the specification requests a date and never supplies one.
+That is a second gap in the same brief and belongs to its own cycle. Also left:
+the 22 XCTest compile errors, unchanged and still waiting on a question.
