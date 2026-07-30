@@ -648,7 +648,7 @@ const KNOWN_UNWIRED_SWIFT_TESTS: &[&str] = &[
 /// a prototype and a file somebody dropped by accident visible at all.
 /// Ceiling on the list below. Lower it as prototypes are resolved; raising it is
 /// an edit someone has to defend, which is the whole point of a budget.
-const PROTOTYPE_BUDGET: usize = 17;
+const PROTOTYPE_BUDGET: usize = 16;
 
 const KNOWN_PROTOTYPE_SOURCES: &[&str] = &[
     "AIMacroGenerator.swift",
@@ -666,7 +666,6 @@ const KNOWN_PROTOTYPE_SOURCES: &[&str] = &[
     "OpenNLParser.swift",
     "PluginAPI.swift",
     "SearchOverlay.swift",
-    "ToolCallFix.swift",
     "VoiceCommandHandler.swift",
 ];
 
