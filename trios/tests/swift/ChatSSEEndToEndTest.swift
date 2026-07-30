@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 308
+    static let minimumChecks = 314
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -67,6 +67,7 @@ struct ChatSSEEndToEndTests {
         await runScrollPositionPolicyAndRequestDelivery()
         await runCassetteReplayAndObserver()
         await runSalienceLearnsFromOutcomes()
+        await runQueenCorrectsTheWorker()
         await runAcceptanceIsCheckedAgainstCriteria()
         await runDelegationAcceptsCriteria()
         await runWorkerBriefIsASpecification()
@@ -2148,6 +2149,48 @@ struct ChatSSEEndToEndTests {
     /// done means and then signs off on a feeling anyway. The three-state
     /// verdict is the load-bearing bit - collapsing "not checked" into either
     /// neighbour is how work gets accepted on a glance.
+    /// The Queen corrects the worker, not just the report.
+    ///
+    /// The observer already noticed looping and out-of-bounds writes, and told
+    /// the user about them - the worker was never addressed. Telling you a bee
+    /// is heading the wrong way while saying nothing to the bee is observation,
+    /// not supervision: it leaves the only remaining choice a decision about
+    /// wreckage.
+    static func runQueenCorrectsTheWorker() async {
+        print("\n# Scenario: the correction reaches the worker")
+
+        let text = QueenObserver.correctionText(concerns: ["writing outside docs/"])
+        check(text.contains("writing outside docs/"), "the correction says what is wrong")
+        check(text.contains("Adjust before continuing"), "and what to do about it")
+        // A correction the worker cannot argue with turns a mistaken Queen into
+        // a stuck task.
+        check(text.contains("say so here"),
+              "and invites the worker to push back rather than work around her")
+
+        // Interventions accumulate on the task so review can see how much
+        // steering it took.
+        let store = NSTemporaryDirectory() + "queen-intervene-\(UUID().uuidString).json"
+        defer { try? FileManager.default.removeItem(atPath: store) }
+        let registry = QueenDelegationRegistry(storePath: store)
+        guard let issue = IssueReference.parse("gHashTag/trios#51"),
+              let task = registry.delegate(
+                  issue: issue, title: "probe", worker: "queen-swift",
+                  conversationId: UUID(), ownedPaths: ["docs"]
+              )
+        else {
+            fail("could not open a probe task"); return
+        }
+        check(registry.task(forIssue: issue)?.interventions.isEmpty == true,
+              "a fresh task has not been corrected")
+
+        registry.recordIntervention(taskID: task.id, text: "first")
+        registry.recordIntervention(taskID: task.id, text: "second")
+        let corrected = registry.task(forIssue: issue)
+        check(corrected?.interventions.count == 2, "each correction is counted, not just the last")
+        check(corrected?.interventions.first == "first",
+              "and kept in order, so review can read how the work drifted")
+    }
+
     static func runAcceptanceIsCheckedAgainstCriteria() async {
         print("\n# Scenario: accepted means the criteria say so")
 

@@ -2782,6 +2782,22 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Puts a correction where the worker will read it.
+    ///
+    /// Written straight through the persister rather than into `messages`,
+    /// because the worker's conversation is usually not the one on screen and
+    /// touching the visible transcript for a different chat is how two
+    /// conversations end up sharing a history.
+    private func appendCorrectionToWorkerChat(task: DelegatedTask, text: String) async {
+        let note = ChatMessage(
+            role: .system,
+            content: QueenObserver.correctionText(concerns: [text])
+        )
+        var history = await persister.load(conversationId: task.conversationId)
+        history.append(note)
+        await persister.save(messages: history, conversationId: task.conversationId)
+    }
+
     private func appendSystemMessageToQueenChat(_ content: String) async {
         let message = ChatMessage(role: .system, content: content)
         if conversationId == ChatConversation.trinityQueenId {
@@ -3280,12 +3296,28 @@ final class ChatViewModel: ObservableObject {
 
         let body = fresh.map(\.explanation).joined(separator: "\n")
         Task { [weak self] in
-            await self?.appendSystemMessageToQueenChat(
+            guard let self else { return }
+            // The correction goes to the worker, not only to the report. Telling
+            // the user about a bee heading the wrong way and saying nothing to
+            // the bee is observation, not supervision - it leaves the only
+            // available fix as a decision about wreckage.
+            //
+            // It cannot interrupt a stream in flight; it lands in the worker's
+            // conversation, which is what it reads on its next turn. Steering
+            // between deltas would need the transport to support it, and
+            // claiming otherwise here would be a comment that lies.
+            await self.appendCorrectionToWorkerChat(task: task, text: body)
+            QueenDelegationRegistry.shared.recordIntervention(taskID: task.id, text: body)
+
+            let count = QueenDelegationRegistry.shared.task(forIssue: task.issue)?
+                .interventions.count ?? 1
+            await self.appendSystemMessageToQueenChat(
                 SystemNoticeClassifier.warningMarker
                     + "Watching \(task.worker) on \(task.issue.slug):\n\(body)\n"
-                    + "Nothing is cancelled - I am telling you while it is still running, "
-                    + "because after it finishes the only choice left is whether to keep the "
-                    + "wreckage."
+                    + "I have said this in its chat - correction \(count) for this task. "
+                    + "Nothing is cancelled: while it is still running there is something "
+                    + "to steer, and after it finishes the only choice left is whether to "
+                    + "keep the wreckage."
             )
         }
         for concern in fresh {

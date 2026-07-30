@@ -137,6 +137,13 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// and a wish.
     var acceptanceCriteria: [String]
 
+    /// Corrections the Queen sent into this worker's chat while it ran.
+    ///
+    /// Kept so "she corrected this three times and it still went wrong" is
+    /// answerable at review. A supervisor who steers invisibly leaves a
+    /// transcript that reads as if the worker got there alone.
+    var interventions: [String]
+
     /// What was found when each criterion was checked, keyed by the criterion.
     ///
     /// Keyed by text rather than index so editing the criteria list cannot
@@ -197,6 +204,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         state: DelegatedTaskState = .queued,
         ownedPaths: [String] = [],
         acceptanceCriteria: [String] = [],
+        interventions: [String] = [],
         criterionVerdicts: [String: QueenCriterionVerdict] = [:],
         virtualBranch: String? = nil,
         createdAt: Date = Date(),
@@ -218,6 +226,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         self.state = state
         self.ownedPaths = ownedPaths
         self.acceptanceCriteria = acceptanceCriteria
+        self.interventions = interventions
         self.criterionVerdicts = criterionVerdicts
         self.virtualBranch = virtualBranch
         self.createdAt = createdAt

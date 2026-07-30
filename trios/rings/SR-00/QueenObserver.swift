@@ -12,6 +12,19 @@ import Foundation
 /// that can be wrong in the same way as the thing it is watching; these
 /// patterns are mechanical, and mechanical checks do not hallucinate.
 enum QueenObserver {
+    /// What the Queen says to a worker she is correcting.
+    ///
+    /// A separate function because the wording is the intervention. Telling a
+    /// worker it is wrong without saying what to do leaves it to guess, and a
+    /// correction it cannot argue with turns a mistaken Queen into a stuck task
+    /// - so it is invited to push back here rather than work around her.
+    static func correctionText(concerns: [String]) -> String {
+        "The Queen is watching this task and has a correction:\n"
+            + concerns.joined(separator: "\n") + "\n"
+            + "Adjust before continuing. If you think the correction is wrong, "
+            + "say so here rather than working around it."
+    }
+
     /// Something worth interrupting a human for.
     struct Concern: Equatable {
         enum Kind: String, Equatable {

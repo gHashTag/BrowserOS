@@ -222,6 +222,13 @@ final class QueenDelegationRegistry: ObservableObject {
         persist()
     }
 
+    func recordIntervention(taskID: UUID, text: String) {
+        guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        tasks[index].interventions.append(text)
+        tasks[index].updatedAt = Date()
+        persist()
+    }
+
     /// Records what was found for one criterion.
     ///
     /// Returns false when the text matches no criterion on the task, so a typo
