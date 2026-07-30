@@ -1915,3 +1915,28 @@ Left alone deliberately: the same run wrote 2025-07-30 into a file that asked
 for the date, because the specification requests a date and never supplies one.
 That is a second gap in the same brief and belongs to its own cycle. Also left:
 the 22 XCTest compile errors, unchanged and still waiting on a question.
+
+### Correction to the entry above, same night
+
+Two claims in it were wrong and one omission matters.
+
+"No live delegation had ever run" is false. I had grepped `.trinity/logs/` for
+filenames containing "delegat", found none, and concluded never - a check that
+matched nothing because it was looking in the wrong place. The evidence lives in
+the event stream at `.trinity-dev/logs/trios-app.jsonl`, and live runs go back
+to 2026-07-29 with 675 worker turns on a real provider. What is true, and is the
+gap that actually matters, is narrower: the string `pullRequest` appears nowhere
+in that entire log. Every delegation this project has ever run stops at "worker
+answered, branch committed". None has reached a pull request, let alone a merge.
+
+Second, the reflog shows the worker did more than switch branches. It ran a
+`git reset` and made its own commit before the Queen's committer made hers, so
+the branch carried two commits, not one. The brief now forbids committing as
+well as checking out.
+
+Third, the probe branch is gone. The `cassettes` target deletes every `queen/*`
+branch as housekeeping after a replay, and it cannot tell a synthetic branch
+from one holding real work; running the cassette suite after the probe swept it
+away. Nothing was lost tonight because the commit is still reachable and the
+content was a throwaway, but that is luck rather than design, and it is the next
+cycle's work.
