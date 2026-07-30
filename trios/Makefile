@@ -270,6 +270,19 @@ delegate-probe:
 		|| echo "no self-test lines were written"
 
 # The XCTest target, reported honestly rather than folded into the app build.
+# Counts distinct errors, not lines mentioning one.
+#
+# swiftc prints each error with several lines of source context, and every one
+# of those contains the word "error:". Counting lines reported 1651 where there
+# were 76 - a debt that looks hopeless instead of a fortnight's work, which is a
+# decent explanation for why nobody has picked it up. A metric nobody measured
+# is worse than no metric: this one was actively arguing against being fixed.
 xctest:
-	@swift build --build-tests 2>&1 | grep -cE "error:" | \
-		xargs -I{} echo "XCTest compile errors: {} (pre-existing debt)"
+	@errors=$$(swift build --build-tests 2>&1 \
+		| grep -E "^/.*error:" \
+		| sed "s/:[0-9]*:[0-9]*: error: /: /" \
+		| sort -u | wc -l | tr -d " "); \
+	files=$$(swift build --build-tests 2>&1 \
+		| grep -E "^/.*error:" | grep -oE "^/[^:]*\.swift" \
+		| sort -u | wc -l | tr -d " "); \
+	echo "XCTest: $$errors distinct compile errors across $$files files (pre-existing debt)"
