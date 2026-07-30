@@ -97,10 +97,30 @@ check: dev test cassettes
 # then look for queen.selftest.second_turn_passed.
 CASSETTE_DIR := $(ROOT)/tests/cassettes
 
+# Only the branches this target creates. A replay delegates issue 1086 with the
+# title "Cassette <file>", and QueenBranchPolicy names the branch
+# queen/<issue>-<slugified title> - so every branch a cassette makes, and only
+# those, match this glob.
+#
+# It used to be 'queen/*', which cannot tell a replay's throwaway branch from a
+# live delegation's committed work. Running the suite after a real probe deleted
+# the probe's branch: nothing was lost that time because the commit was still
+# reachable and the content was disposable, but a destructive sweep that is
+# right by luck is not right.
+CASSETTE_BRANCHES := queen/1086-cassette-*
+
+# Planted before the replays and checked after the sweep. Deliberately named so
+# it looks exactly like a real delegation's branch and nothing like a cassette's.
+SWEEP_CANARY := queen/0-sweep-canary
+
 cassettes:
 	@pkill -x trios-dev 2>/dev/null || true
 	@pkill -f "trios-dev.app/Contents/MacOS" 2>/dev/null || true
 	@sleep 2
+	@: "A branch that looks like a delegation's real work, planted so the sweep \
+	    below has something it must NOT delete. Widening CASSETTE_BRANCHES back \
+	    to queen/* now fails the suite instead of quietly eating a branch."; \
+	git -C "$(ROOT)" branch --force $(SWEEP_CANARY) HEAD >/dev/null 2>&1
 	@fail=0; covered=""; \
 	for spec in \
 		"worker-happy-path.sse:queen.branch.committed:commits the file its cassette declares" \
@@ -118,7 +138,7 @@ cassettes:
 		   baseline diff is empty and the commit assertion fails for the wrong \
 		   reason. Clean before, not only after."; \
 		rm -f "$(ROOT)/docs/replay.md"; \
-		git -C "$(ROOT)" branch --list 'queen/*' --format='%(refname:short)' \
+		git -C "$(ROOT)" branch --list '$(CASSETTE_BRANCHES)' --format='%(refname:short)' \
 			| xargs -r -n1 git -C "$(ROOT)" branch -D >/dev/null 2>&1 || true; \
 		open --env TRIOS_E2E_DELEGATE="gHashTag/trios\#1086|queen-swift|Cassette $$cassette|docs" \
 		     --env TRIOS_REPLAY_CASSETTE="$(CASSETTE_DIR)/$$cassette" \
@@ -134,7 +154,16 @@ cassettes:
 		pkill -f "trios-dev.app/Contents/MacOS" 2>/dev/null || true; \
 		sleep 2; \
 	done; \
-	git -C "$(ROOT)" branch --list 'queen/*' --format='%(refname:short)' | xargs -r -n1 git -C "$(ROOT)" branch -D >/dev/null 2>&1; \
+	git -C "$(ROOT)" branch --list '$(CASSETTE_BRANCHES)' --format='%(refname:short)' | xargs -r -n1 git -C "$(ROOT)" branch -D >/dev/null 2>&1; \
+	if git -C "$(ROOT)" rev-parse --verify --quiet $(SWEEP_CANARY) >/dev/null; then \
+		echo "  ok   - the branch sweep spares work it did not create"; \
+		git -C "$(ROOT)" branch -D $(SWEEP_CANARY) >/dev/null 2>&1; \
+	else \
+		echo "  FAIL - the branch sweep deleted $(SWEEP_CANARY), which it did not create"; fail=1; \
+	fi; \
+	if git -C "$(ROOT)" branch --list '$(CASSETTE_BRANCHES)' --format='%(refname:short)' | grep -q .; then \
+		echo "  FAIL - cassette branches survived the sweep; the glob matches nothing"; fail=1; \
+	fi; \
 	rm -f "$(ROOT)/docs/replay.md"; \
 	: "A cassette nothing runs is not coverage. Deleting a spec above leaves \
 	   its .sse file on disk and the suite still says passed, which is the \
