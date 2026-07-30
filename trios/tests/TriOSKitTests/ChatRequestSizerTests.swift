@@ -110,9 +110,9 @@ final class ChatRequestSizerTests: XCTestCase {
         XCTAssertTrue(policy.retainedMessageCount <= messages.count)
     }
 
-    func testDefaultOutputBudgetCapsAtProfileMaxOutputTokens() {
+    func testDefaultOutputBudgetCapsAtProfileMaxOutputTokens() async {
         let profile = ModelContextProfile(maxContextTokens: 4_096, maxOutputTokens: 512)
-        let size = sizer.size(
+        let size = await sizer.size(
             messages: [],
             currentMessage: ChatMessage(role: .user, content: "hi"),
             systemPrompt: nil,
@@ -124,9 +124,9 @@ final class ChatRequestSizerTests: XCTestCase {
         XCTAssertTrue(size.fitsCurrentModel)
     }
 
-    func testRequestedOutputTokensClampedByProfileCeiling() {
+    func testRequestedOutputTokensClampedByProfileCeiling() async {
         let profile = ModelContextProfile(maxContextTokens: 4_096, maxOutputTokens: 1_024)
-        let size = sizer.size(
+        let size = await sizer.size(
             messages: [],
             currentMessage: ChatMessage(role: .user, content: "hi"),
             systemPrompt: nil,
@@ -137,9 +137,9 @@ final class ChatRequestSizerTests: XCTestCase {
         XCTAssertEqual(size.requestedOutputTokens, 1_024)
     }
 
-    func testRequestedOutputTokensBelowCeilingIsHonored() {
+    func testRequestedOutputTokensBelowCeilingIsHonored() async {
         let profile = ModelContextProfile(maxContextTokens: 4_096, maxOutputTokens: 4_096)
-        let size = sizer.size(
+        let size = await sizer.size(
             messages: [],
             currentMessage: ChatMessage(role: .user, content: "hi"),
             systemPrompt: nil,
@@ -150,9 +150,9 @@ final class ChatRequestSizerTests: XCTestCase {
         XCTAssertEqual(size.requestedOutputTokens, 512)
     }
 
-    func testSizeExposesEffectiveOutputCeiling() {
+    func testSizeExposesEffectiveOutputCeiling() async {
         let profile = ModelContextProfile(maxContextTokens: 4_096, maxOutputTokens: 2_048)
-        let size = sizer.size(
+        let size = await sizer.size(
             messages: [],
             currentMessage: ChatMessage(role: .user, content: "hi"),
             systemPrompt: nil,
@@ -164,12 +164,18 @@ final class ChatRequestSizerTests: XCTestCase {
         XCTAssertTrue(size.isOutputBudgetSaturated)
     }
 
-    func testIsOutputBudgetSaturatedWhenRequestedReachesCeiling() {
+    func testIsOutputBudgetSaturatedWhenRequestedReachesCeiling() async {
         let profile = ModelContextProfile(maxContextTokens: 4_096, maxOutputTokens: 1_024)
-        XCTAssertTrue(sizer.isOutputBudgetSaturated(requested: 1_024, profile: profile))
-        XCTAssertTrue(sizer.isOutputBudgetSaturated(requested: 2_048, profile: profile))
-        XCTAssertFalse(sizer.isOutputBudgetSaturated(requested: 512, profile: profile))
-        XCTAssertFalse(sizer.isOutputBudgetSaturated(requested: nil, profile: profile))
+        let atCeiling = await sizer.isOutputBudgetSaturated(requested: 1_024, profile: profile)
+        let overCeiling = await sizer.isOutputBudgetSaturated(requested: 2_048, profile: profile)
+        let underCeiling = await sizer.isOutputBudgetSaturated(requested: 512, profile: profile)
+        let unspecified = await sizer.isOutputBudgetSaturated(requested: nil, profile: profile)
+        XCTAssertTrue(atCeiling)
+        XCTAssertTrue(overCeiling)
+        XCTAssertFalse(underCeiling)
+        // Nil is "no budget asked for", not "a budget of zero" - it cannot
+        // saturate a ceiling it never named.
+        XCTAssertFalse(unspecified)
     }
 
     // MARK: - Draft context utilization

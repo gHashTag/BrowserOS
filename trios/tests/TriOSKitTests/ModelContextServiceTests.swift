@@ -46,8 +46,10 @@ final class ModelContextServiceTests: XCTestCase {
 
     func testFitsWithMargin() async {
         let profile = ModelContextProfile(maxContextTokens: 100_000, maxOutputTokens: 4_096)
-        XCTAssertTrue(await service.fits(10_000, profile: profile, outputTokens: 2_000, margin: 0.85))
-        XCTAssertFalse(await service.fits(90_000, profile: profile, outputTokens: 10_000, margin: 0.85))
+        let fits1 = await service.fits(10_000, profile: profile, outputTokens: 2_000, margin: 0.85)
+        XCTAssertTrue(fits1)
+        let fits2 = await service.fits(90_000, profile: profile, outputTokens: 10_000, margin: 0.85)
+        XCTAssertFalse(fits2)
     }
 
     func testLargerContextCandidatesOrdering() async {
