@@ -56,26 +56,19 @@ actor GitHubAPIClient {
     }
 
     func fetchIssues(repo: String, state: String = "all") async throws -> [GitHubIssue] {
-        let path = try encodedRepoPath(repo: repo, suffix: "/issues?state=\(state)&per_page=100")
+        let path = try GitHubEndpoint.repositoryPath(repo, "/issues?state=\(state)&per_page=100")
         let (data, _) = try await URLSession.shared.data(for: request(path))
         return try JSONDecoder().decode([GitHubIssue].self, from: data)
     }
 
     func fetchIssueComments(repo: String, issueNumber: Int) async throws -> [GitHubComment] {
-        let path = try encodedRepoPath(repo: repo, suffix: "/issues/\(issueNumber)/comments")
+        let path = try GitHubEndpoint.repositoryPath(repo, "/issues/\(issueNumber)/comments")
         let (data, _) = try await URLSession.shared.data(for: request(path))
         return try JSONDecoder().decode([GitHubComment].self, from: data)
     }
 
-    private func encodedRepoPath(repo: String, suffix: String) throws -> String {
-        guard let encoded = repo.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) else {
-            throw GitHubAPIError.badURL(endpoint: "/repos/gHashTag/\(repo)\(suffix)")
-        }
-        return "/repos/gHashTag/\(encoded)\(suffix)"
-    }
-
     func createIssue(repo: String, title: String, body: String, labels: [String] = []) async throws -> GitHubIssue {
-        var req = try request("/repos/gHashTag/\(repo)/issues")
+        var req = try request(GitHubEndpoint.repositoryPath(repo, "/issues"))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let payload: [String: Any] = [
@@ -89,7 +82,7 @@ actor GitHubAPIClient {
     }
 
     func createPR(repo: String, title: String, body: String, head: String, base: String = "dev") async throws -> GitHubPullRequest {
-        var req = try request("/repos/gHashTag/\(repo)/pulls")
+        var req = try request(GitHubEndpoint.repositoryPath(repo, "/pulls"))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let payload: [String: Any] = [
@@ -113,7 +106,7 @@ actor GitHubAPIClient {
     /// check, an out-of-date base - rather than throwing, because "not allowed
     /// to merge yet" is a normal answer here and the task simply stays open.
     func mergePullRequest(repo: String, number: Int, title: String) async throws -> Bool {
-        let path = try encodedRepoPath(repo: repo, suffix: "pulls/\(number)/merge")
+        let path = try GitHubEndpoint.repositoryPath(repo, "/pulls/\(number)/merge")
         var put = try request(path)
         put.httpMethod = "PUT"
         put.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -132,13 +125,13 @@ actor GitHubAPIClient {
     /// `merged`. List endpoints omit it, and without it a closed pull request
     /// cannot be told from a landed one.
     func fetchPullRequest(repo: String, number: Int) async throws -> GitHubPullRequest {
-        let path = try encodedRepoPath(repo: repo, suffix: "pulls/\(number)")
+        let path = try GitHubEndpoint.repositoryPath(repo, "/pulls/\(number)")
         let (data, _) = try await URLSession.shared.data(for: try request(path))
         return try JSONDecoder().decode(GitHubPullRequest.self, from: data)
     }
 
     func addComment(repo: String, issueNumber: Int, body: String) async throws -> GitHubComment {
-        var req = try request("/repos/gHashTag/\(repo)/issues/\(issueNumber)/comments")
+        var req = try request(GitHubEndpoint.repositoryPath(repo, "/issues/\(issueNumber)/comments"))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         let payload: [String: Any] = ["body": body]

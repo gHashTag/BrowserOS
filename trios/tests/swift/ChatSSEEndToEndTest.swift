@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 324
+    static let minimumChecks = 332
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -70,6 +70,7 @@ struct ChatSSEEndToEndTests {
         await runQueenCorrectsTheWorker()
         await runAcceptanceIsCheckedAgainstCriteria()
         await runDelegationAcceptsCriteria()
+        await runGitHubEndpointPaths()
         await runWorkerBriefIsASpecification()
         await runQueenProposesEvolutionOptions()
         await runWorkerLivenessIsObservable()
@@ -2289,6 +2290,60 @@ struct ChatSSEEndToEndTests {
             fail("a delegation without criteria did not parse"); return
         }
         check(none.isEmpty, "criteria are optional, and absent means absent")
+    }
+
+    static func runGitHubEndpointPaths() async {
+        print("\n# Scenario: the paths the Queen calls GitHub with")
+
+        // Every one of these is a bug that shipped and survived, because the
+        // pull-request half of the client had never been called once. No test
+        // looked at a finished URL, so nothing could have noticed.
+
+        // The Queen passes "owner/repo". The old builder pasted that after a
+        // hardcoded owner: /repos/gHashTag/gHashTag/trios/pulls.
+        check(
+            (try? GitHubEndpoint.repositoryPath("gHashTag/trios", "/pulls")) == "/repos/gHashTag/trios/pulls",
+            "a repository given as owner/name is addressed once, not twice"
+        )
+        // The dashboard passes a bare name and relies on the default owner.
+        check(
+            (try? GitHubEndpoint.repositoryPath("trios", "/issues")) == "/repos/gHashTag/trios/issues",
+            "a bare name still resolves against the default owner"
+        )
+        // A different owner is now honoured rather than silently mangled.
+        check(
+            (try? GitHubEndpoint.repositoryPath("browseros-ai/BrowserOS", "/pulls/7/merge"))
+                == "/repos/browseros-ai/BrowserOS/pulls/7/merge",
+            "an owner that is not the default is addressed as written"
+        )
+
+        // The merge and fetch calls passed "pulls/7/merge" with no leading
+        // slash, which glued itself to the repository name.
+        var missingSlashRefused = false
+        do { _ = try GitHubEndpoint.repositoryPath("trios", "pulls/7/merge") }
+        catch { missingSlashRefused = true }
+        check(missingSlashRefused, "a suffix without its leading slash is refused, not concatenated")
+
+        var malformedRefused = false
+        do { _ = try GitHubEndpoint.repositoryPath("a/b/c", "/pulls") }
+        catch { malformedRefused = true }
+        check(malformedRefused, "a repository with two slashes is refused rather than guessed at")
+
+        var emptyOwnerRefused = false
+        do { _ = try GitHubEndpoint.repositoryPath("/trios", "/pulls") }
+        catch { emptyOwnerRefused = true }
+        check(emptyOwnerRefused, "an empty owner is refused")
+
+        // The old code encoded with .urlPathAllowed, which permits "/" and so
+        // protected against nothing.
+        check(
+            GitHubEndpoint.escape("a/b") == "a%2Fb",
+            "a slash inside one component is encoded instead of becoming a separator"
+        )
+        check(
+            (try? GitHubEndpoint.repositoryPath("owner/na me", "/pulls")) == "/repos/owner/na%20me/pulls",
+            "and a space is encoded without disturbing the separators around it"
+        )
     }
 
     static func runWorkerBriefIsASpecification() async {
