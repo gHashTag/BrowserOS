@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 314
+    static let minimumChecks = 324
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -2313,6 +2313,13 @@ struct ChatSSEEndToEndTests {
         check(spec.contains("1. make check passes"), "criteria are numbered so they can be answered one by one")
         check(spec.contains("docs"), "the boundary names the paths the worker owns")
         check(spec.contains("queen/21-probe"), "and the branch its edits belong to")
+        // Naming the branch is not enough. The first live delegation ended with
+        // the shared checkout standing on the worker's branch, because "every
+        // edit belongs to X" reads as "go to X" and the worker obliged.
+        check(spec.contains("Do not check out"),
+              "the boundary forbids checking the branch out, not just names it")
+        check(spec.contains("shared"),
+              "and says why: the checkout belongs to everyone, not to this task")
 
         // The case worth protecting.
         let empty = QueenTaskSpec.render(for: task(criteria: []))

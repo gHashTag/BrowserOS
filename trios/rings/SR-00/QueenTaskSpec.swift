@@ -66,7 +66,18 @@ enum QueenTaskSpec {
                 + task.ownedPaths.joined(separator: ", ") + ".")
         }
         if let branch = task.virtualBranch {
-            lines.append("Every edit belongs to `\(branch)`.")
+            // Naming the branch without this sentence is what a live run proved
+            // costs the repository: "every edit belongs to X" reads as an
+            // instruction to go and stand on X, and a capable worker duly runs
+            // `git switch`. The checkout is shared with the user, the build and
+            // every other worker, so one bee moving HEAD drags all of them onto
+            // its branch - the precise conflict the branch exists to prevent.
+            // The committer already attributes the edits afterwards with git
+            // plumbing, leaving HEAD alone; the worker has nothing to do here.
+            lines.append("Every edit belongs to `\(branch)`. Do not check out, "
+                + "switch to, or create that branch, and do not commit: the "
+                + "Queen attributes your edits to it after your turn. Leave the "
+                + "checkout on whatever branch you found it on - it is shared.")
         }
         lines.append("")
 
