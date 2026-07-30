@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 347
+    static let minimumChecks = 350
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -2969,15 +2969,37 @@ struct ChatSSEEndToEndTests {
 
         // QueenSelfAudit. Unreachable code outranks everything else, because
         // every plan downstream of a false capability is wrong.
+        // The subjects fight the answer on purpose. This fixture used to name
+        // the dead finding "a" and the fragile one "b", so the tie-break on
+        // subject produced the same order as the severity rule and the
+        // assertion passed with the severity rule deleted - a correct test that
+        // its own data had made unable to fail. Naming them the other way round
+        // means only severity can put dead first.
         let findings = [
-            QueenSelfAudit.Finding(severity: .fragile, kind: "k", subject: "b",
+            QueenSelfAudit.Finding(severity: .fragile, kind: "k", subject: "a",
                                    explanation: "e", proposal: "p"),
-            QueenSelfAudit.Finding(severity: .dead, kind: "k", subject: "a",
+            QueenSelfAudit.Finding(severity: .unverified, kind: "k", subject: "m",
+                                   explanation: "e", proposal: "p"),
+            QueenSelfAudit.Finding(severity: .dead, kind: "k", subject: "z",
                                    explanation: "e", proposal: "p")
         ]
+        let ranked = QueenSelfAudit.roadmap(from: findings)
+        check(ranked.map(\.severity) == [.dead, .unverified, .fragile],
+              "the whole roadmap is ordered by severity, not just its first entry")
+        check(ranked.map(\.subject) == ["z", "m", "a"],
+              "and severity beats the alphabet, which is the only way to tell the rule is there")
+        // Ordering is not academic: options() hands the user the top three, so
+        // whichever the rank puts first is what the Queen proposes.
+        check(QueenEvolutionOptions.options(from: findings).map(\.subject) == ["z", "m", "a"],
+              "the three options offered follow that same order")
         check(
-            QueenSelfAudit.roadmap(from: findings).first?.severity == .dead,
-            "dead code is ranked above everything else"
+            QueenSelfAudit.roadmap(from: [
+                QueenSelfAudit.Finding(severity: .dead, kind: "k", subject: "b",
+                                       explanation: "e", proposal: "p"),
+                QueenSelfAudit.Finding(severity: .dead, kind: "k", subject: "a",
+                                       explanation: "e", proposal: "p")
+            ]).map(\.subject) == ["a", "b"],
+            "and within one severity the subject decides, so the order is stable"
         )
         check(
             QueenSelfAudit.report(findings: [], now: Date())
