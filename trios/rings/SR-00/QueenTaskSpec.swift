@@ -13,21 +13,36 @@ import Foundation
 /// A specification is not longer prose. The difference is that every criterion
 /// is something someone can run and get an answer from.
 enum QueenTaskSpec {
-    /// Section titles, in the order a worker who only skims should meet them.
+    /// The sections, in the order a worker who only skims should meet them.
     /// Boundary before method: the rules land before the recipe.
-    static let sectionTitles = [
-        "Intent", "Acceptance criteria", "Boundary", "Out of scope", "Verification"
-    ]
+    ///
+    /// An enum rather than a list of strings, and `render` writes its headings
+    /// from it. They used to be two copies of the same knowledge - the list said
+    /// five sections, the renderer spelled five headings, and nothing tied them
+    /// together. A sixth section added to the renderer would have been invisible
+    /// to the test that walks this list, which is the kind of coverage that
+    /// reads as thorough and checks the wrong thing.
+    enum Section: String, CaseIterable {
+        case intent = "Intent"
+        case acceptanceCriteria = "Acceptance criteria"
+        case boundary = "Boundary"
+        case outOfScope = "Out of scope"
+        case verification = "Verification"
+
+        var heading: String { "## \(rawValue)" }
+    }
+
+    static var sectionTitles: [String] { Section.allCases.map(\.rawValue) }
 
     static func render(for task: DelegatedTask) -> String {
         var lines: [String] = ["# Specification: \(task.issue.slug)", ""]
 
-        lines.append("## Intent")
+        lines.append(Section.intent.heading)
         lines.append(task.title)
         lines.append("Issue: \(task.issue.url)")
         lines.append("")
 
-        lines.append("## Acceptance criteria")
+        lines.append(Section.acceptanceCriteria.heading)
         if task.acceptanceCriteria.isEmpty {
             // Stated, never hidden. A task with no criteria cannot be judged
             // complete - only abandoned - and the worker needs to know that
@@ -43,7 +58,7 @@ enum QueenTaskSpec {
         }
         lines.append("")
 
-        lines.append("## Boundary")
+        lines.append(Section.boundary.heading)
         if task.ownedPaths.isEmpty {
             lines.append("No paths were assigned. Ask before editing anything shared.")
         } else {
@@ -55,14 +70,14 @@ enum QueenTaskSpec {
         }
         lines.append("")
 
-        lines.append("## Out of scope")
+        lines.append(Section.outOfScope.heading)
         lines.append("Anything not required by a criterion above. Work that seems "
             + "obviously needed and is not listed is a thing to raise here, not "
             + "to do quietly - unstated scope is where a review turns into an "
             + "argument.")
         lines.append("")
 
-        lines.append("## Verification")
+        lines.append(Section.verification.heading)
         lines.append("State each criterion and whether you met it, did not meet "
             + "it, or could not check. Do not summarise. An unchecked criterion "
             + "is not a pass, and reporting it honestly costs you nothing.")
