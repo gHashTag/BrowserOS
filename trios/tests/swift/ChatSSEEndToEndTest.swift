@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 377
+    static let minimumChecks = 381
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -45,6 +45,7 @@ struct ChatSSEEndToEndTests {
     static func main() async {
         await runHappyPathStreaming()
         await runCancellationIsNonError()
+        await runQueenAnswersACommand()
         await runDeduplication()
         await runConversationRenamePersistence()
         await runMemoryStoreAndPlannerPersistence()
@@ -237,6 +238,59 @@ struct ChatSSEEndToEndTests {
         let stored = persister.messages(for: conversationId)
         check(stored.first(where: { $0.role == .user })?.content == "cancel me",
               "persister saved user message after cancellation")
+    }
+
+    /// The Queen answering a command, driven the way the user drives her.
+    ///
+    /// Last night I recorded that the harness "has no way into the Queen's
+    /// command handling". That was inferred from runQueenCommand appearing
+    /// nowhere in this file, not from trying it - the same mistake as reading a
+    /// scanner's silence as a clean result. It works: the view model this file
+    /// already builds is the one the app builds.
+    static func runQueenAnswersACommand() async {
+        print("\n# Scenario: the Queen answers a command")
+
+        let transport = MockChatTransport()
+        let healthCheck = MockHealthCheck()
+        let persister = InMemoryPersister()
+        let parser = UIMessageStreamParser()
+        let stateMachine = ConversationStateMachine()
+        let testDefaults = UserDefaults(suiteName: "trios-chat-sse-queencmd") ?? .standard
+        let modelStore = ModelConfigurationStore(
+            defaults: testDefaults, environment: [:],
+            reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
+        )
+        let viewModel = ChatViewModel(
+            transport: transport,
+            healthCheck: healthCheck,
+            parser: parser,
+            persister: persister,
+            stateMachine: stateMachine,
+            a2aClient: nil,
+            modelStore: modelStore,
+            memoryService: AgentMemoryService(
+                store: VolatileMemoryStore(),
+                fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: TODOPlanner(
+                store: VolatileMemoryStore(),
+                preferences: testDefaults
+            )
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        // Read-only on purpose. Everything the Queen does that writes touches
+        // shared singletons - the skill store, the delegation registry - and a
+        // test that switches a real skill off would leave the machine changed.
+        await viewModel.runQueenCommand("/definitely-not-a-skill")
+        let notices = viewModel.messages.filter { $0.role == .system }.map(\.content)
+        check(!notices.isEmpty, "an unknown command is answered rather than swallowed")
+        check(notices.contains { $0.contains("no skill called") },
+              "and the answer says the skill does not exist, which is one of the two failures")
+        check(notices.contains { $0.contains("/skills") },
+              "and points at how to find out what does exist")
+        check(viewModel.conversationId == ChatConversation.trinityQueenId,
+              "a Queen command lands in the Queen's chat, whichever one was open")
     }
 
     // MARK: - Scenario 3: message deduplication
