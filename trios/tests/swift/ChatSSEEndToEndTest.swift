@@ -12,9 +12,23 @@ import SwiftUI
 @MainActor
 struct ChatSSEEndToEndTests {
     static var failures = 0
+    static var checksRun = 0
     static let testFingerprintKey = Data(repeating: 0x5A, count: 32)
 
+    /// Fewest checks this suite may run and still be believed.
+    ///
+    /// "No failures" is not evidence of coverage. Delete half the bodies below
+    /// and this suite still prints that everything passed, because zero
+    /// assertions cannot fail - the same shape as a scanner that matches
+    /// nothing, one level up, guarding the loop rather than the code.
+    ///
+    /// Set just under the current count so ordinary edits do not trip it and a
+    /// real loss does. Raise it when coverage grows; lowering it is a decision
+    /// someone has to make on purpose, which is the entire point.
+    static let minimumChecks = 190
+
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
+        checksRun += 1
         if condition() {
             print("ok   - \(name)")
         } else {
@@ -57,11 +71,17 @@ struct ChatSSEEndToEndTests {
         await runSelfAuditFindsPlantedDeadCode()
         await runBranchCommitterAgainstScratchRepo()
 
+        if checksRun < minimumChecks {
+            print("\nFAIL - only \(checksRun) checks ran, expected at least \(minimumChecks).")
+            print("Coverage was removed, or a scenario returned early without asserting.")
+            exit(1)
+        }
+
         if failures == 0 {
-            print("\nAll ChatSSEEndToEnd tests passed.")
+            print("\nAll ChatSSEEndToEnd tests passed (\(checksRun) checks).")
             exit(0)
         } else {
-            print("\n\(failures) test(s) failed.")
+            print("\n\(failures) of \(checksRun) test(s) failed.")
             exit(1)
         }
     }
