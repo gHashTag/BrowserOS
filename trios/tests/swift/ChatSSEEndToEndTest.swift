@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 338
+    static let minimumChecks = 342
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -2421,6 +2421,21 @@ struct ChatSSEEndToEndTests {
         let orders = QueenWorkerRunner.workerSystemPrompt(for: task(criteria: ["x"]))
         check(orders.contains(rule),
               "the standing orders carry the identical sentence, not a paraphrase of it")
+
+        // The other two rules that were written twice. The boundary had not
+        // diverged in meaning yet; the report rule had, and in the direction
+        // that costs the Queen her verdicts - the specification said not to
+        // summarise while the orders asked for "a short report".
+        let boundary = QueenBranchPolicy.boundaryRule(ownedPaths: ["docs"])
+        check(spec.contains(boundary) && orders.contains(boundary),
+              "both documents state the path boundary in the same words")
+        check(QueenBranchPolicy.boundaryRule(ownedPaths: []) != boundary,
+              "and having no paths at all says something different from having some")
+        check(spec.contains(QueenBranchPolicy.reportRule)
+                && orders.contains(QueenBranchPolicy.reportRule),
+              "and both ask for the same report")
+        check(!orders.contains("short report"),
+              "which is no longer a short one, because short contradicted do-not-summarise")
         check(!orders.contains("Attribute every edit to the branch"),
               "the wording that made a worker switch branches is gone from both places")
 

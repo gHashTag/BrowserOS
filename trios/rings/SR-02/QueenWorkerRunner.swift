@@ -233,12 +233,12 @@ final class QueenWorkerRunner: ObservableObject {
             // ones an agent trusts.
             lines.append(QueenBranchPolicy.ownershipRule(branch: branch))
         }
-        if task.ownedPaths.isEmpty {
-            lines.append("No file boundary was set; ask before editing shared files.")
-        } else {
-            lines.append("You may edit only these paths: \(task.ownedPaths.joined(separator: ", ")).")
-        }
-        lines.append("When you are done, end with a short report the Queen can review.")
+        // Both from the same source as the specification. The report rule in
+        // particular used to read "end with a short report the Queen can
+        // review", which contradicted the specification's "do not summarise" -
+        // and did so from the stronger position.
+        lines.append(QueenBranchPolicy.boundaryRule(ownedPaths: task.ownedPaths))
+        lines.append(QueenBranchPolicy.reportRule)
         return lines.joined(separator: " ")
     }
 

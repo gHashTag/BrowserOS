@@ -76,12 +76,10 @@ enum QueenTaskSpec {
         lines.append("")
 
         lines.append(Section.boundary.heading)
-        if task.ownedPaths.isEmpty {
-            lines.append("No paths were assigned. Ask before editing anything shared.")
-        } else {
-            lines.append("You may write to these paths and no others: "
-                + task.ownedPaths.joined(separator: ", ") + ".")
-        }
+        // Shared with the standing orders rather than restated, for the same
+        // reason as the branch rule below: two sentences for one rule drift,
+        // and the drift is invisible until it costs something.
+        lines.append(QueenBranchPolicy.boundaryRule(ownedPaths: task.ownedPaths))
         if let branch = task.virtualBranch {
             // Shared with the worker's standing orders rather than restated
             // here. Naming the branch without the prohibition is what a live
@@ -100,9 +98,7 @@ enum QueenTaskSpec {
         lines.append("")
 
         lines.append(Section.verification.heading)
-        lines.append("State each criterion and whether you met it, did not meet "
-            + "it, or could not check. Do not summarise. An unchecked criterion "
-            + "is not a pass, and reporting it honestly costs you nothing.")
+        lines.append(QueenBranchPolicy.reportRule)
 
         return lines.joined(separator: "\n")
     }

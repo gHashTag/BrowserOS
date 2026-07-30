@@ -463,6 +463,37 @@ enum QueenBranchPolicy {
     static let prefix = "queen"
     static let maximumSlugLength = 40
 
+    /// The one statement of where a worker may write.
+    ///
+    /// Said twice before this: "You may write to these paths and no others" in
+    /// the specification, "You may edit only these paths" in the standing
+    /// orders. Nothing had gone wrong yet, which is the only interesting thing
+    /// about it - the branch rule read the same way until the day it did not.
+    static func boundaryRule(ownedPaths: [String]) -> String {
+        guard !ownedPaths.isEmpty else {
+            return "No paths were assigned to you. Ask in this chat before "
+                + "editing anything, because everything here is shared until "
+                + "someone says otherwise."
+        }
+        return "You may create or edit files under these paths and nowhere "
+            + "else: " + ownedPaths.joined(separator: ", ")
+            + ". Work outside them is dropped rather than reviewed."
+    }
+
+    /// The one statement of what a finished worker owes the Queen.
+    ///
+    /// These two did not merely differ, they disagreed. The specification said
+    /// to answer every criterion and not to summarise; the standing orders
+    /// asked for "a short report". Short and do-not-summarise pull opposite
+    /// ways, and the orders are the side an agent trusts, so the instruction
+    /// most likely to be followed was the one that loses the Queen the
+    /// per-criterion verdicts her acceptance check is built on.
+    static let reportRule =
+        "When you stop, answer every acceptance criterion in turn: met, not "
+        + "met, or could not check. Do not summarise and do not shorten this "
+        + "part - an unchecked criterion is not a pass, and saying so plainly "
+        + "costs you nothing."
+
     /// The one statement of who moves the branch and who leaves it alone.
     ///
     /// This sentence used to exist twice - in the specification and in the
