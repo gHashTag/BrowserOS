@@ -76,11 +76,32 @@ final class StreamingContextWatchdogTests: XCTestCase {
         )
         // input 3500 + output 400 = 3900 -> 3900 / (4000*0.85=3400) = 1.14 -> pause.
         let decision = await watchdog.append(deltaText: String(repeating: "a", count: 400 * 4))
-        guard case .limitReached(let partial, let kind) = decision else {
+        guard case .limitReached(let partial, let suggestion) = decision else {
             XCTFail("Expected limitReached, got \(String(describing: decision))")
             return
         }
-        XCTAssertEqual(kind, .totalContext)
+        // This used to bind the second value as `kind` and compare it to
+        // .totalContext, which is a case of a different enum. `limitReached`
+        // reports what to do, not why the limit was hit - the reason lives on
+        // `approachingLimit`. So the test was asking a question this case has
+        // never answered.
+        //
+        // Running out of total context cannot be solved by writing less, so the
+        // watchdog offers to summarise when almost no output budget is left and
+        // to stop otherwise. Either is a correct answer here; what would be
+        // wrong is offering a larger model, which is the remedy for an output
+        // limit rather than a context one.
+        XCTAssertNotEqual(
+            suggestion,
+            .continueOnLargerModel(
+                CrossProviderModelCandidate(provider: .openai, baseURL: "", model: "")
+            ),
+            "a full context is not fixed by a bigger output allowance"
+        )
+        XCTAssertTrue(
+            suggestion == .summarizeSoFar || suggestion == .stopHere,
+            "a full context is answered by summarising or stopping, got \(suggestion)"
+        )
         XCTAssertFalse(partial.isEmpty)
         await watchdog.endStream()
     }
@@ -178,7 +199,8 @@ final class StreamingContextWatchdogTests: XCTestCase {
 
     func testBudgetRatiosNilBeforeStream() async {
         let watchdog = makeWatchdog()
-        XCTAssertNil(await watchdog.budgetRatios())
+        let observed1 = await watchdog.budgetRatios()
+        XCTAssertNil(observed1)
     }
 
     func testBudgetRatiosReflectsOutputAndTotal() async {
