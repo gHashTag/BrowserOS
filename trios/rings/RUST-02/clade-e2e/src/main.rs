@@ -638,14 +638,40 @@ const KNOWN_UNWIRED_SWIFT_TESTS: &[&str] = &[
 /// BR-OUTPUT files deliberately left out of the app.
 ///
 /// build.sh's LEAN_BR_OUTPUT decides what the binary contains, and both dev and
-/// release use it. A file can therefore sit in the tree looking entirely
-/// present and never be compiled - which is not a hypothetical: QueenStatusBadge
-/// rendered nothing for months partly because it was absent from that list, and
-/// a reference-count scan cannot tell "unused" from "not built".
+/// release use it. A source can therefore sit in the tree looking entirely
+/// present and never be compiled - which is not hypothetical: QueenStatusBadge
+/// rendered nothing partly because it was absent from that list, and a
+/// reference-count scan cannot tell "unused" from "not built".
 ///
-/// These seventeen are experiments, reachable only through
-/// TRIOS_INCLUDE_PROTOTYPES=1. Naming them is what makes the difference between
-/// a prototype and a file somebody dropped by accident visible at all.
+/// **Fourteen of these sixteen compile cleanly against the real app.** That was
+/// measured, not assumed, by typechecking each one alongside every source the
+/// dev build uses. It matters because the obvious reading of "prototype" is
+/// "probably broken", and acting on that reading would have deleted working
+/// code: AgentTaskBubbleView was next in line by file size and has no errors at
+/// all. These are not a debt of broken files. They are a shelf of features
+/// nobody wired up, and the reason to remove one is that we do not want it, not
+/// that it does not work.
+///
+/// Clean today, excluded by choice:
+///   AIMacroGenerator, AccessibilityEnhancements, AgentTaskBubbleView,
+///   CommunityMacroMarketplace, HotkeyAnalytics, HotkeyPreferences,
+///   MacroRecorder, MessageSearchOverlay, NLHotkeyCreator, OpenNLParser,
+///   SearchOverlay, VoiceCommandHandler
+///
+/// Clean as a pair - OnboardingFlow calls AnalyticsService, and the two
+/// typecheck together with zero errors:
+///   AnalyticsService, OnboardingFlow
+///
+/// Actually broken, and the only two that are:
+///   PluginAPI       - 52 errors, starting with an instance method declared in
+///                     an `@objc` protocol that cannot be represented in
+///                     Objective-C. A design that never compiled.
+///   ExtensionStoreAPI - needs a type named `PluginAPI`, which PluginAPI.swift
+///                     does not declare; it has PluginContext, PluginRegistry
+///                     and PluginError. Blocked behind the file above.
+///
+/// So the budget below is not a debt counter. Lowering it means deciding a
+/// feature is unwanted, or wiring one up - both judgements, neither mechanical.
 /// Ceiling on the list below. Lower it as prototypes are resolved; raising it is
 /// an edit someone has to defend, which is the whole point of a budget.
 const PROTOTYPE_BUDGET: usize = 16;
