@@ -663,12 +663,23 @@ const KNOWN_UNWIRED_SWIFT_TESTS: &[&str] = &[
 ///   AnalyticsService, OnboardingFlow
 ///
 /// Actually broken, and the only two that are:
-///   PluginAPI       - 52 errors, starting with an instance method declared in
-///                     an `@objc` protocol that cannot be represented in
-///                     Objective-C. A design that never compiled.
+///   PluginAPI       - 52 errors. Thirty of them are one bad decision: the
+///                     protocol is `@objc` while its own signatures use
+///                     `Result<Any, PluginError>`, `AnyView?` and a plain Swift
+///                     class, none representable in Objective-C. Dropping
+///                     `@objc` takes it to 22 - measured, not guessed.
+///                     The other 22 are six separate design problems, and one
+///                     settles the question: it calls
+///                     `TextField.secureTextEntry`, a UIKit API that does not
+///                     exist in macOS SwiftUI. This file was written by
+///                     pattern-matching iOS code and has never compiled once.
+///                     Finishing it is designing a plugin system - there are no
+///                     plugins and no host integration - not fixing a bug, so it
+///                     is not work an unattended cycle should start.
 ///   ExtensionStoreAPI - needs a type named `PluginAPI`, which PluginAPI.swift
 ///                     does not declare; it has PluginContext, PluginRegistry
-///                     and PluginError. Blocked behind the file above.
+///                     and PluginError. Blocked behind the file above, and
+///                     un-blockable until someone decides that system's fate.
 ///
 /// So the budget below is not a debt counter. Lowering it means deciding a
 /// feature is unwanted, or wiring one up - both judgements, neither mechanical.
