@@ -2310,3 +2310,35 @@ never-called function candidates; the pull request waiting on a token only the
 user can place; and the 22 XCTest errors. The mutation sweep has now covered the
 specification, the acceptance path and the observer - the committer and the
 salience learner remain.
+
+## 2026-07-31 ~04:0x UTC - a queue test that agreed with the rule it replaced
+
+Verifications green first. Mutation probes moved to the committer and the
+ranking. Dropping the committer's boundary filter is caught. Two mutations in
+QueenSalience.score were not: removing the age cap, and removing the tie-break.
+Both are load-bearing - the cap is why a fortnight-old quiet task cannot drown a
+fresh failure, the tie-break is why an equally salient task cannot starve.
+
+There is a test for the queue. Its fixture expects 12, 14, 11 and labels that
+"oldest first". Those are the oldest three in that order, and they are also
+exactly what the salience weights produce - so the fixture agrees with the rule
+salience was built to replace and cannot distinguish between them. The comment
+still describes age ordering; the code stopped doing age ordering some time ago
+and nothing noticed, because the answer did not change.
+
+That is the third fixture this week to give a right answer for a reason it was
+not testing, after the roadmap fixture where the alphabet stood in for severity
+and the canary whose empty parameter list hid a broken scanner. The pattern is
+worth stating plainly: a fixture agreeing with the old behaviour and the new one
+tests neither.
+
+Two cases that can tell them apart now, with `now` pinned so ages are known
+rather than however long ago the fixture's epoch happens to sit: an hour-old
+failure against a fortnight-old quiet task, and two equally salient tasks fed
+newest-first. Both mutations fail the suite.
+
+Left alone deliberately: teaching the observer to read shell commands, which is
+a parser; the four RichTextRenderer deprecations; the 86 never-called function
+candidates; the pull request waiting on a token only the user can place; and the
+22 XCTest errors. The mutation sweep has now covered the specification, the
+acceptance path, the observer, the committer and the ranking.
