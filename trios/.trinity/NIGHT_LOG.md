@@ -2342,3 +2342,32 @@ a parser; the four RichTextRenderer deprecations; the 86 never-called function
 candidates; the pull request waiting on a token only the user can place; and the
 22 XCTest errors. The mutation sweep has now covered the specification, the
 acceptance path, the observer, the committer and the ranking.
+
+## 2026-07-31 ~05:0x UTC - a verdict nobody could read
+
+Verifications green first. Mutation probes reached the delegation registry.
+Removing the guard in recordVerdict - the one that refuses a criterion the task
+does not carry - left every check green, so the refusal was a claim rather than
+a behaviour.
+
+It is load-bearing. QueenAcceptancePolicy builds its table by walking the
+task's own criteria and looking each one up, so a verdict filed under anything
+else is invisible. The Queen would believe she had answered a criterion, the
+table would still read unchecked, and acceptance would stay blocked with
+nothing on screen saying why her answer did not count - a silent disagreement
+between what the reviewer did and what the reviewer sees.
+
+Three assertions cover it and the mutation now fails two by name. Writing the
+fixture ran straight into the registry refusing a second task on `docs`, which
+is single-writer ownership doing its job - a rule that defends itself, and the
+opposite of the finding.
+
+Probed and deliberately left: `archived` claims newest-first and nothing checks
+the sort. Getting a list order wrong misleads nobody about whether work was
+accepted, so it does not outrank the ground the sweep has left.
+
+Left alone otherwise: the observer's shell blind spot, which needs a parser;
+the four RichTextRenderer deprecations; the 86 never-called function candidates;
+the pull request waiting on a token only the user can place; and the 22 XCTest
+errors. The sweep has now covered the specification, the acceptance path, the
+observer, the committer, the ranking and the registry.
