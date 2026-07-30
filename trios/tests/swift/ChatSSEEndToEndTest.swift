@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 355
+    static let minimumChecks = 358
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -2231,6 +2231,30 @@ struct ChatSSEEndToEndTests {
         check(corrected?.interventions.count == 2, "each correction is counted, not just the last")
         check(corrected?.interventions.first == "first",
               "and kept in order, so review can read how the work drifted")
+
+        // recordVerdict refuses a criterion the task does not have, and nothing
+        // checked that until now: removing the guard left every check green.
+        // The refusal matters because QueenAcceptancePolicy builds its table by
+        // walking the task's criteria and looking each one up. A verdict filed
+        // under a criterion that is not in that list is invisible - the Queen
+        // would believe she had answered it, the table would still read
+        // unchecked, and acceptance would stay blocked with no way to see why.
+        guard let scored = registry.delegate(
+            issue: IssueReference(owner: "gHashTag", repo: "trios", number: 52),
+            title: "scored", worker: "queen-swift",
+            // A path of its own: the registry allows one owner per path, and
+            // the task above already holds docs.
+            conversationId: UUID(), ownedPaths: ["scratch"],
+            acceptanceCriteria: ["make check passes"]
+        ) else {
+            fail("could not open a task with criteria"); return
+        }
+        check(registry.recordVerdict(taskID: scored.id, criterion: "make check passes", verdict: .met),
+              "a verdict against a real criterion is recorded")
+        check(!registry.recordVerdict(taskID: scored.id, criterion: "a criterion nobody set", verdict: .met),
+              "and one against a criterion the task never had is refused, not filed where nothing reads it")
+        check(registry.task(forConversation: scored.conversationId)?.criterionVerdicts.count == 1,
+              "so the task carries exactly the verdicts its own criteria can show")
     }
 
     static func runAcceptanceIsCheckedAgainstCriteria() async {
