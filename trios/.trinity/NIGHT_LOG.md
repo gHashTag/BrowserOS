@@ -2371,3 +2371,35 @@ the four RichTextRenderer deprecations; the 86 never-called function candidates;
 the pull request waiting on a token only the user can place; and the 22 XCTest
 errors. The sweep has now covered the specification, the acceptance path, the
 observer, the committer, the ranking and the registry.
+
+## 2026-07-31 ~06:0x UTC - the probe becomes a command
+
+Verifications green first. Five nights of breaking a guard by hand and watching
+what stayed green found five checks that could not fail. The method worked
+every night, which is the argument for taking it out of my hands: done
+manually it decays, because I choose the targets, I choose them by taste, and
+the returns fall as the taste narrows.
+
+`make mutants` breaks three known guards and requires the suite to notice each.
+Kept out of `make` and out of `check` - it edits sources and it is slow - but it
+is now a command anybody can run instead of a habit only I had.
+
+A mutation whose needle no longer matches is reported STALE rather than skipped,
+because a probe that quietly matches nothing is the same lie it exists to catch.
+That check earned itself in the first run: the first needle contains `||` and
+split its own record in half, because I had used a vertical bar as the record
+separator. It was reported, not passed.
+
+The target writes to tracked sources, so each file is copied before the first
+edit and restored by a trap on exit, interrupt or kill. That trap is the entire
+safety argument, and the failed first run exercised it for real - the working
+tree was clean afterwards. I also narrowed one assertion's tool list on purpose
+and watched the target report SURVIVED, because a harness I have not seen fail
+is a harness I have not tested.
+
+Left alone deliberately: the age cap and tie-break mutations, which a logic
+suite inside clade-e2e catches - clade-e2e also exits non-zero when the app or
+server is down, so reading its exit code as "caught" would be a false pass.
+Also left: the observer's shell blind spot; the four RichTextRenderer
+deprecations; the 86 never-called function candidates; the pull request waiting
+on a token only the user can place; and the 22 XCTest errors.
