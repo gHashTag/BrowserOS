@@ -46,12 +46,49 @@ help:
 # when the application compiles and links cleanly. Treating that as a build
 # failure blocked every rebuild, so success here means "the app binary was
 # produced" and the suite's state is reported rather than hidden.
+#
+# The build also emits compiler warnings, and until now threw them away. The
+# recurring defects here have all been things nobody looked at, and this is a
+# signal the toolchain produces correctly, for free, on every build - unlike the
+# hand-written greps in this repository, three of which have quietly measured
+# the wrong thing this week. A ceiling rather than zero because the debt is real
+# and pretending otherwise would mean turning the check off the first time it
+# fired. Counted unique so one warning in a header included many times is one
+# warning.
+#
+# Application sources only. Test warnings come from swift test, which compiles
+# incrementally, so their number depends on what happened to be cached - a first
+# attempt at this gate counted them and swung between 17 and 30 across two
+# consecutive runs. A gate that fires at random gets switched off, so it counts
+# only what build.sh compiles in full every time.
+#
+# Two consecutive runs then agreed at 5. An earlier log showed 7, two of them in
+# HotkeyAnalytics, and I could neither reproduce nor explain that - so the
+# ceiling is 7, not 5. Setting it to the best number seen once would claim a
+# stability that has not been demonstrated, and the first spurious failure would
+# be the end of the check. The note below asks for it to be lowered as the debt
+# is paid down; that is where the ratchet actually lives.
+#
+# Uses /usr/bin/grep deliberately: this shell has grep shadowed by a function.
+WARNING_CEILING := 7
+
 dev:
 	@TRIOS_VARIANT=dev "$(ROOT)/build.sh" > /tmp/trios_build_dev.log 2>&1; \
 	if grep -q "Build successful: $(ROOT)/trios_dev_app" /tmp/trios_build_dev.log; then \
 		echo "[OK] dev app built"; \
 		grep -q "swift test failed" /tmp/trios_build_dev.log && \
 			echo "[NOTE] XCTest suite still broken (pre-existing); run 'make xctest' for detail"; \
+		warnings=$$(/usr/bin/grep -oE "^/[^:]+\.swift:[0-9]+:[0-9]+: warning: " /tmp/trios_build_dev.log 2>/dev/null \
+			| sort -u | /usr/bin/grep -vE "/tests/" | wc -l | tr -d ' '); \
+		if [ "$$warnings" -gt $(WARNING_CEILING) ]; then \
+			echo "[FAIL] $$warnings compiler warnings; the ceiling is $(WARNING_CEILING)."; \
+			/usr/bin/grep -oE "^/[^:]+\.swift:[0-9]+:[0-9]+: warning: .*" /tmp/trios_build_dev.log \
+				| sort -u | /usr/bin/grep -vE "/tests/" | sed 's|$(ROOT)/||' | head -25; \
+			exit 1; \
+		elif [ "$$warnings" -lt $(WARNING_CEILING) ]; then \
+			echo "[NOTE] $$warnings warnings, under the ceiling of $(WARNING_CEILING)."; \
+			echo "       Lower WARNING_CEILING in the Makefile so the gain cannot be given back."; \
+		fi; \
 		exit 0; \
 	else \
 		echo "[FAIL] dev app did not build:"; \
