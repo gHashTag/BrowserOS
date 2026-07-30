@@ -15,7 +15,14 @@ enum QueenCommand: Equatable {
     case deleteChat(UUID)
     case delegate(agent: String, task: String)
     /// Opens a worker chat bound to a GitHub issue, on its own virtual branch.
-    case delegateIssue(issue: IssueReference, worker: String, title: String, paths: [String], skill: String?)
+    case delegateIssue(
+        issue: IssueReference,
+        worker: String,
+        title: String,
+        paths: [String],
+        skill: String?,
+        criteria: [String]
+    )
     /// Shows the swarm and what is waiting on the Queen.
     case swarm
     /// Closes the review loop on delegated work.
@@ -120,13 +127,28 @@ struct QueenCommandParser {
                     skill = components[flag + 1]
                     components.removeSubrange(flag...(flag + 1))
                 }
+                // `--criteria "a; b"` is what makes the brief a contract rather
+                // than a description. Split on semicolons, not commas, because
+                // an acceptance criterion is a sentence and sentences contain
+                // commas - "renders 50 rows, then paginates" is one criterion,
+                // not two.
+                var criteria: [String] = []
+                if let flag = components.firstIndex(of: "--criteria"), flag + 1 < components.count {
+                    criteria = components[(flag + 1)...]
+                        .joined(separator: " ")
+                        .split(separator: ";")
+                        .map { $0.trimmingCharacters(in: .whitespaces) }
+                        .filter { !$0.isEmpty }
+                    components.removeSubrange(flag..<components.count)
+                }
                 let title = components.joined(separator: " ")
                 return .delegateIssue(
                     issue: issue,
                     worker: worker,
                     title: title.isEmpty ? "Work on \(issue.slug)" : title,
                     paths: paths,
-                    skill: skill
+                    skill: skill,
+                    criteria: criteria
                 )
             }
             return .delegate(agent: first, task: components.joined(separator: " "))

@@ -96,7 +96,8 @@ final class QueenDelegationRegistry: ObservableObject {
         title: String,
         worker: String,
         conversationId: UUID,
-        ownedPaths: [String] = []
+        ownedPaths: [String] = [],
+        acceptanceCriteria: [String] = []
     ) -> DelegatedTask? {
         // One live task per issue: two chats on one issue is the fastest way to
         // get two workers fighting over the same change.
@@ -117,6 +118,7 @@ final class QueenDelegationRegistry: ObservableObject {
             worker: worker,
             state: .queued,
             ownedPaths: ownedPaths,
+            acceptanceCriteria: acceptanceCriteria,
             virtualBranch: QueenBranchPolicy.branchName(for: issue, title: title),
             createdAt: now,
             updatedAt: now

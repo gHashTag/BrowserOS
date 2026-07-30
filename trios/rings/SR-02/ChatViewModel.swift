@@ -2832,13 +2832,14 @@ final class ChatViewModel: ObservableObject {
             await appendSystemMessageToQueenChat("Deleted conversation \(id.uuidString.prefix(8))")
         case .delegate(let agent, let task):
             await delegateTaskToAgent(agentIdString: agent, taskDescription: task)
-        case .delegateIssue(let issue, let worker, let title, let paths, let skill):
+        case .delegateIssue(let issue, let worker, let title, let paths, let skill, let criteria):
             await delegateIssueToWorker(
                 issue: issue,
                 worker: worker,
                 title: title,
                 paths: paths,
-                skill: skill
+                skill: skill,
+                criteria: criteria
             )
         case .cancelTask(let issue, let reason):
             await cancelDelegatedTask(issue: issue, reason: reason)
@@ -2938,7 +2939,8 @@ final class ChatViewModel: ObservableObject {
         worker: String,
         title: String,
         paths: [String] = [],
-        skill: String? = nil
+        skill: String? = nil,
+        criteria: [String] = []
     ) async {
         let registry = QueenDelegationRegistry.shared
 
@@ -2987,7 +2989,8 @@ final class ChatViewModel: ObservableObject {
             title: title,
             worker: worker,
             conversationId: conversationId,
-            ownedPaths: paths
+            ownedPaths: paths,
+            acceptanceCriteria: criteria
         ) else {
             await postQueenNotice(SystemNoticeClassifier.failureMarker + (registry.lastError ?? "Delegation was refused."))
             return

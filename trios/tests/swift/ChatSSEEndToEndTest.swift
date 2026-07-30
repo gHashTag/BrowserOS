@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 283
+    static let minimumChecks = 294
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -67,6 +67,7 @@ struct ChatSSEEndToEndTests {
         await runScrollPositionPolicyAndRequestDelivery()
         await runCassetteReplayAndObserver()
         await runSalienceLearnsFromOutcomes()
+        await runDelegationAcceptsCriteria()
         await runWorkerBriefIsASpecification()
         await runQueenProposesEvolutionOptions()
         await runWorkerLivenessIsObservable()
@@ -2134,6 +2135,54 @@ struct ChatSSEEndToEndTests {
     /// that finished sent the same signal. These checks pin the sections that
     /// make the difference, and the one case that is easy to paper over: a task
     /// with no criteria has to say so rather than read as ordinary.
+    /// Criteria can actually be given, and survive the trip to the brief.
+    ///
+    /// The contract was built last cycle with nothing able to fill it, which is
+    /// the "capability with no caller" shape this project keeps finding. These
+    /// checks pin the whole path: command text in, criteria on the task,
+    /// numbered list out.
+    static func runDelegationAcceptsCriteria() async {
+        print("\n# Scenario: the Queen can state what done means")
+
+        guard case .delegateIssue(let issue, let worker, let title, let paths, _, let criteria) =
+            QueenCommandParser.parse(
+                "/delegate gHashTag/trios#31 queen-swift --paths docs "
+                    + "--criteria make check passes; the tab renders 50 rows, then paginates"
+            )
+        else {
+            fail("a delegation with criteria did not parse"); return
+        }
+        check(issue.slug == "gHashTag/trios#31", "the issue survives the flags")
+        check(worker == "queen-swift", "so does the worker")
+        check(paths == ["docs"], "and the boundary")
+        check(criteria.count == 2, "two criteria are read as two")
+        check(criteria.first == "make check passes", "the first is intact")
+        // The reason for splitting on semicolons rather than commas.
+        check(criteria.last == "the tab renders 50 rows, then paginates",
+              "a criterion containing a comma stays one criterion")
+        check(title.isEmpty || !title.contains("--criteria"),
+              "the flag does not leak into the title")
+
+        // And the whole way through to what the worker reads.
+        let task = DelegatedTask(
+            issue: issue, title: "probe", worker: worker,
+            ownedPaths: paths, acceptanceCriteria: criteria
+        )
+        let brief = QueenBriefing.text(for: task)
+        check(brief.contains("1. make check passes"), "criteria reach the brief, numbered")
+        check(brief.contains("2. the tab renders 50 rows, then paginates"),
+              "including the one with a comma in it")
+        check(QueenTaskSpec.isActionable(task), "a task delegated with criteria is actionable")
+
+        // Omitting them still works and still says so.
+        guard case .delegateIssue(_, _, _, _, _, let none) =
+            QueenCommandParser.parse("/delegate gHashTag/trios#32 queen-swift Fix the thing")
+        else {
+            fail("a delegation without criteria did not parse"); return
+        }
+        check(none.isEmpty, "criteria are optional, and absent means absent")
+    }
+
     static func runWorkerBriefIsASpecification() async {
         print("\n# Scenario: the brief is a specification")
 
