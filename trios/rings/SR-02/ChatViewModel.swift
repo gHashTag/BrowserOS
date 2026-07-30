@@ -2841,6 +2841,8 @@ final class ChatViewModel: ObservableObject {
             )
         case .cancelTask(let issue, let reason):
             await cancelDelegatedTask(issue: issue, reason: reason)
+        case .openPullRequest(let issue):
+            await openPullRequestForTask(issue: issue)
         case .swarm:
             await reportSwarm()
         case .review(let issue, let decision, let note):
@@ -3430,6 +3432,55 @@ final class ChatViewModel: ObservableObject {
                     + "same files.")
         }
         await loadConversations()
+    }
+
+    /// Opens a pull request for a task's branch, on request.
+    ///
+    /// Deliberately a command rather than a step of acceptance. Acceptance is
+    /// the Queen's judgement and happens unattended; opening a pull request
+    /// publishes work to a place other people read. Those should not be the
+    /// same event until someone decides they should be.
+    func openPullRequestForTask(issue: IssueReference) async {
+        let registry = QueenDelegationRegistry.shared
+        guard let task = registry.task(forIssue: issue) else {
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker + "I have no task for \(issue.slug)."
+            )
+            return
+        }
+        if let reason = QueenDelegationPolicy.pullRequestBlockReason(for: task) {
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "Not opening a pull request for \(issue.slug): \(reason)"
+            )
+            return
+        }
+        guard let branch = task.virtualBranch else { return }
+
+        do {
+            let pr = try await GitHubAPIClient().createPR(
+                repo: "\(issue.owner)/\(issue.repo)",
+                title: task.title,
+                body: "Closes #\(issue.number)\n\nOpened by the Queen for \(task.worker).",
+                head: branch
+            )
+            registry.recordPullRequest(taskID: task.id, number: pr.number)
+            await postQueenNotice(
+                SystemNoticeClassifier.successMarker
+                    + "Opened #\(pr.number) for \(issue.slug) from `\(branch)`. "
+                    + "The task stays open until that merges - a closed pull request "
+                    + "that never merged is not the same as landed work."
+            )
+            TriosLogBus.shared.info(
+                .queen, "queen.pr.opened", "Opened a pull request",
+                ["issue": issue.slug, "pr": "\(pr.number)", "branch": branch]
+            )
+        } catch {
+            await postQueenNotice(
+                SystemNoticeClassifier.failureMarker
+                    + "Could not open a pull request for \(issue.slug): \(error.localizedDescription)"
+            )
+        }
     }
 
     // MARK: - Self-audit

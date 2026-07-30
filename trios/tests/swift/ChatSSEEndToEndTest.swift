@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 221
+    static let minimumChecks = 235
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -67,6 +67,7 @@ struct ChatSSEEndToEndTests {
         await runScrollPositionPolicyAndRequestDelivery()
         await runCassetteReplayAndObserver()
         await runSalienceLearnsFromOutcomes()
+        await runPullRequestRefusals()
         await runMergedIsNotTheSameAsClosed()
         await runStalledWorkerIsResumedBeforeCancelled()
         await runQueenTaskLifecycleCloses()
@@ -2093,6 +2094,71 @@ struct ChatSSEEndToEndTests {
     /// delegation spec turns on this distinction: the chat closes when the forge
     /// says merged, which is a fact, rather than when review said yes, which is
     /// an opinion. Decoded from the shapes the API actually returns.
+    /// Opening a pull request is refused for every reason it should be.
+    ///
+    /// The network call cannot be exercised here, so the decision is kept apart
+    /// from it and this pins the decision. Each refusal is a case where opening
+    /// would publish something wrong: an empty branch, a second pull request for
+    /// work that already has one, or a task nobody finished.
+    static func runPullRequestRefusals() async {
+        print("\n# Scenario: when the Queen refuses to open a pull request")
+
+        guard let issue = IssueReference.parse("gHashTag/trios#9") else {
+            fail("could not build a test issue"); return
+        }
+        func task(
+            _ state: DelegatedTaskState,
+            branch: String? = "queen/9-probe",
+            files: Int? = 3,
+            pr: Int? = nil
+        ) -> DelegatedTask {
+            DelegatedTask(
+                issue: issue, title: "probe", worker: "queen-swift", state: state,
+                virtualBranch: branch, committedFiles: files, pullRequestNumber: pr
+            )
+        }
+        typealias P = QueenDelegationPolicy
+
+        check(P.pullRequestBlockReason(for: task(.awaitingReview)) == nil,
+              "reviewed work with a branch and commits can be proposed")
+        check(P.pullRequestBlockReason(for: task(.accepted)) == nil,
+              "so can work the Queen already accepted")
+
+        check(P.pullRequestBlockReason(for: task(.running)) != nil,
+              "work still in progress is not proposed")
+        check(P.pullRequestBlockReason(for: task(.queued)) != nil,
+              "work that has not started is not proposed")
+        check(P.pullRequestBlockReason(for: task(.rejected)) != nil,
+              "work sent back and not redone is not proposed")
+        check(P.pullRequestBlockReason(for: task(.cancelled)) != nil,
+              "a closed task is not proposed")
+        check(P.pullRequestBlockReason(for: task(.failed)) != nil,
+              "a failed task is not proposed")
+
+        check(P.pullRequestBlockReason(for: task(.accepted, branch: nil)) != nil,
+              "no branch means there is nothing to propose")
+        check(P.pullRequestBlockReason(for: task(.accepted, files: 0)) != nil,
+              "a worker that committed nothing would open an empty pull request")
+        check(P.pullRequestBlockReason(for: task(.accepted, pr: 12)) != nil,
+              "a task that already has a pull request does not get a second one")
+
+        // Unknown is not zero: a task from before commit counting existed has
+        // nil files, and refusing those would block real work.
+        check(P.pullRequestBlockReason(for: task(.accepted, files: nil)) == nil,
+              "an unrecorded commit count is not treated as an empty branch")
+
+        // The command has to reach the handler at all.
+        check(QueenCommandParser.parse("/pr gHashTag/trios#9") == .openPullRequest(issue: issue),
+              "/pr reaches the handler")
+        check(QueenCommandParser.parse("/pull-request gHashTag/trios#9") == .openPullRequest(issue: issue),
+              "and so does the long form")
+        if case .unknown = QueenCommandParser.parse("/pr not-an-issue") {
+            check(true, "a malformed issue is refused rather than guessed")
+        } else {
+            fail("a malformed issue is refused rather than guessed")
+        }
+    }
+
     static func runMergedIsNotTheSameAsClosed() async {
         print("\n# Scenario: merged and closed are different answers")
 

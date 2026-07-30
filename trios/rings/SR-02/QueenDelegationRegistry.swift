@@ -210,6 +210,13 @@ final class QueenDelegationRegistry: ObservableObject {
         persist()
     }
 
+    func recordPullRequest(taskID: UUID, number: Int) {
+        guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        tasks[index].pullRequestNumber = number
+        tasks[index].updatedAt = Date()
+        persist()
+    }
+
     /// Records a restart and marks the task as freshly active.
     ///
     /// Bumping `updatedAt` is the point, not bookkeeping: `stalled()` measures

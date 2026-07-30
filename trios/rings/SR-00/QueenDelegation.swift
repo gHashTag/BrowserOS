@@ -124,6 +124,12 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     var toolCalls: Int?
     /// Files the worker committed to its branch, filled in at review time.
     var committedFiles: Int?
+    /// The pull request opened for this task's branch, once one exists.
+    ///
+    /// Nil means no pull request has been opened - not that one failed. The
+    /// difference matters when deciding whether a task is waiting on a merge or
+    /// waiting on somebody to open it.
+    var pullRequestNumber: Int?
     /// How many times the Queen has restarted this worker after it went silent.
     ///
     /// Optional so delegation stores written before resuming existed still
@@ -164,6 +170,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         toolCalls: Int? = nil,
         committedFiles: Int? = nil,
         resumeAttempts: Int? = nil,
+        pullRequestNumber: Int? = nil,
         provider: String? = nil,
         model: String? = nil
     ) {
@@ -182,6 +189,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         self.toolCalls = toolCalls
         self.committedFiles = committedFiles
         self.resumeAttempts = resumeAttempts
+        self.pullRequestNumber = pullRequestNumber
         self.provider = provider
         self.model = model
     }
@@ -253,6 +261,35 @@ enum QueenDelegationPolicy {
     /// Two, not zero and not many. Zero is today's behaviour - an hour of
     /// silence ends in a closed chat and nothing learned. Many lets a confused
     /// worker spend the day rediscovering the same wall.
+    /// Why a pull request cannot be opened for a task, or nil if it can.
+    ///
+    /// Split out from the call that opens it so the refusals are testable
+    /// without a network or a token. Every one of these is a case where opening
+    /// a pull request would publish something wrong: an empty branch, a second
+    /// pull request for work that already has one, or a task nobody has
+    /// finished reviewing.
+    static func pullRequestBlockReason(for task: DelegatedTask) -> String? {
+        if let existing = task.pullRequestNumber {
+            return "#\(existing) is already open for this task."
+        }
+        guard task.virtualBranch != nil else {
+            return "the task has no branch, so there is nothing to propose."
+        }
+        if let files = task.committedFiles, files == 0 {
+            return "the worker committed nothing, so the pull request would be empty."
+        }
+        switch task.state {
+        case .accepted, .awaitingReview:
+            return nil
+        case .queued, .running:
+            return "the work is not finished yet."
+        case .rejected:
+            return "the work was sent back and has not been redone."
+        case .cancelled, .failed:
+            return "the task was closed without a result."
+        }
+    }
+
     static let maxResumeAttempts = 2
 
     static let stallThreshold: TimeInterval = 60 * 60

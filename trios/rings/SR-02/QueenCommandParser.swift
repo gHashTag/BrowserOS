@@ -22,6 +22,12 @@ enum QueenCommand: Equatable {
     case review(issue: IssueReference, decision: ReviewDecision, note: String)
     /// Stops a worker that is going nowhere.
     case cancelTask(issue: IssueReference, reason: String)
+    /// Opens a pull request for a task's virtual branch.
+    ///
+    /// Explicit rather than automatic on acceptance. Opening a pull request
+    /// publishes work, and whether that should happen without being asked is a
+    /// decision for the person who owns the repository, not a default.
+    case openPullRequest(issue: IssueReference)
     case broadcast(String)
     case audit
     case memory
@@ -129,6 +135,10 @@ struct QueenCommandParser {
                   let issue = IssueReference.parse(first) else { return .unknown(trimmed) }
             components.removeFirst()
             return .cancelTask(issue: issue, reason: components.joined(separator: " "))
+        case "pr", "pull-request":
+            guard let first = components.first,
+                  let issue = IssueReference.parse(first) else { return .unknown(trimmed) }
+            return .openPullRequest(issue: issue)
         case "review", "accept", "reject-task":
             guard let first = components.first,
                   let issue = IssueReference.parse(first) else { return .unknown(trimmed) }
