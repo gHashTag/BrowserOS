@@ -1,6 +1,9 @@
 import Foundation
+// @testable, because the types under test are internal. A plain
+// import compiles and sees none of them, which reads as "the type is
+// missing" rather than "this import cannot see it".
 #if canImport(TriOSKit)
-import TriOSKit
+@testable import TriOSKit
 #endif
 import XCTest
 

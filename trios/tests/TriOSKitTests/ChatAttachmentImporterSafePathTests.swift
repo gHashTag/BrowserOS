@@ -1,6 +1,9 @@
 import Foundation
+// @testable, because the types under test are internal. A plain
+// import compiles and sees none of them, which reads as "the type is
+// missing" rather than "this import cannot see it".
 #if canImport(TriOSKit)
-import TriOSKit
+@testable import TriOSKit
 #endif
 import XCTest
 
@@ -40,11 +43,17 @@ final class ChatAttachmentImporterSafePathTests: XCTestCase {
         XCTAssertThrowsError(
             try SafeFilePath.validateWritePath(candidate: destination, baseURL: base)
         ) { error in
-            guard let safeError = error as? SafeFilePath.SafePathError else {
-                XCTFail("Expected SafePathError, got \(type(of: error))")
+            guard let safeError = error as? SafeFilePathError else {
+                XCTFail("Expected SafeFilePathError, got \(type(of: error))")
                 return
             }
-            XCTAssertEqual(safeError, .outsideBaseDirectory)
+            // Matched by case, not equality: the case carries the offending
+            // path, which this test does not and should not know - asserting it
+            // would pin a temporary directory name into the expectation.
+            guard case .pathOutsideBase = safeError else {
+                XCTFail("Expected pathOutsideBase, got \(safeError)")
+                return
+            }
         }
     }
 
@@ -55,11 +64,17 @@ final class ChatAttachmentImporterSafePathTests: XCTestCase {
         XCTAssertThrowsError(
             try SafeFilePath.validateWritePath(candidate: destination, baseURL: base)
         ) { error in
-            guard let safeError = error as? SafeFilePath.SafePathError else {
-                XCTFail("Expected SafePathError, got \(type(of: error))")
+            guard let safeError = error as? SafeFilePathError else {
+                XCTFail("Expected SafeFilePathError, got \(type(of: error))")
                 return
             }
-            XCTAssertEqual(safeError, .sensitivePathComponent(".ssh"))
+            guard case .sensitivePath(let path) = safeError else {
+                XCTFail("Expected sensitivePath, got \(safeError)")
+                return
+            }
+            // The component is still what matters; the case just reports the
+            // whole path now.
+            XCTAssertTrue(path.contains(".ssh"), "the rejected path names the sensitive component")
         }
     }
 
@@ -80,11 +95,17 @@ final class ChatAttachmentImporterSafePathTests: XCTestCase {
         XCTAssertThrowsError(
             try SafeFilePath.validateWritePath(candidate: destination, baseURL: base)
         ) { error in
-            guard let safeError = error as? SafeFilePath.SafePathError else {
-                XCTFail("Expected SafePathError, got \(type(of: error))")
+            guard let safeError = error as? SafeFilePathError else {
+                XCTFail("Expected SafeFilePathError, got \(type(of: error))")
                 return
             }
-            XCTAssertEqual(safeError, .outsideBaseDirectory)
+            // Matched by case, not equality: the case carries the offending
+            // path, which this test does not and should not know - asserting it
+            // would pin a temporary directory name into the expectation.
+            guard case .pathOutsideBase = safeError else {
+                XCTFail("Expected pathOutsideBase, got \(safeError)")
+                return
+            }
         }
     }
 
