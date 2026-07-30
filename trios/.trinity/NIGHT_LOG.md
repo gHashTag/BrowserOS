@@ -2123,3 +2123,33 @@ someone watching the screen; the 86 never-called function candidates, mostly
 framework callbacks; and no delegation has yet reached a pull request, which
 waits on a GitHub token that is the user's to place. The 22 XCTest errors are
 unchanged and still waiting on a question only the user can answer.
+
+## 2026-07-30 ~22:4x UTC - the same rule, stated twice, fixed once
+
+Verifications green first. The plan was to read the specification as a worker
+would and find other facts we ask for without supplying, the way the date was.
+The first candidate did not survive: the boundary says "docs" while git sees
+"trios/docs", but the standing orders already name the repository root and the
+worker runs there, so the ambiguity I expected is not one. Worth writing down,
+because a non-finding checked is cheaper than the same suspicion returning next
+week.
+
+What the reading did find is worse than a missing fact. The branch rule is
+stated in two places. Two nights ago a live worker checked out its branch and
+dragged the shared checkout with it; I traced that to the specification's
+wording and corrected it there, and never noticed workerSystemPrompt still said
+"Attribute every edit to the branch X" - the exact sentence that caused it, in
+the stronger of the two places, because an agent trusts its system prompt over
+a message in the conversation. QueenBriefing's own comment warns that two
+documents describing one task drift and the softer one wins. It was right about
+the shape; I applied it to the wrong pair.
+
+The standing orders now carry the prohibition and the reason, and they had no
+test coverage whatsoever before tonight - which is exactly how they kept wording
+the specification had already been corrected for. Four assertions hold them now,
+one of which fails if the old sentence reappears anywhere; I put it back and
+watched three fail before believing them. Floor 334 to 338.
+
+Left alone deliberately: the four RichTextRenderer deprecations, which want
+someone at the screen; the 86 never-called function candidates; the pull request
+that still waits on a token only the user can place; and the 22 XCTest errors.
