@@ -2246,3 +2246,34 @@ someone at the screen; the 86 never-called function candidates; the pull request
 waiting on a token only the user can place; and the 22 XCTest errors. The wider
 audit of substring assertions is not finished - mutation is the way to do it,
 one subject per cycle, and tonight covered the specification only.
+
+## 2026-07-31 ~02:0x UTC - the assertion was right, its data was not
+
+Verifications green first, then mutation probes on the acceptance path, since
+last night proved reading the assertions is not how holes get found. Five were
+caught: not blocking on unmet criteria, not blocking on unchecked ones, treating
+a task with an open pull request as settled, dropping the consent flag on
+evolution options, and the branch-boundary deletion from the night before.
+Checked non-findings, written down so the suspicion does not return.
+
+The sixth was not. Deleting the severity comparison from QueenSelfAudit.roadmap
+left all 347 checks green - surprising, because an assertion exists for exactly
+that, worded "dead code is ranked above everything else". It passed for the
+wrong reason: the fixture named the dead finding "a" and the fragile one "b",
+so with the rule gone the tie-break on subject put "a" first anyway. A correct
+assertion its own data had made incapable of failing, which is the same shape
+as the canary with an empty parameter list that fooled me about the function
+scanner. Wording proves nothing if the data cannot discriminate.
+
+The subjects now fight the answer - dead "z", unverified "m", fragile "a" - and
+the assertions read the whole order rather than its first element. This is not
+academic: options() hands the user the top three, so how roadmap ranks is which
+three the Queen proposes, which is the thing being asked for by name every
+cycle. That is asserted now too. The mutation fails three checks instead of
+none. Floor 347 to 350.
+
+Left alone deliberately: the four RichTextRenderer deprecations, wanting someone
+at the screen; the 86 never-called function candidates; the pull request waiting
+on a token only the user can place; and the 22 XCTest errors. The mutation sweep
+has covered the specification and the acceptance path so far - the observer, the
+committer and the salience learner are untouched.
