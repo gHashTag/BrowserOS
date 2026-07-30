@@ -24,7 +24,7 @@ final class MemoryStoreEncryptionTests: XCTestCase {
         try? fileManager.removeItem(at: directory)
     }
 
-    func testSQLCipherDatabaseIsNotPlaintext() throws {
+    func testSQLCipherDatabaseIsNotPlaintext() async throws {
         let store = try MemoryStore(databaseURL: databaseURL, encryptedURL: encryptedURL)
         let record = AgentMemoryRecord(
             id: UUID(),
@@ -33,10 +33,8 @@ final class MemoryStoreEncryptionTests: XCTestCase {
             body: "Recall: encryptionprobe\nGoal: verify SQLCipher encrypted memory storage",
             createdAt: Date(timeIntervalSince1970: 100)
         )
-        try runAsyncAndBlock {
-            try await store.saveMemory(record)
-            await store.close()
-        }
+        try await store.saveMemory(record)
+        await store.close()
 
         XCTAssertTrue(fileManager.fileExists(atPath: databaseURL.path))
         let header = try Data(contentsOf: databaseURL, options: .mappedIfSafe)
@@ -48,7 +46,7 @@ final class MemoryStoreEncryptionTests: XCTestCase {
         XCTAssertFalse(text.contains("encryptionprobe"), "encrypted file must not contain plaintext token")
     }
 
-    func testSQLCipherRoundTrip() throws {
+    func testSQLCipherRoundTrip() async throws {
         let conversationId = UUID()
         let record = AgentMemoryRecord(
             id: UUID(),
@@ -59,22 +57,16 @@ final class MemoryStoreEncryptionTests: XCTestCase {
         )
 
         let store = try MemoryStore(databaseURL: databaseURL, encryptedURL: encryptedURL)
-        try runAsyncAndBlock {
-            try await store.saveMemory(record)
-            await store.close()
-        }
+        try await store.saveMemory(record)
+        await store.close()
 
         let reloaded = try MemoryStore(databaseURL: databaseURL, encryptedURL: encryptedURL)
-        try runAsyncAndBlock {
-            let candidates = try await reloaded.memoryCandidates(for: "roundtripprobe", limit: 10)
-            XCTAssertTrue(candidates.contains { $0.id == record.id })
-        }
-        try runAsyncAndBlock {
-            await reloaded.close()
-        }
+        let candidates = try await reloaded.memoryCandidates(for: "roundtripprobe", limit: 10)
+        XCTAssertTrue(candidates.contains { $0.id == record.id })
+        await reloaded.close()
     }
 
-    func testLegacyEncryptedSnapshotMigratesToSQLCipher() throws {
+    func testLegacyEncryptedSnapshotMigratesToSQLCipher() async throws {
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         let legacy = try createLegacyPlaintextDatabase(at: databaseURL)
         sqlite3_close(legacy)
@@ -86,11 +78,9 @@ final class MemoryStoreEncryptionTests: XCTestCase {
         try fileManager.removeItem(at: databaseURL)
 
         let store = try MemoryStore(databaseURL: databaseURL, encryptedURL: encryptedURL)
-        try runAsyncAndBlock {
-            let candidates = try await store.memoryCandidates(for: "legacyprobe", limit: 10)
-            XCTAssertTrue(candidates.contains { $0.body.contains("legacy value") })
-            await store.close()
-        }
+        let candidates = try await store.memoryCandidates(for: "legacyprobe", limit: 10)
+        XCTAssertTrue(candidates.contains { $0.body.contains("legacy value") })
+        await store.close()
 
         XCTAssertTrue(fileManager.fileExists(atPath: databaseURL.path))
         let header = try Data(contentsOf: databaseURL, options: .mappedIfSafe)
@@ -98,7 +88,7 @@ final class MemoryStoreEncryptionTests: XCTestCase {
         XCTAssertFalse(fileManager.fileExists(atPath: encryptedURL.path), "legacy .enc snapshot should be removed after migration")
     }
 
-    func testSQLCipherRejectsWrongKey() throws {
+    func testSQLCipherRejectsWrongKey() async throws {
         let store = try MemoryStore(databaseURL: databaseURL, encryptedURL: encryptedURL)
         let record = AgentMemoryRecord(
             id: UUID(),
@@ -107,10 +97,8 @@ final class MemoryStoreEncryptionTests: XCTestCase {
             body: "Recall: wrongkeyprobe\nGoal: wrong key must not decrypt",
             createdAt: Date(timeIntervalSince1970: 300)
         )
-        try runAsyncAndBlock {
-            try await store.saveMemory(record)
-            await store.close()
-        }
+        try await store.saveMemory(record)
+        await store.close()
 
         let wrongKey = String(repeating: "ab", count: 32)
         var handle: OpaquePointer?
@@ -164,30 +152,4 @@ final class MemoryStoreEncryptionTests: XCTestCase {
         return handle
     }
 
-    /// Blocks the calling thread until an async operation finishes.
-    ///
-    /// `throws`, not `rethrows`: rethrows promises to throw only what the
-    /// parameter threw through this call, and the error here escapes from a
-    /// detached Task instead. The compiler is right to refuse the weaker
-    /// promise.
-    ///
-    /// The shape is worth flagging rather than only fixing. Waiting on a
-    /// semaphore while a Task runs is the pattern that produced two real hangs
-    /// in this project already, and XCTest supports `async throws` test methods
-    /// directly, so all seven call sites here could drop it. That is a larger
-    /// change than this cycle should make half of.
-    private func runAsyncAndBlock(_ operation: @escaping () async throws -> Void) throws {
-        let semaphore = DispatchSemaphore(value: 0)
-        var thrown: Error?
-        Task {
-            do {
-                try await operation()
-            } catch {
-                thrown = error
-            }
-            semaphore.signal()
-        }
-        semaphore.wait()
-        if let thrown { throw thrown }
-    }
 }
