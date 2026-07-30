@@ -1944,6 +1944,26 @@ final class ChatViewModel: ObservableObject {
             guard let index = messageCache[messageId] else { return }
             messages[index].toolCalls.append(toolCall)
             messages[index].segments.append(.toolCall(id: toolCall.id))
+            // The Queen is told by name which tools she must not call, and
+            // nothing can stop her: the client sends no tool list and the agent
+            // server takes no filter, so refusing one is a change to that
+            // server's API rather than something available here. What is
+            // available is noticing. An unenforceable rule that is at least
+            // observed is a different thing from one nobody would ever know was
+            // broken - and if this line never fires, that is evidence about the
+            // instruction the next person can act on.
+            if QueenDelegationPolicy.isForbiddenQueenToolCall(
+                conversationId: conversationId,
+                queenConversationId: ChatConversation.trinityQueenId,
+                tool: toolCall.name
+            ) {
+                TriosLogBus.shared.error(
+                    .queen,
+                    "queen.tool.forbidden",
+                    "The Queen called a tool she is told not to call",
+                    ["tool": toolCall.name]
+                )
+            }
             await todoPlanner.markToolActivity(name: toolCall.name)
             guard isCurrentStream(expectedGeneration) else { return }
             objectWillChange.send()

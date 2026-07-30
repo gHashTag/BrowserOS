@@ -44,6 +44,7 @@ enum QueenDelegationTests {
         concurrencyBound()
         singleWriterOwnership()
         reviewQueueOrder()
+        forbiddenQueenToolCall()
         stateMachine()
         virtualBranchNaming()
 
@@ -219,6 +220,46 @@ enum QueenDelegationTests {
             QueenDelegationPolicy.reviewQueue([newer, older], now: now)
                 .map(\.issue.number) == [30, 31],
             "and two equally loud tasks come back oldest first, not in the order they arrived"
+        )
+    }
+
+    static func forbiddenQueenToolCall() {
+        scenario("the same tool call means different things in different chats")
+
+        let queenChat = UUID()
+        let workerChat = UUID()
+        typealias P = QueenDelegationPolicy
+
+        // Nothing can refuse the call - the client sends no tool list and the
+        // agent server takes no filter - so noticing is the whole of what this
+        // does. Which makes getting the condition right the whole of the value.
+        check(
+            P.isForbiddenQueenToolCall(
+                conversationId: queenChat, queenConversationId: queenChat,
+                tool: "filesystem_write"
+            ),
+            "the Queen writing a file is the supervisor editing code"
+        )
+        check(
+            !P.isForbiddenQueenToolCall(
+                conversationId: workerChat, queenConversationId: queenChat,
+                tool: "filesystem_write"
+            ),
+            "and a worker writing a file is a worker doing its job"
+        )
+        check(
+            !P.isForbiddenQueenToolCall(
+                conversationId: queenChat, queenConversationId: queenChat,
+                tool: "filesystem_read"
+            ),
+            "reading is hers to do; she has to review what came back"
+        )
+        check(
+            P.isForbiddenQueenToolCall(
+                conversationId: queenChat, queenConversationId: queenChat,
+                tool: "FILESYSTEM_WRITE"
+            ),
+            "and the name is matched without regard to case, since providers differ"
         )
     }
 

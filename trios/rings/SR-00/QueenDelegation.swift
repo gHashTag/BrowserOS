@@ -260,6 +260,22 @@ enum QueenDelegationPolicy {
         !queenForbiddenTools.contains(tool.lowercased())
     }
 
+    /// Whether a tool call arriving in some conversation breaks the Queen's own
+    /// rule, given which conversation is hers.
+    ///
+    /// A worker calling filesystem_write is the worker doing its job; the same
+    /// call in the Queen's chat is the supervisor editing code. The difference
+    /// is entirely which conversation it arrived in, so the decision takes both
+    /// and lives here rather than as a condition inline at the call site, where
+    /// only a running app could tell whether it was right.
+    static func isForbiddenQueenToolCall(
+        conversationId: UUID,
+        queenConversationId: UUID,
+        tool: String
+    ) -> Bool {
+        conversationId == queenConversationId && !queenMayUse(tool: tool)
+    }
+
     /// Maximum worker chats running at once.
     ///
     /// Bounded because every running worker costs the Queen context on every
