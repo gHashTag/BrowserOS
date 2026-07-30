@@ -128,6 +128,15 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     var toolCalls: Int?
     /// Files the worker committed to its branch, filled in at review time.
     var committedFiles: Int?
+    /// What the worker must make true, written by the Queen when she opens the
+    /// task.
+    ///
+    /// Empty is a real state and is shown as such in the specification rather
+    /// than hidden: a task with no criteria cannot be judged complete, only
+    /// abandoned, and saying so up front is the difference between a contract
+    /// and a wish.
+    var acceptanceCriteria: [String]
+
     /// The pull request opened for this task's branch, once one exists.
     ///
     /// Nil means no pull request has been opened - not that one failed. The
@@ -179,6 +188,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         worker: String,
         state: DelegatedTaskState = .queued,
         ownedPaths: [String] = [],
+        acceptanceCriteria: [String] = [],
         virtualBranch: String? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
@@ -198,6 +208,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         self.worker = worker
         self.state = state
         self.ownedPaths = ownedPaths
+        self.acceptanceCriteria = acceptanceCriteria
         self.virtualBranch = virtualBranch
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -343,6 +354,20 @@ enum QueenDelegationPolicy {
         case .abandoned: return .awaitingReview
         case .pending: return nil
         }
+    }
+
+    /// Why the Queen may not open this chat yet, or nil if the user has agreed.
+    ///
+    /// The Queen proposes; the person decides. Without this she is free to keep
+    /// opening chats on her own judgement, and a supervisor that can start work
+    /// unprompted is not a supervisor, it is a second author with a budget.
+    ///
+    /// Deliberately not a rate limit. Slowing down an agent that should not be
+    /// acting at all just spreads the same decision over more hours.
+    static func approvalBlockReason(issue: IssueReference, approved: Set<String>) -> String? {
+        guard !approved.contains(issue.slug) else { return nil }
+        return "\(issue.slug) has not been approved. Propose it first and let the "
+            + "user decide - `/approve \(issue.slug)` once they agree."
     }
 
     static let maxResumeAttempts = 2

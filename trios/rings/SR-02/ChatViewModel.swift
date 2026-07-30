@@ -2842,6 +2842,8 @@ final class ChatViewModel: ObservableObject {
             )
         case .cancelTask(let issue, let reason):
             await cancelDelegatedTask(issue: issue, reason: reason)
+        case .approveDelegation(let issue):
+            await approveDelegation(issue: issue)
         case .openPullRequest(let issue):
             await openPullRequestForTask(issue: issue)
         case .swarm:
@@ -2946,6 +2948,16 @@ final class ChatViewModel: ObservableObject {
                     + "\(issue.slug) is already delegated to \(existing.worker). "
                     + "Open that chat rather than starting a second one."
             )
+            return
+        }
+        // The Queen proposes, the person decides. Checked before every other
+        // refusal so the answer is about consent rather than capacity - being
+        // told "three workers are busy" when the real problem is that nobody
+        // agreed to this work would send the user to fix the wrong thing.
+        if let reason = QueenDelegationPolicy.approvalBlockReason(
+            issue: issue, approved: registry.approvedIssues
+        ) {
+            await postQueenNotice(SystemNoticeClassifier.warningMarker + reason)
             return
         }
         if let reason = registry.delegationBlockReason(paths: paths) {
@@ -3559,6 +3571,16 @@ final class ChatViewModel: ObservableObject {
             )
         }
         registry.pruneArchive()
+    }
+
+    /// Records that the user agreed to a piece of work.
+    func approveDelegation(issue: IssueReference) async {
+        QueenDelegationRegistry.shared.approve(issue: issue)
+        await postQueenNotice(
+            SystemNoticeClassifier.successMarker
+                + "Noted - I may open a chat for \(issue.slug). I will not start "
+                + "anything else without asking."
+        )
     }
 
     // MARK: - Self-audit

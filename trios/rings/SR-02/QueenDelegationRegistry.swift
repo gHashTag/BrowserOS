@@ -63,6 +63,16 @@ final class QueenDelegationRegistry: ObservableObject {
     }
 
     /// Whether the Queen may open another worker right now, and why not.
+    /// Issues the user has agreed the Queen may work on, this session.
+    ///
+    /// Not persisted: consent to open a chat is about now, and a decision made
+    /// last week should not silently authorise work today.
+    private(set) var approvedIssues: Set<String> = []
+
+    func approve(issue: IssueReference) {
+        approvedIssues.insert(issue.slug)
+    }
+
     func delegationBlockReason(paths: [String]) -> String? {
         if !QueenDelegationPolicy.canStartAnother(running: running.count) {
             return "\(running.count) workers already running "
