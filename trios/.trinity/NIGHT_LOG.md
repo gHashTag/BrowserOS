@@ -2432,3 +2432,36 @@ Left alone deliberately: the observer's shell blind spot, which needs a parser;
 the four RichTextRenderer deprecations, which want someone at the screen; the
 86 never-called function candidates; the pull request waiting on a token only
 the user can place; and the 22 XCTest errors.
+
+## 2026-07-31 ~08:0x UTC - the function scanner was wrong, and so was the number I reported
+
+Verifications green first. This cycle went after the 86 never-called function
+candidates and found that the list itself was the defect.
+
+Three of the most promising candidates were private functions with no visible
+callers - the safest kind of deletion, since nothing outside the file can reach
+them. All three are alive. `mutatePlan` has ten call sites written as trailing
+closures, `mutatePlan { ... }`, which have no parenthesis for my pattern to
+match. `searchMemory` and `copyDiff` are passed as values, `Button(action:
+copyDiff)`, which has neither parenthesis nor brace. The rule `name(` cannot see
+either form, and Swift uses both constantly.
+
+So the corrected rule is the one the app's own audit already used for types:
+count the bare identifier anywhere, subtract the declarations. Under it the
+count is 57, not 86. The number I reported to the user for three nights was
+wrong, and had I acted on it I would have deleted three working functions.
+
+The canary failed twice before it worked, both times for its own reasons rather
+than the scanner's. First the file list was a snapshot taken before the canary
+file existed, so the declaration scan never saw it - the lists are rebuilt per
+run now. Then I wrote the first declaration on the same line as its enum, and
+the pattern anchors `func` to the start of a line. Third week running that an
+unrepresentative canary has cost more than the thing it was checking.
+
+Nothing was committed to the sources. The corrected list holds a real finding -
+the store-level output budget can be read but never set, so
+setRequestedOutputTokens and clearRequestedOutputTokens are unreachable and the
+knob can only ever be nil - but removing them touches routing, the cycle had
+already run long past its budget, and deleting a half-understood dependency at
+seven in the morning is worse than reporting it. It is the first item for the
+next cycle.
