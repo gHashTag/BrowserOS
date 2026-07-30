@@ -67,10 +67,16 @@ help:
 # in swift test emitted warnings whose paths are application paths - which is
 # the whole of the unexplained "7" an earlier version of this comment recorded
 # as a mystery and used to justify a slack ceiling. Cutting at the end of the
-# app build removes the guesswork: two consecutive runs report exactly 5.
+# app build removes the guesswork.
+#
+# The count was 5 when the gate went in and is 4 now: the discarded runProcess
+# result in branch creation became the failure reason the user sees. The four
+# that remain are deprecated Text concatenation in RichTextRenderer, and
+# replacing them means rebuilding inline markdown on AttributedString - visible
+# to the user, and not something to change without looking at the screen.
 #
 # Uses /usr/bin/grep deliberately: this shell has grep shadowed by a function.
-WARNING_CEILING := 5
+WARNING_CEILING := 4
 
 dev:
 	@TRIOS_VARIANT=dev "$(ROOT)/build.sh" > /tmp/trios_build_dev.log 2>&1; \

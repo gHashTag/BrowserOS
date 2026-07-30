@@ -3016,12 +3016,12 @@ final class ChatViewModel: ObservableObject {
 
         // The virtual branch is what keeps two bees off each other's files.
         if let branch = task.virtualBranch {
-            let created = await createVirtualBranch(named: branch)
-            if !created {
+            if let reason = await createVirtualBranch(named: branch) {
                 registry.transition(taskID: task.id, to: .cancelled)
                 await postQueenNotice(
                     SystemNoticeClassifier.failureMarker
-                        + "Could not create the virtual branch `\(branch)`; delegation rolled back."
+                        + "Could not create the virtual branch `\(branch)`, so the delegation "
+                        + "was rolled back. git said: \(reason)"
                 )
                 return
             }
@@ -3089,7 +3089,16 @@ final class ChatViewModel: ObservableObject {
     /// every other worker, so switching it on delegation silently dragged the
     /// whole repository onto one bee's branch - the exact conflict the branch
     /// was supposed to prevent.
-    private func createVirtualBranch(named name: String) async -> Bool {
+    /// Returns nil when the branch exists afterwards, or git's own complaint
+    /// when it does not.
+    ///
+    /// It used to return Bool and throw away what git said, so a failed
+    /// delegation told the user only that the branch could not be created -
+    /// never that the name was already taken, or that HEAD was unborn, or
+    /// whichever of those it actually was. The compiler had been reporting the
+    /// discarded result on every build; the value it named was the answer to
+    /// the question the failure message could not answer.
+    private func createVirtualBranch(named name: String) async -> String? {
         await Task.detached(priority: .utility) {
             let existing = QueenStatusViewModel.runProcess(
                 "/usr/bin/git",
@@ -3098,8 +3107,8 @@ final class ChatViewModel: ObservableObject {
                 timeout: 10
             )
             // Reconnecting to an existing task must not be treated as an error.
-            if existing.contains(name) { return true }
-            QueenStatusViewModel.runProcess(
+            if existing.contains(name) { return nil }
+            let attempt = QueenStatusViewModel.runProcess(
                 "/usr/bin/git",
                 arguments: ["branch", name, "HEAD"],
                 workDir: ProjectPaths.root,
@@ -3111,7 +3120,11 @@ final class ChatViewModel: ObservableObject {
                 workDir: ProjectPaths.root,
                 timeout: 10
             )
-            return created.contains(name)
+            if created.contains(name) { return nil }
+            // git is usually loud about why, but a timeout or a killed process
+            // leaves nothing to quote, and "" would read as success upstream.
+            let reason = attempt.trimmingCharacters(in: .whitespacesAndNewlines)
+            return reason.isEmpty ? "git branch produced no output and no branch" : reason
         }.value
     }
 
