@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 334
+    static let minimumChecks = 338
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -2404,6 +2404,20 @@ struct ChatSSEEndToEndTests {
               "the brief the worker actually receives is the specification")
         check(brief.contains("reviews against the criteria"),
               "and says review happens against them, not against a summary")
+
+        // The standing orders had no coverage at all until now, which is how
+        // they kept the wording the specification had already been corrected
+        // for. They outrank the brief in practice: an agent trusts its system
+        // prompt over a message in the conversation, so a rule stated in both
+        // places is only as strong as the weaker statement.
+        let orders = QueenWorkerRunner.workerSystemPrompt(for: task(criteria: ["x"]))
+        check(orders.contains("queen/21-probe"), "the standing orders name the branch")
+        check(orders.contains("Do not check it out"),
+              "and forbid checking it out, as the specification does")
+        check(orders.contains("shared"),
+              "and give the reason, so the rule survives being paraphrased")
+        check(!orders.contains("Attribute every edit to the branch"),
+              "the wording that made a worker switch branches is gone from both places")
 
         // A skill still arrives verbatim, after the rules.
         let withSkill = QueenBriefing.text(for: task(criteria: ["x"]), skillBody: "STEP ONE")
