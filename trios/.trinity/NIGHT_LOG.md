@@ -2183,3 +2183,36 @@ that is the file I added to.
 Left alone deliberately: the four RichTextRenderer deprecations, still wanting
 someone at the screen; the 86 never-called function candidates; the pull request
 waiting on a token only the user can place; and the 22 XCTest errors.
+
+## 2026-07-31 ~00:1x UTC - short, and do not summarise
+
+Verifications green first. Reading the specification and the standing orders
+side by side, the way a worker receives them, turned up the last two rules
+written twice - and one of them did not merely differ, it disagreed.
+
+The specification said to answer every acceptance criterion and not to
+summarise. The standing orders asked for "a short report the Queen can review".
+Short and do-not-summarise pull opposite ways, and the orders are the side an
+agent trusts, so the instruction most likely to be followed was the one that
+loses the Queen the per-criterion verdicts her acceptance check is built on.
+The first live worker produced a criteria table anyway, which is luck, not
+design. Both documents now ask reportRule for one sentence.
+
+The path boundary was the same duplication without a contradiction yet -
+"You may write to these paths and no others" against "You may edit only these
+paths". Nothing had gone wrong, which is the only interesting thing about it:
+the branch rule read exactly this harmless until the night it moved the whole
+repository. Sharing it also let the rule say what neither sentence had - that
+work outside the boundary is dropped rather than reviewed, which is what the
+committer actually does.
+
+Four assertions compare rendered text against the shared source instead of
+grepping for phrases; I put the old sentences back and watched three fail. Ran
+clade-e2e as well, since QueenDelegation.swift has its own logic suite with its
+own source list. Floor 338 to 342.
+
+Left alone deliberately: the four RichTextRenderer deprecations, which want
+someone at the screen; the 86 never-called function candidates; the pull request
+waiting on a token only the user can place; and the 22 XCTest errors. Also
+noted for a future cycle: many assertions in this harness still grep for
+substrings, and last night proved that kind passes a paraphrase.
