@@ -56,7 +56,13 @@ packages/browseros-agent/trios/
 .agents/
 .build/
 .claude/worktrees/
-Sources/
+# Sources/ is a grab-bag ignore alongside .build and .agents, but it also hides
+# Sources/CSQLCipher - the module map Package.swift names as a systemLibrary
+# target and build.sh cannot compile without. A clone of this repository failed
+# on exactly those two files. Re-included by name; a manifest that declares a
+# path the checkout can never contain is a dependency nobody can satisfy.
+Sources/*
+!Sources/CSQLCipher/
 amp
 OF
 
