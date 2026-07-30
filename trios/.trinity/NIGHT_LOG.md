@@ -2403,3 +2403,32 @@ server is down, so reading its exit code as "caught" would be a false pass.
 Also left: the observer's shell blind spot; the four RichTextRenderer
 deprecations; the 86 never-called function candidates; the pull request waiting
 on a token only the user can place; and the 22 XCTest errors.
+
+## 2026-07-31 ~07:0x UTC - reading the verdict instead of the exit code
+
+Verifications green first, including both mutation targets. Last night two
+proven mutations were left out of `make mutants` because a clade-e2e logic
+suite catches them and clade-e2e also exits non-zero when the app or server is
+down: reading that as "caught" would be a false pass. Leaving them uncovered
+was the right call for one night and the wrong one for two.
+
+`make mutants-logic` stops reading the exit code and reads the verdict of the
+one suite that should have broken. clade-e2e writes a report per run and prints
+its path; a failed suite appears as "- [FAIL] Swift logic tests (<label>)", and
+everything else in that report is somebody else's news.
+
+Proven rather than reasoned. "The exit code is not read, therefore it cannot
+mislead" is exactly the kind of argument that has been wrong three times this
+week, so I stopped the app - guaranteeing clade-e2e would fail for an unrelated
+reason - and deleted the assertion catching the age-cap mutation at the same
+time. The target reported SURVIVED for that one and caught the other in the
+same run. No false pass in the precise situation the omission existed for. The
+app was relaunched afterwards.
+
+Both commands are in `make help` now, because a capability nobody can find is
+the shape this project keeps deleting.
+
+Left alone deliberately: the observer's shell blind spot, which needs a parser;
+the four RichTextRenderer deprecations, which want someone at the screen; the
+86 never-called function candidates; the pull request waiting on a token only
+the user can place; and the 22 XCTest errors.
