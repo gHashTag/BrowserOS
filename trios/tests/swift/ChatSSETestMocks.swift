@@ -5,6 +5,10 @@
 
 import Foundation
 
+// Make the in-memory test store usable as a reliability backend so e2e tests
+// avoid opening the persistent SQLCipher database.
+extension VolatileMemoryStore: ModelReliabilityStoreProtocol {}
+
 /// Records the request body and replays a canned SSE event sequence.
 actor MockChatTransport: ChatTransportProtocol {
     private(set) var lastBody: Data?
@@ -113,7 +117,7 @@ actor ControlledCompletionTransport: ChatTransportProtocol {
     }
 
     func finish() {
-        continuation?.yield(.finish(id: "memory-clear-race"))
+        continuation?.yield(.finish(id: "memory-clear-race", reason: nil))
         continuation?.finish()
         continuation = nil
     }
@@ -491,6 +495,7 @@ actor DeleteFailingMemoryStore: AgentMemoryStoreProtocol {
 actor DelayedInitializationPersister: ChatPersisterProtocol {
     private var storage: [UUID: [ChatMessage]]
     private var currentId: UUID
+    private var settingsStorage: [UUID: ConversationSettings] = [:]
     private let initializationDelayNanoseconds: UInt64
 
     init(
@@ -501,6 +506,14 @@ actor DelayedInitializationPersister: ChatPersisterProtocol {
         self.currentId = currentId
         self.storage = [currentId: messages]
         self.initializationDelayNanoseconds = initializationDelayNanoseconds
+    }
+
+    func saveSettings(_ settings: ConversationSettings, conversationId: UUID) async {
+        settingsStorage[conversationId] = settings
+    }
+
+    func loadSettings(conversationId: UUID) async -> ConversationSettings {
+        settingsStorage[conversationId] ?? .default
     }
 
     func save(messages: [ChatMessage], conversationId: UUID) async {
@@ -561,7 +574,16 @@ final class InMemoryPersister: ChatPersisterProtocol, @unchecked Sendable {
     private let lock = NSLock()
     private var storage: [UUID: [ChatMessage]] = [:]
     private var titles: [UUID: String] = [:]
+    private var settings: [UUID: ConversationSettings] = [:]
     private var currentId: UUID = UUID()
+
+    func saveSettings(_ settings: ConversationSettings, conversationId: UUID) async {
+        lock.withLock { self.settings[conversationId] = settings }
+    }
+
+    func loadSettings(conversationId: UUID) async -> ConversationSettings {
+        lock.withLock { settings[conversationId] ?? .default }
+    }
 
     func save(messages: [ChatMessage], conversationId: UUID) async {
         lock.withLock { storage[conversationId] = messages }

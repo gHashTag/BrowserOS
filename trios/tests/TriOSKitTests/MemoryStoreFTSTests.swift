@@ -23,7 +23,10 @@ final class MemoryStoreFTSTests: XCTestCase {
     func testFtsMatchExpressionTokenLengthAndCountCaps() {
         let longToken = String(repeating: "a", count: 100)
         let expression = MemoryStore.ftsMatchExpression(for: longToken)
-        XCTAssertEqual(expression, "\"\(String(repeating: \"a\", count: 40))\"*")
+        // Build the expected value outside the literal: a nested escaped quote
+        // inside string interpolation is not valid Swift.
+        let expectedToken = String(repeating: "a", count: 40)
+        XCTAssertEqual(expression, "\"\(expectedToken)\"*")
 
         let manyTokens = (1...20).map { "token\($0)" }.joined(separator: " ")
         let capped = MemoryStore.ftsMatchExpression(for: manyTokens)

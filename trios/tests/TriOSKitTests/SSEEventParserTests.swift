@@ -17,4 +17,16 @@ final class SSEEventParserTests: XCTestCase {
     func textNonDataLineReturnsNil() {
         XCTAssertNil(SSEEventParser.parse(line: "event: usage"))
     }
+
+    func testFinishEventCapturesReason() {
+        let line = #"data: {"type":"finish","id":"msg-1","finish_reason":"length"}"#
+        let event = SSEEventParser.parse(line: line)
+        XCTAssertEqual(event, .finish(id: "msg-1", reason: "length"))
+    }
+
+    func testFinishEventWithoutReason() {
+        let line = #"data: {"type":"finish","id":"msg-2"}"#
+        let event = SSEEventParser.parse(line: line)
+        XCTAssertEqual(event, .finish(id: "msg-2", reason: nil))
+    }
 }

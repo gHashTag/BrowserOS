@@ -100,4 +100,16 @@ final class QueenStatusViewModelTests: XCTestCase {
         XCTAssertNil(Policy.validate("FOO=bar rm -rf /")) // AGENT-V-WAIVER: test fixture
         XCTAssertNil(Policy.validate("FOO=bar cat ~/.ssh/id_rsa"))
     }
+
+    // MARK: - Health endpoint alignment
+
+    func testAgentHealthURLPointsAtBrowserOSServer() {
+        // The BrowserOS/A2A server is served on the MCP port (9105). `a2aPort`
+        // (9200) is not currently used, so the Agent status component must not
+        // probe the wrong port and falsely report the agent offline.
+        // AGENT-V-WAIVER: port-alignment test (Agent V conditional waiver, 2026-07-27).
+        let url = ProjectPaths.agentHealthURL
+        XCTAssertEqual(url, ProjectPaths.browserOSHealthURL,
+                       "agentHealthURL must match the BrowserOS health URL on the MCP port")
+    }
 }

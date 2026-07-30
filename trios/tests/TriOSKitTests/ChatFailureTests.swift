@@ -76,6 +76,58 @@ final class ChatFailureTests: XCTestCase {
         }
     }
 
+    func testContextLengthErrorDetectedFrom400Body() {
+        let error = TransportError.serverError(
+            statusCode: 400,
+            bodySample: "{\"error\":{\"type\":\"context_length_exceeded\",\"message\":\"This model's maximum context length is 200000 tokens\"}}",
+            url: nil
+        )
+        XCTAssertTrue(error.isContextLengthError)
+        XCTAssertFalse(error.isInvalidModelError, "Context-length should not be classified as invalid model")
+        XCTAssertFalse(error.isEligibleForCrossProviderFailover, "Context-length should not failover across providers")
+    }
+
+    func testContextLength413Detected() {
+        let error = TransportError.serverError(
+            statusCode: 413,
+            bodySample: "Payload Too Large",
+            url: nil
+        )
+        XCTAssertTrue(error.isContextLengthError)
+    }
+
+    func testRetryAfterNumericParsed() {
+        let error = TransportError.serverError(
+            statusCode: 429,
+            bodySample: "Rate limited",
+            url: nil,
+            retryAfter: 120
+        )
+        XCTAssertEqual(error.retryAfter, 120)
+    }
+
+    func testRetryAfterHTTPDateParsed() {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "GMT")
+        let future = Date(timeIntervalSinceNow: 120)
+        let header = formatter.string(from: future)
+        let parsed = SSETransport.parseRetryAfter(header)
+        XCTAssertNotNil(parsed)
+        XCTAssertEqual(parsed!, 120, accuracy: 1.0)
+    }
+
+    func testAuth403NotTreatedAsBalance() {
+        let error = TransportError.serverError(
+            statusCode: 403,
+            bodySample: "Incorrect API key provided",
+            url: nil
+        )
+        XCTAssertTrue(error.isAuthError)
+        XCTAssertFalse(error.isBalanceError)
+    }
+
     // MARK: - Model fallback helpers
 
     func testFallbackModelsExcludeCurrent() async {
@@ -312,7 +364,7 @@ final class ChatFailureTests: XCTestCase {
             successEvents: [
                 .start(id: "msg-1"),
                 .textDelta(id: "msg-1", delta: "Fallback response"),
-                .finish(id: "msg-1")
+                .finish(id: "msg-1", reason: nil)
             ]
         )
         let viewModel = makeChatViewModel(
@@ -372,7 +424,7 @@ final class ChatFailureTests: XCTestCase {
             successEvents: [
                 .start(id: "msg-1"),
                 .textDelta(id: "msg-1", delta: "Healthy response"),
-                .finish(id: "msg-1")
+                .finish(id: "msg-1", reason: nil)
             ]
         )
         let viewModel = makeChatViewModel(
@@ -433,7 +485,7 @@ final class ChatFailureTests: XCTestCase {
             successEvents: [
                 .start(id: "msg-1"),
                 .textDelta(id: "msg-1", delta: "Original response"),
-                .finish(id: "msg-1")
+                .finish(id: "msg-1", reason: nil)
             ]
         )
         let viewModel = makeChatViewModel(

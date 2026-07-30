@@ -892,8 +892,37 @@ fn check_swift_suites_are_wired(dir: &str, report: &mut String) -> bool {
             .map(|n| format!("{n} (now wired)")),
     );
 
+    // A wired suite whose file is not in the repository is a green result that
+    // exists only on this machine. Fifteen of these were found after a third of
+    // the suites turned out to read untracked sources - the wiring check counted
+    // files on disk and never asked whether anyone else could get them.
+    let mut uncommitted: Vec<String> = Vec::new();
+    for name in &wired {
+        let path = format!("tests/swift/{name}");
+        let tracked = Command::new("git")
+            .args(["ls-files", "--error-unmatch", &path])
+            .current_dir(dir)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !tracked {
+            uncommitted.push((*name).to_string());
+        }
+    }
+
     orphans.sort();
     stale.sort();
+    uncommitted.sort();
+    if !uncommitted.is_empty() {
+        report.push_str(&format!(
+            "\n- [FAIL] {} wired suite(s) read files that are not committed: {}\n",
+            uncommitted.len(),
+            uncommitted.join(", ")
+        ));
+        return false;
+    }
     if !stale.is_empty() {
         report.push_str(&format!(
             "\n- [FAIL] unwired exemption(s) no longer needed, delete them: {}\n",

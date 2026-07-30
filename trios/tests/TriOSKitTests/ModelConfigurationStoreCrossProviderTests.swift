@@ -266,6 +266,61 @@ final class ModelConfigurationStoreCrossProviderTests: XCTestCase {
         XCTAssertNil(store.lastContextRoutingReason)
     }
 
+    func testResolveContextRoutingDecisionHonorsPerConversationMargin() async {
+        store.applySelection(provider: .zai, baseURL: "https://z.ai", model: "glm-5")
+        store.contextWindowMargin = 0.95
+
+        let currentMessage = ChatMessage(role: .user, content: String(repeating: "word ", count: 20_000))
+        let candidates: [CrossProviderModelCandidate] = []
+
+        let generousDecision = await store.resolveContextRoutingDecision(
+            conversationId: UUID(),
+            messages: [],
+            currentMessage: currentMessage,
+            systemPrompt: nil,
+            requestedOutputTokens: nil,
+            candidates: candidates,
+            margin: 0.95
+        )
+
+        let conservativeDecision = await store.resolveContextRoutingDecision(
+            conversationId: UUID(),
+            messages: [],
+            currentMessage: currentMessage,
+            systemPrompt: nil,
+            requestedOutputTokens: nil,
+            candidates: candidates,
+            margin: 0.50
+        )
+
+        XCTAssertEqual(generousDecision, .useCurrent, "Generous margin should allow the request to fit")
+        if case .trimHistory = conservativeDecision {
+            // expected
+        } else {
+            XCTFail("Conservative margin should trigger trimming, got \(conservativeDecision)")
+        }
+    }
+
+    func testResolveContextRoutingDecisionFallsBackToGlobalMargin() async {
+        store.applySelection(provider: .zai, baseURL: "https://z.ai", model: "glm-5")
+        store.contextWindowMargin = 0.95
+
+        let currentMessage = ChatMessage(role: .user, content: String(repeating: "word ", count: 20_000))
+        let candidates: [CrossProviderModelCandidate] = []
+
+        let decision = await store.resolveContextRoutingDecision(
+            conversationId: UUID(),
+            messages: [],
+            currentMessage: currentMessage,
+            systemPrompt: nil,
+            requestedOutputTokens: nil,
+            candidates: candidates,
+            margin: nil
+        )
+
+        XCTAssertEqual(decision, .useCurrent, "Nil margin should fall back to the global margin")
+    }
+
     func testLearnedContextLimitTriggersTrimming() async {
         let model = "claude-sonnet-4-5"
         let provider = ModelProvider.anthropic
@@ -320,6 +375,97 @@ final class ModelConfigurationStoreCrossProviderTests: XCTestCase {
             return
         }
         XCTAssertTrue(policy.droppedMessageCount > 0, "Learned context ceiling should force history trimming")
+    }
+
+    func testWarmupCandidatesConstrainedToPinnedTuple() {
+        let constraint = ConversationModelConstraint(
+            provider: .anthropic,
+            baseURL: "https://api.anthropic.com",
+            model: "claude-sonnet-4-5"
+        )
+        let candidates = store.warmupCandidates(constrainedTo: constraint)
+        XCTAssertEqual(candidates.count, 1)
+        XCTAssertEqual(candidates.first?.provider, .anthropic)
+        XCTAssertEqual(candidates.first?.model, "claude-sonnet-4-5")
+    }
+
+    func testRunAdaptiveWarmupConstrainedDoesNotSwitch() async {
+        let constraint = ConversationModelConstraint(
+            provider: .anthropic,
+            baseURL: "https://api.anthropic.com",
+            model: "claude-sonnet-4-5"
+        )
+        let result = await store.runAdaptiveWarmup(constrainedTo: constraint)
+        XCTAssertFalse(result.didSwitch)
+        XCTAssertEqual(result.selected.provider, .anthropic)
+        XCTAssertEqual(result.selected.model, "claude-sonnet-4-5")
+        XCTAssertTrue(result.reason.contains("constrained"), "Reason should mention the conversation pin constraint")
+    }
+
+    func testSelectFirstHealthyCrossProviderModelConstrainedReturnsNil() async {
+        await reliabilityService.record(
+            model: "gpt-5",
+            provider: .openai,
+            baseURL: "https://api.openai.com",
+            success: true,
+            reason: nil
+        )
+
+        let constraint = ConversationModelConstraint(
+            provider: .anthropic,
+            baseURL: "https://api.anthropic.com",
+            model: "claude-sonnet-4-5"
+        )
+        let candidate = await store.selectFirstHealthyCrossProviderModel(constrainedTo: constraint)
+        XCTAssertNil(candidate, "Cross-provider failover must be blocked when a conversation pin is active")
+        XCTAssertEqual(store.selectedProvider, .anthropic, "Selection must not change when constrained")
+    }
+
+    func testSelectLargerModelCandidateConstrainedDoesNotEscape() async {
+        store.applySelection(provider: .zai, baseURL: "https://z.ai", model: "glm-5")
+
+        let constraint = ConversationModelConstraint(
+            provider: .zai,
+            baseURL: "https://z.ai",
+            model: "glm-5"
+        )
+        let larger = await store.selectLargerModelCandidate(
+            estimatedInput: 50_000,
+            outputTokens: 1024,
+            constrainedTo: constraint
+        )
+        XCTAssertNil(larger, "A pinned small-context model must not be replaced by a larger candidate")
+    }
+
+    func testResolveContextRoutingDecisionConstrainedDoesNotRoute() async {
+        store.applySelection(provider: .zai, baseURL: "https://z.ai", model: "glm-5")
+
+        let huge = String(repeating: "word ", count: 30_000)
+        let currentMessage = ChatMessage(role: .user, content: huge)
+        let candidates = [
+            CrossProviderModelCandidate(provider: .openai, baseURL: "https://api.openai.com", model: "gpt-5")
+        ]
+        let constraint = ConversationModelConstraint(
+            provider: .zai,
+            baseURL: "https://z.ai",
+            model: "glm-5"
+        )
+
+        let decision = await store.resolveContextRoutingDecision(
+            conversationId: UUID(),
+            messages: [],
+            currentMessage: currentMessage,
+            systemPrompt: nil,
+            requestedOutputTokens: nil,
+            candidates: candidates,
+            constrainedTo: constraint
+        )
+
+        if case .routeTo = decision {
+            XCTFail("Routing must not escape the pinned tuple when constrained")
+        }
+        XCTAssertEqual(store.selectedProvider, .zai)
+        XCTAssertEqual(store.selectedModel, "glm-5")
     }
 }
 

@@ -33,6 +33,16 @@ enum ChatLogicTests {
         check(ChatLogic.firstPageId(in: "   2. Indented (tab 1)") == 2,
               "firstPageId tolerates leading whitespace")
 
+        // activePageId — real `get_active_page` text format: "Active page: 29 (tab 12)..."
+        check(ChatLogic.activePageId(in: "Active page: 29 (tab 1197258256)\nGoogle\nhttps://www.google.com/") == 29,
+              "activePageId parses the active page id")
+        check(ChatLogic.activePageId(in: "Active page: 7 Some title") == 7,
+              "activePageId parses a single-digit active page id")
+        check(ChatLogic.activePageId(in: "No active page.") == nil,
+              "activePageId returns nil when prefix is absent")
+        check(ChatLogic.activePageId(in: "") == nil,
+              "activePageId returns nil for empty string")
+
         // isLikelyCommand — strict matching
         check(ChatLogic.isLikelyCommand("shell ls -la"), "prefix 'shell ' is a command")
         check(ChatLogic.isLikelyCommand("open https://x"), "prefix 'open ' is a command")

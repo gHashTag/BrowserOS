@@ -185,4 +185,56 @@ final class ChatRequestBuilderTests: XCTestCase {
 
         XCTAssertNil(json?["models"])
     }
+
+    func testMaxTokensEmittedWhenSet() throws {
+        let config = ModelRuntimeConfiguration(
+            provider: .anthropic,
+            model: "claude-sonnet-4-5",
+            baseURL: "https://api.anthropic.com/v1",
+            apiKey: "test-key",
+            fallbackModels: nil,
+            maxOutputTokens: 4096
+        )
+        let builder = ChatRequestBuilder(
+            conversationId: conversationId,
+            message: "Hello",
+            mode: "chat",
+            origin: "test",
+            userSystemPrompt: nil,
+            previousConversation: [],
+            browserContext: nil,
+            modelConfiguration: config
+        )
+
+        let data = try builder.build()
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+
+        XCTAssertEqual(json?["max_tokens"] as? Int, 4096)
+    }
+
+    func testMaxTokensOmittedWhenNil() throws {
+        let config = ModelRuntimeConfiguration(
+            provider: .anthropic,
+            model: "claude-sonnet-4-5",
+            baseURL: "https://api.anthropic.com/v1",
+            apiKey: "test-key",
+            fallbackModels: nil,
+            maxOutputTokens: nil
+        )
+        let builder = ChatRequestBuilder(
+            conversationId: conversationId,
+            message: "Hello",
+            mode: "chat",
+            origin: "test",
+            userSystemPrompt: nil,
+            previousConversation: [],
+            browserContext: nil,
+            modelConfiguration: config
+        )
+
+        let data = try builder.build()
+        let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+
+        XCTAssertNil(json?["max_tokens"])
+    }
 }

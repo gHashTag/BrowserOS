@@ -171,4 +171,76 @@ final class ChatRequestSizerTests: XCTestCase {
         XCTAssertFalse(sizer.isOutputBudgetSaturated(requested: 512, profile: profile))
         XCTAssertFalse(sizer.isOutputBudgetSaturated(requested: nil, profile: profile))
     }
+
+    // MARK: - Draft context utilization
+
+    func testDraftContextUtilizationReturnsNilForEmptyDraft() {
+        let profile = ModelContextProfile(maxContextTokens: 4_096, maxOutputTokens: 1_024)
+        let status = ChatRequestSizer.draftContextUtilization(
+            draft: "   ",
+            history: [],
+            systemPrompt: nil,
+            modelProfile: profile,
+            margin: 0.85
+        )
+        XCTAssertNil(status)
+    }
+
+    func testDraftContextUtilizationFitsSmallDraft() {
+        let profile = ModelContextProfile(maxContextTokens: 1_024, maxOutputTokens: 256)
+        let status = ChatRequestSizer.draftContextUtilization(
+            draft: "hello",
+            history: [],
+            systemPrompt: nil,
+            modelProfile: profile,
+            margin: 1.0
+        )
+        XCTAssertNotNil(status)
+        XCTAssertEqual(status?.isTooLarge, false)
+        XCTAssertEqual(status?.wouldTrimToFit, false)
+        XCTAssertLessThan(status?.utilizationPercent ?? 100, 100)
+    }
+
+    func testDraftContextUtilizationFlagsTooLargeWhenDraftExceedsWindow() {
+        let profile = ModelContextProfile(maxContextTokens: 100, maxOutputTokens: 10)
+        let status = ChatRequestSizer.draftContextUtilization(
+            draft: String(repeating: "a", count: 500),
+            history: [],
+            systemPrompt: nil,
+            modelProfile: profile,
+            margin: 1.0
+        )
+        XCTAssertNotNil(status)
+        XCTAssertTrue(status?.isTooLarge ?? false)
+        XCTAssertFalse(status?.wouldTrimToFit ?? true)
+        XCTAssertGreaterThan(status?.utilizationPercent ?? 0, 100)
+    }
+
+    func testDraftContextUtilizationFlagsTrimWhenHistoryPushesOverWindow() {
+        let profile = ModelContextProfile(maxContextTokens: 100, maxOutputTokens: 10)
+        let history = [ChatMessage(role: .user, content: String(repeating: "a", count: 300))]
+        let status = ChatRequestSizer.draftContextUtilization(
+            draft: "short",
+            history: history,
+            systemPrompt: nil,
+            modelProfile: profile,
+            margin: 1.0
+        )
+        XCTAssertNotNil(status)
+        XCTAssertFalse(status?.isTooLarge ?? true)
+        XCTAssertTrue(status?.wouldTrimToFit ?? false)
+    }
+
+    func testDraftContextUtilizationClampsMargin() {
+        let profile = ModelContextProfile(maxContextTokens: 1_000, maxOutputTokens: 100)
+        let status = ChatRequestSizer.draftContextUtilization(
+            draft: String(repeating: "a", count: 600),
+            history: [],
+            systemPrompt: nil,
+            modelProfile: profile,
+            margin: 2.0
+        )
+        XCTAssertNotNil(status)
+        XCTAssertEqual(status?.usableWindow, 1_000)
+    }
 }

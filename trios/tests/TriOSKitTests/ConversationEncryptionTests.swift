@@ -80,6 +80,84 @@ final class ConversationEncryptionTests: XCTestCase {
         XCTAssertNil(asString, "Encrypted blob should not be valid UTF-8 plaintext JSON")
         XCTAssertFalse(stored.contains(Data("plain secret".utf8)), "Plaintext should not appear in stored data")
     }
+
+    // MARK: - Conversation settings persistence
+
+    func testConversationSettingsRoundtrip() async {
+        let persister = ConversationPersister(suiteName: suiteName)
+        let id = UUID()
+        var settings = ConversationSettings()
+        settings.requestedOutputTokens = 4096
+        settings.contextWindowMargin = 0.75
+
+        await persister.saveSettings(settings, conversationId: id)
+        let loaded = await persister.loadSettings(conversationId: id)
+
+        XCTAssertEqual(loaded.requestedOutputTokens, 4096)
+        XCTAssertEqual(loaded.contextWindowMargin, 0.75)
+    }
+
+    func testConversationSettingsModelOverrideRoundtrip() async {
+        let persister = ConversationPersister(suiteName: suiteName)
+        let id = UUID()
+        var settings = ConversationSettings()
+        settings.provider = .openrouter
+        settings.baseURL = "https://openrouter.ai/api/v1"
+        settings.model = "anthropic/claude-sonnet-4.5"
+
+        await persister.saveSettings(settings, conversationId: id)
+        let loaded = await persister.loadSettings(conversationId: id)
+
+        XCTAssertEqual(loaded.provider, .openrouter)
+        XCTAssertEqual(loaded.baseURL, "https://openrouter.ai/api/v1")
+        XCTAssertEqual(loaded.model, "anthropic/claude-sonnet-4.5")
+    }
+
+    func testConversationSettingsDefaultWhenNoneSaved() async {
+        let persister = ConversationPersister(suiteName: suiteName)
+        let id = UUID()
+        let loaded = await persister.loadSettings(conversationId: id)
+        XCTAssertEqual(loaded, ConversationSettings())
+        XCTAssertNil(loaded.requestedOutputTokens)
+        XCTAssertNil(loaded.contextWindowMargin)
+        XCTAssertNil(loaded.provider)
+        XCTAssertNil(loaded.baseURL)
+        XCTAssertNil(loaded.model)
+    }
+
+    func testConversationSettingsEncryptedInUserDefaults() async {
+        let persister = ConversationPersister(suiteName: suiteName)
+        let id = UUID()
+        var settings = ConversationSettings()
+        settings.requestedOutputTokens = 2048
+        settings.provider = .anthropic
+        settings.baseURL = "https://api.anthropic.com/v1"
+        settings.model = "claude-opus-4-5"
+        await persister.saveSettings(settings, conversationId: id)
+
+        let key = "trios.conversation.settings." + id.uuidString
+        guard let stored = UserDefaults(suiteName: suiteName)?.data(forKey: key) else {
+            XCTFail("No stored settings data")
+            return
+        }
+        let asString = String(data: stored, encoding: .utf8)
+        XCTAssertNil(asString, "Encrypted settings blob should not be valid UTF-8 plaintext JSON")
+        XCTAssertFalse(stored.contains(Data("2048".utf8)), "Plaintext token value should not appear in stored data")
+        XCTAssertFalse(stored.contains(Data("anthropic".utf8)), "Plaintext provider should not appear in stored data")
+        XCTAssertFalse(stored.contains(Data("claude-opus-4-5".utf8)), "Plaintext model should not appear in stored data")
+    }
+
+    func testConversationSettingsClearedWithConversation() async {
+        let persister = ConversationPersister(suiteName: suiteName)
+        let id = UUID()
+        var settings = ConversationSettings()
+        settings.requestedOutputTokens = 8192
+        await persister.saveSettings(settings, conversationId: id)
+        await persister.clear(conversationId: id)
+
+        let loaded = await persister.loadSettings(conversationId: id)
+        XCTAssertEqual(loaded, ConversationSettings())
+    }
 }
 
 private extension Data {

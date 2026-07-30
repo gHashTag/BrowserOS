@@ -7,6 +7,8 @@ set -euo pipefail
 # The SSE end-to-end test exercises ChatViewModel in-process and must not make
 # real A2A registration calls to the BrowserOS server.
 export TRIOS_SKIP_A2A_STARTUP=1
+# Keep the run independent of which models this machine happens to have.
+export TRIOS_E2E_DISABLE_WARMUP=1
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -85,7 +87,7 @@ if [ ${PIPESTATUS[0]} -eq 0 ]; then
     echo "[OK] Build successful: $OUTPUT"
     chmod +x "$OUTPUT"
     echo "Running $OUTPUT..."
-    TRIOS_DISABLE_STATUS_MONITORING=1 TRIOS_E2E_DISABLE_KEYCHAIN=1 "$OUTPUT"
+    TRIOS_DISABLE_STATUS_MONITORING=1 TRIOS_E2E_DISABLE_KEYCHAIN=1 TRIOS_E2E_DISABLE_WARMUP=1 "$OUTPUT"
 else
     echo "[FAIL] Build failed (log: $LOG_FILE)"
     exit 1
