@@ -37,6 +37,8 @@ help:
 	@echo "  make chat-probe - send a real message and report whether the agent answered"
 	@echo "  make verify     - build, relaunch, and prove the chat answers (use after every change)"
 	@echo "  make clean      - remove build products for both variants"
+	@echo "  make mutants    - break known guards and require the SSE suite to notice"
+	@echo "  make mutants-logic - the same, for guards a clade-e2e logic suite owns"
 
 # --- Building -----------------------------------------------------------
 
@@ -393,7 +395,7 @@ MUTANTS := \
 	rings/SR-02/QueenDelegationRegistry.swift@@tasks[index].acceptanceCriteria.contains(criterion) else { return false }@@true else { return false }@@a verdict is accepted for a criterion the task never had \
 	rings/SR-00/QueenTaskSpec.swift@@lines.append(QueenBranchPolicy.ownershipRule(branch: branch))@@lines.append("")@@the specification stops telling the worker to leave the branch alone
 
-.PHONY: mutants
+.PHONY: mutants mutants-logic
 mutants:
 	@backup=$$(mktemp -d); \
 	trap 'for f in $$backup/*.bak; do [ -e "$$f" ] || continue; \
@@ -425,3 +427,55 @@ mutants:
 	done; \
 	if [ $$fail -eq 0 ]; then echo "[OK] every mutation was caught ($$n)"; \
 	else echo "[FAIL] a mutation survived or went stale"; exit 1; fi
+
+# Mutations a logic suite catches rather than the SSE harness.
+#
+# These were left out when `make mutants` first shipped, because clade-e2e's
+# exit code is also non-zero when the app or the server is down - reading it as
+# "the mutation was caught" would be a false pass, and the two proven mutations
+# stayed uncovered rather than covered dishonestly.
+#
+# The fix is to stop reading the exit code and read the verdict for the one
+# suite that should have failed. clade-e2e writes a report per run whose path is
+# its last line, and a failed suite appears there as
+# "- [FAIL] Swift logic tests (<label>)". A suite that fails for its own reason
+# is a caught mutation; everything else in that report is somebody else's news.
+#
+# Fields: source@@needle@@replacement@@suite label@@name.
+MUTANTS_LOGIC := \
+	rings/SR-00/QueenSalience.swift@@min(hours, ageCeiling) * agePerHourWeight@@hours * agePerHourWeight@@QueenDelegation@@age has no ceiling, so an old quiet task outshouts a fresh failure \
+	rings/SR-00/QueenSalience.swift@@return lhs.updatedAt < rhs.updatedAt@@return false@@QueenDelegation@@equally salient tasks stop breaking their tie on age
+
+.PHONY: mutants-logic
+mutants-logic:
+	@backup=$$(mktemp -d); \
+	trap 'for f in $$backup/*.bak; do [ -e "$$f" ] || continue; \
+	      target=$$(cat "$$f.path"); cp "$$f" "$(ROOT)/$$target"; done; \
+	      rm -rf $$backup' EXIT INT TERM; \
+	fail=0; n=0; \
+	IFS='~'; for entry in $$(echo '$(MUTANTS_LOGIC)' | sed 's/ rings\//~rings\//g'); do \
+		unset IFS; \
+		src=$$(echo "$$entry" | awk -F'@@' '{print $$1}'); \
+		needle=$$(echo "$$entry" | awk -F'@@' '{print $$2}'); \
+		repl=$$(echo "$$entry" | awk -F'@@' '{print $$3}'); \
+		suite=$$(echo "$$entry" | awk -F'@@' '{print $$4}'); \
+		name=$$(echo "$$entry" | awk -F'@@' '{print $$5}'); \
+		n=$$((n + 1)); \
+		cp "$(ROOT)/$$src" "$$backup/$$n.bak"; echo "$$src" > "$$backup/$$n.bak.path"; \
+		if ! MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
+			'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; sys.exit(1) if o not in s else open(p,"w").write(s.replace(o,os.environ["MUT_NEW"],1))'; then \
+			echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
+			cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue; \
+		fi; \
+		report=$$(cd "$(ROOT)" && cargo run --quiet --bin clade-e2e 2>/dev/null | tail -1); \
+		if [ -f "$$report" ] && grep -q "\[FAIL\] Swift logic tests ($$suite)" "$$report"; then \
+			echo "  ok   - caught by $$suite: $$name"; \
+		elif [ ! -f "$$report" ]; then \
+			echo "  ERROR - clade-e2e wrote no report, so nothing was measured"; fail=1; \
+		else \
+			echo "  SURVIVED - $$name"; fail=1; \
+		fi; \
+		cp "$$backup/$$n.bak" "$(ROOT)/$$src"; \
+	done; \
+	if [ $$fail -eq 0 ]; then echo "[OK] every logic-suite mutation was caught ($$n)"; \
+	else echo "[FAIL] a logic-suite mutation survived, went stale, or was not measured"; exit 1; fi
