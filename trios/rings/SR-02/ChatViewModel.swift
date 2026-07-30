@@ -3485,10 +3485,19 @@ final class ChatViewModel: ObservableObject {
             await postQueenNotice(
                 SystemNoticeClassifier.successMarker
                     + "Accepted \(issue.slug) from \(task.worker).\(evidence)\nIts work is on "
-                    + "`\(task.virtualBranch ?? "-")` and the task is archived - kept as a "
-                    + "record rather than deleted, so \"what did the swarm do today\" still "
-                    + "has an answer tomorrow.\(tail)"
+                    + "`\(task.virtualBranch ?? "-")`. It stays open until its pull "
+                    + "request merges - acceptance is my opinion, a merge is a fact.\(tail)"
             )
+            // Acceptance now proposes the work, rather than leaving a reviewed
+            // branch sitting for someone to remember. The gate that matters
+            // already happened: you approved the task before it opened, and the
+            // criteria decided this acceptance. Making the person who wrote
+            // neither of those type one more command adds a step without adding
+            // a decision.
+            //
+            // It still refuses on its own terms - no branch, no commits, or a
+            // pull request already open - and says why.
+            await openPullRequestForTask(issue: issue)
         case .reject:
             guard !note.isEmpty else {
                 await postQueenNotice(
@@ -3601,6 +3610,35 @@ final class ChatViewModel: ObservableObject {
                     ["issue": task.issue.slug, "pr": "\(number)"]
                 )
                 continue
+            }
+
+            // An open pull request for accepted work is the Queen's to finish.
+            // She reviewed it against the criteria; waiting for a human to press
+            // the same button she already decided on is ceremony, not oversight.
+            // The forge is still the authority - branch protection or a red
+            // check refuses, and the task just stays open until the next poll.
+            if QueenDelegationPolicy.outcome(
+                merged: pullRequest.isMerged, closedUnmerged: pullRequest.isClosedUnmerged
+            ) == .pending {
+                let merged = (try? await client.mergePullRequest(
+                    repo: "\(task.issue.owner)/\(task.issue.repo)",
+                    number: number,
+                    title: "\(task.title) (\(task.issue.slug))"
+                )) ?? false
+                if merged {
+                    TriosLogBus.shared.info(
+                        .queen, "queen.pr.merged", "Merged a reviewed pull request",
+                        ["issue": task.issue.slug, "pr": "\(number)"]
+                    )
+                    registry.transition(taskID: task.id, to: .merged)
+                    await appendSystemMessageToQueenChat(
+                        SystemNoticeClassifier.successMarker
+                            + "Merged #\(number) for \(task.issue.slug). The work is in, and "
+                            + "the chat is archived because the forge says so - not because "
+                            + "I liked the result."
+                    )
+                    continue
+                }
             }
 
             let outcome = QueenDelegationPolicy.outcome(

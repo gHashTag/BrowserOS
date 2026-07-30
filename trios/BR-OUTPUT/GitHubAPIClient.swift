@@ -103,6 +103,31 @@ actor GitHubAPIClient {
         return try JSONDecoder().decode(GitHubPullRequest.self, from: data)
     }
 
+    /// Merges a pull request.
+    ///
+    /// Squash by default: a worker's branch is a session's worth of
+    /// intermediate commits, and the history that matters afterwards is one
+    /// change with the issue attached, not eleven attempts at it.
+    ///
+    /// Returns false when the forge refuses - branch protection, a failing
+    /// check, an out-of-date base - rather than throwing, because "not allowed
+    /// to merge yet" is a normal answer here and the task simply stays open.
+    func mergePullRequest(repo: String, number: Int, title: String) async throws -> Bool {
+        let path = try encodedRepoPath(repo: repo, suffix: "pulls/\(number)/merge")
+        var put = try request(path)
+        put.httpMethod = "PUT"
+        put.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        put.httpBody = try JSONSerialization.data(withJSONObject: [
+            "merge_method": "squash",
+            "commit_title": title
+        ])
+        let (_, response) = try await URLSession.shared.data(for: put)
+        guard let http = response as? HTTPURLResponse else { return false }
+        // 200 merged. 405 not mergeable, 409 head moved - both mean "not now",
+        // and both are answers rather than errors.
+        return http.statusCode == 200
+    }
+
     /// Fetches one pull request, which is the only endpoint that reports
     /// `merged`. List endpoints omit it, and without it a closed pull request
     /// cannot be told from a landed one.
