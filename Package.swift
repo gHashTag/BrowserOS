@@ -30,6 +30,11 @@ let package = Package(
                 "BR-OUTPUT/A2AMessageRouter.swift",
                 "BR-OUTPUT/ChatLogic.swift",
                 "BR-OUTPUT/CladeGuard.swift",
+                // HotkeyAnalyticsEncryptionTests asserts that analytics are
+                // encrypted at rest, and could not see the type it tests.
+                // Excluded from the app build as a prototype, which is a
+                // separate question from whether its test can compile.
+                "BR-OUTPUT/HotkeyAnalytics.swift",
                 "rings/SR-01/ChatEvents.swift",
             ],
             linkerSettings: [

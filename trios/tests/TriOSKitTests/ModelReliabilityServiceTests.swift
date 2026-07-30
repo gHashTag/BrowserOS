@@ -209,4 +209,132 @@ final class ModelReliabilityServiceTests: XCTestCase {
         )
         XCTAssertEqual(best, "gpt-4o")
     }
+
+    func testLatencyAggregateUsesTTFTWhenAvailable() async throws {
+        let provider = ModelProvider.anthropic
+        let baseURL = "https://api.anthropic.com"
+        await service.record(
+            model: "claude-fast",
+            provider: provider,
+            baseURL: baseURL,
+            success: true,
+            latencyMs: 5000,
+            timeToFirstTokenMs: 200
+        )
+
+        let latency = await service.latency(for: "claude-fast", provider: provider, baseURL: baseURL)
+        XCTAssertEqual(latency.perceivedAvgMs, 200, accuracy: 0.1)
+        // Unwrapped rather than defaulted. These are optional because "no
+        // measurement yet" is a real state, and a `?? 0` here would turn a
+        // missing reading into an assertion that the reading was zero - the
+        // failure would then be about latency instead of about the recording
+        // never happening.
+        XCTAssertEqual(try XCTUnwrap(latency.totalEmaMs), 5000, accuracy: 0.1)
+        XCTAssertEqual(try XCTUnwrap(latency.ttftEmaMs), 200, accuracy: 0.1)
+    }
+
+    func testLatencyAggregateFallsBackToTotalWhenTTFTMissing() async {
+        let provider = ModelProvider.anthropic
+        let baseURL = "https://api.anthropic.com"
+        await service.record(
+            model: "claude-probe",
+            provider: provider,
+            baseURL: baseURL,
+            success: true,
+            latencyMs: 1200
+        )
+
+        let latency = await service.latency(for: "claude-probe", provider: provider, baseURL: baseURL)
+        XCTAssertEqual(latency.perceivedAvgMs, 1200, accuracy: 0.1)
+        XCTAssertNil(latency.ttftEmaMs)
+    }
+
+    func testFastModelOutranksSlowModelWithSameReliability() async {
+        let provider = ModelProvider.anthropic
+        let baseURL = "https://api.anthropic.com"
+        for _ in 0..<3 {
+            await service.record(
+                model: "claude-fast",
+                provider: provider,
+                baseURL: baseURL,
+                success: true,
+                latencyMs: 500,
+                timeToFirstTokenMs: 200
+            )
+            await service.record(
+                model: "claude-slow",
+                provider: provider,
+                baseURL: baseURL,
+                success: true,
+                latencyMs: 15_000,
+                timeToFirstTokenMs: 10_000
+            )
+        }
+
+        let ranked = await service.rankedFallbacks(
+            excluding: "unused",
+            from: ["claude-fast", "claude-slow"],
+            provider: provider,
+            baseURL: baseURL
+        )
+        XCTAssertEqual(ranked.first, "claude-fast")
+    }
+
+    func testBestModelPrefersFasterWhenReliabilityEqual() async {
+        let provider = ModelProvider.anthropic
+        let baseURL = "https://api.anthropic.com"
+        for _ in 0..<3 {
+            await service.record(
+                model: "claude-fast",
+                provider: provider,
+                baseURL: baseURL,
+                success: true,
+                latencyMs: 800,
+                timeToFirstTokenMs: 300
+            )
+            await service.record(
+                model: "claude-slow",
+                provider: provider,
+                baseURL: baseURL,
+                success: true,
+                latencyMs: 12_000,
+                timeToFirstTokenMs: 8_000
+            )
+        }
+
+        let best = await service.bestModel(
+            from: ["claude-slow", "claude-fast"],
+            provider: provider,
+            baseURL: baseURL
+        )
+        XCTAssertEqual(best, "claude-fast")
+    }
+
+    func testOutcomePersistsObservedTokensAndFinishReason() async {
+        let provider = ModelProvider.anthropic
+        let baseURL = "https://api.anthropic.com"
+        await service.record(
+            model: "claude-sonnet-4-5",
+            provider: provider,
+            baseURL: baseURL,
+            success: true,
+            observedOutputTokens: 8_000,
+            observedTotalTokens: 120_000,
+            finishReason: "length"
+        )
+
+        let outcomes = try? await store.outcomes(
+            for: "claude-sonnet-4-5",
+            provider: provider,
+            baseURL: baseURL,
+            limit: 1
+        )
+        guard let outcome = outcomes?.first else {
+            XCTFail("Outcome not persisted")
+            return
+        }
+        XCTAssertEqual(outcome.observedOutputTokens, 8_000)
+        XCTAssertEqual(outcome.observedTotalTokens, 120_000)
+        XCTAssertEqual(outcome.finishReason, "length")
+    }
 }
