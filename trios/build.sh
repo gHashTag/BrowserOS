@@ -157,17 +157,6 @@ else
              [ "$relative_file" = "BR-OUTPUT/HotkeyBar.swift" ] || \
              [ "$relative_file" = "BR-OUTPUT/SmoothStreamingEnhancements.swift" ] || \
              [ "$relative_file" = "BR-OUTPUT/ModelsTabView.swift" ] || \
-             [ "$relative_file" = "BR-OUTPUT/QueenMasterViewModel.swift" ] || \
-             [ "$relative_file" = "BR-OUTPUT/QueenIntelligenceEngine.swift" ] || \
-             [ "$relative_file" = "BR-OUTPUT/TaskDelegator.swift" ] || \
-             [ "$relative_file" = "BR-OUTPUT/PredictiveOrchestrator.swift" ] || \
-             [ "$relative_file" = "BR-OUTPUT/TeamQueenManager.swift" ] || \
-             [ "$relative_file" = "BR-OUTPUT/QueenPermissions.swift" ] || \
-             [ "$relative_file" = "BR-OUTPUT/QueenAuditLog.swift" ] || \
-             [ "$relative_file" = "BR-OUTPUT/QueenIntegrationsHub.swift" ] || \
-             [ "$relative_file" = "BR-OUTPUT/SlackIntegration.swift" ] || \
-             [ "$relative_file" = "BR-OUTPUT/EmailIntegration.swift" ] || \
-             [ "$relative_file" = "BR-OUTPUT/CalendarIntegration.swift" ] || \
              [ "$relative_file" = "BR-OUTPUT/TODOAnimations.swift" ] || \
              [ "$relative_file" = "BR-OUTPUT/TODOListView.swift" ]; then
             SWIFT_FILES+=("$swift_file")

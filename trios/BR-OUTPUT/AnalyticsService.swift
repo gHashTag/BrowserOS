@@ -143,7 +143,12 @@ class AnalyticsService {
 
 // MARK: - Models
 
-struct AnalyticsEvent: Codable {
+/// Encodable, not Codable: `properties` is `[String: Any]`, which cannot be
+/// decoded without a custom `init(from:)`, and there isn't one - only
+/// `encode(to:)` below. Nothing reads these events back; they are written out
+/// and gone. Claiming Codable asked the compiler to synthesise a decoder it had
+/// no way to build.
+struct AnalyticsEvent: Encodable {
     let id: UUID
     let timestamp: Date
     let event: String
