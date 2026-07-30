@@ -71,7 +71,9 @@ actor MockLocalAuthProvider: LocalAuthProviding {
 /// A provider that always throws, used to verify graceful degradation.
 actor ThrowingLocalAuthProvider: LocalAuthProviding {
     func validToken(forcingRefresh: Bool) async throws -> String? {
-        throw LocalAuthError.fetchFailed
+        // fetchFailed carries the status that caused it; nil means the fetch
+        // never reached a response, which is what this stub simulates.
+        throw LocalAuthError.fetchFailed(statusCode: nil)
     }
 }
 
@@ -165,7 +167,10 @@ final class SSETransportTests: XCTestCase {
             _ = try await transport.sendMessage(body: Data("{}".utf8))
             XCTFail("Expected TransportError.serverError to be thrown")
         } catch let error as TransportError {
-            if case .serverError(let statusCode, let bodySample, _) = error {
+            // serverError carries four values - status, body, url, retryAfter.
+            // Matching three made the compiler fail to even describe the
+            // mismatch, which is why this read as a compiler bug.
+            if case .serverError(let statusCode, let bodySample, _, _) = error {
                 XCTAssertEqual(statusCode, 503)
                 XCTAssertEqual(bodySample, "Service Unavailable")
             } else {
@@ -408,7 +413,7 @@ final class SSETransportTests: XCTestCase {
             _ = try await transport.sendMessage(body: Data("{}".utf8))
             XCTFail("Expected TransportError.serverError(403)")
         } catch let error as TransportError {
-            if case .serverError(let statusCode, _, _) = error {
+            if case .serverError(let statusCode, _, _, _) = error {
                 XCTAssertEqual(statusCode, 403)
             } else {
                 XCTFail("Expected serverError, got \(error)")
@@ -447,7 +452,7 @@ final class SSETransportTests: XCTestCase {
             _ = try await transport.sendMessage(body: Data("{}".utf8))
             XCTFail("Expected TransportError.serverError(503)")
         } catch let error as TransportError {
-            if case .serverError(let statusCode, _, _) = error {
+            if case .serverError(let statusCode, _, _, _) = error {
                 XCTAssertEqual(statusCode, 503)
             } else {
                 XCTFail("Expected serverError, got \(error)")

@@ -69,7 +69,7 @@ final class MemoryStoreEncryptionTests: XCTestCase {
             let candidates = try await reloaded.memoryCandidates(for: "roundtripprobe", limit: 10)
             XCTAssertTrue(candidates.contains { $0.id == record.id })
         }
-        runAsyncAndBlock {
+        try runAsyncAndBlock {
             await reloaded.close()
         }
     }
@@ -77,7 +77,7 @@ final class MemoryStoreEncryptionTests: XCTestCase {
     func testLegacyEncryptedSnapshotMigratesToSQLCipher() throws {
         try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
         let legacy = try createLegacyPlaintextDatabase(at: databaseURL)
-        try legacy.close()
+        sqlite3_close(legacy)
 
         // Produce the Cycle 12 encrypted snapshot and remove the plaintext file.
         let plaintext = try Data(contentsOf: databaseURL)
@@ -164,7 +164,19 @@ final class MemoryStoreEncryptionTests: XCTestCase {
         return handle
     }
 
-    private func runAsyncAndBlock(_ operation: @escaping () async throws -> Void) rethrows {
+    /// Blocks the calling thread until an async operation finishes.
+    ///
+    /// `throws`, not `rethrows`: rethrows promises to throw only what the
+    /// parameter threw through this call, and the error here escapes from a
+    /// detached Task instead. The compiler is right to refuse the weaker
+    /// promise.
+    ///
+    /// The shape is worth flagging rather than only fixing. Waiting on a
+    /// semaphore while a Task runs is the pattern that produced two real hangs
+    /// in this project already, and XCTest supports `async throws` test methods
+    /// directly, so all seven call sites here could drop it. That is a larger
+    /// change than this cycle should make half of.
+    private func runAsyncAndBlock(_ operation: @escaping () async throws -> Void) throws {
         let semaphore = DispatchSemaphore(value: 0)
         var thrown: Error?
         Task {
