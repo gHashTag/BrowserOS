@@ -11,6 +11,7 @@ enum QueenTaskStyle {
         case .running: return isLive ? .green : .orange
         case .awaitingReview: return .yellow
         case .accepted: return .green
+        case .merged: return .green
         case .rejected: return .orange
         case .failed: return .red
         case .queued: return .grokMuted
@@ -23,6 +24,7 @@ enum QueenTaskStyle {
         case .running: return isLive ? "arrow.triangle.2.circlepath" : "exclamationmark.circle"
         case .awaitingReview: return "hand.raised.fill"
         case .accepted: return "checkmark.circle.fill"
+        case .merged: return "arrow.triangle.merge"
         case .rejected: return "arrow.uturn.backward"
         case .failed: return "xmark.octagon.fill"
         case .queued: return "clock"

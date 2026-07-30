@@ -37,13 +37,13 @@ final class QueenDelegationRegistry: ObservableObject {
     /// Work still on the Queen's plate: anything unfinished, plus failures
     /// nobody has acknowledged.
     var open: [DelegatedTask] {
-        tasks.filter { !$0.state.isArchivable }
+        tasks.filter { !$0.isSettled }
     }
 
     /// Settled work, newest first. Kept rather than deleted so "what did the
     /// swarm actually do today" has an answer.
     var archived: [DelegatedTask] {
-        tasks.filter { $0.state.isArchivable }.sorted { $0.updatedAt > $1.updatedAt }
+        tasks.filter { $0.isSettled }.sorted { $0.updatedAt > $1.updatedAt }
     }
 
     /// Bees that have stopped without saying so.

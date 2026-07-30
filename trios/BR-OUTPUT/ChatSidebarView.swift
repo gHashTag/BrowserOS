@@ -241,6 +241,8 @@ struct ChatSidebarView: View {
         case .awaitingReview: return .orange
         case .failed, .rejected: return .red
         case .accepted: return .blue
+        // Landed work reads as done, not as another shade of pending.
+        case .merged: return .green
         case .queued: return .grokMuted
         case .cancelled: return .grokDim
         }

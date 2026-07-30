@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 235
+    static let minimumChecks = 246
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -67,6 +67,7 @@ struct ChatSSEEndToEndTests {
         await runScrollPositionPolicyAndRequestDelivery()
         await runCassetteReplayAndObserver()
         await runSalienceLearnsFromOutcomes()
+        await runAcceptedWaitsForTheMerge()
         await runPullRequestRefusals()
         await runMergedIsNotTheSameAsClosed()
         await runStalledWorkerIsResumedBeforeCancelled()
@@ -2100,6 +2101,51 @@ struct ChatSSEEndToEndTests {
     /// from it and this pins the decision. Each refusal is a case where opening
     /// would publish something wrong: an empty branch, a second pull request for
     /// work that already has one, or a task nobody finished.
+    /// Accepted work with a pull request open is not finished.
+    ///
+    /// This is the whole point of R5: acceptance is the Queen's opinion, a merge
+    /// is a fact from the forge, and the chat should close on the fact. The risk
+    /// in saying so is the opposite failure - tasks that will never have a pull
+    /// request waiting forever for one - so both halves are pinned here.
+    static func runAcceptedWaitsForTheMerge() async {
+        print("\n# Scenario: the chat closes on the merge, not on the opinion")
+
+        guard let issue = IssueReference.parse("gHashTag/trios#11") else {
+            fail("could not build a test issue"); return
+        }
+        func task(_ state: DelegatedTaskState, pr: Int? = nil) -> DelegatedTask {
+            DelegatedTask(
+                issue: issue, title: "probe", worker: "queen-swift",
+                state: state, virtualBranch: "queen/11-probe", pullRequestNumber: pr
+            )
+        }
+
+        check(!task(.accepted, pr: 4).isSettled,
+              "accepted work with a pull request open is still waiting on the merge")
+        check(task(.merged, pr: 4).isSettled,
+              "once it merges the task is finished")
+
+        // The regression this could easily have caused.
+        check(task(.accepted).isSettled,
+              "accepted work with no pull request settles as it always did")
+        check(task(.cancelled).isSettled, "a cancelled task still settles")
+        check(!task(.failed).isSettled, "a failure still stays visible rather than filing itself away")
+
+        typealias P = QueenDelegationPolicy
+        check(P.canTransition(from: .accepted, to: .merged),
+              "a merge can settle accepted work")
+        check(P.canTransition(from: .accepted, to: .awaitingReview),
+              "and a pull request closed without merging sends it back to the queue")
+        check(!P.canTransition(from: .merged, to: .running),
+              "landed work does not reopen")
+        check(!P.canTransition(from: .awaitingReview, to: .merged),
+              "work cannot merge before it has been accepted")
+
+        check(DelegatedTaskState.merged.isTerminal, "merged is an end state")
+        check(!DelegatedTaskState.merged.needsQueenAttention,
+              "and needs nothing further from the Queen")
+    }
+
     static func runPullRequestRefusals() async {
         print("\n# Scenario: when the Queen refuses to open a pull request")
 

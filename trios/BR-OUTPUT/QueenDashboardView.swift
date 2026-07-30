@@ -121,7 +121,10 @@ struct QueenDashboardView: View {
         switch task.state {
         case .running: return isLive ? .green : .orange
         case .awaitingReview: return .yellow
+        // Accepted is dimmed because it is still waiting on its merge; merged
+        // is the state that is actually over.
         case .accepted: return .grokDim
+        case .merged: return .green
         case .failed, .rejected: return .red
         case .queued: return .grokMuted
         case .cancelled: return .grokDim

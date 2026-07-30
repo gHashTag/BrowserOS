@@ -52,10 +52,13 @@ enum DelegatedTaskState: String, Codable, Equatable, Sendable, CaseIterable {
     case cancelled
     /// The worker failed and could not recover.
     case failed
+    /// The task's pull request landed. The only state established by asking the
+    /// forge rather than by anyone's judgement.
+    case merged
 
     var isTerminal: Bool {
         switch self {
-        case .accepted, .cancelled, .failed: return true
+        case .accepted, .cancelled, .failed, .merged: return true
         case .queued, .running, .awaitingReview, .rejected: return false
         }
     }
@@ -66,7 +69,7 @@ enum DelegatedTaskState: String, Codable, Equatable, Sendable, CaseIterable {
     /// it never gets looked at.
     var isArchivable: Bool {
         switch self {
-        case .accepted, .cancelled: return true
+        case .accepted, .cancelled, .merged: return true
         case .failed, .queued, .running, .awaitingReview, .rejected: return false
         }
     }
@@ -79,6 +82,7 @@ enum DelegatedTaskState: String, Codable, Equatable, Sendable, CaseIterable {
         case .running: return "Working"
         case .awaitingReview: return "Needs review"
         case .accepted: return "Accepted"
+        case .merged: return "Merged"
         case .rejected: return "Sent back"
         case .cancelled: return "Cancelled"
         case .failed: return "Failed"
@@ -89,7 +93,7 @@ enum DelegatedTaskState: String, Codable, Equatable, Sendable, CaseIterable {
     var needsQueenAttention: Bool {
         switch self {
         case .awaitingReview, .failed, .rejected: return true
-        case .queued, .running, .accepted, .cancelled: return false
+        case .queued, .running, .accepted, .cancelled, .merged: return false
         }
     }
 }
@@ -153,6 +157,19 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     }
 
     var totalTokens: Int { (inputTokens ?? 0) + (outputTokens ?? 0) }
+
+    /// Whether this task can leave the working view.
+    ///
+    /// Settlement stopped being a property of the state alone the moment a pull
+    /// request could be attached. Accepted means the Queen is satisfied, which
+    /// is an opinion; if a pull request exists, the work has not landed until
+    /// that merges, which is a fact. A task with no pull request settles on
+    /// acceptance exactly as before - otherwise every task predating this would
+    /// wait forever for a merge nobody is going to perform.
+    var isSettled: Bool {
+        if state == .accepted, pullRequestNumber != nil { return false }
+        return state.isArchivable
+    }
 
     init(
         id: UUID = UUID(),
@@ -287,6 +304,8 @@ enum QueenDelegationPolicy {
             return "the work was sent back and has not been redone."
         case .cancelled, .failed:
             return "the task was closed without a result."
+        case .merged:
+            return "this work already landed."
         }
     }
 
@@ -339,6 +358,11 @@ enum QueenDelegationPolicy {
         case (.running, .awaitingReview), (.running, .failed), (.running, .cancelled):
             return true
         case (.awaitingReview, .accepted), (.awaitingReview, .rejected):
+            return true
+        // A pull request is the only thing that can settle accepted work, and
+        // it can settle it either way: landed, or closed with nothing landed
+        // and therefore back in the queue.
+        case (.accepted, .merged), (.accepted, .awaitingReview):
             return true
         case (.rejected, .running), (.rejected, .cancelled):
             return true
