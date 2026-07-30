@@ -2527,3 +2527,35 @@ from the same reading, which each need their own cycle; the store-level output
 budget that can be read but never set; the observer's shell blind spot; the four
 RichTextRenderer deprecations; the pull request waiting on a token only the user
 can place; and the 22 XCTest errors.
+
+## 2026-07-31 ~11:0x UTC - the enforcement that is not ours to write
+
+Verifications green first. Last night I called my own fix a half measure - the
+Queen is told which tools she must not call and nothing stops her - and planned
+to stop giving her those tools at all. Establishing that this is impossible here
+was most of tonight's work and is the more useful half of it.
+
+The Swift client sends no tool list. The request body carries the message, the
+history, attachments and browser context, and nothing else; the agent server
+exposes no field to filter tools with. Withholding a tool is a change to that
+server's API. Anything built in this repository that resembled enforcement
+would have been a rule reading stronger than it is, which is precisely the
+defect I have spent three cycles removing.
+
+What is available is noticing, so a forbidden tool call arriving in the Queen's
+own conversation is logged as queen.tool.forbidden. An unenforceable rule that
+is observed is a different thing from one nobody would know was broken, and if
+that line never fires, the silence is evidence about the instruction rather than
+about nothing.
+
+The decision lives in QueenDelegationPolicy rather than as a condition at the
+call site, because the interesting part is not whether a tool is forbidden but
+whose chat it arrived in - a worker calling filesystem_write is a worker doing
+its job. Four assertions cover both sides; deleting the conversation check,
+which would report every worker write as a violation, fails the suite.
+
+Left alone deliberately: consumeBudget and canRun, the other uncalled rules from
+yesterday's audit reading; the store-level output budget that can be read but
+never set; the observer's shell blind spot; the four RichTextRenderer
+deprecations; the pull request waiting on a token only the user can place; and
+the 22 XCTest errors.
