@@ -3786,7 +3786,10 @@ final class ChatViewModel: ObservableObject {
             symbols.insert(symbol)
         }
 
-        var findings: [QueenSelfAudit.Finding] = []
+        // One occurrence is the declaration itself. Two is a declaration plus a
+        // single mention, which for a type usually means only its own file
+        // refers to it.
+        var occurrences: [String: Int] = [:]
         for symbol in symbols.sorted() {
             let uses = QueenStatusViewModel.runProcess(
                 "/usr/bin/grep",
@@ -3794,11 +3797,16 @@ final class ChatViewModel: ObservableObject {
                 workDir: root,
                 timeout: 20
             )
-            let occurrences = uses.components(separatedBy: .newlines).filter { !$0.isEmpty }.count
-            // One occurrence is the declaration itself. Two is a declaration
-            // plus a single mention, which for a type usually means only its
-            // own file refers to it.
-            guard occurrences <= 1 else { continue }
+            occurrences[symbol] = uses.components(separatedBy: .newlines).filter { !$0.isEmpty }.count
+        }
+
+        // The ranking rule lives in QueenSelfAudit.deadSymbols, which has tests
+        // and, until now, no caller: this function counted occurrences and then
+        // applied the same threshold inline. Two implementations of one idea,
+        // and the one that ran was the one nothing checked. Whichever of them
+        // drifted, the audit would have kept reporting confidently.
+        var findings: [QueenSelfAudit.Finding] = []
+        for symbol in QueenSelfAudit.deadSymbols(declarations: occurrences) {
             findings.append(QueenSelfAudit.Finding(
                 severity: .dead,
                 kind: "zero-call-sites",
