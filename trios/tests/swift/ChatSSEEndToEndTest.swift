@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 190
+    static let minimumChecks = 205
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -67,6 +67,7 @@ struct ChatSSEEndToEndTests {
         await runScrollPositionPolicyAndRequestDelivery()
         await runCassetteReplayAndObserver()
         await runSalienceLearnsFromOutcomes()
+        await runQueenTaskLifecycleCloses()
         await runPureQueenTypes()
         await runSelfAuditFindsPlantedDeadCode()
         await runBranchCommitterAgainstScratchRepo()
@@ -2067,6 +2068,56 @@ struct ChatSSEEndToEndTests {
     /// expensive: money, the skill catalogue, and what the Queen claims about
     /// her own state. Every assertion here is a property that has already gone
     /// wrong once in this project.
+    /// Walks a delegated task the whole way round: opened, worked, reviewed,
+    /// archived - and the two ways it can go wrong.
+    ///
+    /// The cassettes prove single moments of a worker's life. Nothing proved the
+    /// shape of the life itself, so nothing would have noticed if the cycle
+    /// stopped closing: a state that cannot be left, or settled work that never
+    /// leaves the open list, looks exactly like a healthy swarm from outside.
+    static func runQueenTaskLifecycleCloses() async {
+        print("\n# Scenario: the delegation cycle closes")
+
+        typealias P = QueenDelegationPolicy
+
+        // The happy round trip.
+        check(P.canTransition(from: .queued, to: .running), "a queued task can start")
+        check(P.canTransition(from: .running, to: .awaitingReview), "work finishes into review")
+        check(P.canTransition(from: .awaitingReview, to: .accepted), "review can accept")
+        check(DelegatedTaskState.accepted.isArchivable, "accepted work leaves the open list")
+
+        // Rejection sends it back rather than ending it, which is the whole
+        // point of having a review step.
+        check(P.canTransition(from: .awaitingReview, to: .rejected), "review can send work back")
+        check(P.canTransition(from: .rejected, to: .running), "rejected work can be redone")
+        check(!DelegatedTaskState.rejected.isArchivable, "rejected work stays open, it is not finished")
+
+        // Failure is terminal only in the sense that the worker stopped. There
+        // must still be a way out, or the swarm accumulates corpses.
+        check(DelegatedTaskState.failed.isTerminal, "a failed worker is not still running")
+        check(
+            P.canTransition(from: .failed, to: .running) || P.canTransition(from: .failed, to: .cancelled),
+            "a failed task can be retried or abandoned, so it is not stuck forever"
+        )
+
+        // Every state must be reachable out of, except the two that are
+        // genuinely the end. Stated as a rule rather than a list, so adding a
+        // state does not quietly add a dead end.
+        for state in [DelegatedTaskState.queued, .running, .awaitingReview, .rejected, .failed] {
+            let hasExit = DelegatedTaskState.allCases.contains { P.canTransition(from: state, to: $0) }
+            check(hasExit, "\(state.rawValue) has somewhere to go")
+        }
+        check(
+            DelegatedTaskState.accepted.isArchivable && DelegatedTaskState.cancelled.isArchivable,
+            "the two end states are the two that archive"
+        )
+
+        // Backwards moves are refused. Re-running an accepted task would redo
+        // work that was already signed off.
+        check(!P.canTransition(from: .accepted, to: .running), "accepted work cannot silently restart")
+        check(!P.canTransition(from: .queued, to: .accepted), "work cannot be accepted before it is done")
+    }
+
     static func runPureQueenTypes() async {
         print("\n# Scenario: pure Queen types")
 

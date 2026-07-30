@@ -37,7 +37,7 @@ struct IssueReference: Codable, Equatable, Sendable {
 }
 
 /// Lifecycle of delegated work.
-enum DelegatedTaskState: String, Codable, Equatable, Sendable {
+enum DelegatedTaskState: String, Codable, Equatable, Sendable, CaseIterable {
     /// Created by the Queen, no worker attached yet.
     case queued
     /// A worker chat is open and running.
