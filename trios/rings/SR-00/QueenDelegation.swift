@@ -309,6 +309,42 @@ enum QueenDelegationPolicy {
         }
     }
 
+    /// What a pull request's current shape means for the task waiting on it.
+    enum PullRequestOutcome: String, Equatable {
+        /// Merged. The work landed and the chat can close.
+        case landed
+        /// Closed with nothing merged. Back to the queue, not the archive.
+        case abandoned
+        /// Still open. Nothing to decide yet.
+        case pending
+    }
+
+    /// Reads the forge's answer without inferring anything from `state` alone.
+    ///
+    /// Takes two facts rather than the GitHub model on purpose. SR-00 is the
+    /// bottom ring; reaching up into BR-OUTPUT for a decoding type would make
+    /// this policy un-compilable on its own, which is exactly how three suites
+    /// silently stopped building earlier in this project. The caller reads the
+    /// model, this decides.
+    ///
+    /// The distinction is the point: "closed" is the same word for landed and
+    /// abandoned work, and a poll that guessed would archive changes that never
+    /// reached the branch.
+    static func outcome(merged: Bool, closedUnmerged: Bool) -> PullRequestOutcome {
+        if merged { return .landed }
+        if closedUnmerged { return .abandoned }
+        return .pending
+    }
+
+    /// The state a task should move to for an outcome, or nil to leave it alone.
+    static func nextState(for outcome: PullRequestOutcome) -> DelegatedTaskState? {
+        switch outcome {
+        case .landed: return .merged
+        case .abandoned: return .awaitingReview
+        case .pending: return nil
+        }
+    }
+
     static let maxResumeAttempts = 2
 
     static let stallThreshold: TimeInterval = 60 * 60

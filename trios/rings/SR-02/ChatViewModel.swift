@@ -3137,6 +3137,7 @@ final class ChatViewModel: ObservableObject {
         scheduler.spentToday = { QueenDelegationRegistry.shared.spentToday() }
         scheduler.beforeReport = { [weak self] in
             await self?.reapStalledWorkers()
+            await self?.pollPullRequests()
             QueenDelegationRegistry.shared.pruneArchive()
         }
         scheduler.start()
@@ -3481,6 +3482,71 @@ final class ChatViewModel: ObservableObject {
                     + "Could not open a pull request for \(issue.slug): \(error.localizedDescription)"
             )
         }
+    }
+
+    /// Asks the forge what happened to each open pull request and settles the
+    /// tasks waiting on them.
+    ///
+    /// This is the step that makes archiving a fact rather than an opinion. It
+    /// only ever asks about tasks that actually have a pull request, so a swarm
+    /// that never opens one costs nothing and behaves exactly as before.
+    func pollPullRequests() async {
+        let registry = QueenDelegationRegistry.shared
+        let waiting = registry.tasks.filter {
+            $0.pullRequestNumber != nil && $0.state == .accepted
+        }
+        guard !waiting.isEmpty else { return }
+
+        let client = GitHubAPIClient()
+        for task in waiting {
+            guard let number = task.pullRequestNumber else { continue }
+            let pullRequest: GitHubPullRequest
+            do {
+                pullRequest = try await client.fetchPullRequest(
+                    repo: "\(task.issue.owner)/\(task.issue.repo)", number: number
+                )
+            } catch {
+                // A forge that cannot be reached says nothing about the work.
+                // Leaving the task where it is beats guessing in either
+                // direction; the next poll asks again.
+                TriosLogBus.shared.warn(
+                    .queen, "queen.pr.poll_failed", "Could not read a pull request",
+                    ["issue": task.issue.slug, "pr": "\(number)"]
+                )
+                continue
+            }
+
+            let outcome = QueenDelegationPolicy.outcome(
+                merged: pullRequest.isMerged,
+                closedUnmerged: pullRequest.isClosedUnmerged
+            )
+            guard let next = QueenDelegationPolicy.nextState(for: outcome),
+                  registry.transition(taskID: task.id, to: next) else { continue }
+
+            switch outcome {
+            case .landed:
+                await appendSystemMessageToQueenChat(
+                    SystemNoticeClassifier.successMarker
+                        + "#\(number) merged, so \(task.issue.slug) is done and its chat is "
+                        + "archived. That is the forge saying the work landed, not me saying "
+                        + "I liked it."
+                )
+            case .abandoned:
+                await appendSystemMessageToQueenChat(
+                    SystemNoticeClassifier.warningMarker
+                        + "#\(number) was closed without merging, so \(task.issue.slug) is "
+                        + "back in the review queue. Nothing landed - the branch still holds "
+                        + "the work, and it needs a decision rather than an archive."
+                )
+            case .pending:
+                break
+            }
+            TriosLogBus.shared.info(
+                .queen, "queen.pr.polled", "Read a pull request outcome",
+                ["issue": task.issue.slug, "pr": "\(number)", "outcome": outcome.rawValue]
+            )
+        }
+        registry.pruneArchive()
     }
 
     // MARK: - Self-audit

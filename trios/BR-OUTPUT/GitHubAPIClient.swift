@@ -103,6 +103,15 @@ actor GitHubAPIClient {
         return try JSONDecoder().decode(GitHubPullRequest.self, from: data)
     }
 
+    /// Fetches one pull request, which is the only endpoint that reports
+    /// `merged`. List endpoints omit it, and without it a closed pull request
+    /// cannot be told from a landed one.
+    func fetchPullRequest(repo: String, number: Int) async throws -> GitHubPullRequest {
+        let path = try encodedRepoPath(repo: repo, suffix: "pulls/\(number)")
+        let (data, _) = try await URLSession.shared.data(for: try request(path))
+        return try JSONDecoder().decode(GitHubPullRequest.self, from: data)
+    }
+
     func addComment(repo: String, issueNumber: Int, body: String) async throws -> GitHubComment {
         var req = try request("/repos/gHashTag/\(repo)/issues/\(issueNumber)/comments")
         req.httpMethod = "POST"

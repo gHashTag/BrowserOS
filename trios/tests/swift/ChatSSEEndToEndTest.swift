@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 246
+    static let minimumChecks = 253
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -67,6 +67,7 @@ struct ChatSSEEndToEndTests {
         await runScrollPositionPolicyAndRequestDelivery()
         await runCassetteReplayAndObserver()
         await runSalienceLearnsFromOutcomes()
+        await runPullRequestOutcomeMapping()
         await runAcceptedWaitsForTheMerge()
         await runPullRequestRefusals()
         await runMergedIsNotTheSameAsClosed()
@@ -2107,6 +2108,45 @@ struct ChatSSEEndToEndTests {
     /// is a fact from the forge, and the chat should close on the fact. The risk
     /// in saying so is the opposite failure - tasks that will never have a pull
     /// request waiting forever for one - so both halves are pinned here.
+    /// The forge's answer maps to one of three actions, and an unreachable
+    /// forge maps to none of them.
+    static func runPullRequestOutcomeMapping() async {
+        print("\n# Scenario: reading what the forge actually said")
+
+        let base = #""id":1,"number":7,"title":"t","html_url":"u","head":null,"base":null"#
+        func pr(_ json: String, _ label: String) -> GitHubPullRequest? {
+            guard let decoded = try? JSONDecoder().decode(GitHubPullRequest.self, from: Data(json.utf8)) else {
+                fail("could not decode \(label)"); return nil
+            }
+            return decoded
+        }
+        typealias P = QueenDelegationPolicy
+
+        if let merged = pr("{\(base),\"state\":\"closed\",\"merged\":true,\"merged_at\":\"2026-07-30T00:00:00Z\"}", "merged") {
+            check(P.outcome(merged: merged.isMerged, closedUnmerged: merged.isClosedUnmerged) == .landed, "a merged pull request means the work landed")
+            check(P.nextState(for: .landed) == .merged, "and the task settles as merged")
+        }
+        if let closed = pr("{\(base),\"state\":\"closed\",\"merged\":false,\"merged_at\":null}", "closed unmerged") {
+            check(P.outcome(merged: closed.isMerged, closedUnmerged: closed.isClosedUnmerged) == .abandoned, "closed without merging means nothing landed")
+            check(P.nextState(for: .abandoned) == .awaitingReview,
+                  "so the task goes back to the queue rather than the archive")
+        }
+        if let open = pr("{\(base),\"state\":\"open\"}", "open") {
+            check(P.outcome(merged: open.isMerged, closedUnmerged: open.isClosedUnmerged) == .pending, "an open pull request decides nothing yet")
+            check(P.nextState(for: .pending) == nil, "and moves the task nowhere")
+        }
+
+        // The distinction that makes the whole poll worth writing: two answers
+        // whose `state` is the same word lead to opposite actions.
+        if let merged = pr("{\(base),\"state\":\"closed\",\"merged\":true,\"merged_at\":null}", "merged"),
+           let closed = pr("{\(base),\"state\":\"closed\",\"merged\":false,\"merged_at\":null}", "closed") {
+            check(
+                P.nextState(for: P.outcome(merged: merged.isMerged, closedUnmerged: merged.isClosedUnmerged)) != P.nextState(for: P.outcome(merged: closed.isMerged, closedUnmerged: closed.isClosedUnmerged)),
+                "identical state, opposite destinations - archive versus back to the queue"
+            )
+        }
+    }
+
     static func runAcceptedWaitsForTheMerge() async {
         print("\n# Scenario: the chat closes on the merge, not on the opinion")
 
