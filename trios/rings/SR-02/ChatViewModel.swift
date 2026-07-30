@@ -2843,6 +2843,8 @@ final class ChatViewModel: ObservableObject {
             )
         case .cancelTask(let issue, let reason):
             await cancelDelegatedTask(issue: issue, reason: reason)
+        case .verifyCriterion(let issue, let criterion, let verdict):
+            await recordCriterionVerdict(issue: issue, criterion: criterion, verdict: verdict)
         case .approveDelegation(let issue):
             await approveDelegation(issue: issue)
         case .openPullRequest(let issue):
@@ -3417,14 +3419,40 @@ final class ChatViewModel: ObservableObject {
 
         switch decision {
         case .accept:
+            // Acceptance is checked against the contract before it is checked
+            // against anything else. This is the whole point of writing criteria
+            // down: without it the Queen signs off on an impression, and the
+            // specification becomes decoration that made the brief longer.
+            if let reason = QueenAcceptancePolicy.acceptanceBlockReason(
+                criteria: task.acceptanceCriteria, recorded: task.criterionVerdicts
+            ) {
+                await postQueenNotice(
+                    SystemNoticeClassifier.warningMarker
+                        + "Not accepting \(issue.slug) yet. \(reason)\n\n"
+                        + QueenAcceptancePolicy.table(
+                            criteria: task.acceptanceCriteria, recorded: task.criterionVerdicts
+                        )
+                        + "\n\nRecord what you found with "
+                        + "`/verify \(issue.slug) <criterion text> met|unmet`."
+                )
+                return
+            }
             guard registry.transition(taskID: task.id, to: .accepted) else {
                 await postQueenNotice(SystemNoticeClassifier.failureMarker + (registry.lastError ?? "Could not accept \(issue.slug)."))
                 return
             }
             let tail = note.isEmpty ? "" : "\n\(note)"
+            // The table, not a sentence saying it went well. A reviewer reading
+            // this later should see what was checked, not that someone was
+            // satisfied.
+            let evidence = task.acceptanceCriteria.isEmpty
+                ? ""
+                : "\n\n" + QueenAcceptancePolicy.table(
+                    criteria: task.acceptanceCriteria, recorded: task.criterionVerdicts
+                )
             await postQueenNotice(
                 SystemNoticeClassifier.successMarker
-                    + "Accepted \(issue.slug) from \(task.worker). Its work is on "
+                    + "Accepted \(issue.slug) from \(task.worker).\(evidence)\nIts work is on "
                     + "`\(task.virtualBranch ?? "-")` and the task is archived - kept as a "
                     + "record rather than deleted, so \"what did the swarm do today\" still "
                     + "has an answer tomorrow.\(tail)"
@@ -3574,6 +3602,43 @@ final class ChatViewModel: ObservableObject {
             )
         }
         registry.pruneArchive()
+    }
+
+    /// Records what was found when one acceptance criterion was checked.
+    func recordCriterionVerdict(
+        issue: IssueReference,
+        criterion: String,
+        verdict: QueenCriterionVerdict
+    ) async {
+        let registry = QueenDelegationRegistry.shared
+        guard let task = registry.task(forIssue: issue) else {
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker + "I have no task for \(issue.slug)."
+            )
+            return
+        }
+        guard registry.recordVerdict(taskID: task.id, criterion: criterion, verdict: verdict) else {
+            // Refused rather than filed under a criterion that does not exist.
+            // A verdict nobody can see is worse than no verdict, because the
+            // table would then show unchecked while someone believes they
+            // answered it.
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "No criterion on \(issue.slug) reads \"\(criterion)\". The ones that exist:\n"
+                    + QueenAcceptancePolicy.table(
+                        criteria: task.acceptanceCriteria, recorded: task.criterionVerdicts
+                    )
+            )
+            return
+        }
+        let updated = registry.task(forIssue: issue) ?? task
+        await postQueenNotice(
+            SystemNoticeClassifier.infoMarker
+                + "Recorded.\n"
+                + QueenAcceptancePolicy.table(
+                    criteria: updated.acceptanceCriteria, recorded: updated.criterionVerdicts
+                )
+        )
     }
 
     /// Records that the user agreed to a piece of work.

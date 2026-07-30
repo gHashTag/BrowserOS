@@ -29,6 +29,8 @@ enum QueenCommand: Equatable {
     case review(issue: IssueReference, decision: ReviewDecision, note: String)
     /// Stops a worker that is going nowhere.
     case cancelTask(issue: IssueReference, reason: String)
+    /// Records what was found when one acceptance criterion was checked.
+    case verifyCriterion(issue: IssueReference, criterion: String, verdict: QueenCriterionVerdict)
     /// Records the user's agreement to a proposed piece of work.
     case approveDelegation(issue: IssueReference)
     /// Opens a pull request for a task's virtual branch.
@@ -159,6 +161,19 @@ struct QueenCommandParser {
                   let issue = IssueReference.parse(first) else { return .unknown(trimmed) }
             components.removeFirst()
             return .cancelTask(issue: issue, reason: components.joined(separator: " "))
+        case "verify", "checked":
+            // `/verify <issue> <criterion text> met|unmet`. The verdict is the
+            // last word so the criterion can contain spaces without quoting -
+            // a reviewer typing this at 3am should not be fighting a parser.
+            guard let first = components.first,
+                  let issue = IssueReference.parse(first),
+                  components.count >= 3 else { return .unknown(trimmed) }
+            components.removeFirst()
+            guard let verdict = QueenCriterionVerdict(rawValue: components.removeLast()),
+                  verdict != .unchecked else { return .unknown(trimmed) }
+            let criterion = components.joined(separator: " ")
+            guard !criterion.isEmpty else { return .unknown(trimmed) }
+            return .verifyCriterion(issue: issue, criterion: criterion, verdict: verdict)
         case "approve", "ok":
             guard let first = components.first,
                   let issue = IssueReference.parse(first) else { return .unknown(trimmed) }

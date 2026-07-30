@@ -222,6 +222,21 @@ final class QueenDelegationRegistry: ObservableObject {
         persist()
     }
 
+    /// Records what was found for one criterion.
+    ///
+    /// Returns false when the text matches no criterion on the task, so a typo
+    /// is refused rather than quietly filed under a requirement that does not
+    /// exist - a verdict nobody can see is worse than none.
+    @discardableResult
+    func recordVerdict(taskID: UUID, criterion: String, verdict: QueenCriterionVerdict) -> Bool {
+        guard let index = tasks.firstIndex(where: { $0.id == taskID }),
+              tasks[index].acceptanceCriteria.contains(criterion) else { return false }
+        tasks[index].criterionVerdicts[criterion] = verdict
+        tasks[index].updatedAt = Date()
+        persist()
+        return true
+    }
+
     func recordPullRequest(taskID: UUID, number: Int) {
         guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
         tasks[index].pullRequestNumber = number

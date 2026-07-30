@@ -252,6 +252,7 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
         sources: &[
             "tests/swift/queen_delegation_test.swift",
             "rings/SR-00/QueenDelegation.swift",
+            "rings/SR-00/QueenCriterionVerdict.swift",
             "rings/SR-00/ModelPricing.swift",
             "rings/SR-00/QueenSalience.swift",
         ],

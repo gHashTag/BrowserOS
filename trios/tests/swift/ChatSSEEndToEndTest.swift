@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 294
+    static let minimumChecks = 308
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -67,6 +67,7 @@ struct ChatSSEEndToEndTests {
         await runScrollPositionPolicyAndRequestDelivery()
         await runCassetteReplayAndObserver()
         await runSalienceLearnsFromOutcomes()
+        await runAcceptanceIsCheckedAgainstCriteria()
         await runDelegationAcceptsCriteria()
         await runWorkerBriefIsASpecification()
         await runQueenProposesEvolutionOptions()
@@ -2141,6 +2142,70 @@ struct ChatSSEEndToEndTests {
     /// the "capability with no caller" shape this project keeps finding. These
     /// checks pin the whole path: command text in, criteria on the task,
     /// numbered list out.
+    /// Acceptance is decided by the criteria, not by an impression.
+    ///
+    /// Without this the specification is decoration: the Queen writes down what
+    /// done means and then signs off on a feeling anyway. The three-state
+    /// verdict is the load-bearing bit - collapsing "not checked" into either
+    /// neighbour is how work gets accepted on a glance.
+    static func runAcceptanceIsCheckedAgainstCriteria() async {
+        print("\n# Scenario: accepted means the criteria say so")
+
+        typealias P = QueenAcceptancePolicy
+        let criteria = ["make check passes", "the tab paginates"]
+
+        check(P.acceptanceBlockReason(criteria: criteria, recorded: [:]) != nil,
+              "work with nothing checked cannot be accepted")
+        check(P.acceptanceBlockReason(
+                criteria: criteria,
+                recorded: ["make check passes": .met]
+              ) != nil,
+              "nor work where only some criteria were answered")
+        check(P.acceptanceBlockReason(
+                criteria: criteria,
+                recorded: ["make check passes": .met, "the tab paginates": .unmet]
+              ) != nil,
+              "nor work that failed one")
+        check(P.acceptanceBlockReason(
+                criteria: criteria,
+                recorded: ["make check passes": .met, "the tab paginates": .met]
+              ) == nil,
+              "work that met every criterion can be accepted")
+
+        // Unchecked must not read as either neighbour.
+        let reason = P.acceptanceBlockReason(criteria: criteria, recorded: [:]) ?? ""
+        check(reason.contains("never checked"), "an unanswered criterion is named as unchecked")
+        check(reason.contains("not a pass"), "and the report says plainly that it is not a pass")
+
+        // A task predating criteria must not be stranded.
+        check(P.acceptanceBlockReason(criteria: [], recorded: [:]) == nil,
+              "a task with no criteria can still be accepted, as it always could")
+        check(P.table(criteria: [], recorded: [:]).contains("on judgement"),
+              "but the table says that acceptance is then a judgement, not a check")
+
+        // The table shows every criterion, including the ones nobody answered.
+        let table = P.table(criteria: criteria, recorded: ["make check passes": .met])
+        check(table.contains("[x] 1. make check passes"), "a met criterion is marked met")
+        check(table.contains("[?] 2. the tab paginates"),
+              "and an unanswered one still appears rather than vanishing from the table")
+
+        // The command that records a verdict.
+        guard case .verifyCriterion(let issue, let criterion, let verdict) =
+            QueenCommandParser.parse("/verify gHashTag/trios#41 the tab paginates met")
+        else {
+            fail("/verify did not parse"); return
+        }
+        check(issue.slug == "gHashTag/trios#41", "the issue is read")
+        check(criterion == "the tab paginates",
+              "the criterion keeps its spaces, so it needs no quoting")
+        check(verdict == .met, "and the verdict is the last word")
+        if case .unknown = QueenCommandParser.parse("/verify gHashTag/trios#41 something unchecked") {
+            check(true, "unchecked cannot be recorded by hand - it is the absence of an answer")
+        } else {
+            fail("unchecked cannot be recorded by hand - it is the absence of an answer")
+        }
+    }
+
     static func runDelegationAcceptsCriteria() async {
         print("\n# Scenario: the Queen can state what done means")
 

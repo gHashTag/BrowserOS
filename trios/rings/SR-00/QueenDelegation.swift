@@ -137,6 +137,14 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// and a wish.
     var acceptanceCriteria: [String]
 
+    /// What was found when each criterion was checked, keyed by the criterion.
+    ///
+    /// Keyed by text rather than index so editing the criteria list cannot
+    /// silently reassign a verdict to a different requirement - a renumbering
+    /// that moves a "met" onto something nobody looked at is the worst possible
+    /// failure for this table.
+    var criterionVerdicts: [String: QueenCriterionVerdict]
+
     /// The pull request opened for this task's branch, once one exists.
     ///
     /// Nil means no pull request has been opened - not that one failed. The
@@ -189,6 +197,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         state: DelegatedTaskState = .queued,
         ownedPaths: [String] = [],
         acceptanceCriteria: [String] = [],
+        criterionVerdicts: [String: QueenCriterionVerdict] = [:],
         virtualBranch: String? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
@@ -209,6 +218,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         self.state = state
         self.ownedPaths = ownedPaths
         self.acceptanceCriteria = acceptanceCriteria
+        self.criterionVerdicts = criterionVerdicts
         self.virtualBranch = virtualBranch
         self.createdAt = createdAt
         self.updatedAt = updatedAt
