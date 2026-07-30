@@ -210,6 +210,20 @@ final class QueenDelegationRegistry: ObservableObject {
         persist()
     }
 
+    /// Records a restart and marks the task as freshly active.
+    ///
+    /// Bumping `updatedAt` is the point, not bookkeeping: `stalled()` measures
+    /// silence from that timestamp, so without it a resumed worker is reaped
+    /// again on the very next sweep and the restart accomplishes nothing.
+    func recordResumeAttempt(taskID: UUID) -> Int {
+        guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return 0 }
+        let next = (tasks[index].resumeAttempts ?? 0) + 1
+        tasks[index].resumeAttempts = next
+        tasks[index].updatedAt = Date()
+        persist()
+        return next
+    }
+
     /// Drops the oldest settled tasks once the archive grows past `limit`.
     ///
     /// Unbounded history turns the delegation store into a file that has to be

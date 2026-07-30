@@ -124,6 +124,12 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     var toolCalls: Int?
     /// Files the worker committed to its branch, filled in at review time.
     var committedFiles: Int?
+    /// How many times the Queen has restarted this worker after it went silent.
+    ///
+    /// Optional so delegation stores written before resuming existed still
+    /// decode. Counted rather than flagged, because the interesting question is
+    /// not "was it stuck" but "how many times, and did it ever get anywhere".
+    var resumeAttempts: Int?
     /// Which model did the work, so a cost estimate is possible after the fact.
     var provider: String?
     var model: String?
@@ -157,6 +163,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         outputTokens: Int? = nil,
         toolCalls: Int? = nil,
         committedFiles: Int? = nil,
+        resumeAttempts: Int? = nil,
         provider: String? = nil,
         model: String? = nil
     ) {
@@ -174,6 +181,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         self.outputTokens = outputTokens
         self.toolCalls = toolCalls
         self.committedFiles = committedFiles
+        self.resumeAttempts = resumeAttempts
         self.provider = provider
         self.model = model
     }
@@ -240,6 +248,13 @@ enum QueenDelegationPolicy {
 
     /// A worker with no stream and no result has stopped, whatever the registry
     /// says. Distinguishing "slow" from "gone" is the point.
+    /// How many times a silent worker is restarted before the Queen gives up.
+    ///
+    /// Two, not zero and not many. Zero is today's behaviour - an hour of
+    /// silence ends in a closed chat and nothing learned. Many lets a confused
+    /// worker spend the day rediscovering the same wall.
+    static let maxResumeAttempts = 2
+
     static let stallThreshold: TimeInterval = 60 * 60
 
     static func isExpensive(_ task: DelegatedTask) -> Bool {

@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 205
+    static let minimumChecks = 213
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -67,6 +67,7 @@ struct ChatSSEEndToEndTests {
         await runScrollPositionPolicyAndRequestDelivery()
         await runCassetteReplayAndObserver()
         await runSalienceLearnsFromOutcomes()
+        await runStalledWorkerIsResumedBeforeCancelled()
         await runQueenTaskLifecycleCloses()
         await runPureQueenTypes()
         await runSelfAuditFindsPlantedDeadCode()
@@ -2075,6 +2076,71 @@ struct ChatSSEEndToEndTests {
     /// shape of the life itself, so nothing would have noticed if the cycle
     /// stopped closing: a state that cannot be left, or settled work that never
     /// leaves the open list, looks exactly like a healthy swarm from outside.
+    /// A silent worker is restarted before it is written off, and only a
+    /// certain number of times.
+    ///
+    /// The complaint that prompted this was a chat left hanging mid-sentence.
+    /// The old behaviour turned an hour of silence straight into a cancelled
+    /// task, which is "unfinished" relabelled as "abandoned" - it looks like a
+    /// decision and teaches nobody anything. These checks pin both halves: that
+    /// a restart happens, and that restarting is bounded.
+    static func runStalledWorkerIsResumedBeforeCancelled() async {
+        print("\n# Scenario: a silent worker gets restarted, not written off")
+
+        let store = NSTemporaryDirectory() + "queen-resume-\(UUID().uuidString).json"
+        defer { try? FileManager.default.removeItem(atPath: store) }
+        let registry = QueenDelegationRegistry(storePath: store)
+
+        guard let issue = IssueReference.parse("gHashTag/trios#1") else {
+            fail("could not build a test issue"); return
+        }
+        guard let task = registry.delegate(
+            issue: issue, title: "resume probe", worker: "queen-swift",
+            conversationId: UUID(), ownedPaths: ["docs"]
+        ) else {
+            fail("registry refused a clean delegation"); return
+        }
+        check(registry.transition(taskID: task.id, to: .running), "the probe task is running")
+
+        check(
+            QueenDelegationPolicy.maxResumeAttempts >= 1,
+            "silence is answered by at least one restart, not by giving up immediately"
+        )
+        // Stop here rather than build `1...0` below. A test that traps instead
+        // of failing prints nothing, and "no FAIL lines" then reads as success -
+        // which is how this very check nearly went unverified.
+        guard QueenDelegationPolicy.maxResumeAttempts >= 1 else { return }
+
+        // Count up to the budget and confirm each attempt is recorded.
+        var attempt = 0
+        for expected in 1...QueenDelegationPolicy.maxResumeAttempts {
+            attempt = registry.recordResumeAttempt(taskID: task.id)
+            check(attempt == expected, "restart \(expected) is counted")
+        }
+        check(
+            registry.task(forIssue: issue)?.resumeAttempts == QueenDelegationPolicy.maxResumeAttempts,
+            "the count survives on the task, so the next sweep knows how often this already happened"
+        )
+
+        // The bump is the load-bearing part: stalled() measures silence from
+        // updatedAt, so a restart that did not touch it would be reaped again
+        // immediately and the retry would accomplish nothing.
+        check(
+            registry.stalled(now: Date()).isEmpty,
+            "a just-restarted worker is not immediately stale again"
+        )
+        check(
+            !registry.stalled(now: Date().addingTimeInterval(QueenDelegationPolicy.stallThreshold + 60)).isEmpty,
+            "and it does become stale again once the threshold passes"
+        )
+
+        // Still running: restarting must not quietly settle the task.
+        check(
+            registry.task(forIssue: issue)?.state == .running,
+            "restarting leaves the task running rather than closing it"
+        )
+    }
+
     static func runQueenTaskLifecycleCloses() async {
         print("\n# Scenario: the delegation cycle closes")
 

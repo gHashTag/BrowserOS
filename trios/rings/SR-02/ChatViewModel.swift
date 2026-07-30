@@ -3278,19 +3278,49 @@ final class ChatViewModel: ObservableObject {
         for task in stalled {
             // Only reap what has genuinely stopped. A long stream is not a stall.
             guard workerRunner?.isRunning(conversationId: task.conversationId) != true else { continue }
+
+            // Try to finish the work before writing it off. A silent worker is
+            // a chat left mid-sentence, and closing it converts "unfinished"
+            // into "abandoned" while learning nothing about why it stopped.
+            let alreadyTried = task.resumeAttempts ?? 0
+            if alreadyTried < QueenDelegationPolicy.maxResumeAttempts, let runner = workerRunner {
+                let attempt = registry.recordResumeAttempt(taskID: task.id)
+                let brief = QueenBriefing.text(for: task)
+                    + "\n\nYour stream stopped without a result. Continue from where you "
+                    + "left off in this same chat and on the same branch - do not start "
+                    + "over. If you cannot finish, say plainly what blocked you."
+                workerBaselineTrees[task.conversationId] = await QueenBranchCommitter.snapshotWorkingTree()
+                runner.start(task: task, brief: brief)
+                await appendSystemMessageToQueenChat(
+                    SystemNoticeClassifier.infoMarker
+                        + "\(task.worker) went quiet on \(task.issue.slug), so I restarted it "
+                        + "in the same chat - attempt \(attempt) of "
+                        + "\(QueenDelegationPolicy.maxResumeAttempts). Same branch, so it "
+                        + "continues rather than competing with its own earlier work."
+                )
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.worker.resumed",
+                    "Restarted a silent worker",
+                    ["issue": task.issue.slug, "worker": task.worker, "attempt": "\(attempt)"]
+                )
+                continue
+            }
+
             guard registry.transition(taskID: task.id, to: .cancelled) else { continue }
             await appendSystemMessageToQueenChat(
                 SystemNoticeClassifier.warningMarker
-                    + "I closed \(task.issue.slug). \(task.worker) had no live stream for over "
-                    + "an hour, which means the reaction stopped without producing anything - "
-                    + "it was holding a slot and giving nothing back. Its branch and chat "
-                    + "survive, so nothing is lost; re-delegate when you want another attempt."
+                    + "I closed \(task.issue.slug). \(task.worker) went silent and did not "
+                    + "come back after \(alreadyTried) restart"
+                    + (alreadyTried == 1 ? "" : "s") + ", so this is not a stall I can "
+                    + "clear by asking again. Its branch and chat survive, so nothing is "
+                    + "lost - but treat the task as unanswered rather than attempted."
             )
             TriosLogBus.shared.warn(
                 .queen,
                 "queen.worker.reaped",
-                "Cancelled a stalled worker",
-                ["issue": task.issue.slug, "worker": task.worker]
+                "Cancelled a stalled worker after exhausting restarts",
+                ["issue": task.issue.slug, "worker": task.worker, "attempts": "\(alreadyTried)"]
             )
         }
         registry.pruneArchive()
