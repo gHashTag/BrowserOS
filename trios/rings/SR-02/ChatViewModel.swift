@@ -109,6 +109,13 @@ final class ChatViewModel: ObservableObject {
     let queenStatusVM = QueenStatusViewModel()
     let modelStore: ModelConfigurationStore
     let todoPlanner: TODOPlanner
+    /// Injected rather than reached for, so a test can hand over a store built
+    /// on a temporary directory. Five call sites used SkillStore.shared, which
+    /// reads the real .claude/skills and writes the real disabled-skill state:
+    /// covering the Queen saying "that skill is switched off" meant switching a
+    /// real one off on whoever ran the suite. Defaulting to .shared keeps every
+    /// existing caller unchanged.
+    let skillStore: SkillStore
 
     private let transport: ChatTransportProtocol
     private let healthCheck: ChatHealthCheckProtocol
@@ -165,8 +172,14 @@ final class ChatViewModel: ObservableObject {
         modelStore: ModelConfigurationStore,
         memoryService: AgentMemoryService,
         todoPlanner: TODOPlanner,
-        workerRunner: QueenWorkerRunner? = nil
+        workerRunner: QueenWorkerRunner? = nil,
+        // Optional rather than defaulting to .shared directly: a default
+        // argument is evaluated outside the actor, and SkillStore.shared is
+        // main-actor isolated, which Swift 6 rejects. Resolved inside the
+        // initialiser, where the isolation already holds.
+        skillStore: SkillStore? = nil
     ) {
+        self.skillStore = skillStore ?? .shared
         NSLog("ChatViewModel.init starting")
         self.transport = transport
         self.healthCheck = healthCheck
@@ -3054,8 +3067,8 @@ final class ChatViewModel: ObservableObject {
         // like it disobeyed.
         var skillBody: String?
         if let skill {
-            guard let descriptor = SkillStore.shared.skill(named: skill),
-                  SkillStore.shared.isEnabled(descriptor),
+            guard let descriptor = skillStore.skill(named: skill),
+                  skillStore.isEnabled(descriptor),
                   let body = try? String(contentsOfFile: descriptor.path, encoding: .utf8) else {
                 registry.transition(taskID: task.id, to: .cancelled)
                 await postQueenNotice(
@@ -3972,7 +3985,7 @@ final class ChatViewModel: ObservableObject {
         guard conversationId == ChatConversation.trinityQueenId else { return memory }
 
         let registry = QueenDelegationRegistry.shared
-        let store = SkillStore.shared
+        let store = skillStore
         let charter = QueenSystemPrompt.text(
             skills: store.enabled,
             disabledSkills: store.skills
@@ -3986,7 +3999,7 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func reportSkills() async {
-        let store = SkillStore.shared
+        let store = skillStore
         store.reload()
         guard !store.skills.isEmpty else {
             await postQueenNotice(
@@ -4018,7 +4031,7 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func runQueenSkill(command: String, arguments: [String]) async {
-        let store = SkillStore.shared
+        let store = skillStore
         guard let skill = store.skill(named: command) else {
             await postQueenNotice(
                 SystemNoticeClassifier.warningMarker

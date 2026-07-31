@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 381
+    static let minimumChecks = 385
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -279,9 +279,6 @@ struct ChatSSEEndToEndTests {
         )
         try? await Task.sleep(nanoseconds: 50_000_000)
 
-        // Read-only on purpose. Everything the Queen does that writes touches
-        // shared singletons - the skill store, the delegation registry - and a
-        // test that switches a real skill off would leave the machine changed.
         await viewModel.runQueenCommand("/definitely-not-a-skill")
         let notices = viewModel.messages.filter { $0.role == .system }.map(\.content)
         check(!notices.isEmpty, "an unknown command is answered rather than swallowed")
@@ -291,6 +288,59 @@ struct ChatSSEEndToEndTests {
               "and points at how to find out what does exist")
         check(viewModel.conversationId == ChatConversation.trinityQueenId,
               "a Queen command lands in the Queen's chat, whichever one was open")
+
+        // The other half of the answer, which needed the skill store to become
+        // injectable to reach: yesterday this test could not switch a skill off
+        // without switching off a real one on whoever ran the suite.
+        let root = NSTemporaryDirectory() + "queen-cmd-skills-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        try? FileManager.default.createDirectory(
+            atPath: "\(root)/.claude/skills/probe", withIntermediateDirectories: true
+        )
+        try? "---\nname: probe\ndescription: A probe skill.\n---\nDo the thing."
+            .write(toFile: "\(root)/.claude/skills/probe/SKILL.md", atomically: true, encoding: .utf8)
+        let skills = SkillStore(projectRoot: root, home: root, statePath: "\(root)/state.json")
+        guard let probe = skills.skill(named: "/probe") else {
+            fail("the probe skill was not discovered"); return
+        }
+        skills.setEnabled(false, for: probe)
+
+        let offVM = ChatViewModel(
+            transport: MockChatTransport(),
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: InMemoryPersister(),
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: modelStore,
+            memoryService: AgentMemoryService(
+                store: VolatileMemoryStore(),
+                fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: TODOPlanner(store: VolatileMemoryStore(), preferences: testDefaults),
+            skillStore: skills
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        await offVM.runQueenCommand("/probe")
+        let offNotices = offVM.messages.filter { $0.role == .system }.map(\.content)
+        check(offNotices.contains { $0.contains("switched off") },
+              "a skill that exists but is off is refused for that reason, not for being missing")
+        check(!offNotices.contains { $0.contains("no skill called") },
+              "and is not reported as absent, which is the distinction the whole message exists for")
+        // The assertions above are not enough on their own, which I found by
+        // mutating the enabled check away and watching them both pass. The
+        // phrase survives because SkillStore.run refuses a disabled skill too
+        // and says so in the same words - the behaviour is guarded twice, and
+        // "switched off" appears either way.
+        //
+        // What the outer guard is actually for is not letting her announce work
+        // she will not do. Without it she says "Running /probe" and only then
+        // discovers it is off, which reads to the user as a skill that ran and
+        // failed rather than one that was never going to start.
+        check(!offNotices.contains { $0.contains("Running `/probe`") },
+              "and she does not announce running something she is about to refuse")
+        check(offNotices.count == 1,
+              "one answer, not an announcement followed by a retraction")
     }
 
     // MARK: - Scenario 3: message deduplication
