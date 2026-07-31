@@ -32,6 +32,17 @@ final class QueenBackgroundService: ObservableObject {
     @Published private(set) var lastAudit: QueenAuditEvent?
     @Published private(set) var proposals: [QueenProposal] = []
 
+    /// How often the Queen wakes, walks the delegation registry, and writes a
+    /// report to the master chat. Default is 30 minutes (1800 s). Override at
+    /// launch with the `TRIOS_QUEEN_REPORT_SECONDS` environment variable.
+    @Published var reportingIntervalSeconds: TimeInterval = {
+        if let raw = ProcessInfo.processInfo.environment["TRIOS_QUEEN_REPORT_SECONDS"],
+           let seconds = TimeInterval(raw), seconds > 0 {
+            return seconds
+        }
+        return 30 * 60
+    }()
+
     private var queenService: QueenSelfImprovementService?
     private var a2aClient: A2ARegistryClient?
     private var persister: ChatPersisterProtocol?
@@ -41,6 +52,21 @@ final class QueenBackgroundService: ObservableObject {
     private var a2aReconnectAttempt = 0
     private let maxA2AReconnectAttempts = 5
     private var a2aStreamHealthy = false
+
+    /// Background task that wakes the Queen on `reportingIntervalSeconds` and
+    /// walks the delegation registry to produce a conversational report.
+    private var reportLoopTask: Task<Void, Never>?
+
+    /// Snapshot of the last report's state fingerprint. When a new wake
+    /// produces the same signature the Queen says so in one line instead of
+    /// repeating the previous report.
+    private var lastReportSignature: String?
+
+    /// Text of the most recent registry report — the full prose when the
+    /// swarm changed, or the "nothing has changed" one-liner when it did
+    /// not. The self-test reads this to log what the Queen actually said
+    /// without parsing the chat transcript.
+    @Published private(set) var lastReportText: String?
 
     weak var delegate: QueenBackgroundServiceDelegate?
 
@@ -194,6 +220,7 @@ final class QueenBackgroundService: ObservableObject {
 
         await registerA2A()
         startAuditLoop()
+        startReportLoop()
 
         // Publish initial state so any observing view model is in sync.
         objectWillChange.send()
@@ -204,6 +231,9 @@ final class QueenBackgroundService: ObservableObject {
         isRunning = false
         auditLoopTask?.cancel()
         auditLoopTask = nil
+        reportLoopTask?.cancel()
+        reportLoopTask = nil
+        lastReportSignature = nil
         a2aStreamTask?.cancel()
         a2aStreamTask = nil
         a2aRouter = nil
@@ -367,6 +397,189 @@ final class QueenBackgroundService: ObservableObject {
             self.a2aRouter = nil
         }
     }
+
+    // MARK: - Registry report loop
+
+    /// Starts the periodic wake that walks the delegation registry and writes a
+    /// conversational report to the Queen chat.
+    ///
+    /// Separate from the audit loop because they answer different questions: the
+    /// audit asks "where is the codebase weak?" while this loop asks "what is
+    /// the swarm doing?" Running them on different cadences lets the Queen
+    /// report twice as often as she audits — a supervisor checks in often but
+    /// thinks deeply less frequently.
+    private func startReportLoop() {
+        reportLoopTask?.cancel()
+        reportLoopTask = Task { [weak self, interval = reportingIntervalSeconds] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+                guard let self, self.isRunning else { return }
+                await self.walkRegistryAndReport()
+            }
+        }
+    }
+
+    /// Walks the delegation registry and posts a conversational report to the
+    /// Queen chat.
+    ///
+    /// This is what the acceptance criteria describe: the Queen wakes, looks at
+    /// every task, and says what she sees — not as a table but as prose that
+    /// explains what moved, what is stuck, and what she proposes. When the
+    /// swarm has not changed since the last wake, she says so in one line
+    /// instead of repeating herself.
+    func walkRegistryAndReport() async {
+        let registry = QueenDelegationRegistry.shared
+
+        // Housekeeping before reporting, so the digest describes the swarm
+        // after reaping rather than before — the same policy the existing
+        // review scheduler follows.
+        _ = registry.archiveTerminalTasks()
+
+        let now = Date()
+        let swarm = registry.open
+        let stalled = QueenReviewDigest.stalled(swarm, now: now)
+        let pendingProposals = proposals.filter { $0.status == .pending }
+        let spentToday = registry.spentToday(now: now)
+
+        // Build a fingerprint of everything that matters. When it matches the
+        // last report, nothing has changed and the Queen says so in one line.
+        let signature = Self.registrySignature(
+            swarm: swarm, proposals: proposals, spentToday: spentToday
+        )
+        if signature == lastReportSignature {
+            let oneLiner = SystemNoticeClassifier.infoMarker
+                + "Nothing has changed since my last look — all quiet."
+            lastReportText = oneLiner
+            await appendQueenSystemMessage(oneLiner)
+            return
+        }
+        lastReportSignature = signature
+
+        // Generate the conversational digest. Returns nil when nothing is
+        // running and nothing is waiting — but proposals may still be worth
+        // mentioning, so we compose around that.
+        let digest = QueenReviewDigest.text(for: swarm, now: now)
+
+        var report = SystemNoticeClassifier.infoMarker
+
+        if let digest {
+            report += digest
+        } else if pendingProposals.isEmpty {
+            report += "I checked the hive at \(Self.reportTimestamp(now)). "
+                + "Everything is quiet — no workers running, nothing waiting "
+                + "for review."
+        } else {
+            report += "I checked the hive at \(Self.reportTimestamp(now)). "
+                + "No workers are running and nothing is waiting for review, "
+                + "but I have some thoughts about the repository."
+        }
+
+        if !stalled.isEmpty {
+            report += "\n\n" + QueenReviewDigest.stallParagraph(stalled, now: now)
+        }
+
+        // Proposals: the Queen's decisions about how to develop the repository.
+        // She explains her reasoning, not just the facts — the difference
+        // between a dashboard and a supervisor.
+        if let proposalsText = Self.proposalsDigest(pendingProposals) {
+            report += "\n\n" + proposalsText
+        }
+
+        if let budgetNote = QueenReviewDigest.budgetParagraph(
+            spentToday: spentToday, budget: .default
+        ) {
+            report += "\n\n" + budgetNote
+        }
+
+        lastReportText = report
+        await appendQueenSystemMessage(report)
+
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.report.posted",
+            "Posted a registry report",
+            [
+                "open": String(swarm.count),
+                "stalled": String(stalled.count),
+                "proposals": String(pendingProposals.count),
+            ]
+        )
+    }
+
+    // MARK: - Report helpers
+
+    /// A compact fingerprint of the swarm and proposals, used to detect
+    /// "nothing changed since last time."
+    ///
+    /// Task identity is slug + state (not `updatedAt`, which changes on every
+    /// usage record and would make the signature thrash). Proposal identity is
+    /// id + status. Spend is rounded so a penny's difference does not count as
+    /// movement.
+    nonisolated static func registrySignature(
+        swarm: [DelegatedTask],
+        proposals: [QueenProposal],
+        spentToday: Double
+    ) -> String {
+        let taskPart = swarm
+            .map { "\($0.issue.slug):\($0.state.rawValue)" }
+            .sorted()
+            .joined(separator: "|")
+        let proposalPart = proposals
+            .map { "\($0.id.uuidString.prefix(8)):\($0.status.rawValue)" }
+            .sorted()
+            .joined(separator: "|")
+        let spendBucket = String(Int(spentToday * 100))
+        return "\(taskPart)##\(proposalPart)##\(spendBucket)"
+    }
+
+    /// Conversational text about pending improvement proposals.
+    ///
+    /// The Queen explains *why* she thinks each change matters, not just what
+    /// she would change — criterion 3. Returns nil when there are no pending
+    /// proposals, so callers can skip the paragraph cleanly.
+    nonisolated static func proposalsDigest(
+        _ proposals: [QueenProposal]
+    ) -> String? {
+        let pending = proposals.filter { $0.status == .pending }
+        guard !pending.isEmpty else { return nil }
+
+        var lines: [String] = []
+        if pending.count == 1, let p = pending.first {
+            lines.append(
+                "I have a proposal for the repository: \(p.rationale) "
+                    + "I would change `\(p.targetFile)` — say "
+                    + "`/evolve-apply \(p.id.uuidString.prefix(8))` if you "
+                    + "agree, or `/evolve-reject \(p.id.uuidString.prefix(8))` "
+                    + "if you do not."
+            )
+        } else {
+            lines.append(
+                "I have \(pending.count) proposals for how to develop the "
+                    + "repository:"
+            )
+            for p in pending {
+                lines.append(
+                    "  - \(p.rationale) I would touch "
+                        + "`\(p.targetFile)`."
+                )
+            }
+            lines.append(
+                "Use `/evolve-apply <id>` to approve any of them, or "
+                    + "`/evolve-list` to see the full patches."
+            )
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    nonisolated static func reportTimestamp(_ date: Date) -> String {
+        Self.reportTimeFormatter.string(from: date)
+    }
+
+    private nonisolated static let reportTimeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
 
     // MARK: - Audit loop
 

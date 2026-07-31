@@ -65,6 +65,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // self-improvement audit loop. It survives chat switches and panel close.
             await QueenBackgroundService.shared.start()
             await runDelegationSelfTestIfRequested()
+            await runQueenReportSelfTestIfRequested()
         }
     }
 
@@ -273,6 +274,55 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             "queen.selftest.reviewed",
             "Review command applied",
             ["issue": issue.slug, "command": verb, "state": reviewed?.rawValue ?? "unknown"]
+        )
+    }
+
+    /// Wait for one Queen registry report and log its text as a separate
+    /// event so the self-test run gives a verdict, not silence.
+    ///
+    /// The delegation self-test proves the bee flew; this proves the Queen
+    /// noticed and said something about it. Without it, the report is lost to
+    /// the chat transcript that nobody reads after the app closes.
+    ///
+    /// Set `TRIOS_E2E_QUEEN_REPORT=1` to opt in. The report comes from the
+    /// same `walkRegistryAndReport()` the loop calls, so the text is exactly
+    /// what the Queen would say on a timer wake.
+    @MainActor
+    private func runQueenReportSelfTestIfRequested() async {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["TRIOS_E2E_QUEEN_REPORT"] != nil else { return }
+
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.selftest.report.start",
+            "Waiting for a Queen registry report",
+            [:]
+        )
+
+        await QueenBackgroundService.shared.walkRegistryAndReport()
+
+        guard let text = QueenBackgroundService.shared.lastReportText else {
+            TriosLogBus.shared.error(
+                .queen,
+                "queen.selftest.report.failed",
+                "Queen produced no report text",
+                [:]
+            )
+            return
+        }
+
+        // Reasonably truncated — enough to see what she said without flooding
+        // the log. The full text lives in the Queen chat transcript.
+        let limit = 500
+        let truncated = String(text.prefix(limit))
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.selftest.report",
+            truncated,
+            [
+                "length": String(text.count),
+                "truncated": text.count > limit ? "true" : "false"
+            ]
         )
     }
 
