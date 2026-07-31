@@ -2624,3 +2624,35 @@ Left alone deliberately: the store-level output budget that can be read but
 never set; the observer's shell blind spot; the four RichTextRenderer
 deprecations; the pull request waiting on a token only the user can place; and
 the 22 XCTest errors.
+
+## 2026-07-31 ~14:0x UTC - the door was not locked
+
+Verifications green first. Last night I recorded that the harness "has no way
+into the Queen's command handling" and planned a cycle of scaffolding to build
+one. The door was open. runQueenCommand is callable on the very view model this
+harness already builds five times over - the same one the application builds -
+and it worked unchanged.
+
+I had inferred the limitation from runQueenCommand appearing nowhere in the
+test file. That is the same mistake as reading a scanner's silence as a clean
+result, made this time about my own suite: absence of a call is not absence of
+a way in. Worth naming because it cost a night's plan, and because it is the
+cheap kind of mistake to keep making - not doing something looks identical to
+not being able to.
+
+So the first coverage of the Queen replying to a user: an unknown command is
+answered rather than swallowed, the answer says the skill does not exist -
+which is one of the two failures the canRun deletion was about yesterday - and
+it points at /skills. Also that a Queen command lands in her chat whichever
+conversation was open, which nothing had checked. Blurring the message fails
+two of the four.
+
+Read-only on purpose. Everything the Queen does that writes goes through shared
+singletons, and a test that switched a real skill off would leave the machine
+changed. Covering the "switched off" message needs those injectable, which is
+real work and its own cycle.
+
+Left alone deliberately: making the skill store and delegation registry
+injectable; the store-level output budget that can be read but never set; the
+observer's shell blind spot; the four RichTextRenderer deprecations; the pull
+request waiting on a token only the user can place; and the 22 XCTest errors.
