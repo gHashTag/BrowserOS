@@ -3543,38 +3543,31 @@ final class ChatViewModel: ObservableObject {
         }.value
     }
 
-    /// The full contents of files the worker touched, read from the working
-    /// tree after the commit.
+    /// The full contents of every file in the task's `ownedPaths`, read from
+    /// the working tree after the commit.
     ///
     /// The diff answers "what changed"; the file contents answer "what the
     /// file looks like now". Both are needed — a criterion may ask about code
-    /// that the change did not touch but that lives in a file the change did.
+    /// that the change did not touch but that lives in a file the task owns.
     /// Reading from the working tree, not from a git object, because the diff
     /// itself is taken against the working tree: if the diff is correct, the
     /// working tree is the right source for the content around it.
+    ///
+    /// Files are drawn from `ownedPaths` (the task boundary), not from
+    /// `git diff --name-only`. A worker that changed nothing still produced
+    /// work — the criteria describe the result, not the delta. If the
+    /// reviewer only sees the delta, an empty diff is an empty brief, and
+    /// every criterion reads "could not check". Carrying the owned files
+    /// means the reviewer can judge what is there regardless of what moved.
     private func fileContentsForReview(
         baselineTree: String?,
         ownedPaths: [String]
     ) async -> [String: String] {
-        guard let baselineTree else { return [:] }
         return await Task.detached(priority: .utility) {
-            var nameArgs = ["diff", "--name-only", baselineTree]
-            if !ownedPaths.isEmpty {
-                nameArgs.append("--")
-                nameArgs.append(contentsOf: ownedPaths.map {
-                    QueenDelegationPolicy.normalizePath($0)
-                })
-            }
-            let changedFiles = QueenStatusViewModel.runProcess(
-                "/usr/bin/git",
-                arguments: nameArgs,
-                workDir: ProjectPaths.root,
-                timeout: 30
-            )
             let repoRoot = QueenBranchCommitter.repositoryRoot()
             var result: [String: String] = [:]
-            for filePath in changedFiles.split(separator: "\n") {
-                let path = filePath.trimmingCharacters(in: .whitespacesAndNewlines)
+            for rawPath in ownedPaths {
+                let path = QueenDelegationPolicy.normalizePath(rawPath)
                 guard !path.isEmpty else { continue }
                 let content = QueenStatusViewModel.runProcess(
                     "/bin/cat",
@@ -3582,6 +3575,12 @@ final class ChatViewModel: ObservableObject {
                     workDir: ProjectPaths.root,
                     timeout: 10
                 )
+                // An empty string from cat means the file does not exist or is
+                // genuinely empty. Either way it carries no information for the
+                // reviewer, so it is omitted rather than added as a blank entry
+                // that would pad the brief without adding context.
+                guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                else { continue }
                 result[path] = content
             }
             return result
