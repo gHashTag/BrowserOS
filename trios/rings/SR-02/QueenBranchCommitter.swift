@@ -148,6 +148,23 @@ enum QueenBranchCommitter {
                 .split(separator: "\n")
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
+                // The Queen writes her own state (.trinity/state/*,
+                // .trinity-dev/state/*) between the two snapshots as
+                // bookkeeping — registry, verdicts, task tracking. Those
+                // are not the worker's edits, but a git diff cannot tell
+                // them apart from one: both are just "a path that changed
+                // while the worker ran." Without this filter they surface
+                // as boundary violations and false evidence, accusing the
+                // worker of writing files it never touched.
+                //
+                // Narrow on purpose: only the state subdirectory, not the
+                // whole .trinity tree. Specs and wave logs under .trinity
+                // are real work product that a boundary check must still see.
+                .filter { path in
+                    let normalized = QueenDelegationPolicy.normalizePath(path)
+                    return !normalized.contains(".trinity/state/")
+                        && !normalized.contains(".trinity-dev/state/")
+                }
         }.value
     }
 
