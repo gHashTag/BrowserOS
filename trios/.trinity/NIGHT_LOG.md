@@ -2900,3 +2900,38 @@ Still broken, plainly: the bees sit beside the Queen, not under her - there is
 no hierarchy in the sidebar at all, only a pinned crown. No per-bee status in
 her chat. Nothing in the list says whether a bee is running, waiting for review
 or failed. That is (b)'s remaining half and (c), and both are UI.
+
+## 2026-08-01 ~10:xx - correcting myself, then two chats that vanished
+
+First, a correction. Yesterday's entry said the sidebar has no hierarchy and no
+per-bee status. It has both: the Queen occupies her own section above
+everything with a crown and a review-queue badge, and each bee row carries a
+status dot, the state in words, its issue slug and its branch. I wrote
+otherwise without opening the file - the same read-free conclusion I have spent
+weeks catching in scanners and tests, made about the very thing I was asked to
+build.
+
+What was actually wrong is narrower and worse. The Swarm section drew
+registry.active, meaning "not terminal", and failed is terminal - so the one
+state a supervisor most needs to see removed the bee from her list the instant
+it happened. The registry already draws the right line in `open`, with a
+comment saying why: a failure nobody has looked at is still work, and filing it
+away silently is how it never gets looked at. The sidebar was reading the wrong
+property.
+
+Fixing that exposed the second. The ordinary conversation list excluded every
+chat that had a task at all, so a settled task left the swarm section and did
+not reappear below - its chat existed and was unreachable from the sidebar.
+Now the ordinary list excludes only what the swarm section is currently drawing.
+
+Proven at the model level: active drops a failed task, open keeps it, a
+cancelled one leaves open while its conversation remains. The view is not
+driven by tests, so the release app was rebuilt and relaunched to be looked at.
+The fixture was wrong once - failed to accepted is refused, because the state
+machine allows failed only to running or cancelled, which is correct.
+
+Still broken: nothing is live. The master chat does not update as a bee changes
+state; the sidebar redraws because it observes the registry, but the Queen says
+nothing in her own chat. And context control is unproven - the brief looks
+right, but that the Queen's history never reaches a worker is an assumption
+until it is driven.
