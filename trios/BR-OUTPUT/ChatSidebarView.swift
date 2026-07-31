@@ -121,7 +121,13 @@ struct ChatSidebarView: View {
             
             // Regular conversations
             Section {
-                ForEach(filteredConversations.filter { !$0.isPinned && $0.id != ChatConversation.trinityQueenId && registry.task(forConversation: $0.id) == nil }) { conversation in
+                // Excluded from here only while the Swarm section is showing
+                // them. The filter used to drop every conversation that had a
+                // task at all, so once a task settled it left the swarm list
+                // and did not come back here either - the chat became
+                // unreachable from the sidebar, and reading what a finished bee
+                // actually did meant it was gone.
+                ForEach(filteredConversations.filter { !$0.isPinned && $0.id != ChatConversation.trinityQueenId && !swarmConversationIds.contains($0.id) }) { conversation in
                     conversationRow(conversation)
                 }
             }
@@ -249,7 +255,20 @@ struct ChatSidebarView: View {
     }
 
     private var delegatedTasks: [DelegatedTask] {
-        registry.active.sorted { $0.updatedAt > $1.updatedAt }
+        // `open`, not `active`. Active means "not terminal", and failed is
+        // terminal, so a bee that fell over left this list the instant it did -
+        // the one state a supervisor must not miss was the one that vanished.
+        // The registry already draws the right line: open keeps a failure until
+        // somebody acknowledges it, and the comment beside it says why - a
+        // failure nobody has looked at is still work, and filing it away
+        // silently is how it never gets looked at.
+        registry.open.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    /// The conversations the Swarm section is drawing right now, so the
+    /// ordinary list can leave exactly those out and no more.
+    private var swarmConversationIds: Set<UUID> {
+        Set(delegatedTasks.map(\.conversationId))
     }
 
     private var pinnedConversations: [ChatConversation] {

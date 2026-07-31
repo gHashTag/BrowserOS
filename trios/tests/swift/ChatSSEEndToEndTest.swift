@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 409
+    static let minimumChecks = 413
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -529,6 +529,33 @@ struct ChatSSEEndToEndTests {
         )
         check(staffed.conversations.contains { $0.id == ChatConversation.trinityQueenId },
               "and the Queen's own chat is still there beside it")
+
+        // What the swarm list must not do: lose a failure. The sidebar drew
+        // registry.active, which is "not terminal", and failed is terminal - so
+        // a bee that fell over left the list the instant it did. The registry
+        // already knows better: `open` keeps unacknowledged failures, and the
+        // comment beside it says why - a failure nobody has looked at is still
+        // work, and filing it away silently is how it never gets looked at.
+        registry.transition(taskID: opened.id, to: .failed)
+        check(!registry.active.contains { $0.id == opened.id },
+              "a failed bee is gone from `active`, which is what the sidebar used to draw")
+        check(registry.open.contains { $0.id == opened.id },
+              "but `open` keeps it, because nobody has looked at the failure yet")
+
+        // And a settled task must leave the swarm list, because that is what
+        // lets its chat fall back into the ordinary one. Before this, the
+        // sidebar excluded every conversation that had a task at all, so a
+        // finished bee's chat was in neither list and could not be opened to
+        // see what it had done.
+        // Cancelled, not accepted: the state machine only allows failed to go
+        // to running or cancelled, which is right - work that fell over is
+        // retried or abandoned, not quietly approved. My first fixture tried
+        // failed to accepted and the refusal was the machine being correct.
+        registry.transition(taskID: opened.id, to: .cancelled)
+        check(!registry.open.contains { $0.id == opened.id },
+              "an acknowledged task leaves the swarm list")
+        check(staffed.conversations.contains { $0.id == opened.conversationId },
+              "while its chat is still a conversation, so the sidebar has somewhere to put it")
 
         // The consent gate, checked on the staffed view model on purpose. I
         // first asserted it on the unstaffed one, where no task opens whatever
