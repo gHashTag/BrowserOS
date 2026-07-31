@@ -65,6 +65,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // self-improvement audit loop. It survives chat switches and panel close.
             await QueenBackgroundService.shared.start()
             await runDelegationSelfTestIfRequested()
+            await runQueenReportSelfTestIfRequested()
         }
     }
 
@@ -274,6 +275,126 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             "Review command applied",
             ["issue": issue.slug, "command": verb, "state": reviewed?.rawValue ?? "unknown"]
         )
+    }
+
+    /// Wait for one Queen registry report and log its text as a separate
+    /// event so the self-test run gives a verdict, not silence.
+    ///
+    /// The delegation self-test proves the bee flew; this proves the Queen
+    /// noticed and said something about it. Without it, the report is lost to
+    /// the chat transcript that nobody reads after the app closes.
+    ///
+    /// Set `TRIOS_E2E_QUEEN_REPORT=1` to opt in. The report comes from the
+    /// same `walkRegistryAndReport()` the loop calls, so the text is exactly
+    /// what the Queen would say on a timer wake.
+    /// Prove the Queen's first report in a process is always full and that a
+    /// second walk without changes collapses to the one-liner.
+    ///
+    /// Two consecutive walks with no swarm movement: the first must be a full
+    /// digest (never "nothing has changed"), the second must be the one-liner.
+    /// If someone removes the deduplication guard entirely, the second walk
+    /// would produce a full report identical to the first, and this test would
+    /// catch it.
+    ///
+    /// Set `TRIOS_E2E_QUEEN_REPORT=1` to opt in. The reports come from the
+    /// same `walkRegistryAndReport()` the loop calls.
+    @MainActor
+    private func runQueenReportSelfTestIfRequested() async {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["TRIOS_E2E_QUEEN_REPORT"] != nil else { return }
+
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.selftest.report.start",
+            "Starting Queen report self-test: two walks, same swarm",
+            [:]
+        )
+
+        // Reset so the first walk is treated as the first report in the
+        // process, even if the timer loop already fired between start() and
+        // here. The guarantee under test is "the first report in a process is
+        // always full" — the reset puts us in exactly that state.
+        QueenBackgroundService.shared.resetReportTracking()
+
+        // ── Walk 1: must be a full report, never the one-liner ──
+        await QueenBackgroundService.shared.walkRegistryAndReport()
+
+        guard let firstText = QueenBackgroundService.shared.lastReportText else {
+            TriosLogBus.shared.error(
+                .queen,
+                "queen.selftest.report.failed",
+                "First walk produced no report text",
+                [:]
+            )
+            return
+        }
+
+        let firstWasOneLiner = QueenBackgroundService.shared.lastReportWasOneLiner ?? false
+        let firstLimit = 500
+        TriosLogBus.shared.info(
+            .queen,
+            firstWasOneLiner
+                ? "queen.selftest.report.first_was_oneliner"
+                : "queen.selftest.report.first",
+            String(firstText.prefix(firstLimit)),
+            [
+                "walk": "1",
+                "length": String(firstText.count),
+                "one_liner": String(firstWasOneLiner),
+                "truncated": firstText.count > firstLimit ? "true" : "false"
+            ]
+        )
+
+        if firstWasOneLiner {
+            TriosLogBus.shared.error(
+                .queen,
+                "queen.selftest.report.failed",
+                "First report in a process was a one-liner — it must always be full",
+                [:]
+            )
+            return
+        }
+
+        // ── Walk 2: same registry, nothing changed — must be the one-liner ──
+        await QueenBackgroundService.shared.walkRegistryAndReport()
+
+        guard let secondText = QueenBackgroundService.shared.lastReportText else {
+            TriosLogBus.shared.error(
+                .queen,
+                "queen.selftest.report.failed",
+                "Second walk produced no report text",
+                [:]
+            )
+            return
+        }
+
+        let secondWasOneLiner = QueenBackgroundService.shared.lastReportWasOneLiner ?? false
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.selftest.report.second",
+            String(secondText.prefix(200)),
+            [
+                "walk": "2",
+                "length": String(secondText.count),
+                "one_liner": String(secondWasOneLiner)
+            ]
+        )
+
+        if secondWasOneLiner {
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.selftest.report.passed",
+                "First report was full, second was a one-liner — dedup works",
+                [:]
+            )
+        } else {
+            TriosLogBus.shared.error(
+                .queen,
+                "queen.selftest.report.failed",
+                "Second walk without changes was not a one-liner — dedup is broken",
+                [:]
+            )
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
