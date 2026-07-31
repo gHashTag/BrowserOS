@@ -3106,10 +3106,20 @@ final class ChatViewModel: ObservableObject {
             skillBody = body
         }
         let brief = QueenBriefing.text(for: task, skillBody: skillBody)
+        // Materialise the chat before naming it. renameConversation renames a
+        // record that exists; the comment above claimed the persister creates
+        // one "the moment messages are saved against a fresh id", which is true
+        // and is the problem - nothing was saved yet, so the rename landed on
+        // nothing and the chat stayed out of the sidebar until the bee spoke.
+        //
+        // A delegated chat nobody can see is a bee nobody can supervise, which
+        // is the whole point of the Queen having chats at all.
+        await persister.save(messages: [], conversationId: conversationId)
         await persister.renameConversation(
             id: conversationId,
             title: "\(issue.slug) \(title)"
         )
+        await loadConversations()
         registry.transition(taskID: task.id, to: .running)
 
         // Actually start the bee. Saving the briefing and stopping there left a

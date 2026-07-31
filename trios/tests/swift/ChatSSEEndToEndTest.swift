@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 406
+    static let minimumChecks = 409
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -517,6 +517,18 @@ struct ChatSSEEndToEndTests {
 
         check(opened.virtualBranch?.hasPrefix("queen/4243-") == true,
               "and a branch is named for the issue, so the work is attributable")
+
+        // The chat the Queen just opened - is it in the list the sidebar draws?
+        await staffed.loadConversations()
+        check(staffed.conversations.contains { $0.id == opened.conversationId },
+              "the chat she opened for the issue is in the sidebar")
+        check(
+            staffed.conversations.first { $0.id == opened.conversationId }?
+                .title.contains(opened.issue.slug) == true,
+            "and it is named for its issue, so the list says which task it is"
+        )
+        check(staffed.conversations.contains { $0.id == ChatConversation.trinityQueenId },
+              "and the Queen's own chat is still there beside it")
 
         // The consent gate, checked on the staffed view model on purpose. I
         // first asserted it on the unstaffed one, where no task opens whatever
