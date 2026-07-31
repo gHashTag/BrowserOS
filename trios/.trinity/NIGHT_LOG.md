@@ -3026,3 +3026,38 @@ towards is not. No delegation has ever reached a pull request, so the Queen has
 never reviewed or merged anything - that waits on a GitHub token only the user
 can place. She is not proactive either: she answers, she does not arrive with
 three options of her own.
+
+## 2026-08-01 ~07:2x UTC - the first pull request
+
+Four defects stood between an accepted task and a pull request, and none was
+visible from reading. Each was found by running the cycle and asking why it
+stopped, and each answer was one line.
+
+Accepting made the task vanish: task(forIssue:) hides terminal states so
+/delegate refuses a second chat on a live issue, and accepted is terminal - so
+the step immediately after acceptance looked the task up, found nothing, said
+"I have no task for this issue" and returned. That is why no pull request has
+ever been opened here. Nothing pushed the branch: commit deliberately avoids
+the network, the pull request path assumed publication, and between them was
+nothing. The pull request was aimed at the issue's repository while the branch
+lives in the code's - the issues are in gHashTag/trios and the commits in
+gHashTag/BrowserOS. And the probe reviewed before handleWorkerFinished had
+committed and transitioned, so /accept hit a still-running task and was
+refused; every probe that ever "closed the loop" was reporting a refusal as a
+state.
+
+Under all four: silence. Three exits returned without a word, so every attempt
+looked exactly like nothing happening, and I guessed twice before instrumenting
+instead. Once the exits logged, the remaining answers came in four straight
+steps. The lesson is the one this project keeps teaching - a silent failure
+costs more than the defect it hides.
+
+Proven live: queen.pr.opened, gHashTag/BrowserOS#6, opened by the Queen after
+she accepted a bee's work. The worktree stayed on feat/queen-supervisor
+throughout, so the branch-hijack fix held in a real run, and the out-of-bounds
+detector fired on measured writes for the first time outside a test.
+
+Still broken: she has not reviewed against criteria or merged anything - the
+task had no acceptance criteria to check, which is #1092. The dev build reads
+secrets from ~/.trios-dev/secrets rather than the Keychain by design, which
+cost an hour to discover; worth knowing before the next credential.
