@@ -2935,3 +2935,33 @@ state; the sidebar redraws because it observes the registry, but the Queen says
 nothing in her own chat. And context control is unproven - the brief looks
 right, but that the Queen's history never reaches a worker is an assumption
 until it is driven.
+
+## 2026-08-01 ~11:5x - a real defect found, and a tree that is not mine alone
+
+Step 3, live updates. Verifications were green at the start of the cycle.
+
+The defect is worth the cycle on its own. postQueenNotice appended to
+`messages` - whatever conversation is open - rather than to the Queen's. Every
+caller that arrives through a slash command is fine, because runQueenCommand
+switches to her chat first. The callers that matter are the ones that do not: a
+worker finishing, the observer seeing a stray write, the review scheduler
+waking. Those fire while the user is watching a bee, and the Queen's words
+landed in that bee's chat. The supervisor talking into the wrong room, her own
+chat silent about the work she was supervising. Two functions existed for one
+job and the correct one, appendSystemMessageToQueenChat, was used by half the
+callers; postQueenNotice now delegates to it.
+
+It is not committed. Partway through, another writer began editing this same
+checkout - ModelHealthService.swift was left half-refactored with an enum body
+inside an actor, and CompositionRoot.swift, ModelHealthTypes.swift,
+TriosPanelMode.swift and TriosScreenManager.swift appeared. They vanished, came
+back, and are still there; the harness now fails on CompositionRoot referencing
+SessionGuard and CladeGuard, which are not in its source list. I did not touch
+or revert any of it - two agents editing one tree is the exact conflict the
+Queen exists to prevent, and reverting someone's in-flight work is how work has
+been destroyed here before. My two files are copied to
+/tmp/queen-cycle-backup/ and left in place.
+
+Still broken: everything in step 3 beyond this routing fix is unproven, because
+no verification can pass while the tree changes underneath the compiler. Step 4,
+context control, is untouched.
