@@ -2965,3 +2965,35 @@ been destroyed here before. My two files are copied to
 Still broken: everything in step 3 beyond this routing fix is unproven, because
 no verification can pass while the tree changes underneath the compiler. Step 4,
 context control, is untouched.
+
+## 2026-08-01 ~12:2x - the supervisor was talking into the wrong room
+
+Step 3. The other writer stopped around 11:50 and left four untracked files
+under rings/; the app still builds with them, but the harness did not, because
+CompositionRoot reaches SessionGuard and CladeGuard and the harness compiles
+only a named subset of BR-OUTPUT. Both are ordinary shipped sources that
+build.sh already includes, so the harness now compiles them too. I did not
+touch their files. build.sh is modified in this checkout by someone else and is
+deliberately outside my commit.
+
+Then the actual step, and it found two defects rather than needing a feature.
+postQueenNotice appended to `messages`, meaning whatever chat is open. Callers
+reached through a slash command were fine - runQueenCommand switches to her
+chat first - but the ones that fire on their own do not: a worker finishing,
+the observer, the review scheduler. Those land while the user is watching a
+bee, so the Queen's words went into that bee's chat and her own stayed silent
+about the work she was supervising. The correct routing already existed and
+half the callers used it.
+
+Routing correctly then exposed the worse defect: load, append, save has two
+suspension points, and six bees reporting together each loaded the same
+history and saved one line over the others. The probe printed "Queen heard 2 of
+6". Four bees lost, silently, with nothing in the sidebar to suggest it. Her
+chat is now held in memory while the user is elsewhere, so appends cannot
+interleave; the load re-checks after its await for the same reason. Restoring
+the old form fails both assertions.
+
+Still broken: step 4 is untouched - that a worker chat never carries the
+Queen's history is still an assumption. And "live" is only proven for messages
+she posts; nothing yet proves her chat reflects a bee's state change that
+produces no message at all.
