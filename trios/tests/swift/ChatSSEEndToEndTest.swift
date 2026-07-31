@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 418
+    static let minimumChecks = 422
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -519,12 +519,16 @@ struct ChatSSEEndToEndTests {
             "and says why, because a delegation that vanishes silently looks like a bug in the command"
         )
 
-        // Now with one, which is the path the application takes.
+        // Now with one, which is the path the application takes. The Queen and
+        // the runner share a persister here, as they do in the app - separate
+        // ones would make an isolation check meaningless, since nothing could
+        // leak between two stores that cannot see each other.
+        let sharedPersister = InMemoryPersister()
         let staffed = ChatViewModel(
             transport: MockChatTransport(),
             healthCheck: MockHealthCheck(),
             parser: UIMessageStreamParser(),
-            persister: InMemoryPersister(),
+            persister: sharedPersister,
             stateMachine: ConversationStateMachine(),
             a2aClient: nil,
             modelStore: modelStore,
@@ -534,7 +538,7 @@ struct ChatSSEEndToEndTests {
             ),
             todoPlanner: TODOPlanner(store: VolatileMemoryStore(), preferences: testDefaults),
             workerRunner: QueenWorkerRunner(
-                persister: InMemoryPersister(),
+                persister: sharedPersister,
                 modelStore: modelStore,
                 makeTransport: { MockChatTransport() }
             ),
@@ -630,6 +634,29 @@ struct ChatSSEEndToEndTests {
             staffed.messages.contains { $0.role == .system && $0.content.contains("has not been approved") },
             "and she says so, naming the approval she is waiting for"
         )
+
+        // Context control. The supervisor pattern's whole claim is that a bee
+        // carries its own task and nothing else - not the Queen's history, not
+        // another bee's. Worth proving rather than assuming, because until this
+        // week a notice from the Queen landed in whichever chat was open, which
+        // meant her words could be saved into a bee's conversation and replayed
+        // to it as history on the next brief.
+        // Standing in the bee's chat, which is where a user is while it works -
+        // and the case that used to put her words in the wrong conversation.
+        // Posting from her own chat would make the routing trivially right and
+        // prove nothing.
+        await staffed.switchConversation(id: opened.conversationId)
+        await staffed.postQueenNotice("QUEEN-ONLY-SECRET: the other bee is failing")
+        let workerHistory = await sharedPersister.load(conversationId: opened.conversationId)
+        check(!workerHistory.contains { $0.content.contains("QUEEN-ONLY-SECRET") },
+              "the Queen's own chat does not leak into a worker's conversation")
+        let queenHistory = await sharedPersister.load(conversationId: ChatConversation.trinityQueenId)
+        check(queenHistory.contains { $0.content.contains("QUEEN-ONLY-SECRET") },
+              "and it is in hers, so the check above is about isolation and not about a lost message")
+        check(workerHistory.contains { $0.content.contains(opened.issue.slug) },
+              "the worker's chat does carry its own issue")
+        check(workerHistory.contains { $0.content.contains("docs") },
+              "and its own boundary")
     }
 
     // MARK: - Scenario 3: message deduplication
