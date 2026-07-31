@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 431
+    static let minimumChecks = 437
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -495,7 +495,11 @@ struct ChatSSEEndToEndTests {
             ),
             todoPlanner: TODOPlanner(store: VolatileMemoryStore(), preferences: testDefaults),
             skillStore: skills,
-            delegationRegistry: registry
+            delegationRegistry: registry,
+            // Offline. Delegation reads the issue's contract, and a suite that
+            // reaches github.com is a suite that stops finishing - which is
+            // exactly what happened the first time this shipped.
+            fetchIssueBody: { _ in "## Готово, когда\n- docs/probe.md exists" }
         )
         try? await Task.sleep(nanoseconds: 50_000_000)
 
@@ -543,7 +547,11 @@ struct ChatSSEEndToEndTests {
                 makeTransport: { MockChatTransport() }
             ),
             skillStore: skills,
-            delegationRegistry: registry
+            delegationRegistry: registry,
+            // Offline. Delegation reads the issue's contract, and a suite that
+            // reaches github.com is a suite that stops finishing - which is
+            // exactly what happened the first time this shipped.
+            fetchIssueBody: { _ in "## Готово, когда\n- docs/probe.md exists" }
         )
         try? await Task.sleep(nanoseconds: 50_000_000)
         await staffed.runQueenCommand("/approve gHashTag/trios#4243")
@@ -582,6 +590,12 @@ struct ChatSSEEndToEndTests {
 
         check(opened.virtualBranch?.hasPrefix("queen/4243-") == true,
               "and a branch is named for the issue, so the work is attributable")
+
+        // No --criteria on the command line, and the task still has a contract:
+        // she read it from the issue. Requiring it to be retyped is why every
+        // delegation in this project's history went out with nothing to judge.
+        check(opened.acceptanceCriteria == ["docs/probe.md exists"],
+              "delegation with no criteria takes the contract the issue states")
 
         // The chat the Queen just opened - is it in the list the sidebar draws?
         await staffed.loadConversations()
@@ -2762,6 +2776,46 @@ struct ChatSSEEndToEndTests {
                 )
             ) == nil,
             "and a contract made only of checkable facts needs nobody"
+        )
+
+        // The contract an issue already states. Requiring it on the command
+        // line meant it was retyped, which in practice meant skipped - every
+        // delegation in this project's history went out with nothing to judge.
+        let issueBody = """
+        ## Зачем
+
+        Что-то важное.
+
+        ## Что уже сделано
+
+        - [x] это было раньше и не является контрактом
+
+        ## Готово, когда
+
+        - docs/queen-verdicts.md exists
+        - [ ] the gate refuses an unchecked criterion
+        * a bullet with a star counts too
+
+        ## Замечание
+
+        - not a criterion either
+        """
+        let fromIssue = QueenTaskSpec.criteriaFromIssue(body: issueBody)
+        check(fromIssue == [
+            "docs/queen-verdicts.md exists",
+            "the gate refuses an unchecked criterion",
+            "a bullet with a star counts too"
+        ], "the criteria come from the done-when list, in the author's own words")
+        check(!fromIssue.contains { $0.contains("было раньше") },
+              "and not from what is already done, which is a claim about the past")
+        check(!fromIssue.contains { $0.contains("not a criterion") },
+              "and the list stops at the next heading")
+        check(QueenTaskSpec.criteriaFromIssue(body: "no headings here").isEmpty,
+              "an issue that states no contract yields none, rather than something invented")
+        check(
+            QueenTaskSpec.criteriaFromIssue(body: "## Acceptance criteria\n- it builds")
+                == ["it builds"],
+            "and the English heading works too, since half these issues are written in it"
         )
 
         let criteria = ["make check passes", "the tab paginates"]

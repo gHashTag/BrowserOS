@@ -103,6 +103,47 @@ enum QueenTaskSpec {
         return lines.joined(separator: "\n")
     }
 
+    /// The acceptance criteria an issue already states, in its author's words.
+    ///
+    /// Requiring them on the command line meant the contract was retyped by
+    /// whoever ran /delegate, so in practice it was skipped and every task went
+    /// out with nothing to judge it by. The issue almost always says what done
+    /// looks like already - under "Готово, когда" or "Acceptance criteria" -
+    /// and reading it there is both less work and closer to what the author
+    /// meant than a paraphrase typed at a prompt.
+    ///
+    /// Only the list under that heading, and only until the next heading. A
+    /// bullet from "What is already done" is a claim about the past, not a
+    /// contract for this task, and treating it as one would have the Queen
+    /// accepting work for things nobody asked for.
+    static func criteriaFromIssue(body: String) -> [String] {
+        let headings = ["готово, когда", "acceptance criteria", "done when", "готово когда"]
+        var collecting = false
+        var found: [String] = []
+
+        for rawLine in body.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("#") {
+                let title = line
+                    .drop(while: { $0 == "#" })
+                    .trimmingCharacters(in: .whitespaces)
+                    .lowercased()
+                collecting = headings.contains { title.contains($0) }
+                continue
+            }
+            guard collecting else { continue }
+            guard line.hasPrefix("- ") || line.hasPrefix("* ") else { continue }
+            var item = String(line.dropFirst(2))
+            // A checklist marker is state, not part of the sentence.
+            for marker in ["[x] ", "[X] ", "[ ] "] where item.hasPrefix(marker) {
+                item = String(item.dropFirst(marker.count))
+            }
+            let cleaned = item.trimmingCharacters(in: .whitespaces)
+            if !cleaned.isEmpty { found.append(cleaned) }
+        }
+        return found
+    }
+
     /// Whether this specification can be handed to a worker at all.
     ///
     /// Separate from rendering so the Queen can tell the difference between "no

@@ -124,6 +124,13 @@ final class ChatViewModel: ObservableObject {
     /// ran the suite. Views and main.swift keep observing .shared; it is only
     /// this view model's own use that is now handed in.
     let delegationRegistry: QueenDelegationRegistry
+    /// How the Queen reads the contract an issue already states.
+    ///
+    /// Injected because reaching straight into GitHubAPIClient made delegation
+    /// a network call, and the harness delegates - so the suite started going
+    /// to github.com and stopped finishing. Every other dependency here is
+    /// handed in; this one had no business being the exception.
+    let fetchIssueBody: @Sendable (IssueReference) async -> String?
 
     private let transport: ChatTransportProtocol
     private let healthCheck: ChatHealthCheckProtocol
@@ -186,10 +193,16 @@ final class ChatViewModel: ObservableObject {
         // main-actor isolated, which Swift 6 rejects. Resolved inside the
         // initialiser, where the isolation already holds.
         skillStore: SkillStore? = nil,
-        delegationRegistry: QueenDelegationRegistry? = nil
+        delegationRegistry: QueenDelegationRegistry? = nil,
+        fetchIssueBody: (@Sendable (IssueReference) async -> String?)? = nil
     ) {
         self.skillStore = skillStore ?? .shared
         self.delegationRegistry = delegationRegistry ?? .shared
+        self.fetchIssueBody = fetchIssueBody ?? { issue in
+            try? await GitHubAPIClient().fetchIssue(
+                repo: "\(issue.owner)/\(issue.repo)", number: issue.number
+            ).body
+        }
         NSLog("ChatViewModel.init starting")
         self.transport = transport
         self.healthCheck = healthCheck
@@ -3078,6 +3091,32 @@ final class ChatViewModel: ObservableObject {
                     + "the daily ceiling. Anything already running continues."
             )
             return
+        }
+
+        // No contract on the command line? Read the one the issue already
+        // states. Requiring it to be retyped is why every delegation in this
+        // project's history went out with nothing to judge it by - the flag
+        // existed, and in practice nobody used it.
+        var criteria = criteria
+        if criteria.isEmpty {
+            if let body = await fetchIssueBody(issue) {
+                criteria = QueenTaskSpec.criteriaFromIssue(body: body)
+                if !criteria.isEmpty {
+                    TriosLogBus.shared.info(
+                        .queen, "queen.spec.fromIssue", "Read the contract from the issue",
+                        ["issue": issue.slug, "criteria": String(criteria.count)]
+                    )
+                }
+            } else {
+                // Not fatal. A task with no criteria is still delegated, and the
+                // specification says plainly that nothing here can be judged
+                // finished - the honest state, not a silent one.
+                TriosLogBus.shared.warn(
+                    .queen, "queen.spec.issueUnreadable",
+                    "Could not read the issue, so there is no contract",
+                    ["issue": issue.slug]
+                )
+            }
         }
 
         // Create the worker's own conversation. The persister materialises a

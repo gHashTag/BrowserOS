@@ -61,6 +61,16 @@ actor GitHubAPIClient {
         return try JSONDecoder().decode([GitHubIssue].self, from: data)
     }
 
+    /// One issue, because the Queen needs its body to read the contract the
+    /// author already wrote. The list endpoint would work but pulls a hundred
+    /// issues to answer a question about one.
+    func fetchIssue(repo: String, number: Int) async throws -> GitHubIssue {
+        let path = try GitHubEndpoint.repositoryPath(repo, "/issues/\(number)")
+        let (data, response) = try await URLSession.shared.data(for: request(path))
+        try validate(response, endpoint: path)
+        return try JSONDecoder().decode(GitHubIssue.self, from: data)
+    }
+
     func fetchIssueComments(repo: String, issueNumber: Int) async throws -> [GitHubComment] {
         let path = try GitHubEndpoint.repositoryPath(repo, "/issues/\(issueNumber)/comments")
         let (data, _) = try await URLSession.shared.data(for: request(path))
