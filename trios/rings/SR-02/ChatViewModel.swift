@@ -3354,6 +3354,29 @@ final class ChatViewModel: ObservableObject {
                 )
             }
 
+            // What she can settle on evidence, she settles now. A criterion
+            // naming a file is answered by whether that file changed; one
+            // naming none is left unchecked, so the gate still stops on the
+            // questions a person has to answer and no longer stops on the ones
+            // nobody needed to be asked.
+            let evidenceVerdicts = QueenAcceptancePolicy.mechanicalVerdicts(
+                criteria: task.acceptanceCriteria,
+                changedPaths: measured.map { QueenBranchCommitter.projectRelative($0) }
+            )
+            for (criterion, verdict) in evidenceVerdicts {
+                registry.recordVerdict(taskID: task.id, criterion: criterion, verdict: verdict)
+            }
+            if !evidenceVerdicts.isEmpty {
+                TriosLogBus.shared.info(
+                    .queen, "queen.review.evidence", "Judged what the files show",
+                    [
+                        "issue": task.issue.slug,
+                        "judged": String(evidenceVerdicts.count),
+                        "of": String(task.acceptanceCriteria.count)
+                    ]
+                )
+            }
+
             let outcome = await QueenBranchCommitter.commitWorkerChanges(
                 branch: branch,
                 baselineTree: workerBaselineTrees[task.conversationId],

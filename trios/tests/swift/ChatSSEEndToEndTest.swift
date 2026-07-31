@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 426
+    static let minimumChecks = 431
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -2729,6 +2729,41 @@ struct ChatSSEEndToEndTests {
         print("\n# Scenario: accepted means the criteria say so")
 
         typealias P = QueenAcceptancePolicy
+
+        // What the Queen can settle without taking the worker's word. A bee
+        // saying it met a criterion is the same agent grading its own homework;
+        // a gate that accepts that is decoration. A file either changed or it
+        // did not.
+        let contract = [
+            "docs/queen-review-gate.md exists",
+            "it names what blocks a merge",
+            "docs/missing.md is updated"
+        ]
+        let judged = P.mechanicalVerdicts(
+            criteria: contract,
+            changedPaths: ["docs/queen-review-gate.md", "docs/other.md"]
+        )
+        check(judged["docs/queen-review-gate.md exists"] == .met,
+              "a criterion naming a file that changed is met on the evidence")
+        check(judged["docs/missing.md is updated"] == .unmet,
+              "and one naming a file that did not change is unmet, not left open")
+        check(judged["it names what blocks a merge"] == nil,
+              "a criterion naming no file gets no verdict - guessing is worse than leaving it")
+        check(
+            P.acceptanceBlockReason(criteria: contract, recorded: judged) != nil,
+            "so acceptance still stops, on the one question a person has to answer"
+        )
+        check(
+            P.acceptanceBlockReason(
+                criteria: ["docs/queen-review-gate.md exists"],
+                recorded: P.mechanicalVerdicts(
+                    criteria: ["docs/queen-review-gate.md exists"],
+                    changedPaths: ["docs/queen-review-gate.md"]
+                )
+            ) == nil,
+            "and a contract made only of checkable facts needs nobody"
+        )
+
         let criteria = ["make check passes", "the tab paginates"]
 
         check(P.acceptanceBlockReason(criteria: criteria, recorded: [:]) != nil,

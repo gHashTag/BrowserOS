@@ -36,6 +36,52 @@ enum QueenAcceptancePolicy {
         criteria.map { ($0, recorded[$0] ?? .unchecked) }
     }
 
+    /// Verdicts the Queen can reach on evidence, without taking anyone's word.
+    ///
+    /// A worker stating that it met a criterion is not a check - it is the same
+    /// agent grading its own homework, and a gate that accepts that is
+    /// decoration. But some criteria are settled by fact rather than opinion:
+    /// "docs/queen-review-gate.md exists" is answered by what the branch
+    /// actually carries.
+    ///
+    /// So a criterion naming a path gets a verdict from the paths that changed:
+    /// met if one of them is there, unmet if none is. A criterion naming no
+    /// path gets no entry at all and stays unchecked, which keeps acceptance
+    /// blocked on exactly the questions a person still has to answer. The point
+    /// is not to unblock the gate; it is to stop it blocking on things nobody
+    /// needed to be asked.
+    static func mechanicalVerdicts(
+        criteria: [String],
+        changedPaths: [String]
+    ) -> [String: QueenCriterionVerdict] {
+        var found: [String: QueenCriterionVerdict] = [:]
+        let changed = Set(changedPaths.map(QueenDelegationPolicy.normalizePath))
+        for criterion in criteria {
+            let mentioned = pathsMentioned(in: criterion)
+            guard !mentioned.isEmpty else { continue }
+            let satisfied = mentioned.contains { path in
+                changed.contains { $0 == path || $0.hasSuffix("/\(path)") }
+            }
+            found[criterion] = satisfied ? .met : .unmet
+        }
+        return found
+    }
+
+    /// Tokens in a sentence that look like a file path: a slash and a suffix.
+    ///
+    /// Deliberately narrow. "it is short" names nothing checkable and must not
+    /// be guessed at - a wrong verdict is worse than an absent one, because the
+    /// absent one still stops the merge.
+    static func pathsMentioned(in criterion: String) -> [String] {
+        criterion
+            .split(whereSeparator: { $0 == " " || $0 == "," || $0 == ";" })
+            .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "`'\".:()")) }
+            .filter { token in
+                token.contains("/") && token.contains(".") && !token.hasSuffix("/")
+            }
+            .map(QueenDelegationPolicy.normalizePath)
+    }
+
     /// Why this work cannot be accepted yet, or nil if it can.
     static func acceptanceBlockReason(
         criteria: [String],
