@@ -13,8 +13,12 @@ PROJECT_DIR="${TRIOS_ROOT:-$SCRIPT_DIR}"
 case "${1:-}" in
     --release) TRIOS_VARIANT="prod" ;;
     --dev) TRIOS_VARIANT="dev" ;;
+    --vendored) TRIOS_VENDORED=1 ;;
 esac
 VARIANT="${TRIOS_VARIANT:-dev}"
+# --vendored: use pre-built dylibs from Frameworks-dev/ instead of compiling
+# QueenUILib from the trinity repo. Makes the build work without trinity.
+TRIOS_VENDORED="${TRIOS_VENDORED:-}"
 if [ "$VARIANT" != "dev" ] && [ "$VARIANT" != "prod" ]; then
     echo "[FAIL] TRIOS_VARIANT must be 'dev' or 'prod', got '$VARIANT'"
     exit 1
@@ -60,24 +64,38 @@ QUEEN_PACKAGE_ROOT="$TRINITY_SOURCE_ROOT/apps/queen"
 
 mkdir -p "$LOG_DIR"
 
-if [ ! -f "$QUEEN_PACKAGE_ROOT/Package.swift" ]; then
-    echo "[FAIL] Canonical Queen package not found: $QUEEN_PACKAGE_ROOT"
-    echo "Set TRINITY_ROOT to the gHashTag/trinity checkout."
-    exit 1
-fi
-
-echo "Building canonical Trinity Queen interface..."
-if [ -n "${TRIOS_REUSE_QUEEN_BUILD:-}" ]; then
-    QUEEN_BIN_DIR="$QUEEN_PACKAGE_ROOT/.build/arm64-apple-macosx/debug"
-    echo "[REUSE] Using existing QueenUILib build: $QUEEN_BIN_DIR"
+# --- QueenUILib resolution: compile from source or use vendored dylib ---
+if [ -n "$TRIOS_VENDORED" ]; then
+    # Use pre-built dylib from Frameworks-dev/ or Frameworks/
+    QUEEN_DYLIB="$STANDALONE_FRAMEWORKS/libQueenUILib.dylib"
+    if [ ! -f "$QUEEN_DYLIB" ]; then
+        echo "[FAIL] Vendored QueenUILib not found: $QUEEN_DYLIB"
+        echo "       Run a normal build first, or unset TRIOS_VENDORED."
+        exit 1
+    fi
+    QUEEN_BIN_DIR="$STANDALONE_FRAMEWORKS"
+    echo "[VENDORED] Using pre-built QueenUILib: $QUEEN_DYLIB"
 else
-    swift build --package-path "$QUEEN_PACKAGE_ROOT" --product QueenUILib
-    QUEEN_BIN_DIR="$(swift build --package-path "$QUEEN_PACKAGE_ROOT" --show-bin-path)"
-fi
-QUEEN_DYLIB="$QUEEN_BIN_DIR/libQueenUILib.dylib"
-if [ ! -f "$QUEEN_DYLIB" ]; then
-    echo "[FAIL] QueenUILib was not produced: $QUEEN_DYLIB"
-    exit 1
+    if [ ! -f "$QUEEN_PACKAGE_ROOT/Package.swift" ]; then
+        echo "[FAIL] Canonical Queen package not found: $QUEEN_PACKAGE_ROOT"
+        echo "       Set TRINITY_ROOT to the gHashTag/trinity checkout,"
+        echo "       or use TRIOS_VENDORED=1 to build with pre-built dylibs."
+        exit 1
+    fi
+
+    echo "Building canonical Trinity Queen interface..."
+    if [ -n "${TRIOS_REUSE_QUEEN_BUILD:-}" ]; then
+        QUEEN_BIN_DIR="$QUEEN_PACKAGE_ROOT/.build/arm64-apple-macosx/debug"
+        echo "[REUSE] Using existing QueenUILib build: $QUEEN_BIN_DIR"
+    else
+        swift build --package-path "$QUEEN_PACKAGE_ROOT" --product QueenUILib
+        QUEEN_BIN_DIR="$(swift build --package-path "$QUEEN_PACKAGE_ROOT" --show-bin-path)"
+    fi
+    QUEEN_DYLIB="$QUEEN_BIN_DIR/libQueenUILib.dylib"
+    if [ ! -f "$QUEEN_DYLIB" ]; then
+        echo "[FAIL] QueenUILib was not produced: $QUEEN_DYLIB"
+        exit 1
+    fi
 fi
 
 # Build tracked production sources. BR-OUTPUT is also used for local prototypes,
