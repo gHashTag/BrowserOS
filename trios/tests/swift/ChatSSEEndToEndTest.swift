@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 403
+    static let minimumChecks = 406
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -45,6 +45,7 @@ struct ChatSSEEndToEndTests {
     static func main() async {
         await runHappyPathStreaming()
         await runCancellationIsNonError()
+        await runNewChatAppears()
         await runQueenAnswersACommand()
         await runDeduplication()
         await runConversationRenamePersistence()
@@ -247,6 +248,41 @@ struct ChatSSEEndToEndTests {
     /// nowhere in this file, not from trying it - the same mistake as reading a
     /// scanner's silence as a clean result. It works: the view model this file
     /// already builds is the one the app builds.
+    /// Does creating a chat actually create one the user can see?
+    static func runNewChatAppears() async {
+        print("\n# Scenario: a new chat appears")
+
+        let testDefaults = UserDefaults(suiteName: "trios-chat-sse-newchat") ?? .standard
+        let persister = InMemoryPersister()
+        let viewModel = ChatViewModel(
+            transport: MockChatTransport(),
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: persister,
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: ModelConfigurationStore(
+                defaults: testDefaults, environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
+            ),
+            memoryService: AgentMemoryService(
+                store: VolatileMemoryStore(), fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: TODOPlanner(store: VolatileMemoryStore(), preferences: testDefaults)
+        )
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        let before = viewModel.conversationId
+        viewModel.newConversation()
+        try? await Task.sleep(nanoseconds: 400_000_000)
+        let after = viewModel.conversationId
+        check(after != before, "starting a new chat moves the user into a different conversation")
+        check(viewModel.conversations.contains { $0.id == after },
+              "and the new chat is in the list the sidebar draws")
+        check(viewModel.conversations.contains { $0.id == ChatConversation.trinityQueenId },
+              "and the Queen's chat is still there, not replaced by it")
+    }
+
     static func runQueenAnswersACommand() async {
         print("\n# Scenario: the Queen answers a command")
 

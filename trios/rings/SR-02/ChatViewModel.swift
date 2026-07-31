@@ -1761,6 +1761,15 @@ final class ChatViewModel: ObservableObject {
             memoryControlRevision &+= 1
             await todoPlanner.load(conversationId: newConversationId)
             await persister.setCurrentConversationId(newConversationId)
+            // Persist it empty, the way the Queen's reserved conversation is.
+            // Without this the chat exists only as a UUID in memory: the user
+            // presses New Chat, lands somewhere that works, and sees nothing
+            // added to the sidebar, because listAllConversations only returns
+            // what has been saved. It appeared after the first message, which
+            // reads as "creating chats is broken" rather than "creating chats
+            // is deferred". It matters more now the Queen opens one per issue -
+            // a chat she cannot see is a bee she cannot supervise.
+            await persister.save(messages: [], conversationId: newConversationId)
             await loadConversations()
             endConversationTransition()
         }
