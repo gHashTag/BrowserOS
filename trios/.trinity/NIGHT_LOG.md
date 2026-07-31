@@ -2997,3 +2997,32 @@ Still broken: step 4 is untouched - that a worker chat never carries the
 Queen's history is still an assumption. And "live" is only proven for messages
 she posts; nothing yet proves her chat reflects a bee's state change that
 produces no message at all.
+
+## 2026-08-01 ~13:xx - step 4, and the only one where the code was already right
+
+Context subsetting is the supervisor pattern's whole claim: a bee holds its
+issue, its boundary and its criteria, and nothing else. The runner loads only
+the worker's own conversation and says so in a comment. A comment is not a
+demonstration, and this had never been driven.
+
+Four assertions now drive it. The Queen posts a distinctive line while the user
+is standing in the bee's chat - which is where a user is while a bee works, and
+the case that until yesterday put her words in the wrong conversation. The
+bee's history does not contain it, hers does, and the bee's history does carry
+its own issue slug and boundary. That last pair is not decoration: without it
+the negative check would pass just as happily against an empty conversation,
+which is the shape of a test that proves nothing.
+
+The Queen and the runner share a persister here, as they do in the app. Two
+separate stores cannot leak into each other, so an isolation test built on them
+would be theatre.
+
+Restoring the old postQueenNotice fails the leak check and the one beside it.
+My first grep for those failures missed them and I nearly recorded the mutation
+as surviving - the assertions were right, my filter was wrong.
+
+Still broken: the four listed steps are done, and the thing they were building
+towards is not. No delegation has ever reached a pull request, so the Queen has
+never reviewed or merged anything - that waits on a GitHub token only the user
+can place. She is not proactive either: she answers, she does not arrive with
+three options of her own.
