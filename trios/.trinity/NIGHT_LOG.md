@@ -3333,3 +3333,31 @@ Still broken: #1104's board is written and blocked on one criterion the reviewer
 would not confirm, because it is satisfied by code the diff does not touch - a
 reviewer who sees only the diff cannot judge a criterion about the whole. Nobody
 has yet opened the app and looked at any of this with their eyes.
+
+## Two bees died mid-edit, and the boundaries did not save the build
+
+The Queen was opening and merging pull requests into whatever branch a person
+was on, because the base came from the local checkout. It broke my push twice in
+one cycle, the second time as a conflict where her merge carried a file back to
+the state it held when she opened the request. She now targets the remote
+default branch and refuses to open anything when that cannot be determined.
+
+That refusal broke the tree, and the way it broke is the finding. `baseBranch()`
+became optional - exactly what the contract asked - and its only call site sits
+in a file another bee owned. Neither bee crossed its boundary. Both were right.
+The build was broken anyway, because single-writer-per-path is a rule about
+files and this was a disagreement about an interface, which nothing in a bee's
+own cycle compiles. Filed as #1111 and repaired by a third bee.
+
+Both of the first two bees died on an eleven-minute transport timeout with their
+edits sitting in the working tree, no branch, no owner, and the tree left in a
+state that would not compile. The next bee would have inherited those lines as
+its own; a person running `make` would have seen an error with nothing anywhere
+saying whose it was. Filed as #1112.
+
+Still broken and honestly so: the reviewer now receives the touched files as
+they stand and not only the diff, which is what refused the board on a criterion
+satisfied by code the diff never showed. It is wired, it compiles, and it has
+never once run - the only review after that change went through a binary built
+before it, because the build in between was the broken one. A fourth bee sent to
+re-review the board hung for eighteen minutes and wrote nothing.
