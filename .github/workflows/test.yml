@@ -9,7 +9,7 @@ on:
       - ready_for_review
     paths:
       - .github/workflows/test.yml
-      - packages/browseros-agent/**
+      - trios/agent-server/**
   workflow_dispatch:
 
 permissions:
@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 20
     defaults:
       run:
-        working-directory: packages/browseros-agent
+        working-directory: trios/agent-server
     strategy:
       fail-fast: false
       matrix:
@@ -113,7 +113,7 @@ jobs:
         id: browseros-cache
         uses: actions/cache@v4
         with:
-          path: packages/browseros-agent/.ci/bin/BrowserOS.AppImage
+          path: trios/agent-server/.ci/bin/BrowserOS.AppImage
           key: ${{ steps.browseros-cache-key.outputs.key }}
 
       - name: Download BrowserOS
@@ -136,16 +136,16 @@ jobs:
           chmod +x .ci/bin/browseros
 
       - name: Create server env file
-        working-directory: packages/browseros-agent/apps/server
+        working-directory: trios/agent-server/apps/server
         run: cp .env.example .env.development
 
       - name: Run ${{ matrix.suite }} tests
         id: test
         env:
-          BROWSEROS_BINARY: ${{ github.workspace }}/packages/browseros-agent/.ci/bin/browseros
+          BROWSEROS_BINARY: ${{ github.workspace }}/trios/agent-server/.ci/bin/browseros
           BROWSEROS_TEST_HEADLESS: "true"
           BROWSEROS_TEST_EXTRA_ARGS: --no-sandbox --disable-dev-shm-usage
-          BROWSEROS_JUNIT_PATH: ${{ github.workspace }}/packages/browseros-agent/${{ matrix.junit_path }}
+          BROWSEROS_JUNIT_PATH: ${{ github.workspace }}/trios/agent-server/${{ matrix.junit_path }}
         run: |
           set +e
           mkdir -p test-results
@@ -180,7 +180,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: junit-${{ matrix.suite }}
-          path: packages/browseros-agent/${{ matrix.junit_path }}
+          path: trios/agent-server/${{ matrix.junit_path }}
 
       - name: Summarize suite result
         if: always()

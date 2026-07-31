@@ -7,8 +7,8 @@ on:
   push:
     branches: [main]
     paths:
-      - 'packages/browseros-agent/apps/server/src/agent/**'
-      - 'packages/browseros-agent/apps/server/src/tools/**'
+      - 'trios/agent-server/apps/server/src/agent/**'
+      - 'trios/agent-server/apps/server/src/tools/**'
   workflow_dispatch:
     inputs:
       config:
@@ -41,11 +41,11 @@ jobs:
           bun-version: latest
 
       - name: Install dependencies
-        working-directory: packages/browseros-agent
+        working-directory: trios/agent-server
         run: bun install --ignore-scripts
 
       - name: Install Claude Code CLI
-        working-directory: packages/browseros-agent/apps/eval
+        working-directory: trios/agent-server/apps/eval
         env:
           EVAL_CONFIG: ${{ github.event.inputs.config || 'configs/legacy/browseros-agent-weekly.json' }}
         run: |
@@ -69,14 +69,14 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y xvfb
 
       - name: Install captcha solver extension
-        working-directory: packages/browseros-agent/apps/eval
+        working-directory: trios/agent-server/apps/eval
         run: |
           mkdir -p extensions
           curl -sL -o /tmp/nopecha.zip https://github.com/NopeCHALLC/nopecha-extension/releases/latest/download/chromium_automation.zip
           unzip -qo /tmp/nopecha.zip -d extensions/nopecha
 
       - name: Run eval and publish to R2
-        working-directory: packages/browseros-agent/apps/eval
+        working-directory: trios/agent-server/apps/eval
         env:
           FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -105,7 +105,7 @@ jobs:
 
       - name: Generate run analysis report
         if: success()
-        working-directory: packages/browseros-agent/apps/eval
+        working-directory: trios/agent-server/apps/eval
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
@@ -114,7 +114,7 @@ jobs:
 
       - name: Publish eval run to R2
         if: success()
-        working-directory: packages/browseros-agent/apps/eval
+        working-directory: trios/agent-server/apps/eval
         env:
           EVAL_R2_ACCOUNT_ID: ${{ secrets.EVAL_R2_ACCOUNT_ID }}
           EVAL_R2_ACCESS_KEY_ID: ${{ secrets.EVAL_R2_ACCESS_KEY_ID }}
@@ -127,7 +127,7 @@ jobs:
         if: success()
         timeout-minutes: 5
         continue-on-error: true
-        working-directory: packages/browseros-agent
+        working-directory: trios/agent-server
         env:
           EVAL_R2_ACCOUNT_ID: ${{ secrets.EVAL_R2_ACCOUNT_ID }}
           EVAL_R2_ACCESS_KEY_ID: ${{ secrets.EVAL_R2_ACCESS_KEY_ID }}

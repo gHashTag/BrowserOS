@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: packages/browseros-agent
+        working-directory: trios/agent-server
 
     steps:
       - name: Checkout code

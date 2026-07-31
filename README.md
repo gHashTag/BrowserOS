@@ -171,7 +171,7 @@ BrowserOS/
 │   ├── build/                       # Build CLI and modules
 │   └── resources/                   # Icons, entitlements, signing
 │
-├── packages/browseros-agent/        # Agent platform (TypeScript/Go)
+├── trios/agent-server/        # Agent platform (TypeScript/Go)
 │   ├── apps/
 │   │   ├── server/                  # MCP server + AI agent loop (Bun)
 │   │   ├── agent/                   # Browser extension UI (WXT + React)
@@ -188,12 +188,12 @@ BrowserOS/
 | Package | What it does |
 |---------|-------------|
 | [`packages/browseros`](packages/browseros/) | Chromium fork — patches, build system, signing |
-| [`apps/server`](packages/browseros-agent/apps/server/) | Bun server exposing 53+ MCP tools and running the AI agent loop |
-| [`apps/agent`](packages/browseros-agent/apps/agent/) | Browser extension — new tab, side panel chat, onboarding, settings |
-| [`apps/cli`](packages/browseros-agent/apps/cli/) | Go CLI — control BrowserOS from the terminal or AI coding agents |
-| [`apps/eval`](packages/browseros-agent/apps/eval/) | Benchmark framework — WebVoyager, Mind2Web evaluation |
-| [`agent-sdk`](packages/browseros-agent/packages/agent-sdk/) | Node.js SDK for browser automation with natural language |
-| [`cdp-protocol`](packages/browseros-agent/packages/cdp-protocol/) | Type-safe Chrome DevTools Protocol bindings |
+| [`apps/server`](trios/agent-server/apps/server/) | Bun server exposing 53+ MCP tools and running the AI agent loop |
+| [`apps/agent`](trios/agent-server/apps/agent/) | Browser extension — new tab, side panel chat, onboarding, settings |
+| [`apps/cli`](trios/agent-server/apps/cli/) | Go CLI — control BrowserOS from the terminal or AI coding agents |
+| [`apps/eval`](trios/agent-server/apps/eval/) | Benchmark framework — WebVoyager, Mind2Web evaluation |
+| [`agent-sdk`](trios/agent-server/packages/agent-sdk/) | Node.js SDK for browser automation with natural language |
+| [`cdp-protocol`](trios/agent-server/packages/cdp-protocol/) | Type-safe Chrome DevTools Protocol bindings |
 
 ## Contributing
 
@@ -204,7 +204,7 @@ We'd love your help making BrowserOS better! See our [Contributing Guide](CONTRI
 - [Join Discord](https://discord.gg/YKwjt5vuKr) · [Join Slack](https://dub.sh/browserOS-slack)
 - [Follow on Twitter](https://x.com/browserOS_ai)
 
-**Agent development** (TypeScript/Go) — see the [agent monorepo README](packages/browseros-agent/README.md) for setup instructions.
+**Agent development** (TypeScript/Go) — see the [agent monorepo README](trios/agent-server/README.md) for setup instructions.
 
 **Browser development** (C++/Python) — requires ~100GB disk space. See [`packages/browseros`](packages/browseros/) for build instructions.
 

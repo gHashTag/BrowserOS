@@ -63,7 +63,7 @@ The agent is a Chrome extension that provides AI-powered automation. Most contri
 
 ```bash
 # 1. Navigate to agent directory
-cd packages/browseros-agent
+cd trios/agent-server
 
 # 2. Install dependencies
 yarn install
@@ -81,10 +81,10 @@ yarn build:dev       # One-time build
 1. Open `chrome://extensions/`
 2. Enable **Developer mode** (top right toggle)
 3. Click **Load unpacked**
-4. Select `packages/browseros-agent/dist/`
+4. Select `trios/agent-server/dist/`
 5. Press Agent icon from extensions toolbar to open the agent panel
 
-**For detailed setup, architecture, and code standards, see [Agent Contributing Guide](packages/browseros-agent/CONTRIBUTING.md).**
+**For detailed setup, architecture, and code standards, see [Agent Contributing Guide](trios/agent-server/CONTRIBUTING.md).**
 
 ## Browser Development
 
@@ -198,7 +198,7 @@ export type ToolInput = z.infer<typeof ToolInputSchema>
 - Handle errors gracefully
 
 **For detailed standards:**
-- Agent: [packages/browseros-agent/CLAUDE.md](packages/browseros-agent/CLAUDE.md)
+- Agent: [trios/agent-server/CLAUDE.md](trios/agent-server/CLAUDE.md)
 - Browser: Follow Chromium style guide
 
 ## Project Structure
@@ -211,7 +211,7 @@ monorepo/
 │   │   ├── chromium_patches/  # Patches to Chromium source
 │   │   └── resources/         # Icons, configs
 │   │
-│   └── browseros-agent/        # Chrome extension
+│                               # (agent runtime now lives in trios/agent-server/)
 │       ├── src/
 │       │   ├── lib/           # Core agent logic
 │       │   ├── sidepanel/     # Side panel UI

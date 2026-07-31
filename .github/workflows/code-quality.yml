@@ -6,7 +6,7 @@ on:
       - main
       - dev
     paths:
-      - "packages/browseros-agent/**"
+      - "trios/agent-server/**"
 
 jobs:
   biome:
@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: packages/browseros-agent
+        working-directory: trios/agent-server
     permissions:
       contents: read
     steps:
@@ -38,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: packages/browseros-agent
+        working-directory: trios/agent-server
     permissions:
       contents: read
     steps:

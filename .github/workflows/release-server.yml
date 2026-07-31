@@ -21,7 +21,7 @@ jobs:
       contents: write
     defaults:
       run:
-        working-directory: packages/browseros-agent
+        working-directory: trios/agent-server
 
     steps:
       - uses: actions/checkout@v6
@@ -71,11 +71,11 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PACKAGE_VERSION: ${{ steps.version.outputs.package_version }}
         run: |
-          SERVER_APP_PATH="packages/browseros-agent/apps/server"
-          SERVER_BUILD_DIR="packages/browseros-agent/scripts/build/server"
-          SERVER_BUILD_ENTRY="packages/browseros-agent/scripts/build/server.ts"
-          SERVER_RESOURCE_MANIFEST="packages/browseros-agent/scripts/build/config/server-prod-resources.json"
-          SERVER_WORKSPACE_PKG="packages/browseros-agent/package.json"
+          SERVER_APP_PATH="trios/agent-server/apps/server"
+          SERVER_BUILD_DIR="trios/agent-server/scripts/build/server"
+          SERVER_BUILD_ENTRY="trios/agent-server/scripts/build/server.ts"
+          SERVER_RESOURCE_MANIFEST="trios/agent-server/scripts/build/config/server-prod-resources.json"
+          SERVER_WORKSPACE_PKG="trios/agent-server/package.json"
           CURRENT_TAG="browseros-server-v$PACKAGE_VERSION"
           PREV_TAG=$(git tag -l "browseros-server-v*" --sort=-v:refname | grep -v "^${CURRENT_TAG}$" | head -n 1)
 
@@ -117,7 +117,7 @@ jobs:
         run: |
           TAG="browseros-server-v$PACKAGE_VERSION"
           TITLE="BrowserOS Server - v$PACKAGE_VERSION"
-          mapfile -t ZIP_FILES < <(find packages/browseros-agent/dist/prod/server -maxdepth 1 -type f -name 'browseros-server-resources-*.zip' | sort)
+          mapfile -t ZIP_FILES < <(find trios/agent-server/dist/prod/server -maxdepth 1 -type f -name 'browseros-server-resources-*.zip' | sort)
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"

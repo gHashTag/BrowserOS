@@ -23,8 +23,8 @@ wt config shell install
 ## What happens on `wt switch -c`
 
 1. Creates new worktree at `../browseros-main.feat-name/`
-2. Runs `bun install` in `packages/browseros-agent/`
-3. Copies `.env.*` files from main worktree's `packages/browseros-agent/apps/`
+2. Runs `bun install` in `trios/agent-server/`
+3. Copies `.env.*` files from main worktree's `trios/agent-server/apps/`
 
 ## Hooks
 

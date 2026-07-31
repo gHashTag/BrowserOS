@@ -130,4 +130,4 @@ Feature flags are defined in `features.yaml` and control which BrowserOS-specifi
 
 - [Chromium Build Instructions](https://chromium.googlesource.com/chromium/src/+/main/docs/linux/build_instructions.md)
 - [ungoogled-chromium](https://github.com/ungoogled-software/ungoogled-chromium) — upstream privacy patches
-- [BrowserOS Agent Platform](../browseros-agent/) — the TypeScript/Go agent system that runs inside the browser
+- [BrowserOS Agent Platform](../../trios/agent-server/) — the TypeScript/Go agent system that runs inside the browser
