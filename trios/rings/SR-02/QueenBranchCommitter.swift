@@ -206,6 +206,25 @@ enum QueenBranchCommitter {
         return prefix.isEmpty ? normalized : "\(prefix)/\(normalized)"
     }
 
+    /// The inverse of `repositoryRelative`: git reports `trios/docs/x.md` and a
+    /// boundary is written as `docs`, so a measured path has to come back down
+    /// to the project before it can be compared with one.
+    ///
+    /// A path outside the project entirely keeps its repository-relative form.
+    /// It is out of bounds under any boundary, and rewriting it would only
+    /// disguise where it is.
+    static func projectRelative(
+        _ path: String,
+        projectRoot: String = ProjectPaths.root
+    ) -> String {
+        let root = repositoryRoot(projectRoot: projectRoot)
+        let normalized = QueenDelegationPolicy.normalizePath(path)
+        guard projectRoot.hasPrefix(root), projectRoot != root else { return normalized }
+        let prefix = QueenDelegationPolicy.normalizePath(String(projectRoot.dropFirst(root.count)))
+        guard !prefix.isEmpty, normalized.hasPrefix("\(prefix)/") else { return normalized }
+        return String(normalized.dropFirst(prefix.count + 1))
+    }
+
     /// Returns nil on a non-zero exit so each step can refuse to continue.
     private static func runGit(
         _ arguments: [String],

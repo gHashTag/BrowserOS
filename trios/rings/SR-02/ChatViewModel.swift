@@ -3273,6 +3273,43 @@ final class ChatViewModel: ObservableObject {
         // runs, the branch is an empty ref and the edits sit loose in the shared
         // working tree with nothing tying them to the issue.
         if failure == nil, let branch = task.virtualBranch {
+            // Ask git what changed before committing, and judge the boundary on
+            // that rather than on the names of the tools the worker called.
+            // Names cannot see a shell write - filesystem_bash is neither
+            // write-named nor path-argumented - so until now a worker could
+            // `echo >` its way outside its lane and the only sign was the file
+            // quietly not appearing on the branch, because the committer drops
+            // what it may not carry. Dropped without a word looks like the work
+            // was never done.
+            //
+            // Here rather than in observeWorker: that runs on every SSE delta,
+            // and one git invocation per token costs more than the warning is
+            // worth. This is once, when the turn ends.
+            let measured = await QueenBranchCommitter.changedPaths(
+                since: workerBaselineTrees[task.conversationId]
+            )
+            // An empty transcript on purpose. Anything the tool names could see
+            // has already been announced during the turn by observeWorker, and
+            // saying it twice at the end reads as two separate problems. What
+            // is added here is only what names could not see.
+            let strays = QueenObserver.outOfBoundsPaths(
+                in: QueenWorkerTranscript(),
+                ownedPaths: task.ownedPaths,
+                observedWrites: measured.map {
+                    QueenBranchCommitter.projectRelative($0)
+                }
+            )
+            if !strays.isEmpty {
+                notice += "\n\(task.worker) wrote outside its boundary, so those files "
+                    + "will not be on the branch: " + strays.joined(separator: ", ")
+                TriosLogBus.shared.error(
+                    .queen,
+                    "queen.observer.outOfBounds",
+                    "A worker wrote outside its boundary",
+                    ["issue": task.issue.slug, "paths": strays.joined(separator: ",")]
+                )
+            }
+
             let outcome = await QueenBranchCommitter.commitWorkerChanges(
                 branch: branch,
                 baselineTree: workerBaselineTrees[task.conversationId],

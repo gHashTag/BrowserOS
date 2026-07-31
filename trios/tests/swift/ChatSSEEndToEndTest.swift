@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 399
+    static let minimumChecks = 403
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -2296,6 +2296,23 @@ struct ChatSSEEndToEndTests {
                 observedWrites: ["rings/B.swift"]
             ) == ["rings/A.swift", "rings/B.swift"],
             "and the two sources are joined rather than one replacing the other"
+        )
+
+        // git reports paths from the repository root and a boundary is written
+        // from the project, so the measured list has to come down a level
+        // before it can be compared. Getting this backwards would report every
+        // file as a stray, or none.
+        check(QueenBranchCommitter.projectRelative("trios/docs/x.md") == "docs/x.md",
+              "a measured path comes down to the project the boundary is written in")
+        check(QueenBranchCommitter.projectRelative("docs/x.md") == "docs/x.md",
+              "one already at that level is left alone rather than stripped twice")
+        check(QueenBranchCommitter.projectRelative("other-project/x.md") == "other-project/x.md",
+              "and a path outside the project keeps its shape, since disguising where it is helps nobody")
+        check(
+            QueenBranchCommitter.repositoryRelative(
+                QueenBranchCommitter.projectRelative("trios/docs/x.md")
+            ) == "trios/docs/x.md",
+            "and the two directions undo each other, which is the only reason to trust either"
         )
 
         // The old blind spot, kept as the transcript-only answer, because
