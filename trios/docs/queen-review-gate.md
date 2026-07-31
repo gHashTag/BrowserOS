@@ -33,3 +33,5 @@ After acceptance, the forge decides. A merge is blocked when:
 
 The Queen judges acceptance; the forge confirms the merge. Accepted
 work with an open PR is **not settled** until the merge lands.
+The Queen records each criterion's verdict (`recordVerdict`); no
+other role writes verdicts.
