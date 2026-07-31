@@ -3297,3 +3297,11 @@ other.
 Still broken: an `unmet` verdict has never occurred, so the claim that a failed
 criterion is named in the block reason remains untested - #1101 stays open for
 that alone. #1097 and #1098 are untouched.
+
+Later the same cycle: a board of bee cards in the master chat and an archive for
+terminal tasks, both written by bees running in parallel. Both were reviewed by
+an agent and both refused on exactly one named criterion - 4 verdicts of 5 and 2
+of 3. That is the gate doing its job rather than failing: what stopped them is a
+criterion the reviewer would not commit to, not one nobody was asked. The card
+metaphor is not invention; Agent View, AgentGrid and the kanban supervisors all
+converged on a card per task that singles out whoever is waiting on a person.
