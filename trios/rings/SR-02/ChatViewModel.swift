@@ -443,7 +443,12 @@ final class ChatViewModel: ObservableObject {
         let draftTokens = TokenEstimator.estimate(inputText)
         let contextExceeded = usableWindow > 0 && draftTokens > usableWindow
 
-        let requestedOutput = effectiveConversationOutputTokens ?? modelStore.requestedOutputTokens ?? 0
+        // effectiveConversationOutputTokens already falls back to the store, so
+        // the second `?? modelStore.requestedOutputTokens` here was the same
+        // fallback written twice. Harmless today because the store value is
+        // always nil, which is its own problem, but two statements of one rule
+        // is how this file has produced most of its defects.
+        let requestedOutput = effectiveConversationOutputTokens ?? 0
         let outputExceeded = requestedOutput > 0 && requestedOutput > profile.maxOutputTokens
 
         if contextExceeded && outputExceeded {

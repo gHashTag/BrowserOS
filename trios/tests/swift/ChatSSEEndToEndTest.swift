@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 392
+    static let minimumChecks = 396
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -458,6 +458,27 @@ struct ChatSSEEndToEndTests {
         }
         check(opened.worker == "queen-swift", "the named worker is the one recorded")
         check(opened.ownedPaths == ["docs"], "and the boundary from --paths reaches the task")
+        // The global output budget and its per-conversation override. Nothing
+        // covered either, and the global one is currently unreachable: the
+        // store has setRequestedOutputTokens, the sibling setting
+        // contextWindowMargin has the same shape *and* a control in the Models
+        // tab, and this one has no control anywhere. So the fallback below can
+        // only ever be nil in the shipped app. Asserting it now means the day
+        // someone adds the missing field, the behaviour it depends on is
+        // already known to work.
+        modelStore.setRequestedOutputTokens(4096)
+        check(staffed.effectiveConversationOutputTokens == 4096,
+              "a conversation with no override inherits the global budget")
+        await staffed.setConversationRequestedOutputTokens(512)
+        check(staffed.effectiveConversationOutputTokens == 512,
+              "and an override wins over it, which is the only reason to have both")
+        check(staffed.hasConversationOutputTokensOverride,
+              "and the view model says the override exists, so the UI can offer to clear it")
+        await staffed.setConversationRequestedOutputTokens(nil)
+        check(staffed.effectiveConversationOutputTokens == 4096,
+              "and clearing the override falls back rather than to nothing")
+        modelStore.setRequestedOutputTokens(nil)
+
         check(opened.virtualBranch?.hasPrefix("queen/4243-") == true,
               "and a branch is named for the issue, so the work is attributable")
 
