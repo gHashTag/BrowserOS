@@ -78,7 +78,7 @@ Two non-message views already render above the chat transcript:
 | View | Where it appears | Width gate | Registry observed? |
 |------|-----------------|------------|-------------------|
 | `QueenDashboardView` | Queen's chat, fullscreen | > 760pt | Yes |
-| `QueenCompactSupervisorBar` | Any chat, narrow panel | all widths | Yes |
+| `QueenCompactSupervisorBar` | Any chat, narrow panel | < 760pt | Yes |
 
 Both draw status pills, issue slugs, branch names, and accept/cancel
 buttons directly from the registry. They are the "live status strip"
