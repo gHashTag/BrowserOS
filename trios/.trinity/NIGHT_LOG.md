@@ -2656,3 +2656,36 @@ Left alone deliberately: making the skill store and delegation registry
 injectable; the store-level output budget that can be read but never set; the
 observer's shell blind spot; the four RichTextRenderer deprecations; the pull
 request waiting on a token only the user can place; and the 22 XCTest errors.
+
+## 2026-07-31 ~15:0x UTC - two attempts at an assertion, and the first was worthless
+
+Verifications green first. The skill store is injected into ChatViewModel now,
+defaulting to .shared so no caller changes, which unblocked the half of the
+Queen's answers yesterday could not reach: covering "that skill is switched off"
+previously meant switching a real one off on whoever ran the suite.
+
+Two things worth keeping from how it went.
+
+The warning ceiling paid for itself for the first time. Writing the parameter as
+`skillStore: SkillStore = .shared` compiles a default argument outside the
+actor, and SkillStore.shared is main-actor isolated - Swift 6 rejects it. The
+build failed on the ceiling rather than on my reading it. The parameter is
+optional now and resolved inside the initialiser where the isolation holds.
+
+And the first pair of assertions I wrote were worthless. Checking that the
+answer contains "switched off" passed with the enabled check deleted, because
+SkillStore.run refuses a disabled skill too and says so in the same words - the
+behaviour is guarded twice and the phrase appears on either path. I only knew
+because I mutated the guard away and watched them pass, which is the habit
+finally catching my own work rather than the codebase's.
+
+What the outer guard is for is not letting her announce work she will not do:
+without it she says "Running /probe" and only then finds it is off, which reads
+as a skill that ran and failed rather than one that never started. That is what
+is asserted now, and the mutation fails it.
+
+Left alone deliberately: the delegation registry, still a singleton and the
+next thing standing between this harness and the Queen's writing commands; the
+store-level output budget that can be read but never set; the observer's shell
+blind spot; the four RichTextRenderer deprecations; the pull request waiting on
+a token only the user can place; and the 22 XCTest errors.
