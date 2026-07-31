@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 385
+    static let minimumChecks = 392
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -341,6 +341,138 @@ struct ChatSSEEndToEndTests {
               "and she does not announce running something she is about to refuse")
         check(offNotices.count == 1,
               "one answer, not an announcement followed by a retraction")
+
+        // Delegation, driven the way the user drives it. Until the registry
+        // became injectable this could not run at all: /delegate writes to the
+        // real .trinity state, so testing it meant leaving tasks behind on
+        // whoever ran the suite.
+        let regPath = NSTemporaryDirectory() + "queen-cmd-reg-\(UUID().uuidString).json"
+        defer { try? FileManager.default.removeItem(atPath: regPath) }
+        // Delegation creates a real git branch in this checkout - the registry
+        // is injectable but ProjectPaths is not, and createVirtualBranch runs
+        // `git branch` for real. The first run of this test left
+        // queen/4242-do-a-thing and queen/4243-do-a-thing behind, and the
+        // cassette sweep no longer collects those: it was narrowed to
+        // queen/1086-cassette-* precisely so it would stop eating branches that
+        // hold work. So this cleans up after itself, by name, deleting only the
+        // two it makes.
+        defer {
+            for issue in [4242, 4243, 4244] {
+                let list = Process()
+                list.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+                list.arguments = ["branch", "--list", "queen/\(issue)-*", "--format=%(refname:short)"]
+                list.currentDirectoryURL = URL(fileURLWithPath: ProjectPaths.root)
+                let pipe = Pipe()
+                list.standardOutput = pipe
+                list.standardError = Pipe()
+                guard (try? list.run()) != nil else { continue }
+                let out = String(
+                    data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8
+                ) ?? ""
+                list.waitUntilExit()
+                for name in out.components(separatedBy: .newlines)
+                where name.hasPrefix("queen/\(issue)-") {
+                    let remove = Process()
+                    remove.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+                    remove.arguments = ["branch", "-D", name]
+                    remove.currentDirectoryURL = URL(fileURLWithPath: ProjectPaths.root)
+                    remove.standardOutput = Pipe()
+                    remove.standardError = Pipe()
+                    try? remove.run()
+                    remove.waitUntilExit()
+                }
+            }
+        }
+        let registry = QueenDelegationRegistry(storePath: regPath)
+        let delegateVM = ChatViewModel(
+            transport: MockChatTransport(),
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: InMemoryPersister(),
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: modelStore,
+            memoryService: AgentMemoryService(
+                store: VolatileMemoryStore(),
+                fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: TODOPlanner(store: VolatileMemoryStore(), preferences: testDefaults),
+            skillStore: skills,
+            delegationRegistry: registry
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        // The consent gate first. She refuses an issue nobody named, which is
+        // the rule the user asked for by name - she does not open chats on her
+        // own initiative.
+        await delegateVM.runQueenCommand("/delegate gHashTag/trios#4242 queen-swift Do a thing")
+
+        // Approving is not enough on its own, which the first run of this test
+        // discovered: she refuses to open a task she cannot staff rather than
+        // leaving an orphan for someone to find later. Worth asserting - it is
+        // the difference between a queue of real work and a queue of intentions.
+        await delegateVM.runQueenCommand("/approve gHashTag/trios#4242")
+        await delegateVM.runQueenCommand(
+            "/delegate gHashTag/trios#4242 queen-swift --paths docs Do a thing"
+        )
+        check(registry.task(forIssue: IssueReference(owner: "gHashTag", repo: "trios", number: 4242)) == nil,
+              "with no worker runner she opens no task, rather than one nobody will start")
+        check(
+            delegateVM.messages.contains { $0.role == .system && $0.content.contains("no worker runner") },
+            "and says why, because a delegation that vanishes silently looks like a bug in the command"
+        )
+
+        // Now with one, which is the path the application takes.
+        let staffed = ChatViewModel(
+            transport: MockChatTransport(),
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: InMemoryPersister(),
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: modelStore,
+            memoryService: AgentMemoryService(
+                store: VolatileMemoryStore(),
+                fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: TODOPlanner(store: VolatileMemoryStore(), preferences: testDefaults),
+            workerRunner: QueenWorkerRunner(
+                persister: InMemoryPersister(),
+                modelStore: modelStore,
+                makeTransport: { MockChatTransport() }
+            ),
+            skillStore: skills,
+            delegationRegistry: registry
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+        await staffed.runQueenCommand("/approve gHashTag/trios#4243")
+        await staffed.runQueenCommand(
+            "/delegate gHashTag/trios#4243 queen-swift --paths docs Do a thing"
+        )
+        guard let opened = registry.task(
+            forIssue: IssueReference(owner: "gHashTag", repo: "trios", number: 4243)
+        ) else {
+            let said = staffed.messages.filter { $0.role == .system }.map(\.content)
+            print("    [delegate] notices: \(said)")
+            fail("an approved issue with a runner still opened no task"); return
+        }
+        check(opened.worker == "queen-swift", "the named worker is the one recorded")
+        check(opened.ownedPaths == ["docs"], "and the boundary from --paths reaches the task")
+        check(opened.virtualBranch?.hasPrefix("queen/4243-") == true,
+              "and a branch is named for the issue, so the work is attributable")
+
+        // The consent gate, checked on the staffed view model on purpose. I
+        // first asserted it on the unstaffed one, where no task opens whatever
+        // the gate does - so removing the gate entirely left the assertion
+        // green. Passing for the wrong reason is the third time in three
+        // cycles, each caught only by mutating the thing under test.
+        await staffed.runQueenCommand("/delegate gHashTag/trios#4244 queen-swift Unapproved work")
+        check(registry.task(forIssue: IssueReference(owner: "gHashTag", repo: "trios", number: 4244)) == nil,
+              "an issue nobody approved opens no task, even with a worker standing by")
+        check(
+            staffed.messages.contains { $0.role == .system && $0.content.contains("has not been approved") },
+            "and she says so, naming the approval she is waiting for"
+        )
     }
 
     // MARK: - Scenario 3: message deduplication

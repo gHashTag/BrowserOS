@@ -116,6 +116,14 @@ final class ChatViewModel: ObservableObject {
     /// real one off on whoever ran the suite. Defaulting to .shared keeps every
     /// existing caller unchanged.
     let skillStore: SkillStore
+    /// Injected for the same reason as the skill store above: eighteen call
+    /// sites reached for the singleton, which reads and writes the real
+    /// .trinity/state/queen_delegation.json. Every command that makes the
+    /// Queen do something - delegate, accept, review, cancel - goes through it,
+    /// so none of them could be tested without leaving tasks behind on whoever
+    /// ran the suite. Views and main.swift keep observing .shared; it is only
+    /// this view model's own use that is now handed in.
+    let delegationRegistry: QueenDelegationRegistry
 
     private let transport: ChatTransportProtocol
     private let healthCheck: ChatHealthCheckProtocol
@@ -177,9 +185,11 @@ final class ChatViewModel: ObservableObject {
         // argument is evaluated outside the actor, and SkillStore.shared is
         // main-actor isolated, which Swift 6 rejects. Resolved inside the
         // initialiser, where the isolation already holds.
-        skillStore: SkillStore? = nil
+        skillStore: SkillStore? = nil,
+        delegationRegistry: QueenDelegationRegistry? = nil
     ) {
         self.skillStore = skillStore ?? .shared
+        self.delegationRegistry = delegationRegistry ?? .shared
         NSLog("ChatViewModel.init starting")
         self.transport = transport
         self.healthCheck = healthCheck
@@ -2993,7 +3003,7 @@ final class ChatViewModel: ObservableObject {
         skill: String? = nil,
         criteria: [String] = []
     ) async {
-        let registry = QueenDelegationRegistry.shared
+        let registry = delegationRegistry
 
         if let existing = registry.task(forIssue: issue) {
             await postQueenNotice(
@@ -3190,8 +3200,8 @@ final class ChatViewModel: ObservableObject {
                 self.rebuildCache()
             }
 
-        runner.onModelResolved = { task, provider, model in
-            QueenDelegationRegistry.shared.recordModel(
+        runner.onModelResolved = { [delegationRegistry] task, provider, model in
+            delegationRegistry.recordModel(
                 taskID: task.id,
                 provider: provider,
                 model: model
@@ -3219,17 +3229,17 @@ final class ChatViewModel: ObservableObject {
         }
 
         let scheduler = QueenReviewScheduler.shared
-        scheduler.tasks = { QueenDelegationRegistry.shared.tasks }
+        scheduler.tasks = { [delegationRegistry] in delegationRegistry.tasks }
         scheduler.report = { [weak self] digest in
             await self?.appendSystemMessageToQueenChat(digest)
         }
         // The wake is also when housekeeping happens: a supervisor that only
         // reports, and never acts on what it sees, is a nicer log.
-        scheduler.spentToday = { QueenDelegationRegistry.shared.spentToday() }
-        scheduler.beforeReport = { [weak self] in
+        scheduler.spentToday = { [delegationRegistry] in delegationRegistry.spentToday() }
+        scheduler.beforeReport = { [weak self, delegationRegistry] in
             await self?.reapStalledWorkers()
             await self?.pollPullRequests()
-            QueenDelegationRegistry.shared.pruneArchive()
+            delegationRegistry.pruneArchive()
         }
         scheduler.start()
     }
@@ -3239,7 +3249,7 @@ final class ChatViewModel: ObservableObject {
         failure: String?,
         usage: QueenWorkerRunner.WorkerUsage
     ) async {
-        let registry = QueenDelegationRegistry.shared
+        let registry = delegationRegistry
         registry.recordUsage(
             taskID: task.id,
             inputTokens: usage.inputTokens,
@@ -3294,7 +3304,7 @@ final class ChatViewModel: ObservableObject {
     /// reviewer at all. Off unless `TRIOS_QUEEN_AUTONOMY=1`.
     private func autoAcceptIfUnambiguous(taskID: UUID) async {
         guard ProcessInfo.processInfo.environment["TRIOS_QUEEN_AUTONOMY"] == "1" else { return }
-        let registry = QueenDelegationRegistry.shared
+        let registry = delegationRegistry
         guard let task = registry.tasks.first(where: { $0.id == taskID }) else { return }
         guard QueenDelegationPolicy.qualifiesForAutoAccept(
             task,
@@ -3353,9 +3363,9 @@ final class ChatViewModel: ObservableObject {
             // between deltas would need the transport to support it, and
             // claiming otherwise here would be a comment that lies.
             await self.appendCorrectionToWorkerChat(task: task, text: body)
-            QueenDelegationRegistry.shared.recordIntervention(taskID: task.id, text: body)
+            delegationRegistry.recordIntervention(taskID: task.id, text: body)
 
-            let count = QueenDelegationRegistry.shared.task(forIssue: task.issue)?
+            let count = delegationRegistry.task(forIssue: task.issue)?
                 .interventions.count ?? 1
             await self.appendSystemMessageToQueenChat(
                 SystemNoticeClassifier.warningMarker
@@ -3381,7 +3391,7 @@ final class ChatViewModel: ObservableObject {
     /// A task stuck in `running` forever occupies a worker slot and hides real
     /// capacity, so the swarm quietly shrinks to nothing.
     func reapStalledWorkers(now: Date = Date()) async {
-        let registry = QueenDelegationRegistry.shared
+        let registry = delegationRegistry
         let stalled = registry.stalled(now: now)
         guard !stalled.isEmpty else { return }
 
@@ -3446,7 +3456,7 @@ final class ChatViewModel: ObservableObject {
     // MARK: - Review Loop
 
     private func reportSwarm() async {
-        let registry = QueenDelegationRegistry.shared
+        let registry = delegationRegistry
         guard !registry.tasks.isEmpty else {
             await postQueenNotice(SystemNoticeClassifier.infoMarker
                     + "The hive is empty. Give me an issue and a worker - "
@@ -3478,7 +3488,7 @@ final class ChatViewModel: ObservableObject {
         decision: ReviewDecision,
         note: String
     ) async {
-        let registry = QueenDelegationRegistry.shared
+        let registry = delegationRegistry
         guard let task = registry.task(forIssue: issue) else {
             await postQueenNotice(SystemNoticeClassifier.warningMarker + "\(issue.slug) has no open task to review.")
             return
@@ -3584,7 +3594,7 @@ final class ChatViewModel: ObservableObject {
     /// publishes work to a place other people read. Those should not be the
     /// same event until someone decides they should be.
     func openPullRequestForTask(issue: IssueReference) async {
-        let registry = QueenDelegationRegistry.shared
+        let registry = delegationRegistry
         guard let task = registry.task(forIssue: issue) else {
             await postQueenNotice(
                 SystemNoticeClassifier.warningMarker + "I have no task for \(issue.slug)."
@@ -3633,7 +3643,7 @@ final class ChatViewModel: ObservableObject {
     /// only ever asks about tasks that actually have a pull request, so a swarm
     /// that never opens one costs nothing and behaves exactly as before.
     func pollPullRequests() async {
-        let registry = QueenDelegationRegistry.shared
+        let registry = delegationRegistry
         let waiting = registry.tasks.filter {
             $0.pullRequestNumber != nil && $0.state == .accepted
         }
@@ -3726,7 +3736,7 @@ final class ChatViewModel: ObservableObject {
         criterion: String,
         verdict: QueenCriterionVerdict
     ) async {
-        let registry = QueenDelegationRegistry.shared
+        let registry = delegationRegistry
         guard let task = registry.task(forIssue: issue) else {
             await postQueenNotice(
                 SystemNoticeClassifier.warningMarker + "I have no task for \(issue.slug)."
@@ -3759,7 +3769,7 @@ final class ChatViewModel: ObservableObject {
 
     /// Records that the user agreed to a piece of work.
     func approveDelegation(issue: IssueReference) async {
-        QueenDelegationRegistry.shared.approve(issue: issue)
+        delegationRegistry.approve(issue: issue)
         await postQueenNotice(
             SystemNoticeClassifier.successMarker
                 + "Noted - I may open a chat for \(issue.slug). I will not start "
@@ -3984,7 +3994,7 @@ final class ChatViewModel: ObservableObject {
         let memory = memoryService.promptContext(for: recalledMemories)
         guard conversationId == ChatConversation.trinityQueenId else { return memory }
 
-        let registry = QueenDelegationRegistry.shared
+        let registry = delegationRegistry
         let store = skillStore
         let charter = QueenSystemPrompt.text(
             skills: store.enabled,
@@ -4060,7 +4070,7 @@ final class ChatViewModel: ObservableObject {
     /// the moment the observer has just told you a bee is looping - and hunting
     /// for the right syntax then is how a wasted turn becomes a wasted ten.
     func cancelDelegatedTask(issue: IssueReference, reason: String) async {
-        let registry = QueenDelegationRegistry.shared
+        let registry = delegationRegistry
         guard let task = registry.task(forIssue: issue) else {
             await postQueenNotice(
                 SystemNoticeClassifier.warningMarker + "\(issue.slug) has no open task to stop."
