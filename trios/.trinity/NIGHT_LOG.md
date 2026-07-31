@@ -2784,3 +2784,36 @@ where it belongs and wants its own cycle with its own proof; the missing
 Models-tab field for the output budget; ProjectPaths, pending the user's word;
 the four RichTextRenderer deprecations; the pull request waiting on a token only
 the user can place; and the 22 XCTest errors.
+
+## 2026-07-31 ~19:0x UTC - the measurement gets a caller
+
+Verifications green first. changedPaths shipped last night with nothing calling
+it, which is precisely the shape this repository keeps producing and I keep
+deleting - so finishing it took priority over anything new. It runs once now,
+where a worker's turn ends.
+
+The gap it closes is quieter than it sounds. The committer already refuses to
+carry files a worker was not allowed to touch, so a shell write outside the
+boundary has always ended with the file simply not being on the branch. Dropped
+without a word is indistinguishable from work never done, and by then the turn
+is spent. The Queen names those paths now, in the same notice that reports what
+landed.
+
+Only the measured half is reported. Anything the tool names could see was
+already announced during the turn, and repeating it at the end reads as two
+separate problems, so this passes an empty transcript and adds only what names
+cannot see.
+
+The path mapping needed its inverse, which is where the real risk was. git
+reports trios/docs/x.md and a boundary is written as docs; get the direction
+wrong and every file reads as a stray, or none does. A path outside the project
+keeps its repository-relative form, since it is out of bounds under any
+boundary and rewriting it would disguise where it is. Four assertions, including
+that the two directions undo each other - the only reason to trust either.
+Stripping the prefix without checking it is present fails two.
+
+Left alone deliberately: the mid-turn half of the blind spot, which cannot have
+a git call per SSE delta and would need a cheaper signal; the missing
+Models-tab field for the output budget; ProjectPaths, pending the user's word;
+the four RichTextRenderer deprecations; the pull request waiting on a token only
+the user can place; and the 22 XCTest errors.
