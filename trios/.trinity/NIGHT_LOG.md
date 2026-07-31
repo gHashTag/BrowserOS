@@ -3061,3 +3061,34 @@ Still broken: she has not reviewed against criteria or merged anything - the
 task had no acceptance criteria to check, which is #1092. The dev build reads
 secrets from ~/.trios-dev/secrets rather than the Keychain by design, which
 cost an hour to discover; worth knowing before the next credential.
+
+## 2026-08-01 ~07:5x UTC - the loop closes
+
+A bee's work reached `merged` without a human in the path: brief, worker
+writes, branch committed and pushed, Queen accepts, pull request opens, the
+next poll lands it. gHashTag/BrowserOS#8 into feat/queen-supervisor.
+
+Three things stood in the way, two of them the same mistake in different
+clothes. The pull request was opened against a hardcoded `dev` while a bee's
+branch is cut from HEAD, so the base was a branch HEAD is not on - a conflict
+that can never resolve, which is precisely what #6 and #7 are. And polling and
+merging still asked the issue's repository about a number that only exists in
+the checkout's origin; creating had been corrected for that, the two steps
+after it had not. The third was the probe polling before the review, which is
+always before a pull request exists, so the merge half had never been reached.
+
+One run in between refused with "the worker committed nothing, so the pull
+request would be empty" - the bee had found the section already written. The
+refusal was correct and, more to the point, legible: last cycle's logging of
+the silent exits is what turned three days of guessing into four straight
+answers.
+
+Pushing then failed because the remote had moved - the Queen had merged her
+bee's work into it. An untracked leftover of the bee's file blocked the rebase;
+moved aside rather than deleted, and confirmed byte-identical to the merged
+copy afterwards.
+
+Still broken: she has never reviewed against criteria, because nothing has had
+any - the criteria still come from the human on the command line, which is
+#1092 and the next thing worth doing. #6 and #7 are open and unmergeable, left
+as evidence of the base defect rather than tidied away.
