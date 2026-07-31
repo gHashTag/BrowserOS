@@ -62,6 +62,19 @@ final class QueenDelegationRegistry: ObservableObject {
         tasks.first { $0.issue == issue && !$0.state.isTerminal }
     }
 
+    /// The task for an issue whatever state it reached, newest first.
+    ///
+    /// `task(forIssue:)` deliberately hides terminal states so `/delegate`
+    /// refuses to open a second chat on a live issue. That filter reaches one
+    /// step too far: `accepted` is terminal, and opening the pull request is
+    /// the step immediately after acceptance. So the moment the Queen accepted
+    /// work, the task vanished from the lookup the next step used, that step
+    /// said "I have no task for this issue" and returned - which is why no
+    /// pull request has ever been opened in this project's history.
+    func anyTask(forIssue issue: IssueReference) -> DelegatedTask? {
+        tasks.filter { $0.issue == issue }.max { $0.updatedAt < $1.updatedAt }
+    }
+
     /// Whether the Queen may open another worker right now, and why not.
     /// Issues the user has agreed the Queen may work on, this session.
     ///

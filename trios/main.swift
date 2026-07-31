@@ -202,6 +202,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Optionally close the loop, so the review commands are exercised by the
         // same probe rather than only by hand.
         guard let verb = environment["TRIOS_E2E_DELEGATE_REVIEW"], !verb.isEmpty else { return }
+
+        // Wait for the task to leave `running`, not merely for the runner to
+        // drop its flag. Those are different moments: the runner clears first,
+        // and only afterwards does handleWorkerFinished commit the branch and
+        // move the task to awaitingReview. Reviewing in between issues /accept
+        // against a running task, which is not a legal transition - so the
+        // command was refused, the state never moved, and no pull request was
+        // ever opened. Every probe that has ever "closed the loop" was in fact
+        // reviewing too early and reporting the refusal as a state.
+        for _ in 0..<120 {
+            let current = QueenDelegationRegistry.shared
+                .task(forConversation: task.conversationId)?.state
+            if current != .running { break }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+        }
+
         await vm.runQueenCommand("/swarm")
         let command = verb == "reject"
             ? "/review \(issue.slug) reject probe rejection"

@@ -3692,27 +3692,76 @@ final class ChatViewModel: ObservableObject {
     /// publishes work to a place other people read. Those should not be the
     /// same event until someone decides they should be.
     func openPullRequestForTask(issue: IssueReference) async {
+        TriosLogBus.shared.info(
+            .queen, "queen.pr.attempt", "Trying to open a pull request", ["issue": issue.slug]
+        )
         let registry = delegationRegistry
-        guard let task = registry.task(forIssue: issue) else {
+        guard let task = registry.anyTask(forIssue: issue) else {
             await postQueenNotice(
                 SystemNoticeClassifier.warningMarker + "I have no task for \(issue.slug)."
             )
             return
         }
         if let reason = QueenDelegationPolicy.pullRequestBlockReason(for: task) {
+            TriosLogBus.shared.warn(
+                .queen, "queen.pr.refused", "Refused to open a pull request",
+                ["issue": issue.slug, "reason": reason]
+            )
             await postQueenNotice(
                 SystemNoticeClassifier.warningMarker
                     + "Not opening a pull request for \(issue.slug): \(reason)"
             )
             return
         }
-        guard let branch = task.virtualBranch else { return }
+        guard let branch = task.virtualBranch else {
+            // Used to return without a word, which is how this step stayed
+            // invisible: the cycle simply stopped and nothing said so.
+            TriosLogBus.shared.error(
+                .queen, "queen.pr.noBranch", "The task has no branch to propose",
+                ["issue": issue.slug]
+            )
+            return
+        }
+
+        // Publish it first. GitHub cannot open a pull request from a branch it
+        // has never seen, and until now nothing in the delegation path pushed:
+        // the bee committed locally, the Queen asked for a pull request, and
+        // the cycle stopped one step short of the only thing it is for.
+        if let pushFailure = await QueenBranchCommitter.pushBranch(branch) {
+            TriosLogBus.shared.error(
+                .queen, "queen.pr.pushFailed", "Could not publish the branch",
+                ["issue": issue.slug, "branch": branch, "detail": pushFailure]
+            )
+            await postQueenNotice(
+                SystemNoticeClassifier.failureMarker
+                    + "Could not publish `\(branch)`, so there is no pull request for "
+                    + "\(issue.slug) yet. git said: \(pushFailure)"
+            )
+            return
+        }
+
+        // Where the branch is, not where the issue is. Those differ here and the
+        // mismatch is what stopped the cycle: the branch lives in the checkout's
+        // own origin, the issue in another repository entirely, and GitHub
+        // cannot open a pull request from a ref it has never seen.
+        guard let prRepo = QueenBranchCommitter.originRepository() else {
+            TriosLogBus.shared.error(
+                .queen, "queen.pr.noRepository", "Could not derive the branch's repository",
+                ["issue": issue.slug, "branch": branch]
+            )
+            await postQueenNotice(
+                SystemNoticeClassifier.failureMarker
+                    + "I could not work out which repository `\(branch)` belongs to, so there "
+                    + "is no pull request for \(issue.slug)."
+            )
+            return
+        }
 
         do {
             let pr = try await GitHubAPIClient().createPR(
-                repo: "\(issue.owner)/\(issue.repo)",
+                repo: prRepo,
                 title: task.title,
-                body: "Closes #\(issue.number)\n\nOpened by the Queen for \(task.worker).",
+                body: "For \(issue.url)\n\nOpened by the Queen for \(task.worker).",
                 head: branch
             )
             registry.recordPullRequest(taskID: task.id, number: pr.number)
@@ -3727,6 +3776,10 @@ final class ChatViewModel: ObservableObject {
                 ["issue": issue.slug, "pr": "\(pr.number)", "branch": branch]
             )
         } catch {
+            TriosLogBus.shared.error(
+                .queen, "queen.pr.failed", "Could not open a pull request",
+                ["issue": issue.slug, "branch": branch, "error": "\(error)"]
+            )
             await postQueenNotice(
                 SystemNoticeClassifier.failureMarker
                     + "Could not open a pull request for \(issue.slug): \(error.localizedDescription)"

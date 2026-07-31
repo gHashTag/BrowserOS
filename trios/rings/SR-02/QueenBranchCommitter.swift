@@ -45,6 +45,62 @@ enum QueenBranchCommitter {
         }.value
     }
 
+    /// The `owner/name` of the checkout the branch actually lives in.
+    ///
+    /// Not the issue's repository, and the difference is not cosmetic. The
+    /// issues for this work live in gHashTag/trios while the code and every
+    /// worker branch live in gHashTag/BrowserOS, so asking GitHub to open a
+    /// pull request in the issue's repository from a branch that repository has
+    /// never seen fails, silently, one step from the end of the cycle. A pull
+    /// request belongs where its commits are; the issue stays as a link in the
+    /// body.
+    static func originRepository(projectRoot: String = ProjectPaths.root) -> String? {
+        let url = QueenStatusViewModel.runProcess(
+            "/usr/bin/git",
+            arguments: ["remote", "get-url", "origin"],
+            workDir: projectRoot,
+            timeout: 10
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !url.isEmpty else { return nil }
+        // git@github.com:owner/name.git or https://github.com/owner/name.git
+        guard let range = url.range(of: "github.com") else { return nil }
+        var tail = String(url[range.upperBound...])
+        if tail.hasPrefix(":") || tail.hasPrefix("/") { tail.removeFirst() }
+        if tail.hasSuffix(".git") { tail.removeLast(4) }
+        let parts = tail.split(separator: "/").map(String.init)
+        guard parts.count == 2, !parts[0].isEmpty, !parts[1].isEmpty else { return nil }
+        return "\(parts[0])/\(parts[1])"
+    }
+
+    /// Publishes a worker's branch so a pull request can be opened from it.
+    ///
+    /// The commit path deliberately never touched the network, and the pull
+    /// request path assumed the branch was already there. Between them, nothing
+    /// pushed: the bee's work sat on a local branch, GitHub was asked to open a
+    /// pull request from a ref it had never seen, and the whole cycle stopped
+    /// one step short of the thing it exists for.
+    ///
+    /// Returns nil on success, or git's own complaint. `--force-with-lease`
+    /// rather than `--force`: re-running a review should update the branch, but
+    /// not over the top of something that arrived while we were not looking.
+    static func pushBranch(
+        _ branch: String,
+        projectRoot: String = ProjectPaths.root
+    ) async -> String? {
+        await Task.detached(priority: .utility) {
+            let index = temporaryIndexPath()
+            defer { try? FileManager.default.removeItem(atPath: index) }
+            let output = runGit(
+                ["push", "--force-with-lease", "-u", "origin", "\(branch):\(branch)"],
+                index: index, projectRoot: projectRoot
+            )
+            guard output != nil else {
+                return "git push failed for \(branch)"
+            }
+            return nil
+        }.value
+    }
+
     /// Which repository-relative paths differ from `baselineTree` right now.
     ///
     /// The observer decides whether a worker wrote outside its lane by reading
