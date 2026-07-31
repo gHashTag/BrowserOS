@@ -2851,3 +2851,29 @@ am now fairly sure should not be built; the missing Models-tab field for the
 output budget; ProjectPaths, pending the user's word; the four RichTextRenderer
 deprecations; the pull request waiting on a token only the user can place; and
 the 22 XCTest errors.
+
+## 2026-08-01 ~08:xx - stopped polishing, found why chats did not appear
+
+The user cut the night short and was right to. Three crons had me doing
+micro-improvements; they are deleted and replaced with one that says the task
+out loud: the Queen's master chat, a chat per issue, bees visible under her.
+
+Then the actual complaint, which took one probe. Pressing New Chat moved the
+user into a fresh conversation that appeared nowhere: the sidebar draws
+listAllConversations, that returns what has been saved, and a new conversation
+was only a UUID in memory until its first message. The Queen's own conversation
+was already persisted empty on purpose, with a comment explaining why, and
+nothing did the same for anyone else's. Driving newConversation in the harness
+printed a sidebar containing only "Trinity Queen" while the view model sat in a
+different conversation entirely. Fixed, asserted, and the release app rebuilt so
+it is in the one being used.
+
+packages/browseros-agent is gone - 1516 tracked files - after checking that
+ProjectPaths points at trios/agent-server with no fallback and both live server
+processes run from there. Forty-two references followed it.
+
+Still broken, and this is the honest list: the Queen has no visible hierarchy in
+the sidebar - her chat is pinned with a crown but her workers are not shown
+under her; a delegated chat is not marked as belonging to an issue in the list;
+and there is no live per-bee status in the master chat. That is the next work
+and it is what the new cron points at.
