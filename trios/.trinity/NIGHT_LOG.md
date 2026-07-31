@@ -3305,3 +3305,31 @@ of 3. That is the gate doing its job rather than failing: what stopped them is a
 criterion the reviewer would not commit to, not one nobody was asked. The card
 metaphor is not invention; Agent View, AgentGrid and the kanban supervisors all
 converged on a card per task that singles out whoever is waiting on a person.
+
+## She wakes up and tells you where things stand
+
+The report loop landed: the Queen wakes on an interval, walks the registry and
+writes into her own chat in prose - "I looked in on the hive at 23:14.
+queen-swift came back from #1108 five minutes ago with 25 tool calls, so it
+worked the problem rather than guessing." Four bee turns, no code from me.
+
+It shipped broken and the review could not see it, because a reviewer reading a
+diff can confirm that a loop exists and not that the thing it produces is worth
+reading. Every criterion came back met. The first sentence she ever spoke in a
+fresh process was "Nothing has changed since my last look - all quiet", with no
+last look behind it. Worse, the interval was reachable only from code, so
+proving anything meant waiting thirty minutes - which is the same as never
+proving it. Making it drivable came first, and the defect turned up within a
+minute of being able to drive it, twice in a row.
+
+Both halves are now proven by driving: a fresh launch gives a 10,458-character
+report, a second walk over an unchanged swarm gives one line, and turning the
+dedup check off flips the self-test's verdict from passed to failed. My first
+attempt at that break test edited a line the bee had already rewritten, so it
+changed nothing and the suite passed - a green result from a mutation that never
+applied, which is exactly the way a break test lies.
+
+Still broken: #1104's board is written and blocked on one criterion the reviewer
+would not confirm, because it is satisfied by code the diff does not touch - a
+reviewer who sees only the diff cannot judge a criterion about the whole. Nobody
+has yet opened the app and looked at any of this with their eyes.
