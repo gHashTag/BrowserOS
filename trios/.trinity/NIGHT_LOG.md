@@ -3263,3 +3263,37 @@ warning that fires every single time is one nobody reads.
 One unexplained cassette failure, immediately after the delegation probe; five
 subsequent runs were clean and I could not reproduce it. Recorded rather than
 explained.
+
+## The whole cycle closed, unattended, on real work
+
+#1102 went `queued -> running -> awaitingReview -> accepted -> merged` without
+me touching any of it. A bee wrote the fix, a reviewer agent judged both
+criteria `met` with reasons, the Queen accepted, opened PR #11 and merged it.
+That is the MVP running end to end for the first time: delegate, work, review
+against the contract, accept, propose, land.
+
+It only became possible because the reviewer's reply is now written to the log.
+Three cycles running I had watched verdicts come back empty and could say
+nothing about why - the reply lived in memory and a chat message, so with the
+app closed there was `response_chars=370` and nothing else. The first captured
+reply answered it in one line: *"The diff contains no changes, so there is
+nothing to verify against the criteria."* Every review I had driven was a
+re-review of #1093, whose work was already committed, so the reviewer was handed
+an empty diff and honestly refused to judge it. The parser was never broken. It
+was declining to read "could not check" as a pass, which is what it was built to
+do. I had been testing the one case that could not work and reading the result
+as a defect in the machinery.
+
+The cassette gate stopped failing on a stopwatch: 40 seconds became 120 and it
+now tells "never started" apart from "ran but never emitted the marker". The
+first attempt at that distinction was wrong and only a break test caught it -
+the executable inside trios-dev.app is called `trios`, so `pgrep -x trios-dev`
+matched nothing and every failure claimed the app had never started, including
+one where it plainly had. The pattern was copied from a `pkill -x trios-dev` in
+the same target that has never killed anything either. Both branches are now
+proven by driving: a bogus marker gives one message, a nonexistent DEV_APP the
+other.
+
+Still broken: an `unmet` verdict has never occurred, so the claim that a failed
+criterion is named in the block reason remains untested - #1101 stays open for
+that alone. #1097 and #1098 are untouched.
