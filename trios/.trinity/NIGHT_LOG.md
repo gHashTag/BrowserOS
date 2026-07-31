@@ -2877,3 +2877,26 @@ the sidebar - her chat is pinned with a crown but her workers are not shown
 under her; a delegated chat is not marked as belonging to an issue in the list;
 and there is no live per-bee status in the master chat. That is the next work
 and it is what the new cron points at.
+
+## 2026-08-01 ~09:xx - the bee chats were invisible too
+
+Step (b). Yesterday's fix made a user's New Chat appear; the same defect sat one
+layer along, in the chat the Queen opens for an issue. She delegated, the
+registry held a live task, and the sidebar showed only "Trinity Queen".
+
+The cause was written in a comment above the bug: the persister "materialises a
+conversation the moment messages are saved against a fresh id". True, and
+therefore fatal - the code renamed the conversation to "<issue> <title>" before
+anything had been saved, so the rename landed on a record that did not exist and
+the chat became real only when the bee first spoke. Until then the Queen had a
+task pointing at a conversation nobody could open.
+
+Saved empty, then renamed, then reloaded. The sidebar reads
+"gHashTag/trios#4243 Do a thing" beside "Trinity Queen". Proven by driving
+/approve and /delegate through runQueenCommand and reading conversations - the
+first run printed one entry while a live task existed.
+
+Still broken, plainly: the bees sit beside the Queen, not under her - there is
+no hierarchy in the sidebar at all, only a pinned crown. No per-bee status in
+her chat. Nothing in the list says whether a bee is running, waiting for review
+or failed. That is (b)'s remaining half and (c), and both are UI.
