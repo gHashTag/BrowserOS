@@ -2817,3 +2817,37 @@ a git call per SSE delta and would need a cheaper signal; the missing
 Models-tab field for the output budget; ProjectPaths, pending the user's word;
 the four RichTextRenderer deprecations; the pull request waiting on a token only
 the user can place; and the 22 XCTest errors.
+
+## 2026-07-31 ~20:0x UTC - the net catches up with the hand
+
+Verifications green first. I did not build the mid-turn boundary warning I had
+put first on last night's list. I had already written that I doubted it was
+worth building - a worker learns its boundary at the end of the turn either way,
+and chat noise is something this project has treated as a defect before.
+Building it because it was next on a list would be the shape I keep deleting: a
+capability nobody asked for.
+
+Instead I audited my own work, since I have been the only author here for
+nineteen nights. Everything I added recently has a caller; no dead additions.
+What the audit did find is that `make mutants` shipped with three mutations and
+has stayed at three, while I have verified perhaps a dozen guards by breaking
+them at the keyboard. Each of those was proven exactly once, on the night it was
+written, and nothing has re-proven any since. A net believed to cover a dozen
+things and covering three is worse than one nobody trusts.
+
+Four more now, all previously hand-proven: the observer ignoring what git
+measured, projectRelative stripping a prefix that is not there, a disabled skill
+reporting itself as on, and the prompt losing the names of the tools the Queen
+may not call. Seven, all caught.
+
+The last took two attempts and the harness is what told me. My first needle
+changed prose around the interpolation and left \(forbidden) in place, so the
+names still reached the prompt and the assertions still passed - reported as
+SURVIVED, correctly: the mutation was useless, not the coverage. The harness
+doing to me what I have spent three weeks doing to this codebase.
+
+Left alone deliberately: the mid-turn half of the boundary blind spot, which I
+am now fairly sure should not be built; the missing Models-tab field for the
+output budget; ProjectPaths, pending the user's word; the four RichTextRenderer
+deprecations; the pull request waiting on a token only the user can place; and
+the 22 XCTest errors.
