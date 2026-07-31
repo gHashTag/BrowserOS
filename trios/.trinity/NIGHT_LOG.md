@@ -2720,3 +2720,35 @@ tests touch the real checkout; the store-level output budget that can be read
 but never set; the observer's shell blind spot; the four RichTextRenderer
 deprecations; the pull request waiting on a token only the user can place; and
 the 22 XCTest errors.
+
+## 2026-07-31 ~17:0x UTC - not dead code, half a feature
+
+Verifications green first. I did not take last night's own recommendation:
+injecting ProjectPaths needs the user's word, because repo law names it the UI
+single source of truth, and I said I wanted that word before reshaping it. It
+has not come, so the cycle took the next item instead and says so rather than
+quietly proceeding.
+
+The store-level output budget has sat on the "read but never set" list for days
+and I had been filing it as dead code. It is not. The sibling setting decides
+it: contextWindowMargin has exactly the same shape - published property, loader,
+setter writing UserDefaults - and a control in the Models tab wired to it.
+requestedOutputTokens has the property, the loader and the setter, and no
+control anywhere. The symmetry says the design intends a global default the user
+sets and a conversation overrides, and only the output half was never surfaced.
+
+That changes the correct action from deleting to wiring, and wiring is UI, which
+wants someone at the screen. So the behaviour is covered instead: no override
+inherits the global, an override beats it, the view model reports the override
+so a control could offer to clear it, and clearing falls back rather than to
+nothing. Removing the fallback fails two of them. When the field is added, what
+it rests on is already known to work.
+
+Also removed a fallback written twice - effectiveConversationOutputTokens
+already falls back to the store, and one caller restated it. Harmless while the
+store value is always nil, which is the same defect seen from the other side.
+
+Left alone deliberately: the missing Models-tab field, which is the actual fix
+and needs eyes; ProjectPaths, pending the user's word; the observer's shell
+blind spot; the four RichTextRenderer deprecations; the pull request waiting on
+a token only the user can place; and the 22 XCTest errors.
