@@ -223,6 +223,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             ? "/review \(issue.slug) reject probe rejection"
             : "/accept \(issue.slug) probe acceptance"
         await vm.runQueenCommand(command)
+        // Poll again, after the review. The earlier reviewNow() runs while work
+        // is still outstanding and therefore always before any pull request
+        // exists - so the merge half of the loop had never once been reached by
+        // a probe. This is the step that closes the cycle: acceptance opens the
+        // pull request, and the next poll is what can land it.
+        if verb != "reject" {
+            for _ in 0..<40 {
+                let task = QueenDelegationRegistry.shared.task(forConversation: task.conversationId)
+                    ?? QueenDelegationRegistry.shared.tasks.first { $0.issue == issue }
+                if task?.pullRequestNumber != nil { break }
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+            await QueenReviewScheduler.shared.reviewNow()
+        }
+
         let reviewed = QueenDelegationRegistry.shared.tasks
             .first { $0.conversationId == task.conversationId }?
             .state

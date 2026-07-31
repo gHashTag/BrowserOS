@@ -3762,7 +3762,8 @@ final class ChatViewModel: ObservableObject {
                 repo: prRepo,
                 title: task.title,
                 body: "For \(issue.url)\n\nOpened by the Queen for \(task.worker).",
-                head: branch
+                head: branch,
+                base: QueenBranchCommitter.baseBranch()
             )
             registry.recordPullRequest(taskID: task.id, number: pr.number)
             await postQueenNotice(
@@ -3800,13 +3801,18 @@ final class ChatViewModel: ObservableObject {
         }
         guard !waiting.isEmpty else { return }
 
+        // The repository the pull requests are in, which is the checkout's
+        // origin - not the issue's. Creating them was already corrected for
+        // this; polling and merging still asked the issue's repository about a
+        // number that only exists in the other one.
+        guard let prRepo = QueenBranchCommitter.originRepository() else { return }
         let client = GitHubAPIClient()
         for task in waiting {
             guard let number = task.pullRequestNumber else { continue }
             let pullRequest: GitHubPullRequest
             do {
                 pullRequest = try await client.fetchPullRequest(
-                    repo: "\(task.issue.owner)/\(task.issue.repo)", number: number
+                    repo: prRepo, number: number
                 )
             } catch {
                 // A forge that cannot be reached says nothing about the work.
@@ -3828,7 +3834,7 @@ final class ChatViewModel: ObservableObject {
                 merged: pullRequest.isMerged, closedUnmerged: pullRequest.isClosedUnmerged
             ) == .pending {
                 let merged = (try? await client.mergePullRequest(
-                    repo: "\(task.issue.owner)/\(task.issue.repo)",
+                    repo: prRepo,
                     number: number,
                     title: "\(task.title) (\(task.issue.slug))"
                 )) ?? false

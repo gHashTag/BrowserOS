@@ -72,6 +72,22 @@ enum QueenBranchCommitter {
         return "\(parts[0])/\(parts[1])"
     }
 
+    /// The branch a worker's work should land on: whatever the checkout is on.
+    ///
+    /// The pull request used to be opened against a hardcoded `dev`. A bee's
+    /// branch is cut from HEAD, so basing it on a branch HEAD is not on
+    /// guarantees a conflicting pull request that can never be merged - which
+    /// is exactly what the first one did. Work lands where it came from.
+    static func baseBranch(projectRoot: String = ProjectPaths.root) -> String {
+        let name = QueenStatusViewModel.runProcess(
+            "/usr/bin/git",
+            arguments: ["branch", "--show-current"],
+            workDir: projectRoot,
+            timeout: 10
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? "dev" : name
+    }
+
     /// Publishes a worker's branch so a pull request can be opened from it.
     ///
     /// The commit path deliberately never touched the network, and the pull
