@@ -3228,3 +3228,38 @@ deterministic instead: the mock persister now holds the first write to her chat
 open for two seconds, the second write is issued 200ms into that window, and a
 stale snapshot arriving afterwards erases it every time. Verified from both
 sides - the check fails with the fix removed and passes with it restored.
+
+## The Queen delegated two real tasks and still cannot accept either
+
+Both #1093 and #1100 were done by bees; I wrote the boundary and the contract
+and no code. #1093 got a pinned specification header in ChatPanelView - criteria
+above the conversation, a verdict beside each, the acceptance blocker named -
+and #1100 got QueenReviewVerdictRequest plus the wiring that asks a reviewer
+agent for a verdict when a criterion names no path. Both compile; all three
+gates pass with them in the tree, which is worth stating because nothing in the
+Queen's review builds a bee's work before judging it.
+
+The live re-review is what this cycle actually proved, and it proved a failure.
+`asked=3 parsed=3 recorded=3` - the reviewer is reached for the first time - and
+one second later `accept.blocked: 3 criterion(s) were never checked` with
+`verdicts=3`. The state file settles it: three entries, keys matching the
+criteria word for word, every value `unchecked`. So the parser records
+"unchecked" as though it were an answer, when its own comment says an
+unparseable response must stay out of the dictionary. Recording it destroys the
+difference between "asked and could not read the reply" and "never asked", and
+the Queen then reports the second while the first is what happened. My guess at
+the mechanism: the fallback strategy takes the first line containing the
+criterion's opening words, which is the reviewer's echo of the criterion - and
+criterion 2 contains the words "выполнен / не выполнен / не проверен" in its own
+text, so its echo reads as a verdict. Unprovable for now, because the reviewer's
+reply is not kept anywhere: the log holds `response_chars=459` and nothing else.
+A verdict that decided a task's fate cannot be re-examined. Filed as #1101.
+
+Also filed #1102: every review logs the worker for writing outside its boundary,
+and the path is `.trinity-dev/state/queen_delegation.json` - the Queen's own
+state file, written by her during the worker's turn and attributed to the bee. A
+warning that fires every single time is one nobody reads.
+
+One unexplained cassette failure, immediately after the delegation probe; five
+subsequent runs were clean and I could not reproduce it. Recorded rather than
+explained.
