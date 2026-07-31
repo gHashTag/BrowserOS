@@ -286,20 +286,45 @@ enum QueenDelegationPolicy {
         running < maximumConcurrentWorkers
     }
 
+    /// Whether two boundaries can reach the same file.
+    ///
+    /// A directory contains everything beneath it, so `docs` and `docs/live`
+    /// overlap even though the strings differ. The comparison is by path
+    /// component, not by characters: `docs` and `docsite` share a prefix and
+    /// nothing else.
+    ///
+    /// This is the single notion of containment for the ownership rule and for
+    /// judging writes. They had one each, and disagreed.
+    static func pathsOverlap(_ first: String, _ second: String) -> Bool {
+        let a = normalizePath(first)
+        let b = normalizePath(second)
+        guard !a.isEmpty, !b.isEmpty else { return false }
+        return a == b || a.hasPrefix("\(b)/") || b.hasPrefix("\(a)/")
+    }
+
     /// Detects an ownership clash before two workers touch the same file.
     ///
     /// Single-writer on hotspot files is the structural way to avoid conflicts;
     /// detecting it at delegation time is far cheaper than at merge time.
+    ///
+    /// Compared as paths rather than as strings. Set disjointness was the old
+    /// test, and it only ever caught two bees naming a boundary identically -
+    /// the one case a human notices unaided. The case it let through is the
+    /// ordinary one: one bee owns `rings`, the next owns
+    /// `rings/SR-02/ChatViewModel.swift`, both are inside their boundary when
+    /// they write that file, and nothing complains until the merge. Two bees
+    /// running in parallel on `docs` and `docs/live` is how this surfaced.
     static func conflictingTasks(
         for paths: [String],
         among tasks: [DelegatedTask]
     ) -> [DelegatedTask] {
-        let wanted = Set(paths.map(normalizePath))
+        let wanted = paths.map(normalizePath).filter { !$0.isEmpty }
         guard !wanted.isEmpty else { return [] }
         return tasks.filter { task in
             guard !task.state.isTerminal else { return false }
-            let owned = Set(task.ownedPaths.map(normalizePath))
-            return !owned.isDisjoint(with: wanted)
+            return task.ownedPaths.contains { owned in
+                wanted.contains { pathsOverlap(owned, $0) }
+            }
         }
     }
 

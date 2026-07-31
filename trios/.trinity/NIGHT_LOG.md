@@ -3182,3 +3182,49 @@ the exception.
 Still broken: #1093, #1097 and #1098 remain, and nothing has yet run two bees
 at once - parallelism is bounded at four in policy and has never been
 demonstrated.
+
+## Two bees at once, and what running them exposed
+
+Two bees ran at the same time for the first time. #1093 from 10:21:16 to
+10:23:18 and #1098 from 10:21:18 to 10:24:15 - two minutes of genuine overlap,
+each on its own branch, each committing one file, the working copy never
+leaving feat/queen-supervisor. Both branches diffed against the base contain
+exactly their own file and nothing of the other's.
+
+The value was not the green result. It was the two defects it uncovered, both
+of which only exist when bees run in parallel, which is why neither had ever
+been seen.
+
+**The ownership rule compared strings.** #1093 owned `docs`, #1098 owned
+`docs/live`, and both claims were admitted, because `Set.isDisjoint` sees two
+different strings. But a write is judged by containment, so the bee owning
+`docs` was fully entitled to write `docs/live/x.md` - the file the other bee
+owned. Two writers, one file, and nothing complaining until the merge. The two
+rules had one notion of "path" each and disagreed. They now share
+`pathsOverlap`, which compares by path component: `docs` clashes with
+`docs/live`, `docs` does not clash with `docsite`, and siblings never clash -
+that last one matters, because a rule that answered yes to everything would
+pass every clash test and quietly stop all parallel work.
+
+**The Queen was losing bee reports.** Six reports arriving at once persisted
+three. Not slow - lost: the check waits ten seconds and they never arrive. Each
+caller appended to the same main-actor buffer, so the array in memory was always
+complete; then each passed its own whole-array snapshot to `save`, the saves
+raced, and the file ended up holding whichever snapshot finished last rather
+than whichever held the most. Writes to her chat are now queued, and each takes
+its snapshot when it runs instead of when it was queued.
+
+That one had been hiding behind a fixed 300ms sleep in the test. The sleep was
+enough on an idle machine, so the scenario passed every run I had ever done. It
+failed once under a parallel build, which is the only reason I looked. A guessed
+sleep does not make a test slow, it makes it silent.
+
+Also cleared: sixteen prototype exemptions naming files that `939028c91` had
+already deleted. The gate had been failing on them and was right to.
+
+Twenty loaded runs then passed without a failure, which on a one-in-eight defect
+is worth about as much as a coin landing heads four times. So the race was made
+deterministic instead: the mock persister now holds the first write to her chat
+open for two seconds, the second write is issued 200ms into that window, and a
+stale snapshot arriving afterwards erases it every time. Verified from both
+sides - the check fails with the fix removed and passes with it restored.

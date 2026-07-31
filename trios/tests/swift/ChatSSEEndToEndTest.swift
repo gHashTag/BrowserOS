@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 437
+    static let minimumChecks = 455
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -47,6 +47,7 @@ struct ChatSSEEndToEndTests {
         await runCancellationIsNonError()
         await runNewChatAppears()
         await runQueenHearsEveryBee()
+        await runSlowReportDoesNotEraseAFasterOne()
         await runQueenAnswersACommand()
         await runDeduplication()
         await runConversationRenamePersistence()
@@ -79,6 +80,7 @@ struct ChatSSEEndToEndTests {
         await runWorkerLivenessIsObservable()
         await runPullRequestOutcomeMapping()
         await runAcceptedWaitsForTheMerge()
+        await runNestedBoundariesClash()
         await runPullRequestRefusals()
         await runMergedIsNotTheSameAsClosed()
         await runStalledWorkerIsResumedBeforeCancelled()
@@ -333,15 +335,85 @@ struct ChatSSEEndToEndTests {
                 }
             }
         }
-        try? await Task.sleep(nanoseconds: 300_000_000)
+        // Wait for the writes to settle rather than sleeping a guessed 300ms.
+        // The guess held on an idle machine and failed under a parallel build,
+        // which is the worst kind of check: it taught you to run it again.
+        //
+        // Not tautological. If the defect this scenario exists to catch comes
+        // back, the notices overwrite each other, the count never reaches six,
+        // the deadline expires and the assertion below fails - the same verdict
+        // as before, arrived at by waiting instead of by luck.
+        func beeNotices() async -> [ChatMessage] {
+            await persister.load(conversationId: ChatConversation.trinityQueenId)
+                .filter { $0.content.hasPrefix("bee ") }
+        }
+        let deadline = Date().addingTimeInterval(10)
+        var heard = await beeNotices()
+        while heard.count < 6, Date() < deadline {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            heard = await beeNotices()
+        }
 
         // Counting only this burst: her chat already holds the single notice
         // from the check above, and "7 of 6" was my arithmetic, not a defect.
-        let heard = await persister.load(conversationId: ChatConversation.trinityQueenId)
-            .filter { $0.content.hasPrefix("bee ") }
-        check(heard.count == 6, "every bee that reported is in her chat, none overwritten")
-        check(Set(heard.map(\.content)).count == 6,
-              "and they are six different bees, not one line saved six times")
+        let distinct = Set(heard.map(\.content))
+        check(heard.count == 6,
+              "every bee that reported is in her chat, none overwritten "
+                + "(saw \(heard.count): \(distinct.sorted().joined(separator: ", ")))")
+        check(distinct.count == 6,
+              "and they are six different bees, not one line saved six times "
+                + "(saw \(distinct.count) distinct)")
+    }
+
+    /// The scenario above found this once in eight runs, under load, and only
+    /// after a guessed sleep was replaced by a wait. This one finds it every
+    /// time: the first write to her chat is held open, so the second is certain
+    /// to land first, and a stale snapshot arriving afterwards would erase it.
+    static func runSlowReportDoesNotEraseAFasterOne() async {
+        print("\n# Scenario: a slow report does not erase the one that overtook it")
+
+        let testDefaults = UserDefaults(suiteName: "trios-chat-sse-lostreport") ?? .standard
+        let persister = InMemoryPersister()
+        let viewModel = ChatViewModel(
+            transport: MockChatTransport(),
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: persister,
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: ModelConfigurationStore(
+                defaults: testDefaults, environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
+            ),
+            memoryService: AgentMemoryService(
+                store: VolatileMemoryStore(), fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: TODOPlanner(store: VolatileMemoryStore(), preferences: testDefaults)
+        )
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        viewModel.newConversation()
+        try? await Task.sleep(nanoseconds: 300_000_000)
+
+        // Two seconds against a 200ms gap. The margin is the point: the second
+        // report has to be well inside the first one's write, and no plausible
+        // scheduling delay closes a gap that wide.
+        persister.delayedConversation = ChatConversation.trinityQueenId
+        persister.delayNanoseconds = 2_000_000_000
+
+        let slow = Task { @MainActor in
+            await viewModel.postQueenNotice("the slow bee reported")
+        }
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        await viewModel.postQueenNotice("the quick bee reported")
+        await slow.value
+
+        let saved = await persister.load(conversationId: ChatConversation.trinityQueenId)
+            .map(\.content)
+        check(saved.contains("the slow bee reported"),
+              "the report that took longest is still there")
+        check(saved.contains("the quick bee reported"),
+              "and so is the one that overtook it - a late write does not "
+                + "carry a stale copy of her chat over the top")
     }
 
     static func runQueenAnswersACommand() async {
@@ -3268,6 +3340,84 @@ struct ChatSSEEndToEndTests {
         check(DelegatedTaskState.merged.isTerminal, "merged is an end state")
         check(!DelegatedTaskState.merged.needsQueenAttention,
               "and needs nothing further from the Queen")
+    }
+
+    /// Two bees at once is the whole point of the design, and the first time it
+    /// actually ran it exposed this: the ownership rule compared boundaries as
+    /// strings, so `docs` and `docs/live` looked unrelated and both claims were
+    /// admitted. Meanwhile a write is judged by containment, so the bee owning
+    /// `docs` was entitled to write `docs/live/x.md` - the same file the other
+    /// bee owned. Two writers, one file, nothing complaining until the merge.
+    static func runNestedBoundariesClash() async {
+        print("\n# Scenario: two bees cannot claim boundaries that contain each other")
+
+        typealias P = QueenDelegationPolicy
+
+        check(P.pathsOverlap("docs", "docs/live"),
+              "a directory overlaps anything beneath it")
+        check(P.pathsOverlap("docs/live", "docs"),
+              "and the question is symmetric - claim order must not decide it")
+        check(P.pathsOverlap("rings", "rings/SR-02/ChatViewModel.swift"),
+              "the ordinary case: a wide boundary and a file inside it")
+        check(P.pathsOverlap("docs", "docs"),
+              "identical boundaries still clash")
+        check(P.pathsOverlap("./docs/", "docs") == P.pathsOverlap("docs", "docs"),
+              "normalization does not change the verdict")
+
+        // The other half. A rule that answers yes to everything would pass every
+        // check above and stop all parallel work, which is the failure mode that
+        // looks like safety.
+        check(!P.pathsOverlap("docs", "docsite"),
+              "a shared prefix is not containment - comparison is by component")
+        check(!P.pathsOverlap("docs/live", "docs/spec"),
+              "siblings do not overlap, or no two bees could ever run")
+        check(!P.pathsOverlap("rings/SR-00", "rings/SR-02"),
+              "two rings are two boundaries")
+        check(!P.pathsOverlap("", "docs"),
+              "an empty boundary claims nothing rather than everything")
+
+        guard let first = IssueReference.parse("gHashTag/trios#1093"),
+              let second = IssueReference.parse("gHashTag/trios#1098") else {
+            fail("could not build the two test issues"); return
+        }
+        let held = DelegatedTask(
+            issue: first, title: "spec header", worker: "queen-swift",
+            state: .running, ownedPaths: ["docs"]
+        )
+
+        check(!P.conflictingTasks(for: ["docs/live"], among: [held]).isEmpty,
+              "the registry refuses a boundary inside one already held")
+        check(!P.conflictingTasks(for: ["docs"], among: [held]).isEmpty,
+              "and refuses the identical boundary")
+        check(P.conflictingTasks(for: ["rings/SR-00"], among: [held]).isEmpty,
+              "a disjoint boundary is still allowed - this is parallel work")
+        check(P.conflictingTasks(for: [], among: [held]).isEmpty,
+              "delegating without a boundary is not blocked by this rule")
+
+        // Terminal work owns nothing. Otherwise the first bee to finish would
+        // hold its files against every bee after it, and the fleet would
+        // deadlock on its own history.
+        let done = DelegatedTask(
+            issue: second, title: "live strip", worker: "queen-swift",
+            state: .merged, ownedPaths: ["docs"]
+        )
+        check(P.conflictingTasks(for: ["docs/live"], among: [done]).isEmpty,
+              "a finished task releases its boundary")
+
+        // The two rules have to agree. Writing inside your own boundary stays
+        // legal - fixing the clash must not make every nested write a stray.
+        check(QueenObserver.outOfBoundsPaths(
+                  in: QueenWorkerTranscript(),
+                  ownedPaths: ["docs"],
+                  observedWrites: ["docs/live/queen-live-strip.md"]
+              ).isEmpty,
+              "owning a directory still licenses writing beneath it")
+        check(!QueenObserver.outOfBoundsPaths(
+                  in: QueenWorkerTranscript(),
+                  ownedPaths: ["docs/live"],
+                  observedWrites: ["docs/queen-spec-header.md"]
+              ).isEmpty,
+              "but owning a subdirectory does not license writing the parent")
     }
 
     static func runPullRequestRefusals() async {

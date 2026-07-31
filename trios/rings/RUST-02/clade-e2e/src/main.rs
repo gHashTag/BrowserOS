@@ -644,55 +644,18 @@ const KNOWN_UNWIRED_SWIFT_TESTS: &[&str] = &[
 /// rendered nothing partly because it was absent from that list, and a
 /// reference-count scan cannot tell "unused" from "not built".
 ///
-/// **Fourteen of these sixteen compile cleanly against the real app.** That was
-/// measured, not assumed, by typechecking each one alongside every source the
-/// dev build uses. It matters because the obvious reading of "prototype" is
-/// "probably broken", and acting on that reading would have deleted working
-/// code: AgentTaskBubbleView was next in line by file size and has no errors at
-/// all. These are not a debt of broken files. They are a shelf of features
-/// nobody wired up, and the reason to remove one is that we do not want it, not
-/// that it does not work.
+/// The shelf is empty. Sixteen files sat here - a set of features nobody had
+/// wired up, all of which compiled - until `939028c91` removed them for the
+/// plain reason that we did not want them. Nothing was broken and nothing was
+/// salvaged; the decision was the whole content of the change.
 ///
-/// Clean today, excluded by choice:
-///   AIMacroGenerator, AccessibilityEnhancements, AgentTaskBubbleView,
-///   CommunityMacroMarketplace, HotkeyAnalytics, HotkeyPreferences,
-///   MacroRecorder, MessageSearchOverlay, NLHotkeyCreator, OpenNLParser,
-///   SearchOverlay, VoiceCommandHandler
-///
-/// Clean as a pair - OnboardingFlow calls AnalyticsService, and the two
-/// typecheck together with zero errors:
-///   AnalyticsService, OnboardingFlow
-///
-/// Nothing here is broken any more. PluginAPI and ExtensionStoreAPI were the
-/// last two and both now typecheck at zero errors against the real app - the
-/// `@objc` protocol was dropped, five support types made public, two UIKit
-/// `secureTextEntry` calls replaced with SecureField, and an injected
-/// `PluginAPI` dependency that no method ever read was removed rather than
-/// guessed at. All sixteen compile.
-///
-/// So the budget below is not a debt counter. Lowering it means deciding a
-/// feature is unwanted, or wiring one up - both judgements, neither mechanical.
-/// Ceiling on the list below. Lower it as prototypes are resolved; raising it is
-/// an edit someone has to defend, which is the whole point of a budget.
-const PROTOTYPE_BUDGET: usize = 16;
+/// The list is kept, at zero, rather than deleted with them. It is the place
+/// this repository writes down "present in the tree, absent from the binary",
+/// and that state will occur again. Raising the budget is an edit someone has
+/// to defend, which is the point of a budget.
+const PROTOTYPE_BUDGET: usize = 0;
 
 const KNOWN_PROTOTYPE_SOURCES: &[&str] = &[
-    "AIMacroGenerator.swift",
-    "AccessibilityEnhancements.swift",
-    "AgentTaskBubbleView.swift",
-    "AnalyticsService.swift",
-    "CommunityMacroMarketplace.swift",
-    "ExtensionStoreAPI.swift",
-    "HotkeyAnalytics.swift",
-    "HotkeyPreferences.swift",
-    "MacroRecorder.swift",
-    "MessageSearchOverlay.swift",
-    "NLHotkeyCreator.swift",
-    "OnboardingFlow.swift",
-    "OpenNLParser.swift",
-    "PluginAPI.swift",
-    "SearchOverlay.swift",
-    "VoiceCommandHandler.swift",
 ];
 
 /// Fails when a BR-OUTPUT source is neither compiled nor declared a prototype,

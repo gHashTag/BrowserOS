@@ -116,6 +116,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         await vm.runQueenCommand("/approve \(issueText)")
         await vm.runQueenCommand("/delegate \(issueText) \(worker)\(pathsFlag)\(criteriaFlag) \(title)")
 
+        // A second bee, started before the first is waited on, so the two
+        // genuinely overlap. Parallel work is the part of the design that has
+        // never once been demonstrated: the concurrency bound, the file
+        // boundaries and the one-owner-per-path rule are all written and have
+        // never run together.
+        if let second = environment["TRIOS_E2E_DELEGATE_SECOND"], !second.isEmpty {
+            let two = second.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+            if two.count >= 3 {
+                let secondPaths = two.count >= 4 && !two[3].isEmpty ? " --paths \(two[3])" : ""
+                await vm.runQueenCommand("/approve \(two[0])")
+                await vm.runQueenCommand(
+                    "/delegate \(two[0]) \(two[1])\(secondPaths) \(two[2])"
+                )
+                TriosLogBus.shared.info(
+                    .queen, "queen.selftest.secondStarted",
+                    "A second bee was started alongside the first",
+                    ["issue": two[0]]
+                )
+            }
+        }
+
         guard let issue = IssueReference.parse(issueText),
               let task = QueenDelegationRegistry.shared.task(forIssue: issue) else {
             TriosLogBus.shared.error(

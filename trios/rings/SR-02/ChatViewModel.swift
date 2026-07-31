@@ -2881,6 +2881,9 @@ final class ChatViewModel: ObservableObject {
     /// two callers can interleave between reading and writing it. Only the save
     /// suspends, and by then every caller's line is already in the array.
     private var queenChatWhileAway: [ChatMessage]?
+    /// The tail of the queue of writes to her chat, so two reports arriving at
+    /// once cannot land out of order and lose one.
+    private var queenChatSaveChain: Task<Void, Never>?
 
     func appendSystemMessageToQueenChat(_ content: String) async {
         let message = ChatMessage(role: .system, content: content)
@@ -2902,9 +2905,38 @@ final class ChatViewModel: ObservableObject {
             if queenChatWhileAway == nil { queenChatWhileAway = loaded }
         }
         queenChatWhileAway?.append(message)
-        let snapshot = queenChatWhileAway ?? [message]
-        await persister.save(messages: snapshot, conversationId: ChatConversation.trinityQueenId)
+        await persistQueenChatWhileAway(fallback: message)
         await loadConversations()
+    }
+
+    /// Serialises the writes to the Queen's chat, and takes the snapshot at the
+    /// moment each one runs rather than when it was queued.
+    ///
+    /// The buffer above already stopped concurrent reports from overwriting each
+    /// other in memory - every bee appends to the same array on the main actor,
+    /// so the array is always complete. What was still lost was the file: each
+    /// caller passed its own whole-array snapshot to `save`, the saves raced,
+    /// and the winner was whichever finished last, not whichever held the most.
+    /// Six bees reporting at once persisted three, and the Queen was missing
+    /// half her fleet with nothing anywhere saying so.
+    ///
+    /// Found by running six reports concurrently under a parallel build - it
+    /// survived every idle run, which is why a fixed sleep had been enough to
+    /// hide it.
+    private func persistQueenChatWhileAway(fallback: ChatMessage) async {
+        let previous = queenChatSaveChain
+        let save = Task { @MainActor [weak self] in
+            await previous?.value
+            guard let self else { return }
+            let snapshot = self.queenChatWhileAway ?? [fallback]
+            await self.persister.save(
+                messages: snapshot,
+                conversationId: ChatConversation.trinityQueenId
+            )
+        }
+        queenChatSaveChain = save
+        await save.value
+        if queenChatSaveChain == save { queenChatSaveChain = nil }
     }
 
     // MARK: - Queen Slash Commands

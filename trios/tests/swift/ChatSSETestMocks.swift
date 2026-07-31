@@ -585,7 +585,26 @@ final class InMemoryPersister: ChatPersisterProtocol, @unchecked Sendable {
         lock.withLock { settings[conversationId] ?? .default }
     }
 
+    /// Holds the first save to one conversation open, so a write that races it
+    /// is guaranteed to land first.
+    ///
+    /// A lost update needs one writer to finish out of order, and waiting for
+    /// that to happen by chance is how the defect stayed hidden: it appeared
+    /// roughly once in eight runs, and only under load. Here the order is
+    /// chosen rather than hoped for.
+    var delayedConversation: UUID?
+    var delayNanoseconds: UInt64 = 0
+    private var delayFired = false
+
     func save(messages: [ChatMessage], conversationId: UUID) async {
+        let hold: UInt64? = lock.withLock {
+            guard conversationId == delayedConversation, !delayFired, delayNanoseconds > 0 else {
+                return nil
+            }
+            delayFired = true
+            return delayNanoseconds
+        }
+        if let hold { try? await Task.sleep(nanoseconds: hold) }
         lock.withLock { storage[conversationId] = messages }
     }
 

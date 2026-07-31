@@ -142,6 +142,10 @@ enum QueenObserver {
 
         func consider(_ path: String) {
             let normalized = QueenDelegationPolicy.normalizePath(path)
+            // A write is inside when its own boundary contains it, which is not
+            // symmetric: owning `docs/live` does not license writing `docs`.
+            // pathsOverlap answers the symmetric question the ownership rule
+            // asks, so the containment test stays spelled out here.
             let inside = owned.contains { normalized == $0 || normalized.hasPrefix("\($0)/") }
             if !inside { strays.insert(normalized) }
         }
