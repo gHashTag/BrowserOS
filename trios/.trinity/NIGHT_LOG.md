@@ -3120,3 +3120,36 @@ happened.
 Still broken: the Queen does not judge. Verdicts are recorded by a human typing
 /verify, so what exists today is a gate, not a review - and #1092, her writing
 the criteria in the first place, is untouched.
+
+## 2026-08-01 ~08:5x UTC - she reaches her own verdicts now
+
+The gate held but nobody could pass it: verdicts came from a human typing
+/verify, so what existed was a gate and not a review. The tempting shortcut -
+believe the worker's report - is the same agent grading its own homework, and a
+gate that accepts that is decoration.
+
+Some criteria are not opinion. "docs/queen-verdicts.md exists" is answered by
+what the branch carries, and that diff is already computed at the end of a
+worker's turn for the boundary check. So a criterion naming a path gets a
+verdict from the facts, and one naming no path gets none at all - "it is short"
+cannot be guessed, and a wrong verdict is worse than an absent one because the
+absent one still stops the merge. The aim was never to open the gate; it was to
+stop it closing on questions nobody needed to be asked.
+
+Proven live and end to end: queen.review.evidence, the verdict
+`docs/queen-verdicts.md exists: met` reached by her rather than supplied by me,
+acceptance passing on it, gHashTag/BrowserOS#9 opened and merged, task state
+merged. The run before, whose contract held an unjudgeable criterion, was
+correctly refused.
+
+Two housekeeping notes worth keeping. Rebasing onto her own merge kept failing
+on untracked leftovers - the committer uses git plumbing and never cleans the
+working tree, so every bee leaves its file behind. I moved them aside rather
+than deleting, then checked each: four live on their own branches, two are
+byte-identical to the merged copies, and one - EXTERNAL-APP-INTEGRATION.md -
+was not a bee's file at all and went straight back. Checking after moving is
+the only reason that was caught.
+
+Still broken: the criteria are still written by a human on the command line,
+which is #1092 and now the last thing between this and the Queen owning the
+whole contract.
