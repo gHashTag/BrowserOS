@@ -45,6 +45,40 @@ enum QueenBranchCommitter {
         }.value
     }
 
+    /// Which repository-relative paths differ from `baselineTree` right now.
+    ///
+    /// The observer decides whether a worker wrote outside its lane by reading
+    /// the names of the tools it called, which cannot see a write made with
+    /// `echo >` or `sed -i` through the shell: filesystem_bash is neither
+    /// write-named nor path-argumented. Names are guesses about what happened;
+    /// this is what happened.
+    ///
+    /// Deliberately not called from observeWorker, which runs on every SSE
+    /// delta - a git invocation per token would cost more than the warning is
+    /// worth. It belongs where a turn ends.
+    static func changedPaths(
+        since baselineTree: String?,
+        projectRoot: String = ProjectPaths.root
+    ) async -> [String] {
+        guard let baselineTree else { return [] }
+        return await Task.detached(priority: .utility) {
+            let index = temporaryIndexPath()
+            defer { try? FileManager.default.removeItem(atPath: index) }
+            guard runGit(["add", "-A"], index: index, projectRoot: projectRoot) != nil,
+                  let endTree = runGit(["write-tree"], index: index, projectRoot: projectRoot)?
+                      .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !endTree.isEmpty else { return [] }
+            let diff = runGit(
+                ["diff", "--name-only", baselineTree, endTree],
+                index: index, projectRoot: projectRoot
+            ) ?? ""
+            return diff
+                .split(separator: "\n")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        }.value
+    }
+
     /// Commits the paths that changed since `baselineTree` onto `branch`.
     static func commitWorkerChanges(
         branch: String,

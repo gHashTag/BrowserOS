@@ -120,22 +120,39 @@ enum QueenObserver {
     ///
     /// Only write-shaped tools count. A worker reading a file outside its lane
     /// is doing its homework; writing there is the problem.
+    /// `observedWrites` are paths something outside this transcript knows
+    /// changed - in practice, what git reports against the snapshot taken when
+    /// the worker started.
+    ///
+    /// Tool names cannot see a write made through the shell: filesystem_bash is
+    /// neither write-named nor path-argumented, so `echo > file` and `sed -i`
+    /// have always been invisible here. That was asserted as a known blind spot
+    /// rather than fixed, because reading shell commands means parsing them and
+    /// guessing. Measuring what changed needs no parser and no guess. Optional
+    /// so the transcript-only answer stays available where a git call would
+    /// cost more than the warning is worth.
     static func outOfBoundsPaths(
         in transcript: QueenWorkerTranscript,
-        ownedPaths: [String]
+        ownedPaths: [String],
+        observedWrites: [String] = []
     ) -> [String] {
         guard !ownedPaths.isEmpty else { return [] }
         let owned = ownedPaths.map(QueenDelegationPolicy.normalizePath)
         var strays: Set<String> = []
 
+        func consider(_ path: String) {
+            let normalized = QueenDelegationPolicy.normalizePath(path)
+            let inside = owned.contains { normalized == $0 || normalized.hasPrefix("\($0)/") }
+            if !inside { strays.insert(normalized) }
+        }
+
         for message in transcript.messages {
             for call in message.toolCalls where isWriteTool(call.name) {
                 guard let path = extractPath(from: call.arguments) else { continue }
-                let normalized = QueenDelegationPolicy.normalizePath(path)
-                let inside = owned.contains { normalized == $0 || normalized.hasPrefix("\($0)/") }
-                if !inside { strays.insert(normalized) }
+                consider(path)
             }
         }
+        observedWrites.forEach(consider)
         return strays.sorted()
     }
 

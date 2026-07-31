@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 396
+    static let minimumChecks = 399
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -2268,7 +2268,38 @@ struct ChatSSEEndToEndTests {
             )
         }
 
-        // A blind spot, asserted so it is a known one rather than a discovery.
+        // The blind spot, now closed from the other side. A shell write is
+        // still invisible to the tool names - nothing about filesystem_bash
+        // says "write" and its arguments carry no path - but the observer no
+        // longer has to guess from names when something can tell it what
+        // actually changed.
+        check(
+            QueenObserver.outOfBoundsPaths(
+                in: transcript(tool: "filesystem_bash", path: "rings/SR-00/NotYours.swift"),
+                ownedPaths: ["docs"],
+                observedWrites: ["rings/SR-00/NotYours.swift"]
+            ) == ["rings/SR-00/NotYours.swift"],
+            "a write measured after the fact is seen, whichever tool made it"
+        )
+        check(
+            QueenObserver.outOfBoundsPaths(
+                in: transcript(tool: "filesystem_bash", path: "docs/fine.md"),
+                ownedPaths: ["docs"],
+                observedWrites: ["docs/fine.md"]
+            ).isEmpty,
+            "and a measured write inside the boundary is still not a complaint"
+        )
+        check(
+            QueenObserver.outOfBoundsPaths(
+                in: transcript(tool: "filesystem_write", path: "rings/A.swift"),
+                ownedPaths: ["docs"],
+                observedWrites: ["rings/B.swift"]
+            ) == ["rings/A.swift", "rings/B.swift"],
+            "and the two sources are joined rather than one replacing the other"
+        )
+
+        // The old blind spot, kept as the transcript-only answer, because
+        // observeWorker runs on every SSE delta and cannot afford a git call.
         //
         // filesystem_bash is neither write-named nor path-argumented, so a
         // worker that writes with `echo >` or `sed -i` is invisible here. The
