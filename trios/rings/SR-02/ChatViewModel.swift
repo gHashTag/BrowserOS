@@ -3462,6 +3462,30 @@ final class ChatViewModel: ObservableObject {
                 outcome.summary,
                 ["issue": task.issue.slug, "branch": branch]
             )
+
+            // Ask a reviewer agent for verdicts on criteria the files alone
+            // could not settle. A path check answers "does the file exist";
+            // it cannot answer "does the change do what the criterion asks".
+            // Without a reviewer those criteria stayed "never checked", which
+            // blocked acceptance on the right question but left the user with
+            // no answer to it. The reviewer fills the gap; the parser is
+            // conservative, so a garbled response still leaves the criterion
+            // unchecked rather than guessing it passed.
+            let current = registry.task(forIssue: task.issue) ?? task
+            let unanswered = current.acceptanceCriteria.filter {
+                current.criterionVerdicts[$0] == nil
+            }
+            if !unanswered.isEmpty {
+                let diffText = await diffForReview(
+                    baselineTree: workerBaselineTrees[task.conversationId],
+                    ownedPaths: task.ownedPaths
+                )
+                await requestReviewerVerdicts(
+                    for: task,
+                    criteria: unanswered,
+                    diff: diffText
+                )
+            }
         }
         workerBaselineTrees[task.conversationId] = nil
         // Transition only after the branch is tallied. Announcing
@@ -3475,6 +3499,145 @@ final class ChatViewModel: ObservableObject {
         await autoAcceptIfUnambiguous(taskID: task.id)
         await loadConversations()
     }
+
+    // MARK: - Reviewer Agent
+
+    /// The diff of what the worker changed, limited to its owned paths.
+    ///
+    /// Read after the commit so the reviewer sees the same changes that
+    /// landed on the branch. Empty when the baseline was never captured or
+    /// git produced nothing — the reviewer still gets the criteria, and an
+    /// empty diff is itself information.
+    private func diffForReview(
+        baselineTree: String?,
+        ownedPaths: [String]
+    ) async -> String {
+        guard let baselineTree else { return "" }
+        return await Task.detached(priority: .utility) {
+            var args = ["diff", baselineTree]
+            if !ownedPaths.isEmpty {
+                args.append("--")
+                args.append(contentsOf: ownedPaths.map {
+                    QueenDelegationPolicy.normalizePath($0)
+                })
+            }
+            return QueenStatusViewModel.runProcess(
+                "/usr/bin/git",
+                arguments: args,
+                workDir: ProjectPaths.root,
+                timeout: 30
+            )
+        }.value
+    }
+
+    /// Asks a reviewer agent for per-criterion verdicts on a finished task.
+    ///
+    /// Runs after mechanical verdicts have settled what the files show; this
+    /// is for the criteria a path check cannot answer. The reviewer's response
+    /// is parsed conservatively — anything the parser could not match stays
+    /// absent, which reads as `unchecked`. An empty or garbled response
+    /// changes nothing, which is the correct outcome: an unexamined criterion
+    /// is not a pass.
+    private func requestReviewerVerdicts(
+        for task: DelegatedTask,
+        criteria: [String],
+        diff: String
+    ) async {
+        let brief = QueenReviewVerdictRequest.brief(
+            criteria: criteria,
+            diff: diff
+        )
+
+        let response = await sendOneShotReviewerRequest(brief) ?? ""
+
+        let verdicts = QueenReviewVerdictRequest.parse(response, criteria: criteria)
+        let registry = delegationRegistry
+        var recorded = 0
+        for (criterion, verdict) in verdicts {
+            if registry.recordVerdict(
+                taskID: task.id, criterion: criterion, verdict: verdict
+            ) {
+                recorded += 1
+            }
+        }
+
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.review.verdicts",
+            "Reviewer returned \(recorded) verdict(s) for \(criteria.count) criterion(s)",
+            [
+                "issue": task.issue.slug,
+                "asked": String(criteria.count),
+                "parsed": String(verdicts.count),
+                "recorded": String(recorded),
+                "response_chars": String(response.count)
+            ]
+        )
+    }
+
+    /// Sends a one-shot prompt to the model and collects the text response.
+    ///
+    /// No prior context, no persistence, no conversation in the sidebar. The
+    /// reviewer's job is to read the criteria and the diff and return
+    /// verdicts, not to carry on a conversation or use tools. A fresh parser
+    /// per call so the reviewer's stream cannot interfere with the main
+    /// chat's parse state.
+    private func sendOneShotReviewerRequest(_ prompt: String) async -> String? {
+        let configuration = await modelStore.runtimeConfiguration
+
+        guard let body = try? ChatRequestBuilder(
+            conversationId: UUID(),
+            message: prompt,
+            mode: "agent",
+            origin: "sidepanel",
+            userSystemPrompt: Self.reviewerSystemPrompt,
+            previousConversation: [],
+            browserContext: nil,
+            modelConfiguration: configuration,
+            attachments: nil,
+            workingDirectory: ProjectPaths.root
+        ).build() else { return nil }
+
+        let streamParser = UIMessageStreamParser()
+        var transcript = QueenWorkerTranscript(
+            seed: [ChatMessage(role: .user, content: prompt)]
+        )
+
+        do {
+            let stream = try await transport.sendMessage(body: body)
+            for await event in stream {
+                if Task.isCancelled { break }
+                if let action = await streamParser.parse(event) {
+                    transcript.apply(action)
+                }
+            }
+        } catch {
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.review.transport_error",
+                "Reviewer request failed: \(error.localizedDescription)",
+                [:]
+            )
+            return nil
+        }
+
+        let text = transcript.assistantText
+        return text.isEmpty ? nil : text
+    }
+
+    /// Standing orders for the reviewer agent.
+    ///
+    /// Separate from the worker's system prompt because the reviewer's role is
+    /// different: it judges, it does not build. Letting it call tools would
+    /// turn a one-shot verdict into another worker, which is exactly the kind
+    /// of scope expansion the boundary exists to prevent.
+    private static let reviewerSystemPrompt = """
+        You are a code reviewer. You read acceptance criteria and a diff and \
+        return a verdict for each criterion. You do not edit code, run \
+        commands, or delegate. Give each criterion its own line with the \
+        number, the verdict word (met, unmet, or could not check), and one \
+        sentence explaining why.
+        """
 
     /// Closes a task the Queen can judge on her own.
     ///
