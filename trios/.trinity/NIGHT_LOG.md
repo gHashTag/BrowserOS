@@ -3361,3 +3361,30 @@ satisfied by code the diff never showed. It is wired, it compiles, and it has
 never once run - the only review after that change went through a binary built
 before it, because the build in between was the broken one. A fourth bee sent to
 re-review the board hung for eighteen minutes and wrote nothing.
+
+## The board was finished five cycles ago; the reviewer was reading the wrong thing
+
+Five criteria, all describing a result - "the board does not draw in an ordinary
+chat", "state reads without a legend" - and the reviewer was handed a diff. On a
+re-review of finished work that diff is empty, so the brief was empty, and the
+reply was the only honest one available: "The diff shows no changes detected,
+which means I need to check the actual codebase." It has no tools and one
+request. It could not go and look.
+
+The brief now carries the contents of the files in the task's boundary rather
+than the files that happened to change. Measured on the same task an hour apart,
+both times with nothing changed: 0 verdicts of 5, then 5 of 5, with the reply
+opening "I've now reviewed the full code." The task stopped at awaitingReview
+and that is correct - the branch is empty because the board's code was committed
+cycles ago, so there is nothing left to land.
+
+What that cost is worth naming. A finished feature sat refused for five cycles
+and every refusal looked like a verdict on the work. It was a verdict on the
+brief.
+
+The bee that fixed it hung for fifteen minutes with no terminal event, the
+second hang in two cycles; its edit was complete and compiling when I stopped
+it. And a bee was again accused of leaving its boundary while writing to the one
+file it owned, this time because the path arrives absolute and is compared
+against a relative boundary - #1114. Two false accusations in three cycles is
+enough to make the real ones unreadable.
