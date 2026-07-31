@@ -2752,3 +2752,35 @@ Left alone deliberately: the missing Models-tab field, which is the actual fix
 and needs eyes; ProjectPaths, pending the user's word; the observer's shell
 blind spot; the four RichTextRenderer deprecations; the pull request waiting on
 a token only the user can place; and the 22 XCTest errors.
+
+## 2026-07-31 ~18:0x UTC - measuring what changed instead of reading tool names
+
+Verifications green first. This took the largest item I can carry alone: the
+observer's shell blind spot. Its boundary check reads the names of the tools a
+worker called, and filesystem_bash is neither write-named nor path-argumented,
+so `echo >` and `sed -i` have always been invisible. I had asserted that as a
+known blind spot rather than fixed it, because closing it by reading shell
+commands means writing a parser, and a parser here is one more thing that
+guesses.
+
+Measuring needs no parser. The machinery already existed for the commit path -
+a tree snapshot when a worker starts, a diff against it when the branch is
+written - so the diff is now available on its own as changedPaths(since:), and
+outOfBoundsPaths takes an optional list of paths something else knows changed,
+joined with what the tool names imply.
+
+The limit is worth stating rather than glossing. observeWorker runs on every SSE
+delta, and a git invocation per token would cost far more than the warning is
+worth, so this is not wired there. The end-of-turn half of the blind spot is
+closed; the mid-turn half is not. A worker writing through the shell can still
+spend its whole turn before anyone says anything - better than the file silently
+never appearing, and not the warning I wanted.
+
+Three assertions, including that the two sources join rather than one replacing
+the other. Ignoring the measured writes fails two.
+
+Left alone deliberately: wiring changedPaths into handleWorkerFinished, which is
+where it belongs and wants its own cycle with its own proof; the missing
+Models-tab field for the output budget; ProjectPaths, pending the user's word;
+the four RichTextRenderer deprecations; the pull request waiting on a token only
+the user can place; and the 22 XCTest errors.
