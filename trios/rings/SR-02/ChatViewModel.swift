@@ -106,6 +106,14 @@ final class ChatViewModel: ObservableObject {
     @Published var canSummarizeStreamSoFar: Bool = false
     @Published var streamingBudgetStatus: StreamingBudgetStatus?
 
+    /// Raw reviewer responses keyed by task ID, preserved so a verdict can be
+    /// re-examined. The parsed verdicts are recorded in the delegation
+    /// registry, but the text the reviewer actually wrote is the evidence
+    /// behind them — without it, re-checking a verdict means re-running the
+    /// review. Posted to the Queen's chat as well, so the response is visible
+    /// in the transcript after the fact.
+    @Published private(set) var reviewerResponses: [UUID: String] = [:]
+
     let queenStatusVM = QueenStatusViewModel()
     let modelStore: ModelConfigurationStore
     let todoPlanner: TODOPlanner
@@ -3537,7 +3545,9 @@ final class ChatViewModel: ObservableObject {
     /// is parsed conservatively — anything the parser could not match stays
     /// absent, which reads as `unchecked`. An empty or garbled response
     /// changes nothing, which is the correct outcome: an unexamined criterion
-    /// is not a pass.
+    /// is not a pass. The raw response is stored in `reviewerResponses` and
+    /// posted to the Queen's chat so the reasoning behind each verdict can be
+    /// re-examined later.
     private func requestReviewerVerdicts(
         for task: DelegatedTask,
         criteria: [String],
@@ -3550,6 +3560,13 @@ final class ChatViewModel: ObservableObject {
 
         let response = await sendOneShotReviewerRequest(brief) ?? ""
 
+        // Keep the raw response so a verdict can be re-examined later without
+        // re-running the review. The parsed verdicts are a summary; the text
+        // behind them is the evidence.
+        if !response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            reviewerResponses[task.id] = response
+        }
+
         let verdicts = QueenReviewVerdictRequest.parse(response, criteria: criteria)
         let registry = delegationRegistry
         var recorded = 0
@@ -3561,6 +3578,14 @@ final class ChatViewModel: ObservableObject {
             }
         }
 
+        // Criteria the parser could not match stay absent from `verdicts`,
+        // which reads as `unchecked` downstream. Naming them in the log makes
+        // the gap visible: a criterion nobody answered is different from one
+        // everyone agreed passed, and that difference should not be buried
+        // inside a count.
+        let matchedCriteria = Set(verdicts.keys)
+        let unmatched = criteria.filter { !matchedCriteria.contains($0) }
+
         TriosLogBus.shared.info(
             .queen,
             "queen.review.verdicts",
@@ -3570,9 +3595,41 @@ final class ChatViewModel: ObservableObject {
                 "asked": String(criteria.count),
                 "parsed": String(verdicts.count),
                 "recorded": String(recorded),
-                "response_chars": String(response.count)
+                "response_chars": String(response.count),
+                "unchecked": unmatched.isEmpty
+                    ? "none"
+                    : unmatched.joined(separator: " | ")
             ]
         )
+
+        // The raw response is the evidence behind every verdict. The parsed
+        // verdicts are a summary; without the text that produced them,
+        // re-examining a verdict means re-running the review. Writing it to
+        // TriosLogBus puts it on disk (`.trinity/logs/trios-app.jsonl`),
+        // where it survives the app closing and can be read back later.
+        if !response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.review.raw_response",
+                "Reviewer raw response for \(task.issue.slug)",
+                [
+                    "issue": task.issue.slug,
+                    "response": response
+                ]
+            )
+        }
+
+        // Post the reviewer's response to the Queen's chat so it is visible in
+        // the transcript after the fact. The verdict table shows the outcome;
+        // the response shows the reasoning, which is what someone re-examining
+        // a verdict needs to read.
+        if !response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            await appendSystemMessageToQueenChat(
+                SystemNoticeClassifier.infoMarker
+                    + "Reviewer response for \(task.issue.slug):\n\n"
+                    + response
+            )
+        }
     }
 
     /// Sends a one-shot prompt to the model and collects the text response.

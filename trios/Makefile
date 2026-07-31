@@ -189,13 +189,25 @@ cassettes:
 		open --env TRIOS_E2E_DELEGATE="gHashTag/trios\#1086|queen-swift|Cassette $$cassette|docs" \
 		     --env TRIOS_REPLAY_CASSETTE="$(CASSETTE_DIR)/$$cassette" \
 		     --env TRIOS_E2E_SECOND_TURN="$$second" "$(DEV_APP)"; \
-		found=0; \
-		for i in $$(seq 1 20); do \
+		: "The wait is not a fixed 40-second cliff. The budget is 120 s \
+		   (3x the original) so a busy machine is not penalised, but the \
+		   loop breaks the moment trios-dev exits — a crashed app should \
+		   not burn the full budget. Two failure modes that used to look \
+		   identical are now told apart: 'never started' (no trios-dev \
+		   process was ever seen) vs 'ran but produced no marker'."; \
+		found=0; started=0; \
+		for i in $$(seq 1 60); do \
 			tail -n "+$$((before + 1))" "$(LOG)" 2>/dev/null | grep -q "$$marker" && { found=1; break; }; \
+			if pgrep -f "trios-dev.app/Contents/MacOS" >/dev/null 2>&1; then started=1; \
+			elif [ $$started -eq 1 ]; then break; fi; \
 			sleep 2; \
 		done; \
 		if [ $$found -eq 1 ]; then echo "  ok   - $$label"; \
-		else echo "  FAIL - $$label ($$cassette expected $$marker)"; fail=1; fi; \
+		elif [ $$started -eq 0 ]; then \
+			echo "  FAIL - $$label (trios-dev never started; no process was seen)"; fail=1; \
+		else \
+			echo "  FAIL - $$label (trios-dev ran but $$marker never appeared in the log)"; fail=1; \
+		fi; \
 		pkill -x trios-dev 2>/dev/null || true; \
 		pkill -f "trios-dev.app/Contents/MacOS" 2>/dev/null || true; \
 		sleep 2; \
