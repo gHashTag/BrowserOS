@@ -304,6 +304,7 @@ WORKER ?= queen-swift
 TASK ?= Fix LOGS noise profile
 # Without a boundary the brief tells the worker to ask before editing, so a
 # write task legitimately produces no writes.
+CRITERIA ?=
 PATHS ?=
 # Set to accept or reject to exercise the review loop in the same probe.
 REVIEW ?=
@@ -328,7 +329,7 @@ delegate-probe:
 	@before=$$(wc -l < "$(LOG)" 2>/dev/null || echo 0); echo $$before > /tmp/trios_delegate_mark
 	@# `open` launches through LaunchServices, which does not inherit the shell
 	@# environment; --env is the only way the flag reaches the app.
-	@open --env TRIOS_E2E_DELEGATE="$(ISSUE)|$(WORKER)|$(TASK)|$(PATHS)" \
+	@open --env TRIOS_E2E_DELEGATE="$(ISSUE)|$(WORKER)|$(TASK)|$(PATHS)|$(CRITERIA)" \
 		--env TRIOS_E2E_DELEGATE_REVIEW="$(REVIEW)" \
 		--env TRIOS_QUEEN_AUTONOMY="$(AUTONOMY)" \
 		--env TRIOS_REPLAY_CASSETTE="$(CASSETTE)" \

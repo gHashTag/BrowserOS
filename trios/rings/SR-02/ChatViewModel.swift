@@ -3612,6 +3612,18 @@ final class ChatViewModel: ObservableObject {
             if let reason = QueenAcceptancePolicy.acceptanceBlockReason(
                 criteria: task.acceptanceCriteria, recorded: task.criterionVerdicts
             ) {
+                // Logged as well as said. The refusal is the contract doing its
+                // job, and until it was visible outside her chat every run that
+                // hit it looked identical to a run where nothing happened.
+                TriosLogBus.shared.warn(
+                    .queen, "queen.accept.blocked", "Acceptance blocked by the contract",
+                    [
+                        "issue": issue.slug,
+                        "reason": reason,
+                        "criteria": String(task.acceptanceCriteria.count),
+                        "verdicts": String(task.criterionVerdicts.count)
+                    ]
+                )
                 await postQueenNotice(
                     SystemNoticeClassifier.warningMarker
                         + "Not accepting \(issue.slug) yet. \(reason)\n\n"

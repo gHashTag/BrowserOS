@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 422
+    static let minimumChecks = 426
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -2823,6 +2823,35 @@ struct ChatSSEEndToEndTests {
             fail("a delegation without criteria did not parse"); return
         }
         check(none.isEmpty, "criteria are optional, and absent means absent")
+
+        // Quoted criteria must end at the closing quote. They did not: the flag
+        // took everything to the end of the line, so a real run produced a task
+        // titled "Work on gHashTag/trios#1095" - the fallback - whose last
+        // criterion was `it is under 40 lines" Extend docs/...`. The one flag
+        // that turns a brief into a contract was destroying the brief.
+        guard case .delegateIssue(_, _, let quotedTitle, _, _, let quotedCriteria) =
+            QueenCommandParser.parse(
+                "/delegate gHashTag/trios#7 queen-swift --paths docs "
+                    + "--criteria \"the file exists; it is short\" Write the file"
+            )
+        else {
+            fail("a delegation with quoted criteria did not parse"); return
+        }
+        check(quotedCriteria == ["the file exists", "it is short"],
+              "quoted criteria stop at the closing quote and carry no quote marks")
+        check(quotedTitle == "Write the file",
+              "and the words after them are the title, not more contract")
+
+        // One token that opens and closes its own quote.
+        guard case .delegateIssue(_, _, let oneTitle, _, _, let oneCriterion) =
+            QueenCommandParser.parse(
+                "/delegate gHashTag/trios#8 queen-swift --criteria \"builds\" Make it build"
+            )
+        else {
+            fail("a single quoted criterion did not parse"); return
+        }
+        check(oneCriterion == ["builds"], "a single quoted criterion is just itself")
+        check(oneTitle == "Make it build", "and the title survives it")
     }
 
     static func runGitHubEndpointPaths() async {

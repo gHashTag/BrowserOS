@@ -134,14 +134,36 @@ struct QueenCommandParser {
                 // an acceptance criterion is a sentence and sentences contain
                 // commas - "renders 50 rows, then paginates" is one criterion,
                 // not two.
+                //
+                // Quoting is honoured, and it has to be: this took everything to
+                // the end of the line, so supplying criteria silently ate the
+                // title. A live run produced a task called "Work on
+                // gHashTag/trios#1095" whose last criterion was `it is under 40
+                // lines" Extend docs/...` - the closing quote and the whole
+                // title swallowed into the contract. The one command that makes
+                // a brief a contract destroyed the brief.
                 var criteria: [String] = []
                 if let flag = components.firstIndex(of: "--criteria"), flag + 1 < components.count {
-                    criteria = components[(flag + 1)...]
+                    let rest = Array(components[(flag + 1)...])
+                    let quoted = rest[0].hasPrefix("\"")
+                    var last = rest.count - 1
+                    if quoted {
+                        // A single token can open and close the quote itself.
+                        if rest[0].count > 1 && rest[0].hasSuffix("\"") {
+                            last = 0
+                        } else if let close = rest.dropFirst().firstIndex(where: { $0.hasSuffix("\"") }) {
+                            last = close
+                        }
+                        // An unterminated quote falls back to end-of-line, which
+                        // is the old behaviour and the best guess available.
+                    }
+                    criteria = rest[0...last]
                         .joined(separator: " ")
+                        .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
                         .split(separator: ";")
                         .map { $0.trimmingCharacters(in: .whitespaces) }
                         .filter { !$0.isEmpty }
-                    components.removeSubrange(flag..<components.count)
+                    components.removeSubrange(flag..<(flag + 1 + last + 1))
                 }
                 let title = components.joined(separator: " ")
                 return .delegateIssue(

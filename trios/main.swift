@@ -85,11 +85,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let fields = spec.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
-        guard fields.count == 3 || fields.count == 4 else {
+        guard (3...5).contains(fields.count) else {
             TriosLogBus.shared.error(
                 .queen,
                 "queen.selftest.failed",
-                "TRIOS_E2E_DELEGATE must be 'owner/repo#N|worker|title[|paths]'",
+                "TRIOS_E2E_DELEGATE must be 'owner/repo#N|worker|title[|paths[|criteria]]'",
                 ["spec": spec]
             )
             return
@@ -99,7 +99,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let title = fields[2]
         // A fourth field is the worker's file boundary. Without one the brief
         // tells it to ask before editing, so a write task produces no writes.
-        let pathsFlag = fields.count == 4 && !fields[3].isEmpty ? " --paths \(fields[3])" : ""
+        let pathsFlag = fields.count >= 4 && !fields[3].isEmpty ? " --paths \(fields[3])" : ""
+        // A fifth field is the acceptance contract, semicolon-separated. Without
+        // one every probe has delegated work nobody could judge finished, which
+        // is why the review gate has never run against a real task.
+        let criteriaFlag = fields.count == 5 && !fields[4].isEmpty
+            ? " --criteria \"\(fields[4])\""
+            : ""
 
         TriosLogBus.shared.info(.queen, "queen.selftest.start", "Delegation self-test starting", ["spec": spec])
         // Setting TRIOS_E2E_DELEGATE is a person naming this exact issue and
@@ -108,7 +114,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // route, not a bypass: no issue gets worked on that a human did not
         // name.
         await vm.runQueenCommand("/approve \(issueText)")
-        await vm.runQueenCommand("/delegate \(issueText) \(worker)\(pathsFlag) \(title)")
+        await vm.runQueenCommand("/delegate \(issueText) \(worker)\(pathsFlag)\(criteriaFlag) \(title)")
 
         guard let issue = IssueReference.parse(issueText),
               let task = QueenDelegationRegistry.shared.task(forIssue: issue) else {
