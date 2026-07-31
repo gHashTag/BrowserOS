@@ -3092,3 +3092,31 @@ Still broken: she has never reviewed against criteria, because nothing has had
 any - the criteria still come from the human on the command line, which is
 #1092 and the next thing worth doing. #6 and #7 are open and unmergeable, left
 as evidence of the base defect rather than tidied away.
+
+## 2026-08-01 ~08:3x UTC - the contract flag was eating the contract
+
+Delegating with acceptance criteria has never worked, and nobody had found out
+because no probe had ever passed any. `--criteria` took every word to the end
+of the line, so the title after it was swallowed: a live run produced a task
+titled "Work on gHashTag/trios#1095" - the fallback - with a last criterion of
+`it is under 40 lines" Extend docs/...`, closing quote included, and a first
+criterion still wearing its opening one. The single flag that turns a brief
+into a contract was destroying the brief.
+
+That also explains a gap I had been describing as missing work: the acceptance
+gate had never fired against a real task because every delegation in this
+project's history went out with an empty contract. There was nothing to check.
+
+Quoting is honoured now, and with it a live delegation carries a real contract -
+title intact, two clean criteria - and acceptance refuses with zero verdicts.
+The gate holds against real work for the first time. Ignoring the quote again
+fails all four new assertions.
+
+Two changes made this findable rather than a guess: the probe can carry
+criteria, and the acceptance refusal logs instead of only speaking into her
+chat. A correctly blocked run used to look exactly like a run where nothing
+happened.
+
+Still broken: the Queen does not judge. Verdicts are recorded by a human typing
+/verify, so what exists today is a gate, not a review - and #1092, her writing
+the criteria in the first place, is untouched.
