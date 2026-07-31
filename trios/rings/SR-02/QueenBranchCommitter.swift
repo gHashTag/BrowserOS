@@ -72,20 +72,33 @@ enum QueenBranchCommitter {
         return "\(parts[0])/\(parts[1])"
     }
 
-    /// The branch a worker's work should land on: whatever the checkout is on.
+    /// The branch a pull request should land on: the remote's default.
     ///
-    /// The pull request used to be opened against a hardcoded `dev`. A bee's
-    /// branch is cut from HEAD, so basing it on a branch HEAD is not on
-    /// guarantees a conflicting pull request that can never be merged - which
-    /// is exactly what the first one did. Work lands where it came from.
-    static func baseBranch(projectRoot: String = ProjectPaths.root) -> String {
-        let name = QueenStatusViewModel.runProcess(
+    /// A worker's branch is cut from HEAD. Opening a PR against whatever the
+    /// checkout happens to be on targets the wrong base — or, worse, the
+    /// branch itself, producing a pull request that can never merge. The
+    /// right base is the branch the forge considers the trunk: whatever
+    /// `origin/HEAD` points at.
+    ///
+    /// Returns nil when the default branch cannot be determined — no remote
+    /// configured, no HEAD symbolic-ref set, or a bare name git refuses to
+    /// resolve. The caller must treat nil as "do not open a PR": silently
+    /// guessing the wrong base is worse than not opening one.
+    static func baseBranch(projectRoot: String = ProjectPaths.root) -> String? {
+        let ref = QueenStatusViewModel.runProcess(
             "/usr/bin/git",
-            arguments: ["branch", "--show-current"],
+            arguments: ["symbolic-ref", "refs/remotes/origin/HEAD"],
             workDir: projectRoot,
             timeout: 10
         ).trimmingCharacters(in: .whitespacesAndNewlines)
-        return name.isEmpty ? "dev" : name
+
+        // `git symbolic-ref` prints something like
+        // `refs/remotes/origin/main`. Strip the prefix; what remains is the
+        // branch name the PR's `base` field needs.
+        guard ref.hasPrefix("refs/remotes/origin/") else { return nil }
+        let branch = String(ref.dropFirst("refs/remotes/origin/".count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return branch.isEmpty ? nil : branch
     }
 
     /// Publishes a worker's branch so a pull request can be opened from it.

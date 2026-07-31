@@ -3488,10 +3488,15 @@ final class ChatViewModel: ObservableObject {
                     baselineTree: workerBaselineTrees[task.conversationId],
                     ownedPaths: task.ownedPaths
                 )
+                let touchedFiles = await fileContentsForReview(
+                    baselineTree: workerBaselineTrees[task.conversationId],
+                    ownedPaths: task.ownedPaths
+                )
                 await requestReviewerVerdicts(
                     for: task,
                     criteria: unanswered,
-                    diff: diffText
+                    diff: diffText,
+                    fileContents: touchedFiles
                 )
             }
         }
@@ -3538,7 +3543,50 @@ final class ChatViewModel: ObservableObject {
         }.value
     }
 
-    /// Asks a reviewer agent for per-criterion verdicts on a finished task.
+    /// The full contents of files the worker touched, read from the working
+    /// tree after the commit.
+    ///
+    /// The diff answers "what changed"; the file contents answer "what the
+    /// file looks like now". Both are needed — a criterion may ask about code
+    /// that the change did not touch but that lives in a file the change did.
+    /// Reading from the working tree, not from a git object, because the diff
+    /// itself is taken against the working tree: if the diff is correct, the
+    /// working tree is the right source for the content around it.
+    private func fileContentsForReview(
+        baselineTree: String?,
+        ownedPaths: [String]
+    ) async -> [String: String] {
+        guard let baselineTree else { return [:] }
+        return await Task.detached(priority: .utility) {
+            var nameArgs = ["diff", "--name-only", baselineTree]
+            if !ownedPaths.isEmpty {
+                nameArgs.append("--")
+                nameArgs.append(contentsOf: ownedPaths.map {
+                    QueenDelegationPolicy.normalizePath($0)
+                })
+            }
+            let changedFiles = QueenStatusViewModel.runProcess(
+                "/usr/bin/git",
+                arguments: nameArgs,
+                workDir: ProjectPaths.root,
+                timeout: 30
+            )
+            let repoRoot = QueenBranchCommitter.repositoryRoot()
+            var result: [String: String] = [:]
+            for filePath in changedFiles.split(separator: "\n") {
+                let path = filePath.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !path.isEmpty else { continue }
+                let content = QueenStatusViewModel.runProcess(
+                    "/bin/cat",
+                    arguments: ["\(repoRoot)/\(path)"],
+                    workDir: ProjectPaths.root,
+                    timeout: 10
+                )
+                result[path] = content
+            }
+            return result
+        }.value
+    }
     ///
     /// Runs after mechanical verdicts have settled what the files show; this
     /// is for the criteria a path check cannot answer. The reviewer's response
@@ -3551,11 +3599,13 @@ final class ChatViewModel: ObservableObject {
     private func requestReviewerVerdicts(
         for task: DelegatedTask,
         criteria: [String],
-        diff: String
+        diff: String,
+        fileContents: [String: String] = [:]
     ) async {
         let brief = QueenReviewVerdictRequest.brief(
             criteria: criteria,
-            diff: diff
+            diff: diff,
+            fileContents: fileContents
         )
 
         let response = await sendOneShotReviewerRequest(brief) ?? ""
@@ -3635,10 +3685,10 @@ final class ChatViewModel: ObservableObject {
     /// Sends a one-shot prompt to the model and collects the text response.
     ///
     /// No prior context, no persistence, no conversation in the sidebar. The
-    /// reviewer's job is to read the criteria and the diff and return
-    /// verdicts, not to carry on a conversation or use tools. A fresh parser
-    /// per call so the reviewer's stream cannot interfere with the main
-    /// chat's parse state.
+    /// reviewer's job is to read the criteria, the diff, and the touched
+    /// files, and return verdicts — not to carry on a conversation or use
+    /// tools. A fresh parser per call so the reviewer's stream cannot
+    /// interfere with the main chat's parse state.
     private func sendOneShotReviewerRequest(_ prompt: String) async -> String? {
         let configuration = await modelStore.runtimeConfiguration
 
@@ -3689,11 +3739,11 @@ final class ChatViewModel: ObservableObject {
     /// turn a one-shot verdict into another worker, which is exactly the kind
     /// of scope expansion the boundary exists to prevent.
     private static let reviewerSystemPrompt = """
-        You are a code reviewer. You read acceptance criteria and a diff and \
-        return a verdict for each criterion. You do not edit code, run \
-        commands, or delegate. Give each criterion its own line with the \
-        number, the verdict word (met, unmet, or could not check), and one \
-        sentence explaining why.
+        You are a code reviewer. You read acceptance criteria, a diff, and the \
+        full contents of touched files, and return a verdict for each criterion. \
+        You do not edit code, run commands, or delegate. Give each criterion its \
+        own line with the number, the verdict word (met, unmet, or could not \
+        check), and one sentence explaining why.
         """
 
     /// Closes a task the Queen can judge on her own.
@@ -4083,13 +4133,33 @@ final class ChatViewModel: ObservableObject {
             return
         }
 
+        // The base branch is the PR's target — what the head merges into.
+        // baseBranch() returns nil when the checkout has no origin/HEAD
+        // symbolic ref, which means we genuinely do not know what to merge
+        // into. The old default ("dev") was a guess: if the repo's default
+        // branch is "main" or "trunk", a PR opened against "dev" lands in the
+        // wrong place. Refuse and name the reason instead.
+        guard let baseBranch = QueenBranchCommitter.baseBranch() else {
+            TriosLogBus.shared.error(
+                .queen, "queen.pr.noBaseBranch", "Could not determine the base branch",
+                ["issue": issue.slug, "branch": branch]
+            )
+            await postQueenNotice(
+                SystemNoticeClassifier.failureMarker
+                    + "I could not determine the base branch for `\(branch)`, so there "
+                    + "is no pull request for \(issue.slug). Set origin/HEAD to point "
+                    + "at the default branch and try again."
+            )
+            return
+        }
+
         do {
             let pr = try await GitHubAPIClient().createPR(
                 repo: prRepo,
                 title: task.title,
                 body: "For \(issue.url)\n\nOpened by the Queen for \(task.worker).",
                 head: branch,
-                base: QueenBranchCommitter.baseBranch()
+                base: baseBranch
             )
             registry.recordPullRequest(taskID: task.id, number: pr.number)
             await postQueenNotice(

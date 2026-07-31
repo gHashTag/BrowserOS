@@ -19,27 +19,41 @@ import Foundation
 /// on a glance — the whole point of the three-state verdict is that "I did
 /// not check" is different from "I checked and it passed".
 enum QueenReviewVerdictRequest {
+    /// Maximum lines a single file may occupy in the brief before being
+    /// truncated. A file dumped in full crowds out the diff and the criteria,
+    /// leaving the reviewer with a wall of code and no room for the verdicts
+    /// the brief exists to collect. Truncation is explicit — the marker shows
+    /// how many lines were omitted — so the reviewer knows the file was cut
+    /// rather than ending where the fence closes.
+    private static let maxFileLinesInBrief = 500
+
     /// Builds the brief a reviewer agent receives.
     ///
     /// The criteria are listed as a numbered table so the response can refer
     /// to them by number or by text. The diff is included verbatim so the
     /// reviewer sees what changed rather than a summary of it — a summary
     /// that paraphrases a diff is the same summary that hides the line that
-    /// fails.
+    /// fails. The full contents of touched files are appended after the diff
+    /// so a criterion that asks about code the change did not touch — but
+    /// that lives in a file the change did — can be judged from what is
+    /// there, not only from what was added or removed. Large files are
+    /// truncated with a visible marker rather than omitted silently.
     static func brief(
         criteria: [String],
-        diff: String
+        diff: String,
+        fileContents: [String: String] = [:]
     ) -> String {
         var lines: [String] = [
-            "You are a code reviewer. Below are the acceptance criteria for a task",
-            "and the diff of what the worker changed. For each criterion give a",
-            "verdict on its own line, using the criterion's number, in this format:",
+            "You are a code reviewer. Below are the acceptance criteria for a task,",
+            "the diff of what the worker changed, and the full contents of the files",
+            "that were touched. For each criterion give a verdict on its own line,",
+            "using the criterion's number, in this format:",
             "",
             "N. met|unmet|could not check — one sentence explaining why",
             "",
-            "Say \"could not check\" if the diff does not let you tell. Do not guess:",
-            "a criterion you are unsure about is better left to a human than",
-            "silently marked met.",
+            "Say \"could not check\" if the diff and file contents do not let you",
+            "tell. Do not guess: a criterion you are unsure about is better left to",
+            "a human than silently marked met.",
             "",
             "## Acceptance criteria"
         ]
@@ -55,6 +69,36 @@ enum QueenReviewVerdictRequest {
             lines.append(diff)
             lines.append("```")
         }
+
+        // Full file contents let the reviewer judge criteria that depend on
+        // unchanged code near the change — a diff alone hides the context
+        // the criterion asks about. Truncated, not omitted, when a file is
+        // large enough to crowd the rest of the brief.
+        if !fileContents.isEmpty {
+            lines.append("")
+            lines.append("## Touched files (full contents after change)")
+            for path in fileContents.keys.sorted() {
+                let content = fileContents[path] ?? ""
+                let fileLines = content.components(separatedBy: "\n")
+                lines.append("")
+                lines.append("### \(path)")
+                lines.append("```")
+                if fileLines.count <= Self.maxFileLinesInBrief {
+                    lines.append(content)
+                } else {
+                    lines.append(
+                        fileLines.prefix(Self.maxFileLinesInBrief)
+                            .joined(separator: "\n")
+                    )
+                    lines.append(
+                        "… (truncated: \(Self.maxFileLinesInBrief) of "
+                        + "\(fileLines.count) lines)"
+                    )
+                }
+                lines.append("```")
+            }
+        }
+
         return lines.joined(separator: "\n")
     }
 
