@@ -3153,3 +3153,32 @@ the only reason that was caught.
 Still broken: the criteria are still written by a human on the command line,
 which is #1092 and now the last thing between this and the Queen owning the
 whole contract.
+
+## 2026-08-01 ~09:3x UTC - the contract was in the issue all along
+
+Criteria had to be retyped on the command line, so they were skipped, so every
+delegation this project has ever made went out with nothing to judge it by. The
+contract was not missing - it was in the issue, under "Готово, когда", in the
+words of whoever filed it. She reads it there now.
+
+Narrow on purpose: the list under that heading and only until the next one. A
+bullet from "What is already done" is a claim about the past, and treating it
+as a contract would have her accept work for things nobody asked for. No
+contract in the issue yields none rather than something invented; an unreadable
+issue warns rather than fails.
+
+Proven live: delegating #1097 with no --criteria produced its three criteria,
+and acceptance then blocked with zero verdicts because none of them names a
+file. That is last cycle's evidence rule working - guessing is worse than
+leaving a question open.
+
+I broke the suite doing it, and that is the part to remember. Reaching straight
+into GitHubAPIClient turned delegation into a network call, and the harness
+delegates, so the suite went to github.com and stopped finishing - fifteen
+minutes and no verdict, which read as a hang rather than as my change. Every
+other dependency in that view model is injected; this one had no business being
+the exception.
+
+Still broken: #1093, #1097 and #1098 remain, and nothing has yet run two bees
+at once - parallelism is bounded at four in policy and has never been
+demonstrated.
