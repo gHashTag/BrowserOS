@@ -62,6 +62,7 @@ struct ChatPanelView: View {
         GeometryReader { pane in
             VStack(spacing: 0) {
                 pinnedSpecHeader
+                queenBeeBoard
                 unifiedMessageArea
                     .frame(maxHeight: .infinity)
                 // The planner is bounded and scrolls internally. Unbounded it
@@ -193,6 +194,27 @@ struct ChatPanelView: View {
             conversationId: viewModel.conversationId,
             isCollapsed: $isSpecHeaderCollapsed
         )
+    }
+
+    // MARK: - Queen Bee Board
+
+    /// One card per live task, shown only in the Queen's master chat.
+    ///
+    /// The board renders nothing outside `trinityQueenId`, so it never appears
+    /// in worker or regular chats. When the swarm is empty the section collapses
+    /// to zero height — a permanent header for an idle hive is a permanent tax
+    /// on the reading area.
+    @ViewBuilder
+    private var queenBeeBoard: some View {
+        if viewModel.conversationId == ChatConversation.trinityQueenId,
+           !viewModel.delegationRegistry.open.isEmpty {
+            QueenBeeBoard(
+                registry: viewModel.delegationRegistry,
+                onSelectBee: { conversationId in
+                    viewModel.selectConversation(conversationId)
+                }
+            )
+        }
     }
 
     // MARK: - Unified Messages / Empty State
@@ -2686,5 +2708,251 @@ private struct PinnedSpecHeader: View {
         case .unmet: return .white.opacity(0.78)
         case .unchecked: return .white.opacity(0.55)
         }
+    }
+}
+
+// MARK: - Queen Bee Board
+
+/// Board of bee cards pinned at the top of the Queen's master chat.
+///
+/// One card per live task — issue, worker, state, branch — so the Queen sees
+/// the swarm at a glance without scrolling through worker transcripts. A task
+/// that waits on a human decision is visually distinct from one that is quietly
+/// working, because that distinction is the most frequent reason to look.
+private struct QueenBeeBoard: View {
+    @ObservedObject var registry: QueenDelegationRegistry
+    let onSelectBee: (UUID) -> Void
+
+    /// Tasks shown needs-attention first, then newest. Attention-demanding
+    /// tasks rise to the left so the Queen does not have to hunt past quiet
+    /// workers to find what is blocked.
+    private var displayTasks: [DelegatedTask] {
+        registry.open.sorted { a, b in
+            if a.state.needsQueenAttention != b.state.needsQueenAttention {
+                return a.state.needsQueenAttention && !b.state.needsQueenAttention
+            }
+            return a.updatedAt > b.updatedAt
+        }
+    }
+
+    /// Whether any task is currently demanding the Queen's attention, so the
+    /// header can flag it without the user reading every card.
+    private var hasAttentionTasks: Bool {
+        displayTasks.contains { $0.state.needsQueenAttention }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            boardHeader
+            cardsRow
+        }
+        .padding(.vertical, 8)
+        .background(
+            ZStack {
+                GlassmorphismBackground(
+                    material: .underWindowBackground,
+                    blending: .withinWindow,
+                    cornerRadius: 0
+                )
+                Color.black.opacity(0.2)
+            }
+        )
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.grokBorder.opacity(0.3))
+                .frame(height: 1)
+        }
+    }
+
+    // MARK: - Header
+
+    private var boardHeader: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "rectangle.grid.2x2.fill")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundColor(.white.opacity(0.4))
+            Text("Bee Board")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(.white.opacity(0.5))
+                .textCase(.uppercase)
+                .tracking(0.5)
+
+            Text("\(displayTasks.count)")
+                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .foregroundColor(.white.opacity(0.35))
+
+            if hasAttentionTasks {
+                let attentionCount = displayTasks.filter { $0.state.needsQueenAttention }.count
+                HStack(spacing: 2) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 8))
+                    Text("\(attentionCount) need you")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+                .foregroundColor(.yellow.opacity(0.9))
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+    }
+
+    // MARK: - Cards
+
+    private var cardsRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(displayTasks) { task in
+                    BeeCard(task: task) {
+                        onSelectBee(task.conversationId)
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+        }
+    }
+}
+
+// MARK: - Bee Card
+
+/// One task card on the bee board.
+///
+/// The card answers four questions at a glance: which issue, which bee, what
+/// state, and which branch. Clicking opens that bee's conversation.
+///
+/// A card that needs a human decision is visually distinct from one that is
+/// working: it gets a coloured border, a tinted background, and a filled dot
+/// indicator instead of a glyph, so the most important distinction — "do I
+/// need to act?" — is visible before reading any text.
+private struct BeeCard: View {
+    let task: DelegatedTask
+    let onTap: () -> Void
+
+    @State private var isHovered = false
+
+    private var needsAttention: Bool { task.state.needsQueenAttention }
+    private var accentColor: Color { QueenTaskStyle.color(for: task.state) }
+    private var stateIcon: String { QueenTaskStyle.symbol(for: task.state) }
+
+    /// State label tuned for the board: "Ready to merge" for an accepted task
+    /// with a pull request reads more clearly than "Accepted", because the
+    /// question the Queen asks is not "did I accept this?" but "is it ready?".
+    private var stateLabel: String {
+        switch task.state {
+        case .accepted:
+            return task.pullRequestNumber != nil ? "Ready to merge" : "Accepted"
+        default:
+            return QueenTaskStyle.label(for: task.state)
+        }
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            cardContent
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovered = hovering
+        }
+        .help("Open \(task.worker)'s chat")
+    }
+
+    private var cardContent: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            // Row 1 — status + issue number
+            HStack(spacing: 6) {
+                statusIndicator
+                Text(stateLabel)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(accentColor)
+                    .lineLimit(1)
+
+                Spacer(minLength: 4)
+
+                Text("#\(task.issue.number)")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.55))
+            }
+
+            // Row 2 — task title
+            Text(task.title)
+                .font(.system(size: 11))
+                .foregroundColor(.white.opacity(0.82))
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Row 3 — bee + branch
+            HStack(spacing: 4) {
+                Image(systemName: "ant.fill")
+                    .font(.system(size: 8))
+                    .foregroundColor(accentColor.opacity(0.7))
+                Text(task.worker)
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(.grokMuted)
+                    .lineLimit(1)
+                if let branch = task.virtualBranch {
+                    Text("·")
+                        .font(.system(size: 9))
+                        .foregroundColor(.grokDim)
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 7))
+                        .foregroundColor(.grokDim)
+                    Text(branch)
+                        .font(.system(size: 9, design: .monospaced))
+                        .foregroundColor(.grokMuted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+        .padding(10)
+        .frame(width: 208)
+        .background(cardBackground)
+        .overlay(cardBorder)
+        .scaleEffect(isHovered ? 1.02 : 1.0)
+        .animation(.easeOut(duration: 0.12), value: isHovered)
+    }
+
+    // MARK: - Status Indicator
+
+    @ViewBuilder
+    private var statusIndicator: some View {
+        if needsAttention {
+            // A filled dot with a halo ring is visually distinct from the SF
+            // Symbol icons on working cards. The shape difference — circle vs
+            // glyph — reads instantly before any text is scanned.
+            Circle()
+                .fill(accentColor)
+                .frame(width: 8, height: 8)
+                .overlay(
+                    Circle()
+                        .stroke(accentColor.opacity(0.3), lineWidth: 2)
+                        .padding(-3)
+                )
+        } else {
+            Image(systemName: stateIcon)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundColor(accentColor)
+        }
+    }
+
+    // MARK: - Background & Border
+
+    private var cardBackground: some View {
+        RoundedRectangle(cornerRadius: 10)
+            .fill(needsAttention
+                  ? accentColor.opacity(0.08)
+                  : Color.grokElevated.opacity(0.5))
+    }
+
+    private var cardBorder: some View {
+        RoundedRectangle(cornerRadius: 10)
+            .strokeBorder(
+                needsAttention
+                    ? accentColor.opacity(0.5)
+                    : (isHovered ? Color.grokBorder.opacity(0.5) : Color.grokBorder.opacity(0.2)),
+                lineWidth: needsAttention ? 1.5 : 1
+            )
     }
 }

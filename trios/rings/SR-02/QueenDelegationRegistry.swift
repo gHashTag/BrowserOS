@@ -28,22 +28,76 @@ final class QueenDelegationRegistry: ObservableObject {
         load()
     }
 
-    // MARK: - Queries
+    // MARK: - Live / Archive separation
+    //
+    // Terminal tasks (`merged`, `cancelled`) leave the live list the moment
+    // they reach that state. They are not deleted — they remain in the store
+    // and are reachable only through `archived`. Every query that feeds the
+    // UI or the Queen's decisions draws from the live set, so a settled task
+    // can never appear in the sidebar, the review queue, or the slot counter.
 
     var running: [DelegatedTask] { tasks.filter { $0.state == .running } }
-    var reviewQueue: [DelegatedTask] { QueenDelegationPolicy.reviewQueue(tasks) }
+
+    /// The Queen's review queue, drawn only from live tasks.
+    ///
+    /// Archived tasks are excluded *before* the policy sees them. The
+    /// policy's own `needsQueenAttention` filter already drops `merged` and
+    /// `cancelled`, but that is a property of the policy, not of the
+    /// registry. Filtering here makes the guarantee structural: even if the
+    /// policy were to change, a settled task can never enter the review
+    /// queue.
+    var reviewQueue: [DelegatedTask] {
+        QueenDelegationPolicy.reviewQueue(tasks.filter { !$0.isSettled })
+    }
+
     var active: [DelegatedTask] { tasks.filter { !$0.state.isTerminal } }
 
-    /// Work still on the Queen's plate: anything unfinished, plus failures
-    /// nobody has acknowledged.
+    /// The live list: work still on the Queen's plate.
+    ///
+    /// Anything unfinished, plus failures nobody has acknowledged. Terminal
+    /// tasks (`merged`, `cancelled`) are excluded because they are settled —
+    /// they live in `archived`, not here.
     var open: [DelegatedTask] {
         tasks.filter { !$0.isSettled }
     }
 
     /// Settled work, newest first. Kept rather than deleted so "what did the
     /// swarm actually do today" has an answer.
+    ///
+    /// This is the archive's access point: an explicit, read-only view of
+    /// every task that reached a terminal state. Tasks are never removed to
+    /// produce it — they are filtered from the same store that holds live
+    /// work.
     var archived: [DelegatedTask] {
         tasks.filter { $0.isSettled }.sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    /// Moves terminal tasks off the live list and into the archive view.
+    ///
+    /// Terminal tasks already leave `open` and `reviewQueue` by virtue of
+    /// their state — the filtering is automatic. This method is the
+    /// explicit, named action for archival: the Queen calls it to
+    /// acknowledge that finished work has moved off the board. It logs each
+    /// archived task and returns them so the caller can report what moved.
+    ///
+    /// Tasks are not deleted. They remain in the store and are visible
+    /// through `archived` for as long as `pruneArchive` has not trimmed them.
+    @discardableResult
+    func archiveTerminalTasks() -> [DelegatedTask] {
+        let toArchive = tasks.filter { $0.isSettled }
+        guard !toArchive.isEmpty else { return [] }
+        for task in toArchive {
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.archive",
+                "Archived \(task.issue.slug) (\(task.state.displayName))",
+                [
+                    "issue": task.issue.slug,
+                    "state": task.state.rawValue,
+                ]
+            )
+        }
+        return toArchive.sorted { $0.updatedAt > $1.updatedAt }
     }
 
     /// Bees that have stopped without saying so.
