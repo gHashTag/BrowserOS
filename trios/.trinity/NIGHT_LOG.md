@@ -2689,3 +2689,34 @@ next thing standing between this harness and the Queen's writing commands; the
 store-level output budget that can be read but never set; the observer's shell
 blind spot; the four RichTextRenderer deprecations; the pull request waiting on
 a token only the user can place; and the 22 XCTest errors.
+
+## 2026-07-31 ~16:0x UTC - delegation under test, and two things I did not know
+
+Verifications green first. The delegation registry is injected now - eighteen
+call sites had reached for the singleton, which reads and writes the real
+.trinity state, so every command that makes the Queen do something was
+untestable without leaving tasks behind on whoever ran the suite.
+
+The first coverage of delegation immediately taught me two things about code I
+thought I knew. She refuses to open a task she cannot staff: with no worker
+runner the delegation aborts and says why, rather than filing something nobody
+will start. And she creates a real git branch, because the registry is
+injectable but ProjectPaths is not - the first run left two queen/* branches in
+the checkout, and the cassette sweep no longer collects those, having been
+narrowed weeks ago precisely so it would stop eating branches that hold work.
+The test deletes the three it makes, by name.
+
+The consent gate assertion was wrong twice before it was right, and this is the
+part worth keeping. I checked it on the unstaffed view model, where no task
+opens whatever the gate does, so deleting the gate entirely left it green. It is
+checked on the staffed one now, where the gate is the only thing that can stop
+the delegation. Third assertion in three cycles to pass for the wrong reason,
+each caught only by mutating the thing under test. The habit is worth more than
+any single finding it has produced - without it I would have shipped three
+tests that prove nothing and believed the suite was 392 strong.
+
+Left alone deliberately: ProjectPaths, which is the last thing making these
+tests touch the real checkout; the store-level output budget that can be read
+but never set; the observer's shell blind spot; the four RichTextRenderer
+deprecations; the pull request waiting on a token only the user can place; and
+the 22 XCTest errors.
