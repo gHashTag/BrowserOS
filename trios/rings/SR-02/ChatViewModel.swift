@@ -2855,17 +2855,42 @@ final class ChatViewModel: ObservableObject {
         await persister.save(messages: history, conversationId: task.conversationId)
     }
 
-    private func appendSystemMessageToQueenChat(_ content: String) async {
+    /// The Queen's chat as last known, when the user is looking somewhere else.
+    ///
+    /// Kept because the obvious version loses messages. Load, append, save has
+    /// two suspension points, and bees do not report politely one at a time -
+    /// six finishing together each loaded the same history, appended their own
+    /// line and saved, so five were overwritten. Six notices arrived and she
+    /// heard two. A supervisor silently missing four bees is worse than one
+    /// reporting late.
+    ///
+    /// Appending to an array held here is synchronous on the main actor, so no
+    /// two callers can interleave between reading and writing it. Only the save
+    /// suspends, and by then every caller's line is already in the array.
+    private var queenChatWhileAway: [ChatMessage]?
+
+    func appendSystemMessageToQueenChat(_ content: String) async {
         let message = ChatMessage(role: .system, content: content)
         if conversationId == ChatConversation.trinityQueenId {
+            // Her chat is open, so `messages` is the live copy and the cache
+            // would only go stale behind it.
+            queenChatWhileAway = nil
             messages.append(message)
             rebuildCache()
             await saveHistory(expectedGeneration: streamGeneration)
-        } else {
-            var queenMessages = await persister.load(conversationId: ChatConversation.trinityQueenId)
-            queenMessages.append(message)
-            await persister.save(messages: queenMessages, conversationId: ChatConversation.trinityQueenId)
+            await loadConversations()
+            return
         }
+
+        if queenChatWhileAway == nil {
+            let loaded = await persister.load(conversationId: ChatConversation.trinityQueenId)
+            // Re-check: a second caller may have filled it while this one was
+            // suspended, and overwriting would drop whatever it had appended.
+            if queenChatWhileAway == nil { queenChatWhileAway = loaded }
+        }
+        queenChatWhileAway?.append(message)
+        let snapshot = queenChatWhileAway ?? [message]
+        await persister.save(messages: snapshot, conversationId: ChatConversation.trinityQueenId)
         await loadConversations()
     }
 
@@ -3507,11 +3532,23 @@ final class ChatViewModel: ObservableObject {
         registry.pruneArchive()
     }
 
-    private func postQueenNotice(_ text: String) async {
-        messages.append(ChatMessage(role: .system, content: text))
-        rebuildCache()
-        let snapshot = captureHistorySnapshot()
-        await persistHistorySnapshot(snapshot)
+    /// A word from the Queen, which belongs in the Queen's chat.
+    ///
+    /// This used to append to `messages` - whatever conversation happens to be
+    /// open. Every caller reached through /delegate is fine, because
+    /// runQueenCommand switches to her chat first. The callers that are not are
+    /// the ones that matter: a worker finishing, the observer noticing a stray
+    /// write, the review scheduler waking. Those fire while the user is
+    /// watching a bee, and her words landed in that bee's chat - the supervisor
+    /// talking into the wrong room, and her own chat silent about work she was
+    /// supervising.
+    ///
+    /// Not private, so a test can call it with some other conversation open.
+    /// The routing is the whole behaviour and there is no other way in: every
+    /// caller that reaches it through a command has already switched away from
+    /// the case worth proving.
+    func postQueenNotice(_ text: String) async {
+        await appendSystemMessageToQueenChat(text)
     }
 
     // MARK: - Review Loop

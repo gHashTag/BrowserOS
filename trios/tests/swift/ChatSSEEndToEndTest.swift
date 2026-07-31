@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 413
+    static let minimumChecks = 418
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -46,6 +46,7 @@ struct ChatSSEEndToEndTests {
         await runHappyPathStreaming()
         await runCancellationIsNonError()
         await runNewChatAppears()
+        await runQueenHearsEveryBee()
         await runQueenAnswersACommand()
         await runDeduplication()
         await runConversationRenamePersistence()
@@ -281,6 +282,66 @@ struct ChatSSEEndToEndTests {
               "and the new chat is in the list the sidebar draws")
         check(viewModel.conversations.contains { $0.id == ChatConversation.trinityQueenId },
               "and the Queen's chat is still there, not replaced by it")
+    }
+
+    /// Does the Queen hear every bee, including while the user is elsewhere?
+    static func runQueenHearsEveryBee() async {
+        print("\n# Scenario: the Queen hears every bee")
+
+        let testDefaults = UserDefaults(suiteName: "trios-chat-sse-livequeen") ?? .standard
+        let persister = InMemoryPersister()
+        let viewModel = ChatViewModel(
+            transport: MockChatTransport(),
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: persister,
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: ModelConfigurationStore(
+                defaults: testDefaults, environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
+            ),
+            memoryService: AgentMemoryService(
+                store: VolatileMemoryStore(), fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: TODOPlanner(store: VolatileMemoryStore(), preferences: testDefaults)
+        )
+        try? await Task.sleep(nanoseconds: 200_000_000)
+
+        // The user is looking at some other chat, which is the normal case
+        // while bees work: she is supervising, not being read.
+        viewModel.newConversation()
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        check(viewModel.conversationId != ChatConversation.trinityQueenId,
+              "the user is somewhere other than the Queen's chat")
+
+        // One notice first: does it even reach her, or land where the user is?
+        await viewModel.postQueenNotice("a bee reported")
+        let elsewhere = viewModel.messages.filter { $0.role == .system }
+        check(elsewhere.isEmpty,
+              "a word from the Queen does not land in whichever chat happens to be open")
+        let hers = await persister.load(conversationId: ChatConversation.trinityQueenId)
+        check(hers.contains { $0.content == "a bee reported" },
+              "it lands in her chat, which is where a supervisor's words belong")
+
+        // Several bees report at once. Nothing about finishing is serialised -
+        // four workers can end within the same instant.
+        await withTaskGroup(of: Void.self) { group in
+            for i in 1...6 {
+                group.addTask { @MainActor in
+                    await viewModel.postQueenNotice("bee \(i) finished")
+                }
+            }
+        }
+        try? await Task.sleep(nanoseconds: 300_000_000)
+
+        // Counting only this burst: her chat already holds the single notice
+        // from the check above, and "7 of 6" was my arithmetic, not a defect.
+        let heard = await persister.load(conversationId: ChatConversation.trinityQueenId)
+            .filter { $0.content.hasPrefix("bee ") }
+        check(heard.count == 6, "every bee that reported is in her chat, none overwritten")
+        check(Set(heard.map(\.content)).count == 6,
+              "and they are six different bees, not one line saved six times")
     }
 
     static func runQueenAnswersACommand() async {

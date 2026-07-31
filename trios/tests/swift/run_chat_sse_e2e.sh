@@ -50,6 +50,11 @@ PROD_FILES+=(
     "$PROJECT_DIR/BR-OUTPUT/TriosTheme.swift"
     "$PROJECT_DIR/BR-OUTPUT/GitHubModels.swift"
     "$PROJECT_DIR/BR-OUTPUT/GitHubAPIClient.swift"
+    # Reached from rings/SR-00/CompositionRoot.swift. Both are ordinary shipped
+    # sources - build.sh compiles them for the app - and the harness simply had
+    # never needed them until something under rings started referring to them.
+    "$PROJECT_DIR/BR-OUTPUT/SessionGuard.swift"
+    "$PROJECT_DIR/BR-OUTPUT/CladeGuard.swift"
 )
 
 # Add the test files.
