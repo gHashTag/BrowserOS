@@ -46,6 +46,7 @@ struct ChatPanelView: View {
     @StateObject private var throttle = StreamingThrottle()
     private let attachmentImporter = ChatAttachmentImporter()
     @State private var effectiveOutputCeiling: Int? = nil
+    @State private var isSpecHeaderCollapsed = false
 
     // Manual previous-value tracking for .onChange compatibility with the
     // swiftc-based build path, which does not consistently expose the two-arg
@@ -60,6 +61,7 @@ struct ChatPanelView: View {
     var body: some View {
         GeometryReader { pane in
             VStack(spacing: 0) {
+                pinnedSpecHeader
                 unifiedMessageArea
                     .frame(maxHeight: .infinity)
                 // The planner is bounded and scrolls internally. Unbounded it
@@ -180,6 +182,17 @@ struct ChatPanelView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color.black.opacity(0.35))
         .ignoresSafeArea()
+    }
+
+    // MARK: - Pinned Spec Header
+
+    @ViewBuilder
+    private var pinnedSpecHeader: some View {
+        PinnedSpecHeader(
+            registry: viewModel.delegationRegistry,
+            conversationId: viewModel.conversationId,
+            isCollapsed: $isSpecHeaderCollapsed
+        )
     }
 
     // MARK: - Unified Messages / Empty State
@@ -2426,5 +2439,252 @@ private struct PlannerContentHeightPreferenceKey: PreferenceKey {
     static var defaultValue: CGFloat = 0
     static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
         value = max(value, nextValue())
+    }
+}
+
+// MARK: - Pinned Spec Header
+
+/// Pins the active task's specification above the chat so it stays visible
+/// without scrolling. Shows each acceptance criterion with its verdict and,
+/// when acceptance is blocked, what is blocking — without running `/verify`.
+///
+/// Renders nothing when the current conversation has no delegated task, so the
+/// header is invisible in normal (non-delegated) chats.
+private struct PinnedSpecHeader: View {
+    @ObservedObject var registry: QueenDelegationRegistry
+    let conversationId: UUID
+    @Binding var isCollapsed: Bool
+
+    private var task: DelegatedTask? {
+        registry.task(forConversation: conversationId)
+    }
+
+    var body: some View {
+        if let task {
+            headerContent(for: task)
+        }
+    }
+
+    // MARK: - Layout
+
+    @ViewBuilder
+    private func headerContent(for task: DelegatedTask) -> some View {
+        let verdicts = QueenAcceptancePolicy.verdicts(
+            criteria: task.acceptanceCriteria,
+            recorded: task.criterionVerdicts
+        )
+        let blockReason = QueenAcceptancePolicy.acceptanceBlockReason(
+            criteria: task.acceptanceCriteria,
+            recorded: task.criterionVerdicts
+        )
+        let metCount = verdicts.filter { $0.verdict == .met }.count
+        let unmetCount = verdicts.filter { $0.verdict == .unmet }.count
+        let uncheckedCount = verdicts.filter { $0.verdict == .unchecked }.count
+
+        VStack(spacing: 0) {
+            titleBar(
+                task: task,
+                metCount: metCount,
+                unmetCount: unmetCount,
+                uncheckedCount: uncheckedCount,
+                isBlocked: blockReason != nil
+            )
+            if !isCollapsed {
+                Divider()
+                    .overlay(Color.grokDivider.opacity(0.4))
+                    .padding(.horizontal, 14)
+                criteriaList(verdicts: verdicts)
+                if let reason = blockReason {
+                    blockReasonBanner(reason: reason)
+                }
+            }
+        }
+        .background(
+            ZStack {
+                GlassmorphismBackground(
+                    material: .underWindowBackground,
+                    blending: .withinWindow,
+                    cornerRadius: 0
+                )
+                Color.black.opacity(0.25)
+            }
+        )
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.grokBorder.opacity(0.5))
+                .frame(height: 1)
+        }
+    }
+
+    // MARK: - Title Bar
+
+    @ViewBuilder
+    private func titleBar(
+        task: DelegatedTask,
+        metCount: Int,
+        unmetCount: Int,
+        uncheckedCount: Int,
+        isBlocked: Bool
+    ) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "doc.text.magnifyingglass")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(.white.opacity(0.6))
+
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(spacing: 6) {
+                    Text(task.issue.slug)
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.88))
+                    Text(task.title)
+                        .font(.system(size: 11))
+                        .foregroundColor(.grokMuted)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                HStack(spacing: 8) {
+                    if metCount > 0 {
+                        verdictPill(count: metCount, label: "met", color: .green)
+                    }
+                    if unmetCount > 0 {
+                        verdictPill(count: unmetCount, label: "unmet", color: .red)
+                    }
+                    if uncheckedCount > 0 {
+                        verdictPill(count: uncheckedCount, label: "unchecked", color: .yellow)
+                    }
+                    if isBlocked {
+                        HStack(spacing: 3) {
+                            Image(systemName: "lock.fill")
+                                .font(.system(size: 8, weight: .bold))
+                            Text("blocked")
+                                .font(.system(size: 9, weight: .semibold))
+                        }
+                        .foregroundColor(.red.opacity(0.9))
+                    }
+                }
+            }
+
+            Spacer(minLength: 4)
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    isCollapsed.toggle()
+                }
+            } label: {
+                Image(systemName: isCollapsed ? "chevron.down" : "chevron.up")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.5))
+                    .frame(width: 22, height: 22)
+            }
+            .buttonStyle(.plain)
+            .help(isCollapsed ? "Expand specification" : "Collapse specification")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+
+    // MARK: - Criteria List
+
+    @ViewBuilder
+    private func criteriaList(
+        verdicts: [(criterion: String, verdict: QueenCriterionVerdict)]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Array(verdicts.enumerated()), id: \.offset) { index, row in
+                criterionRow(index: index + 1, text: row.criterion, verdict: row.verdict)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+    }
+
+    @ViewBuilder
+    private func criterionRow(
+        index: Int,
+        text: String,
+        verdict: QueenCriterionVerdict
+    ) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            verdictBadge(verdict)
+                .frame(width: 14, height: 14)
+                .padding(.top, 1)
+            Text("\(index). \(text)")
+                .font(.system(size: 11))
+                .foregroundColor(verdictTextColor(verdict))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 2)
+    }
+
+    @ViewBuilder
+    private func verdictBadge(_ verdict: QueenCriterionVerdict) -> some View {
+        ZStack {
+            Circle()
+                .fill(verdictColor(verdict).opacity(0.18))
+            Image(systemName: verdictIcon(verdict))
+                .font(.system(size: 8, weight: .bold))
+                .foregroundColor(verdictColor(verdict))
+        }
+    }
+
+    private func verdictPill(count: Int, label: String, color: Color) -> some View {
+        HStack(spacing: 3) {
+            Text("\(count)")
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+            Text(label)
+                .font(.system(size: 9))
+        }
+        .foregroundColor(color.opacity(0.9))
+        .padding(.horizontal, 5)
+        .padding(.vertical, 1)
+        .background(color.opacity(0.12))
+        .clipShape(Capsule())
+    }
+
+    // MARK: - Block Reason
+
+    @ViewBuilder
+    private func blockReasonBanner(reason: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(.red.opacity(0.85))
+                .padding(.top, 1)
+            Text(reason)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.red.opacity(0.8))
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(Color.red.opacity(0.06))
+    }
+
+    // MARK: - Verdict Helpers
+
+    private func verdictColor(_ verdict: QueenCriterionVerdict) -> Color {
+        switch verdict {
+        case .met: return .green
+        case .unmet: return .red
+        case .unchecked: return .yellow
+        }
+    }
+
+    private func verdictIcon(_ verdict: QueenCriterionVerdict) -> String {
+        switch verdict {
+        case .met: return "checkmark"
+        case .unmet: return "xmark"
+        case .unchecked: return "questionmark"
+        }
+    }
+
+    private func verdictTextColor(_ verdict: QueenCriterionVerdict) -> Color {
+        switch verdict {
+        case .met: return .white.opacity(0.78)
+        case .unmet: return .white.opacity(0.78)
+        case .unchecked: return .white.opacity(0.55)
+        }
     }
 }
