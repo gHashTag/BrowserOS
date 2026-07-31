@@ -106,6 +106,14 @@ final class ChatViewModel: ObservableObject {
     @Published var canSummarizeStreamSoFar: Bool = false
     @Published var streamingBudgetStatus: StreamingBudgetStatus?
 
+    /// Raw reviewer responses keyed by task ID, preserved so a verdict can be
+    /// re-examined. The parsed verdicts are recorded in the delegation
+    /// registry, but the text the reviewer actually wrote is the evidence
+    /// behind them — without it, re-checking a verdict means re-running the
+    /// review. Posted to the Queen's chat as well, so the response is visible
+    /// in the transcript after the fact.
+    @Published private(set) var reviewerResponses: [UUID: String] = [:]
+
     let queenStatusVM = QueenStatusViewModel()
     let modelStore: ModelConfigurationStore
     let todoPlanner: TODOPlanner
@@ -3537,7 +3545,9 @@ final class ChatViewModel: ObservableObject {
     /// is parsed conservatively — anything the parser could not match stays
     /// absent, which reads as `unchecked`. An empty or garbled response
     /// changes nothing, which is the correct outcome: an unexamined criterion
-    /// is not a pass.
+    /// is not a pass. The raw response is stored in `reviewerResponses` and
+    /// posted to the Queen's chat so the reasoning behind each verdict can be
+    /// re-examined later.
     private func requestReviewerVerdicts(
         for task: DelegatedTask,
         criteria: [String],
@@ -3549,6 +3559,13 @@ final class ChatViewModel: ObservableObject {
         )
 
         let response = await sendOneShotReviewerRequest(brief) ?? ""
+
+        // Keep the raw response so a verdict can be re-examined later without
+        // re-running the review. The parsed verdicts are a summary; the text
+        // behind them is the evidence.
+        if !response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            reviewerResponses[task.id] = response
+        }
 
         let verdicts = QueenReviewVerdictRequest.parse(response, criteria: criteria)
         let registry = delegationRegistry
@@ -3573,6 +3590,18 @@ final class ChatViewModel: ObservableObject {
                 "response_chars": String(response.count)
             ]
         )
+
+        // Post the reviewer's response to the Queen's chat so it is visible in
+        // the transcript after the fact. The verdict table shows the outcome;
+        // the response shows the reasoning, which is what someone re-examining
+        // a verdict needs to read.
+        if !response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            await appendSystemMessageToQueenChat(
+                SystemNoticeClassifier.infoMarker
+                    + "Reviewer response for \(task.issue.slug):\n\n"
+                    + response
+            )
+        }
     }
 
     /// Sends a one-shot prompt to the model and collects the text response.

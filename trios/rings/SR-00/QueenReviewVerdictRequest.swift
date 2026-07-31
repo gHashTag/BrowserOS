@@ -9,11 +9,15 @@ import Foundation
 /// This builds the brief that carries the criteria and the branch diff to a
 /// reviewer agent, and parses the response back into verdicts.
 ///
-/// Parsing is deliberately conservative: a garbled or empty answer leaves a
-/// criterion absent from the result, which reads as `unchecked` downstream.
-/// Guessing "met" from a response that did not say so is how unexamined work
-/// gets accepted on a glance — the whole point of the three-state verdict is
-/// that "I did not check" is different from "I checked and it passed".
+/// Parsing is deliberately conservative: a garbled, empty, or inconclusive
+/// answer leaves a criterion absent from the result, which reads as
+/// `unchecked` downstream. The parser never records `.unchecked` itself —
+/// "could not check" from the reviewer is treated the same as no answer at
+/// all, so an unreviewed criterion is simply missing from the dictionary
+/// rather than carrying a value that looks like a verdict. Guessing "met"
+/// from a response that did not say so is how unexamined work gets accepted
+/// on a glance — the whole point of the three-state verdict is that "I did
+/// not check" is different from "I checked and it passed".
 enum QueenReviewVerdictRequest {
     /// Builds the brief a reviewer agent receives.
     ///
@@ -57,10 +61,12 @@ enum QueenReviewVerdictRequest {
     /// Parses a reviewer's response into per-criterion verdicts.
     ///
     /// Only criteria that appear in the response with a recognisable verdict
-    /// are returned. Absent criteria stay out of the dictionary and read as
-    /// `unchecked` when the acceptance policy builds its table — the contract
-    /// is that an answer the parser could not understand must not become a
-    /// pass.
+    /// (`.met` or `.unmet`) are returned. Absent criteria stay out of the
+    /// dictionary and read as `unchecked` when the acceptance policy builds
+    /// its table — the contract is that an answer the parser could not
+    /// understand, or one that explicitly says "could not check", must not
+    /// become a pass. The parser never records `.unchecked`; an unreviewed
+    /// criterion is simply missing.
     static func parse(
         _ response: String,
         criteria: [String]
@@ -100,23 +106,31 @@ enum QueenReviewVerdictRequest {
         in lines: [String]
     ) -> QueenCriterionVerdict? {
         let numberPrefix = "\(number)."
+        // The criterion text is stripped from any matched line before the
+        // verdict keyword search. A criterion whose own wording contains a
+        // verdict word — "met" inside "must be met", "unmet" inside "is not
+        // unmet" — would otherwise be decided by its own echo when the
+        // reviewer merely quoted it back. What remains after stripping is the
+        // reviewer's own words; if those carry no verdict keyword, the
+        // criterion stays absent.
+        let echo = distinctivePrefix(of: criterion)
+
         // Strategy 1: a line that references the criterion by its number,
         // either as the leading token ("3.") or after a checkbox marker
         // ("[x] 3.").
         if let line = lines.first(where: {
             lineStartsWithNumber($0, prefix: numberPrefix)
         }) {
-            return verdictKeyword(in: line)
+            return verdictKeyword(in: line, stripping: echo)
         }
         // Strategy 2: a line that quotes the criterion's opening words.
         // The reviewer may abbreviate a long criterion, so only the first few
         // words need to appear.
-        let key = distinctivePrefix(of: criterion)
-        if !key.isEmpty {
+        if !echo.isEmpty {
             if let line = lines.first(where: {
-                $0.localizedCaseInsensitiveContains(key)
+                $0.localizedCaseInsensitiveContains(echo)
             }) {
-                return verdictKeyword(in: line)
+                return verdictKeyword(in: line, stripping: echo)
             }
         }
         return nil
@@ -141,23 +155,38 @@ enum QueenReviewVerdictRequest {
 
     /// Extracts a verdict from the keywords on a single line.
     ///
+    /// Returns only `.met` or `.unmet` — never `.unchecked`. A criterion the
+    /// reviewer could not settle ("could not check", "[?]") must stay absent
+    /// from the result dictionary so it reads as unchecked downstream. Recording
+    /// `.unchecked` explicitly would make an answer the parser understood look
+    /// identical to one it could not parse, which is the very confusion the
+    /// three-state verdict exists to prevent.
+    ///
     /// "not met" is checked before "met" so that "not met" is not swallowed
     /// by a substring match on "met". Word boundaries guard against "metrics"
     /// and "parameter" — false friends that would turn a line about something
     /// else into a pass.
-    private static func verdictKeyword(in line: String) -> QueenCriterionVerdict? {
-        let lower = line.lowercased()
+    private static func verdictKeyword(
+        in line: String,
+        stripping echo: String = ""
+    ) -> QueenCriterionVerdict? {
+        // Remove the echoed criterion text so keywords from the criterion's
+        // own wording do not decide its verdict. A reviewer who writes
+        // "1. the file must be met" and nothing else has not given a verdict —
+        // "met" came from the criterion, not from the reviewer.
+        let searchLine = echo.isEmpty
+            ? line
+            : line.replacingOccurrences(of: echo, with: " ", options: .caseInsensitive)
+        let lower = searchLine.lowercased()
 
         // Checkbox markers used elsewhere in the project.
         if lower.contains("[x]") { return .met }
         if lower.contains("[ ]") { return .unmet }
-        if lower.contains("[?]") { return .unchecked }
+        // "[?]" is treated the same as "could not check": the criterion stays
+        // absent rather than being recorded as .unchecked.
 
         if matchesWord(lower, "not met") || matchesWord(lower, "unmet") {
             return .unmet
-        }
-        if matchesWord(lower, "could not check") {
-            return .unchecked
         }
         if matchesWord(lower, "met") {
             return .met
