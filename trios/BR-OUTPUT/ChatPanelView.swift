@@ -2493,6 +2493,13 @@ private struct PinnedSpecHeader: View {
     let conversationId: UUID
     @Binding var isCollapsed: Bool
 
+    /// The live working-tree fingerprint, computed on appear so the spec header
+    /// can tell a verdict carved against yesterday's tree from one that still
+    /// holds (#1126). Nil until the first `.task` completes, so the initial
+    /// render behaves like the pre-state-tracking path — no verdict is marked
+    /// stale before the tree has been measured.
+    @State private var currentTreeState: String?
+
     private var task: DelegatedTask? {
         registry.task(forConversation: conversationId)
     }
@@ -2500,6 +2507,9 @@ private struct PinnedSpecHeader: View {
     var body: some View {
         if let task {
             headerContent(for: task)
+                .task(id: task.id) {
+                    currentTreeState = await QueenBranchCommitter.snapshotWorkingTree()
+                }
         }
     }
 
@@ -2509,15 +2519,20 @@ private struct PinnedSpecHeader: View {
     private func headerContent(for task: DelegatedTask) -> some View {
         let verdicts = QueenAcceptancePolicy.verdicts(
             criteria: task.acceptanceCriteria,
-            recorded: task.criterionVerdicts
+            recorded: task.criterionVerdicts,
+            verdictTreeState: task.treeStateFingerprint,
+            currentTreeState: currentTreeState
         )
         let blockReason = QueenAcceptancePolicy.acceptanceBlockReason(
             criteria: task.acceptanceCriteria,
-            recorded: task.criterionVerdicts
+            recorded: task.criterionVerdicts,
+            verdictTreeState: task.treeStateFingerprint,
+            currentTreeState: currentTreeState
         )
         let metCount = verdicts.filter { $0.verdict == .met }.count
         let unmetCount = verdicts.filter { $0.verdict == .unmet }.count
         let uncheckedCount = verdicts.filter { $0.verdict == .unchecked }.count
+        let staleCount = verdicts.filter { $0.verdict == .stale }.count
 
         VStack(spacing: 0) {
             titleBar(
@@ -2525,6 +2540,7 @@ private struct PinnedSpecHeader: View {
                 metCount: metCount,
                 unmetCount: unmetCount,
                 uncheckedCount: uncheckedCount,
+                staleCount: staleCount,
                 isBlocked: blockReason != nil
             )
             if !isCollapsed {
@@ -2562,6 +2578,7 @@ private struct PinnedSpecHeader: View {
         metCount: Int,
         unmetCount: Int,
         uncheckedCount: Int,
+        staleCount: Int,
         isBlocked: Bool
     ) -> some View {
         HStack(spacing: 8) {
@@ -2586,6 +2603,9 @@ private struct PinnedSpecHeader: View {
                     }
                     if unmetCount > 0 {
                         verdictPill(count: unmetCount, label: "unmet", color: .red)
+                    }
+                    if staleCount > 0 {
+                        verdictPill(count: staleCount, label: "stale", color: .orange)
                     }
                     if uncheckedCount > 0 {
                         verdictPill(count: uncheckedCount, label: "unchecked", color: .yellow)
@@ -2707,6 +2727,7 @@ private struct PinnedSpecHeader: View {
         case .met: return .green
         case .unmet: return .red
         case .unchecked: return .yellow
+        case .stale: return .orange
         }
     }
 
@@ -2715,6 +2736,7 @@ private struct PinnedSpecHeader: View {
         case .met: return "checkmark"
         case .unmet: return "xmark"
         case .unchecked: return "questionmark"
+        case .stale: return "arrow.triangle.2.circlepath"
         }
     }
 
@@ -2723,6 +2745,7 @@ private struct PinnedSpecHeader: View {
         case .met: return .white.opacity(0.78)
         case .unmet: return .white.opacity(0.78)
         case .unchecked: return .white.opacity(0.55)
+        case .stale: return .white.opacity(0.65)
         }
     }
 }

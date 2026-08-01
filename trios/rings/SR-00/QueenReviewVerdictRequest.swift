@@ -2,6 +2,20 @@ import Foundation
 
 /// Asks a reviewer agent for a verdict on each acceptance criterion.
 ///
+/// The reviewer is prompted as an adversary — its task is to find why each
+/// criterion is NOT met, and `met` is recorded only when the reviewer tried
+/// to break the criterion and could not. A reviewer that confirms everything
+/// it sees is a rubber stamp; the adversarial framing makes confirmation
+/// harder than refutation, so a `met` that survives is one the reviewer
+/// stood behind rather than one it nodded through. (#1127)
+///
+/// When two or more providers are configured, `reviewerProvider` routes the
+/// reviewer to one the worker did not use, so the same model is not grading
+/// its own output. When only one provider exists, role separation — the
+/// adversarial prompt itself — is the safeguard: the same model plays a
+/// different part, and the prompt is materially different from anything a
+/// worker receives. (#1127)
+///
 /// Mechanical verdicts settle criteria that name a file — the file exists or
 /// it does not — but most criteria ask whether something works, is correct,
 /// or reads the right way. Those questions a path check cannot answer, and
@@ -27,27 +41,131 @@ enum QueenReviewVerdictRequest {
     /// rather than ending where the fence closes.
     private static let maxFileLinesInBrief = 500
 
+    // MARK: - Adversarial prompt identity (#1127 criteria 1 & 4)
+
+    /// A token embedded in every adversarial reviewer brief. The caller checks
+    /// for its presence (`isAdversarialBrief`) before trusting the response,
+    /// and tests check for it to prove the reviewer received the adversary's
+    /// instructions. If the brief were replaced with a worker's prompt — which
+    /// carries no such marker — the check fails and the verdicts are discarded.
+    ///
+    /// The marker is a literal, not a hash: a hash of the prompt would change
+    /// every time the wording is revised, turning every improvement into a
+    /// broken test. A stable token survives edits and still proves the prompt
+    /// is the adversary's, because the worker's prompt never carries it.
+    static let adversaryPromptMarker = "adversary-review"
+
+    /// Whether a prompt carries the adversary marker.
+    ///
+    /// Returns `false` for any text that lacks the token — including the old
+    /// neutral reviewer prompt and any worker prompt. The caller uses this as
+    /// a guard: if the brief sent to the reviewer does not carry the marker,
+    /// the response is not trusted, because the reviewer was not prompted as
+    /// an adversary. This is the check that "breaks" when the reviewer
+    /// receives the worker's instructions instead of the adversary's.
+    static func isAdversarialBrief(_ prompt: String) -> Bool {
+        prompt.contains(adversaryPromptMarker)
+    }
+
+    // MARK: - Reviewer model selection (#1127 criterion 2)
+
+    /// Picks a provider for the reviewer that differs from the worker's.
+    ///
+    /// When two or more providers are configured, the reviewer is sent to the
+    /// first available provider that is not the worker's. This prevents the
+    /// same model from grading its own output: the worker built the code, and
+    /// a different model judges it.
+    ///
+    /// When only one provider is available, returns `nil`. This is not an
+    /// error — it means role separation (the adversarial prompt) is the
+    /// safeguard instead of a different model. The caller uses the same
+    /// provider but still sends the adversarial brief, so the same model is
+    /// asked to play a different role.
+    ///
+    /// `workerProvider` may be `nil` when the worker's provider is unknown;
+    /// in that case any available provider is acceptable, and the first is
+    /// returned (a model whose identity is unknown is already not trusted to
+    /// be the same as the worker's).
+    static func reviewerProvider(
+        from available: [String],
+        avoiding workerProvider: String?
+    ) -> String? {
+        guard available.count > 1 else { return nil }
+        if let workerProvider {
+            return available.first(where: { $0 != workerProvider })
+        }
+        return available.first
+    }
+
+    // MARK: - Journal metadata (#1127 criterion 3)
+
+    /// Formats the model identity for the review journal so a reader can see
+    /// which model produced each verdict.
+    ///
+    /// The independence of a verdict is only as strong as the independence of
+    /// the model behind it. When the reviewer used a different provider than
+    /// the worker, the line says so. When it used the same provider (role
+    /// separation was the safeguard), the line says that too — so a reader
+    /// knows the prompt was the defence, not the model.
+    ///
+    /// `provider` is `nil` when only one provider exists or when
+    /// `reviewerProvider` returned `nil`. In both cases the reviewer ran on
+    /// the same provider as the worker, and the line records that fact rather
+    /// than hiding it behind a model name alone.
+    static func journalModelLine(model: String, provider: String?) -> String {
+        if let provider {
+            return "Verdict by \(model) via \(provider)"
+        }
+        return "Verdict by \(model) (same provider as worker; role separation)"
+    }
+
+    // MARK: - Brief
+
     /// Builds the brief a reviewer agent receives.
     ///
-    /// The criteria are listed as a numbered table so the response can refer
-    /// to them by number or by text. The diff is included verbatim so the
-    /// reviewer sees what changed rather than a summary of it — a summary
-    /// that paraphrases a diff is the same summary that hides the line that
-    /// fails. The full contents of touched files are appended after the diff
-    /// so a criterion that asks about code the change did not touch — but
-    /// that lives in a file the change did — can be judged from what is
-    /// there, not only from what was added or removed. Large files are
-    /// truncated with a visible marker rather than omitted silently.
+    /// The reviewer is framed as an adversary: its task is to find why each
+    /// criterion is NOT met, not to confirm that it is. `met` is the verdict
+    /// for a criterion the reviewer tried to break and could not — anything
+    /// weaker stays unchecked. This framing is the difference between a
+    /// reviewer and a rubber stamp.
+    ///
+    /// The brief opens with `adversaryPromptMarker` so the caller can verify
+    /// (`isAdversarialBrief`) that the prompt was not swapped for a worker's
+    /// before sending it. The criteria are listed as a numbered table so the
+    /// response can refer to them by number or by text. The diff is included
+    /// verbatim so the reviewer sees what changed rather than a summary of
+    /// it — a summary that paraphrases a diff is the same summary that hides
+    /// the line that fails. The full contents of touched files are appended
+    /// after the diff so a criterion that asks about code the change did not
+    /// touch — but that lives in a file the change did — can be judged from
+    /// what is there, not only from what was added or removed. Large files
+    /// are truncated with a visible marker rather than omitted silently.
     static func brief(
         criteria: [String],
         diff: String,
         fileContents: [String: String] = [:]
     ) -> String {
         var lines: [String] = [
-            "You are a code reviewer. Below are the acceptance criteria for a task,",
-            "the diff of what the worker changed, and the full contents of the files",
-            "that were touched. For each criterion give a verdict on its own line,",
-            "using the criterion's number, in this format:",
+            "[\(adversaryPromptMarker)]",
+            "",
+            "You are an adversarial reviewer, not a helper. Your task is to find",
+            "why each criterion is NOT met — not to confirm that it is.",
+            "",
+            "For each criterion, try to break it. Look for gaps, missing cases,",
+            "partial implementations, edges the code does not handle, and anything",
+            "that would fail under scrutiny. Only mark a criterion as \"met\" when",
+            "you have actively tried to refute it and could not find a single reason",
+            "it fails. If you can find even one reason the criterion does not hold,",
+            "mark it \"unmet\" and state why.",
+            "",
+            "This is not about being harsh — it is about being honest. A criterion",
+            "that survives an attempt to break it is one you can stand behind. One",
+            "approved on a glance is one nobody checked.",
+            "",
+            "Below are the acceptance criteria, the diff of what the worker changed,",
+            "and the full contents of the files that were touched. For each criterion",
+            "give a verdict on its own line, using the criterion's number, in this",
+            "format:",
             "",
             "N. met|unmet|could not check — one sentence explaining why",
             "",

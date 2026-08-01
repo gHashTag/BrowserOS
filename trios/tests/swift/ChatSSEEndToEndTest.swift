@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 538  // was 542; the 4 drift-guard checks moved to make drift-guard (#1125)
+    static let minimumChecks = 552  // 538 + 14 stale-verdict checks (#1126)
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -106,6 +106,7 @@ struct ChatSSEEndToEndTests {
         await runBeeBoardReflectsStateChanges()
         await runDashboardEntryExitCardButtonsAndEmptyState()
         await runVerdictParserHandlesMarkdownNumbers()
+        await runVerdictCarriesTreeState()
         // The interface-drift proof invokes the Swift compiler and is
         // deliberately kept out of the fast suite. Run it explicitly with:
         //   make drift-guard
@@ -4617,6 +4618,167 @@ struct ChatSSEEndToEndTests {
         // checks above. The bare 1. and [x] 1. checks survive without
         // the fix, which is why only the decorated variants are the
         // guard — they are the ones that fail when support is removed.
+    }
+
+    // MARK: - Scenario: a verdict judged against one tree state is stale against another
+
+    /// A verdict carries the fingerprint of the code tree it was checked against,
+    /// and acceptance treats that fingerprint as load-bearing: a verdict carved
+    /// against yesterday's tree is not "met" today, and it is not "unchecked"
+    /// either — it was looked at, but the code moved. Collapsing stale into
+    /// either neighbour is how work gets accepted on a glance or sent back to
+    /// a reviewer who already settled it. #1126.
+    ///
+    /// The four criteria this scenario proves:
+    ///
+    /// 1. A verdict carries the state it was derived against.
+    /// 2. Acceptance rejects a verdict against a different state and names it
+    ///    separately from one that was never checked.
+    /// 3. A re-review after changes does not silently inherit old verdicts.
+    /// 4. The check breaks if the state binding is stripped.
+    static func runVerdictCarriesTreeState() async {
+        print("\n# Scenario: a verdict judged against one tree state reads stale against another")
+
+        typealias P = QueenAcceptancePolicy
+        let criterion = "the tab paginates under load"
+
+        // --- Criterion 1: the verdict carries the state it was judged against.
+        //
+        // The DelegatedTask stores a treeStateFingerprint at review time, and
+        // the acceptance policy threads it through as verdictTreeState. When
+        // that state matches the current tree, a met verdict reads met — the
+        // binding is present and agrees, so there is nothing to invalidate.
+        let task = DelegatedTask(
+            issue: IssueReference(owner: "gHashTag", repo: "trios", number: 1126),
+            title: "probe", worker: "queen-swift",
+            acceptanceCriteria: [criterion],
+            criterionVerdicts: [criterion: .met],
+            treeStateFingerprint: "tree-v1"
+        )
+        check(task.treeStateFingerprint == "tree-v1",
+              "a task carries the tree state fingerprint its verdicts were derived against")
+        let same = P.verdicts(
+            criteria: [criterion],
+            recorded: [criterion: .met],
+            verdictTreeState: task.treeStateFingerprint,
+            currentTreeState: "tree-v1"
+        )
+        check(same.first?.verdict == .met,
+              "a verdict checked against the current tree reads met, not stale")
+
+        // --- Criterion 2: acceptance rejects a verdict against a different
+        // state, and names it separately from unchecked.
+        //
+        // "Checked against different code" is a different instruction from
+        // "never checked": the first asks the reviewer to re-examine something
+        // they already looked at; the second asks them to look for the first
+        // time. Collapsing them wastes the reviewer's attention on the wrong
+        // question.
+        let staleRow = P.verdicts(
+            criteria: [criterion],
+            recorded: [criterion: .met],
+            verdictTreeState: "tree-v1",
+            currentTreeState: "tree-v2"
+        )
+        check(staleRow.first?.verdict == .stale,
+              "a verdict checked against a different tree reads stale, not met")
+
+        let staleReason = P.acceptanceBlockReason(
+            criteria: [criterion],
+            recorded: [criterion: .met],
+            verdictTreeState: "tree-v1",
+            currentTreeState: "tree-v2"
+        )
+        check(staleReason != nil,
+              "a stale verdict blocks acceptance — it is not a pass")
+        check(staleReason?.contains("different code") == true,
+              "the reason says it was checked against different code")
+        check(staleReason?.contains("never checked") == false,
+              "and does not call it unchecked, which is a different instruction")
+
+        // The contrast: a criterion nobody answered has its own message.
+        let uncheckedReason = P.acceptanceBlockReason(
+            criteria: [criterion],
+            recorded: [:]
+        )
+        check(uncheckedReason?.contains("never checked") == true,
+              "an unanswered criterion is named as never checked")
+        check(uncheckedReason?.contains("different code") == false,
+              "and that message is not the stale one")
+
+        // --- Criterion 3: a re-review after changes does not silently
+        // inherit old verdicts.
+        //
+        // When the tree moves from v1 to v2, every verdict carved against v1
+        // goes stale. The acceptance gate blocks and says so — the reviewer
+        // is told which criteria need re-checking, not left to assume the
+        // old verdicts still hold. This is what stops a re-review from
+        // rubber-stamping yesterday's verdict onto today's code.
+        let multiCriteria = ["builds cleanly", "the tab paginates", "no warnings"]
+        let afterChange = P.verdicts(
+            criteria: multiCriteria,
+            recorded: ["builds cleanly": .met, "the tab paginates": .unmet, "no warnings": .met],
+            verdictTreeState: "tree-v1",
+            currentTreeState: "tree-v2"
+        )
+        check(afterChange.allSatisfy { $0.verdict == .stale },
+              "every checked verdict goes stale when the tree state changes — none are silently inherited")
+        let reReviewReason = P.acceptanceBlockReason(
+            criteria: multiCriteria,
+            recorded: ["builds cleanly": .met, "the tab paginates": .unmet, "no warnings": .met],
+            verdictTreeState: "tree-v1",
+            currentTreeState: "tree-v2"
+        )
+        check(reReviewReason != nil,
+              "a re-review that inherits stale verdicts cannot pass")
+        // The table renders stale verdicts with [~], so the staleness is
+        // visible to the reviewer — not hidden behind a pass that reads as
+        // current.
+        let staleTable = P.table(
+            criteria: [criterion],
+            recorded: [criterion: .met],
+            verdictTreeState: "tree-v1",
+            currentTreeState: "tree-v2"
+        )
+        check(staleTable.contains("[~]"),
+              "a stale verdict is rendered with [~] in the review table, so it is visible, not silent")
+
+        // --- Criterion 4: the check breaks if the state binding is removed.
+        //
+        // When currentTreeState is known but verdictTreeState is nil — the
+        // binding was stripped, or the task predates state tracking — the
+        // verdict is stale. This is what keeps the binding load-bearing: if
+        // you remove treeStateFingerprint, the acceptance gate stops trusting
+        // the verdict and blocks, instead of silently treating it as current.
+        // The test fails if isStale ever returns false for a nil binding
+        // against a known current state.
+        let stripped = P.verdicts(
+            criteria: [criterion],
+            recorded: [criterion: .met],
+            verdictTreeState: nil,
+            currentTreeState: "tree-v1"
+        )
+        check(stripped.first?.verdict == .stale,
+              "a verdict whose state binding was stripped is stale when the current state is known")
+        check(P.acceptanceBlockReason(
+                criteria: [criterion],
+                recorded: [criterion: .met],
+                verdictTreeState: nil,
+                currentTreeState: "tree-v1"
+              ) != nil,
+              "removing the state binding causes acceptance to block — the binding is load-bearing")
+
+        // Backward compatibility: when neither state is tracked, the
+        // function behaves as it did before #1126. Old callers that never
+        // heard of tree states are left alone — no verdict is marked stale.
+        let noTracking = P.verdicts(
+            criteria: [criterion],
+            recorded: [criterion: .met],
+            verdictTreeState: nil,
+            currentTreeState: nil
+        )
+        check(noTracking.first?.verdict == .met,
+              "without state tracking, the old behaviour is preserved — no verdict is marked stale")
     }
 
     // MARK: - Scenario: the interface-drift guard catches a signature mismatch
