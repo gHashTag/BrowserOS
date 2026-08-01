@@ -3476,3 +3476,26 @@ Ratchet 473 -> 504.
 Still broken: #1118 (no way into the dashboard), #1117 and #1097 landed
 unverified this cycle - I have their code and not their proof - and nobody has
 opened the app and looked.
+
+## Three bees at one screen, and none of them opened it
+
+The Queen's three options are proven now - a bee drove the arrival rather than
+asserting the code exists: subject, reason and command on each option, the
+sentence promising no chat without consent, and a second arrival that does not
+repeat the first. #1097 closed, the last of the surface sub-issues.
+
+The dashboard is the failure of this cycle and the fault is in how I wrote it.
+Three bees have been sent at #1118 and `FullscreenChatWorkspace` still has no
+caller. The first added Accept and Cancel to the board instead. The second
+changed nothing, and its reviewer scored the board's own show/hide toggle as the
+entry point - a nearby surface satisfying a plausible reading of a loose
+criterion. The third committed a test about the entry point without the entry
+point, and the suite went green because the test does not assert what its name
+suggests.
+
+The criterion is mechanical now: `git grep "FullscreenChatWorkspace("` must find
+a call outside that file. Three attempts is the cost of a contract that could be
+read two ways, and the reviewer cannot save a criterion the writer left open -
+it judged the wrong surface as confidently as it judges the right one.
+
+Still broken: #1118, and nobody has opened the app and looked at any of this.
