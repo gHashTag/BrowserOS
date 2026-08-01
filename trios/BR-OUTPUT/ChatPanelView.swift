@@ -218,6 +218,16 @@ struct ChatPanelView: View {
                 registry: viewModel.delegationRegistry,
                 onSelectBee: { conversationId in
                     viewModel.selectConversation(conversationId)
+                },
+                onAccept: { task in
+                    Task { await viewModel.runQueenCommand("/accept \(task.issue.slug)") }
+                },
+                onCancel: { task in
+                    Task {
+                        await viewModel.runQueenCommand(
+                            "/cancel \(task.issue.slug) stopped from the bee board"
+                        )
+                    }
                 }
             )
         }
@@ -2733,6 +2743,13 @@ private struct PinnedSpecHeader: View {
 private struct QueenBeeBoard: View {
     @ObservedObject var registry: QueenDelegationRegistry
     let onSelectBee: (UUID) -> Void
+    let onAccept: (DelegatedTask) -> Void
+    let onCancel: (DelegatedTask) -> Void
+
+    /// The board's own visibility switch — a visible way in and a visible way
+    /// out. When false the board collapses to a single reopen button so the
+    /// reading area is reclaimed without losing the entry point.
+    @State private var isBoardVisible = true
 
     /// Tasks blocked on a human decision — review pending, failed, or sent
     /// back. These rise to their own section so the Queen does not have to
@@ -2754,14 +2771,23 @@ private struct QueenBeeBoard: View {
 
     @ViewBuilder
     var body: some View {
-        /// Collapses to zero height when the swarm is idle. This check is here
-        /// rather than in the parent because the parent view never re-evaluates
-        /// on registry mutations — only this `@ObservedObject` does. Moving the
-        /// guard here is what lets the board appear, disappear, and change its
-        /// contents live, without a reload and without switching chats.
-        if !registry.open.isEmpty {
-            VStack(alignment: .leading, spacing: 6) {
-                boardHeader
+        if isBoardVisible {
+            boardContent
+        } else if !registry.open.isEmpty {
+            /// Collapsed: only show the reopen button when there is something
+            /// to reopen to. A hidden board with no tasks renders nothing.
+            collapsedToggle
+        }
+    }
+
+    // MARK: - Board Content
+
+    private var boardContent: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            boardHeader
+            if registry.open.isEmpty {
+                emptyMessage
+            } else {
                 if !waitingTasks.isEmpty {
                     sectionHeader("Waiting on you", count: waitingTasks.count)
                     cardsRow(tasks: waitingTasks)
@@ -2771,23 +2797,87 @@ private struct QueenBeeBoard: View {
                     cardsRow(tasks: workingTasks)
                 }
             }
-            .padding(.vertical, 8)
-            .background(
-                ZStack {
-                    GlassmorphismBackground(
-                        material: .underWindowBackground,
-                        blending: .withinWindow,
-                        cornerRadius: 0
-                    )
-                    Color.black.opacity(0.2)
-                }
-            )
-            .overlay(alignment: .bottom) {
-                Rectangle()
-                    .fill(Color.grokBorder.opacity(0.3))
-                    .frame(height: 1)
-            }
         }
+        .padding(.vertical, 8)
+        .background(
+            ZStack {
+                GlassmorphismBackground(
+                    material: .underWindowBackground,
+                    blending: .withinWindow,
+                    cornerRadius: 0
+                )
+                Color.black.opacity(0.2)
+            }
+        )
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.grokBorder.opacity(0.3))
+                .frame(height: 1)
+        }
+    }
+
+    /// A single line that says the hive is idle — not a broken, empty box.
+    /// Shown only when the board is visible and the swarm is empty.
+    private var emptyMessage: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "moon.zzz")
+                .font(.system(size: 9))
+                .foregroundColor(.grokDim)
+            Text("No bees in flight. /delegate <owner/repo#N> <worker> <title> to start one.")
+                .font(.system(size: 10))
+                .foregroundColor(.grokDim)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 4)
+    }
+
+    /// The collapsed state: one button that brings the board back.
+    /// This is the "way in" after closing — without it the board would be
+    /// unreachable, which is exactly what criterion 4 guards against.
+    private var collapsedToggle: some View {
+        Button {
+            isBoardVisible = true
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "rectangle.grid.2x2.fill")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.4))
+                Text("Show Bee Board")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.white.opacity(0.5))
+                    .textCase(.uppercase)
+                    .tracking(0.5)
+                Text("\(registry.open.count)")
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.35))
+                if hasAttentionTasks {
+                    HStack(spacing: 2) {
+                        Image(systemName: "exclamationmark.circle.fill")
+                            .font(.system(size: 8))
+                        Text("\(waitingTasks.count) waiting")
+                            .font(.system(size: 9, weight: .semibold))
+                    }
+                    .foregroundColor(.yellow.opacity(0.9))
+                }
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundColor(.grokMuted)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(Color.grokElevated.opacity(0.25))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.grokBorder.opacity(0.3))
+                .frame(height: 1)
+        }
+        .accessibilityLabel("Show Bee Board")
     }
 
     // MARK: - Header
@@ -2817,6 +2907,16 @@ private struct QueenBeeBoard: View {
                 .foregroundColor(.yellow.opacity(0.9))
             }
             Spacer()
+            Button {
+                isBoardVisible = false
+            } label: {
+                Image(systemName: "chevron.up")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.grokMuted)
+            }
+            .buttonStyle(.plain)
+            .help("Hide Bee Board")
+            .accessibilityLabel("Hide Bee Board")
         }
         .padding(.horizontal, 14)
     }
@@ -2847,9 +2947,12 @@ private struct QueenBeeBoard: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 8) {
                 ForEach(tasks) { task in
-                    BeeCard(task: task) {
-                        onSelectBee(task.conversationId)
-                    }
+                    BeeCard(
+                        task: task,
+                        onTap: { onSelectBee(task.conversationId) },
+                        onAccept: { onAccept(task) },
+                        onCancel: { onCancel(task) }
+                    )
                 }
             }
             .padding(.horizontal, 14)
@@ -2871,6 +2974,8 @@ private struct QueenBeeBoard: View {
 private struct BeeCard: View {
     let task: DelegatedTask
     let onTap: () -> Void
+    let onAccept: () -> Void
+    let onCancel: () -> Void
 
     @State private var isHovered = false
 
@@ -2890,17 +2995,40 @@ private struct BeeCard: View {
     }
 
     var body: some View {
-        Button(action: onTap) {
-            cardContent
+        VStack(alignment: .leading, spacing: 0) {
+            /// The info area — status, title, bee — opens the chat when tapped.
+            /// A tap gesture rather than a wrapping Button lets the action
+            /// buttons below receive their own taps without interference.
+            cardInfo
+                .contentShape(Rectangle())
+                .onTapGesture { onTap() }
+
+            actionButtons
         }
-        .buttonStyle(.plain)
+        .padding(10)
+        .frame(width: 208)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.grokElevated.opacity(0.5))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(
+                    isHovered ? Color.grokBorder.opacity(0.5) : Color.grokBorder.opacity(0.2),
+                    lineWidth: 1
+                )
+        )
+        .scaleEffect(isHovered ? 1.02 : 1.0)
+        .animation(.easeOut(duration: 0.12), value: isHovered)
         .onHover { hovering in
             isHovered = hovering
         }
         .help("Open \(task.worker)'s chat")
     }
 
-    private var cardContent: some View {
+    // MARK: - Card Info
+
+    private var cardInfo: some View {
         VStack(alignment: .leading, spacing: 5) {
             // Row 1 — status word + issue number
             HStack(spacing: 6) {
@@ -2952,20 +3080,38 @@ private struct BeeCard: View {
                 Spacer(minLength: 0)
             }
         }
-        .padding(10)
-        .frame(width: 208)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color.grokElevated.opacity(0.5))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(
-                    isHovered ? Color.grokBorder.opacity(0.5) : Color.grokBorder.opacity(0.2),
-                    lineWidth: 1
-                )
-        )
-        .scaleEffect(isHovered ? 1.02 : 1.0)
-        .animation(.easeOut(duration: 0.12), value: isHovered)
+    }
+
+    // MARK: - Action Buttons
+
+    /// Accept and Cancel — each fires its own closure. Shown only when the
+    /// task's state makes the action relevant, so the card never offers a
+    /// button that does nothing.
+    @ViewBuilder
+    private var actionButtons: some View {
+        if task.state.needsQueenAttention || task.state == .running {
+            HStack(spacing: 8) {
+                if task.state.needsQueenAttention {
+                    Button(action: onAccept) {
+                        Text("Accept")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.green)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Accept \(task.issue.slug)")
+                }
+                if task.state == .running {
+                    Button(action: onCancel) {
+                        Text("Cancel")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.orange)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Cancel \(task.issue.slug)")
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.top, 4)
+        }
     }
 }

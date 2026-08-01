@@ -62,6 +62,11 @@ final class QueenBackgroundService: ObservableObject {
     /// repeating the previous report.
     private var lastReportSignature: String?
 
+    /// Signature of the last set of audit options presented to the Queen
+    /// chat. When a new audit produces the same set, the Queen stays quiet
+    /// instead of repeating herself — acceptance criterion 3.
+    private var lastPresentedAuditSignature: String?
+
     /// Text of the most recent registry report — the full prose when the
     /// swarm changed, or the "nothing has changed" one-liner when it did
     /// not. The self-test reads this to log what the Queen actually said
@@ -246,16 +251,83 @@ final class QueenBackgroundService: ObservableObject {
         lastReportSignature = nil
         hasReportedInProcess = false
         lastReportWasOneLiner = nil
+        lastPresentedAuditSignature = nil
         a2aStreamTask?.cancel()
         a2aStreamTask = nil
         a2aRouter = nil
         await unregisterA2A()
     }
 
-    /// Run one audit cycle and refresh published state.
+    /// Run one audit cycle, refresh published state, and bring new options to
+    /// the Queen chat.
+    ///
+    /// After the audit generates proposals from detected weak spots, the Queen
+    /// brings up to three of them to her own chat unprompted — each with its
+    /// rationale and the command that applies it (criterion 1). She stays
+    /// quiet when the audit found nothing new, and never repeats the same set
+    /// of options twice in a row (criterion 3).
     func runAudit() async {
+        let proposalIdsBefore = Set(proposals.map(\.id))
         await queenService?.runAudit()
         refreshPublishedState()
+
+        let newProposals = proposals.filter {
+            $0.status == .pending && !proposalIdsBefore.contains($0.id)
+        }
+        await presentAuditOptions(newProposals)
+    }
+
+    // MARK: - Audit options presentation
+
+    /// After a self-audit the Queen brings up to three options to her own
+    /// chat, each with a rationale and the command that triggers it.
+    ///
+    /// Criterion 1: the Queen writes to her own chat unprompted after the
+    /// audit. Criterion 3: she does not come with the same set twice in a row
+    /// — when the signature of presented options matches the previous run she
+    /// stays silent.
+    private func presentAuditOptions(_ proposals: [QueenProposal]) async {
+        guard !proposals.isEmpty else { return }
+
+        let top = Array(proposals.prefix(3))
+        let signature = top
+            .map { "\($0.targetFile):\($0.rationale.prefix(60))" }
+            .sorted()
+            .joined(separator: "|")
+
+        guard signature != lastPresentedAuditSignature else {
+            TriosLogBus.shared.debug(
+                .queen,
+                "queen.audit.options.deduped",
+                "Audit options match the previous run; staying quiet",
+                ["signature": signature]
+            )
+            return
+        }
+        lastPresentedAuditSignature = signature
+
+        var lines: [String] = []
+        let headline = proposals.count == 1
+            ? "I audited the hive and have one option:"
+            : "I audited the hive and here are \(top.count) options"
+                + (proposals.count > 3 ? " from \(proposals.count)" : "") + ":"
+        lines.append(SystemNoticeClassifier.infoMarker + headline)
+
+        for p in top {
+            lines.append(
+                "• \(p.rationale) "
+                    + "I would change `\(p.targetFile)`. "
+                    + "Apply with `/evolve-apply \(p.id.uuidString.prefix(8))`, "
+                    + "or reject with `/evolve-reject \(p.id.uuidString.prefix(8))`."
+            )
+        }
+
+        if proposals.count > 3 {
+            let extra = proposals.count - 3
+            lines.append("(\(extra) more — run `/evolve-list` to see all.)")
+        }
+
+        await appendQueenSystemMessage(lines.joined(separator: "\n"))
     }
 
     func approveProposal(id: UUID) -> QueenProposal? {

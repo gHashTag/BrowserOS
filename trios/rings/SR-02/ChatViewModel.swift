@@ -114,6 +114,15 @@ final class ChatViewModel: ObservableObject {
     /// in the transcript after the fact.
     @Published private(set) var reviewerResponses: [UUID: String] = [:]
 
+    /// Criteria the reviewer was asked about but gave no answer for, keyed by
+    /// task ID. An empty answer is not the same as a question nobody asked:
+    /// the former means the request went out and silence came back, the
+    /// latter means the criterion never reached a reviewer at all. Keeping
+    /// them separate lets the log and the block reason say "reviewer gave no
+    /// answer" instead of "never checked" — they are different problems with
+    /// different fixes (#1117).
+    @Published private(set) var askedButUnanswered: [UUID: Set<String>] = [:]
+
     let queenStatusVM = QueenStatusViewModel()
     let modelStore: ModelConfigurationStore
     let todoPlanner: TODOPlanner
@@ -3389,7 +3398,7 @@ final class ChatViewModel: ObservableObject {
         reason: String
     ) async -> String {
         let baselineTree = workerBaselineTrees[task.conversationId]
-        let measured = await QueenBranchCommitter.changedPaths(since: baselineTree)
+        let measured = await QueenBranchCommitter.changedPaths(since: baselineTree, ownedPaths: task.ownedPaths)
         let measuredRelative = measured.map { QueenBranchCommitter.projectRelative($0) }
 
         // Nothing the worker touched — the tree is clean, nothing to settle.
@@ -3487,7 +3496,8 @@ final class ChatViewModel: ObservableObject {
             // and one git invocation per token costs more than the warning is
             // worth. This is once, when the turn ends.
             let measured = await QueenBranchCommitter.changedPaths(
-                since: workerBaselineTrees[task.conversationId]
+                since: workerBaselineTrees[task.conversationId],
+                ownedPaths: task.ownedPaths
             )
             // An empty transcript on purpose. Anything the tool names could see
             // has already been announced during the turn by observeWorker, and
@@ -3691,12 +3701,57 @@ final class ChatViewModel: ObservableObject {
             fileContents: fileContents
         )
 
-        let response = await sendOneShotReviewerRequest(brief) ?? ""
+        var response = await sendOneShotReviewerRequest(brief) ?? ""
+
+        // An empty answer is not the same as no question. The reviewer was
+        // asked; silence is a problem to fix, not a state to accept. One
+        // retry — not a loop — because the first attempt may have been a
+        // transport blip that a second try settles. If the second try is
+        // also empty, the criteria are recorded as "asked but unanswered"
+        // so the distinction from "never checked" stays alive downstream (#1117).
+        if response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.review.empty_response",
+                "Reviewer returned no answer; retrying once",
+                [
+                    "issue": task.issue.slug,
+                    "asked": String(criteria.count),
+                    "attempt": "1"
+                ]
+            )
+            response = await sendOneShotReviewerRequest(brief) ?? ""
+        }
+
+        let isStillEmpty = response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+
+        // Still empty after the retry: the question was asked, the reviewer
+        // did not answer. This is distinct from a criterion nobody asked
+        // about — the former is a missing answer, the latter is a missing
+        // question. Recording the unanswered criteria here keeps that
+        // distinction in the block reason and the log, so a reader does not
+        // have to infer it from `response_chars=0` (#1117).
+        if isStillEmpty {
+            var existing = askedButUnanswered[task.id] ?? []
+            existing.formUnion(criteria)
+            askedButUnanswered[task.id] = existing
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.review.empty_response",
+                "Reviewer gave no answer after retry; \(criteria.count) criterion(s) asked but unanswered",
+                [
+                    "issue": task.issue.slug,
+                    "asked": String(criteria.count),
+                    "attempt": "2",
+                    "unanswered": criteria.joined(separator: " | ")
+                ]
+            )
+        }
 
         // Keep the raw response so a verdict can be re-examined later without
         // re-running the review. The parsed verdicts are a summary; the text
         // behind them is the evidence.
-        if !response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if !isStillEmpty {
             reviewerResponses[task.id] = response
         }
 
@@ -3708,6 +3763,19 @@ final class ChatViewModel: ObservableObject {
                 taskID: task.id, criterion: criterion, verdict: verdict
             ) {
                 recorded += 1
+            }
+        }
+
+        // Criteria the retry answered — if any — are no longer "unanswered."
+        // The first attempt may have been empty while the retry succeeded,
+        // so only criteria that genuinely have no recorded verdict stay in
+        // the asked-but-unanswered set (#1117).
+        if var unanswered = askedButUnanswered[task.id], !unanswered.isEmpty {
+            unanswered.subtract(verdicts.keys)
+            if unanswered.isEmpty {
+                askedButUnanswered.removeValue(forKey: task.id)
+            } else {
+                askedButUnanswered[task.id] = unanswered
             }
         }
 
@@ -3763,6 +3831,83 @@ final class ChatViewModel: ObservableObject {
                     + response
             )
         }
+    }
+
+    /// The acceptance block reason, augmented to distinguish criteria the
+    /// reviewer was asked about but did not answer from criteria nobody
+    /// asked about.
+    ///
+    /// The underlying `QueenAcceptancePolicy.acceptanceBlockReason` says
+    /// "never checked" for every criterion with no recorded verdict. That
+    /// conflates two states: a criterion the reviewer was asked about and
+    /// gave no answer (a missing answer, fixable with a re-request), and a
+    /// criterion nobody reached at all (a missing question, fixable with a
+    /// human decision). The distinction matters because the fix is
+    /// different, and a block reason that hides it sends the reader looking
+    /// for the wrong problem (#1117).
+    ///
+    /// This function is also the regression guard for criterion 3 of #1117:
+    /// if `askedButUnanswered` tracking is removed or the augmentation is
+    /// bypassed, the block reason reverts to "never checked" for all
+    /// unchecked criteria, and the assertion below fires for any criterion
+    /// that was tracked as asked-but-unanswered. An empty answer that
+    /// becomes indistinguishable from "no question" is a bug this function
+    /// exists to catch, not a state it tolerates.
+    private func acceptanceBlockReasonDistinguishingEmptyAnswers(
+        for task: DelegatedTask
+    ) -> String? {
+        let table = QueenAcceptancePolicy.verdicts(
+            criteria: task.acceptanceCriteria, recorded: task.criterionVerdicts
+        )
+
+        let unmet = table.filter { $0.verdict == .unmet }
+        let unchecked = table.filter { $0.verdict == .unchecked }
+
+        guard !unmet.isEmpty || !unchecked.isEmpty else { return nil }
+
+        // Split unchecked into "asked but no answer" and "genuinely never
+        // asked". The `askedButUnanswered` set is populated by
+        // `requestReviewerVerdicts` when the reviewer returns empty after
+        // a retry.
+        let askedSet = askedButUnanswered[task.id] ?? []
+        let askedNoAnswer = unchecked.filter { askedSet.contains($0.criterion) }
+        let neverAsked = unchecked.filter { !askedSet.contains($0.criterion) }
+
+        // Regression guard: a criterion tracked as "asked but unanswered"
+        // must not have a recorded verdict. If it does, the tracking is
+        // stale — which means an empty answer leaked into the same state as
+        // a real verdict, the exact collapse #1117 exists to prevent.
+        assert(
+            askedNoAnswer.allSatisfy { task.criterionVerdicts[$0.criterion] == nil },
+            "askedButUnanswered contains a criterion that now has a verdict — "
+            + "tracking is stale; an empty answer may be indistinguishable "
+            + "from a real verdict"
+        )
+
+        var parts: [String] = []
+
+        if !unmet.isEmpty {
+            parts.append(
+                "\(unmet.count) criterion(s) were not met: "
+                + unmet.map(\.criterion).joined(separator: "; ")
+            )
+        }
+        if !askedNoAnswer.isEmpty {
+            parts.append(
+                "\(askedNoAnswer.count) criterion(s) were asked but the reviewer gave no answer: "
+                + askedNoAnswer.map(\.criterion).joined(separator: "; ")
+                + ". The question was asked; the answer is missing, not the question."
+            )
+        }
+        if !neverAsked.isEmpty {
+            parts.append(
+                "\(neverAsked.count) criterion(s) were never checked: "
+                + neverAsked.map(\.criterion).joined(separator: "; ")
+                + ". An unchecked criterion is not a pass."
+            )
+        }
+
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 
     /// Sends a one-shot prompt to the model and collects the text response.
@@ -4064,9 +4209,7 @@ final class ChatViewModel: ObservableObject {
             // against anything else. This is the whole point of writing criteria
             // down: without it the Queen signs off on an impression, and the
             // specification becomes decoration that made the brief longer.
-            if let reason = QueenAcceptancePolicy.acceptanceBlockReason(
-                criteria: task.acceptanceCriteria, recorded: task.criterionVerdicts
-            ) {
+            if let reason = acceptanceBlockReasonDistinguishingEmptyAnswers(for: task) {
                 // Logged as well as said. The refusal is the contract doing its
                 // job, and until it was visible outside her chat every run that
                 // hit it looked identical to a run where nothing happened.
@@ -4076,7 +4219,8 @@ final class ChatViewModel: ObservableObject {
                         "issue": issue.slug,
                         "reason": reason,
                         "criteria": String(task.acceptanceCriteria.count),
-                        "verdicts": String(task.criterionVerdicts.count)
+                        "verdicts": String(task.criterionVerdicts.count),
+                        "asked_unanswered": String(askedButUnanswered[task.id]?.count ?? 0)
                     ]
                 )
                 await postQueenNotice(
@@ -4400,6 +4544,17 @@ final class ChatViewModel: ObservableObject {
                     )
             )
             return
+        }
+        // A criterion that was asked-but-unanswered and now has a recorded
+        // verdict is no longer unanswered. Clearing it here keeps the
+        // tracking from going stale (#1117).
+        if var unanswered = askedButUnanswered[task.id], !unanswered.isEmpty {
+            unanswered.remove(criterion)
+            if unanswered.isEmpty {
+                askedButUnanswered.removeValue(forKey: task.id)
+            } else {
+                askedButUnanswered[task.id] = unanswered
+            }
         }
         let updated = registry.task(forIssue: issue) ?? task
         await postQueenNotice(

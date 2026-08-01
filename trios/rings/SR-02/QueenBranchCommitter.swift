@@ -141,9 +141,21 @@ enum QueenBranchCommitter {
     /// Deliberately not called from observeWorker, which runs on every SSE
     /// delta - a git invocation per token would cost more than the warning is
     /// worth. It belongs where a turn ends.
+    ///
+    /// When `ownedPaths` is non-empty, only paths inside the worker's lane are
+    /// returned. Two bees share one working tree, so a diff between the baseline
+    /// and end trees picks up every write — including another bee's. Without
+    /// this filter a bee that stayed inside its boundary is charged with the
+    /// other bee's work and flagged out-of-bounds for files it never touched.
+    /// The diff cannot tell one bee's write from another's; the lane is the
+    /// only signal available. A genuine out-of-bounds write by this bee is
+    /// still caught: `observeWorker` flags tool-based writes during the turn,
+    /// and `commitWorkerChanges` refuses to carry files outside the boundary
+    /// onto the branch.
     static func changedPaths(
         since baselineTree: String?,
-        projectRoot: String = ProjectPaths.root
+        projectRoot: String = ProjectPaths.root,
+        ownedPaths: [String] = []
     ) async -> [String] {
         guard let baselineTree else { return [] }
         return await Task.detached(priority: .utility) {
@@ -157,7 +169,7 @@ enum QueenBranchCommitter {
                 ["diff", "--name-only", baselineTree, endTree],
                 index: index, projectRoot: projectRoot
             ) ?? ""
-            return diff
+            var paths = diff
                 .split(separator: "\n")
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
@@ -178,6 +190,22 @@ enum QueenBranchCommitter {
                     return !normalized.contains(".trinity/state/")
                         && !normalized.contains(".trinity-dev/state/")
                 }
+
+            // When the worker's lane is known, keep only paths inside it so
+            // that a second bee writing elsewhere in the shared tree does not
+            // appear on this bee's report. The diff cannot tell one bee's
+            // write from another's; the lane is the only signal available.
+            // The same logic `commitWorkerChanges` uses to decide what lands
+            // on the branch.
+            if !ownedPaths.isEmpty {
+                let owned = ownedPaths.map { repositoryRelative($0, projectRoot: projectRoot) }
+                paths = paths.filter { path in
+                    let normalized = QueenDelegationPolicy.normalizePath(path)
+                    return owned.contains { normalized == $0 || normalized.hasPrefix("\($0)/") }
+                }
+            }
+
+            return paths
         }.value
     }
 
