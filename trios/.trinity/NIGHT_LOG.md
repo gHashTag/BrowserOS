@@ -3649,3 +3649,27 @@ had not, and the reviewer said why both times. #1124.
 Five in a row now where the question failed to arrive and the answer read as bad
 work. The pattern is not the reviewer being weak; it is me closing a link on the
 first green run.
+
+## Two weak spots found by reading, not by breaking
+
+A verdict had no expiry. `criterionVerdicts` lives on the task, so a `met`
+recorded against one tree state survived the bee being sent back and rewriting
+the code, and acceptance answered from assertions of different ages. The field
+names this precisely: persisted state is not verification, because resuming a
+run that recorded "tests passed" re-asserts the record without re-establishing
+that it describes the code being merged. A verdict now carries the state it was
+judged against and reads `.stale` against any other - kept apart from "never
+checked", because those two ask different people for different work.
+
+And the judge was the defendant: worker and reviewer both ran on glm-5.2, so the
+assumptions that wrote the code graded it. The reviewer is an adversary now -
+find why the criterion is not met, and `met` is only what could not be refuted.
+
+The stale rule shipped with no test and removing it left the suite green, the
+same way the dashboard guard did. A bee was sent back for the assertion, and it
+now fails four ways by name. Ratchet 538 -> 552.
+
+Fourth interface drift on the way through - `.stale` is a new case and its
+exhaustive switch lives in another lane - and `make drift-guard` exists for
+exactly that and I did not run it before building. The tool I built this
+morning, not used by lunchtime.
