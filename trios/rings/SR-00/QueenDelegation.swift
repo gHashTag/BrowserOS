@@ -152,6 +152,21 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// failure for this table.
     var criterionVerdicts: [String: QueenCriterionVerdict]
 
+    /// The fingerprint of the code tree at the time verdicts were recorded.
+    ///
+    /// Set when the Queen reviews the branch and records what she found. It is
+    /// the state every verdict in `criterionVerdicts` was derived against, so
+    /// that acceptance can tell a current verdict from one carved against code
+    /// that has since moved (#1126).
+    ///
+    /// Nil means the binding has not been set — either the task predates state
+    /// tracking, or the binding was stripped. When the acceptance policy knows
+    /// the current tree state, a nil binding makes every checked verdict stale:
+    /// a verdict whose provenance cannot be verified cannot be trusted to be
+    /// current, and saying so is what keeps the binding load-bearing rather
+    /// than decorative.
+    var treeStateFingerprint: String?
+
     /// The pull request opened for this task's branch, once one exists.
     ///
     /// Nil means no pull request has been opened - not that one failed. The
@@ -206,6 +221,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         acceptanceCriteria: [String] = [],
         interventions: [String] = [],
         criterionVerdicts: [String: QueenCriterionVerdict] = [:],
+        treeStateFingerprint: String? = nil,
         virtualBranch: String? = nil,
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
@@ -228,6 +244,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         self.acceptanceCriteria = acceptanceCriteria
         self.interventions = interventions
         self.criterionVerdicts = criterionVerdicts
+        self.treeStateFingerprint = treeStateFingerprint
         self.virtualBranch = virtualBranch
         self.createdAt = createdAt
         self.updatedAt = updatedAt
