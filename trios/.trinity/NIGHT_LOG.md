@@ -3673,3 +3673,30 @@ Fourth interface drift on the way through - `.stale` is a new case and its
 exhaustive switch lives in another lane - and `make drift-guard` exists for
 exactly that and I did not run it before building. The tool I built this
 morning, not used by lunchtime.
+
+## Somebody finally looked
+
+The supervisor surface was opened and looked at for the first time. It works. In
+the narrow panel: OPEN DASHBOARD at the top, a compact line "1 needs you - 0/4
+working", and the bee board with a WAITING ON YOU section and a card carrying
+the state, the worker, the branch and Accept. Widened, the same plus the swarm
+strip with the issue, branch, awaitingReview and Review. #1118 closed on its last
+criterion - readability - which no test could ever have answered.
+
+Looking found what nothing else had: the issue number printed as `#1,124`. A
+SwiftUI Text interpolating an Int formats it as a quantity, and an issue number
+is an identifier nobody can search for with a comma in it. Two screens print
+one; both fixed.
+
+Then the bee's own assertion for it could not pass - it compared lengths and
+claimed the identifier was shorter, and `#1129` and `1,129` are both five
+characters. False by construction, and indistinguishable from a real failure
+until read. Now it asserts the shape: no group separator in the rendered
+identifier.
+
+The first screenshot read as "the window is empty" and I nearly reported that.
+It was a cross-fade: I had just clicked New chat, and the logo is the empty-chat
+placeholder doing its job. Zooming is what corrected me. Looking is a
+measurement too, and a hasty look lies as readily as a hasty grep.
+
+Ratchet 552 -> 559.
