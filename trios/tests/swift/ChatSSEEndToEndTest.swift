@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 504
+    static let minimumChecks = 519
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -77,6 +77,7 @@ struct ChatSSEEndToEndTests {
         await runGitHubEndpointPaths()
         await runWorkerBriefIsASpecification()
         await runQueenProposesEvolutionOptions()
+        await runThreeOptionArrival()
         await runWorkerLivenessIsObservable()
         await runPullRequestOutcomeMapping()
         await runAcceptedWaitsForTheMerge()
@@ -3232,6 +3233,92 @@ struct ChatSSEEndToEndTests {
         check(message.contains("/approve"), "the message ends with the command that authorises one")
         check(message.contains("will not open a chat"),
               "and restates that she waits rather than starts")
+    }
+
+    // MARK: - Scenario: three options arrive, each justified, each actionable, not repeated
+
+    /// #1097 — asserts the three-option arrival the Queen posts after a
+    /// self-audit: three options, each with a justification and the command
+    /// that launches it; the consent gate is the last thing she says; and she
+    /// does not come with the same set of options twice in a row.
+    static func runThreeOptionArrival() async {
+        print("\n# Scenario: three options arrive in the chat, each justified, each actionable, not repeated")
+
+        func finding(_ severity: QueenSelfAudit.Finding.Severity, _ subject: String) -> QueenSelfAudit.Finding {
+            QueenSelfAudit.Finding(
+                severity: severity, kind: "probe", subject: subject,
+                explanation: "why \(subject) matters", proposal: "do something about \(subject)"
+            )
+        }
+
+        let findings = [
+            finding(.dead, "ghost-A"),
+            finding(.unverified, "ghost-B"),
+            finding(.fragile, "ghost-C"),
+        ]
+
+        // ── Criterion 1: the message carries three options, each with its
+        // own justification and the command that launches it. ──
+        let options = QueenEvolutionOptions.options(from: findings)
+        let message = QueenEvolutionOptions.message(for: options)
+
+        // Each option's subject, rationale and action must appear in the
+        // posted message. The user reads the message, not the Option struct;
+        // a field that exists on the type but is absent from the prose might
+        // as well not exist.
+        for opt in options {
+            check(message.contains(opt.subject),
+                  "the message names option \(opt.label)'s subject (\(opt.subject))")
+            check(message.contains(opt.rationale),
+                  "the message justifies option \(opt.label) — why it is worth doing")
+            check(message.contains(opt.action),
+                  "the message states what option \(opt.label) would do")
+        }
+
+        // The command that authorises one.
+        check(message.contains("/approve"),
+              "the message carries the command that starts an option")
+
+        // ── Criterion 2: the consent gate is the last thing she says. ──
+        // The end-to-end gate (approvalBlockReason refusing an unapproved
+        // issue) is tested in runQueenHearsEveryBee. Here we assert that the
+        // proposal message itself ends with the gate — so the proposal the
+        // user reads is also the boundary the Queen will not cross.
+        check(message.contains("will not open a chat"),
+              "the message restates that she waits, never starts")
+        check(
+            message.range(of: "will not open a chat")!.lowerBound
+                > message.range(of: options.last!.action)!.upperBound,
+            "the consent gate appears after every option, not before them"
+        )
+
+        // ── Criterion 3: she does not come with the same thing twice in a row.
+        // The dedup comparison is on option subjects (the Finding.subject
+        // strings), not on message prose. Same subjects → the caller must
+        // suppress the full message, because posting it again would be the
+        // same wall of text the user already ignored. ──
+        let previous = QueenEvolutionOptions.options(from: findings)
+        check(options.map(\.subject) == previous.map(\.subject),
+              "two audits with the same findings yield identical subjects — the repeat the caller must catch")
+        check(
+            QueenEvolutionOptions.message(for: options) == QueenEvolutionOptions.message(for: previous),
+            "identical subjects mean an identical message, so repeating is posting the same thing twice"
+        )
+
+        // When the repository changes and a finding drops off or changes,
+        // the subjects differ and the message is genuinely new.
+        let afterFix = [
+            finding(.dead, "ghost-A"),
+            finding(.unverified, "ghost-B"),
+            finding(.fragile, "ghost-FIXED"),
+        ]
+        let fresh = QueenEvolutionOptions.options(from: afterFix)
+        check(options.map(\.subject) != fresh.map(\.subject),
+              "a finding that changed makes the subjects differ, so the next post is not a repeat")
+        check(
+            QueenEvolutionOptions.message(for: options) != QueenEvolutionOptions.message(for: fresh),
+            "and the messages differ, so a changed repository produces a changed proposal"
+        )
     }
 
     static func runWorkerLivenessIsObservable() async {
