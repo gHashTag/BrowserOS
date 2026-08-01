@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 455
+    static let minimumChecks = 473
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -88,6 +88,7 @@ struct ChatSSEEndToEndTests {
         await runPureQueenTypes()
         await runSelfAuditFindsPlantedDeadCode()
         await runBranchCommitterAgainstScratchRepo()
+        await runBeeBoardReflectsStateChanges()
 
         if checksRun < minimumChecks {
             print("\nFAIL - only \(checksRun) checks ran, expected at least \(minimumChecks).")
@@ -4049,5 +4050,120 @@ struct ChatSSEEndToEndTests {
             ownedPaths: ["docs"], projectRoot: root
         )
         check(!refused.committed, "without a baseline the committer refuses rather than guessing")
+    }
+
+    // MARK: - Scenario: the bee board reflects state transitions without a reload
+
+    /// The bee board is the strip of cards at the top of the Queen's master
+    /// chat. It shows one card per live task, grouped into "Working" and
+    /// "Waiting on you" sections. When a task transitions state, the card's
+    /// label changes and it may jump between sections.
+    ///
+    /// The board is a SwiftUI `View` backed by `QueenDelegationRegistry` via
+    /// `@ObservedObject`. That contract has two halves: the registry must fire
+    /// `objectWillChange` on every mutation (so the view knows to redraw), and
+    /// the derived data the view reads must actually change (so the redraw
+    /// shows something different). This test proves both halves against the
+    /// model — the view layer itself is a framework guarantee once the model is
+    /// correct.
+    static func runBeeBoardReflectsStateChanges() async {
+        print("\n# Scenario: the bee board reflects state transitions without a reload")
+
+        let store = NSTemporaryDirectory() + "queen-bee-board-\(UUID().uuidString).json"
+        defer { try? FileManager.default.removeItem(atPath: store) }
+        let registry = QueenDelegationRegistry(storePath: store)
+
+        guard let issue = IssueReference.parse("gHashTag/trios#1098") else {
+            fail("could not build the test issue"); return
+        }
+
+        let conversationId = UUID()
+        guard let task = registry.delegate(
+            issue: issue, title: "bee board live update",
+            worker: "queen-swift", conversationId: conversationId,
+            ownedPaths: ["BR-OUTPUT"]
+        ) else {
+            fail("registry refused a clean delegation"); return
+        }
+
+        // The task starts as queued. Move it to running so the board shows it
+        // as quiet work — the "Working" section.
+        check(registry.transition(taskID: task.id, to: .running),
+              "the task enters running")
+
+        // What the board draws: `registry.open` filtered by `needsQueenAttention`.
+        // Tasks that do not need the Queen go in "Working"; those that do go in
+        // "Waiting on you".
+        let running = registry.open.first { $0.id == task.id }
+        check(running != nil,
+              "the running bee is visible in the master chat (registry.open)")
+        check(running?.state.needsQueenAttention == false,
+              "a running bee sits in the Working section, not Waiting")
+        check(running?.state.displayName == "Working",
+              "the card reads 'Working'")
+
+        // Subscribe to the same publisher SwiftUI's @ObservedObject listens to.
+        // If this does not fire, the board cannot know it needs to redraw —
+        // which is exactly the bug "changes only after a reload" describes.
+        var notifications = 0
+        let subscription = registry.objectWillChange.sink { _ in notifications += 1 }
+        defer { subscription.cancel() }
+        let baseline = notifications
+
+        // Drive the transition: running → awaitingReview.
+        check(registry.transition(taskID: task.id, to: .awaitingReview),
+              "the task moves to review")
+
+        // Criterion 1 — the board changes without a reload. The registry must
+        // fire objectWillChange so the @ObservedObject in QueenBeeBoard redraws.
+        check(notifications > baseline,
+              "the registry fires objectWillChange on transition, so the board redraws live")
+
+        // Criterion 2 — the transition changes what is visible in the bee's card.
+        let review = registry.open.first { $0.id == task.id }
+        check(review?.state == .awaitingReview,
+              "the bee's state is now awaitingReview")
+        check(review?.state.needsQueenAttention == true,
+              "the bee moved to the Waiting section — needsQueenAttention flipped")
+        check(review?.state.displayName == "Needs review",
+              "the card now reads 'Needs review', not 'Working'")
+
+        // The board's two sections are derived by filtering `open` on the flag.
+        // Prove the filter produces different results after the transition —
+        // the card is in one section before and the other after.
+        let waiting = registry.open.filter { $0.state.needsQueenAttention }
+        let working = registry.open.filter { !$0.state.needsQueenAttention }
+        check(waiting.contains(where: { $0.id == task.id }),
+              "the Waiting section contains the bee after the transition")
+        check(!working.contains(where: { $0.id == task.id }),
+              "the Working section no longer contains the bee")
+
+        // A second transition proves the board does not freeze after one update.
+        // A registry that fires once and then stops would pass every check above
+        // and still leave the board stale on the second change.
+        //
+        // The legal path back to "Working" runs through .rejected, so we take
+        // two hops and assert each one. This also proves the card's text changes
+        // on the intermediate hop — "Sent back" is neither "Working" nor "Needs
+        // review", so it cannot be confused with either prior state.
+        let baseline2 = notifications
+        check(registry.transition(taskID: task.id, to: .rejected),
+              "the Queen sends the work back")
+        check(notifications > baseline2,
+              "the second transition fires objectWillChange, so the board tracks every change, not just the first")
+        let sent = registry.open.first { $0.id == task.id }
+        check(sent?.state.displayName == "Sent back",
+              "the card now reads 'Sent back' — a third label, proving the board did not freeze")
+        check(sent?.state.needsQueenAttention == true,
+              "rejected work still needs the Queen, so the card stays in the Waiting section")
+
+        let baseline3 = notifications
+        check(registry.transition(taskID: task.id, to: .running),
+              "the bee returns to running after being sent back")
+        check(notifications > baseline3,
+              "the third transition also fires")
+        let back = registry.open.first { $0.id == task.id }
+        check(back?.state.needsQueenAttention == false,
+              "the bee is back in the Working section after returning to running")
     }
 }
