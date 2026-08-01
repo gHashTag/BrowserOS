@@ -160,8 +160,8 @@ enum QueenReviewVerdictRequest {
         let echo = distinctivePrefix(of: criterion)
 
         // Strategy 1: a line that references the criterion by its number,
-        // either as the leading token ("3.") or after a checkbox marker
-        // ("[x] 3.").
+        // whether the number is bare ("3."), wrapped in markdown ("**3.",
+        // "- 3."), or preceded by a checkbox ("[x] 3.").
         if let line = lines.first(where: {
             lineStartsWithNumber($0, prefix: numberPrefix)
         }) {
@@ -181,20 +181,26 @@ enum QueenReviewVerdictRequest {
     }
 
     /// Whether a line's meaningful content begins with the criterion's
-    /// number prefix. Handles both bare numbers ("3.") and checkbox-style
-    /// markers that precede them ("[x] 3.", "[ ] 3.").
+    /// number prefix. Handles bare numbers ("3."), checkbox markers
+    /// ("[x] 3.", "[ ] 3."), and markdown decoration on the number
+    /// itself ("**3.", "- 3.", "* 3.") — reviewers wrap numbers in
+    /// bold or lead with a bullet, and the prefix hides behind them.
+    ///
+    /// Stripping decoration here does not make the parser more willing
+    /// to guess: `verdictKeyword` still demands a keyword on the matched
+    /// line, so a decorated number with no verdict word returns nil.
     private static func lineStartsWithNumber(
         _ line: String,
         prefix: String
     ) -> Bool {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         if trimmed.hasPrefix(prefix) { return true }
-        let strippedCheckbox = trimmed.replacingOccurrences(
-            of: #"^\[[xX ?]\]\s*"#,
+        let stripped = trimmed.replacingOccurrences(
+            of: #"^([*#\-]+|\[[xX ?]\])\s*"#,
             with: "",
             options: .regularExpression
         )
-        return strippedCheckbox.hasPrefix(prefix)
+        return stripped.hasPrefix(prefix)
     }
 
     /// Extracts a verdict from the keywords on a single line.

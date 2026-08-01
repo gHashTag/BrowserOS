@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 526
+    static let minimumChecks = 538
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -105,6 +105,7 @@ struct ChatSSEEndToEndTests {
         await runBranchCommitterAgainstScratchRepo()
         await runBeeBoardReflectsStateChanges()
         await runDashboardEntryExitCardButtonsAndEmptyState()
+        await runVerdictParserHandlesMarkdownNumbers()
 
         if checksRun < minimumChecks {
             print("\nFAIL - only \(checksRun) checks ran, expected at least \(minimumChecks).")
@@ -4534,5 +4535,81 @@ struct ChatSSEEndToEndTests {
         // exit — the user is trapped.
         check(closeLabelCount >= 2,
               "criterion 4: 'Close Dashboard' appears \(closeLabelCount) times (need ≥ 2: help + a11y) — removing the exit button text breaks the test")
+    }
+
+    /// A verdict whose number is wrapped in markdown is still recognised,
+    /// without the parser becoming willing to guess.
+    ///
+    /// The reviewer agent formats its response in markdown — bold numbers
+    /// (`**1.`), bullet lists (`- 1.`), checkboxes (`[x] 1.`) — and the
+    /// parser's number-matching strategy must see through the decoration
+    /// to the number underneath. But seeing through decoration must not
+    /// become seeing verdicts that are not there: a line with a number
+    /// and no keyword stays absent, decorated or not.
+    static func runVerdictParserHandlesMarkdownNumbers() async {
+        print("\n# Scenario: a verdict whose number is wrapped in markdown is still recognised")
+
+        // Criterion 3: a real reviewer response, captured verbatim from a
+        // live delegation (#1105), not invented. The reviewer wrapped each
+        // verdict keyword in bold markdown. Four criteria, four verdicts —
+        // the parser must return all four. This response already parses
+        // with bare numbers; it guards against regression while the
+        // decoration tests below guard the new code path.
+        let criteria = [
+            "the interval comes from configuration",
+            "the report is prose not a table",
+            "each proposal says why",
+            "an unchanged hive suppresses the report"
+        ]
+        let realResponse = """
+        1. **met** — `reportingIntervalSeconds` defaults to `30 * 60` (1800 s), is `@Published` so callers can change it before `start()`, and `startReportLoop()` launches a `Task` that sleeps on that interval and calls `walkRegistryAndReport()`, which posts to the Queen chat via `appendQueenSystemMessage`.
+
+        2. **met** — The report is composed as prose ("I checked the hive at…", "I have a proposal for the repository: …"), not a table; it calls out what moved (swarm digest), what stalled (`stallParagraph`), and what she proposes (`proposalsDigest`).
+
+        3. **met** — `proposalsDigest` includes `p.rationale` (the "why") alongside the target file, and the surrounding doc comments explicitly frame the paragraph as explaining reasoning, not just listing facts.
+
+        4. **met** — `registrySignature` builds a fingerprint of task slug+state, proposal id+status, and rounded spend; when it matches `lastReportSignature`, the Queen posts a single line ("Nothing has changed since my last look — all quiet.") and returns early instead of repeating the full report.
+        """
+        let parsed = QueenReviewVerdictRequest.parse(realResponse, criteria: criteria)
+        check(parsed.count == 4,
+              "all four verdicts parsed from the real response (\(parsed.count) of 4)")
+        for criterion in criteria {
+            check(parsed[criterion] == .met,
+                  "and '\(criterion)' is met, not left unchecked")
+        }
+
+        // Criterion 1: the number prefix may be wrapped in markdown —
+        // **1., [x] 1., - 1. — and the verdict must still be recognised.
+        // Each line carries the keyword "met" so the only thing that can
+        // fail is the number-matching strategy.
+        let singleCriterion = ["the only criterion"]
+        for decoration in ["**1.", "1.", "[x] 1.", "- 1."] {
+            let single = QueenReviewVerdictRequest.parse(
+                "\(decoration) met — explanation",
+                criteria: singleCriterion
+            )
+            check(single["the only criterion"] == .met,
+                  "a verdict prefixed '\(decoration)' is recognised")
+        }
+
+        // Criterion 2: a line with the number but no verdict keyword must
+        // not produce a verdict. Lenience to decoration must not become a
+        // willingness to guess. [x] is excluded because it is itself a
+        // verdict marker; the others carry no verdict meaning.
+        let twoCriteria = ["first criterion", "second criterion"]
+        for decoration in ["**2.", "2.", "- 2."] {
+            let noKeyword = QueenReviewVerdictRequest.parse(
+                "\(decoration) I looked at this and it seems fine",
+                criteria: twoCriteria
+            )
+            check(noKeyword["second criterion"] == nil,
+                  "a '\(decoration)' line with no verdict keyword stays absent, not guessed")
+        }
+
+        // Criterion 4 is implicit: removing the markdown-decoration
+        // stripping from lineStartsWithNumber breaks the **1. and - 1.
+        // checks above. The bare 1. and [x] 1. checks survive without
+        // the fix, which is why only the decorated variants are the
+        // guard — they are the ones that fail when support is removed.
     }
 }
