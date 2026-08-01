@@ -3524,3 +3524,28 @@ this. #1118 stays open on that criterion alone.
 Lesson for me, not for the bees: a criterion I cannot verify myself before
 writing it down is a criterion that sends work at a phantom. I checked the grep
 returned nothing and never asked whether the symbol existed.
+
+## A guard that counts uses instead of strings
+
+The dashboard guard is real now. The old one greped for "Open Dashboard" and
+`isDashboardExpanded`, which survive in a declaration nothing calls, so removing
+the call left the suite green. `QueenSelfAudit.deadSymbols` was already here for
+exactly this question - a declaration alone counts one, a declaration plus a
+call counts two - and the guard demands two. Proven by the break that defeated
+its predecessor: the suite now fails with "dashboardToggleButton appears 1 times
+(need >= 2)".
+
+Two of #1118's three criteria are closed. The third is whether the full
+dashboard is readable in a narrow panel, and that is a visual judgement nobody
+has made. I cannot make it without a screen-access dialog while the user is
+asleep, so the issue stays open on that one line rather than being closed on a
+guess.
+
+#1118's reviewer returned zero verdicts again, and the reason is worth naming:
+its boundary was the test file, so the diff and the file contents it received
+were a test, while every criterion is about the application. The reviewer can
+only judge what its lane contains - a task whose contract is about one surface
+and whose boundary is another cannot be reviewed at all.
+
+Still broken: #1117 (one of two criteria confirmed), #1118's readability line,
+and #1099, #1100, #1101, #1109, #1111 remain open.
