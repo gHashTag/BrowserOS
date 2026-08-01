@@ -3578,7 +3578,8 @@ final class ChatViewModel: ObservableObject {
                 )
                 let touchedFiles = await fileContentsForReview(
                     baselineTree: workerBaselineTrees[task.conversationId],
-                    ownedPaths: task.ownedPaths
+                    ownedPaths: task.ownedPaths,
+                    criteria: unanswered
                 )
                 await requestReviewerVerdicts(
                     for: task,
@@ -3637,29 +3638,49 @@ final class ChatViewModel: ObservableObject {
         }.value
     }
 
-    /// The full contents of every file in the task's `ownedPaths`, read from
-    /// the working tree after the commit.
+    /// The full contents of files the reviewer needs, read from the working
+    /// tree after the commit.
     ///
-    /// The diff answers "what changed"; the file contents answer "what the
-    /// file looks like now". Both are needed — a criterion may ask about code
-    /// that the change did not touch but that lives in a file the task owns.
-    /// Reading from the working tree, not from a git object, because the diff
-    /// itself is taken against the working tree: if the diff is correct, the
-    /// working tree is the right source for the content around it.
+    /// Two sets of files are carried into the brief:
     ///
-    /// Files are drawn from `ownedPaths` (the task boundary), not from
-    /// `git diff --name-only`. A worker that changed nothing still produced
-    /// work — the criteria describe the result, not the delta. If the
-    /// reviewer only sees the delta, an empty diff is an empty brief, and
-    /// every criterion reads "could not check". Carrying the owned files
-    /// means the reviewer can judge what is there regardless of what moved.
+    /// 1. **Boundary files** (`ownedPaths`) — the files the worker was allowed
+    ///    to edit. The diff answers "what changed"; the file contents answer
+    ///    "what the file looks like now". A criterion may ask about code that
+    ///    the change did not touch but that lives in a file the task owns.
+    ///
+    /// 2. **Criterion-mentioned files** — paths extracted from the acceptance
+    ///    criteria text by `QueenAcceptancePolicy.pathsMentioned`. Criteria
+    ///    often name files outside the boundary: the boundary says where the
+    ///    worker may edit, not where the reviewer needs to look. A criterion
+    ///    that asks "BR-OUTPUT/Foo.swift has property X" is unanswerable when
+    ///    the brief carries only the boundary files.
+    ///
+    /// A file named in a criterion that does not exist on the working tree is
+    /// included with an explicit "(file not found)" marker rather than silently
+    /// dropped. The reviewer needs to know the file was expected and is absent,
+    /// not wonder whether the path was overlooked.
+    ///
+    /// Volume is bounded: each file is truncated to `maxFileLinesInBrief`
+    /// lines downstream in `QueenReviewVerdictRequest.brief`, with a visible
+    /// truncation marker. A total file-count cap (`maxFiles`) prevents a
+    /// criterion that names many paths from drowning the diff and the criteria
+    /// under code.
     private func fileContentsForReview(
         baselineTree: String?,
-        ownedPaths: [String]
+        ownedPaths: [String],
+        criteria: [String] = []
     ) async -> [String: String] {
         return await Task.detached(priority: .utility) {
             let repoRoot = QueenBranchCommitter.repositoryRoot()
             var result: [String: String] = [:]
+            let maxFiles = 20
+
+            // --- Boundary files (owned paths) ---
+            // A worker that changed nothing still produced work — the criteria
+            // describe the result, not the delta. If the reviewer only sees
+            // the delta, an empty diff is an empty brief, and every criterion
+            // reads "could not check". Carrying the owned files means the
+            // reviewer can judge what is there regardless of what moved.
             for rawPath in ownedPaths {
                 let path = QueenDelegationPolicy.normalizePath(rawPath)
                 guard !path.isEmpty else { continue }
@@ -3676,7 +3697,46 @@ final class ChatViewModel: ObservableObject {
                 guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 else { continue }
                 result[path] = content
+                if result.count >= maxFiles { break }
             }
+
+            // --- Criterion-mentioned files ---
+            // Criteria name files the reviewer must see, even when those files
+            // are outside the task boundary. pathsMentioned already extracts
+            // path-like tokens from criterion text; we read those files too,
+            // so the reviewer can judge criteria about files it did not edit.
+            //
+            // A file that does not exist is included with an explicit marker,
+            // not dropped: the criterion named it, the brief must say it is
+            // missing.
+            if result.count < maxFiles {
+                let mentioned: [String] = criteria.flatMap {
+                    QueenAcceptancePolicy.pathsMentioned(in: $0)
+                }
+                for path in mentioned {
+                    let normalized = QueenDelegationPolicy.normalizePath(path)
+                    guard !normalized.isEmpty else { continue }
+                    guard result[normalized] == nil else { continue }
+                    if result.count >= maxFiles { break }
+                    let full = "\(repoRoot)/\(normalized)"
+                    if FileManager.default.fileExists(atPath: full) {
+                        let content = QueenStatusViewModel.runProcess(
+                            "/bin/cat",
+                            arguments: [full],
+                            workDir: ProjectPaths.root,
+                            timeout: 10
+                        )
+                        result[normalized] = content
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                            .isEmpty
+                            ? "(file exists but is empty)"
+                            : content
+                    } else {
+                        result[normalized] = "(file not found)"
+                    }
+                }
+            }
+
             return result
         }.value
     }
