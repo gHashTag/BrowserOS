@@ -8,6 +8,19 @@ struct AdaptiveChatWorkspace: View {
     let scrollToBottomRequest: Int
     @State private var sidebarCollapsed = false
 
+    /// The user's explicit request to see the full dashboard — the sidebar,
+    /// the task history, the expanded layout — from inside the compact panel.
+    ///
+    /// Before this property the expanded view was only reachable by widening
+    /// the window past the layout threshold. No button, no menu item, no
+    /// keyboard shortcut: a screen the user could not open. #1118 is the fix.
+    /// `false` → compact; `true` → force the expanded layout regardless of
+    /// window width. The expanded view's header shows a "Close Dashboard"
+    /// button only when the expansion was user-forced (i.e. the window is
+    /// still narrow, `metrics.mode == .compact`), so the way out is visible
+    /// exactly when it is needed.
+    @State private var isDashboardExpanded = false
+
     var body: some View {
         GeometryReader { geometry in
             let metrics = ChatWorkspaceLayout.metrics(
@@ -15,12 +28,17 @@ struct AdaptiveChatWorkspace: View {
                 sidebarCollapsed: sidebarCollapsed
             )
 
-            if metrics.mode == .compact {
+            if metrics.mode == .compact && !isDashboardExpanded {
                 // The narrow panel is where the user actually lives. Without
                 // this the supervisor was only visible in fullscreen, so a bee
                 // could finish, wait, and be forgotten without a single pixel
                 // saying so.
+                //
+                // The dashboard entry button at the top is the visible way in
+                // (#1118). It sets isDashboardExpanded, which forces the
+                // expanded layout below regardless of window width.
                 VStack(spacing: 0) {
+                    dashboardToggleButton
                     QueenCompactSupervisorBar(
                         registry: QueenDelegationRegistry.shared,
                         conversationId: viewModel.conversationId,
@@ -51,10 +69,48 @@ struct AdaptiveChatWorkspace: View {
                     viewModel: viewModel,
                     sidebarCollapsed: $sidebarCollapsed,
                     metrics: metrics,
-                    scrollToBottomRequest: scrollToBottomRequest
+                    scrollToBottomRequest: scrollToBottomRequest,
+                    isDashboardExpanded: $isDashboardExpanded
                 )
             }
         }
+    }
+
+    /// The visible way in (#1118, criterion 1). A single button at the top of
+    /// the compact panel that opens the full dashboard — the sidebar, the task
+    /// history, the expanded chat layout. Without it the expanded view is
+    /// unreachable from inside a narrow panel, and that is exactly the gap
+    /// criterion 4 guards: a screen with no caller must fail the test.
+    private var dashboardToggleButton: some View {
+        Button {
+            isDashboardExpanded = true
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "rectangle.split.3x1")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.4))
+                Text("Open Dashboard")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.white.opacity(0.5))
+                    .textCase(.uppercase)
+                    .tracking(0.5)
+                Spacer()
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 8, weight: .semibold))
+                    .foregroundColor(.grokMuted)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(Color.grokElevated.opacity(0.25))
+        .overlay(alignment: .bottom) {
+            Rectangle()
+                .fill(Color.grokBorder.opacity(0.3))
+                .frame(height: 1)
+        }
+        .accessibilityLabel("Open Dashboard")
     }
 }
 
@@ -63,6 +119,7 @@ private struct ExpandedChatWorkspace: View {
     @Binding var sidebarCollapsed: Bool
     let metrics: ChatWorkspaceMetrics
     let scrollToBottomRequest: Int
+    @Binding var isDashboardExpanded: Bool
     private let glassProfile = ChatGlassStyle.shared
 
     var body: some View {
@@ -161,6 +218,25 @@ private struct ExpandedChatWorkspace: View {
             }
             .buttonStyle(.plain)
             .help(sidebarCollapsed ? "Show task history" : "Hide task history")
+
+            // The visible way out (#1118, criterion 1). When the dashboard was
+            // opened from the compact panel (the window is still narrow,
+            // metrics.mode == .compact), this button collapses it back. It is
+            // not shown when the window is wide enough — the expanded layout
+            // is the natural state there and there is nothing to close.
+            if metrics.mode == .compact {
+                Button {
+                    isDashboardExpanded = false
+                } label: {
+                    Image(systemName: "rectangle.compress.vertical")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.grokMuted)
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .help("Close Dashboard")
+                .accessibilityLabel("Close Dashboard")
+            }
 
             Text(currentTitle)
                 .font(.system(size: 13, weight: .semibold))

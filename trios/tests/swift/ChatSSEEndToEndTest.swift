@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 522
+    static let minimumChecks = 526
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -4259,59 +4259,85 @@ struct ChatSSEEndToEndTests {
 
     /// Proves every acceptance criterion of #1118:
     ///
-    /// 1. The dashboard has a visible way in (Show Bee Board) and out (Hide
-    ///    Bee Board).
+    /// 1. The dashboard opens from the compact panel via a visible action
+    ///    (Open Dashboard) and closes back (Close Dashboard). The toggle is
+    ///    in `FullscreenChatWorkspace.swift` — not just the bee board toggle
+    ///    inside ChatPanelView, which was the mistake three previous bees made.
     /// 2. Each card button — open chat, accept, cancel — is driven through its
     ///    registry transition.
     /// 3. The empty state (no live tasks) is a calm message, not a broken box.
     /// 4. Removing the entry point from the source breaks a structural check,
     ///    so a screen that cannot be opened fails the suite instead of
-    ///    silently disappearing.
+    ///    silently disappearing. The check reads `FullscreenChatWorkspace.swift`
+    ///    because that is where the entry point lives.
     static func runDashboardEntryExitCardButtonsAndEmptyState() async {
         print("\n# Scenario: dashboard opens and closes; card buttons are driven; empty state holds (#1118)")
 
-        // --- Source-level structural checks --------------------------------
+        // --- Two source files, two roles ------------------------------------
         //
-        // ChatPanelView.swift is not compiled into this harness (it depends on
-        // AppKit types the test does not link). The structural checks below read
-        // the source and verify the entry point, exit point, callbacks, and
-        // empty-state message exist. This is criterion 4's guard: if someone
-        // removes the toggle, the reopen button, or the callbacks, these checks
-        // fail and the suite goes red.
+        // ChatPanelView.swift holds the bee board (card buttons, empty state).
+        // FullscreenChatWorkspace.swift holds the dashboard toggle — the user-
+        // facing entry and exit that makes the expanded layout reachable from
+        // the compact panel. The previous three bees checked only
+        // ChatPanelView.swift; the toggle there satisfied a plausible reading
+        // of criterion 1 but was the wrong surface. #1118 is about the
+        // dashboard, not the board.
 
-        let source = (try? String(
+        let panelSource = (try? String(
             contentsOfFile: "\(ProjectPaths.brOutput)/ChatPanelView.swift",
             encoding: .utf8
         )) ?? ""
 
-        check(!source.isEmpty,
-              "ChatPanelView.swift is readable — the structural checks have something to read")
+        let workspaceSource = (try? String(
+            contentsOfFile: "\(ProjectPaths.brOutput)/FullscreenChatWorkspace.swift",
+            encoding: .utf8
+        )) ?? ""
 
-        // Criterion 1 — a visible way in and a visible way out.
-        check(source.contains("isBoardVisible"),
-              "the bee board has a visibility toggle (isBoardVisible) — a way in and a way out")
-        check(source.contains("\"Show Bee Board\""),
-              "the collapsed board shows a 'Show Bee Board' button — a visible way back in")
-        check(source.contains("\"Hide Bee Board\""),
-              "the board header shows a 'Hide Bee Board' button — a visible way out")
+        check(!panelSource.isEmpty,
+              "ChatPanelView.swift is readable — the card-button and empty-state checks have something to read")
 
-        // Criterion 2 — each button is wired to a command.
-        check(source.contains("onAccept"),
+        check(!workspaceSource.isEmpty,
+              "FullscreenChatWorkspace.swift is readable — the dashboard entry/exit checks have something to read")
+
+        // --- Criterion 1: dashboard opens and closes from the compact panel --
+        //
+        // The toggle (isDashboardExpanded) lets the user force the expanded
+        // layout from inside a narrow panel. The "Open Dashboard" button sets
+        // it; the "Close Dashboard" button clears it. Both are visible text a
+        // person can read on screen — not an incidental property or a handler
+        // with no label.
+
+        check(workspaceSource.contains("isDashboardExpanded"),
+              "criterion 1: the dashboard has a user-controllable toggle (isDashboardExpanded)")
+
+        check(workspaceSource.contains("\"Open Dashboard\""),
+              "criterion 1: the compact panel shows an 'Open Dashboard' button — a visible way in")
+
+        check(workspaceSource.contains("\"Close Dashboard\""),
+              "criterion 1: the expanded header shows a 'Close Dashboard' button — a visible way out")
+
+        // The toggle must gate the layout switch in the body. If the condition
+        // is removed, the expanded layout is unreachable from the compact
+        // panel — back to the original bug.
+        check(workspaceSource.contains("!isDashboardExpanded"),
+              "criterion 1: the compact branch checks !isDashboardExpanded — the toggle controls the layout")
+
+        // --- Criterion 2: card buttons wired and driven ---------------------
+        //
+        // The bee board (QueenBeeBoard in ChatPanelView) has three actions:
+        // tap to open the bee's chat, Accept, Cancel. Each calls
+        // runQueenCommand with the task slug, which transitions the registry.
+
+        check(panelSource.contains("onAccept"),
               "BeeCard has an onAccept callback")
-        check(source.contains("onCancel"),
+        check(panelSource.contains("onCancel"),
               "BeeCard has an onCancel callback")
-        check(source.contains("/accept"),
+        check(panelSource.contains("/accept"),
               "the Accept button issues a /accept command")
-        check(source.contains("/cancel"),
+        check(panelSource.contains("/cancel"),
               "the Cancel button issues a /cancel command")
-        check(source.contains("onSelectBee"),
+        check(panelSource.contains("onSelectBee"),
               "the card tap calls onSelectBee to open the bee's chat")
-
-        // Criterion 3 — the empty state is not a broken box.
-        check(source.contains("No bees in flight"),
-              "the board shows a calm empty-state message when the swarm is idle")
-        check(source.contains("emptyMessage"),
-              "the empty state is its own named view, not an accidental gap")
 
         // --- Registry-level proof: drive each button ------------------------
         //
@@ -4396,9 +4422,11 @@ struct ChatSSEEndToEndTests {
         check(!registry.open.contains(where: { $0.id == cancelTask.id }),
               "the cancelled task no longer appears in registry.open — it left the board")
 
-        // -- Empty state -----------------------------------------------------
+        // --- Criterion 3: empty state is calm, not broken --------------------
+        //
         // A registry with no open tasks must present gracefully, not crash or
         // show a broken box.
+
         let emptyStore = NSTemporaryDirectory() + "queen-empty-1118-\(UUID().uuidString).json"
         defer { try? FileManager.default.removeItem(atPath: emptyStore) }
         let emptyRegistry = QueenDelegationRegistry(storePath: emptyStore)
@@ -4412,41 +4440,58 @@ struct ChatSSEEndToEndTests {
         check(emptyRegistry.active.isEmpty,
               "a fresh registry has no active tasks")
 
-        // The empty-state text is present in the source so the UI shows it
-        // instead of nothing.
-        check(source.contains("moon.zzz"),
+        check(panelSource.contains("No bees in flight"),
+              "the board shows a calm empty-state message when the swarm is idle")
+        check(panelSource.contains("emptyMessage"),
+              "the empty state is its own named view, not an accidental gap")
+        check(panelSource.contains("moon.zzz"),
               "the empty state has an icon (moon.zzz) — it looks intentional, not broken")
 
-        // -- Criterion 4: a screen with no caller must break the test --------
+        // --- Criterion 4: a screen with no caller must break the test --------
         //
-        // The structural checks above guard the strings inside the QueenBeeBoard
-        // struct. But a struct can exist and never render — if someone removes
-        // the `queenBeeBoard` reference from the body or the `QueenBeeBoard(`
-        // constructor call from the computed property, every string above still
-        // matches. The board would be defined but unreachable, which is the
-        // exact shape criterion 4 describes: "a screen that opens from nowhere
-        // must fail the test, not silently disappear."
+        // The dashboard entry point lives in FullscreenChatWorkspace.swift.
+        // If isDashboardExpanded is removed, the "Open Dashboard" button is
+        // removed, or the ExpandedChatWorkspace constructor stops receiving the
+        // binding, the expanded layout becomes unreachable from the compact
+        // panel — the exact shape criterion 4 describes: "a screen that opens
+        // from nowhere must fail the test, not silently disappear."
         //
-        // These two checks close that gap. Removing the instantiation or the
-        // body reference breaks them, proving the board renders, not just exists.
-        // `QueenBeeBoard(` (with open paren) only appears at the constructor
-        // call site, never at the struct definition, so its presence is proof of
-        // instantiation. The lowercase `queenBeeBoard` must appear at least
-        // twice: once in the body (the render site) and once as the computed
-        // property definition. One occurrence means the property exists but is
-        // never rendered — the exact shape criterion 4 forbids.
-        let boardMentions = source.components(separatedBy: "queenBeeBoard").count - 1
-        check(source.contains("QueenBeeBoard("),
-              "criterion 4: QueenBeeBoard is instantiated — the board renders, not just exists")
-        check(boardMentions >= 2,
-              "criterion 4: the board is referenced in the body (\(boardMentions) mentions, need ≥ 2) — it appears on screen, not only in source")
+        // These checks are structural — they read the source as text — because
+        // FullscreenChatWorkspace.swift depends on AppKit and is not compiled
+        // into this harness. But structure is enough: the toggle must exist,
+        // be referenced in the body, be passed to the expanded view, and have
+        // a visible button that sets it. Remove any of those and the suite
+        // goes red.
 
-        // If isBoardVisible is removed from the source, this check fails. A
-        // screen that cannot be opened must break the test, not silently
-        // disappear.
-        check(source.contains("isBoardVisible"),
-              "criterion 4: removing the board toggle breaks this check — the screen cannot silently disappear")
-        check(source.contains("\"Show Bee Board\""),
-              "criterion 4: removing the reopen button breaks this check — the board must always have a way back in")
+        let toggleMentions = workspaceSource
+            .components(separatedBy: "isDashboardExpanded").count - 1
+
+        check(toggleMentions >= 3,
+              "criterion 4: isDashboardExpanded appears \(toggleMentions) times (need ≥ 3: definition, body condition, button actions) — removing any one breaks the test")
+
+        check(workspaceSource.contains("dashboardToggleButton"),
+              "criterion 4: the dashboardToggleButton computed property is referenced in the compact body — the entry button renders, not just exists")
+
+        // `ExpandedChatWorkspace(` (with open paren) only appears at the
+        // constructor call site in the body. If the call is removed, the
+        // expanded view is defined but never shown — a screen with no caller.
+        check(workspaceSource.contains("ExpandedChatWorkspace("),
+              "criterion 4: ExpandedChatWorkspace is instantiated — the expanded layout renders, not just exists")
+
+        // The binding must be passed to the expanded view, so the "Close
+        // Dashboard" button inside it can toggle it back. Without the binding,
+        // the dashboard opens but cannot close.
+        check(workspaceSource.contains("isDashboardExpanded: $isDashboardExpanded"),
+              "criterion 4: the toggle binding is passed to ExpandedChatWorkspace — the way out works")
+
+        // If "Open Dashboard" is removed, the compact panel has no visible
+        // entry point — the screen is unreachable.
+        check(workspaceSource.contains("\"Open Dashboard\""),
+              "criterion 4: removing the 'Open Dashboard' button text breaks this check — the entry point cannot silently disappear")
+
+        // If "Close Dashboard" is removed, the expanded view has no visible
+        // exit — the user is trapped.
+        check(workspaceSource.contains("\"Close Dashboard\""),
+              "criterion 4: removing the 'Close Dashboard' button text breaks this check — the exit point cannot silently disappear")
     }
 }
