@@ -3873,12 +3873,16 @@ final class ChatViewModel: ObservableObject {
         let askedNoAnswer = unchecked.filter { askedSet.contains($0.criterion) }
         let neverAsked = unchecked.filter { !askedSet.contains($0.criterion) }
 
-        // Regression guard: a criterion tracked as "asked but unanswered"
-        // must not have a recorded verdict. If it does, the tracking is
-        // stale — which means an empty answer leaked into the same state as
-        // a real verdict, the exact collapse #1117 exists to prevent.
+        // Regression guard: a criterion tracked as asked-but-unanswered
+        // must not have a recorded verdict. The check uses askedSet — the
+        // source of truth — not askedNoAnswer, which is a subset of
+        // unchecked and whose verdicts are nil by definition. Checking
+        // askedNoAnswer was a tautology that could never fire; checking
+        // askedSet catches criteria that were given a verdict after the
+        // empty response, which means the cleanup in
+        // requestReviewerVerdicts or /verify did not run (#1117).
         assert(
-            askedNoAnswer.allSatisfy { task.criterionVerdicts[$0.criterion] == nil },
+            askedSet.allSatisfy { task.criterionVerdicts[$0] == nil },
             "askedButUnanswered contains a criterion that now has a verdict — "
             + "tracking is stale; an empty answer may be indistinguishable "
             + "from a real verdict"
@@ -3907,7 +3911,27 @@ final class ChatViewModel: ObservableObject {
             )
         }
 
-        return parts.isEmpty ? nil : parts.joined(separator: " ")
+        let result = parts.joined(separator: " ")
+
+        // Regression guard (#1117 criterion 3): if any asked-but-unanswered
+        // criterion is still unchecked, the block reason must carry the
+        // "asked but no answer" language. Without it the empty answer is
+        // indistinguishable from "never checked" — the exact collapse #1117
+        // exists to prevent. The check uses askedSet (the source of truth)
+        // not askedNoAnswer (which would disappear with the split it guards).
+        if !askedSet.isEmpty {
+            let uncheckedCriteria = Set(unchecked.map(\.criterion))
+            let askedStillUnchecked = askedSet.intersection(uncheckedCriteria)
+            assert(
+                askedStillUnchecked.isEmpty
+                    || result.contains("asked but the reviewer gave no answer"),
+                "Block reason omits the asked-but-unanswered distinction — "
+                + "an empty answer is indistinguishable from the absence of "
+                + "a question (#1117 regression)"
+            )
+        }
+
+        return parts.isEmpty ? nil : result
     }
 
     /// Sends a one-shot prompt to the model and collects the text response.

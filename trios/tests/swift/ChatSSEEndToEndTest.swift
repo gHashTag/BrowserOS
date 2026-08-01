@@ -42,6 +42,20 @@ struct ChatSSEEndToEndTests {
         failures += 1
     }
 
+    /// Counts non-overlapping occurrences of `needle` in `haystack`.
+    ///
+    /// `.contains` answers "does the string appear anywhere?" — a dead
+    /// definition satisfies it just as well as a live call. This helper
+    /// answers "how many times?" so a threshold can separate a definition
+    /// from its uses. Remove the call (the body reference) while leaving
+    /// the definition, and the count drops; the test fails. This is the
+    /// difference between guarding a string and guarding the thing the
+    /// string names. #1118.
+    private static func occurrences(_ needle: String, in haystack: String) -> Int {
+        guard !needle.isEmpty else { return 0 }
+        return haystack.components(separatedBy: needle).count - 1
+    }
+
     static func main() async {
         await runHappyPathStreaming()
         await runCancellationIsNonError()
@@ -4301,43 +4315,63 @@ struct ChatSSEEndToEndTests {
 
         // --- Criterion 1: dashboard opens and closes from the compact panel --
         //
-        // The toggle (isDashboardExpanded) lets the user force the expanded
-        // layout from inside a narrow panel. The "Open Dashboard" button sets
-        // it; the "Close Dashboard" button clears it. Both are visible text a
-        // person can read on screen — not an incidental property or a handler
-        // with no label.
+        // Every check below counts occurrences rather than testing presence.
+        // `.contains` passes when a symbol is *defined* but never *called* —
+        // a dead property, a screen with no caller, a button that exists as
+        // code but is never rendered. Counting uses catches the removal of
+        // the call while leaving the definition intact, which is exactly the
+        // failure #1118 guards. The threshold for each count is set to the
+        // number of structurally necessary references: one for the
+        // definition, one for each use that must exist for the feature to
+        // work. Remove any use and the count drops below the threshold.
 
-        check(workspaceSource.contains("isDashboardExpanded"),
-              "criterion 1: the dashboard has a user-controllable toggle (isDashboardExpanded)")
+        let isExpandedCount = occurrences("isDashboardExpanded", in: workspaceSource)
+        check(isExpandedCount >= 4,
+              "criterion 1: isDashboardExpanded appears \(isExpandedCount) times (need ≥ 4: definition, body condition, open action, close action) — counting uses, not just strings")
 
-        check(workspaceSource.contains("\"Open Dashboard\""),
-              "criterion 1: the compact panel shows an 'Open Dashboard' button — a visible way in")
+        let openLabelCount = occurrences("\"Open Dashboard\"", in: workspaceSource)
+        check(openLabelCount >= 2,
+              "criterion 1: 'Open Dashboard' appears \(openLabelCount) times (need ≥ 2: button label + accessibility label) — counting uses, not just strings")
 
-        check(workspaceSource.contains("\"Close Dashboard\""),
-              "criterion 1: the expanded header shows a 'Close Dashboard' button — a visible way out")
+        let closeLabelCount = occurrences("\"Close Dashboard\"", in: workspaceSource)
+        check(closeLabelCount >= 2,
+              "criterion 1: 'Close Dashboard' appears \(closeLabelCount) times (need ≥ 2: help tooltip + accessibility label) — counting uses, not just strings")
 
         // The toggle must gate the layout switch in the body. If the condition
         // is removed, the expanded layout is unreachable from the compact
         // panel — back to the original bug.
-        check(workspaceSource.contains("!isDashboardExpanded"),
-              "criterion 1: the compact branch checks !isDashboardExpanded — the toggle controls the layout")
+        check(occurrences("!isDashboardExpanded", in: workspaceSource) >= 1,
+              "criterion 1: the compact branch gates on !isDashboardExpanded — the toggle controls the layout")
 
         // --- Criterion 2: card buttons wired and driven ---------------------
         //
         // The bee board (QueenBeeBoard in ChatPanelView) has three actions:
         // tap to open the bee's chat, Accept, Cancel. Each calls
         // runQueenCommand with the task slug, which transitions the registry.
+        //
+        // The source checks below count occurrences (uses) rather than
+        // testing presence (strings). A callback that is *declared* as a
+        // parameter but never *connected* to a button passes `.contains`
+        // because the declaration has the name. Counting requires the name
+        // to appear in enough places — declaration, callback binding, button
+        // action — that removing any one drops the count below threshold.
+        // The registry transitions below those source checks are the real
+        // proof: each button is driven through its state-machine transition,
+        // not just checked for the existence of a handler.
 
-        check(panelSource.contains("onAccept"),
-              "BeeCard has an onAccept callback")
-        check(panelSource.contains("onCancel"),
-              "BeeCard has an onCancel callback")
-        check(panelSource.contains("/accept"),
+        let onAcceptUses = occurrences("onAccept", in: panelSource)
+        check(onAcceptUses >= 4,
+              "onAccept appears \(onAcceptUses) times (need ≥ 4: QueenBeeBoard parameter, callback binding, BeeCard parameter, button action) — wiring is used, not just defined")
+        let onCancelUses = occurrences("onCancel", in: panelSource)
+        check(onCancelUses >= 4,
+              "onCancel appears \(onCancelUses) times (need ≥ 4: QueenBeeBoard parameter, callback binding, BeeCard parameter, button action) — wiring is used, not just defined")
+        check(occurrences("/accept", in: panelSource) >= 1,
               "the Accept button issues a /accept command")
-        check(panelSource.contains("/cancel"),
+        check(occurrences("/cancel", in: panelSource) >= 1,
               "the Cancel button issues a /cancel command")
-        check(panelSource.contains("onSelectBee"),
-              "the card tap calls onSelectBee to open the bee's chat")
+        let onSelectBeeUses = occurrences("onSelectBee", in: panelSource)
+        check(onSelectBeeUses >= 3,
+              "onSelectBee appears \(onSelectBeeUses) times (need ≥ 3: QueenBeeBoard parameter, callback binding, card tap) — wiring is used, not just defined")
 
         // --- Registry-level proof: drive each button ------------------------
         //
@@ -4440,11 +4474,11 @@ struct ChatSSEEndToEndTests {
         check(emptyRegistry.active.isEmpty,
               "a fresh registry has no active tasks")
 
-        check(panelSource.contains("No bees in flight"),
+        check(occurrences("No bees in flight", in: panelSource) >= 1,
               "the board shows a calm empty-state message when the swarm is idle")
-        check(panelSource.contains("emptyMessage"),
-              "the empty state is its own named view, not an accidental gap")
-        check(panelSource.contains("moon.zzz"),
+        check(occurrences("emptyMessage", in: panelSource) >= 2,
+              "the empty state is its own named view, referenced and defined — not an accidental gap")
+        check(occurrences("moon.zzz", in: panelSource) >= 1,
               "the empty state has an icon (moon.zzz) — it looks intentional, not broken")
 
         // --- Criterion 4: a screen with no caller must break the test --------
@@ -4456,42 +4490,49 @@ struct ChatSSEEndToEndTests {
         // panel — the exact shape criterion 4 describes: "a screen that opens
         // from nowhere must fail the test, not silently disappear."
         //
-        // These checks are structural — they read the source as text — because
-        // FullscreenChatWorkspace.swift depends on AppKit and is not compiled
-        // into this harness. But structure is enough: the toggle must exist,
-        // be referenced in the body, be passed to the expanded view, and have
-        // a visible button that sets it. Remove any of those and the suite
-        // goes red.
+        // Every guard below uses `occurrences` (counting uses) rather than
+        // `.contains` (testing string presence). The distinction matters for
+        // `dashboardToggleButton`: it is both a *definition* (the computed
+        // property) and a *call* (the reference in the compact panel's body).
+        // `.contains("dashboardToggleButton")` passes if the definition
+        // remains but the body reference is deleted — the button exists as
+        // dead code and the dashboard is unreachable, yet the test is green.
+        // Counting ≥ 2 (definition + call) fails when the call is removed,
+        // because the definition alone leaves only one occurrence.
 
-        let toggleMentions = workspaceSource
-            .components(separatedBy: "isDashboardExpanded").count - 1
+        let toggleUses = occurrences("isDashboardExpanded", in: workspaceSource)
+        check(toggleUses >= 4,
+              "criterion 4: isDashboardExpanded appears \(toggleUses) times (need ≥ 4: definition, body condition, open action, close action) — removing the toggle or any critical use breaks the test")
 
-        check(toggleMentions >= 3,
-              "criterion 4: isDashboardExpanded appears \(toggleMentions) times (need ≥ 3: definition, body condition, button actions) — removing any one breaks the test")
-
-        check(workspaceSource.contains("dashboardToggleButton"),
-              "criterion 4: the dashboardToggleButton computed property is referenced in the compact body — the entry button renders, not just exists")
+        // The key guard: dashboardToggleButton must be *called* from the body,
+        // not just *defined*. Two occurrences = definition + body reference.
+        // Remove the body reference and the count drops to 1 — the test fails.
+        let toggleBtnUses = occurrences("dashboardToggleButton", in: workspaceSource)
+        check(toggleBtnUses >= 2,
+              "criterion 4: dashboardToggleButton appears \(toggleBtnUses) times (need ≥ 2: definition + body reference) — removing the call from the compact body breaks the test")
 
         // `ExpandedChatWorkspace(` (with open paren) only appears at the
         // constructor call site in the body. If the call is removed, the
         // expanded view is defined but never shown — a screen with no caller.
-        check(workspaceSource.contains("ExpandedChatWorkspace("),
+        check(occurrences("ExpandedChatWorkspace(", in: workspaceSource) >= 1,
               "criterion 4: ExpandedChatWorkspace is instantiated — the expanded layout renders, not just exists")
 
         // The binding must be passed to the expanded view, so the "Close
         // Dashboard" button inside it can toggle it back. Without the binding,
         // the dashboard opens but cannot close.
-        check(workspaceSource.contains("isDashboardExpanded: $isDashboardExpanded"),
+        check(occurrences("isDashboardExpanded: $isDashboardExpanded", in: workspaceSource) >= 1,
               "criterion 4: the toggle binding is passed to ExpandedChatWorkspace — the way out works")
 
         // If "Open Dashboard" is removed, the compact panel has no visible
-        // entry point — the screen is unreachable.
-        check(workspaceSource.contains("\"Open Dashboard\""),
-              "criterion 4: removing the 'Open Dashboard' button text breaks this check — the entry point cannot silently disappear")
+        // entry point — the screen is unreachable. Counting ≥ 2 requires both
+        // the Text label and the accessibility label; removing either one
+        // weakens the entry point and drops the count below threshold.
+        check(openLabelCount >= 2,
+              "criterion 4: 'Open Dashboard' appears \(openLabelCount) times (need ≥ 2: label + a11y) — removing the entry button text breaks the test")
 
         // If "Close Dashboard" is removed, the expanded view has no visible
         // exit — the user is trapped.
-        check(workspaceSource.contains("\"Close Dashboard\""),
-              "criterion 4: removing the 'Close Dashboard' button text breaks this check — the exit point cannot silently disappear")
+        check(closeLabelCount >= 2,
+              "criterion 4: 'Close Dashboard' appears \(closeLabelCount) times (need ≥ 2: help + a11y) — removing the exit button text breaks the test")
     }
 }
