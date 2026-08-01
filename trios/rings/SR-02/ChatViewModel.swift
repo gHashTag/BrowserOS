@@ -116,8 +116,10 @@ final class ChatViewModel: ObservableObject {
 
     /// Criteria the reviewer was asked about but gave no answer for, keyed by
     /// task ID. An empty answer is not the same as a question nobody asked:
-    /// the former means the request went out and silence came back, the
-    /// latter means the criterion never reached a reviewer at all. Keeping
+    /// the former means the request went out and silence came back —
+    /// whether the whole response was empty or the reviewer answered some
+    /// criteria but not this one — the latter means the criterion never
+    /// reached a reviewer at all. Keeping
     /// them separate lets the log and the block reason say "reviewer gave no
     /// answer" instead of "never checked" — they are different problems with
     /// different fixes (#1117).
@@ -3660,11 +3662,16 @@ final class ChatViewModel: ObservableObject {
     /// dropped. The reviewer needs to know the file was expected and is absent,
     /// not wonder whether the path was overlooked.
     ///
-    /// Volume is bounded: each file is truncated to `maxFileLinesInBrief`
-    /// lines downstream in `QueenReviewVerdictRequest.brief`, with a visible
-    /// truncation marker. A total file-count cap (`maxFiles`) prevents a
-    /// criterion that names many paths from drowning the diff and the criteria
-    /// under code.
+    /// Volume is bounded: instead of sending the first N lines of a large
+    /// file, each file is narrowed to the regions around names the criteria
+    /// mention — declarations and usages of those names with a margin of
+    /// context above and below (`regionExtractedContent`). When no criteria
+    /// names appear in a file the full content is carried and the downstream
+    /// cap in `QueenReviewVerdictRequest.brief` applies as a fallback. A
+    /// total file-count cap (`maxFiles`) prevents a criterion that names many
+    /// paths from drowning the diff and the criteria under code. The region
+    /// selection header names how many lines were chosen from how many and
+    /// which names drove the selection.
     private func fileContentsForReview(
         baselineTree: String?,
         ownedPaths: [String],
@@ -3702,7 +3709,9 @@ final class ChatViewModel: ObservableObject {
                 // that would pad the brief without adding context.
                 guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 else { continue }
-                result[path] = content
+                result[path] = ChatViewModel.regionExtractedContent(
+                    fullContent: content, criteria: criteria
+                )
                 if result.count >= maxFiles { break }
             }
 
@@ -3736,7 +3745,9 @@ final class ChatViewModel: ObservableObject {
                             .trimmingCharacters(in: .whitespacesAndNewlines)
                             .isEmpty
                             ? "(file exists but is empty)"
-                            : content
+                            : ChatViewModel.regionExtractedContent(
+                                fullContent: content, criteria: criteria
+                            )
                     } else {
                         result[normalized] = "(file not found)"
                     }
@@ -3746,15 +3757,143 @@ final class ChatViewModel: ObservableObject {
             return result
         }.value
     }
+
+    // MARK: - Region extraction for review
+
+    /// Lines of context included above and below each name occurrence when
+    /// building a region-extracted view of a file for the reviewer. Ten
+    /// lines is enough to show the surrounding declaration or call site
+    /// without pulling in unrelated code from the same file.
+    private nonisolated static let regionContextLines = 10
+
+    /// Extracts identifiers from criterion text that are likely to be code
+    /// symbols rather than natural language.
+    ///
+    /// A name qualifies when it is three or more characters long and
+    /// contains at least one uppercase letter — the structure that
+    /// distinguishes `ChatViewModel` and `fileContentsForReview` from plain
+    /// words like "file" or "review". Backtick-quoted tokens are always
+    /// taken regardless of casing, because the author went out of their way
+    /// to mark them as code. Path-like tokens are handled separately by
+    /// `QueenAcceptancePolicy.pathsMentioned` and are not duplicated here.
+    private nonisolated static func criteriaNames(in criteria: [String]) -> [String] {
+        var names = Set<String>()
+
+        for criterion in criteria {
+            // Backtick-quoted tokens: explicit code references.
+            if let regex = try? NSRegularExpression(pattern: "`([^`]+)`") {
+                let nsRange = NSRange(criterion.startIndex..., in: criterion)
+                regex.enumerateMatches(in: criterion, range: nsRange) { match, _, _ in
+                    guard let match,
+                          let r = Range(match.range(at: 1), in: criterion)
+                    else { return }
+                    names.insert(String(criterion[r]))
+                }
+            }
+            // CamelCase / PascalCase identifiers: mixed-case structure.
+            if let regex = try? NSRegularExpression(pattern: "[A-Za-z_][A-Za-z0-9_]*") {
+                let nsRange = NSRange(criterion.startIndex..., in: criterion)
+                regex.enumerateMatches(in: criterion, range: nsRange) { match, _, _ in
+                    guard let match,
+                          let r = Range(match.range, in: criterion)
+                    else { return }
+                    let token = String(criterion[r])
+                    guard token.count >= 3 else { return }
+                    guard token.contains(where: { $0.isUppercase }) else { return }
+                    names.insert(token)
+                }
+            }
+        }
+
+        return Array(names)
+    }
+
+    /// Produces a region-extracted view of a file's content, selecting only
+    /// the areas around names the criteria mention.
+    ///
+    /// Each name occurrence anchors a region of ±`regionContextLines`
+    /// lines. Overlapping and adjacent regions are merged. When the selected
+    /// lines are fewer than the file's total, the result is prefixed with a
+    /// header that states how many lines were chosen from how many and which
+    /// names drove the selection, followed by ellipsis-gap markers between
+    /// non-adjacent regions.
+    ///
+    /// When no criteria names appear in the file — or no criteria names
+    /// were extracted at all — the full content is returned unchanged, so
+    /// the downstream truncation in `QueenReviewVerdictRequest.brief` still
+    /// applies and the reviewer gets the same view it always had.
+    private nonisolated static func regionExtractedContent(
+        fullContent: String,
+        criteria: [String]
+    ) -> String {
+        let allLines = fullContent.components(separatedBy: "\n")
+        let names = criteriaNames(in: criteria)
+
+        guard !names.isEmpty else { return fullContent }
+
+        // Find all line indices where any name appears.
+        var hitLines = Set<Int>()
+        for (index, line) in allLines.enumerated() {
+            if names.contains(where: { line.contains($0) }) {
+                hitLines.insert(index)
+            }
+        }
+
+        guard !hitLines.isEmpty else { return fullContent }
+
+        // Build and merge regions: ±contextLines around each hit.
+        let context = regionContextLines
+        var regions: [(start: Int, end: Int)] = []
+        for hit in hitLines.sorted() {
+            let start = max(0, hit - context)
+            let end = min(allLines.count - 1, hit + context)
+            if let last = regions.last, start <= last.end + 1 {
+                regions[regions.count - 1].end = max(last.end, end)
+            } else {
+                regions.append((start, end))
+            }
+        }
+
+        // If regions cover the whole file, return unchanged.
+        let totalSelected = regions.reduce(0) { $0 + ($1.end - $1.start + 1) }
+        if totalSelected >= allLines.count { return fullContent }
+
+        // Build the extracted text with a selection header and gap markers.
+        var output: [String] = []
+        output.append(
+            "(\(totalSelected) of \(allLines.count) lines — "
+            + "regions around criteria names: "
+            + names.sorted().joined(separator: ", ")
+            + ")"
+        )
+
+        for (i, region) in regions.enumerated() {
+            if i > 0 {
+                let gap = region.start - regions[i - 1].end - 1
+                output.append("… (\(gap) lines omitted) …")
+            }
+            for lineIdx in region.start...region.end {
+                let displayNum = String(format: "%5d", lineIdx + 1)
+                output.append("\(displayNum) | \(allLines[lineIdx])")
+            }
+        }
+
+        return output.joined(separator: "\n")
+    }
+
     ///
     /// Runs after mechanical verdicts have settled what the files show; this
     /// is for the criteria a path check cannot answer. The reviewer's response
     /// is parsed conservatively — anything the parser could not match stays
     /// absent, which reads as `unchecked`. An empty or garbled response
     /// changes nothing, which is the correct outcome: an unexamined criterion
-    /// is not a pass. The raw response is stored in `reviewerResponses` and
-    /// posted to the Queen's chat so the reasoning behind each verdict can be
-    /// re-examined later.
+    /// is not a pass. Criteria the reviewer was asked about but did not
+    /// answer — whether the whole response was empty or the reviewer skipped
+    /// some criteria in a partial response — are tracked in
+    /// `askedButUnanswered` so the block reason can distinguish "asked but
+    /// no answer" from "never checked" (#1117). The raw response is stored
+    /// in `reviewerResponses` and posted to the Queen's chat so the reasoning
+    /// behind each verdict can be re-examined later.
     private func requestReviewerVerdicts(
         for task: DelegatedTask,
         criteria: [String],
@@ -3832,10 +3971,10 @@ final class ChatViewModel: ObservableObject {
             }
         }
 
-        // Criteria the retry answered — if any — are no longer "unanswered."
-        // The first attempt may have been empty while the retry succeeded,
-        // so only criteria that genuinely have no recorded verdict stay in
-        // the asked-but-unanswered set (#1117).
+        // Criteria the reviewer answered — whether from the retry or the
+        // first attempt — are no longer "unanswered." Only criteria that
+        // genuinely have no recorded verdict stay in the asked-but-
+        // unanswered set (#1117).
         if var unanswered = askedButUnanswered[task.id], !unanswered.isEmpty {
             unanswered.subtract(verdicts.keys)
             if unanswered.isEmpty {
@@ -3852,6 +3991,34 @@ final class ChatViewModel: ObservableObject {
         // inside a count.
         let matchedCriteria = Set(verdicts.keys)
         let unmatched = criteria.filter { !matchedCriteria.contains($0) }
+
+        // Criteria the reviewer was asked about but the parser could not
+        // match are also "asked but no answer" — not "never checked".
+        // This covers the case the isStillEmpty block above does not: the
+        // reviewer returned a non-empty response that answered some
+        // criteria but omitted or garbled others. Those criteria were
+        // asked; the answer is missing or unparseable. Treating them as
+        // "never checked" would collapse the distinction #1117 maintains.
+        if !unmatched.isEmpty {
+            var existing = askedButUnanswered[task.id] ?? []
+            existing.formUnion(unmatched)
+            askedButUnanswered[task.id] = existing
+            // Only log for partial responses. Fully-empty responses
+            // already have their own log from the isStillEmpty block.
+            if !isStillEmpty {
+                TriosLogBus.shared.warn(
+                    .queen,
+                    "queen.review.partial_unanswered",
+                    "Reviewer answered \(verdicts.count) of \(criteria.count) criterion(s); \(unmatched.count) asked but unanswered",
+                    [
+                        "issue": task.issue.slug,
+                        "answered": String(verdicts.count),
+                        "asked": String(criteria.count),
+                        "unanswered": unmatched.joined(separator: " | ")
+                    ]
+                )
+            }
+        }
 
         TriosLogBus.shared.info(
             .queen,
@@ -3916,9 +4083,10 @@ final class ChatViewModel: ObservableObject {
     /// if `askedButUnanswered` tracking is removed or the augmentation is
     /// bypassed, the block reason reverts to "never checked" for all
     /// unchecked criteria, and the assertion below fires for any criterion
-    /// that was tracked as asked-but-unanswered. An empty answer that
-    /// becomes indistinguishable from "no question" is a bug this function
-    /// exists to catch, not a state it tolerates.
+    /// that was tracked as asked-but-unanswered. An answer — empty,
+    /// partial, or garbled — that becomes indistinguishable from "no
+    /// question" is a bug this function exists to catch, not a state it
+    /// tolerates.
     private func acceptanceBlockReasonDistinguishingEmptyAnswers(
         for task: DelegatedTask
     ) -> String? {
@@ -3934,7 +4102,8 @@ final class ChatViewModel: ObservableObject {
         // Split unchecked into "asked but no answer" and "genuinely never
         // asked". The `askedButUnanswered` set is populated by
         // `requestReviewerVerdicts` when the reviewer returns empty after
-        // a retry.
+        // a retry, or when the response omits some criteria it was asked
+        // about.
         let askedSet = askedButUnanswered[task.id] ?? []
         let askedNoAnswer = unchecked.filter { askedSet.contains($0.criterion) }
         let neverAsked = unchecked.filter { !askedSet.contains($0.criterion) }
