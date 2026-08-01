@@ -168,7 +168,7 @@ struct GitHubDashboardView: View {
 
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 4) {
-                            Text("#\(issue.number)")
+                            Text(verbatim: "#\(issue.number)")
                                 .font(.system(size: 10, design: .monospaced))
                                 .foregroundColor(.grokMuted)
                             Text(issue.title)
