@@ -3422,3 +3422,31 @@ brief.
 Still broken: #1112 - a worker that dies on the eleven-minute timeout leaves its
 edits in the tree unattributed. One bee wrote the description of that this
 cycle; nobody has fixed it.
+
+## Two bees ran, and each was blamed for the other's writes
+
+The board follows the registry now: a bee that starts working leaves the Waiting
+section, one that finishes joins it, and neither needs a reload. Driven through
+real transitions rather than read off a binding, and the proof was broken to
+check it - inverting `needsQueenAttention` fails four assertions by name. My
+first attempt at that mutation left an unbalanced brace, so the suite failed to
+compile and proved nothing. Second time this week a break test lied by not
+applying; a mutation that does not build is not a mutation.
+
+The finding is the third false accusation in three cycles, and the worst of
+them. `changedPaths` asks git what moved in the **shared working tree** since the
+bee started. With one bee that is its work. With two, each one's diff contains
+the other's, so #1098 was reported for writing `ChatViewModel.swift` and #1112
+for writing `ChatPanelView.swift` - each other's files, neither over its
+boundary. The branches were unaffected, because the committer filters by
+boundary; it is the observer that cannot tell two bees apart. The previous two
+were constant and therefore visible. This one appears only when bees run in
+parallel, which is the thing the whole design exists to do. #1116.
+
+Also #1117: the reviewer returned nothing at all for #1098 - `response_chars=0` -
+and the Queen recorded zero verdicts and blocked with "never checked". Asked and
+not answered is not the same as never asked, and the two need different repairs.
+The same shape as #1101 one floor up.
+
+Still broken: #1116 and #1117 are filed and untouched, and nobody has opened the
+app and looked at any of this.
