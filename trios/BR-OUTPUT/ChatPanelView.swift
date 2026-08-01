@@ -3065,7 +3065,7 @@ private struct BeeCard: View {
 
                 Spacer(minLength: 4)
 
-                Text("#\(task.issue.number)")
+                Text(verbatim: "#\(task.issue.number)")
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundColor(.white.opacity(0.55))
             }

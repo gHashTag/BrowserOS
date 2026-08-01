@@ -3666,12 +3666,13 @@ final class ChatViewModel: ObservableObject {
     /// file, each file is narrowed to the regions around names the criteria
     /// mention — declarations and usages of those names with a margin of
     /// context above and below (`regionExtractedContent`). When no criteria
-    /// names appear in a file the full content is carried and the downstream
-    /// cap in `QueenReviewVerdictRequest.brief` applies as a fallback. A
-    /// total file-count cap (`maxFiles`) prevents a criterion that names many
-    /// paths from drowning the diff and the criteria under code. The region
-    /// selection header names how many lines were chosen from how many and
-    /// which names drove the selection.
+    /// names appear in a file, the excerpt says so explicitly rather than
+    /// substituting the file's opening lines, so the reviewer sees the gap
+    /// instead of a plausible-looking excerpt (#1124). A total file-count
+    /// cap (`maxFiles`) prevents a criterion that names many paths from
+    /// drowning the diff and the criteria under code. The region selection
+    /// header names how many lines were chosen from how many and which
+    /// names drove the selection.
     private func fileContentsForReview(
         baselineTree: String?,
         ownedPaths: [String],
@@ -3819,9 +3820,11 @@ final class ChatViewModel: ObservableObject {
     /// non-adjacent regions.
     ///
     /// When no criteria names appear in the file — or no criteria names
-    /// were extracted at all — the full content is returned unchanged, so
-    /// the downstream truncation in `QueenReviewVerdictRequest.brief` still
-    /// applies and the reviewer gets the same view it always had.
+    /// were extracted at all — an explicit notice replaces the content so
+    /// the reviewer knows the file was scanned and nothing matched, rather
+    /// than reading the first lines of an unrelated section (#1124). The
+    /// notice names what was looked for so the gap is visible, not hidden
+    /// behind a plausible-looking excerpt.
     private nonisolated static func regionExtractedContent(
         fullContent: String,
         criteria: [String]
@@ -3829,7 +3832,14 @@ final class ChatViewModel: ObservableObject {
         let allLines = fullContent.components(separatedBy: "\n")
         let names = criteriaNames(in: criteria)
 
-        guard !names.isEmpty else { return fullContent }
+        if names.isEmpty {
+            // No code-like identifiers were extracted from the criteria.
+            // Returning the full content would give the reviewer the
+            // first lines of the file — which look like relevant context
+            // but are not, because nothing in the criteria pointed there.
+            // An explicit notice makes the gap visible (#1124).
+            return "(no criteria names found to search for in this file)"
+        }
 
         // Find all line indices where any name appears.
         var hitLines = Set<Int>()
@@ -3839,7 +3849,18 @@ final class ChatViewModel: ObservableObject {
             }
         }
 
-        guard !hitLines.isEmpty else { return fullContent }
+        if hitLines.isEmpty {
+            // Names were extracted from the criteria but none appear in
+            // this file. Returning the full content would substitute the
+            // file's opening lines — which read as context but are not,
+            // because no criterion name anchored them. The notice names
+            // what was looked for so the reviewer sees the gap, not a
+            // plausible-looking excerpt (#1124).
+            return "(none of the criteria names found in this file — "
+                + "looked for: "
+                + names.sorted().joined(separator: ", ")
+                + ")"
+        }
 
         // Build and merge regions: ±contextLines around each hit.
         let context = regionContextLines
