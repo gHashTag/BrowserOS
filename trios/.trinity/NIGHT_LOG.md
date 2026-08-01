@@ -3574,3 +3574,30 @@ times and cost several cycles.
 
 Still broken: #1118's readability line needs eyes nobody has offered, and #1099,
 #1100, #1101, #1109, #1111, #1117, #1119 remain open.
+
+## Three defects in one chain, each hiding the next
+
+The same re-review was driven four times tonight and returned `parsed=0` three
+of them. The brief did not carry the files a criterion names, so a task whose
+lane is a test file and whose contract is about the application could not be
+judged - #1119. Fixing that changed nothing, because criterion paths resolve
+against the git root while they are written against the project root, and the
+miss was swallowed by a `fileExists` guard. The contract had asked for a named
+missing file to be reported as missing; had that been honoured the wrong root
+would have shown immediately instead of looking like a criterion with no paths
+in it - #1121. With the right root the reviewer answered properly, 2733
+characters and four readable verdicts, and the parser reported zero: it wants a
+line beginning with the number and the model writes `**1. met**`. Its own
+comment listed bare and checkbox and never markdown - #1122.
+
+`asked=4 parsed=4 recorded=4, unchecked=none` now, and removing the markdown
+tolerance fails three assertions by name.
+
+What this cost is the lesson. Every one of the three looked exactly like "the
+work is not good enough", and every one was the question failing to arrive. The
+only reason any of them was found is that the reviewer's raw answer is written
+to disk - the change that took the whole of one cycle and looked like
+housekeeping at the time.
+
+Ratchet 526 -> 538. Still open: #1118's readability line, #1099, #1100, #1101,
+#1109, #1111, #1117.
