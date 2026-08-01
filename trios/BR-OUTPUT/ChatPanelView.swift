@@ -204,10 +204,16 @@ struct ChatPanelView: View {
     /// in worker or regular chats. When the swarm is empty the section collapses
     /// to zero height — a permanent header for an idle hive is a permanent tax
     /// on the reading area.
+    ///
+    /// The `open.isEmpty` guard lives *inside* `QueenBeeBoard`, not here, because
+    /// `ChatViewModel.delegationRegistry` is a plain `let` — the parent view is
+    /// never re-evaluated when the registry mutates. `QueenBeeBoard` observes the
+    /// registry through its own `@ObservedObject`, so it can collapse or expand
+    /// itself the moment a task is added or settled, without a reload and without
+    /// the parent body running.
     @ViewBuilder
     private var queenBeeBoard: some View {
-        if viewModel.conversationId == ChatConversation.trinityQueenId,
-           !viewModel.delegationRegistry.open.isEmpty {
+        if viewModel.conversationId == ChatConversation.trinityQueenId {
             QueenBeeBoard(
                 registry: viewModel.delegationRegistry,
                 onSelectBee: { conversationId in
@@ -2746,33 +2752,41 @@ private struct QueenBeeBoard: View {
 
     private var hasAttentionTasks: Bool { !waitingTasks.isEmpty }
 
+    @ViewBuilder
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            boardHeader
-            if !waitingTasks.isEmpty {
-                sectionHeader("Waiting on you", count: waitingTasks.count)
-                cardsRow(tasks: waitingTasks)
+        /// Collapses to zero height when the swarm is idle. This check is here
+        /// rather than in the parent because the parent view never re-evaluates
+        /// on registry mutations — only this `@ObservedObject` does. Moving the
+        /// guard here is what lets the board appear, disappear, and change its
+        /// contents live, without a reload and without switching chats.
+        if !registry.open.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                boardHeader
+                if !waitingTasks.isEmpty {
+                    sectionHeader("Waiting on you", count: waitingTasks.count)
+                    cardsRow(tasks: waitingTasks)
+                }
+                if !workingTasks.isEmpty {
+                    sectionHeader("Working", count: workingTasks.count)
+                    cardsRow(tasks: workingTasks)
+                }
             }
-            if !workingTasks.isEmpty {
-                sectionHeader("Working", count: workingTasks.count)
-                cardsRow(tasks: workingTasks)
+            .padding(.vertical, 8)
+            .background(
+                ZStack {
+                    GlassmorphismBackground(
+                        material: .underWindowBackground,
+                        blending: .withinWindow,
+                        cornerRadius: 0
+                    )
+                    Color.black.opacity(0.2)
+                }
+            )
+            .overlay(alignment: .bottom) {
+                Rectangle()
+                    .fill(Color.grokBorder.opacity(0.3))
+                    .frame(height: 1)
             }
-        }
-        .padding(.vertical, 8)
-        .background(
-            ZStack {
-                GlassmorphismBackground(
-                    material: .underWindowBackground,
-                    blending: .withinWindow,
-                    cornerRadius: 0
-                )
-                Color.black.opacity(0.2)
-            }
-        )
-        .overlay(alignment: .bottom) {
-            Rectangle()
-                .fill(Color.grokBorder.opacity(0.3))
-                .frame(height: 1)
         }
     }
 

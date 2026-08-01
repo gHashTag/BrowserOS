@@ -3372,6 +3372,84 @@ final class ChatViewModel: ObservableObject {
         scheduler.start()
     }
 
+    /// Settles a dead worker's edits so the shared tree is not left with
+    /// changes nobody owns.
+    ///
+    /// When a worker fails or is cancelled, its edits are still in the shared
+    /// working tree. Without this method they sit there unattributed: the next
+    /// worker, the user, or the build inherits them without knowing whose they
+    /// are. The method commits what changed to the worker's own branch with an
+    /// incompleteness marker, logging each file by name. If the commit cannot
+    /// happen (no branch, no baseline), the failure is logged as an error so it
+    /// is never silent.
+    ///
+    /// Returns a human-readable summary for the Queen's notice.
+    private func settleFailedWorkerEdits(
+        task: DelegatedTask,
+        reason: String
+    ) async -> String {
+        let baselineTree = workerBaselineTrees[task.conversationId]
+        let measured = await QueenBranchCommitter.changedPaths(since: baselineTree)
+        let measuredRelative = measured.map { QueenBranchCommitter.projectRelative($0) }
+
+        // Nothing the worker touched — the tree is clean, nothing to settle.
+        if measuredRelative.isEmpty {
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.worker.died.clean",
+                "\(task.worker) died but changed no files; the tree is clean",
+                ["issue": task.issue.slug, "worker": task.worker, "reason": reason]
+            )
+            return "\(task.worker) changed no files before it stopped."
+        }
+
+        guard let branch = task.virtualBranch else {
+            // Changes exist but there is nowhere to put them. This is the exact
+            // "silent" state the issue forbids: the tree is dirty, no branch
+            // carries the edits, and nobody has taken ownership. Log it loudly
+            // so the user knows the tree needs manual attention.
+            TriosLogBus.shared.error(
+                .queen,
+                "queen.worker.died.orphaned",
+                "\(task.worker) died with edits but no branch to carry them",
+                [
+                    "issue": task.issue.slug,
+                    "worker": task.worker,
+                    "reason": reason,
+                    "files": measuredRelative.joined(separator: ", ")
+                ]
+            )
+            return "\(task.worker) left \(measuredRelative.count) file(s) changed "
+                + "but has no branch to attribute them to — the tree needs "
+                + "manual attention: \(measuredRelative.joined(separator: ", "))."
+        }
+
+        // Commit the changes with an incompleteness marker so the partial work
+        // is preserved on the branch, clearly marked as unfinished.
+        let outcome = await QueenBranchCommitter.commitWorkerChanges(
+            branch: branch,
+            baselineTree: baselineTree,
+            message: "queen(\(task.issue.slug)) [INCOMPLETE: \(reason)]: \(task.title)",
+            ownedPaths: task.ownedPaths
+        )
+
+        // Per-file log so the journal says by name what happened to each file.
+        TriosLogBus.shared.warn(
+            .queen,
+            outcome.committed ? "queen.worker.died.attributed" : "queen.worker.died.unsettled",
+            "\(task.worker) died; \(outcome.summary)",
+            [
+                "issue": task.issue.slug,
+                "worker": task.worker,
+                "reason": reason,
+                "files": measuredRelative.joined(separator: ", "),
+                "committed": outcome.committed ? "true" : "false"
+            ]
+        )
+
+        return outcome.summary
+    }
+
     private func handleWorkerFinished(
         task: DelegatedTask,
         failure: String?,
@@ -3499,6 +3577,12 @@ final class ChatViewModel: ObservableObject {
                     fileContents: touchedFiles
                 )
             }
+        } else if failure != nil {
+            // A dead worker's edits are still in the shared tree. Settle them
+            // so they are attributed to its branch with an incompleteness
+            // marker, or reported loudly if they cannot be.
+            let settlement = await settleFailedWorkerEdits(task: task, reason: failure!)
+            notice += "\n" + settlement
         }
         workerBaselineTrees[task.conversationId] = nil
         // Transition only after the branch is tallied. Announcing
@@ -3877,6 +3961,13 @@ final class ChatViewModel: ObservableObject {
             }
 
             guard registry.transition(taskID: task.id, to: .cancelled) else { continue }
+            // A cancelled worker's edits are as unattributed as a failed one's.
+            // Settle them the same way before clearing the baseline.
+            let settlement = await settleFailedWorkerEdits(
+                task: task,
+                reason: "cancelled after exhausting restarts"
+            )
+            workerBaselineTrees[task.conversationId] = nil
             await appendSystemMessageToQueenChat(
                 SystemNoticeClassifier.warningMarker
                     + "I closed \(task.issue.slug). \(task.worker) went silent and did not "
@@ -3884,6 +3975,7 @@ final class ChatViewModel: ObservableObject {
                     + (alreadyTried == 1 ? "" : "s") + ", so this is not a stall I can "
                     + "clear by asking again. Its branch and chat survive, so nothing is "
                     + "lost - but treat the task as unanswered rather than attempted."
+                    + "\n" + settlement
             )
             TriosLogBus.shared.warn(
                 .queen,
