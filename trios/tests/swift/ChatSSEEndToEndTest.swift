@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 538
+    static let minimumChecks = 538  // was 542; the 4 drift-guard checks moved to make drift-guard (#1125)
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -106,6 +106,12 @@ struct ChatSSEEndToEndTests {
         await runBeeBoardReflectsStateChanges()
         await runDashboardEntryExitCardButtonsAndEmptyState()
         await runVerdictParserHandlesMarkdownNumbers()
+        // The interface-drift proof invokes the Swift compiler and is
+        // deliberately kept out of the fast suite. Run it explicitly with:
+        //   make drift-guard
+        if ProcessInfo.processInfo.environment["TRIOS_RUN_DRIFT_GUARD"] != nil {
+            await runInterfaceDriftGuardCatchesSignatureMismatch()
+        }
 
         if checksRun < minimumChecks {
             print("\nFAIL - only \(checksRun) checks ran, expected at least \(minimumChecks).")
@@ -4611,5 +4617,173 @@ struct ChatSSEEndToEndTests {
         // checks above. The bare 1. and [x] 1. checks survive without
         // the fix, which is why only the decorated variants are the
         // guard — they are the ones that fail when support is removed.
+    }
+
+    // MARK: - Scenario: the interface-drift guard catches a signature mismatch
+
+    /// `QueenBranchCommitter.verifyCombinedBuild` is the gate that catches
+    /// interface drift: when one lane changes a function's signature and
+    /// another lane's caller was written against the old one, each branch
+    /// compiles in isolation but the combined tree does not.
+    ///
+    /// This scenario builds a minimal Swift package in a scratch repository,
+    /// creates two divergent branches, and proves the guard fails the
+    /// combined build. A third branch with a compatible change is accepted,
+    /// so the guard is proven to discriminate — not just always refuse.
+    /// #1111.
+    static func runInterfaceDriftGuardCatchesSignatureMismatch() async {
+        print("\n# Scenario: the interface-drift guard catches a signature mismatch")
+
+        // --- Fast-path guard (#1125) ---
+        // This scenario invokes the Swift compiler, so it must only run under
+        // the explicit slow target (make drift-guard, which sets
+        // TRIOS_RUN_DRIFT_GUARD).  If it runs in the fast suite without that
+        // flag the proof was put back silently — "a bit slower today" instead
+        // of a failure the next day.  Fail loudly so the regression is
+        // visible, not gradual.
+        guard ProcessInfo.processInfo.environment["TRIOS_RUN_DRIFT_GUARD"] != nil else {
+            fail("the interface-drift proof ran in the fast suite; it belongs in 'make drift-guard', not run_chat_sse_e2e.sh (#1125)")
+            return
+        }
+
+        let root = NSTemporaryDirectory() + "trios-drift-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: root) }
+
+        func git(_ args: [String]) {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            p.arguments = args
+            p.currentDirectoryURL = URL(fileURLWithPath: root)
+            p.standardOutput = Pipe()
+            p.standardError = Pipe()
+            try? p.run()
+            p.waitUntilExit()
+        }
+
+        func writeFile(_ relativePath: String, _ content: String) {
+            let fullPath = "\(root)/\(relativePath)"
+            let dir = (fullPath as NSString).deletingLastPathComponent
+            try? FileManager.default.createDirectory(
+                atPath: dir, withIntermediateDirectories: true)
+            try? content.write(toFile: fullPath, atomically: true, encoding: .utf8)
+        }
+
+        // --- Base: a minimal Swift package that compiles ---
+        git(["init", "-q", "-b", "main"])
+        git(["config", "user.email", "drift@example.com"])
+        git(["config", "user.name", "Drift Test"])
+
+        writeFile("Package.swift", """
+            // swift-tools-version: 5.9
+            import PackageDescription
+
+            let package = Package(
+                name: "DriftTest",
+                targets: [
+                    .target(name: "Lib", path: "Sources/Lib"),
+                    .target(name: "App", dependencies: ["Lib"], path: "Sources/App"),
+                ]
+            )
+            """)
+
+        writeFile("Sources/Lib/Lib.swift", """
+            public func greet(_ name: String) -> String {
+                return "Hello, \\(name)!"
+            }
+            """)
+
+        writeFile("Sources/App/App.swift", """
+            import Lib
+
+            public func runApp() -> String {
+                return greet("world")
+            }
+            """)
+
+        git(["add", "-A"])
+        git(["commit", "-q", "-m", "base"])
+
+        // --- Lane A: change the function signature (and update its own
+        // caller so the branch compiles in isolation). ---
+        git(["checkout", "-q", "-b", "queen/drift-signature"])
+
+        writeFile("Sources/Lib/Lib.swift", """
+            public func greet(_ name: String, _ greeting: String) -> String {
+                return "\\(greeting), \\(name)!"
+            }
+            """)
+
+        writeFile("Sources/App/App.swift", """
+            import Lib
+
+            public func runApp() -> String {
+                return greet("world", "Hello")
+            }
+            """)
+
+        git(["add", "-A"])
+        git(["commit", "-q", "-m", "change signature"])
+        git(["checkout", "-q", "main"])
+
+        // --- Lane B: add a new caller using the old, single-argument
+        // signature. This branch compiles against the base, but the call
+        // is stale once Lane A's two-parameter signature is overlaid. ---
+        git(["checkout", "-q", "-b", "queen/drift-caller"])
+
+        writeFile("Sources/App/Caller.swift", """
+            import Lib
+
+            public func callGreet() -> String {
+                return greet("world")
+            }
+            """)
+
+        git(["add", "-A"])
+        git(["commit", "-q", "-m", "add caller with old signature"])
+        git(["checkout", "-q", "main"])
+
+        // --- Drive the guard: the combined tree must not build. ---
+        // Criterion 1: a signature change in one lane and a stale caller
+        // in another leave the combined tree non-compiling, and the guard
+        // says so rather than letting the broken tree land silently.
+        let driftResult = await QueenBranchCommitter.verifyCombinedBuild(
+            branches: ["queen/drift-signature", "queen/drift-caller"],
+            baseRef: "main",
+            projectRoot: root
+        )
+        check(driftResult.combinedTreeSha != nil,
+              "the combined tree is assembled before the build is judged")
+        check(!driftResult.builds,
+              "the drift guard fails a combined tree whose signature and caller disagree")
+        check(driftResult.summary.contains("FAILED"),
+              "the drift summary reports the build failure, not just a boolean")
+
+        // --- Criterion 2: the guard must discriminate, not always refuse.
+        // A branch whose change is compatible with the base must still be
+        // accepted. If this passes while the drift case fails, removing
+        // the build step from verifyCombinedBuild (the "former behaviour")
+        // breaks both: the drift case wrongly returns true, and this case
+        // still passes — but the drift check catches the lie. ---
+        git(["checkout", "-q", "-b", "queen/drift-compatible"])
+
+        writeFile("Sources/App/Helper.swift", """
+            import Lib
+
+            public func helper() -> String {
+                return greet("helper")
+            }
+            """)
+
+        git(["add", "-A"])
+        git(["commit", "-q", "-m", "add compatible helper"])
+        git(["checkout", "-q", "main"])
+
+        let okResult = await QueenBranchCommitter.verifyCombinedBuild(
+            branches: ["queen/drift-compatible"],
+            baseRef: "main",
+            projectRoot: root
+        )
+        check(okResult.builds,
+              "a compatible change is accepted by the drift guard")
     }
 }

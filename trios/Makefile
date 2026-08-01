@@ -19,7 +19,7 @@ DEV_APP     := $(ROOT)/trios-dev.app
 RELEASE_APP := $(ROOT)/trios.app
 
 .DEFAULT_GOAL := dev
-.PHONY: help dev release build check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe
+.PHONY: help dev release build check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard
 
 help:
 	@echo "TriOS targets:"
@@ -39,6 +39,7 @@ help:
 	@echo "  make clean      - remove build products for both variants"
 	@echo "  make mutants    - break known guards and require the SSE suite to notice"
 	@echo "  make mutants-logic - the same, for guards a clade-e2e logic suite owns"
+	@echo "  make drift-guard - run the interface-drift compiling proof (slow; not in the fast suite)"
 
 # --- Building -----------------------------------------------------------
 
@@ -498,3 +499,16 @@ mutants-logic:
 	done; \
 	if [ $$fail -eq 0 ]; then echo "[OK] every logic-suite mutation was caught ($$n)"; \
 	else echo "[FAIL] a logic-suite mutation survived, went stale, or was not measured"; exit 1; fi
+
+# --- Interface-drift compiling proof ------------------------------------
+#
+# The interface-drift proof builds divergent Swift packages and proves the
+# combined-build guard catches a signature mismatch.  It invokes the Swift
+# compiler, so it is deliberately separate from the fast SSE suite: the same
+# reason make mutants is separate — slow, explicit, never accidental (#1125).
+#
+# The fast suite asserts, via TRIOS_RUN_DRIFT_GUARD, that this scenario is not
+# running inside it; putting the call back unconditionally fails the fast run
+# rather than silently slowing it down.
+drift-guard:
+	@TRIOS_RUN_DRIFT_GUARD=1 bash "$(ROOT)/tests/swift/run_chat_sse_e2e.sh"
