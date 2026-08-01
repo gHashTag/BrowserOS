@@ -3549,3 +3549,28 @@ and whose boundary is another cannot be reviewed at all.
 
 Still broken: #1117 (one of two criteria confirmed), #1118's readability line,
 and #1099, #1100, #1101, #1109, #1111 remain open.
+
+## The password was in the repository all along
+
+The user asked for Touch ID instead of typing. Touch ID cannot reach that
+dialog - biometrics answer "allow access to this key" in the login keychain, and
+a secondary keychain raises "enter the keychain password", which has no
+biometric path. The repair was underneath the request anyway: the password is
+not a secret and never was. `create_dev_signing_identity.sh` hardcodes
+`trios-dev` and says why in its own header - one public self-signed certificate,
+nothing to protect. The build opens the keychain itself now, so there is no
+dialog left to put a finger on.
+
+Proven backwards, which is the only way that means anything here: the keychain
+was locked deliberately, `make release` was run, and it produced a real
+signature that `codesign --verify` accepts, with zero SecurityAgent processes.
+Every release build before it tonight stalled there, and one left the bundle
+unlaunchable when a timeout killed codesign mid-signature. Six cycles of
+ad-hoc-signing the release by hand end here.
+
+Also landed: the reviewer's brief carries the files a criterion names, not only
+the files in the boundary - the scope mismatch that produced `parsed=0` three
+times and cost several cycles.
+
+Still broken: #1118's readability line needs eyes nobody has offered, and #1099,
+#1100, #1101, #1109, #1111, #1117, #1119 remain open.
