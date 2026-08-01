@@ -3499,3 +3499,28 @@ read two ways, and the reviewer cannot save a criterion the writer left open -
 it judged the wrong surface as confidently as it judges the right one.
 
 Still broken: #1118, and nobody has opened the app and looked at any of this.
+
+## The dashboard was never unwired, and I sent three bees after a phantom
+
+`FullscreenChatWorkspace` is the name of a file, not a type. The only struct in
+it is `AdaptiveChatWorkspace` at line 6, and `QueenTabView` presents it, so
+`git grep "FullscreenChatWorkspace("` found nothing because there was nothing to
+find. I wrote that grep into the issue as the mechanical criterion, called it
+unmistakable, and it demanded something impossible. Three bees failed against
+it; the second, which changed nothing and was scored badly for it, was right.
+
+What hides the dashboard is a width. `expandedThreshold` is 760 points - under
+that the compact bar, over it the full dashboard - and the app lives in a narrow
+panel, so it was one window-resize away with nothing saying so. A bee has now
+put a control in the compact panel that opens it and closes it again.
+
+Its guard does not guard. Removing the call to `dashboardToggleButton` leaves
+the suite green, because the test greps the source for "Open Dashboard" and
+`isDashboardExpanded`, and those still sit in the declaration nothing calls. A
+source-text check cannot tell declared from used - closed three times elsewhere
+in this repository and reintroduced here, in the test written to prevent exactly
+this. #1118 stays open on that criterion alone.
+
+Lesson for me, not for the bees: a criterion I cannot verify myself before
+writing it down is a criterion that sends work at a phantom. I checked the grep
+returned nothing and never asked whether the symbol existed.
