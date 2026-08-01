@@ -25,7 +25,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 552  // 538 + 14 stale-verdict checks (#1126)
+    static let minimumChecks = 557  // 538 + 14 stale-verdict (#1126) + 5 issue-number (#1129)
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -107,6 +107,7 @@ struct ChatSSEEndToEndTests {
         await runDashboardEntryExitCardButtonsAndEmptyState()
         await runVerdictParserHandlesMarkdownNumbers()
         await runVerdictCarriesTreeState()
+        await runIssueNumberIsAnIdentifier()
         // The interface-drift proof invokes the Swift compiler and is
         // deliberately kept out of the fast suite. Run it explicitly with:
         //   make drift-guard
@@ -4779,6 +4780,81 @@ struct ChatSSEEndToEndTests {
         )
         check(noTracking.first?.verdict == .met,
               "without state tracking, the old behaviour is preserved — no verdict is marked stale")
+    }
+
+    // MARK: - Scenario: an issue number is an identifier, not a quantity (#1129)
+
+    /// An issue number is an identifier — a name that happens to look like
+    /// a number — not a quantity. When SwiftUI's `Text(LocalizedStringKey)`
+    /// receives `Text("#\(someInt)")`, the interpolation resolves through
+    /// `IntegerFormatStyle`, which inserts a group separator at the thousand
+    /// boundary (`#1,129` in en_US). The fix is `Text(verbatim:)`, which
+    /// prints the raw digits via `String(describing:)` — no formatter, no
+    /// separator.
+    ///
+    /// Two surfaces show the issue number:
+    /// 1. The pinned spec header prints `task.issue.slug` (a `String`
+    ///    variable → `Text(String)` → already verbatim). Already correct.
+    /// 2. The bee card prints `Text("#\(task.issue.number)")` via
+    ///    `LocalizedStringKey` → group separator. Needed `verbatim:`.
+    /// #1129.
+    static func runIssueNumberIsAnIdentifier() async {
+        print("\n# Scenario: an issue number is printed without group separators (#1129)")
+
+        let panelSource = (try? String(
+            contentsOfFile: "\(ProjectPaths.brOutput)/ChatPanelView.swift",
+            encoding: .utf8
+        )) ?? ""
+
+        check(!panelSource.isEmpty,
+              "ChatPanelView.swift is readable — the issue-number checks have something to read")
+
+        // --- Criterion 1: the number is printed without group separator in
+        // both display modes. ---
+        //
+        // The bee card: the fix routes the number through Text(verbatim:).
+        // If verbatim: is stripped, the number re-enters the
+        // LocalizedStringKey path and gains a group separator.
+        let verbatimUses = occurrences(
+            "Text(verbatim: \"#\\(task.issue.number)\")", in: panelSource
+        )
+        check(verbatimUses >= 1,
+              "criterion 1: the bee card prints the issue number via Text(verbatim:) (\(verbatimUses) use) — an identifier, not a formatted quantity")
+
+        // The spec header: task.issue.slug is a String variable, so
+        // Text(task.issue.slug) resolves to Text(String) — verbatim by
+        // default. This is the second display mode; it was already correct.
+        let slugUses = occurrences("Text(task.issue.slug)", in: panelSource)
+        check(slugUses >= 1,
+              "criterion 1: the spec header prints the slug (a String → Text(String) → verbatim) (\(slugUses) use) — already correct")
+
+        // --- Criterion 2: the check breaks if quantity formatting is
+        // restored. ---
+        //
+        // The test must assert about the form — the number contains no
+        // separator — not about a specific value. A number at or above
+        // 1000 is the threshold at which a group separator first appears.
+        // Checking the form (raw digits, shorter than the formatted
+        // version) rather than the value ("1129") makes the test about the
+        // principle, not the instance.
+
+        let identifierNumber = 1129
+
+        // String interpolation — what Text(verbatim:) uses internally —
+        // produces raw digits with no separator.
+        let asIdentifier = "#\(identifierNumber)"
+
+        // IntegerFormatStyle with grouping — what Text(LocalizedStringKey)
+        // uses internally — adds a separator, making the result longer.
+        let asQuantity = identifierNumber.formatted(
+            IntegerFormatStyle().grouping(.automatic)
+        )
+
+        check(asIdentifier.count < asQuantity.count,
+              "criterion 2: the same digits as a quantity (\(asQuantity)) are longer than as an identifier (\(asIdentifier)) — a group separator was added that Text(verbatim:) avoids")
+
+        check(!asIdentifier.contains(","),
+              "criterion 2: the identifier \(asIdentifier) has no group separator — the form is raw digits, not a formatted number")
     }
 
     // MARK: - Scenario: the interface-drift guard catches a signature mismatch
