@@ -3601,3 +3601,27 @@ housekeeping at the time.
 
 Ratchet 526 -> 538. Still open: #1118's readability line, #1099, #1100, #1101,
 #1109, #1111, #1117.
+
+## The fourth link, and the same shape as the first three
+
+`ChatViewModel.swift` is 5,293 lines and the brief carried its first 500. The
+reviewer said so - declarations at the top, behaviour below, criteria always
+about behaviour - and returned "could not check" for everything. The excerpt now
+follows the names a criterion mentions. Driven on the case that failed: the same
+re-review returned two verdicts of three and quoted the implementation.
+
+Four defects in a row now, all the same shape: the question did not reach the
+judge, and every one of them read as "the work is not good enough". Empty brief,
+wrong path root, unrecognised answer format, and now the wrong 500 lines. Each
+was only visible because the reviewer's raw answer is written to disk, and each
+told me exactly what it could not see when I bothered to read it.
+
+Five stale issues closed with the evidence that superseded them - #1099, #1100,
+#1101, #1106, #1109 - and #1106 first re-reviewed rather than closed on my word:
+three verdicts of three.
+
+Incidental: a worker died on a timeout mid-review and logged
+`queen.worker.died.clean` - died, changed nothing, tree clean. #1112 working in
+a case nobody arranged.
+
+Still broken: #1117's retry criterion, #1118's readability line, #1111.
