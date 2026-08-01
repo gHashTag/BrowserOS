@@ -322,30 +322,36 @@ EOF
     install_name_tool -change "/opt/homebrew/opt/sqlcipher/lib/$SQLCIPHER_DYLIB_NAME" \
         "@rpath/$SQLCIPHER_DYLIB_NAME" "$MACOS_DIR/trios"
     # Replacing any file inside a signed bundle invalidates its signature and
-    # macOS terminates the app in dyld before main() runs. Apply an ad-hoc
-    # development signature after the bundle is complete.
-    # An ad-hoc signature has no stable identity, so every rebuild looks like a
-    # different app to macOS and the login keychain re-prompts for every stored
-    # secret. Set TRIOS_SIGN_IDENTITY to a stable certificate to stop that;
-    # scripts/create_dev_signing_identity.sh creates a suitable self-signed one.
-    # Default to the local development identity when one exists. Requiring an
-    # environment variable meant the remedy was documented but never applied:
-    # every plain ./build.sh fell back to ad-hoc and the prompts came back.
-    SIGN_IDENTITY="${TRIOS_SIGN_IDENTITY:-TriOS Development}"
-    # Deliberately not `find-identity -v`. A self-signed development
-    # certificate is untrusted, so -v ("valid identities only") lists zero and
-    # this guard would reject an identity that codesign signs and verifies
-    # perfectly well - a check that silently matches nothing and costs the user
-    # a password dialog per secret.
-    if [ "$SIGN_IDENTITY" != "-" ] && ! security find-identity -p codesigning | grep -q "$SIGN_IDENTITY"; then
-        echo "[WARN] Signing identity '$SIGN_IDENTITY' not found; falling back to ad-hoc."
-        echo "[WARN] Expect repeated keychain password prompts after each rebuild."
-        echo "[WARN] Create one once with: bash scripts/create_dev_signing_identity.sh"
+    # macOS terminates the app in dyld before main() runs. A signature is
+    # required after the bundle is complete.
+    #
+    # Variant policy:
+    #   dev  → ad-hoc sign ("-"). Never touches the keychain, never prompts
+    #          for a password. An ad-hoc identity changes every rebuild, but
+    #          that is harmless for local development.
+    #   prod → sign with a persistent certificate (default "TriOS Development")
+    #          so the binary carries a stable identity across builds.
+    if [ "$VARIANT" = "dev" ]; then
         SIGN_IDENTITY="-"
+    else
+        SIGN_IDENTITY="${TRIOS_SIGN_IDENTITY:-TriOS Development}"
+        # Deliberately not `find-identity -v`. A self-signed development
+        # certificate is untrusted, so -v ("valid identities only") lists zero
+        # and this guard would reject an identity that codesign signs and
+        # verifies perfectly well - a check that silently matches nothing.
+        if [ "$SIGN_IDENTITY" != "-" ] && ! security find-identity -p codesigning | grep -q "$SIGN_IDENTITY"; then
+            echo "[WARN] Signing identity '$SIGN_IDENTITY' not found; falling back to ad-hoc."
+            echo "[WARN] Create one once with: bash scripts/create_dev_signing_identity.sh"
+            SIGN_IDENTITY="-"
+        fi
     fi
+    # Remove stale codesign temp files left by an interrupted build. A leftover
+    # *.cstemp inside the bundle causes the next codesign to produce a signature
+    # that fails verification, leaving an unlaunchable app.
+    find "$APP_BUNDLE" -name '*.cstemp' -delete 2>/dev/null || true
     codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
     codesign --verify --deep --strict "$APP_BUNDLE"
-    echo "[OK] Copied and signed $APP_BUNDLE (variant: $VARIANT, bundle ID: $BUNDLE_ID)"
+    echo "[OK] Copied and signed $APP_BUNDLE (variant: $VARIANT, identity: $SIGN_IDENTITY)"
 
     # The app-level memory, planner, streaming, cancellation, and persistence
     # contracts live in the existing standalone integration harness because the
