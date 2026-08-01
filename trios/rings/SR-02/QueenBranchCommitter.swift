@@ -293,6 +293,245 @@ enum QueenBranchCommitter {
         }.value
     }
 
+    // MARK: - Combined State Verification
+
+    /// The outcome of asking whether the combined tree of several branches
+    /// compiles.
+    ///
+    /// `builds` is the authoritative answer. `summary` carries enough of the
+    /// compiler output to see *why* it failed without dumping a megabyte of
+    /// build log. `combinedTreeSha` is the tree that was tested, for
+    /// traceability; nil means the tree could not be assembled at all.
+    struct CombinedBuildResult {
+        let builds: Bool
+        let summary: String
+        var combinedTreeSha: String?
+    }
+
+    /// Builds a single tree that overlays every branch's edits onto a
+    /// shared base ref.
+    ///
+    /// Each worker branches from the same checkout and stays inside its own
+    /// files, so the combined tree is simply the base with each branch's
+    /// changed paths overwritten by that branch's version. Two branches that
+    /// touch the same path are a boundary violation the Queen prevents; if it
+    /// happens anyway, the last branch in the array wins and the caller
+    /// should investigate.
+    ///
+    /// Returns nil when the base ref or any branch cannot be resolved, or the
+    /// tree cannot be written. The caller should treat nil as "do not accept —
+    /// the combined state is unknown."
+    static func combinedTree(
+        branches: [String],
+        baseRef: String,
+        projectRoot: String = ProjectPaths.root
+    ) async -> String? {
+        guard !branches.isEmpty else { return nil }
+        return await Task.detached(priority: .utility) {
+            let index = temporaryIndexPath()
+            defer { try? FileManager.default.removeItem(atPath: index) }
+
+            // Start from the base tree so the combined index carries
+            // everything no branch touched.
+            guard runGit(["read-tree", baseRef],
+                         index: index, projectRoot: projectRoot) != nil else {
+                return nil
+            }
+
+            for branch in branches {
+                let branchRef = "refs/heads/\(branch)"
+                guard runGit(["rev-parse", "--verify", branchRef],
+                             index: index, projectRoot: projectRoot) != nil else {
+                    return nil
+                }
+
+                // Paths this branch changed relative to base.
+                let diff = runGit(
+                    ["diff", "--name-only", baseRef, branchRef],
+                    index: index, projectRoot: projectRoot
+                ) ?? ""
+                let changed = diff
+                    .split(separator: "\n")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+
+                // Overlay each changed path from the branch tip onto the
+                // combined index. `ls-tree` gives mode and SHA;
+                // `update-index --cacheinfo` stages them without touching
+                // the working tree. A path absent from the branch was
+                // deleted there, so it is removed from the index.
+                for path in changed {
+                    let entry = runGit(
+                        ["ls-tree", branchRef, "--", path],
+                        index: index, projectRoot: projectRoot
+                    )?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    if entry.isEmpty {
+                        _ = runGit(["update-index", "--remove", "--", path],
+                                   index: index, projectRoot: projectRoot)
+                        continue
+                    }
+                    // Format: "<mode> <type> <sha>\t<path>"
+                    guard let tabRange = entry.range(of: "\t") else { continue }
+                    let meta = String(entry[entry.startIndex..<tabRange.lowerBound])
+                    let metaParts = meta.split(separator: " ")
+                    guard metaParts.count >= 3 else { continue }
+                    let mode = String(metaParts[0])
+                    let sha = String(metaParts[2])
+                    _ = runGit(
+                        ["update-index", "--cacheinfo", "\(mode),\(sha),\(path)"],
+                        index: index, projectRoot: projectRoot
+                    )
+                }
+            }
+
+            guard let tree = runGit(["write-tree"], index: index, projectRoot: projectRoot)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                !tree.isEmpty else {
+                return nil
+            }
+            return tree
+        }.value
+    }
+
+    /// Extracts the combined tree of all branches into a throwaway directory
+    /// and runs `swift build` there.
+    ///
+    /// This is the gate that catches interface drift: when one lane changes
+    /// a function's signature and another lane's caller was written against
+    /// the old one, each branch compiles in isolation but the combined tree
+    /// does not. Without this check the broken tree lands on trunk and the
+    /// next person to build discovers it.
+    ///
+    /// The build runs in a copy extracted by `checkout-index` from a
+    /// throwaway index, not in the shared checkout, so the user's working
+    /// tree, the real index, and every other worker's view are undisturbed.
+    static func verifyCombinedBuild(
+        branches: [String],
+        baseRef: String,
+        projectRoot: String = ProjectPaths.root
+    ) async -> CombinedBuildResult {
+        guard !branches.isEmpty else {
+            return CombinedBuildResult(
+                builds: true,
+                summary: "No branches to combine — nothing to verify.",
+                combinedTreeSha: nil
+            )
+        }
+
+        guard let treeSha = await combinedTree(
+            branches: branches, baseRef: baseRef, projectRoot: projectRoot
+        ) else {
+            return CombinedBuildResult(
+                builds: false,
+                summary: "Could not assemble the combined tree from branches: "
+                    + branches.joined(separator: ", ") + ".",
+                combinedTreeSha: nil
+            )
+        }
+
+        return await Task.detached(priority: .utility) {
+            let index = temporaryIndexPath()
+            defer { try? FileManager.default.removeItem(atPath: index) }
+
+            let tempDir = NSTemporaryDirectory()
+                + "queen-combined-\(UUID().uuidString)/"
+            let fm = FileManager.default
+            defer { try? fm.removeItem(atPath: tempDir) }
+
+            do {
+                try fm.createDirectory(
+                    atPath: tempDir, withIntermediateDirectories: true
+                )
+            } catch {
+                return CombinedBuildResult(
+                    builds: false,
+                    summary: "Could not create a temp directory for the combined build.",
+                    combinedTreeSha: treeSha
+                )
+            }
+
+            // Load the combined tree into the temp index and extract every
+            // file into the temp directory. `checkout-index --prefix` writes
+            // files at <prefix>/<repo-relative-path>, preserving the
+            // directory structure that `swift build` expects. The prefix
+            // must end with "/" and the directory must already exist.
+            guard runGit(["read-tree", treeSha],
+                         index: index, projectRoot: projectRoot) != nil else {
+                return CombinedBuildResult(
+                    builds: false,
+                    summary: "Could not read the combined tree into a scratch index.",
+                    combinedTreeSha: treeSha
+                )
+            }
+            guard runGit(["checkout-index", "--prefix=\(tempDir)", "-a"],
+                         index: index, projectRoot: projectRoot) != nil else {
+                return CombinedBuildResult(
+                    builds: false,
+                    summary: "Could not extract the combined tree for building.",
+                    combinedTreeSha: treeSha
+                )
+            }
+
+            // Run `swift build` in the temp directory and report whether it
+            // succeeded. The exit status, not the output text, is the
+            // authoritative signal: a warning printed to stderr does not
+            // mean the tree is broken.
+            let build = Process()
+            build.executableURL = URL(fileURLWithPath: "/usr/bin/swift")
+            build.arguments = ["build"]
+            build.currentDirectoryURL = URL(fileURLWithPath: tempDir)
+            build.environment = ProcessInfo.processInfo.environment
+            let output = Pipe()
+            build.standardOutput = output
+            build.standardError = output
+
+            let watchdog = DispatchWorkItem {
+                if build.isRunning { build.terminate() }
+            }
+            DispatchQueue.global(qos: .utility).asyncAfter(
+                deadline: .now() + 300, execute: watchdog
+            )
+
+            do {
+                try build.run()
+            } catch {
+                return CombinedBuildResult(
+                    builds: false,
+                    summary: "Could not start `swift build`: \(error)",
+                    combinedTreeSha: treeSha
+                )
+            }
+
+            let outputData = output.fileHandleForReading.readDataToEndOfFile()
+            build.waitUntilExit()
+            watchdog.cancel()
+
+            let outputText = String(data: outputData, encoding: .utf8) ?? ""
+            let succeeded = build.terminationStatus == 0
+
+            let summary: String
+            if succeeded {
+                summary = "Combined build of \(branches.count) branch(es) succeeded."
+            } else {
+                // First few error lines — enough to see the failure without
+                // dumping the entire build log.
+                let snippet = outputText
+                    .split(separator: "\n")
+                    .filter { $0.contains("error:") }
+                    .prefix(5)
+                    .joined(separator: "\n")
+                summary = "Combined build FAILED. Tree: \(treeSha)."
+                    + (snippet.isEmpty ? "" : "\n\(snippet)")
+            }
+
+            return CombinedBuildResult(
+                builds: succeeded,
+                summary: summary,
+                combinedTreeSha: treeSha
+            )
+        }.value
+    }
+
     // MARK: - Plumbing
 
     private static func temporaryIndexPath() -> String {

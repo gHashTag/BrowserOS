@@ -344,6 +344,27 @@ EOF
             echo "[WARN] Create one once with: bash scripts/create_dev_signing_identity.sh"
             SIGN_IDENTITY="-"
         fi
+
+        # Unlock the signing keychain so codesign never prompts for a password.
+        # The keychain name and password are read from the create script — the
+        # single source of truth — so the two can never drift apart.
+        #
+        # This unlock is mandatory. On a locked keychain codesign blocks on a
+        # GUI dialog, which is the exact failure mode this code prevents. The
+        # if-guard makes a failed unlock a hard build error, not a silent
+        # fallback: removing the unlock line causes codesign to hang on a locked
+        # keychain, which is the regression signal.
+        if [ "$SIGN_IDENTITY" != "-" ]; then
+            SIGN_SCRIPT="$PROJECT_DIR/scripts/create_dev_signing_identity.sh"
+            # shellcheck disable=SC1090
+            eval "$(grep -E '^(KEYCHAIN_NAME|KEYCHAIN_PASSWORD)=' "$SIGN_SCRIPT")"
+            if security list-keychains -d user | grep -q "$KEYCHAIN_NAME"; then
+                if ! security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_NAME" 2>/dev/null; then
+                    echo "[FAIL] Could not unlock signing keychain '$KEYCHAIN_NAME'"
+                    exit 1
+                fi
+            fi
+        fi
     fi
     # Remove stale codesign temp files left by an interrupted build. A leftover
     # *.cstemp inside the bundle causes the next codesign to produce a signature
