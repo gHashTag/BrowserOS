@@ -3625,3 +3625,27 @@ Incidental: a worker died on a timeout mid-review and logged
 a case nobody arranged.
 
 Still broken: #1117's retry criterion, #1118's readability line, #1111.
+
+## A proof that was right, in a place that was wrong
+
+A bee proved the interface-drift guard properly - build the combined tree, watch
+it fail when a signature moves in one lane and the caller stays in another - and
+put it in the fast suite, calling `verifyCombinedBuild` twice. Each call runs the
+compiler. The suite that finished in about a minute stopped finishing at all:
+exit 124 at 580 seconds. A gate that does not terminate is not a gate.
+
+It lives behind `make drift-guard` now. The fast suite is measured back to 68
+seconds and 538 checks. The slow target starts and compiles and I have not
+watched it end, because it outlasts the ten minutes I can hold a command open -
+said plainly rather than counted as done.
+
+And a correction of my own: I closed #1123 on one run. The excerpt follows the
+changed regions, so it works when there is a diff and falls back to the first
+500 lines when there is not - and a re-review of finished work is always an
+empty diff, which is exactly the case the truncation ruins. The same #1117
+re-review gave two verdicts when the bee had edited the file and zero when it
+had not, and the reviewer said why both times. #1124.
+
+Five in a row now where the question failed to arrive and the answer read as bad
+work. The pattern is not the reviewer being weak; it is me closing a link on the
+first green run.
