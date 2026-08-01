@@ -3671,7 +3671,13 @@ final class ChatViewModel: ObservableObject {
         criteria: [String] = []
     ) async -> [String: String] {
         return await Task.detached(priority: .utility) {
-            let repoRoot = QueenBranchCommitter.repositoryRoot()
+            // Criterion and boundary paths are project-relative (`rings/SR-02/…`,
+            // `BR-OUTPUT/…`), but `repositoryRoot()` returns the git toplevel,
+            // which for this project is the BrowserOS checkout one level up.
+            // Resolving from the project root means the files are actually found;
+            // resolving from the git root left every criterion-named file missing
+            // and the reviewer with nothing to read.
+            let projectRoot = ProjectPaths.root
             var result: [String: String] = [:]
             let maxFiles = 20
 
@@ -3686,7 +3692,7 @@ final class ChatViewModel: ObservableObject {
                 guard !path.isEmpty else { continue }
                 let content = QueenStatusViewModel.runProcess(
                     "/bin/cat",
-                    arguments: ["\(repoRoot)/\(path)"],
+                    arguments: ["\(projectRoot)/\(path)"],
                     workDir: ProjectPaths.root,
                     timeout: 10
                 )
@@ -3718,7 +3724,7 @@ final class ChatViewModel: ObservableObject {
                     guard !normalized.isEmpty else { continue }
                     guard result[normalized] == nil else { continue }
                     if result.count >= maxFiles { break }
-                    let full = "\(repoRoot)/\(normalized)"
+                    let full = "\(projectRoot)/\(normalized)"
                     if FileManager.default.fileExists(atPath: full) {
                         let content = QueenStatusViewModel.runProcess(
                             "/bin/cat",
