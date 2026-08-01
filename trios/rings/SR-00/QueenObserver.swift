@@ -141,7 +141,8 @@ enum QueenObserver {
         var strays: Set<String> = []
 
         func consider(_ path: String) {
-            let normalized = QueenDelegationPolicy.normalizePath(path)
+            let relative = stripRootPrefix(path)
+            let normalized = QueenDelegationPolicy.normalizePath(relative)
             // A write is inside when its own boundary contains it, which is not
             // symmetric: owning `docs/live` does not license writing `docs`.
             // pathsOverlap answers the symmetric question the ownership rule
@@ -163,6 +164,31 @@ enum QueenObserver {
     static func isWriteTool(_ name: String) -> Bool {
         let lowered = name.lowercased()
         return lowered.contains("write") || lowered.contains("edit")
+    }
+
+    /// Strips the repository-root prefix from an absolute path so it can be
+    /// compared with boundary paths, which are written relative to that root.
+    ///
+    /// `normalizePath` removes a single leading `/`, which turns an absolute
+    /// path into a broken string: `/Users/…/trios/docs/x.md` becomes
+    /// `Users/…/trios/docs/x.md` and never matches a boundary written as
+    /// `docs`. Stripping the known prefix first leaves `docs/x.md`, which
+    /// the comparison can reach.
+    ///
+    /// A path that does not start with the root is returned unchanged.
+    /// This is the common case — workers write project-relative paths — and
+    /// leaving those alone means a real boundary violation stays visible:
+    /// stripping only the exact root prefix never shortens a path past
+    /// where the worker actually wrote.
+    static func stripRootPrefix(
+        _ path: String,
+        root: String = ProjectPaths.root
+    ) -> String {
+        guard !root.isEmpty else { return path }
+        let prefix = root.hasSuffix("/") ? root : root + "/"
+        return path.hasPrefix(prefix)
+            ? String(path.dropFirst(prefix.count))
+            : path
     }
 
     /// Pulls a path out of a tool's JSON arguments without decoding a schema
