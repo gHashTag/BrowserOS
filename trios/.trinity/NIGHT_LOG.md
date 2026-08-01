@@ -3450,3 +3450,29 @@ The same shape as #1101 one floor up.
 
 Still broken: #1116 and #1117 are filed and untouched, and nobody has opened the
 app and looked at any of this.
+
+## The dashboard was never wired, and two bees stopped blaming each other
+
+The user asked where the agent dashboard had gone. It had not gone anywhere:
+`QueenDashboardView` is called from `FullscreenChatWorkspace.swift:85`, and
+`FullscreenChatWorkspace` is called from nowhere - `git log -S` finds no commit
+in the history where it ever was. The compact supervisor bar sits in the same
+file, in the same condition. Two finished supervisor surfaces that have never
+been on a screen. The bee sent at it added Accept, Cancel and a collapse to the
+board that *is* visible rather than wiring the screen, so #1118 stays open with
+that written down.
+
+#1116 is closed the way it was found: two bees at once, each writing its own
+file, zero accusations where every previous parallel run produced them. The
+first attempt at the fix was inert - the parameter went into the bee's own file
+and both call sites live in a file another bee owned, so the filter defaulted
+off and never ran. Third cycle lost to that shape. The trade-off is recorded
+rather than swallowed: filtering by lane blinds measured writes to a genuine
+out-of-bounds by that same bee, leaving tool names, which cannot see a shell
+write - the hole measurement existed to close.
+
+Ratchet 473 -> 504.
+
+Still broken: #1118 (no way into the dashboard), #1117 and #1097 landed
+unverified this cycle - I have their code and not their proof - and nobody has
+opened the app and looked.
