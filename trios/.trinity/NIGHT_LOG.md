@@ -3388,3 +3388,37 @@ it. And a bee was again accused of leaving its boundary while writing to the one
 file it owned, this time because the path arrives absolute and is compared
 against a relative boundary - #1114. Two false accusations in three cycles is
 enough to make the real ones unreadable.
+
+## The build asked for a password, and the app would not start
+
+The cycle stopped on a keychain dialog. `codesign` signs both variants with a
+certificate in a locked keychain, and it locks on sleep. The stable certificate
+was introduced to stop the *release* re-prompting at runtime; dev reads its
+secrets from files and never needed it. Dev signs ad-hoc now and cannot raise
+that dialog.
+
+The worse half was mine. A timeout killed `codesign` twice mid-signing, which
+leaves a `.cstemp` beside the file it was writing. The bundle is then signed and
+invalid, macOS refuses to launch it without saying so, and the cassette gate
+reported `trios-dev never started` on all four cassettes - a message that is
+accurate, thanks to last cycle's work, and still impossible to act on. Stale
+temp files are cleared before signing now, proven by planting one.
+
+Two of my own checks lied while I was chasing it. `codesign -v | head` returns
+head's status, so my shell printed "signature fine" over a broken one. And a zsh
+glob that matched nothing aborted the whole command before `ls` ran, so a file
+that was present looked missing. Both were my instruments, not the repository's.
+
+#1114 closed the second false accusation in three cycles: a write arrives as an
+absolute path and the boundary is written relative, so a bee was reported for
+leaving its lane while writing the one file it owned. Driven both ways - a bee
+writing inside its boundary now logs nothing where it always logged, and the
+cassette planting a real violation still catches it.
+
+And #1093 is finally closed, three criteria met by an agent reading the whole
+file. It was done five cycles ago. Every refusal since was a verdict on the
+brief.
+
+Still broken: #1112 - a worker that dies on the eleven-minute timeout leaves its
+edits in the tree unattributed. One bee wrote the description of that this
+cycle; nobody has fixed it.
