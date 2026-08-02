@@ -3772,3 +3772,24 @@ gate that had already refused before anyone spoke. #1133.
 Two of tonight's three asks are therefore unfinished and it is honest to say
 which: a true "unmet" has never been confirmed as recognised, and no task has
 reached a merge. Both need #1133 first.
+
+## The cycle closed, and the pull request carried the whole night
+
+Acceptance waits for its evidence now. Driven and read off the log in order:
+verdicts at 17:43:32, awaitingReview at 17:44:22, **accepted** at 17:44:26, the
+pull request attempted the same second and opened as #14 at 17:44:51. First task
+to go the whole way since #1102 - delegate, work, review, accept, propose.
+
+And the proposal carries 2,010 files. That is my own repair biting: #1110 pointed
+the base at the remote default so she would stop merging into the branch a person
+is working on, and a bee's branch is cut from that working branch, which is a
+night of commits ahead of `dev`. So the diff against `dev` is the night, not the
+bee. Both extremes are wrong - the current branch merges into somebody's work,
+the default branch proposes everything - and the answer is the point the bee's
+branch was cut from. #1135.
+
+Seven links repaired and the eighth found by finally reaching the end of the
+road. Every one of them was invisible until the step before it worked.
+
+Also: the machine filled its disk mid-cycle and no command could run, not even
+one that writes a byte. My own /tmp logs were the bulk of it.
