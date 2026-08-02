@@ -3700,3 +3700,30 @@ placeholder doing its job. Zooming is what corrected me. Looking is a
 measurement too, and a hasty look lies as readily as a hasty grep.
 
 Ratchet 552 -> 559.
+
+## The gate I built to stop stale evidence now stops everything
+
+The combined state is assembled and built before acceptance now, which is the
+answer to four interface drifts in one night: a branch that builds alone says
+nothing about the thing that lands.
+
+#1117 turned out to be already done. The one-shot retry on an empty reviewer
+answer has been in the code for cycles, two bees looked at it and correctly
+changed nothing, and I had been counting their empty branches as failures to
+deliver. What was missing was the assertion. Removing the retry now fails by
+name: "the reviewer transport was called exactly twice, not 1".
+
+Then the third task - drive one all the way to a merge - failed, and the reason
+is mine. `treeStateFingerprint` was declared on the task and never written, so
+`isStale` compared nil against a real snapshot and answered "checked against
+different code" for every criterion. Fifth mechanism in a day to land without
+its wiring, and the worst: the others dropped a result quietly, this one shuts
+the gate. Wiring it was not enough - the snapshot covers the whole working tree
+while the Queen writes her own state files between the review and the decision,
+which is #1102 again, costing the whole cycle this time instead of one false
+accusation.
+
+So: no task has reached a merge since #1102, and none can until the snapshot is
+taken over what the bee owns rather than over everything. #1131.
+
+Ratchet 571 -> 584.
