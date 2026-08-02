@@ -14,7 +14,7 @@ import (
 
 func WriteProductionEnvFiles(agentRoot string, cfg config.Config) error {
 	cfg.FillProductionEnvDefaults()
-	if err := writeEnvFile(filepath.Join(agentRoot, "apps/server/.env.production"), cfg.ProductionEnv.Server); err != nil {
+	if err := writeEnvFile(filepath.Join(agentRoot, "packages/agent-core/.env.production"), cfg.ProductionEnv.Server); err != nil {
 		return err
 	}
 	return writeEnvFile(filepath.Join(agentRoot, "apps/cli/.env.production"), cfg.ProductionEnv.CLI)

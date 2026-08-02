@@ -8,7 +8,7 @@ import (
 
 func TestResolveDevTargetReadsDevelopmentEnvPorts(t *testing.T) {
 	root := t.TempDir()
-	serverDir := filepath.Join(root, "apps/server")
+	serverDir := filepath.Join(root, "packages/agent-core")
 	if err := os.MkdirAll(serverDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestResolveDevTargetReadsDevelopmentEnvPorts(t *testing.T) {
 
 func TestResolveDevTargetFallsBackToExampleEnvPorts(t *testing.T) {
 	root := t.TempDir()
-	serverDir := filepath.Join(root, "apps/server")
+	serverDir := filepath.Join(root, "packages/agent-core")
 	if err := os.MkdirAll(serverDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

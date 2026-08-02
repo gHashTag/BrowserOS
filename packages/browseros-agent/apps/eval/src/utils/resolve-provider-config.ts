@@ -1,7 +1,7 @@
 import {
   fetchBrowserOSConfig,
   getLLMConfigFromProvider,
-} from '@browseros/server/lib/clients/gateway'
+} from '@browseros/agent-core/lib/clients/gateway'
 import { LLM_PROVIDERS, type LLMConfig } from '@browseros/shared/schemas/llm'
 import { resolveEnvValue } from './resolve-env'
 

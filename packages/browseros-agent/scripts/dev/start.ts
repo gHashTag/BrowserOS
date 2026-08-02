@@ -214,11 +214,14 @@ function startManualBrowser(ports: Ports): ReturnType<typeof spawn> {
   })
 }
 
+// The TypeScript HTTP server was retired: the backend is the Rust
+// trios-server (gHashTag/trios, crates/trios-server). Start it separately:
+//   cargo run -p trios-server   (TRIOS_MCP_PORT controls the port)
 function startServer(env: NodeJS.ProcessEnv): ReturnType<typeof spawn> {
-  log('server', 'Starting server...\n')
+  log('server', 'Starting Rust trios-server (cargo run -p trios-server)...\n')
   return spawn({
-    cmd: ['bun', 'run', '--filter', '@browseros/server', 'start'],
-    cwd: MONOREPO_ROOT,
+    cmd: ['cargo', 'run', '-p', 'trios-server'],
+    cwd: process.env.TRIOS_REPO ?? MONOREPO_ROOT,
     stdout: 'pipe',
     stderr: 'pipe',
     env,

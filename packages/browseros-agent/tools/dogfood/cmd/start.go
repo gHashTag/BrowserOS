@@ -248,7 +248,12 @@ func startEnvironment(parent context.Context, cfg config.Config, agentRoot strin
 		proc.LogMsg(proc.TagServer, proc.WarnColor.Sprint("CDP not available, starting server anyway"))
 	}
 	runtimeEnv := serverRuntimeEnv(os.Environ(), cfg)
-	serverDir := filepath.Join(agentRoot, "apps/server")
+	// The TS server was retired: the backend is the Rust trios-server
+	// (gHashTag/trios). Point TRIOS_REPO at your trios checkout.
+	serverDir := os.Getenv("TRIOS_REPO")
+	if serverDir == "" {
+		serverDir = filepath.Join(agentRoot, "packages/agent-core")
+	}
 	reportProgress(opts, "starting server")
 	e.managed = append(e.managed, proc.StartManaged(ctx, &e.wg, proc.ProcConfig{
 		Tag:         proc.TagServer,
@@ -290,7 +295,7 @@ func (e *environment) ForceKill() {
 }
 
 func serverCommand() []string {
-	return []string{"bun", "--env-file=.env.development", "src/index.ts"}
+	return []string{"cargo", "run", "-p", "trios-server"}
 }
 
 func serverRuntimeEnv(base []string, cfg config.Config) []string {

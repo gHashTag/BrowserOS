@@ -219,7 +219,7 @@ export class BrowserOSAppManager {
     // to the regular `start` script outside CI for the dev-watch experience.
     const startScript = process.env.CI ? 'start:ci' : 'start'
     this.serverProc = spawn({
-      cmd: ['bun', 'run', '--filter', '@browseros/server', startScript],
+      cmd: ['bun', 'run', '--filter', '@browseros/agent-core', startScript],
       cwd: MONOREPO_ROOT,
       stdout: logFd,
       stderr: logFd,

@@ -6,7 +6,7 @@
  * Wire types shared by the inline artifact card and the per-agent
  * Outputs rail. These mirror `ProducedFileEntry` /
  * `ProducedFilesRailGroup` on the server and the `FilePreview`
- * discriminated union from `apps/server/src/api/services/openclaw/file-preview.ts`.
+ * discriminated union from `the retired TS server (openclaw file-preview; the backend is now the Rust trios-server)`.
  *
  * The schema mirror is deliberate (vs sharing a workspace package)
  * because the server keeps the on-disk row shape — `agentDefinitionId`,

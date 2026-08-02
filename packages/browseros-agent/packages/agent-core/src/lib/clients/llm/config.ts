@@ -1,0 +1,114 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * LLM config resolution - handles BROWSEROS provider lookup.
+ */
+
+import { LLM_PROVIDERS, type LLMConfig } from '@browseros/shared/schemas/llm'
+import { INLINED_ENV } from '../../../env'
+import { logger } from '../../logger'
+import { fetchBrowserOSConfig, getLLMConfigFromProvider } from '../gateway'
+import {
+  resolveMockBrowserOSConfig,
+  shouldUseMockBrowserOSLLM,
+} from './mock-language-model'
+import type { ResolvedLLMConfig } from './types'
+
+export async function resolveLLMConfig(
+  config: LLMConfig,
+  browserosId?: string,
+): Promise<ResolvedLLMConfig> {
+  // OAuth providers: resolve token from server-side storage
+  if (config.provider === LLM_PROVIDERS.CHATGPT_PRO) {
+    return resolveOAuthConfig(config, browserosId, {
+      providerId: 'chatgpt-pro',
+      displayName: 'ChatGPT Plus/Pro',
+      defaultModel: 'gpt-5.3-codex',
+      useRefresh: true,
+      extraFields: (tokens) => ({
+        upstreamProvider: 'openai',
+        accountId: tokens.accountId,
+      }),
+    })
+  }
+  if (config.provider === LLM_PROVIDERS.GITHUB_COPILOT) {
+    return resolveOAuthConfig(config, browserosId, {
+      providerId: 'github-copilot',
+      displayName: 'GitHub Copilot',
+      defaultModel: 'gpt-5-mini',
+      useRefresh: false,
+    })
+  }
+  if (config.provider === LLM_PROVIDERS.QWEN_CODE) {
+    return resolveOAuthConfig(config, browserosId, {
+      providerId: 'qwen-code',
+      displayName: 'Qwen Code',
+      defaultModel: 'coder-model',
+      useRefresh: true,
+    })
+  }
+
+  // BrowserOS gateway: fetch config from remote service
+  if (config.provider === LLM_PROVIDERS.BROWSEROS) {
+    if (shouldUseMockBrowserOSLLM(config)) {
+      return resolveMockBrowserOSConfig(config, browserosId)
+    }
+    return resolveBrowserOSConfig(config, browserosId)
+  }
+
+  // All other providers: passthrough with model validation
+  if (!config.model) {
+    throw new Error(`model is required for ${config.provider} provider`)
+  }
+  return config as ResolvedLLMConfig
+}
+
+interface OAuthResolveOptions {
+  providerId: string
+  displayName: string
+  defaultModel: string
+  useRefresh: boolean
+  extraFields?: (tokens: { accountId?: string }) => Record<string, unknown>
+}
+
+async function resolveOAuthConfig(
+  _config: LLMConfig,
+  _browserosId: string | undefined,
+  opts: OAuthResolveOptions,
+): Promise<ResolvedLLMConfig> {
+  // OAuth token management moved to the Rust trios-server (trios-store
+  // `oauth_tokens`); the in-process TS token manager was deleted with the
+  // retired TS server. Nothing ever initialized it here, so this path
+  // always threw — keep the same behavior explicitly.
+  throw new Error(
+    `Not authenticated with ${opts.displayName}. Please login first.`,
+  )
+}
+
+async function resolveBrowserOSConfig(
+  config: LLMConfig,
+  browserosId?: string,
+): Promise<ResolvedLLMConfig> {
+  const configUrl = INLINED_ENV.BROWSEROS_CONFIG_URL
+  if (!configUrl) {
+    throw new Error(
+      'BROWSEROS_CONFIG_URL environment variable is required for BrowserOS provider',
+    )
+  }
+
+  logger.debug('Resolving BROWSEROS config', { configUrl, browserosId })
+
+  const browserosConfig = await fetchBrowserOSConfig(configUrl, browserosId)
+  const llmConfig = getLLMConfigFromProvider(browserosConfig, 'default')
+
+  return {
+    ...config,
+    model: llmConfig.modelName,
+    apiKey: llmConfig.apiKey,
+    baseUrl: llmConfig.baseUrl,
+    upstreamProvider: llmConfig.providerType,
+    browserosId,
+  }
+}

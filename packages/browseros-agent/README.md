@@ -1,5 +1,10 @@
 # BrowserOS Agent
 
+> **Note (wave 7, Rust consolidation):** the TypeScript HTTP server was retired.
+> The backend is the Rust `trios-server` (`gHashTag/trios`, `crates/trios-server`).
+> `packages/agent-core` keeps only the host-bound agent core (tool loop, CDP
+> browser driver, MCP tools, clients) used by `apps/eval` and dev tooling.
+
 The agent platform powering [BrowserOS](https://github.com/browseros-ai/BrowserOS) — contains the MCP server, agent UI, CLI, and evaluation framework.
 
 ## Monorepo Structure
@@ -18,7 +23,7 @@ packages/
 
 | Package | Description |
 |---------|-------------|
-| `apps/server` | Bun server exposing MCP tools and running the agent loop |
+| `packages/agent-core` | Bun server exposing MCP tools and running the agent loop |
 | `apps/agent` | Agent UI — Chrome extension for the chat interface |
 | `apps/cli` | Go CLI — control BrowserOS from the terminal or AI coding agents |
 | `apps/eval` | Benchmark framework — WebVoyager, Mind2Web evaluation |
@@ -27,7 +32,7 @@ packages/
 
 ## Architecture
 
-- `apps/server`: Bun server which contains the agent loop and tools.
+- `packages/agent-core`: Bun server which contains the agent loop and tools.
 - `apps/agent`: Agent UI (Chrome extension).
 
 ```
@@ -82,9 +87,9 @@ for the full list, the z.ai setup steps, and how to wire a new provider.
 
 ```bash
 # Copy environment files for each package
-cp apps/server/.env.example apps/server/.env.development
+cp packages/agent-core/.env.example packages/agent-core/.env.development
 cp apps/agent/.env.example apps/agent/.env.development
-cp apps/server/.env.production.example apps/server/.env.production
+cp packages/agent-core/.env.production.example packages/agent-core/.env.production
 
 # Install deps and generate agent code
 bun run dev:setup
@@ -100,11 +105,11 @@ the server startup path and pulls the configured GHCR image on demand.
 
 Runtime uses `.env.development`, while production artifact builds use `.env.production`:
 
-- `apps/server/.env.development` - Server runtime configuration for local dev
-- `apps/server/.env.production` - Server production artifact build configuration
+- `packages/agent-core/.env.development` - Server runtime configuration for local dev
+- `packages/agent-core/.env.production` - Server production artifact build configuration
 - `apps/agent/.env.development` - Agent UI configuration
 
-**Server Variables** (`apps/server/.env.development`)
+**Server Variables** (`packages/agent-core/.env.development`)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -118,9 +123,9 @@ Runtime uses `.env.development`, while production artifact builds use `.env.prod
 | `SENTRY_DSN` | - | Server-side Sentry DSN |
 | `BROWSEROS_TEST_HEADLESS` | false | Headless mode for server tests |
 
-**Server Production Build Variables** (`apps/server/.env.production`)
+**Server Production Build Variables** (`packages/agent-core/.env.production`)
 
-Copy from `apps/server/.env.production.example` before running `build:server`.
+Copy from `packages/agent-core/.env.production.example` before running `build:server`.
 `build:server` requires all values below except `R2_DOWNLOAD_PREFIX` and `R2_UPLOAD_PREFIX`.
 
 | Variable | Default | Description |
@@ -155,7 +160,7 @@ Copy from `apps/server/.env.production.example` before running `build:server`.
 
 ```bash
 # Start
-bun run start:server          # Start the server
+# The HTTP server is the Rust trios-server (gHashTag/trios): cargo run -p trios-server
 bun run start:agent           # Start agent extension (dev mode)
 
 # Build
@@ -169,9 +174,9 @@ bun run test:all              # Run all tests
 bun run test:main             # Run key server tools and integration tests
 
 # App-specific test groups (from packages/browseros-agent)
-cd apps/server && bun run test:tools
-cd apps/server && bun run test:cdp
-cd apps/server && bun run test:integration
+cd packages/agent-core && bun run test:tools
+cd packages/agent-core && bun run test:cdp
+cd packages/agent-core && bun run test:integration
 
 # Quality
 bun run lint                  # Check with Biome

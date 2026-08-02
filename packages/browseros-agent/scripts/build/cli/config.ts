@@ -3,7 +3,7 @@ import { join } from 'node:path'
 
 import { parse } from 'dotenv'
 
-import type { R2Config } from '../server/types'
+import type { R2Config } from '../lib/r2'
 
 const PROD_ENV_PATH = join('apps', 'cli', '.env.production')
 

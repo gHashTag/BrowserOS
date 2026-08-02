@@ -1,5 +1,5 @@
-import type { ResolvedAgentConfig } from '@browseros/server/agent/types'
-import type { Browser } from '@browseros/server/browser'
+import type { ResolvedAgentConfig } from '@browseros/agent-core/agent/types'
+import type { Browser } from '@browseros/agent-core/browser'
 import type {
   ExecutorBackend,
   ExecutorBackendKind,
@@ -7,6 +7,7 @@ import type {
 } from '../executor-backend'
 import { CladoExecutorBackend } from './clado/clado-executor-backend'
 import { isCladoActionProvider } from './clado/types'
+import { RustServerExecutorBackend } from './rust-server/rust-server-executor-backend'
 import { ToolLoopExecutorBackend } from './tool-loop/tool-loop-executor-backend'
 
 export interface CreateExecutorBackendOptions {
@@ -43,6 +44,16 @@ export function createExecutorBackend(
       configTemplate: required(options.configTemplate, 'configTemplate'),
       serverUrl: required(options.serverUrl, 'serverUrl'),
       initialPageId: options.initialPageId,
+      callbacks: options.callbacks,
+    })
+  }
+
+  // TS-retirement endgame: delegate to the Rust trios-server agent loop
+  // (POST /agent/run) instead of the local TS tool loop.
+  if (kind === 'rust-server') {
+    return new RustServerExecutorBackend({
+      configTemplate: required(options.configTemplate, 'configTemplate'),
+      serverUrl: required(options.serverUrl, 'serverUrl'),
       callbacks: options.callbacks,
     })
   }

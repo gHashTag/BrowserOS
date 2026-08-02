@@ -16,13 +16,52 @@ jobs:
     permissions:
       contents: read
     steps:
+      # The .internal-docs submodule lives in the upstream private repo
+      # browseros-ai/internal-docs and is only reachable from the upstream
+      # BrowserOS. This workflow is inherited by forks (e.g. gHashTag/BrowserOS),
+      # where that submodule 404s. Gate the whole sync on the upstream identity so
+      # forks exit cleanly WITHOUT touching INTERNAL_DOCS_SYNC_TOKEN, while
+      # upstream keeps the full token-preflight + sync behavior below.
+      - name: Repository identity guard (upstream-only sync)
+        id: identity
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          if [ "${REPO}" = "browseros-ai/BrowserOS" ]; then
+            echo "Running in upstream ${REPO}; proceeding with internal-docs sync."
+            echo "is_upstream=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Repository ${REPO} is a fork of browseros-ai/BrowserOS. The internal-docs sync is upstream-only; skipping without accessing any secret."
+            echo "is_upstream=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # The .internal-docs submodule lives in a separate private repository, so
+      # syncing it requires a cross-repo credential that the default GITHUB_TOKEN
+      # does not carry. When that secret is absent (e.g. the handoff window before
+      # an admin provisions it), skip cleanly instead of hard-failing checkout on
+      # an empty `token:` input. Once the secret exists, the full sync runs below.
+      - name: Check sync token availability
+        id: preflight
+        if: steps.identity.outputs.is_upstream == 'true'
+        env:
+          TOKEN: ${{ secrets.INTERNAL_DOCS_SYNC_TOKEN }}
+        run: |
+          if [ -z "${TOKEN}" ]; then
+            echo "INTERNAL_DOCS_SYNC_TOKEN is not configured; skipping internal-docs sync."
+            echo "token_present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "token_present=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Rewrite SSH submodule URL to HTTPS-with-token
+        if: steps.identity.outputs.is_upstream == 'true' && steps.preflight.outputs.token_present == 'true'
         env:
           TOKEN: ${{ secrets.INTERNAL_DOCS_SYNC_TOKEN }}
         run: |
           git config --global "url.https://x-access-token:${TOKEN}@github.com/.insteadOf" "git@github.com:"
 
       - uses: actions/checkout@v4
+        if: steps.identity.outputs.is_upstream == 'true' && steps.preflight.outputs.token_present == 'true'
         with:
           token: ${{ secrets.INTERNAL_DOCS_SYNC_TOKEN }}
           submodules: true
@@ -30,6 +69,7 @@ jobs:
           fetch-depth: 50
 
       - name: Open auto-merge PR if internal-docs has new commits
+        if: steps.identity.outputs.is_upstream == 'true' && steps.preflight.outputs.token_present == 'true'
         env:
           GH_TOKEN: ${{ secrets.INTERNAL_DOCS_SYNC_TOKEN }}
         run: |

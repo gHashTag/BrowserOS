@@ -23,8 +23,8 @@ const testSuites = {
       argv: [bun, 'run', 'test'],
     },
     {
-      label: 'server tests',
-      cwd: resolve(projectRoot, 'apps/server'),
+      label: 'agent-core tests',
+      cwd: resolve(projectRoot, 'packages/agent-core'),
       argv: [bun, 'run', 'test'],
     },
     {
@@ -44,13 +44,13 @@ const testSuites = {
   ],
   main: [
     {
-      label: 'server tools tests',
-      cwd: resolve(projectRoot, 'apps/server'),
+      label: 'agent-core tools tests',
+      cwd: resolve(projectRoot, 'packages/agent-core'),
       argv: [bun, 'run', 'test:tools'],
     },
     {
-      label: 'server integration tests',
-      cwd: resolve(projectRoot, 'apps/server'),
+      label: 'agent-core integration tests',
+      cwd: resolve(projectRoot, 'packages/agent-core'),
       argv: [bun, 'run', 'test:integration'],
     },
   ],
