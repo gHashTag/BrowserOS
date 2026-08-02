@@ -206,6 +206,12 @@ enum QueenBranchCommitter {
 
     /// The commit a worker's branch was cut from (#1135).
     ///
+    /// **Superseded by the worktree workflow (#1142).** When a bee works in
+    /// a worktree cut from `origin/<targetBranch>`, the branch point is
+    /// simply the tip of `origin/<targetBranch>` — no merge-base computation
+    /// is needed. This method remains for callers that have not yet
+    /// migrated to the worktree flow.
+    ///
     /// A bee's branch starts at HEAD and grows only the bee's own commits
     /// on top. Opening a PR against the repo's default branch shows every
     /// commit between that branch and HEAD — including the human's work
@@ -258,6 +264,16 @@ enum QueenBranchCommitter {
 
     /// Creates a base branch at a given commit and pushes it to origin
     /// (#1135).
+    ///
+    /// **Superseded by the worktree workflow (#1142).** When a bee works in
+    /// a worktree cut from `origin/<targetBranch>`, the PR `base` is the
+    /// target branch itself — no synthetic `-base` ref is needed. Callers
+    /// should use `prBaseBranch(targetBranch:)` instead.
+    ///
+    /// This method remains for callers that have not yet migrated to the
+    /// worktree flow. It is the root cause of #1141: the synthetic base
+    /// branch is a snapshot of a commit that may not exist on any real
+    /// branch, so GitHub's merge lands into nothing.
     ///
     /// GitHub's PR API needs a branch name for `base`, not a raw SHA.
     /// The base branch is a snapshot of the cut-point commit — the state
@@ -485,6 +501,267 @@ enum QueenBranchCommitter {
                 fileCount: changed.count
             )
         }.value
+    }
+
+    // MARK: - Worktree-based workflow (#1142)
+
+    /// The filesystem location and git identity of a single bee's worktree.
+    ///
+    /// A worktree gives each bee its own isolated working tree, cut from the
+    /// origin of the real target branch. Two bees no longer share one
+    /// checkout, so the second bee cannot silently overwrite the first's
+    /// files (#1139), and the bee's branch starts at the tip of the real
+    /// branch — no synthetic `-base` branch is needed (#1141).
+    struct WorktreeHandle {
+        /// Absolute filesystem path to the worktree directory.
+        let path: String
+        /// The branch the bee commits to (e.g. `queen/1142-slug`).
+        let branch: String
+        /// The real project branch the PR should target (e.g. `dev`,
+        /// `feat/queen-supervisor`). This is the PR `base`, not a snapshot.
+        let targetBranch: String
+    }
+
+    /// Creates a dedicated git worktree for one bee, cut from the origin of
+    /// the real target branch.
+    ///
+    /// The worktree lives outside the shared checkout (under the system temp
+    /// directory) and outside `/Users/playra/trios-land`. It is removed by
+    /// `removeWorktree` after the branch is pushed.
+    ///
+    /// The bee's branch starts exactly at `origin/<targetBranch>`, so:
+    /// - The PR diff shows only the bee's work.
+    /// - No `-base` branch is needed (#1141).
+    /// - The PR `base` is the real target branch, not a snapshot.
+    ///
+    /// Returns nil when fetch or worktree creation fails. The caller must
+    /// treat nil as "cannot isolate this bee — abort the task."
+    static func prepareWorktree(
+        for beeBranch: String,
+        from targetBranch: String,
+        projectRoot: String = ProjectPaths.root
+    ) async -> WorktreeHandle? {
+        await Task.detached(priority: .utility) {
+            let root = repositoryRoot(projectRoot: projectRoot)
+
+            // Bring the latest state of the target branch from origin so the
+            // worktree starts at the real tip, not a stale remote-tracking ref.
+            let (fetchOk, _) = runGitInDir(
+                ["fetch", "origin", targetBranch],
+                workDir: root
+            )
+            guard fetchOk else { return nil }
+
+            // Worktree directory: under the system temp, never under the
+            // shared checkout or /Users/playra/trios-land.
+            let safeName = beeBranch.replacingOccurrences(of: "/", with: "-")
+            let worktreePath = NSTemporaryDirectory()
+                + "queen-worktrees/\(safeName)"
+
+            // Remove a stale worktree from a previous run if one exists.
+            _ = runGitInDir(
+                ["worktree", "remove", "--force", worktreePath],
+                workDir: root
+            )
+
+            // Create a new worktree on the bee's branch, starting from the
+            // fetched origin ref. `-b` creates the local branch at
+            // `origin/<targetBranch>`, so the bee's branch grows only on
+            // top of the real target branch's tip.
+            let (addOk, addErr) = runGitInDir(
+                ["worktree", "add", "-b", beeBranch, worktreePath,
+                 "origin/\(targetBranch)"],
+                workDir: root
+            )
+            guard addOk else {
+                TriosLogBus.shared.error(
+                    .queen, "queen.worktree.addFailed",
+                    "Could not create worktree for \(beeBranch)",
+                    ["error": addErr, "targetBranch": targetBranch]
+                )
+                return nil
+            }
+
+            return WorktreeHandle(
+                path: worktreePath,
+                branch: beeBranch,
+                targetBranch: targetBranch
+            )
+        }.value
+    }
+
+    /// Stages and commits the bee's changes inside its worktree.
+    ///
+    /// Unlike `commitWorkerChanges` — which snapshots the shared tree, diffs
+    /// against a baseline, and uses a throwaway index with `commit-tree` —
+    /// this method operates directly inside the worktree. The worktree IS
+    /// the bee's own tree, so `git add` + `git commit` are all that is
+    /// needed. No baseline snapshot, no temp index, no filtering of other
+    /// bees' writes: they are invisible because they live in a different
+    /// tree entirely.
+    ///
+    /// `ownedPaths` are staged explicitly so files the bee was not allowed
+    /// to touch cannot ride along, even if they exist in the worktree.
+    /// When `ownedPaths` is empty, all changes are staged.
+    static func commitInWorktree(
+        worktreePath: String,
+        message: String,
+        ownedPaths: [String],
+        projectRoot: String = ProjectPaths.root
+    ) async -> Outcome {
+        await Task.detached(priority: .utility) {
+            // Convert project-relative owned paths to repository-relative
+            // paths. The worktree is a full checkout, so the paths match
+            // the main repo's structure.
+            let addArgs: [String]
+            if ownedPaths.isEmpty {
+                addArgs = ["add", "-A"]
+            } else {
+                addArgs = ["add", "--"] + ownedPaths.map {
+                    repositoryRelative($0, projectRoot: projectRoot)
+                }
+            }
+
+            let (addOk, addErr) = runGitInDir(
+                addArgs, workDir: worktreePath
+            )
+            guard addOk else {
+                return Outcome(
+                    committed: false,
+                    summary: "Could not stage files in worktree: \(addErr)"
+                )
+            }
+
+            // Count what was staged so the outcome can report it.
+            let (diffOk, diffOut) = runGitInDir(
+                ["diff", "--cached", "--name-only"],
+                workDir: worktreePath
+            )
+            let stagedCount = diffOk
+                ? diffOut.split(separator: "\n")
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }.count
+                : 0
+
+            guard stagedCount > 0 else {
+                return Outcome(
+                    committed: false,
+                    summary: "The worker changed no files in the worktree."
+                )
+            }
+
+            let (commitOk, commitErr) = runGitInDir(
+                ["commit", "-m", message],
+                workDir: worktreePath
+            )
+            guard commitOk else {
+                return Outcome(
+                    committed: false,
+                    summary: "Could not commit in worktree: \(commitErr)"
+                )
+            }
+
+            return Outcome(
+                committed: true,
+                summary: "Committed \(stagedCount) file(s) in worktree `\(worktreePath)`.",
+                fileCount: stagedCount
+            )
+        }.value
+    }
+
+    /// Pushes the bee's branch from its worktree to origin.
+    ///
+    /// Returns nil on success, or git's error message on failure.
+    /// `--force-with-lease` rather than `--force`: re-running a review
+    /// should update the branch, but not over something that arrived while
+    /// we were not looking.
+    static func pushFromWorktree(
+        worktreePath: String,
+        branch: String
+    ) async -> String? {
+        await Task.detached(priority: .utility) {
+            let (ok, err) = runGitInDir(
+                ["push", "--force-with-lease", "-u", "origin",
+                 "\(branch):\(branch)"],
+                workDir: worktreePath
+            )
+            return ok ? nil : "git push failed for \(branch): \(err)"
+        }.value
+    }
+
+    /// Removes a worktree after the branch has been pushed.
+    ///
+    /// `git worktree list` does not grow: every prepare/remove pair is
+    /// balanced. `--force` is used so uncommitted changes in the worktree
+    /// do not block removal (the bee's work is already on the branch).
+    ///
+    /// Returns nil on success, or git's error message on failure.
+    static func removeWorktree(
+        _ worktreePath: String,
+        projectRoot: String = ProjectPaths.root
+    ) async -> String? {
+        await Task.detached(priority: .utility) {
+            let root = repositoryRoot(projectRoot: projectRoot)
+            let (ok, err) = runGitInDir(
+                ["worktree", "remove", "--force", worktreePath],
+                workDir: root
+            )
+            return ok ? nil : "git worktree remove failed: \(err)"
+        }.value
+    }
+
+    /// The branch a PR should target when a bee works in a worktree: the
+    /// real target branch, not a synthetic `-base` branch.
+    ///
+    /// When a bee works in a worktree cut from `origin/<targetBranch>`, the
+    /// bee's commits sit directly on top of the target branch's tip. The PR
+    /// `base` is therefore the target branch itself — no snapshot, no
+    /// `-base` ref, no `pushBaseBranch` call.
+    ///
+    /// This replaces the `branchPoint` → `pushBaseBranch` → `"-base"` chain
+    /// that produced synthetic branches GitHub could merge into nowhere
+    /// (#1141).
+    static func prBaseBranch(targetBranch: String) -> String {
+        targetBranch
+    }
+
+    /// Whether the given path still has a worktree registered with git.
+    ///
+    /// After `removeWorktree`, this must return false. If it returns true
+    /// after removal, the worktree was not cleaned up and `git worktree list`
+    /// has grown.
+    static func worktreeExists(
+        _ path: String,
+        projectRoot: String = ProjectPaths.root
+    ) -> Bool {
+        let root = repositoryRoot(projectRoot: projectRoot)
+        let (ok, output) = runGitInDir(
+            ["worktree", "list", "--porcelain"],
+            workDir: root
+        )
+        guard ok else { return false }
+        return output.contains("worktree \(path)")
+    }
+
+    /// Verifies that a path is a linked worktree, not the main checkout.
+    ///
+    /// The main checkout has a `.git` directory; a linked worktree has a
+    /// `.git` file that points back to the main repo. This is the cheapest
+    /// signal that "this path is an isolated worktree, not the shared tree."
+    ///
+    /// Tests use this to prove that reverting to the shared tree breaks the
+    /// isolation invariant (#1142 criterion 7): if the path is the main
+    /// checkout, `isWorktree` returns false, and the commit path should
+    /// refuse to proceed.
+    static func isWorktree(_ path: String) -> Bool {
+        let gitPath = "\(path)/.git"
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: gitPath, isDirectory: &isDir) else {
+            return false
+        }
+        // Main checkout: `.git` is a directory → not a linked worktree.
+        // Linked worktree: `.git` is a file containing `gitdir: …` → true.
+        return !isDir.boolValue
     }
 
     // MARK: - Combined State Verification
@@ -814,5 +1091,47 @@ enum QueenBranchCommitter {
         process.waitUntilExit()
         guard process.terminationStatus == 0 else { return nil }
         return String(data: data, encoding: .utf8) ?? ""
+    }
+
+    /// Runs a git command in a specific directory without the `GIT_INDEX_FILE`
+    /// override.
+    ///
+    /// Used for commands inside a worktree, where the index is the worktree's
+    /// own and must not be redirected to a temp file. Also used for
+    /// worktree-management commands (`fetch`, `worktree add`, `worktree remove`)
+    /// that operate on the main repo but do not need a custom index.
+    ///
+    /// Unlike `runGit`, this helper returns both stdout and stderr so callers
+    /// can report git's actual complaint when something goes wrong.
+    private static func runGitInDir(
+        _ arguments: [String],
+        workDir: String
+    ) -> (ok: Bool, output: String) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = arguments
+        process.currentDirectoryURL = URL(fileURLWithPath: workDir)
+        process.environment = ProcessInfo.processInfo.environment
+
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+        do {
+            try process.run()
+        } catch {
+            return (false, "")
+        }
+        let outData = stdout.fileHandleForReading.readDataToEndOfFile()
+        let errData = stderr.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let outText = String(data: outData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let errText = String(data: errData, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard process.terminationStatus == 0 else {
+            return (false, errText.isEmpty ? outText : errText)
+        }
+        return (true, outText)
     }
 }
