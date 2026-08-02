@@ -65,6 +65,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // self-improvement audit loop. It survives chat switches and panel close.
             await QueenBackgroundService.shared.start()
             await runDelegationSelfTestIfRequested()
+            await runAcceptanceGateSelfTestIfRequested()
             await runQueenReportSelfTestIfRequested()
         }
     }
@@ -394,6 +395,215 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 "Second walk without changes was not a one-liner — dedup is broken",
                 [:]
             )
+        }
+    }
+
+    /// Proves the acceptance gate in `autoAcceptIfUnambiguous` is load-bearing.
+    ///
+    /// The gate added in #1133 stops auto-accept from closing a task before
+    /// every criterion has a verdict. This self-test exercises that gate end
+    /// to end: after a delegation finishes, it checks whether the task
+    /// reached `.accepted` only when all criteria are met, and whether a late
+    /// `unmet` verdict on an accepted task reopens it.
+    ///
+    /// Set `TRIOS_E2E_ACCEPTANCE_GATE=1` alongside `TRIOS_E2E_DELEGATE` and
+    /// `TRIOS_QUEEN_AUTONOMY=1`. Without autonomy the auto-accept path never
+    /// runs, so there is nothing to test — the function reports that and
+    /// returns.
+    ///
+    /// What this proves, criterion by criterion:
+    ///
+    /// - **#1133-3**: If every criterion is met, the task must be `.accepted`.
+    ///   If the gate blocked it, the assertion fires.
+    /// - **#1133-4**: If any criterion is not met, the task must NOT be
+    ///   `.accepted`. If the criteria check is removed from
+    ///   `autoAcceptIfUnambiguous`, the task is accepted regardless, and this
+    ///   assertion catches it. That is the sense in which removing the wait
+    ///   breaks the check.
+    /// - **#1133-2**: If the task was accepted, recording an `unmet` verdict
+    ///   on a criterion must reopen it. Without the reopening logic the task
+    ///   stays accepted, and the assertion fires.
+    @MainActor
+    private func runAcceptanceGateSelfTestIfRequested() async {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["TRIOS_E2E_ACCEPTANCE_GATE"] != nil else { return }
+
+        guard let vm = chatViewModel else {
+            TriosLogBus.shared.error(
+                .queen,
+                "queen.selftest.acceptance_gate.failed",
+                "No chat view model",
+                [:]
+            )
+            return
+        }
+
+        guard let spec = environment["TRIOS_E2E_DELEGATE"], !spec.isEmpty else {
+            TriosLogBus.shared.error(
+                .queen,
+                "queen.selftest.acceptance_gate.failed",
+                "TRIOS_E2E_ACCEPTANCE_GATE requires TRIOS_E2E_DELEGATE to have run",
+                [:]
+            )
+            return
+        }
+
+        let fields = spec.split(separator: "|", omittingEmptySubsequences: false)
+            .map(String.init)
+        guard (3...5).contains(fields.count) else { return }
+        guard let issue = IssueReference.parse(fields[0]) else { return }
+
+        guard let task = QueenDelegationRegistry.shared.task(forIssue: issue) else {
+            TriosLogBus.shared.error(
+                .queen,
+                "queen.selftest.acceptance_gate.failed",
+                "No task found for \(issue.slug)",
+                [:]
+            )
+            return
+        }
+
+        let autonomy = environment["TRIOS_QUEEN_AUTONOMY"] == "1"
+        let criteria = task.acceptanceCriteria
+        let verdicts = task.criterionVerdicts
+        let state = task.state
+
+        // Build the verdict table the same way the acceptance gate does, so
+        // the test's view of "met" matches the gate's.
+        let table = QueenAcceptancePolicy.verdicts(
+            criteria: criteria, recorded: verdicts
+        )
+        let metCount = table.filter { $0.verdict == .met }.count
+        let unmetCount = table.filter { $0.verdict == .unmet }.count
+        let uncheckedCount = table.filter { $0.verdict == .unchecked }.count
+        let staleCount = table.filter { $0.verdict == .stale }.count
+        let allMet = !criteria.isEmpty
+            && unmetCount == 0
+            && uncheckedCount == 0
+            && staleCount == 0
+
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.selftest.acceptance_gate.state",
+            "Acceptance gate snapshot",
+            [
+                "issue": issue.slug,
+                "state": state.rawValue,
+                "criteria": String(criteria.count),
+                "met": String(metCount),
+                "unmet": String(unmetCount),
+                "unchecked": String(uncheckedCount),
+                "stale": String(staleCount),
+                "autonomy": String(autonomy),
+                "all_met": String(allMet)
+            ]
+        )
+
+        guard autonomy else {
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.selftest.acceptance_gate.skipped",
+                "TRIOS_QUEEN_AUTONOMY is not set — auto-accept path did not run",
+                [:]
+            )
+            return
+        }
+
+        guard !criteria.isEmpty else {
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.selftest.acceptance_gate.skipped",
+                "Task has no acceptance criteria — nothing to gate on",
+                [:]
+            )
+            return
+        }
+
+        // ── Criterion 3: met criteria must reach .accepted ──
+        if allMet {
+            if state == .accepted {
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.selftest.acceptance_gate.passed",
+                    "All criteria met and task reached accepted",
+                    ["issue": issue.slug]
+                )
+            } else {
+                TriosLogBus.shared.error(
+                    .queen,
+                    "queen.selftest.acceptance_gate.failed",
+                    "All criteria are met but task is \(state.rawValue), not accepted "
+                        + "— the gate blocked a task it should have passed",
+                    ["issue": issue.slug, "state": state.rawValue]
+                )
+            }
+        } else {
+            // ── Criterion 4: unmet criteria must NOT reach .accepted ──
+            // This is the assertion that breaks if the wait (the criteria
+            // check in autoAcceptIfUnambiguous) is removed: without it the
+            // task is accepted regardless of verdicts, and this fires.
+            if state == .accepted {
+                TriosLogBus.shared.error(
+                    .queen,
+                    "queen.selftest.acceptance_gate.failed",
+                    "Criteria not all met but task was accepted — the acceptance "
+                        + "gate did not wait for verdicts (#1133 criterion 4)",
+                    [
+                        "issue": issue.slug,
+                        "state": state.rawValue,
+                        "unmet": String(unmetCount),
+                        "unchecked": String(uncheckedCount),
+                        "stale": String(staleCount)
+                    ]
+                )
+            } else {
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.selftest.acceptance_gate.gate_held",
+                    "Criteria not all met; task correctly not accepted",
+                    ["issue": issue.slug, "state": state.rawValue]
+                )
+            }
+        }
+
+        // ── Criterion 2: late verdicts must reopen an accepted task ──
+        // Only testable when the task was accepted: there must be something
+        // to reopen. The test records an `unmet` verdict on the first
+        // criterion and checks whether the task returns to awaitingReview.
+        if state == .accepted {
+            let firstCriterion = criteria[0]
+            await vm.runQueenCommand(
+                "/verify \(issue.slug) \(firstCriterion) unmet"
+            )
+
+            // Give the reopen logic a moment to settle — it posts a notice
+            // and transitions, neither of which is instantaneous.
+            for _ in 0..<10 {
+                let current = QueenDelegationRegistry.shared
+                    .task(forIssue: issue)?.state
+                if current == .awaitingReview { break }
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+
+            let reopened = QueenDelegationRegistry.shared
+                .task(forIssue: issue)?.state
+
+            if reopened == .awaitingReview {
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.selftest.acceptance_gate.reopened",
+                    "Task reopened after a late unmet verdict (#1133 criterion 2)",
+                    ["issue": issue.slug, "state": reopened?.rawValue ?? "unknown"]
+                )
+            } else {
+                TriosLogBus.shared.error(
+                    .queen,
+                    "queen.selftest.acceptance_gate.failed",
+                    "Task was accepted but a late unmet verdict did not reopen it "
+                        + "(#1133 criterion 2)",
+                    ["issue": issue.slug, "state": reopened?.rawValue ?? "unknown"]
+                )
+            }
         }
     }
 

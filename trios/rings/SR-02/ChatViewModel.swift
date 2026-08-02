@@ -4371,6 +4371,37 @@ final class ChatViewModel: ObservableObject {
             task,
             committedFiles: task.committedFiles ?? 0
         ) else { return }
+
+        // Acceptance must not decide before the verdict request has finished.
+        // The same gate the human-triggered /accept uses: every criterion must
+        // be checked and met before autonomy can close a task. Without this
+        // check the Queen rubber-stamps her own workers regardless of what the
+        // contract says, which makes criteria decoration rather than a gate
+        // (#1133).
+        let verdictTreeState = verdictTreeStates[task.id] ?? task.treeStateFingerprint
+        let currentBoundaryState = await QueenBranchCommitter.fingerprintBoundary(
+            ownedPaths: task.ownedPaths
+        )
+        guard task.ownedPaths.isEmpty || currentBoundaryState != nil else { return }
+        let currentTreeState = currentBoundaryState ?? ""
+
+        if let reason = acceptanceBlockReasonDistinguishingEmptyAnswers(
+            for: task,
+            verdictTreeState: verdictTreeState,
+            currentTreeState: currentTreeState
+        ) {
+            TriosLogBus.shared.info(
+                .queen, "queen.auto_accept.gated",
+                "Auto-accept blocked by the contract: \(reason)",
+                [
+                    "issue": task.issue.slug,
+                    "criteria": String(task.acceptanceCriteria.count),
+                    "verdicts": String(task.criterionVerdicts.count)
+                ]
+            )
+            return
+        }
+
         guard registry.transition(taskID: task.id, to: .accepted) else { return }
 
         await appendSystemMessageToQueenChat(
@@ -5007,6 +5038,44 @@ final class ChatViewModel: ObservableObject {
                     criteria: updated.acceptanceCriteria, recorded: updated.criterionVerdicts
                 )
         )
+
+        // If verdicts arrive after a decision, the decision is reconsidered,
+        // not ignored (#1133). A criterion that was unchecked when acceptance
+        // happened, or one whose verdict now contradicts the basis for it,
+        // reopens the task so the new evidence can change the outcome. This is
+        // the mirror of the gate in autoAcceptIfUnambiguous: that gate stops a
+        // premature decision; this one undoes one the evidence has overtaken.
+        if updated.state == .accepted, !updated.acceptanceCriteria.isEmpty {
+            let reopenVerdictTreeState = verdictTreeStates[updated.id]
+                ?? updated.treeStateFingerprint
+            let reopenBoundaryState = await QueenBranchCommitter.fingerprintBoundary(
+                ownedPaths: updated.ownedPaths
+            )
+            let reopenCurrentState = reopenBoundaryState ?? ""
+            if let reason = acceptanceBlockReasonDistinguishingEmptyAnswers(
+                for: updated,
+                verdictTreeState: reopenVerdictTreeState,
+                currentTreeState: reopenCurrentState
+            ) {
+                if registry.transition(taskID: updated.id, to: .awaitingReview) {
+                    TriosLogBus.shared.info(
+                        .queen, "queen.accept.reopened",
+                        "Reopened after a late verdict changed the outcome",
+                        [
+                            "issue": issue.slug,
+                            "reason": reason,
+                            "criterion": criterion,
+                            "verdict": verdict.rawValue
+                        ]
+                    )
+                    await postQueenNotice(
+                        SystemNoticeClassifier.warningMarker
+                            + "Reopened \(issue.slug). A verdict recorded after "
+                            + "acceptance changed the outcome: \(reason)"
+                    )
+                }
+            }
+        }
     }
 
     /// Records that the user agreed to a piece of work.
