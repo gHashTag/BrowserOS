@@ -3793,3 +3793,27 @@ road. Every one of them was invisible until the step before it worked.
 
 Also: the machine filled its disk mid-cycle and no command could run, not even
 one that writes a byte. My own /tmp logs were the bulk of it.
+
+## Delegate, work, review, accept, propose, merge
+
+The whole road, end to end, nobody steering:
+
+    18:18:04  Committed 1 file(s) to queen/1134-write-docs-seven-links-md
+    18:18:13  Reviewer returned 1 verdict(s) for 1 criterion(s)
+    18:18:15  awaitingReview -> accepted
+    18:19:21  Opened a pull request (#15)
+    18:19:30  accepted -> merged
+
+PR #15 carries one file. Its predecessor carried 2,010, because the base was the
+remote default and a bee's branch is cut from a working branch a night ahead of
+it. Neither extreme was right - the current branch merges into somebody's work,
+the default branch proposes everything - and the base belongs at the fork point.
+
+And the gate was finally tested for the answer nobody had checked. Eight repairs
+to false refusals and not once had a true refusal been confirmed. A task was
+written with a criterion no bee could satisfy, the bee was told to write the
+file and withhold the sentence, and the refusal named exactly that criterion
+while leaving the satisfied one alone. No false yes.
+
+That is the MVP: she wrote the spec, watched, judged against the contract,
+accepted, proposed and landed it, and refused correctly when refusal was right.
