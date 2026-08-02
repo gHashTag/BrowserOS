@@ -3863,3 +3863,22 @@ Still broken: the base. PR #18 carried one file and merged, and
 `docs/worktree-proof.md` is in neither the target branch nor dev, because the
 base was still `...-about-base`. Isolation landed; the real base did not. The
 merge is still cosmetic.
+
+## The merge finally lands
+
+Four delegations on one question, each one narrowing it. Snapshot branches gone,
+then the base fell back to `dev` and the diff was 2,017 files again, then the
+base became the branch the worktree was cut from. Proof run on a file the Queen
+never touches:
+
+    PR #20  base=feat/queen-supervisor  files=1  MERGED
+    docs/merge-truth.md in the target branch: yes
+    -base snapshots created: 0
+
+The commit that carried it is `98b0bc788`, authored by the bee, not by me - my
+own last commit is the one before it. Same task minutes earlier, before the fix:
+base `dev`, 2,017 files, never merged. Fails before, passes after.
+
+The bee having a shell is what made the difference. Three attempts blind, all
+wrong; four attempts with a compiler and a test runner, converging each time on
+the exact error I handed back.
