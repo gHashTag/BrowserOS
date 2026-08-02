@@ -3606,6 +3606,7 @@ final class ChatViewModel: ObservableObject {
             if !unanswered.isEmpty {
                 let diffText = await diffForReview(
                     baselineTree: workerBaselineTrees[task.conversationId],
+                    branch: branch,
                     ownedPaths: task.ownedPaths
                 )
                 let touchedFiles = await fileContentsForReview(
@@ -3644,17 +3645,59 @@ final class ChatViewModel: ObservableObject {
 
     /// The diff of what the worker changed, limited to its owned paths.
     ///
-    /// Read after the commit so the reviewer sees the same changes that
-    /// landed on the branch. Empty when the baseline was never captured or
-    /// git produced nothing — the reviewer still gets the criteria, and an
-    /// empty diff is itself information.
+    /// Compares the baseline tree against the **branch tip**, not the shared
+    /// working tree. The working tree is edited by every worker in the swarm,
+    /// so `git diff <baselineTree>` (tree against working tree) picks up changes
+    /// nobody on this branch made — and when those changes include files the
+    /// baseline captured after another worker's work, the diff shows them as
+    /// deletions, presenting a file the worker created as one it removed (#1132).
+    ///
+    /// The branch tip carries only this worker's committed changes, so the diff
+    /// is exactly what landed on the branch. The direction `git diff A B` reads
+    /// A→B: a file the worker added appears as a new file, never as a deleted
+    /// one. When the branch is empty (no commits beyond its parent), the diff is
+    /// genuinely empty and the brief already says "(no changes detected)".
+    ///
+    /// Returns a parenthetical "nothing to compare" message when the baseline
+    /// was never captured or the branch cannot be resolved, so the reviewer is
+    /// never handed a blank diff with no explanation (#1132).
     private func diffForReview(
         baselineTree: String?,
+        branch: String?,
         ownedPaths: [String]
     ) async -> String {
-        guard let baselineTree else { return "" }
+        // No baseline means the snapshot was never taken, so there is nothing
+        // to diff against. Returning "" left the reviewer with a blank brief
+        // and no reason — indistinguishable from "the diff was lost" (#1132).
+        guard let baselineTree else {
+            return "(No baseline snapshot — nothing to compare.)"
+        }
+        // The branch carries the worker's committed work. Without it there is
+        // no committed state to compare the baseline against.
+        guard let branch else {
+            return "(No branch to review — nothing to compare.)"
+        }
         return await Task.detached(priority: .utility) {
-            var args = ["diff", baselineTree]
+            // Resolve the branch tip's tree object. `git diff A B` compares
+            // two snapshots; using the branch tip instead of the working tree
+            // means the diff reflects only what this worker committed — never
+            // what another bee wrote or cleaned in the shared tree (#1132).
+            let branchRef = "refs/heads/\(branch)"
+            let branchTree = QueenStatusViewModel.runProcess(
+                "/usr/bin/git",
+                arguments: ["rev-parse", "\(branchRef)^{tree}"],
+                workDir: ProjectPaths.root,
+                timeout: 10
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !branchTree.isEmpty,
+                  !branchTree.hasPrefix("fatal") else {
+                return "(Branch \(branch) could not be resolved — nothing to compare.)"
+            }
+            // Direction: baseline → branch tip. Files the worker added appear
+            // as new (all +), files removed as deleted (all -). Reversing the
+            // arguments would invert the reading: a created file would read
+            // as deleted (#1132 criterion 2).
+            var args = ["diff", baselineTree, branchTree]
             if !ownedPaths.isEmpty {
                 args.append("--")
                 args.append(contentsOf: ownedPaths.map {
