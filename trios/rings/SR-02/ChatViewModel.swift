@@ -192,6 +192,18 @@ final class ChatViewModel: ObservableObject {
     /// Working-tree snapshot taken when each worker started, so its edits can be
     /// told apart from everything else happening in the shared checkout.
     private var workerBaselineTrees: [UUID: String] = [:]
+
+    /// The fingerprint of the working tree at the moment verdicts were
+    /// recorded, keyed by task ID. Snapshotted when the Queen or a reviewer
+    /// records a verdict, so acceptance can compare the tree the verdicts
+    /// were carved against with the tree the code is in now (#1131).
+    ///
+    /// This mirrors `DelegatedTask.treeStateFingerprint` but is set from the
+    /// view model because the registry's `recordVerdict` does not take a
+    /// fingerprint argument. At acceptance time, this takes precedence over
+    /// the task's own field — if neither is set, `isStale` returns false and
+    /// the verdicts stand, which is what "missing ≠ stale" means (#1131).
+    private var verdictTreeStates: [UUID: String] = [:]
     /// Observer concerns already reported, keyed by task, so a warning fires
     /// once rather than on every streamed delta.
     private var announcedConcerns: [UUID: Set<String>] = [:]
@@ -3535,6 +3547,16 @@ final class ChatViewModel: ObservableObject {
             for (criterion, verdict) in evidenceVerdicts {
                 registry.recordVerdict(taskID: task.id, criterion: criterion, verdict: verdict)
             }
+            // Record the tree state at the moment the evidence verdicts are
+            // carved, so acceptance can tell a current verdict from one carved
+            // against code that has since moved (#1131). The fingerprint is
+            // written here — at verdict recording time — not at acceptance,
+            // because what matters is the state the verdicts were derived
+            // against, not the state the decision is made in.
+            if !evidenceVerdicts.isEmpty,
+               let snapshot = await QueenBranchCommitter.snapshotWorkingTree() {
+                verdictTreeStates[task.id] = snapshot
+            }
             if !evidenceVerdicts.isEmpty {
                 TriosLogBus.shared.info(
                     .queen, "queen.review.evidence", "Judged what the files show",
@@ -3990,6 +4012,15 @@ final class ChatViewModel: ObservableObject {
             ) {
                 recorded += 1
             }
+        }
+        // Record the tree state at the moment the reviewer's verdicts are
+        // carved (#1131). The reviewer saw the committed diff; the
+        // fingerprint is the state the code was in when the verdicts were
+        // derived, so a later acceptance can tell a current verdict from one
+        // carved against code that has since moved.
+        if recorded > 0,
+           let snapshot = await QueenBranchCommitter.snapshotWorkingTree() {
+            verdictTreeStates[task.id] = snapshot
         }
 
         // Criteria the reviewer answered — whether from the retry or the
@@ -4512,7 +4543,7 @@ final class ChatViewModel: ObservableObject {
             // taken here — once per acceptance, not on every build — so the cost
             // of a git invocation lands where the decision is made, not on every
             // render.
-            let verdictTreeState = task.treeStateFingerprint
+            let verdictTreeState = verdictTreeStates[task.id] ?? task.treeStateFingerprint
             guard let currentTreeState = await QueenBranchCommitter.snapshotWorkingTree() else {
                 // The combined state could not be assembled. This is a structural
                 // failure, not a criterion verdict: "does not build together" is
@@ -4886,6 +4917,13 @@ final class ChatViewModel: ObservableObject {
                     )
             )
             return
+        }
+        // Record the tree state at the moment a verdict is recorded by hand,
+        // so acceptance can tell a current verdict from one carved against
+        // code that has since moved (#1131). This is the moment the
+        // fingerprint is written — at verdict recording time.
+        if let snapshot = await QueenBranchCommitter.snapshotWorkingTree() {
+            verdictTreeStates[task.id] = snapshot
         }
         // A criterion that was asked-but-unanswered and now has a recorded
         // verdict is no longer unanswered. Clearing it here keeps the

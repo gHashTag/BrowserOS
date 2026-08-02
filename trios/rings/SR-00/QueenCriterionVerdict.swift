@@ -38,10 +38,13 @@ enum QueenAcceptancePolicy {
     ///
     /// When the caller supplies a `currentTreeState`, every recorded verdict
     /// (`.met` or `.unmet`) is checked against the `verdictTreeState` it was
-    /// derived against. If the states differ — or if the verdict carries no
-    /// state binding at all — the verdict is marked `.stale`. This is what
-    /// stops a re-review from silently inheriting verdicts carved against code
-    /// that has moved (#1126).
+    /// derived against. If the states differ, the verdict is marked `.stale`.
+    /// A missing `verdictTreeState` (nil) does NOT make the verdict stale: a
+    /// task reviewed before state tracking existed carries verdicts that stand
+    /// as they were — they are neither confirmed as current nor invalidated
+    /// (#1131). This is what stops a re-review from silently inheriting
+    /// verdicts carved against code that has moved (#1126), without zeroing
+    /// the verdicts of tasks that predate the fingerprint.
     ///
     /// Both parameters default to `nil` so that callers written before state
     /// tracking continue to work: with neither state provided, the function
@@ -71,18 +74,23 @@ enum QueenAcceptancePolicy {
     /// not track state are left alone, and the function degrades to its
     /// pre-#1126 behaviour.
     ///
-    /// Returns `true` when `currentTreeState` is known but `verdictTreeState`
-    /// is either absent or different. A checked criterion whose provenance was
-    /// stripped cannot be trusted to be current, and treating it as stale is
-    /// how the binding stays load-bearing rather than decorative: remove the
-    /// binding and the check breaks, which is exactly what #1126 criterion 4
-    /// asks for.
+    /// Returns `false` when `verdictTreeState` is `nil`: a task reviewed
+    /// before the fingerprint existed carries verdicts that should not be
+    /// silently zeroed. Missing is a separate case from stale — a verdict
+    /// whose provenance is unknown stands as it was, neither confirmed as
+    /// current nor invalidated (#1131).
+    ///
+    /// Returns `true` only when both states are known and they differ: the
+    /// verdict was carved against a tree that has since moved, which is what
+    /// makes the binding load-bearing rather than decorative — remove the
+    /// binding and the check breaks, which is what #1126 criterion 4 asks for.
     static func isStale(
         verdictTreeState: String?,
         currentTreeState: String?
     ) -> Bool {
         guard let current = currentTreeState else { return false }
-        return verdictTreeState != current
+        guard let verdict = verdictTreeState else { return false }
+        return verdict != current
     }
 
     /// Verdicts the Queen can reach on evidence, without taking anyone's word.

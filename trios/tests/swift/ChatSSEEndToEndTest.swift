@@ -51,7 +51,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 571  // 538 + 14 stale-verdict (#1126) + 7 issue-number (#1129) + 12 empty-retry (#1117)
+    static let minimumChecks = 584  // 538 + 14 stale-verdict (#1126) + 7 issue-number (#1129) + 12 empty-retry (#1117) + 13 missing-fingerprint (#1131)
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -133,6 +133,7 @@ struct ChatSSEEndToEndTests {
         await runDashboardEntryExitCardButtonsAndEmptyState()
         await runVerdictParserHandlesMarkdownNumbers()
         await runVerdictCarriesTreeState()
+        await runMissingFingerprintIsNotStale()
         await runIssueNumberIsAnIdentifier()
         await runEmptyReviewerAnswerRetriesOnceAndRecordsAsAskedButUnanswered()
         // The interface-drift proof invokes the Swift compiler and is
@@ -4663,7 +4664,8 @@ struct ChatSSEEndToEndTests {
     /// 2. Acceptance rejects a verdict against a different state and names it
     ///    separately from one that was never checked.
     /// 3. A re-review after changes does not silently inherit old verdicts.
-    /// 4. The check breaks if the state binding is stripped.
+    /// 4. A missing fingerprint is not stale: a task reviewed before state
+    ///    tracking existed carries verdicts that stand as they were (#1131).
     static func runVerdictCarriesTreeState() async {
         print("\n# Scenario: a verdict judged against one tree state reads stale against another")
 
@@ -4771,30 +4773,34 @@ struct ChatSSEEndToEndTests {
         check(staleTable.contains("[~]"),
               "a stale verdict is rendered with [~] in the review table, so it is visible, not silent")
 
-        // --- Criterion 4: the check breaks if the state binding is removed.
+        // --- Criterion 4 (#1131): a missing fingerprint is not stale.
         //
-        // When currentTreeState is known but verdictTreeState is nil — the
-        // binding was stripped, or the task predates state tracking — the
-        // verdict is stale. This is what keeps the binding load-bearing: if
-        // you remove treeStateFingerprint, the acceptance gate stops trusting
-        // the verdict and blocks, instead of silently treating it as current.
-        // The test fails if isStale ever returns false for a nil binding
-        // against a known current state.
-        let stripped = P.verdicts(
+        // A task reviewed before state tracking existed carries a nil
+        // verdictTreeState. Under #1126, this was treated as stale — zeroing
+        // the verdicts of every task that predated the fingerprint. #1131
+        // separates the cases: missing ≠ stale. A nil verdictTreeState means
+        // the verdicts stand as they were — they are neither confirmed as
+        // current nor invalidated. The acceptance gate does not block, and
+        // the verdict keeps its original value.
+        //
+        // The test fails if isStale ever returns true for a nil binding
+        // against a known current state — which is what reverts the #1131
+        // fix and brings back the silent zeroing.
+        let missingFingerprint = P.verdicts(
             criteria: [criterion],
             recorded: [criterion: .met],
             verdictTreeState: nil,
             currentTreeState: "tree-v1"
         )
-        check(stripped.first?.verdict == .stale,
-              "a verdict whose state binding was stripped is stale when the current state is known")
+        check(missingFingerprint.first?.verdict == .met,
+              "a verdict with no fingerprint is preserved, not zeroed as stale — missing ≠ stale (#1131)")
         check(P.acceptanceBlockReason(
                 criteria: [criterion],
                 recorded: [criterion: .met],
                 verdictTreeState: nil,
                 currentTreeState: "tree-v1"
-              ) != nil,
-              "removing the state binding causes acceptance to block — the binding is load-bearing")
+              ) == nil,
+              "a task reviewed before fingerprints existed does not block acceptance — its verdicts stand")
 
         // Backward compatibility: when neither state is tracked, the
         // function behaves as it did before #1126. Old callers that never
@@ -4807,6 +4813,151 @@ struct ChatSSEEndToEndTests {
         )
         check(noTracking.first?.verdict == .met,
               "without state tracking, the old behaviour is preserved — no verdict is marked stale")
+    }
+
+    // MARK: - Scenario: a missing fingerprint is not the same as a stale one (#1131)
+
+    /// #1126 treated a nil verdictTreeState as stale when currentTreeState was
+    /// known. That zeroed the verdicts of every task reviewed before the
+    /// fingerprint existed — a silent wipe dressed up as a safety check. #1131
+    /// separates the cases: missing means the verdicts predate the field, and
+    /// they stand as they were; stale means the verdicts were carved against
+    /// a different tree, and they must be re-checked.
+    ///
+    /// The criteria this scenario proves:
+    ///
+    /// 1. A nil verdictTreeState preserves the original verdict (met stays met).
+    /// 2. A nil verdictTreeState preserves an unmet verdict too (unmet stays
+    ///    unmet — it is not promoted to stale and it is not silently cleared).
+    /// 3. `isStale` returns false for nil — missing and stale are separate
+    ///    states, not collapsed into one.
+    /// 4. The stale path still fires for a genuine mismatch — the binding is
+    ///    still load-bearing when it exists.
+    static func runMissingFingerprintIsNotStale() async {
+        print("\n# Scenario: a missing fingerprint is not the same as a stale one")
+
+        typealias P = QueenAcceptancePolicy
+        let criterion = "the feature works end to end"
+
+        // --- Criterion 1: nil verdictTreeState preserves a met verdict.
+        //
+        // A task reviewed before fingerprints existed carries no
+        // verdictTreeState. Under #1126, this met verdict became stale when
+        // currentTreeState was known. Under #1131, the verdict stands —
+        // missing is not stale.
+        let metPreserved = P.verdicts(
+            criteria: [criterion],
+            recorded: [criterion: .met],
+            verdictTreeState: nil,
+            currentTreeState: "abc123"
+        )
+        check(metPreserved.first?.verdict == .met,
+              "a met verdict with no fingerprint stays met — missing is not stale")
+
+        // --- Criterion 2: nil verdictTreeState preserves an unmet verdict.
+        //
+        // The same logic applies to unmet: the verdict is preserved, not
+        // promoted to stale. "Unmet" and "stale" are different instructions
+        // — the first says "this fails," the second says "this was checked
+        // against different code." A task predating fingerprints cannot be
+        // the second, because there was no fingerprint to differ from.
+        let unmetPreserved = P.verdicts(
+            criteria: [criterion],
+            recorded: [criterion: .unmet],
+            verdictTreeState: nil,
+            currentTreeState: "abc123"
+        )
+        check(unmetPreserved.first?.verdict == .unmet,
+              "an unmet verdict with no fingerprint stays unmet — not promoted to stale")
+
+        // --- Criterion 3: isStale returns false for nil.
+        //
+        // The function that decides staleness must return false for nil
+        // verdictTreeState. If it returns true, the #1126 behavior returns
+        // and every pre-existing verdict is silently zeroed.
+        check(P.isStale(verdictTreeState: nil, currentTreeState: "abc123") == false,
+              "isStale returns false for a nil verdictTreeState — missing ≠ stale")
+        check(P.isStale(verdictTreeState: nil, currentTreeState: nil) == false,
+              "and isStale returns false when neither state is tracked — backward compatible")
+
+        // --- Criterion 4: the stale path still fires for a real mismatch.
+        //
+        // The binding is still load-bearing when it exists: a verdict with a
+        // known fingerprint that differs from the current tree is stale.
+        // Removing the nil guard from isStale (reverting #1131) does not
+        // break this — the mismatch test is independent. But removing the
+        // guard brings back the silent zeroing of pre-existing verdicts,
+        // which is what criterion 1 above catches.
+        check(P.isStale(verdictTreeState: "tree-v1", currentTreeState: "tree-v2") == true,
+              "isStale still fires for a genuine mismatch — the binding is load-bearing")
+        check(P.isStale(verdictTreeState: "tree-v1", currentTreeState: "tree-v1") == false,
+              "and isStale does not fire when the fingerprints match")
+
+        // --- The block reason distinguishes the cases.
+        //
+        // A nil fingerprint with all-met verdicts does not block acceptance.
+        // A mismatched fingerprint does block, and names it as "different
+        // code" — not "never checked," which is a separate instruction.
+        check(
+            P.acceptanceBlockReason(
+                criteria: [criterion],
+                recorded: [criterion: .met],
+                verdictTreeState: nil,
+                currentTreeState: "abc123"
+            ) == nil,
+            "a task with no fingerprint and all-met verdicts does not block acceptance"
+        )
+        let mismatchReason = P.acceptanceBlockReason(
+            criteria: [criterion],
+            recorded: [criterion: .met],
+            verdictTreeState: "tree-v1",
+            currentTreeState: "tree-v2"
+        )
+        check(mismatchReason != nil,
+              "a genuine mismatch blocks acceptance — the fingerprint is load-bearing")
+        check(mismatchReason?.contains("different code") == true,
+              "the block reason names it as checked against different code")
+        check(mismatchReason?.contains("never checked") == false,
+              "and does not confuse it with never-checked, which is a different instruction")
+
+        // --- Both sides proven: matching passes, mismatching blocks.
+        //
+        // This is criterion 2 of #1131: acceptance passes when code hasn't
+        // changed since review, and blocks when it has. Both sides are
+        // proven by test, not by reasoning.
+        check(
+            P.acceptanceBlockReason(
+                criteria: [criterion],
+                recorded: [criterion: .met],
+                verdictTreeState: "tree-v1",
+                currentTreeState: "tree-v1"
+            ) == nil,
+            "matching fingerprints: acceptance passes — code hasn't changed since review"
+        )
+        check(
+            P.acceptanceBlockReason(
+                criteria: [criterion],
+                recorded: [criterion: .met],
+                verdictTreeState: "tree-v1",
+                currentTreeState: "tree-v2"
+            ) != nil,
+            "mismatching fingerprints: acceptance blocks — code changed since review"
+        )
+
+        // --- An unchecked verdict with a nil fingerprint is still unchecked.
+        //
+        // A verdict nobody gave is not affected by the fingerprint debate.
+        // It stays unchecked whether or not a fingerprint exists, because
+        // "never looked at" is not "stale" or "missing" — it is the absence
+        // of an answer entirely.
+        let uncheckedPreserved = P.verdicts(
+            criteria: [criterion],
+            recorded: [:],
+            verdictTreeState: nil,
+            currentTreeState: "abc123"
+        )
+        check(uncheckedPreserved.first?.verdict == .unchecked,
+              "an unchecked verdict stays unchecked regardless of fingerprint state")
     }
 
     // MARK: - Scenario: an issue number is an identifier, not a quantity (#1129)
