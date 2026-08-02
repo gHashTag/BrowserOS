@@ -3751,3 +3751,24 @@ Six links now, all the same species: the judge is fine, the question keeps
 arriving damaged.
 
 Ratchet 584 -> 594. Still no task through to a merge since #1102.
+
+## Nobody waited for the answer
+
+The phantom deletion is gone: an empty branch has nothing to compare and says
+so, instead of presenting a file that exists as removed. The same run that
+answered "unmet" twice now fetches the real file and returns two verdicts.
+
+Which surfaced the seventh link, and the one that explains everything since
+#1102. The log order is flat:
+
+    15:15:58  Review command applied
+    15:16:04  Reviewer returned 2 verdict(s) for 2 criterion(s)
+
+Acceptance decides six seconds before the evidence exists and never comes back
+to it. Six links damaged the question; this one does not wait for the answer.
+Everything I have been reading as "the gate refuses" was, at the last step, a
+gate that had already refused before anyone spoke. #1133.
+
+Two of tonight's three asks are therefore unfinished and it is honest to say
+which: a true "unmet" has never been confirmed as recognised, and no task has
+reached a merge. Both need #1133 first.
