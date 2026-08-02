@@ -4,130 +4,111 @@ Issue: gHashTag/trios#1146 · Parent: #1090
 
 ## What this document is
 
-A description of the evidence Trios requires before it treats a worker's
-output as merged — landed on the default branch and part of the codebase.
-It covers the chain from acceptance to merge confirmation, the signals
-the system reads, the signals it refuses to read, and the post-merge
-build that proves the combined tree compiles.
+A description of the evidence chain that proves a merge is real. The
+chain runs from the worker's commit through the review gate, the
+acceptance decision, and the forge's merge confirmation. Each link
+converts a claim into a fact; missing any one leaves the merge
+unproven.
 
-The companion documents
-[`queen-archive-rules.md`](queen-archive-rules.md) (when a task may leave
-the working view) and
-[`interface-drift.md`](interface-drift.md) (why the build runs after
-the merge, not before) each cover one slice of this chain in more depth.
-This document stands on its own as the full account.
+This document complements
+[`queen-verdicts.md`](queen-verdicts.md) (which verdicts exist),
+[`reviewer-scope.md`](reviewer-scope.md) (what evidence the reviewer
+receives), and [`queen-archive-rules.md`](queen-archive-rules.md)
+(when a settled task may leave the working view). It focuses on one
+question: **what makes a merge true rather than merely asserted?**
 
-## The central distinction
+## The chain
 
-> **Acceptance is the Queen's opinion; the merge is a fact.**
+A merge is proven when every link in the chain holds. Each link is
+testable independently; if any one fails, the merge is not proven.
 
-The Queen reviews a worker's output, checks criteria against evidence,
-and records verdicts. When every criterion is `.met`, the task
-transitions to `.accepted`. That transition means: the Queen believes
-the work is correct and ready to land.
+### 1. The worker's diff exists on an isolated branch
 
-It does not mean the work has landed. The task sits in `.accepted` with
-an open pull request, and `DelegatedTask.isSettled` returns `false`
-explicitly — accepted work with an open PR has not settled, and treating
-it as settled would archive changes that may never reach the branch.
+The worker commits to its own branch inside a dedicated worktree. The
+diff against the baseline (the commit the branch was cut from) is the
+first piece of evidence: it shows exactly what the worker changed. No
+diff, no work to merge. The worktree guarantees the diff reflects this
+worker's changes alone, not the user's working tree or another
+worker's branch. See [`worktree-proof.md`](worktree-proof.md).
 
-The merge is a fact because it is confirmed by the forge, not by the
-Queen. The forge either says `merged == true` or it does not. There is
-no opinion in it, no verdict table, no criteria to argue about. The
-SHA landed or it did not.
+### 2. The brief carries the evidence
 
-## What proves a merge happened
+The review brief assembles the criteria, the diff, and the full
+contents of every owned file. The reviewer cannot reach a verdict
+without evidence; the brief is that evidence. The
+`adversaryPromptMarker` proves the brief the reviewer saw is the brief
+the chain built — a swapped brief is rejected. See
+[`reviewer-scope.md`](reviewer-scope.md) and the first link in
+[`seven-links.md`](seven-links.md).
 
-Three signals, each independent:
+### 3. Every criterion receives a verdict
 
-### 1. The forge reports `merged == true`
+Each acceptance criterion carries exactly one of three verdicts:
+`.met`, `.unmet`, or `.unchecked`. Mechanical verdicts settle criteria
+that name a file path (does the file exist on the branch?). The
+reviewer settles criteria the path check cannot reach (does the code
+do what the criterion asks?). Criteria neither check can reach stay
+`.unchecked` — and an unchecked criterion is not a pass. See
+[`queen-verdicts.md`](queen-verdicts.md).
 
-`PullRequest.isMerged` reads the GitHub API response. It returns `true`
-when the `merged` field is `true`, or when `merged` is `nil` but
-`merged_at` carries a timestamp (the timestamp is only ever written
-when a merge happened). This is deliberately not `state == "closed"` —
-closing a pull request without merging is how work gets abandoned, and
-treating abandonment as success would file away changes that never
-reached the branch.
+### 4. The acceptance gate clears
 
-A pull request that reads `state == "closed"` and `merged == false` is
-`isClosedUnmerged`. The outcome is `.abandoned`, not `.merged`. The
-task goes back to `.awaitingReview`, because nothing landed and the
-Queen must decide what to do next.
+`acceptanceBlockReason` returns `nil` only when every criterion is
+`.met`. Any `.unmet` criterion blocks acceptance and lists every
+offender. Any `.unchecked` criterion blocks acceptance with the note
+"An unchecked criterion is not a pass." The gate does not ask the
+reviewer to be thorough; it demands it. The Queen cannot mark the task
+`.accepted` until the gate clears.
 
-### 2. The merge commit SHA exists
+### 5. The Queen marks the task accepted
 
-When the forge merges a pull request (squash or otherwise), it produces
-a `merge_commit_sha`. Trios records this SHA. The presence of a
-`merge_commit_sha` is the forge's cryptographic receipt: a commit
-object exists in the repository history that was created by the merge
-operation, and it cannot be fabricated by anything short of rewriting
-the repository.
+When the gate clears, the Queen transitions the task from
+`.awaitingReview` to `.accepted`. Acceptance is the Queen's opinion:
+the evidence was complete, and every criterion was satisfied. But
+acceptance is not a merge — it is permission to merge. See
+[`queen-archive-rules.md`](queen-archive-rules.md).
 
-`isExactPullRequestMerge` checks whether the PR's head SHA equals the
-merge commit SHA — distinguishing a squash merge (which creates a new
-commit) from a fast-forward (which does not) so the status card reports
-the right thing.
+### 6. The forge confirms the merge
 
-### 3. The post-merge build passes
+The Queen calls `mergePullRequest` (squash merge) or the forge reports
+the PR already merged. Either way, the forge's `merged == true` is the
+fact. The Queen's acceptance was an opinion; the merge confirmation is
+a record on the forge that cannot be faked from inside the application.
 
-A merge that lands a broken tree is not a successful merge. Two workers
-can each pass review individually and each compile against the baseline
-they started from, yet fail when both branches land: a signature change
-in one file meets a call site in another, and neither review saw the
-other's change. The compiler is the only judge that can catch this,
-because it is the only thing that exercises the dependency between the
-two files.
+This is the distinction at the heart of settlement: `.accepted` with
+an open PR is **not settled**, because the merge has not happened yet.
+`.merged` is settled, because the forge confirmed it. See
+[`queen-archive-rules.md`](queen-archive-rules.md).
 
-After `mergePullRequest` lands the branch, the system builds the
-combined tree. The build must pass. If it fails, the system names the
-failing file, identifies the merge that introduced the conflict, blocks
-further merges, and surfaces the failure. The tree is not "merged but
-broken" — it is in a state that requires repair before anything else
-lands.
+## What "proven" means
 
-## What does NOT prove a merge
+A merge is proven when the chain is complete:
 
-- **The Queen saying `.accepted`.** Acceptance is an opinion about
-  quality, not a fact about the repository. A task can be accepted and
-  never merged.
-- **The pull request being "closed".** A closed PR may be closed
-  unmerged — abandoned, not landed. `isClosedUnmerged` exists
-  precisely to catch this.
-- **The worker reporting success.** A worker's own statement that its
-  work is done is the same agent grading its own homework. The review
-  chain exists to turn that statement into checked evidence, and the
-  merge confirmation exists to turn checked evidence into a landed
-  fact.
+| Link | Evidence | Who provides it | How it is checked |
+|------|----------|-----------------|-------------------|
+| Diff | Worker's changes on an isolated branch | Worker | `git diff <baseline> -- <ownedPaths>` |
+| Brief | Criteria + diff + file contents, authenticated | Queen pipeline | `adversaryPromptMarker` |
+| Verdicts | `.met` / `.unmet` / `.unchecked` per criterion | Reviewer + mechanical | `QueenAcceptancePolicy.verdicts` |
+| Gate | No `.unmet`, no `.unchecked` | `acceptanceBlockReason` | Returns `nil` |
+| Acceptance | Queen marks `.accepted` | Queen | Task state transitions |
+| Merge | Forge reports `merged == true` | Forge (GitHub) | `fetchPullRequest` |
 
-## The full sequence
-
-1. **Worker finishes.** Changed paths are committed to the worker's
-   virtual branch.
-2. **Queen reviews.** The review pipeline builds a brief (criteria, diff,
-   file contents), sends it to the reviewer with an adversary marker,
-   and parses the verdicts.
-3. **Acceptance.** Every criterion is `.met`. The task transitions to
-   `.accepted`. If a PR exists, the task is not settled yet.
-4. **Merge.** `mergePullRequest` lands the branch on the default base.
-   The forge produces a `merge_commit_sha`.
-5. **Confirmation.** The next `fetchPullRequest` reads `merged == true`.
-   The task transitions to `.merged`. The PR gate releases; `isSettled`
-   returns `true`.
-6. **Post-merge build.** The combined tree compiles. If it fails,
-   further merges are blocked and the failure is surfaced.
-
-Only after step 6 is the merge proven: the forge confirmed it, the SHA
-exists, and the tree compiles. Anything less is an opinion.
+A break anywhere in this chain leaves the merge unproven. The review
+gate is the most common breakpoint: a criterion left `.unchecked`
+reads as "nobody looked," and the gate refuses to pass. The forge
+confirmation is the least common breakpoint but the most damaging: a
+task accepted but never merged sits in the working view with an open
+PR, and archiving it would file away changes that may never reach the
+branch.
 
 ## Code references
 
 | Symbol | File | Role |
 |--------|------|------|
-| `PullRequest.isMerged` | `BR-OUTPUT/GitHubModels.swift` | Reads `merged` or `merged_at` from the forge. Not `state == "closed"`. |
-| `PullRequest.isClosedUnmerged` | `BR-OUTPUT/GitHubModels.swift` | Closed without merging — abandoned, not landed. |
-| `GitHubAPIClient.mergePullRequest` | `BR-OUTPUT/GitHubAPIClient.swift` | Calls the forge to merge the branch. Returns success/failure. |
-| `TriNetRepositoryStatus.isExactPullRequestMerge` | `rings/SR-00/TriNetRepositoryStatus.swift` | Checks whether head SHA equals merge commit SHA. |
-| `DelegatedTask.isSettled` | `rings/SR-00/QueenDelegation.swift` | The PR gate: accepted + open PR → not settled. |
-| `DelegatedTaskState.isArchivable` | `rings/SR-00/QueenDelegation.swift` | `.merged` is archivable; `.accepted` with a PR is not settled. |
-| `QueenAcceptancePolicy.acceptanceBlockReason` | `rings/SR-00/QueenCriterionVerdict.swift` | Returns nil only when all criteria are `.met`. |
+| `DelegatedTask.isSettled` | `rings/SR-00/QueenDelegation.swift` | True only when archivable AND no open PR gate. |
+| `DelegatedTaskState` | `rings/SR-00/QueenDelegation.swift` | Lifecycle: `.queued` → `.running` → `.awaitingReview` → `.accepted` → `.merged`. |
+| `QueenAcceptancePolicy.acceptanceBlockReason` | `rings/SR-00/QueenCriterionVerdict.swift` | Returns the first reason acceptance is blocked, or nil. |
+| `QueenAcceptancePolicy.mechanicalVerdicts` | `rings/SR-00/QueenCriterionVerdict.swift` | Auto-verdict for path-naming criteria. |
+| `QueenReviewVerdictRequest.brief` | `rings/SR-00/QueenReviewVerdictRequest.swift` | Builds the evidence brief with adversary marker. |
+| `ChatViewModel.mergePullRequest` | `rings/SR-02/ChatViewModel.swift` | Calls the forge to squash-merge the PR. |
+| `ChatViewModel.fetchPullRequest` | `rings/SR-02/ChatViewModel.swift` | Polls the forge for PR state and merge confirmation. |
