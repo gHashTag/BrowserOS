@@ -175,33 +175,38 @@ enum QueenBranchCommitter {
         return "\(parts[0])/\(parts[1])"
     }
 
-    /// The branch a pull request should land on: the remote's default.
+    /// The branch a pull request should land on: the branch the main
+    /// checkout is currently on (#1142).
     ///
-    /// A worker's branch is cut from HEAD. Opening a PR against whatever the
-    /// checkout happens to be on targets the wrong base — or, worse, the
-    /// branch itself, producing a pull request that can never merge. The
-    /// right base is the branch the forge considers the trunk: whatever
-    /// `origin/HEAD` points at.
+    /// A worker's worktree is cut from `origin/<targetBranch>`, where
+    /// `targetBranch` is whatever branch the main checkout is on. The PR
+    /// base must be that same branch so the diff shows only the worker's
+    /// commits — not the full distance between `dev` and `feat/queen-supervisor`
+    /// (2017 files in #1142).
     ///
-    /// Returns nil when the default branch cannot be determined — no remote
-    /// configured, no HEAD symbolic-ref set, or a bare name git refuses to
-    /// resolve. The caller must treat nil as "do not open a PR": silently
-    /// guessing the wrong base is worse than not opening one.
+    /// Using `origin/HEAD` (the remote default) is wrong: the default may be
+    /// `dev` while the actual target is `feat/queen-supervisor`, and the PR
+    /// diff then spans the entire gap between them. The checkout's branch is
+    /// the branch the work was built on top of, and that is the only correct
+    /// base.
+    ///
+    /// Returns nil when HEAD is detached (`git rev-parse` prints literal
+    /// `HEAD`) or git cannot resolve the branch name. The caller must treat
+    /// nil as "do not open a PR": silently guessing the wrong base is worse
+    /// than not opening one.
     static func baseBranch(projectRoot: String = ProjectPaths.root) -> String? {
-        let ref = QueenStatusViewModel.runProcess(
+        let branch = QueenStatusViewModel.runProcess(
             "/usr/bin/git",
-            arguments: ["symbolic-ref", "refs/remotes/origin/HEAD"],
+            arguments: ["rev-parse", "--abbrev-ref", "HEAD"],
             workDir: projectRoot,
             timeout: 10
         ).trimmingCharacters(in: .whitespacesAndNewlines)
 
-        // `git symbolic-ref` prints something like
-        // `refs/remotes/origin/main`. Strip the prefix; what remains is the
-        // branch name the PR's `base` field needs.
-        guard ref.hasPrefix("refs/remotes/origin/") else { return nil }
-        let branch = String(ref.dropFirst("refs/remotes/origin/".count))
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return branch.isEmpty ? nil : branch
+        // `git rev-parse --abbrev-ref HEAD` prints the branch name (e.g.
+        // `feat/queen-supervisor`) or the literal `HEAD` when detached.
+        // `HEAD` is not a valid PR base, so treat it as nil.
+        guard !branch.isEmpty, branch != "HEAD" else { return nil }
+        return branch
     }
 
     /// The commit a worker's branch was cut from (#1135).
@@ -209,26 +214,11 @@ enum QueenBranchCommitter {
     /// **Superseded by the worktree workflow (#1142).** When a bee works in
     /// a worktree cut from `origin/<targetBranch>`, the branch point is
     /// simply the tip of `origin/<targetBranch>` — no merge-base computation
-    /// is needed. This method remains for callers that have not yet
-    /// migrated to the worktree flow.
-    ///
-    /// A bee's branch starts at HEAD and grows only the bee's own commits
-    /// on top. Opening a PR against the repo's default branch shows every
-    /// commit between that branch and HEAD — including the human's work
-    /// the bee never touched. The right base for the bee's PR is the
-    /// commit HEAD pointed at when the branch was created: the merge-base
-    /// of the bee's branch and HEAD.
-    ///
-    /// `merge-base` is correct here because the virtual-branch machinery
-    /// (`git branch <name> HEAD`) never moves HEAD, so HEAD's ancestry
-    /// still contains the original cut-point commit. The merge-base of
-    /// the bee's branch (which adds commits on top of that commit) and
-    /// HEAD (which still has it as an ancestor) is exactly that commit.
+    /// is needed. Callers should use `prBaseBranch(targetBranch:)` instead.
     ///
     /// Returns nil when the branch does not exist, HEAD cannot be
     /// resolved, the merge-base fails, or the branch carries no commits
-    /// of its own yet (merge-base == tip). The caller treats nil as
-    /// "do not open a PR": a branch with nothing on it is not ready.
+    /// of its own yet (merge-base == tip).
     static func branchPoint(
         of beeBranch: String,
         projectRoot: String = ProjectPaths.root
@@ -260,55 +250,6 @@ enum QueenBranchCommitter {
         guard base != tip else { return nil }
 
         return base
-    }
-
-    /// Creates a base branch at a given commit and pushes it to origin
-    /// (#1135).
-    ///
-    /// **Superseded by the worktree workflow (#1142).** When a bee works in
-    /// a worktree cut from `origin/<targetBranch>`, the PR `base` is the
-    /// target branch itself — no synthetic `-base` ref is needed. Callers
-    /// should use `prBaseBranch(targetBranch:)` instead.
-    ///
-    /// This method remains for callers that have not yet migrated to the
-    /// worktree flow. It is the root cause of #1141: the synthetic base
-    /// branch is a snapshot of a commit that may not exist on any real
-    /// branch, so GitHub's merge lands into nothing.
-    ///
-    /// GitHub's PR API needs a branch name for `base`, not a raw SHA.
-    /// The base branch is a snapshot of the cut-point commit — the state
-    /// of the checkout when the bee started — so the PR diff shows only
-    /// the bee's work.
-    ///
-    /// Returns nil on success, or git's own complaint.
-    static func pushBaseBranch(
-        named baseName: String,
-        at commitSha: String,
-        projectRoot: String = ProjectPaths.root
-    ) async -> String? {
-        await Task.detached(priority: .utility) {
-            let index = temporaryIndexPath()
-            defer { try? FileManager.default.removeItem(atPath: index) }
-
-            // Create the local ref at the cut point. `update-ref` is
-            // idempotent: on re-run it moves the ref to the same SHA.
-            guard runGit(
-                ["update-ref", "refs/heads/\(baseName)", commitSha],
-                index: index, projectRoot: projectRoot
-            ) != nil else {
-                return "git update-ref failed for \(baseName)"
-            }
-
-            // Push it to origin so GitHub can see it.
-            guard runGit(
-                ["push", "--force-with-lease", "origin",
-                 "\(baseName):\(baseName)"],
-                index: index, projectRoot: projectRoot
-            ) != nil else {
-                return "git push failed for \(baseName)"
-            }
-            return nil
-        }.value
     }
 
     /// Publishes a worker's branch so a pull request can be opened from it.
@@ -609,7 +550,21 @@ enum QueenBranchCommitter {
         ownedPaths: [String],
         projectRoot: String = ProjectPaths.root
     ) async -> Outcome {
-        await Task.detached(priority: .utility) {
+        // The worktree isolation invariant (#1142 criterion 7): if the path
+        // is the main checkout (`.git` is a directory, not a file), refuse.
+        // A bee that works in the shared tree can overwrite another bee's
+        // files (#1139) and its commits ride on top of the human's work
+        // instead of the target branch. `isWorktree` returns false for the
+        // main checkout, and this guard turns that into a hard stop rather
+        // than a silent corruption.
+        guard isWorktree(worktreePath) else {
+            return Outcome(
+                committed: false,
+                summary: "Refused to commit in the shared checkout at `\(worktreePath)`. "
+                    + "A bee must work in its own worktree (#1142)."
+            )
+        }
+        return await Task.detached(priority: .utility) {
             // Convert project-relative owned paths to repository-relative
             // paths. The worktree is a full checkout, so the paths match
             // the main repo's structure.
@@ -711,16 +666,12 @@ enum QueenBranchCommitter {
     }
 
     /// The branch a PR should target when a bee works in a worktree: the
-    /// real target branch, not a synthetic `-base` branch.
+    /// real target branch, not a synthetic snapshot.
     ///
     /// When a bee works in a worktree cut from `origin/<targetBranch>`, the
     /// bee's commits sit directly on top of the target branch's tip. The PR
-    /// `base` is therefore the target branch itself — no snapshot, no
-    /// `-base` ref, no `pushBaseBranch` call.
-    ///
-    /// This replaces the `branchPoint` → `pushBaseBranch` → `"-base"` chain
-    /// that produced synthetic branches GitHub could merge into nowhere
-    /// (#1141).
+    /// `base` is therefore the target branch itself — no snapshot ref,
+    /// no `-base` branch.
     static func prBaseBranch(targetBranch: String) -> String {
         targetBranch
     }
