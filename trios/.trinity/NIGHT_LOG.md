@@ -3727,3 +3727,27 @@ So: no task has reached a merge since #1102, and none can until the snapshot is
 taken over what the bee owns rather than over everything. #1131.
 
 Ratchet 571 -> 584.
+
+## The gate refuses on substance now, and its substance is a lie
+
+The staleness fingerprint is scoped to the task's boundary, so the Queen's own
+state writes no longer age a bee's verdict. Three attempts: the first overshot
+and the fingerprint stopped changing at all - a rule that answers the same to
+everything passes half its assertions and means nothing. Between attempts I read
+a green suite that was an artifact, because the build had failed with "input file
+was modified during the build" while a bee was still writing. Third instrument
+of the night to lie to me. Proven by breaking: a constant fingerprint fails four
+checks by name.
+
+Acceptance moved from "checked against different code" to "criterion not met" -
+refusing on substance instead of bookkeeping. And that revealed the sixth link:
+on an empty branch the diff is taken against a baseline captured after an
+earlier run's work, so a file sitting on disk arrives at the reviewer as
+`deleted file mode 100644`, 119 lines removed. It answered "unmet" twice, and it
+was right about the document it was given. A confident wrong "no" is worse than
+silence: it looks exactly like the gate working. #1132.
+
+Six links now, all the same species: the judge is fine, the question keeps
+arriving damaged.
+
+Ratchet 584 -> 594. Still no task through to a merge since #1102.
