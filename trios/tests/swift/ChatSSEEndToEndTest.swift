@@ -8,6 +8,32 @@
 import Foundation
 import SwiftUI
 
+/// A transport that replays a fixed sequence of SSE events on every call and
+/// counts how many times `sendMessage` was invoked. Used to feed the reviewer
+/// agent a controlled response — empty or otherwise — while tracking the retry
+/// count (#1117).
+actor CountingScriptedTransport: ChatTransportProtocol {
+    private(set) var sendCount = 0
+    private let events: [SSEEvent]
+
+    init(events: [SSEEvent]) {
+        self.events = events
+    }
+
+    func sendMessage(body: Data) async throws -> AsyncStream<SSEEvent> {
+        sendCount += 1
+        let toYield = events
+        return AsyncStream { continuation in
+            for event in toYield {
+                continuation.yield(event)
+            }
+            continuation.finish()
+        }
+    }
+
+    func cancel() async {}
+}
+
 @main
 @MainActor
 struct ChatSSEEndToEndTests {
@@ -25,7 +51,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 559  // 538 + 14 stale-verdict (#1126) + 7 issue-number (#1129)
+    static let minimumChecks = 571  // 538 + 14 stale-verdict (#1126) + 7 issue-number (#1129) + 12 empty-retry (#1117)
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -108,6 +134,7 @@ struct ChatSSEEndToEndTests {
         await runVerdictParserHandlesMarkdownNumbers()
         await runVerdictCarriesTreeState()
         await runIssueNumberIsAnIdentifier()
+        await runEmptyReviewerAnswerRetriesOnceAndRecordsAsAskedButUnanswered()
         // The interface-drift proof invokes the Swift compiler and is
         // deliberately kept out of the fast suite. Run it explicitly with:
         //   make drift-guard
@@ -5053,5 +5080,228 @@ struct ChatSSEEndToEndTests {
         )
         check(okResult.builds,
               "a compatible change is accepted by the drift guard")
+    }
+
+    // MARK: - Scenario: empty reviewer answer retries once and is recorded as asked-but-unanswered (#1117)
+
+    /// Asserts the retry that already exists: an empty reviewer answer is
+    /// asked once more and exactly once, and a second empty answer is
+    /// recorded as asked-but-unanswered rather than "never checked".
+    ///
+    /// Three things are proved:
+    /// 1. An empty reviewer answer is distinguished from "criterion wasn't
+    ///    checked" — in the block reason and in the tracking state.
+    /// 2. An empty answer triggers exactly one retry, not zero and not a
+    ///    loop.
+    /// 3. The distinction breaks (the test fails) if an empty answer
+    ///    becomes indistinguishable from the absence of a question.
+    static func runEmptyReviewerAnswerRetriesOnceAndRecordsAsAskedButUnanswered() async {
+        print("\n# Scenario: empty reviewer answer retries once and is recorded as asked-but-unanswered (#1117)")
+
+        typealias P = QueenAcceptancePolicy
+
+        let criteria = ["make check passes", "it is fast"]
+
+        // ── Policy-level proof: the building blocks the retry depends on ──
+
+        // An empty reviewer answer produces no verdicts. This is the
+        // condition that makes the retry necessary: the reviewer was asked,
+        // said nothing, and the parse conservatively returns nothing rather
+        // than guessing.
+        let emptyParsed = QueenReviewVerdictRequest.parse("", criteria: criteria)
+        check(emptyParsed.isEmpty,
+              "an empty reviewer response yields no verdicts — the parse does not guess")
+
+        // The base policy — what the block reason would say without the
+        // asked-but-unanswered augmentation — calls every unchecked
+        // criterion "never checked". This is the message the augmentation
+        // exists to replace for criteria that were asked but got no answer.
+        let baseReason = P.acceptanceBlockReason(criteria: criteria, recorded: [:]) ?? ""
+        check(baseReason.contains("never checked"),
+              "the base policy says 'never checked' for criteria with no recorded verdict")
+        check(!baseReason.contains("asked but the reviewer gave no answer"),
+              "the base policy does not carry the asked-but-unanswered distinction — it is added later")
+
+        // A non-empty reviewer answer produces verdicts. This is the
+        // contrast: the retry is only needed when the answer is empty.
+        let realResponse = "1. make check passes — met\n2. it is fast — unmet"
+        let realParsed = QueenReviewVerdictRequest.parse(realResponse, criteria: criteria)
+        check(!realParsed.isEmpty,
+              "a non-empty reviewer response produces verdicts — the retry is only for empty answers")
+        check(realParsed["make check passes"] == .met
+              && realParsed["it is fast"] == .unmet,
+              "and the verdicts match what the reviewer said")
+
+        // ── Full-flow proof: the retry through ChatViewModel ──
+
+        // The main transport returns events that produce no assistant text.
+        // When the reviewer's one-shot request reads these events, the
+        // transcript's assistantText is empty, and
+        // sendOneShotReviewerRequest returns nil — which triggers the
+        // retry.
+        let reviewerTransport = CountingScriptedTransport(events: [
+            .start(id: "reviewer-empty"),
+            .finish(id: "reviewer-empty", reason: nil)
+        ])
+
+        let testDefaults = UserDefaults(
+            suiteName: "trios-review-retry-\(UUID().uuidString)"
+        ) ?? .standard
+        let modelStore = ModelConfigurationStore(
+            defaults: testDefaults, environment: [:],
+            reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
+        )
+        let sharedPersister = InMemoryPersister()
+        let regPath = NSTemporaryDirectory()
+            + "queen-review-retry-reg-\(UUID().uuidString).json"
+        defer { try? FileManager.default.removeItem(atPath: regPath) }
+        let registry = QueenDelegationRegistry(storePath: regPath)
+
+        // Delegation creates a real git branch in this checkout. Clean it
+        // up by name so the test does not leave branches behind (same
+        // pattern as runQueenHearsEveryBee).
+        defer {
+            let list = Process()
+            list.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            list.arguments = [
+                "branch", "--list", "queen/1117-*",
+                "--format=%(refname:short)"
+            ]
+            list.currentDirectoryURL = URL(fileURLWithPath: ProjectPaths.root)
+            let pipe = Pipe()
+            list.standardOutput = pipe
+            list.standardError = Pipe()
+            if (try? list.run()) != nil {
+                let out = String(
+                    data: pipe.fileHandleForReading.readDataToEndOfFile(),
+                    encoding: .utf8
+                ) ?? ""
+                list.waitUntilExit()
+                for name in out.components(separatedBy: .newlines)
+                where name.hasPrefix("queen/1117-") {
+                    let remove = Process()
+                    remove.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+                    remove.arguments = ["branch", "-D", name]
+                    remove.currentDirectoryURL = URL(fileURLWithPath: ProjectPaths.root)
+                    remove.standardOutput = Pipe()
+                    remove.standardError = Pipe()
+                    try? remove.run()
+                    remove.waitUntilExit()
+                }
+            }
+        }
+
+        let viewModel = ChatViewModel(
+            transport: reviewerTransport,
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: sharedPersister,
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: modelStore,
+            memoryService: AgentMemoryService(
+                store: VolatileMemoryStore(),
+                fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: TODOPlanner(
+                store: VolatileMemoryStore(), preferences: testDefaults
+            ),
+            workerRunner: QueenWorkerRunner(
+                persister: sharedPersister,
+                modelStore: modelStore,
+                makeTransport: {
+                    CountingScriptedTransport(events: [
+                        .start(id: "worker-1117"),
+                        .textDelta(id: "worker-1117", delta: "Done."),
+                        .finish(id: "worker-1117", reason: nil)
+                    ])
+                }
+            ),
+            delegationRegistry: registry,
+            fetchIssueBody: { _ in
+                "## Готово, когда\n- make check passes\n- it is fast"
+            }
+        )
+
+        // Let the background init settle.
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        await viewModel.runQueenCommand("/approve gHashTag/trios#1117")
+        await viewModel.runQueenCommand(
+            "/delegate gHashTag/trios#1117 queen-swift --paths tests/swift Assert the retry"
+        )
+
+        guard let task = registry.task(
+            forIssue: IssueReference(owner: "gHashTag", repo: "trios", number: 1117)
+        ) else {
+            fail("could not open a delegated task for #1117"); return
+        }
+
+        // Wait for the worker to finish, the review to run, and the task
+        // to land in awaitingReview. The review is the async path:
+        // worker finishes → handleWorkerFinished → requestReviewerVerdicts
+        // → sendOneShotReviewerRequest (once + one retry) →
+        // askedButUnanswered populated → transition to awaitingReview.
+        var settled = false
+        for _ in 0..<100 {
+            let state = registry.task(forIssue: task.issue)?.state
+            if state == .awaitingReview || state == .failed {
+                settled = true
+                break
+            }
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+        check(settled,
+              "the worker finished and the task reached a terminal review state")
+
+        // Let any remaining async work flush.
+        try? await Task.sleep(nanoseconds: 500_000_000)
+
+        // ── Criterion 2: exactly one retry ──
+        //
+        // The reviewer transport was called twice: once for the initial
+        // request, once for the retry. Not once (the retry was removed),
+        // not three or more (it became a loop). Two is the proof that an
+        // empty first answer triggers exactly one more try.
+        let reviewerSends = await reviewerTransport.sendCount
+        check(reviewerSends == 2,
+              "the reviewer transport was called exactly twice (once + one retry), not \(reviewerSends)")
+
+        // ── Criterion 1: empty answer ≠ "never checked" ──
+        //
+        // The asked-but-unanswered set is populated by the retry path. If
+        // it is empty, the distinction has been lost and the block reason
+        // will revert to "never checked" for these criteria.
+        let asked = viewModel.askedButUnanswered[task.id] ?? []
+        check(!asked.isEmpty,
+              "an empty reviewer answer populates askedButUnanswered, distinguishing it from 'never checked'")
+        check(asked.contains("make check passes") && asked.contains("it is fast"),
+              "and the specific criteria that went unanswered are named in the set")
+
+        // The raw response is not stored for empty answers — there is
+        // nothing to re-examine. A nil entry is correct; a stored empty
+        // string would imply the response was worth keeping.
+        check(viewModel.reviewerResponses[task.id] == nil,
+              "an empty reviewer response is not stored as if it were evidence")
+
+        // ── Criterion 1 continued: /accept block reason distinguishes ──
+        await viewModel.runQueenCommand("/accept gHashTag/trios#1117")
+        let acceptNotices = viewModel.messages
+            .filter { $0.role == .system }
+            .map(\.content)
+        let acceptBlock = acceptNotices
+            .last(where: { $0.contains("Not accepting") }) ?? ""
+        check(acceptBlock.contains("asked but the reviewer gave no answer"),
+              "the acceptance block reason says the criteria were asked but unanswered")
+        // ── Criterion 3: the test breaks if the distinction collapses ──
+        //
+        // If askedButUnanswered tracking were removed, the block reason
+        // would revert to "never checked" for every unchecked criterion.
+        // This check would fail because acceptBlock would contain "never
+        // checked" instead of "asked but the reviewer gave no answer". The
+        // guard is structural: it exists to break loudly, not to pass
+        // silently.
+        check(!acceptBlock.contains("never checked"),
+              "the block reason does not call asked-but-unanswered criteria 'never checked' — the question was asked, the answer was empty")
     }
 }

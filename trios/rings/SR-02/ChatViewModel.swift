@@ -4109,16 +4109,28 @@ final class ChatViewModel: ObservableObject {
     /// question" is a bug this function exists to catch, not a state it
     /// tolerates.
     private func acceptanceBlockReasonDistinguishingEmptyAnswers(
-        for task: DelegatedTask
+        for task: DelegatedTask,
+        verdictTreeState: String?,
+        currentTreeState: String
     ) -> String? {
+        // The combined state is threaded here, not built here: the caller
+        // snapshots the working tree once per acceptance (#1128) and passes
+        // both states in. Making currentTreeState a non-optional String —
+        // not String? — is deliberate: it means the function cannot be
+        // called without the combined state already assembled, which is what
+        // keeps the snapshot call load-bearing. Remove the call in the
+        // .accept case and this function's call site no longer compiles.
         let table = QueenAcceptancePolicy.verdicts(
-            criteria: task.acceptanceCriteria, recorded: task.criterionVerdicts
+            criteria: task.acceptanceCriteria, recorded: task.criterionVerdicts,
+            verdictTreeState: verdictTreeState,
+            currentTreeState: currentTreeState
         )
 
         let unmet = table.filter { $0.verdict == .unmet }
+        let stale = table.filter { $0.verdict == .stale }
         let unchecked = table.filter { $0.verdict == .unchecked }
 
-        guard !unmet.isEmpty || !unchecked.isEmpty else { return nil }
+        guard !unmet.isEmpty || !stale.isEmpty || !unchecked.isEmpty else { return nil }
 
         // Split unchecked into "asked but no answer" and "genuinely never
         // asked". The `askedButUnanswered` set is populated by
@@ -4150,6 +4162,13 @@ final class ChatViewModel: ObservableObject {
             parts.append(
                 "\(unmet.count) criterion(s) were not met: "
                 + unmet.map(\.criterion).joined(separator: "; ")
+            )
+        }
+        if !stale.isEmpty {
+            parts.append(
+                "\(stale.count) criterion(s) were checked against different code: "
+                + stale.map(\.criterion).joined(separator: "; ")
+                + ". They need re-checking against the current tree."
             )
         }
         if !askedNoAnswer.isEmpty {
@@ -4485,11 +4504,50 @@ final class ChatViewModel: ObservableObject {
 
         switch decision {
         case .accept:
+            // --- Build the combined state (#1128) ---
+            // Acceptance reads the tree state the verdicts were carved against
+            // alongside the tree state the code is in now. Without both,
+            // staleness is invisible: a verdict checked against yesterday's code
+            // silently passes because nothing compares the two. The snapshot is
+            // taken here — once per acceptance, not on every build — so the cost
+            // of a git invocation lands where the decision is made, not on every
+            // render.
+            let verdictTreeState = task.treeStateFingerprint
+            guard let currentTreeState = await QueenBranchCommitter.snapshotWorkingTree() else {
+                // The combined state could not be assembled. This is a structural
+                // failure, not a criterion verdict: "does not build together" is
+                // not "criterion not met". The first says the check cannot run;
+                // the second says it ran and the answer was no. Mixing them hides
+                // a broken tool behind a verdict that was never reached.
+                TriosLogBus.shared.warn(
+                    .queen, "queen.accept.state_failed",
+                    "Combined state assembly failed — working tree snapshot returned nil",
+                    [
+                        "issue": issue.slug,
+                        "verdictTreeState": verdictTreeState ?? "(none)",
+                        "criteria": String(task.acceptanceCriteria.count),
+                        "verdicts": String(task.criterionVerdicts.count),
+                    ]
+                )
+                await postQueenNotice(
+                    SystemNoticeClassifier.warningMarker
+                        + "Not accepting \(issue.slug): the combined state could not be "
+                        + "assembled — the working tree snapshot failed. This is a structural "
+                        + "failure, not a criterion verdict. The state acceptance needs to read "
+                        + "was not built, so the verdicts cannot be checked for staleness."
+                )
+                return
+            }
+
             // Acceptance is checked against the contract before it is checked
             // against anything else. This is the whole point of writing criteria
             // down: without it the Queen signs off on an impression, and the
             // specification becomes decoration that made the brief longer.
-            if let reason = acceptanceBlockReasonDistinguishingEmptyAnswers(for: task) {
+            if let reason = acceptanceBlockReasonDistinguishingEmptyAnswers(
+                for: task,
+                verdictTreeState: verdictTreeState,
+                currentTreeState: currentTreeState
+            ) {
                 // Logged as well as said. The refusal is the contract doing its
                 // job, and until it was visible outside her chat every run that
                 // hit it looked identical to a run where nothing happened.
@@ -4507,7 +4565,9 @@ final class ChatViewModel: ObservableObject {
                     SystemNoticeClassifier.warningMarker
                         + "Not accepting \(issue.slug) yet. \(reason)\n\n"
                         + QueenAcceptancePolicy.table(
-                            criteria: task.acceptanceCriteria, recorded: task.criterionVerdicts
+                            criteria: task.acceptanceCriteria, recorded: task.criterionVerdicts,
+                            verdictTreeState: verdictTreeState,
+                            currentTreeState: currentTreeState
                         )
                         + "\n\nRecord what you found with "
                         + "`/verify \(issue.slug) <criterion text> met|unmet`."
@@ -4525,7 +4585,9 @@ final class ChatViewModel: ObservableObject {
             let evidence = task.acceptanceCriteria.isEmpty
                 ? ""
                 : "\n\n" + QueenAcceptancePolicy.table(
-                    criteria: task.acceptanceCriteria, recorded: task.criterionVerdicts
+                    criteria: task.acceptanceCriteria, recorded: task.criterionVerdicts,
+                    verdictTreeState: verdictTreeState,
+                    currentTreeState: currentTreeState
                 )
             await postQueenNotice(
                 SystemNoticeClassifier.successMarker
