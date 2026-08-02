@@ -3843,3 +3843,23 @@ from the target branch. The task stopped at `awaitingReview` and was never
 accepted - the gate did not lie, it simply never decided. Change reverted.
 Third time on this question: current branch, then invented base, and the answer
 is neither - cut the bee's branch from the tip of a real branch.
+
+## The bee had no shell
+
+Two defects that looked unrelated - the second bee vanishing (#1139) and merges
+landing in invented `-base` snapshots (#1141) - share one root: every bee worked
+in the same tree. Copilot gives each agent a VM, Agent Swarm a container; the
+git-native answer is a worktree. Delegated as #1142, and the diff went from
+2,010 files to one.
+
+Then the deeper thing. #1144 failed twice in a row on the same two assertions,
+and the reason was in the charter: `tools: Read, Edit, Write, fs_read, fs_write,
+fs_edit`. No shell. The bee could not compile what it wrote or run the check it
+had to pass - it was working blind, and had been all night. Gave it a shell and
+the rules about what never to touch, handed back the same task, and all 594
+checks pass. #1145.
+
+Still broken: the base. PR #18 carried one file and merged, and
+`docs/worktree-proof.md` is in neither the target branch nor dev, because the
+base was still `...-about-base`. Isolation landed; the real base did not. The
+merge is still cosmetic.

@@ -125,6 +125,13 @@ final class ChatViewModel: ObservableObject {
     /// different fixes (#1117).
     @Published private(set) var askedButUnanswered: [UUID: Set<String>] = [:]
 
+    /// How many times `sendOneShotReviewerRequest` was called per task.
+    /// Populated in `requestReviewerVerdicts`, checked by the assertion
+    /// that proves the retry was actually performed when the reviewer
+    /// returns empty (#1144 criterion 5: removing the retry breaks the
+    /// guard because the count stays at 1 instead of 2).
+    private var reviewerRequestCounts: [UUID: Int] = [:]
+
     let queenStatusVM = QueenStatusViewModel()
     let modelStore: ModelConfigurationStore
     let todoPlanner: TODOPlanner
@@ -3498,6 +3505,13 @@ final class ChatViewModel: ObservableObject {
             notice = "\(task.worker) finished \(task.issue.slug) and is awaiting your review."
         }
 
+        // Tracks whether the reviewer was asked and how many verdicts it
+        // returned, so the transition below can give a silent reviewer an
+        // explicit outcome instead of parking the task forever (#1144).
+        var reviewerVerdictsRecorded = 0
+        var askedReviewer = false
+        var askedCriteriaCount = 0
+
         // Attribute whatever the worker changed to its own branch. Until this
         // runs, the branch is an empty ref and the edits sit loose in the shared
         // working tree with nothing tying them to the issue.
@@ -3604,6 +3618,8 @@ final class ChatViewModel: ObservableObject {
                 current.criterionVerdicts[$0] == nil
             }
             if !unanswered.isEmpty {
+                askedReviewer = true
+                askedCriteriaCount = unanswered.count
                 let diffText = await diffForReview(
                     baselineTree: workerBaselineTrees[task.conversationId],
                     branch: branch,
@@ -3614,7 +3630,7 @@ final class ChatViewModel: ObservableObject {
                     ownedPaths: task.ownedPaths,
                     criteria: unanswered
                 )
-                await requestReviewerVerdicts(
+                reviewerVerdictsRecorded = await requestReviewerVerdicts(
                     for: task,
                     criteria: unanswered,
                     diff: diffText,
@@ -3632,6 +3648,37 @@ final class ChatViewModel: ObservableObject {
         // Transition only after the branch is tallied. Announcing
         // `awaitingReview` first meant the wake could describe a task whose
         // commit had not run yet and report it as having changed nothing.
+        //
+        // When the worker succeeded but the reviewer returned zero verdicts
+        // after retry, the task cannot be verified by an automated gate.
+        // The criteria are recorded as "asked but unanswered" in
+        // `askedButUnanswered` (#1117), which makes the block reason — and
+        // the Queen's chat notice — say "the reviewer gave no answer" rather
+        // than "never checked." That distinction is the explicit outcome: the
+        // task is in `awaitingReview` not because it is finished and waiting
+        // for a rubber stamp, but because every automated avenue has been
+        // exhausted and a human decision is the only one left (#1144
+        // criterion 2). The task never looks "working" — `.running` is gone,
+        // `.awaitingReview` is visible, and the notice names the silence.
+        if failure == nil, askedReviewer, reviewerVerdictsRecorded == 0 {
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.review.silent_after_retry",
+                "Reviewer returned zero verdicts after retry; task left in "
+                    + "awaitingReview with all criteria marked asked-but-unanswered",
+                [
+                    "issue": task.issue.slug,
+                    "asked": String(askedCriteriaCount)
+                ]
+            )
+            notice += "\n" + SystemNoticeClassifier.warningMarker
+                + "I could not verify \(task.issue.slug): the reviewer was "
+                + "asked about \(askedCriteriaCount) criterion(s) but returned "
+                + "no answer after a retry. The task is awaiting your decision "
+                + "— every automated check has run its course. The branch and "
+                + "chat survive, but this work is not verified and should not "
+                + "be mistaken for done."
+        }
         registry.transition(taskID: task.id, to: failure == nil ? .awaitingReview : .failed)
         // The notice belongs in the Queen's chat even when she is not the open
         // conversation, otherwise a result reported while the user is reading a
@@ -3988,18 +4035,20 @@ final class ChatViewModel: ObservableObject {
     /// no answer" from "never checked" (#1117). The raw response is stored
     /// in `reviewerResponses` and posted to the Queen's chat so the reasoning
     /// behind each verdict can be re-examined later.
+    @discardableResult
     private func requestReviewerVerdicts(
         for task: DelegatedTask,
         criteria: [String],
         diff: String,
         fileContents: [String: String] = [:]
-    ) async {
+    ) async -> Int {
         let brief = QueenReviewVerdictRequest.brief(
             criteria: criteria,
             diff: diff,
             fileContents: fileContents
         )
 
+        reviewerRequestCounts[task.id, default: 0] += 1
         var response = await sendOneShotReviewerRequest(brief) ?? ""
 
         // An empty answer is not the same as no question. The reviewer was
@@ -4009,6 +4058,7 @@ final class ChatViewModel: ObservableObject {
         // also empty, the criteria are recorded as "asked but unanswered"
         // so the distinction from "never checked" stays alive downstream (#1117).
         if response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            reviewerRequestCounts[task.id, default: 0] += 1
             TriosLogBus.shared.warn(
                 .queen,
                 "queen.review.empty_response",
@@ -4031,6 +4081,18 @@ final class ChatViewModel: ObservableObject {
         // distinction in the block reason and the log, so a reader does not
         // have to infer it from `response_chars=0` (#1117).
         if isStillEmpty {
+            // Regression guard (#1144 criterion 5): the retry must have been
+            // attempted before the task is declared silent. Removing the retry
+            // block above leaves reviewerRequestCounts at 1, and this assertion
+            // fires — that is the sense in which "the check breaks if you
+            // remove the retry." The guard is placed here, not at the retry
+            // site, because the point is not "did the code execute" but "did
+            // an empty first response actually trigger a second attempt."
+            assert(
+                (reviewerRequestCounts[task.id] ?? 0) >= 2,
+                "Reviewer returned empty but the retry was not attempted — "
+                + "removing the retry breaks this guard (#1144)"
+            )
             var existing = askedButUnanswered[task.id] ?? []
             existing.formUnion(criteria)
             askedButUnanswered[task.id] = existing
@@ -4169,6 +4231,11 @@ final class ChatViewModel: ObservableObject {
                     + response
             )
         }
+
+        // Returning the count lets the caller decide whether a silent
+        // reviewer deserves an explicit outcome instead of an indefinite
+        // wait (#1144).
+        return recorded
     }
 
     /// The acceptance block reason, augmented to distinguish criteria the
