@@ -204,6 +204,97 @@ enum QueenBranchCommitter {
         return branch.isEmpty ? nil : branch
     }
 
+    /// The commit a worker's branch was cut from (#1135).
+    ///
+    /// A bee's branch starts at HEAD and grows only the bee's own commits
+    /// on top. Opening a PR against the repo's default branch shows every
+    /// commit between that branch and HEAD — including the human's work
+    /// the bee never touched. The right base for the bee's PR is the
+    /// commit HEAD pointed at when the branch was created: the merge-base
+    /// of the bee's branch and HEAD.
+    ///
+    /// `merge-base` is correct here because the virtual-branch machinery
+    /// (`git branch <name> HEAD`) never moves HEAD, so HEAD's ancestry
+    /// still contains the original cut-point commit. The merge-base of
+    /// the bee's branch (which adds commits on top of that commit) and
+    /// HEAD (which still has it as an ancestor) is exactly that commit.
+    ///
+    /// Returns nil when the branch does not exist, HEAD cannot be
+    /// resolved, the merge-base fails, or the branch carries no commits
+    /// of its own yet (merge-base == tip). The caller treats nil as
+    /// "do not open a PR": a branch with nothing on it is not ready.
+    static func branchPoint(
+        of beeBranch: String,
+        projectRoot: String = ProjectPaths.root
+    ) -> String? {
+        let root = repositoryRoot(projectRoot: projectRoot)
+        let beeRef = "refs/heads/\(beeBranch)"
+
+        // Verify the branch exists and get its tip.
+        let tip = QueenStatusViewModel.runProcess(
+            "/usr/bin/git",
+            arguments: ["rev-parse", "--verify", beeRef],
+            workDir: root,
+            timeout: 10
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !tip.isEmpty, !tip.contains("fatal:") else { return nil }
+
+        // The merge-base of the bee's branch and HEAD is the commit the
+        // branch was created from.
+        let base = QueenStatusViewModel.runProcess(
+            "/usr/bin/git",
+            arguments: ["merge-base", beeRef, "HEAD"],
+            workDir: root,
+            timeout: 10
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !base.isEmpty, !base.contains("fatal:") else { return nil }
+
+        // If the merge-base is the tip, the branch has no commits of its
+        // own — nothing to open a PR for.
+        guard base != tip else { return nil }
+
+        return base
+    }
+
+    /// Creates a base branch at a given commit and pushes it to origin
+    /// (#1135).
+    ///
+    /// GitHub's PR API needs a branch name for `base`, not a raw SHA.
+    /// The base branch is a snapshot of the cut-point commit — the state
+    /// of the checkout when the bee started — so the PR diff shows only
+    /// the bee's work.
+    ///
+    /// Returns nil on success, or git's own complaint.
+    static func pushBaseBranch(
+        named baseName: String,
+        at commitSha: String,
+        projectRoot: String = ProjectPaths.root
+    ) async -> String? {
+        await Task.detached(priority: .utility) {
+            let index = temporaryIndexPath()
+            defer { try? FileManager.default.removeItem(atPath: index) }
+
+            // Create the local ref at the cut point. `update-ref` is
+            // idempotent: on re-run it moves the ref to the same SHA.
+            guard runGit(
+                ["update-ref", "refs/heads/\(baseName)", commitSha],
+                index: index, projectRoot: projectRoot
+            ) != nil else {
+                return "git update-ref failed for \(baseName)"
+            }
+
+            // Push it to origin so GitHub can see it.
+            guard runGit(
+                ["push", "--force-with-lease", "origin",
+                 "\(baseName):\(baseName)"],
+                index: index, projectRoot: projectRoot
+            ) != nil else {
+                return "git push failed for \(baseName)"
+            }
+            return nil
+        }.value
+    }
+
     /// Publishes a worker's branch so a pull request can be opened from it.
     ///
     /// The commit path deliberately never touched the network, and the pull

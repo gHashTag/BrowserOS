@@ -4833,22 +4833,43 @@ final class ChatViewModel: ObservableObject {
             return
         }
 
-        // The base branch is the PR's target — what the head merges into.
-        // baseBranch() returns nil when the checkout has no origin/HEAD
-        // symbolic ref, which means we genuinely do not know what to merge
-        // into. The old default ("dev") was a guess: if the repo's default
-        // branch is "main" or "trunk", a PR opened against "dev" lands in the
-        // wrong place. Refuse and name the reason instead.
-        guard let baseBranch = QueenBranchCommitter.baseBranch() else {
+        // The PR base is the commit the bee's branch was cut from, not
+        // the repo's default branch (#1135). A bee's branch starts at HEAD
+        // and grows only its own commits on top; opening against the default
+        // branch would show every commit between that branch and HEAD — the
+        // human's work the bee never touched. The branch point is the
+        // merge-base of the bee's branch and HEAD: the exact commit the
+        // branch was created from.
+        guard let cutPoint = QueenBranchCommitter.branchPoint(of: branch) else {
             TriosLogBus.shared.error(
-                .queen, "queen.pr.noBaseBranch", "Could not determine the base branch",
+                .queen, "queen.pr.noBranchPoint", "Could not find the branch point",
                 ["issue": issue.slug, "branch": branch]
             )
             await postQueenNotice(
                 SystemNoticeClassifier.failureMarker
-                    + "I could not determine the base branch for `\(branch)`, so there "
-                    + "is no pull request for \(issue.slug). Set origin/HEAD to point "
-                    + "at the default branch and try again."
+                    + "I could not determine where `\(branch)` was cut from, so there "
+                    + "is no pull request for \(issue.slug). The branch may not have "
+                    + "any commits yet."
+            )
+            return
+        }
+
+        // GitHub needs a branch name for `base`, not a raw SHA. Push a
+        // base branch pointing at the cut-point commit so the PR diff
+        // shows only the bee's work.
+        let prBase = "\(branch)-base"
+        if let basePushFailure = await QueenBranchCommitter.pushBaseBranch(
+            named: prBase, at: cutPoint
+        ) {
+            TriosLogBus.shared.error(
+                .queen, "queen.pr.basePushFailed", "Could not publish the base branch",
+                ["issue": issue.slug, "baseBranch": prBase, "detail": basePushFailure]
+            )
+            await postQueenNotice(
+                SystemNoticeClassifier.failureMarker
+                    + "Could not publish the base branch `\(prBase)` for "
+                    + "\(issue.slug), so there is no pull request. git said: "
+                    + "\(basePushFailure)"
             )
             return
         }
@@ -4859,7 +4880,7 @@ final class ChatViewModel: ObservableObject {
                 title: task.title,
                 body: "For \(issue.url)\n\nOpened by the Queen for \(task.worker).",
                 head: branch,
-                base: baseBranch
+                base: prBase
             )
             registry.recordPullRequest(taskID: task.id, number: pr.number)
             await postQueenNotice(
@@ -4870,7 +4891,8 @@ final class ChatViewModel: ObservableObject {
             )
             TriosLogBus.shared.info(
                 .queen, "queen.pr.opened", "Opened a pull request",
-                ["issue": issue.slug, "pr": "\(pr.number)", "branch": branch]
+                ["issue": issue.slug, "pr": "\(pr.number)", "branch": branch,
+                 "base": prBase, "cutPoint": cutPoint]
             )
         } catch {
             TriosLogBus.shared.error(
