@@ -209,26 +209,11 @@ enum QueenBranchCommitter {
     /// **Superseded by the worktree workflow (#1142).** When a bee works in
     /// a worktree cut from `origin/<targetBranch>`, the branch point is
     /// simply the tip of `origin/<targetBranch>` — no merge-base computation
-    /// is needed. This method remains for callers that have not yet
-    /// migrated to the worktree flow.
-    ///
-    /// A bee's branch starts at HEAD and grows only the bee's own commits
-    /// on top. Opening a PR against the repo's default branch shows every
-    /// commit between that branch and HEAD — including the human's work
-    /// the bee never touched. The right base for the bee's PR is the
-    /// commit HEAD pointed at when the branch was created: the merge-base
-    /// of the bee's branch and HEAD.
-    ///
-    /// `merge-base` is correct here because the virtual-branch machinery
-    /// (`git branch <name> HEAD`) never moves HEAD, so HEAD's ancestry
-    /// still contains the original cut-point commit. The merge-base of
-    /// the bee's branch (which adds commits on top of that commit) and
-    /// HEAD (which still has it as an ancestor) is exactly that commit.
+    /// is needed. Callers should use `prBaseBranch(targetBranch:)` instead.
     ///
     /// Returns nil when the branch does not exist, HEAD cannot be
     /// resolved, the merge-base fails, or the branch carries no commits
-    /// of its own yet (merge-base == tip). The caller treats nil as
-    /// "do not open a PR": a branch with nothing on it is not ready.
+    /// of its own yet (merge-base == tip).
     static func branchPoint(
         of beeBranch: String,
         projectRoot: String = ProjectPaths.root
@@ -260,55 +245,6 @@ enum QueenBranchCommitter {
         guard base != tip else { return nil }
 
         return base
-    }
-
-    /// Creates a base branch at a given commit and pushes it to origin
-    /// (#1135).
-    ///
-    /// **Superseded by the worktree workflow (#1142).** When a bee works in
-    /// a worktree cut from `origin/<targetBranch>`, the PR `base` is the
-    /// target branch itself — no synthetic `-base` ref is needed. Callers
-    /// should use `prBaseBranch(targetBranch:)` instead.
-    ///
-    /// This method remains for callers that have not yet migrated to the
-    /// worktree flow. It is the root cause of #1141: the synthetic base
-    /// branch is a snapshot of a commit that may not exist on any real
-    /// branch, so GitHub's merge lands into nothing.
-    ///
-    /// GitHub's PR API needs a branch name for `base`, not a raw SHA.
-    /// The base branch is a snapshot of the cut-point commit — the state
-    /// of the checkout when the bee started — so the PR diff shows only
-    /// the bee's work.
-    ///
-    /// Returns nil on success, or git's own complaint.
-    static func pushBaseBranch(
-        named baseName: String,
-        at commitSha: String,
-        projectRoot: String = ProjectPaths.root
-    ) async -> String? {
-        await Task.detached(priority: .utility) {
-            let index = temporaryIndexPath()
-            defer { try? FileManager.default.removeItem(atPath: index) }
-
-            // Create the local ref at the cut point. `update-ref` is
-            // idempotent: on re-run it moves the ref to the same SHA.
-            guard runGit(
-                ["update-ref", "refs/heads/\(baseName)", commitSha],
-                index: index, projectRoot: projectRoot
-            ) != nil else {
-                return "git update-ref failed for \(baseName)"
-            }
-
-            // Push it to origin so GitHub can see it.
-            guard runGit(
-                ["push", "--force-with-lease", "origin",
-                 "\(baseName):\(baseName)"],
-                index: index, projectRoot: projectRoot
-            ) != nil else {
-                return "git push failed for \(baseName)"
-            }
-            return nil
-        }.value
     }
 
     /// Publishes a worker's branch so a pull request can be opened from it.
@@ -609,7 +545,21 @@ enum QueenBranchCommitter {
         ownedPaths: [String],
         projectRoot: String = ProjectPaths.root
     ) async -> Outcome {
-        await Task.detached(priority: .utility) {
+        // The worktree isolation invariant (#1142 criterion 7): if the path
+        // is the main checkout (`.git` is a directory, not a file), refuse.
+        // A bee that works in the shared tree can overwrite another bee's
+        // files (#1139) and its commits ride on top of the human's work
+        // instead of the target branch. `isWorktree` returns false for the
+        // main checkout, and this guard turns that into a hard stop rather
+        // than a silent corruption.
+        guard isWorktree(worktreePath) else {
+            return Outcome(
+                committed: false,
+                summary: "Refused to commit in the shared checkout at `\(worktreePath)`. "
+                    + "A bee must work in its own worktree (#1142)."
+            )
+        }
+        return await Task.detached(priority: .utility) {
             // Convert project-relative owned paths to repository-relative
             // paths. The worktree is a full checkout, so the paths match
             // the main repo's structure.
@@ -711,16 +661,12 @@ enum QueenBranchCommitter {
     }
 
     /// The branch a PR should target when a bee works in a worktree: the
-    /// real target branch, not a synthetic `-base` branch.
+    /// real target branch, not a synthetic snapshot.
     ///
     /// When a bee works in a worktree cut from `origin/<targetBranch>`, the
     /// bee's commits sit directly on top of the target branch's tip. The PR
-    /// `base` is therefore the target branch itself — no snapshot, no
-    /// `-base` ref, no `pushBaseBranch` call.
-    ///
-    /// This replaces the `branchPoint` → `pushBaseBranch` → `"-base"` chain
-    /// that produced synthetic branches GitHub could merge into nowhere
-    /// (#1141).
+    /// `base` is therefore the target branch itself — no snapshot ref,
+    /// no `-base` branch.
     static func prBaseBranch(targetBranch: String) -> String {
         targetBranch
     }
