@@ -3817,3 +3817,29 @@ while leaving the satisfied one alone. No false yes.
 
 That is the MVP: she wrote the spec, watched, judged against the contract,
 accepted, proposed and landed it, and refused correctly when refusal was right.
+
+## Three answers, and none of them was the one I wanted
+
+**Parallel.** Two tasks, disjoint files, eight seconds apart. #1138 ran the whole
+road and merged. #1137 went to `running` at 19:13:47 and then nothing at all -
+no worker, no branch, no file, no error. The second bee displaced the first in
+silence and the task still reads as working. Eight defects tonight were at least
+visible in the log; this one leaves no trace. #1139.
+
+**Self-direction.** Not broken - absent. No function chooses the next task, no
+Makefile target asks her to, and `chat-probe` is a health probe that answers
+`TRIOS OK` to any question. She can do the work and cannot decide what the work
+is. #1140.
+
+**Looking at what merged.** No `queen/*` branch is an ancestor of `dev`, which is
+how I found the real thing: PRs #15 and #16 merged into `*-base` branches -
+snapshots invented to be a base. `docs/parallel-two.md` exists in neither `dev`
+nor the working branch. The merge is cosmetic; the bee's work reaches nothing.
+My #1135 repair traded 2,010 useless files for a merge that goes nowhere. #1141.
+
+I delegated the repair for #1141. Build green, 594 checks green, and the proof
+run reproduced the fault exactly: base `...-about-base`, 873 files, file absent
+from the target branch. The task stopped at `awaitingReview` and was never
+accepted - the gate did not lie, it simply never decided. Change reverted.
+Third time on this question: current branch, then invented base, and the answer
+is neither - cut the bee's branch from the tip of a real branch.
