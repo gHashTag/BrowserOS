@@ -193,10 +193,15 @@ final class ChatViewModel: ObservableObject {
     /// told apart from everything else happening in the shared checkout.
     private var workerBaselineTrees: [UUID: String] = [:]
 
-    /// The fingerprint of the working tree at the moment verdicts were
-    /// recorded, keyed by task ID. Snapshotted when the Queen or a reviewer
-    /// records a verdict, so acceptance can compare the tree the verdicts
-    /// were carved against with the tree the code is in now (#1131).
+    /// The boundary-scoped fingerprint of the task's own files at the moment
+    /// verdicts were recorded, keyed by task ID. Snapshotted when the Queen
+    /// or a reviewer records a verdict, so acceptance can compare the
+    /// boundary the verdicts were carved against with the boundary's current
+    /// state (#1131).
+    ///
+    /// Only the task's `ownedPaths` are hashed, so the Queen's state writes
+    /// (`.trinity/state/*`) cannot age a verdict — they are outside the lane
+    /// and invisible to the boundary fingerprint.
     ///
     /// This mirrors `DelegatedTask.treeStateFingerprint` but is set from the
     /// view model because the registry's `recordVerdict` does not take a
@@ -3547,14 +3552,17 @@ final class ChatViewModel: ObservableObject {
             for (criterion, verdict) in evidenceVerdicts {
                 registry.recordVerdict(taskID: task.id, criterion: criterion, verdict: verdict)
             }
-            // Record the tree state at the moment the evidence verdicts are
-            // carved, so acceptance can tell a current verdict from one carved
-            // against code that has since moved (#1131). The fingerprint is
-            // written here — at verdict recording time — not at acceptance,
-            // because what matters is the state the verdicts were derived
-            // against, not the state the decision is made in.
+            // Record the boundary-scoped fingerprint at the moment the
+            // evidence verdicts are carved (#1131). Only the task's own
+            // files are hashed, so the Queen's state writes cannot age a
+            // verdict. The fingerprint is written here — at verdict
+            // recording time — not at acceptance, because what matters is
+            // the state the verdicts were derived against, not the state
+            // the decision is made in.
             if !evidenceVerdicts.isEmpty,
-               let snapshot = await QueenBranchCommitter.snapshotWorkingTree() {
+               let snapshot = await QueenBranchCommitter.fingerprintBoundary(
+                   ownedPaths: task.ownedPaths
+               ) {
                 verdictTreeStates[task.id] = snapshot
             }
             if !evidenceVerdicts.isEmpty {
@@ -4013,13 +4021,15 @@ final class ChatViewModel: ObservableObject {
                 recorded += 1
             }
         }
-        // Record the tree state at the moment the reviewer's verdicts are
-        // carved (#1131). The reviewer saw the committed diff; the
-        // fingerprint is the state the code was in when the verdicts were
-        // derived, so a later acceptance can tell a current verdict from one
-        // carved against code that has since moved.
+        // Record the boundary-scoped fingerprint at the moment the reviewer's
+        // verdicts are carved (#1131). Only the task's own files are hashed,
+        // so the Queen's state writes cannot age a verdict. The reviewer saw
+        // the committed diff; the fingerprint is the state the boundary was
+        // in when the verdicts were derived.
         if recorded > 0,
-           let snapshot = await QueenBranchCommitter.snapshotWorkingTree() {
+           let snapshot = await QueenBranchCommitter.fingerprintBoundary(
+               ownedPaths: task.ownedPaths
+           ) {
             verdictTreeStates[task.id] = snapshot
         }
 
@@ -4536,15 +4546,21 @@ final class ChatViewModel: ObservableObject {
         switch decision {
         case .accept:
             // --- Build the combined state (#1128) ---
-            // Acceptance reads the tree state the verdicts were carved against
-            // alongside the tree state the code is in now. Without both,
-            // staleness is invisible: a verdict checked against yesterday's code
-            // silently passes because nothing compares the two. The snapshot is
-            // taken here — once per acceptance, not on every build — so the cost
-            // of a git invocation lands where the decision is made, not on every
-            // render.
+            // Acceptance reads the boundary-scoped fingerprint the verdicts
+            // were carved against alongside the boundary's current fingerprint.
+            // Only the task's own files are hashed, so the Queen's state
+            // writes cannot age a verdict (#1131). Without both fingerprints,
+            // staleness is invisible: a verdict checked against yesterday's
+            // code silently passes because nothing compares the two.
             let verdictTreeState = verdictTreeStates[task.id] ?? task.treeStateFingerprint
-            guard let currentTreeState = await QueenBranchCommitter.snapshotWorkingTree() else {
+            let currentBoundaryState = await QueenBranchCommitter.fingerprintBoundary(
+                ownedPaths: task.ownedPaths
+            )
+            // When the boundary is empty (no ownedPaths), both states are nil
+            // and the staleness check is skipped — "missing ≠ stale" (#1131).
+            // When the boundary exists but the snapshot failed, that is a
+            // structural failure: the tool cannot answer.
+            guard task.ownedPaths.isEmpty || currentBoundaryState != nil else {
                 // The combined state could not be assembled. This is a structural
                 // failure, not a criterion verdict: "does not build together" is
                 // not "criterion not met". The first says the check cannot run;
@@ -4552,23 +4568,25 @@ final class ChatViewModel: ObservableObject {
                 // a broken tool behind a verdict that was never reached.
                 TriosLogBus.shared.warn(
                     .queen, "queen.accept.state_failed",
-                    "Combined state assembly failed — working tree snapshot returned nil",
+                    "Boundary fingerprint could not be assembled — snapshot returned nil",
                     [
                         "issue": issue.slug,
                         "verdictTreeState": verdictTreeState ?? "(none)",
+                        "ownedPaths": task.ownedPaths.joined(separator: ", "),
                         "criteria": String(task.acceptanceCriteria.count),
                         "verdicts": String(task.criterionVerdicts.count),
                     ]
                 )
                 await postQueenNotice(
                     SystemNoticeClassifier.warningMarker
-                        + "Not accepting \(issue.slug): the combined state could not be "
+                        + "Not accepting \(issue.slug): the boundary fingerprint could not be "
                         + "assembled — the working tree snapshot failed. This is a structural "
                         + "failure, not a criterion verdict. The state acceptance needs to read "
                         + "was not built, so the verdicts cannot be checked for staleness."
                 )
                 return
             }
+            let currentTreeState = currentBoundaryState ?? ""
 
             // Acceptance is checked against the contract before it is checked
             // against anything else. This is the whole point of writing criteria
@@ -4918,11 +4936,13 @@ final class ChatViewModel: ObservableObject {
             )
             return
         }
-        // Record the tree state at the moment a verdict is recorded by hand,
-        // so acceptance can tell a current verdict from one carved against
-        // code that has since moved (#1131). This is the moment the
-        // fingerprint is written — at verdict recording time.
-        if let snapshot = await QueenBranchCommitter.snapshotWorkingTree() {
+        // Record the boundary-scoped fingerprint at the moment a verdict is
+        // recorded by hand (#1131). Only the task's own files are hashed,
+        // so the Queen's state writes cannot age a verdict. This is the
+        // moment the fingerprint is written — at verdict recording time.
+        if let snapshot = await QueenBranchCommitter.fingerprintBoundary(
+            ownedPaths: task.ownedPaths
+        ) {
             verdictTreeStates[task.id] = snapshot
         }
         // A criterion that was asked-but-unanswered and now has a recorded

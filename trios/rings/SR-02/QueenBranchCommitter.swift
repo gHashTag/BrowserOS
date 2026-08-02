@@ -45,6 +45,109 @@ enum QueenBranchCommitter {
         }.value
     }
 
+    /// A fingerprint of only the files inside the task boundary, so the
+    /// Queen's own state writes cannot age a verdict (#1131).
+    ///
+    /// `snapshotWorkingTree` hashes the entire tree. When the Queen writes
+    /// `.trinity/state/*` between verdict recording and acceptance, that hash
+    /// changes — even though the code under review has not. Every checked
+    /// verdict then reads `.stale` because the fingerprints differ, and the
+    /// acceptance gate blocks on code that did not move.
+    ///
+    /// The boundary-scoped fingerprint builds a tree from only `ownedPaths`:
+    /// it stages the whole working tree, lists every blob, keeps only those
+    /// whose path falls inside the boundary, and writes a second tree from
+    /// just those entries. Two such trees have the same SHA iff the boundary
+    /// files have not changed — regardless of what the Queen or another bee
+    /// wrote elsewhere.
+    ///
+    /// Returns nil when `ownedPaths` is empty (there is no boundary to
+    /// fingerprint) or when git fails to stage or write the tree. The caller
+    /// treats nil as "no fingerprint," which the acceptance policy reads as
+    /// "missing, not stale" (#1131).
+    static func fingerprintBoundary(
+        ownedPaths: [String],
+        projectRoot: String = ProjectPaths.root
+    ) async -> String? {
+        guard !ownedPaths.isEmpty else { return nil }
+        return await Task.detached(priority: .utility) {
+            let index = temporaryIndexPath()
+            defer { try? FileManager.default.removeItem(atPath: index) }
+
+            // Stage the entire working tree to capture the current state of
+            // every file, then write it to a tree object we can inspect.
+            guard runGit(["add", "-A"], index: index, projectRoot: projectRoot) != nil,
+                  let fullTree = runGit(
+                      ["write-tree"], index: index, projectRoot: projectRoot
+                  )?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !fullTree.isEmpty else { return nil }
+
+            // List every blob in the full tree: "<mode> <type> <sha>\t<path>"
+            let lsTree = runGit(
+                ["ls-tree", "-r", "--full-tree", fullTree],
+                index: index, projectRoot: projectRoot
+            ) ?? ""
+
+            // Keep only blobs whose path falls inside the task's boundary.
+            let repoOwned = ownedPaths.map {
+                repositoryRelative($0, projectRoot: projectRoot)
+            }
+            let boundaryEntries = lsTree
+                .split(separator: "\n")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .filter { entry in
+                    guard let tabRange = entry.range(of: "\t") else { return false }
+                    let path = String(entry[tabRange.upperBound...])
+                    let normalized = QueenDelegationPolicy.normalizePath(path)
+                    return repoOwned.contains {
+                        normalized == $0 || normalized.hasPrefix("\($0)/")
+                    }
+                }
+
+            guard !boundaryEntries.isEmpty else {
+                // No boundary files exist in the tree. The empty tree SHA is
+                // deterministic (4b825…), so two calls that both find nothing
+                // will match — a file appearing later will change the hash.
+                return "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+            }
+
+            // Build a fresh index containing only the boundary entries, then
+            // write a tree from it. This tree's SHA depends only on the
+            // boundary files' content and structure — everything else is
+            // invisible.
+            //
+            // `--add` is required: `update-index --cacheinfo` alone refuses
+            // to insert a path that does not already exist in the index
+            // ("cannot add to the index - missing --add option?"). The
+            // boundary index starts empty, so every entry is a first
+            // insertion. Without `--add`, the command fails silently (its
+            // exit code is non-zero, but the return value was ignored) and
+            // `write-tree` produces the empty-tree SHA — a constant that
+            // never changes regardless of boundary content (#1131).
+            let boundaryIndex = temporaryIndexPath()
+            defer { try? FileManager.default.removeItem(atPath: boundaryIndex) }
+            for entry in boundaryEntries {
+                guard let tabRange = entry.range(of: "\t") else { continue }
+                let meta = String(entry[entry.startIndex..<tabRange.lowerBound])
+                let path = String(entry[tabRange.upperBound...])
+                let metaParts = meta.split(separator: " ")
+                guard metaParts.count >= 3 else { continue }
+                let mode = String(metaParts[0])
+                let sha = String(metaParts[2])
+                _ = runGit(
+                    ["update-index", "--add", "--cacheinfo", "\(mode),\(sha),\(path)"],
+                    index: boundaryIndex, projectRoot: projectRoot
+                )
+            }
+            let tree = runGit(
+                ["write-tree"], index: boundaryIndex, projectRoot: projectRoot
+            )?.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let tree, !tree.isEmpty else { return nil }
+            return tree
+        }.value
+    }
+
     /// The `owner/name` of the checkout the branch actually lives in.
     ///
     /// Not the issue's repository, and the difference is not cosmetic. The

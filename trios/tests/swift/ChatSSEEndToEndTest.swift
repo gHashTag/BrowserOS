@@ -51,7 +51,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 584  // 538 + 14 stale-verdict (#1126) + 7 issue-number (#1129) + 12 empty-retry (#1117) + 13 missing-fingerprint (#1131)
+    static let minimumChecks = 594  // 538 + 14 stale-verdict (#1126) + 7 issue-number (#1129) + 12 empty-retry (#1117) + 13 missing-fingerprint (#1131) + 10 boundary-fingerprint (#1131)
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -134,6 +134,7 @@ struct ChatSSEEndToEndTests {
         await runVerdictParserHandlesMarkdownNumbers()
         await runVerdictCarriesTreeState()
         await runMissingFingerprintIsNotStale()
+        await runFingerprintOnlyCoversBoundary()
         await runIssueNumberIsAnIdentifier()
         await runEmptyReviewerAnswerRetriesOnceAndRecordsAsAskedButUnanswered()
         // The interface-drift proof invokes the Swift compiler and is
@@ -4958,6 +4959,147 @@ struct ChatSSEEndToEndTests {
         )
         check(uncheckedPreserved.first?.verdict == .unchecked,
               "an unchecked verdict stays unchecked regardless of fingerprint state")
+    }
+
+    // MARK: - Scenario: boundary fingerprint ignores Queen's state writes (#1131)
+
+    /// #1131: the fingerprint should cover only the files in the task
+    /// boundary, so the Queen's own state writes cannot age a verdict.
+    ///
+    /// `snapshotWorkingTree` hashes the entire tree. When the Queen writes
+    /// `.trinity/state/*` between verdict recording and acceptance, the hash
+    /// changes — even though the code under review has not. The
+    /// boundary-scoped fingerprint (`fingerprintBoundary`) builds a tree from
+    /// only the task's ownedPaths, so a write outside the lane is invisible.
+    ///
+    /// Every check runs against a real scratch git repository — the
+    /// fingerprints are real git tree SHAs, not hand-set strings.
+    static func runFingerprintOnlyCoversBoundary() async {
+        print("\n# Scenario: boundary fingerprint ignores Queen's state writes (#1131)")
+
+        typealias P = QueenAcceptancePolicy
+
+        // --- Scratch repo setup ---
+        let root = NSTemporaryDirectory() + "trios-fp-\(UUID().uuidString)"
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        try? FileManager.default.createDirectory(
+            atPath: "\(root)/docs", withIntermediateDirectories: true
+        )
+        try? FileManager.default.createDirectory(
+            atPath: "\(root)/.trinity/state", withIntermediateDirectories: true
+        )
+
+        func git(_ args: [String]) {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            p.arguments = args
+            p.currentDirectoryURL = URL(fileURLWithPath: root)
+            p.standardOutput = Pipe()
+            p.standardError = Pipe()
+            try? p.run()
+            p.waitUntilExit()
+        }
+        git(["init", "-q", "-b", "main"])
+        git(["config", "user.email", "t@example.com"])
+        git(["config", "user.name", "T"])
+
+        // Boundary file: the code under review.
+        try? "initial\n".write(
+            toFile: "\(root)/docs/feature.swift", atomically: true, encoding: .utf8
+        )
+        // Queen state file: outside the boundary.
+        try? "{\"verdicts\":{}}\n".write(
+            toFile: "\(root)/.trinity/state/queen_delegation.json",
+            atomically: true, encoding: .utf8
+        )
+        git(["add", "-A"])
+        git(["commit", "-q", "-m", "seed"])
+
+        // --- Criterion 1: fingerprintBoundary returns a non-nil hash ---
+        let fp1 = await QueenBranchCommitter.fingerprintBoundary(
+            ownedPaths: ["docs"], projectRoot: root
+        )
+        check(fp1 != nil,
+              "fingerprintBoundary returns a hash for the boundary files")
+
+        // --- Criterion 1: Queen's state write does not change the fingerprint
+        //
+        // Simulate the Queen writing her own state (verdicts, task tracking)
+        // between verdict recording and acceptance. The boundary file has not
+        // changed, so the fingerprint must not change. This is the core of
+        // #1131: "the Queens own state writes cannot age a verdict."
+        try? "{\"verdicts\":{\"c1\":\"met\"}}\n".write(
+            toFile: "\(root)/.trinity/state/queen_delegation.json",
+            atomically: true, encoding: .utf8
+        )
+        let fp2 = await QueenBranchCommitter.fingerprintBoundary(
+            ownedPaths: ["docs"], projectRoot: root
+        )
+        check(fp1 == fp2,
+              "a Queen state write outside the boundary does not change the fingerprint — the verdict is not aged")
+
+        // --- Criterion 1 (contrast): an actual code change does change it ---
+        try? "modified\n".write(
+            toFile: "\(root)/docs/feature.swift", atomically: true, encoding: .utf8
+        )
+        let fp3 = await QueenBranchCommitter.fingerprintBoundary(
+            ownedPaths: ["docs"], projectRoot: root
+        )
+        // Debug
+        print("  [debug] fp1=\(fp1 ?? "nil") fp2=\(fp2 ?? "nil") fp3=\(fp3 ?? "nil")")
+        check(fp2 != fp3,
+              "a code change inside the boundary does change the fingerprint")
+
+        // --- Criterion 2: acceptance passes when code hasn't changed ---
+        //
+        // fp1 and fp2 are the same — no code changed between them. The
+        // acceptance policy says this is not stale, so the gate does not
+        // block. Both sides proven by running git, not by reasoning.
+        check(P.isStale(verdictTreeState: fp1, currentTreeState: fp2) == false,
+              "matching fingerprints: acceptance passes — code hasn't changed since review")
+        check(P.acceptanceBlockReason(
+                criteria: ["the feature works"],
+                recorded: ["the feature works": .met],
+                verdictTreeState: fp1, currentTreeState: fp2
+              ) == nil,
+              "matching fingerprints: the acceptance gate does not block")
+
+        // --- Criterion 2: acceptance blocks when code has changed ---
+        //
+        // fp2 and fp3 differ — the code changed between them. The acceptance
+        // policy says this is stale, so the gate blocks. Both sides proven by
+        // running git, not by reasoning.
+        check(P.isStale(verdictTreeState: fp2, currentTreeState: fp3) == true,
+              "mismatching fingerprints: acceptance blocks — code changed since review")
+        check(P.acceptanceBlockReason(
+                criteria: ["the feature works"],
+                recorded: ["the feature works": .met],
+                verdictTreeState: fp2, currentTreeState: fp3
+              ) != nil,
+              "mismatching fingerprints: the acceptance gate blocks")
+
+        // --- Criterion 4: removing the fingerprint write breaks the check ---
+        //
+        // If the fingerprint is never written (nil), isStale returns false
+        // even when the code has changed — fp3 is a different tree from fp2,
+        // but without a verdict-time fingerprint the comparison cannot fire.
+        // The check is broken: it cannot detect staleness without the
+        // binding. This is what makes the fingerprint write load-bearing.
+        check(P.isStale(verdictTreeState: nil, currentTreeState: fp3) == false,
+              "without a verdict-time fingerprint, staleness is invisible — the check breaks (#1131 criterion 4)")
+
+        // --- Criterion 3: empty boundary returns nil (missing ≠ stale) ---
+        //
+        // A task with no ownedPaths has no boundary to fingerprint. nil means
+        // "no fingerprint" — the acceptance policy treats this as "missing,"
+        // not "stale," so verdicts stand.
+        let emptyBoundary = await QueenBranchCommitter.fingerprintBoundary(
+            ownedPaths: [], projectRoot: root
+        )
+        check(emptyBoundary == nil,
+              "an empty boundary returns nil — no fingerprint to compare")
+        check(P.isStale(verdictTreeState: emptyBoundary, currentTreeState: fp3) == false,
+              "a nil fingerprint does not block — missing ≠ stale")
     }
 
     // MARK: - Scenario: an issue number is an identifier, not a quantity (#1129)
