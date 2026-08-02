@@ -204,6 +204,30 @@ enum QueenBranchCommitter {
         return branch.isEmpty ? nil : branch
     }
 
+    /// Resolves the remote tip SHA of the target branch — the branch a PR
+    /// should land on (#1141). The bee's branch starts at HEAD, but the PR
+    /// needs to merge into the project's real trunk. Cutting the bee's commit
+    /// from the target's tip means the diff against the target is just the
+    /// bee's work, and the merge lands where someone will actually read it.
+    ///
+    /// Returns nil when the target cannot be determined (no remote, no
+    /// symbolic-ref, or the ref does not resolve). The caller treats nil as
+    /// "fall back to the branch tip" — a commit on HEAD is still correct
+    /// content, just not optimally positioned for a PR.
+    private static func resolveTargetTip(
+        index: String,
+        projectRoot: String = ProjectPaths.root
+    ) -> String? {
+        guard let branch = baseBranch(projectRoot: projectRoot) else { return nil }
+        let remoteRef = "refs/remotes/origin/\(branch)"
+        let sha = runGit(
+            ["rev-parse", "--verify", remoteRef],
+            index: index, projectRoot: projectRoot
+        )?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let sha, !sha.isEmpty else { return nil }
+        return sha
+    }
+
     /// The commit a worker's branch was cut from (#1135).
     ///
     /// A bee's branch starts at HEAD and grows only the bee's own commits
@@ -458,8 +482,33 @@ enum QueenBranchCommitter {
                 .trimmingCharacters(in: .whitespacesAndNewlines), !parent.isEmpty else {
                 return Outcome(committed: false, summary: "Branch `\(branch)` does not exist.")
             }
-            guard runGit(["read-tree", parent], index: index, projectRoot: projectRoot) != nil else {
-                return Outcome(committed: false, summary: "Could not read `\(branch)` into a scratch index.")
+
+            // Cut the bee's branch from the tip of the real target branch,
+            // not from HEAD (#1141). A bee's branch starts at HEAD, which may
+            // be far ahead of the branch a PR should land on. Committing on
+            // top of HEAD means the PR diff carries every commit between the
+            // target and HEAD — the human's work the bee never touched, and a
+            // synthetic base branch at the merge-base receives the merge into
+            // a branch nobody reads. Cutting from the target's tip puts the
+            // bee's commit directly on the target, so the diff is naturally
+            // small and the base is a real branch.
+            //
+            // Only the first commit is re-targeted: once the branch carries
+            // its own commit (parent ≠ HEAD), subsequent commits parent on the
+            // branch tip as before. The first commit's tree is built from the
+            // target's tree plus the bee's changed paths — the bee's content
+            // on top of the real branch, not on top of HEAD.
+            let headSha = runGit(["rev-parse", "HEAD"], index: index, projectRoot: projectRoot)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            var treeBase = parent
+            if parent == headSha, !headSha.isEmpty,
+               let target = resolveTargetTip(index: index, projectRoot: projectRoot),
+               target != headSha {
+                treeBase = target
+            }
+
+            guard runGit(["read-tree", treeBase], index: index, projectRoot: projectRoot) != nil else {
+                return Outcome(committed: false, summary: "Could not read a tree into a scratch index.")
             }
             guard runGit(["add", "--"] + changed, index: index, projectRoot: projectRoot) != nil,
                   let tree = runGit(["write-tree"], index: index, projectRoot: projectRoot)?
@@ -468,7 +517,7 @@ enum QueenBranchCommitter {
                 return Outcome(committed: false, summary: "Could not stage the worker's files.")
             }
             guard let commit = runGit(
-                ["commit-tree", tree, "-p", parent, "-m", message],
+                ["commit-tree", tree, "-p", treeBase, "-m", message],
                 index: index, projectRoot: projectRoot
             )?.trimmingCharacters(in: .whitespacesAndNewlines), !commit.isEmpty else {
                 return Outcome(committed: false, summary: "Could not write the commit object.")
