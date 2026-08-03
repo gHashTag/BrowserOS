@@ -3768,6 +3768,46 @@ final class ChatViewModel: ObservableObject {
         // worker chat is lost.
         await appendSystemMessageToQueenChat(notice)
         await autoAcceptIfUnambiguous(taskID: task.id)
+
+        // ── #1156: every awaitingReview task gets its verdicts ──────────
+        //
+        // handleWorkerFinished asks the reviewer about the task whose worker
+        // just finished. A second parallel task already in awaitingReview is
+        // not re-examined: its criteria may be unanswered, auto-accept stays
+        // gated, and nobody comes back to ask the reviewer. The task parks
+        // in awaitingReview forever. This sweep closes that gap: every
+        // awaitingReview task with unanswered criteria gets its verdicts
+        // requested, then gets an auto-accept attempt — not just the one the
+        // human named.
+        for other in registry.tasks where
+            other.state == .awaitingReview && other.id != task.id
+        {
+            let current = registry.task(forIssue: other.issue) ?? other
+            let unanswered = current.acceptanceCriteria.filter {
+                current.criterionVerdicts[$0] == nil
+                    && (askedButUnanswered[current.id]?.contains($0) != true)
+            }
+            guard !unanswered.isEmpty,
+                  let branch = current.virtualBranch else { continue }
+            let diffText = await diffForReview(
+                baselineTree: workerBaselineTrees[current.conversationId],
+                branch: branch,
+                ownedPaths: current.ownedPaths
+            )
+            let touchedFiles = await fileContentsForReview(
+                baselineTree: workerBaselineTrees[current.conversationId],
+                ownedPaths: current.ownedPaths,
+                criteria: unanswered
+            )
+            _ = await requestReviewerVerdicts(
+                for: current,
+                criteria: unanswered,
+                diff: diffText,
+                fileContents: touchedFiles
+            )
+            await autoAcceptIfUnambiguous(taskID: current.id)
+        }
+
         // When a worker finishes, immediately check for orphans left behind by
         // a concurrent delegation that was transitioned to .running but never
         // dispatched. Without this, the orphan waits up to 30 minutes for the
