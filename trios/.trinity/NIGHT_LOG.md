@@ -3923,3 +3923,29 @@ survives both repairs. Isolation creates the tree; the work goes past it. #1154.
 Also worth recording as my own mistake: I wrote a negative test with a "fifty
 thousand characters" threshold I assumed unreachable, and the bee simply wrote a
 50,190 byte file. The criterion was satisfiable; the test proved nothing.
+
+## The restart swallowed the work it was restarting
+
+Driving one task read the whole thing off the log. A bee wrote 60,285 bytes,
+finished, was judged silent, restarted — and the branch came back empty:
+
+    05:58:57  worker.start     turn one
+    06:02     the file is on disk
+    06:03:18  worker.finish
+    06:03:20  worker.resumed
+    06:03:22  branch.empty     "The worker changed no files"
+
+The restart took a **fresh** working-tree snapshot, with the first turn's file
+already written, so that file became part of the baseline and the diff could not
+see it. Two of my own repairs colliding: the retry from #1144 and the
+snapshot-and-diff from #1142. The notice beside it says *same branch, so it
+continues rather than competing with its own earlier work* — and re-baselining
+is exactly what turns continuing into starting over.
+
+Same task after the fix, same restart:
+
+    06:35:38  worker.resumed
+    06:35:41  Committed 1 file(s) to queen/1153-...
+
+Proven the other way too: putting the re-snapshot back brings `branch.empty`
+straight back. #1155.
