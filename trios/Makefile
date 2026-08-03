@@ -330,6 +330,7 @@ CASSETTE ?=
 # Set to 1 to send a second turn on the same conversation. The orphan
 # regression only appears on the send *after* the one that caused it.
 SECOND_TURN ?=
+QUEEN_COMMAND ?=
 
 LOG := $(ROOT)/.trinity-dev/logs/trios-app.jsonl
 
@@ -347,8 +348,9 @@ delegate-probe:
 		--env TRIOS_E2E_DELEGATE_SECOND="$(SECOND)" \
 		--env TRIOS_E2E_DELEGATE_REVIEW="$(REVIEW)" \
 		--env TRIOS_QUEEN_AUTONOMY="$(AUTONOMY)" \
-		--env TRIOS_REPLAY_CASSETTE="$(CASSETTE)" \
-		--env TRIOS_E2E_SECOND_TURN="$(SECOND_TURN)" "$(DEV_APP)"
+	--env TRIOS_REPLAY_CASSETTE="$(CASSETTE)" \
+	--env TRIOS_E2E_SECOND_TURN="$(SECOND_TURN)" \
+	--env TRIOS_E2E_QUEEN_COMMAND="$(QUEEN_COMMAND)" "$(DEV_APP)"
 	@echo "delegating $(ISSUE) to $(WORKER); waiting up to 16 min"
 	@before=$$(cat /tmp/trios_delegate_mark); \
 	for i in $$(seq 1 192); do \
