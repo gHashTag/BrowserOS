@@ -80,6 +80,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     private func runDelegationSelfTestIfRequested() async {
         let environment = ProcessInfo.processInfo.environment
+
+        // A raw queen command run at startup, independently of DELEGATE. Lets
+        // a probe exercise any slash command the Queen accepts without a full
+        // delegation spec, and works even when TRIOS_E2E_DELEGATE is empty.
+        if let queenCommand = environment["TRIOS_E2E_QUEEN_COMMAND"], !queenCommand.isEmpty {
+            guard let vm = chatViewModel else {
+                TriosLogBus.shared.error(.queen, "queen.command.failed", "No chat view model", [:])
+                return
+            }
+            TriosLogBus.shared.info(
+                .queen, "queen.command.start", "E2E queen command", ["command": queenCommand]
+            )
+            await vm.runQueenCommand(queenCommand)
+            TriosLogBus.shared.info(
+                .queen, "queen.command.ran", "E2E queen command executed", ["command": queenCommand]
+            )
+        }
+
         guard let spec = environment["TRIOS_E2E_DELEGATE"], !spec.isEmpty else { return }
         guard let vm = chatViewModel else {
             TriosLogBus.shared.error(.queen, "queen.selftest.failed", "No chat view model", [:])

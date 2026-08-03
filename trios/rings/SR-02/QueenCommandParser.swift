@@ -56,6 +56,8 @@ enum QueenCommand: Equatable {
     case selfAudit
     /// Shows what she has learned about which signals need the user.
     case salience
+    /// Picks the next open sub-issue and names it with a reason.
+    case choose
     /// Any skill discovered from a SKILL.md file.
     case runSkill(command: String, arguments: [String])
     case unknown(String)
@@ -266,6 +268,8 @@ struct QueenCommandParser {
             return .selfAudit
         case "salience", "attention", "learned":
             return .salience
+        case "choose", "pick":
+            return .choose
         default:
             // Anything else may be a skill on disk. The parser cannot know -
             // the catalog is read at runtime - so it hands the name on and the
@@ -288,6 +292,7 @@ struct QueenCommandParser {
         /delegate <agent> <task> — assign a task to an agent
         /delegate <owner/repo#N> <worker> [--paths a,b] <title> — open a worker chat on its own branch
         /swarm               — show every delegated task and what awaits review
+        /choose              — pick the next open sub-issue and say why
         /accept <owner/repo#N> [note] — accept a worker's result
         /review <owner/repo#N> reject <why> — send the work back to the same worker
         /broadcast <message> — message all online agents

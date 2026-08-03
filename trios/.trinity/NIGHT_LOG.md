@@ -4056,3 +4056,27 @@ What was real is the silence. Delegated, and the guard speaks now:
 Three times this epic the fault was in how I was asking, not in what I was
 asking about. Every one of them ended the same way: by making the code say what
 it was doing.
+
+## She can be asked to choose, and the answer is honest about being empty
+
+Nothing in production picks its own next task: Devin takes tickets, PARC has a
+human approve the plan before the agent runs, and frontier models score about
+40% on proactive benchmarks. The recommended path is to choose from an already
+approved set rather than to invent work, which is also what the `/approve` gate
+here already means. So the spec asked for naming, not inventing.
+
+`/choose` exists now, parses, executes, and logs:
+
+    12:32:54  queen.choose — "Nothing to choose — no open sub-issues"
+              {"chosen": "(none)", "considered": "0"}
+
+And a probe hook to call it at all: `TRIOS_E2E_QUEEN_COMMAND` runs any Queen
+command at startup, which every future capability will need — a thing the app
+can do and a run cannot reach is a thing that cannot be proven.
+
+Two things are honestly unfinished. The bee read "open sub-issues" as the
+delegation registry rather than the epic on GitHub, so she chooses among tasks
+she already holds, not from the backlog — my spec named the rule and not the
+source. And the command runs at startup, before any delegation registers, so
+the empty branch is the only one demonstrated. The negative case is proven; the
+positive one is not.
