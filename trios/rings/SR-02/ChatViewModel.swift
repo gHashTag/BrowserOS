@@ -4672,7 +4672,11 @@ final class ChatViewModel: ObservableObject {
                     + "\n\nYour stream stopped without a result. Continue from where you "
                     + "left off in this same chat and on the same branch - do not start "
                     + "over. If you cannot finish, say plainly what blocked you."
-                workerBaselineTrees[task.conversationId] = await QueenBranchCommitter.snapshotWorkingTree()
+                // Keep the baseline from the first turn's start (set at
+                // delegation, line ~3294). A fresh snapshot here would swallow
+                // everything the first turn already wrote — those files would
+                // vanish from the diff at commit time because the baseline now
+                // includes them (#1155).
                 runner.start(task: task, brief: brief)
                 await appendSystemMessageToQueenChat(
                     SystemNoticeClassifier.infoMarker
