@@ -3949,3 +3949,32 @@ Same task after the fix, same restart:
 
 Proven the other way too: putting the re-snapshot back brings `branch.empty`
 straight back. #1155.
+
+## Two bees at once, demonstrated at last — and my diagnosis was wrong
+
+The comment in `main.swift` said parallel work "has never once been
+demonstrated". It has now, twice:
+
+    07:15:51  #1147  Worker turn starting
+    07:15:55  #1149  Worker turn starting     overlapping
+    07:16:15  #1149  Committed 1 file(s)
+    07:16:30  #1147  Committed 1 file(s)
+
+Both bees worked at the same time, each wrote its own file, each committed to
+its own branch. The harness has had a second slot all along
+(`TRIOS_E2E_DELEGATE_SECOND`), and I had never used it.
+
+Which means four passes of diagnosis were wrong. `make delegate-probe` opens
+with `pkill -x trios-dev` and deletes the delegation state, so running it twice
+kills the first run's app. What I had been calling "the second bee displaces the
+first" was my own test method killing the subject. The defect is a Makefile
+target that cannot be run twice, not a swarm that cannot count to two.
+
+What is real: verdicts are requested only for the task a human named, so the
+second parks in `awaitingReview` and is never accepted. #1156.
+
+And that one would not be delegated. Three attempts: a timeout, then 52 tool
+calls and no edit, then 50 and no edit — with a sharpened charter in between
+that changed nothing. `ChatViewModel.swift` is 6,026 lines against a 30-turn
+budget: the bee spends its whole turn navigating and never reaches the edit. The
+boundary the MVP hands a bee is larger than the bee. #1157.

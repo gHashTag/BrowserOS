@@ -27,6 +27,17 @@ Work on BR-OUTPUT/ (presentation layer):
 - NEVER create .sh scripts
 - Extract views when body exceeds 50 lines
 
+## Make the change first, then verify once
+
+Write the edit before you run anything. A build here takes minutes and the
+logic gate takes minutes more, and a turn spent measuring an unchanged tree
+ends with nothing written: fifty-two tool calls and no edit is a real result
+from this charter, not a hypothetical.
+
+So: read only what you need to place the edit, make it, then verify. If the
+verification fails, fix the cause and verify again - but never open with a
+build.
+
 ## Verify your own work before you report
 
 You have a shell. Use it. Do not report a Swift change you have not compiled.
