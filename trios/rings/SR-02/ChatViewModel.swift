@@ -3779,16 +3779,57 @@ final class ChatViewModel: ObservableObject {
         // awaitingReview task with unanswered criteria gets its verdicts
         // requested, then gets an auto-accept attempt — not just the one the
         // human named.
-        for other in registry.tasks where
-            other.state == .awaitingReview && other.id != task.id
-        {
+        //
+        // The filter matches the primary flow above: nil verdicts only,
+        // without the askedButUnanswered exclusion the original sweep had.
+        // That exclusion made the sweep inert — a task whose first reviewer
+        // request came back empty was permanently filtered out, so the sweep
+        // never retried it and the task was stuck in awaitingReview with no
+        // path to acceptance.
+        let otherAwaiting = registry.tasks.filter {
+            $0.state == .awaitingReview && $0.id != task.id
+        }
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.review.sweep",
+            "Sweeping \(otherAwaiting.count) other task(s) in awaitingReview",
+            ["finished": task.issue.slug]
+        )
+        var verdictsRequested = 0
+        for other in otherAwaiting {
             let current = registry.task(forIssue: other.issue) ?? other
             let unanswered = current.acceptanceCriteria.filter {
                 current.criterionVerdicts[$0] == nil
-                    && (askedButUnanswered[current.id]?.contains($0) != true)
             }
-            guard !unanswered.isEmpty,
-                  let branch = current.virtualBranch else { continue }
+            guard !unanswered.isEmpty else {
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.review.sweep.skip",
+                    "All criteria already have verdicts",
+                    [
+                        "issue": current.issue.slug,
+                        "criteria": String(current.acceptanceCriteria.count)
+                    ]
+                )
+                // All criteria have verdicts but the task is still in
+                // awaitingReview — give it the same acceptance attempt
+                // the primary task gets (line ~3770). Without this the
+                // skip leaves the task parked forever (#1156).
+                await autoAcceptIfUnambiguous(taskID: current.id)
+                continue
+            }
+            guard let branch = current.virtualBranch else {
+                TriosLogBus.shared.warn(
+                    .queen,
+                    "queen.review.sweep.skip",
+                    "No virtual branch — cannot request verdicts",
+                    [
+                        "issue": current.issue.slug,
+                        "unanswered": String(unanswered.count)
+                    ]
+                )
+                continue
+            }
             let diffText = await diffForReview(
                 baselineTree: workerBaselineTrees[current.conversationId],
                 branch: branch,
@@ -3799,14 +3840,31 @@ final class ChatViewModel: ObservableObject {
                 ownedPaths: current.ownedPaths,
                 criteria: unanswered
             )
-            _ = await requestReviewerVerdicts(
+            let returned = await requestReviewerVerdicts(
                 for: current,
                 criteria: unanswered,
                 diff: diffText,
                 fileContents: touchedFiles
             )
+            verdictsRequested += 1
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.review.sweep.requested",
+                "Requested verdicts for \(unanswered.count) criterion(s); reviewer returned \(returned)",
+                [
+                    "issue": current.issue.slug,
+                    "asked": String(unanswered.count),
+                    "returned": String(returned)
+                ]
+            )
             await autoAcceptIfUnambiguous(taskID: current.id)
         }
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.review.sweep.done",
+            "Sweep complete: \(otherAwaiting.count) considered, \(verdictsRequested) got verdicts",
+            ["finished": task.issue.slug]
+        )
 
         // When a worker finishes, immediately check for orphans left behind by
         // a concurrent delegation that was transitioned to .running but never

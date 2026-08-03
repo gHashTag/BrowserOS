@@ -3999,3 +3999,31 @@ The edit itself did not do its job — the second task still gets no verdicts, s
 #1156 stays open with better evidence than it had. Worth separating: the bee
 can now reach into this file, and what it wrote there is wrong. Those are
 different problems and only the first was mine to solve.
+
+## Asking the sweep to speak corrected the diagnosis in one run
+
+The sweep over other `awaitingReview` tasks was written last pass and was silent,
+so its failure was indistinguishable from its absence. Asked for one event per
+task considered, and the very first run said something I had been asserting the
+opposite of:
+
+    10:36:50  Sweeping 1 other task(s) in awaitingReview
+    10:36:50  #1149  sweep.skip — All criteria already have verdicts
+    10:36:50  Sweep complete: 1 considered, 0 got verdicts
+
+The second task is judged. Its criteria are answered by the deterministic
+character count, so no reviewer is needed at all. "Nobody judges the second bee"
+was wrong.
+
+What is actually missing is one step further on: a task holding a full set of
+verdicts is never *accepted*, because the acceptance attempt is made only for
+the task whose worker just finished. #1149 sits in `awaitingReview` with nothing
+left to decide and nobody to decide it.
+
+Delegated that too, targeted at the skip branch. The bee edited — 65 lines,
+compiling, 594 checks green — and the run after still ends at `sweep.skip` with
+no acceptance attempt logged. Closer, and not there.
+
+Worth keeping: an observable failure is worth more than a fixed one. Two passes
+of confident wrong diagnosis ended the moment the code was made to say what it
+was doing.
