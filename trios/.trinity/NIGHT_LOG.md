@@ -3978,3 +3978,24 @@ calls and no edit, then 50 and no edit — with a sharpened charter in between
 that changed nothing. `ChatViewModel.swift` is 6,026 lines against a 30-turn
 budget: the bee spends its whole turn navigating and never reaches the edit. The
 boundary the MVP hands a bee is larger than the bee. #1157.
+
+## The boundary was bigger than the bee, and naming the place fixed it
+
+Three delegations of one task died the same way: a timeout, then 52 tool calls
+and no edit, then 50 and no edit. `ChatViewModel.swift` is 6,026 lines and the
+bee spent every turn navigating it.
+
+The industry answer is not a bigger budget: targeted inclusion beats whole-file
+context, and each extra piece in the window costs the quality of every other
+piece. So the repair belongs in the spec, which is the Queen's own work. The
+fourth delegation named the function and the range — `handleWorkerFinished`,
+lines 3500-3730 — and the bee edited on the first attempt, 40 lines, compiling,
+594 checks green.
+
+That is the finding of the pass and it is measured: same task, same worker, same
+file, three failures untargeted and one success targeted. #1157.
+
+The edit itself did not do its job — the second task still gets no verdicts, so
+#1156 stays open with better evidence than it had. Worth separating: the bee
+can now reach into this file, and what it wrote there is wrong. Those are
+different problems and only the first was mine to solve.
