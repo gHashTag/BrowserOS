@@ -81,24 +81,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func runDelegationSelfTestIfRequested() async {
         let environment = ProcessInfo.processInfo.environment
 
-        // A raw queen command run at startup, independently of DELEGATE. Lets
-        // a probe exercise any slash command the Queen accepts without a full
-        // delegation spec, and works even when TRIOS_E2E_DELEGATE is empty.
-        if let queenCommand = environment["TRIOS_E2E_QUEEN_COMMAND"], !queenCommand.isEmpty {
-            guard let vm = chatViewModel else {
-                TriosLogBus.shared.error(.queen, "queen.command.failed", "No chat view model", [:])
-                return
-            }
-            TriosLogBus.shared.info(
-                .queen, "queen.command.start", "E2E queen command", ["command": queenCommand]
-            )
-            await vm.runQueenCommand(queenCommand)
-            TriosLogBus.shared.info(
-                .queen, "queen.command.ran", "E2E queen command executed", ["command": queenCommand]
-            )
+        guard let spec = environment["TRIOS_E2E_DELEGATE"], !spec.isEmpty else {
+            return
         }
-
-        guard let spec = environment["TRIOS_E2E_DELEGATE"], !spec.isEmpty else { return }
         guard let vm = chatViewModel else {
             TriosLogBus.shared.error(.queen, "queen.selftest.failed", "No chat view model", [:])
             return
@@ -156,6 +141,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 )
             }
         }
+
+        await runE2EQueenCommand(environment: environment)
 
         guard let issue = IssueReference.parse(issueText),
               let task = QueenDelegationRegistry.shared.task(forIssue: issue) else {
@@ -293,6 +280,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             "queen.selftest.reviewed",
             "Review command applied",
             ["issue": issue.slug, "command": verb, "state": reviewed?.rawValue ?? "unknown"]
+        )
+
+        // Queen command runs AFTER delegation so a probe can assert on
+        // delegation results before exercising a slash command.
+        await runE2EQueenCommand(environment: environment)
+    }
+
+    /// Runs a raw queen slash command from `TRIOS_E2E_QUEEN_COMMAND`, independently
+    /// of `TRIOS_E2E_DELEGATE`. Called after the delegation block (or directly
+    /// when no delegation was requested), so the command always runs last.
+    @MainActor
+    private func runE2EQueenCommand(environment: [String: String]) async {
+        guard let queenCommand = environment["TRIOS_E2E_QUEEN_COMMAND"], !queenCommand.isEmpty else {
+            return
+        }
+        guard let vm = chatViewModel else {
+            TriosLogBus.shared.error(.queen, "queen.command.failed", "No chat view model", [:])
+            return
+        }
+        TriosLogBus.shared.info(
+            .queen, "queen.command.start", "E2E queen command", ["command": queenCommand]
+        )
+        await vm.runQueenCommand(queenCommand)
+        TriosLogBus.shared.info(
+            .queen, "queen.command.ran", "E2E queen command executed", ["command": queenCommand]
         )
     }
 

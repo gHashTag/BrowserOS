@@ -4080,3 +4080,24 @@ she already holds, not from the backlog — my spec named the rule and not the
 source. And the command runs at startup, before any delegation registers, so
 the empty branch is the only one demonstrated. The negative case is proven; the
 positive one is not.
+
+## She chose one herself
+
+    13:40:24  queen.choose — "Chose gHashTag/trios#1111 out of 22 open sub-issues"
+              {"chosen": "#1111", "considered": "22", "inFlight": "1", "reason": "..."}
+
+Twenty-two open sub-issues read, the one already in flight excluded, one named
+with a reason. The ordering is proven by the count rather than by reading: with
+a delegation running the command reports `inFlight: 1`, without one `inFlight:
+0`, so it is seeing the registry — which it could not, running before it.
+
+Getting there cost three refusals and each named a mistake of mine. The bee
+answered "Outside my boundary. Not met" because it reads the **issue body** as
+the contract, and I had been refining the spec in comments while the body still
+held the criteria I wrote when I first filed it. Then it explained the change
+correctly and edited nothing, because the range I named held the code to move
+and not the place to move it to. Then it spun on 25 tool calls across two files
+at once — the Queen's own observer said so before I did.
+
+A spec is the issue body, it names both ends of a move, and it carries one
+boundary at a time.
