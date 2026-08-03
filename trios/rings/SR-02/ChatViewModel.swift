@@ -4617,13 +4617,37 @@ final class ChatViewModel: ObservableObject {
     /// because an orchestrator that rubber-stamps its own workers has no
     /// reviewer at all. Off unless `TRIOS_QUEEN_AUTONOMY=1`.
     private func autoAcceptIfUnambiguous(taskID: UUID) async {
-        guard ProcessInfo.processInfo.environment["TRIOS_QUEEN_AUTONOMY"] == "1" else { return }
+        guard ProcessInfo.processInfo.environment["TRIOS_QUEEN_AUTONOMY"] == "1" else {
+            TriosLogBus.shared.info(
+                .queen, "queen.auto_accept.autonomy_disabled",
+                "Auto-accept skipped: autonomy is off",
+                ["task_id": taskID.uuidString]
+            )
+            return
+        }
         let registry = delegationRegistry
-        guard let task = registry.tasks.first(where: { $0.id == taskID }) else { return }
+        guard let task = registry.tasks.first(where: { $0.id == taskID }) else {
+            TriosLogBus.shared.info(
+                .queen, "queen.auto_accept.no_task",
+                "Auto-accept skipped: task not found in registry",
+                ["task_id": taskID.uuidString]
+            )
+            return
+        }
         guard QueenDelegationPolicy.qualifiesForAutoAccept(
             task,
             committedFiles: task.committedFiles ?? 0
-        ) else { return }
+        ) else {
+            TriosLogBus.shared.info(
+                .queen, "queen.auto_accept.not_qualified",
+                "Auto-accept skipped: task does not qualify for auto-accept",
+                [
+                    "issue": task.issue.slug,
+                    "committed_files": String(task.committedFiles ?? 0)
+                ]
+            )
+            return
+        }
 
         // Acceptance must not decide before the verdict request has finished.
         // The same gate the human-triggered /accept uses: every criterion must
@@ -4635,7 +4659,17 @@ final class ChatViewModel: ObservableObject {
         let currentBoundaryState = await QueenBranchCommitter.fingerprintBoundary(
             ownedPaths: task.ownedPaths
         )
-        guard task.ownedPaths.isEmpty || currentBoundaryState != nil else { return }
+        guard task.ownedPaths.isEmpty || currentBoundaryState != nil else {
+            TriosLogBus.shared.info(
+                .queen, "queen.auto_accept.no_boundary_fingerprint",
+                "Auto-accept skipped: boundary fingerprint not available",
+                [
+                    "issue": task.issue.slug,
+                    "owned_paths": task.ownedPaths.joined(separator: ", ")
+                ]
+            )
+            return
+        }
         let currentTreeState = currentBoundaryState ?? ""
 
         if let reason = acceptanceBlockReasonDistinguishingEmptyAnswers(
@@ -4655,7 +4689,14 @@ final class ChatViewModel: ObservableObject {
             return
         }
 
-        guard registry.transition(taskID: task.id, to: .accepted) else { return }
+        guard registry.transition(taskID: task.id, to: .accepted) else {
+            TriosLogBus.shared.info(
+                .queen, "queen.auto_accept.transition_failed",
+                "Auto-accept skipped: state transition to .accepted failed",
+                ["issue": task.issue.slug]
+            )
+            return
+        }
 
         await appendSystemMessageToQueenChat(
             SystemNoticeClassifier.successMarker
