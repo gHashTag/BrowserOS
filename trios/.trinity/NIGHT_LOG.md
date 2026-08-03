@@ -3900,3 +3900,26 @@ should not be a matter of opinion. #1151.
 
 What did land tonight: the bee has a shell, the merge reaches a real branch,
 and one task went issue to merged with a one-file diff.
+
+## Counting is not a matter of opinion
+
+The false refusal had a name in the literature: criteria that reduce to bytes or
+exit codes should be decided by code, not by a judge, and the practice is to
+reserve the model for subjective dimensions and failure triage. Delegated that
+shape - recognise "file exists" and "at least N characters", check them against
+the task's own files, put the measured number in the verdict. It works and the
+number is now in the log:
+
+    queen.review.characterCount  measured=2399  threshold=300
+
+The race went too: the snapshot used to be taken three seconds before
+`queen.worker.finish`, so a bee that wrote a file still produced an empty branch.
+Ordering is correct now - finish, then evidence, then snapshot.
+
+Still broken, and it is the same wall in a new place: the bee writes into the
+shared tree while the diff is computed inside its worktree, so `branch.empty`
+survives both repairs. Isolation creates the tree; the work goes past it. #1154.
+
+Also worth recording as my own mistake: I wrote a negative test with a "fifty
+thousand characters" threshold I assumed unreachable, and the bee simply wrote a
+50,190 byte file. The criterion was satisfiable; the test proved nothing.

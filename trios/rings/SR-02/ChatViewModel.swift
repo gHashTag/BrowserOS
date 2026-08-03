@@ -3259,13 +3259,26 @@ final class ChatViewModel: ObservableObject {
             title: "\(issue.slug) \(title)"
         )
         await loadConversations()
-        registry.transition(taskID: task.id, to: .running)
+
+        // Take the baseline BEFORE the transition to .running, so no await
+        // separates the transition from runner.start. Two delegations arriving
+        // seconds apart interleave at every await on the main actor; without
+        // this ordering, the first task transitions to .running, yields at the
+        // snapshot, and the second delegation starts and completes while the
+        // first sits in .running with no worker (#1139).
+        let baseline = await QueenBranchCommitter.snapshotWorkingTree()
 
         // Actually start the bee. Saving the briefing and stopping there left a
         // chat that looked delegated and did nothing, which is worse than
         // refusing to delegate at all.
         guard let runner = workerRunner else {
-            registry.transition(taskID: task.id, to: .failed)
+            // .cancelled, not .failed: the task is still in .queued (the
+            // transition to .running happens below, after this guard), and
+            // the state machine allows .queued → .cancelled but not
+            // .queued → .failed. Using .failed here was silently rejected,
+            // leaving the task orphaned in .queued — visible to every
+            // subsequent delegation as a live task holding its paths (#1139).
+            registry.transition(taskID: task.id, to: .cancelled)
             await postQueenNotice(
                 SystemNoticeClassifier.failureMarker
                     + "Delegation aborted: no worker runner is configured, so \(worker) could not be started."
@@ -3273,9 +3286,19 @@ final class ChatViewModel: ObservableObject {
             await loadConversations()
             return
         }
-        // Take the baseline before the bee touches anything.
-        workerBaselineTrees[conversationId] = await QueenBranchCommitter.snapshotWorkingTree()
+
+        // Transition and start are now synchronous-adjacent: no yield between
+        // them, so a second delegation arriving while this one runs cannot
+        // interleave between marking .running and launching the worker.
+        registry.transition(taskID: task.id, to: .running)
+        workerBaselineTrees[conversationId] = baseline
         runner.start(task: task, brief: brief)
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.worker.dispatched",
+            "Dispatched worker for \(issue.slug)",
+            ["issue": issue.slug, "conversation": conversationId.uuidString.prefix(8).description]
+        )
 
         await postQueenNotice(
             SystemNoticeClassifier.successMarker
@@ -3512,6 +3535,35 @@ final class ChatViewModel: ObservableObject {
         var askedReviewer = false
         var askedCriteriaCount = 0
 
+        // ── #1152: snapshot-after-finish guard ──────────────────────────
+        //
+        // The branch snapshot and commit must not run until the worker's
+        // turn has *actually* finished. `onFinish` — which reaches this
+        // handler — is called from the runner's `finish()` after it logs
+        // `queen.worker.finish` and removes the conversation from its
+        // active set. But that ordering is an implementation detail of the
+        // runner, not a contract this function enforces. Polling
+        // `isRunning` here makes the dependency explicit and load-bearing:
+        // the git diff cannot proceed until the runner has confirmed the
+        // turn is done and the conversation is no longer active.
+        //
+        // Without this guard, the snapshot races the worker's last file
+        // writes — the git diff fires before the writes are visible on
+        // disk, the branch reads empty, and the work is lost (#1152).
+        // Removing the guard breaks criterion 4: the branch goes back to
+        // reporting empty for files the bee wrote, because nothing waits
+        // for the worker's turn to settle.
+        //
+        // The runner's `finish()` currently removes the conversation from
+        // `runningConversationIds` before calling `onFinish`, so the poll
+        // is satisfied immediately in practice. The guard exists for the
+        // day that ordering changes — and for the test that proves the
+        // invariant by keeping the worker "running" until the file write
+        // is observable.
+        while workerRunner?.isRunning(conversationId: task.conversationId) == true {
+            try? await Task.sleep(nanoseconds: 50_000_000)  // 50ms
+        }
+
         // Attribute whatever the worker changed to its own branch. Until this
         // runs, the branch is an empty ref and the edits sit loose in the shared
         // working tree with nothing tying them to the issue.
@@ -3566,6 +3618,37 @@ final class ChatViewModel: ObservableObject {
             for (criterion, verdict) in evidenceVerdicts {
                 registry.recordVerdict(taskID: task.id, criterion: criterion, verdict: verdict)
             }
+
+            // Character-count criteria are settled by counting, not by
+            // asking the model (#1151). A criterion whose threshold the
+            // code can recognise — "at least three hundred characters" —
+            // gets a measured verdict from the file on disk. The count
+            // overrides a path-existence verdict because a file with
+            // enough characters obviously exists. A criterion whose shape
+            // is not recognised stays as it was and still goes to the
+            // reviewer.
+            let charResults = ChatViewModel.characterCountVerdicts(
+                criteria: task.acceptanceCriteria,
+                ownedPaths: task.ownedPaths
+            )
+            for (criterion, result) in charResults {
+                registry.recordVerdict(
+                    taskID: task.id,
+                    criterion: criterion,
+                    verdict: result.verdict
+                )
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.review.characterCount",
+                    "Character-count criterion judged by counting (#1151)",
+                    [
+                        "issue": task.issue.slug,
+                        "measured": String(result.measured),
+                        "threshold": String(result.threshold)
+                    ]
+                )
+            }
+
             // Record the boundary-scoped fingerprint at the moment the
             // evidence verdicts are carved (#1131). Only the task's own
             // files are hashed, so the Queen's state writes cannot age a
@@ -3573,18 +3656,18 @@ final class ChatViewModel: ObservableObject {
             // recording time — not at acceptance, because what matters is
             // the state the verdicts were derived against, not the state
             // the decision is made in.
-            if !evidenceVerdicts.isEmpty,
+            if (!evidenceVerdicts.isEmpty || !charResults.isEmpty),
                let snapshot = await QueenBranchCommitter.fingerprintBoundary(
                    ownedPaths: task.ownedPaths
                ) {
                 verdictTreeStates[task.id] = snapshot
             }
-            if !evidenceVerdicts.isEmpty {
+            if !evidenceVerdicts.isEmpty || !charResults.isEmpty {
                 TriosLogBus.shared.info(
                     .queen, "queen.review.evidence", "Judged what the files show",
                     [
                         "issue": task.issue.slug,
-                        "judged": String(evidenceVerdicts.count),
+                        "judged": String(evidenceVerdicts.count + charResults.count),
                         "of": String(task.acceptanceCriteria.count)
                     ]
                 )
@@ -3685,6 +3768,11 @@ final class ChatViewModel: ObservableObject {
         // worker chat is lost.
         await appendSystemMessageToQueenChat(notice)
         await autoAcceptIfUnambiguous(taskID: task.id)
+        // When a worker finishes, immediately check for orphans left behind by
+        // a concurrent delegation that was transitioned to .running but never
+        // dispatched. Without this, the orphan waits up to 30 minutes for the
+        // scheduler's next sweep (#1139).
+        await reapStalledWorkers()
         await loadConversations()
     }
 
@@ -4548,13 +4636,29 @@ final class ChatViewModel: ObservableObject {
     /// Cancels bees that stopped without saying so, and reports each one.
     ///
     /// A task stuck in `running` forever occupies a worker slot and hides real
-    /// capacity, so the swarm quietly shrinks to nothing.
+    /// capacity, so the swarm quietly shrinks to nothing. This also catches
+    /// **orphans** — tasks the registry shows as `.running` but whose worker
+    /// runner has no active run. A task transitioned to `.running` whose worker
+    /// was never dispatched looks "working" to the sidebar, the slot counter,
+    /// and the stall timer, while doing nothing at all (#1139).
     func reapStalledWorkers(now: Date = Date()) async {
         let registry = delegationRegistry
-        let stalled = registry.stalled(now: now)
-        guard !stalled.isEmpty else { return }
 
-        for task in stalled {
+        // Orphans: the registry says .running but the runner has no active
+        // task for the conversation. Caught immediately rather than waiting
+        // the stall threshold, because a task that was never started looks
+        // "working" to every other part of the system while doing nothing.
+        let orphaned = registry.running.filter {
+            workerRunner?.isRunning(conversationId: $0.conversationId) != true
+        }
+        let stalled = registry.stalled(now: now)
+        // Deduplicate: a task can be both orphaned and stalled, but it only
+        // needs to be processed once.
+        var seen = Set<UUID>()
+        let toProcess = (orphaned + stalled).filter { seen.insert($0.id).inserted }
+        guard !toProcess.isEmpty else { return }
+
+        for task in toProcess {
             // Only reap what has genuinely stopped. A long stream is not a stall.
             guard workerRunner?.isRunning(conversationId: task.conversationId) != true else { continue }
 
@@ -5779,4 +5883,140 @@ struct ChatRequestBuilder {
 struct BrowserContext {
     let url: String
     let title: String
+}
+
+// MARK: - Character-count criteria (#1151)
+
+/// The result of a character-count check: the verdict, how many
+/// characters were measured, and what the threshold was. The measured
+/// number is carried so a log or a test can show it — a verdict that
+/// says "met" without showing the count is the model's word again,
+/// just in code's clothing.
+struct CharacterCountResult {
+    let verdict: QueenCriterionVerdict
+    let measured: Int
+    let threshold: Int
+}
+
+extension ChatViewModel {
+
+    /// Parses a minimum character threshold from criterion text.
+    ///
+    /// Recognises three shapes: plain digits ("at least 300 characters"),
+    /// English word numbers ("at least three hundred characters"), and
+    /// Russian word numbers in genitive ("не меньше трёхсот знаков").
+    /// Returns nil when the criterion names no character threshold —
+    /// that shape is not recognised and still goes to the model (#1151).
+    static func characterThreshold(in criterion: String) -> Int? {
+        let lower = criterion.lowercased()
+
+        // 1. Plain digits: "300 characters", "500 знаков"
+        //    Preceded by "at least", "не менее", or bare.
+        let digitRegexes: [String] = [
+            "(?:at least|minimum)\\s+(\\d+)\\s+(?:char|знак|символ)",
+            "(?:не менее|не меньше)\\s+(\\d+)\\s+(?:знак|символ|char)",
+            "(\\d+)\\s+(?:characters|chars|знаков|знака|символов|символа)",
+        ]
+        for pattern in digitRegexes {
+            if let regex = try? NSRegularExpression(
+                pattern: pattern, options: [.caseInsensitive]),
+               let match = regex.firstMatch(
+                in: lower, range: NSRange(lower.startIndex..., in: lower)),
+               match.numberOfRanges >= 2,
+               let numberRange = Range(match.range(at: 1), in: lower),
+               let n = Int(lower[numberRange])
+            {
+                return n
+            }
+        }
+
+        // 2. English word numbers: "three hundred characters"
+        let engOnes: [String: Int] = [
+            "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+            "six": 6, "seven": 7, "eight": 8, "nine": 9,
+        ]
+        let engPattern =
+            "(?:at least\\s+)?(one|two|three|four|five|six|seven|eight|nine)\\s+hundred\\s+char"
+        if let regex = try? NSRegularExpression(
+            pattern: engPattern, options: [.caseInsensitive]),
+           let match = regex.firstMatch(
+            in: lower, range: NSRange(lower.startIndex..., in: lower)),
+           match.numberOfRanges >= 2,
+           let wordRange = Range(match.range(at: 1), in: lower)
+        {
+            let word = String(lower[wordRange])
+            if let n = engOnes[word] {
+                return n * 100
+            }
+        }
+
+        // 3. Russian word numbers (genitive, after "не меньше/не менее"):
+        //    "трёхсот знаков" → 300, "пятисот знаков" → 500.
+        //    Both ё and е variants are accepted.
+        let ruHundreds: [String: Int] = [
+            "двухсот": 200, "трёхсот": 300, "трехсот": 300,
+            "четырёхсот": 400, "четырехсот": 400,
+            "пятисот": 500, "шестисот": 600, "семисот": 700,
+            "восьмисот": 800, "девятисот": 900,
+        ]
+        let hasCharWord = lower.contains("знак")
+            || lower.contains("символ")
+            || lower.contains("char")
+        for (word, value) in ruHundreds where hasCharWord && lower.contains(word) {
+            return value
+        }
+
+        return nil
+    }
+
+    /// Verdicts the Queen can reach by counting characters in the files
+    /// the task boundary owns — without taking the model's word.
+    ///
+    /// A criterion whose threshold `characterThreshold` can recognise
+    /// gets a measured verdict: the file is read, characters are counted,
+    /// and the count is compared to the threshold. One whose shape is
+    /// not recognised gets no entry and stays unchecked, so it still
+    /// goes to the reviewer. This is the second mechanical shape after
+    /// file-existence (#1151).
+    ///
+    /// `projectRoot` defaults to `ProjectPaths.root` in production and
+    /// is overridable so a test can point it at a scratch directory.
+    static func characterCountVerdicts(
+        criteria: [String],
+        ownedPaths: [String],
+        projectRoot: String? = nil
+    ) -> [String: CharacterCountResult] {
+        let root = projectRoot ?? ProjectPaths.root
+        var results: [String: CharacterCountResult] = [:]
+
+        for criterion in criteria {
+            guard let threshold = characterThreshold(in: criterion) else { continue }
+
+            // Find the file(s) to count. A criterion that names a path
+            // ("Write docs/foo.md …") is checked against that file; one
+            // that names none is checked against the task's owned paths.
+            let mentioned = QueenAcceptancePolicy.pathsMentioned(in: criterion)
+            let candidates = mentioned.isEmpty
+                ? ownedPaths.map { QueenDelegationPolicy.normalizePath($0) }
+                    .filter { !$0.isEmpty }
+                : mentioned
+
+            var measured = 0
+            for path in candidates {
+                let fullPath = "\(root)/\(path)"
+                if let content = try? String(contentsOfFile: fullPath, encoding: .utf8) {
+                    measured += content.count
+                }
+            }
+
+            let verdict: QueenCriterionVerdict = measured >= threshold ? .met : .unmet
+            results[criterion] = CharacterCountResult(
+                verdict: verdict,
+                measured: measured,
+                threshold: threshold
+            )
+        }
+
+        return results
+    }
 }
