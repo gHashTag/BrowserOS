@@ -4027,3 +4027,32 @@ no acceptance attempt logged. Closer, and not there.
 Worth keeping: an observable failure is worth more than a fixed one. Two passes
 of confident wrong diagnosis ended the moment the code was made to say what it
 was doing.
+
+## Both bees accepted, and my method was wrong a third time
+
+Two tasks, one launch, overlapping, and both closed themselves:
+
+    11:21:24  #1147  queued -> running
+    11:21:28  #1149  queued -> running
+    11:21:51  #1147  awaitingReview -> accepted
+    11:21:57  #1149  awaitingReview -> accepted
+    11:21:57  #1149  "Accepted without a human"
+
+The only difference from every earlier run is `AUTONOMY=1`. The first line of
+`autoAcceptIfUnambiguous` is a guard on `TRIOS_QUEEN_AUTONOMY` that returns
+**without writing anything**, and my runs never set it. So a working acceptance
+looked like a broken one, and three passes of diagnosis went into the wrong
+place — each repair compiling, passing 594 checks, and changing nothing.
+
+The sweep written for this never fired once: every record says *Sweeping 0 other
+task(s)*. Both tasks were accepted by their own handlers. Acceptance per task
+already worked; my check of it did not.
+
+What was real is the silence. Delegated, and the guard speaks now:
+
+    without autonomy:  queen.auto_accept.autonomy_disabled — "autonomy is off"
+    with autonomy:     no such record, and "Accepted without a human"
+
+Three times this epic the fault was in how I was asking, not in what I was
+asking about. Every one of them ended the same way: by making the code say what
+it was doing.
