@@ -302,10 +302,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         TriosLogBus.shared.info(
             .queen, "queen.command.start", "E2E queen command", ["command": queenCommand]
         )
-        await vm.runQueenCommand(queenCommand)
-        TriosLogBus.shared.info(
-            .queen, "queen.command.ran", "E2E queen command executed", ["command": queenCommand]
-        )
+        let commands = queenCommand
+            .components(separatedBy: ";;")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        for command in commands {
+            await vm.runQueenCommand(command)
+            TriosLogBus.shared.info(
+                .queen, "queen.command.ran", "E2E queen command executed", ["command": command]
+            )
+        }
     }
 
     /// Wait for one Queen registry report and log its text as a separate
