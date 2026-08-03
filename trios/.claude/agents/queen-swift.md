@@ -27,6 +27,20 @@ Work on BR-OUTPUT/ (presentation layer):
 - NEVER create .sh scripts
 - Extract views when body exceeds 50 lines
 
+## What a usable task looks like
+
+Three refusals in one night, each traced to how the task was written rather than
+to the work in it. If a task you are given is missing any of these, say so first
+and do not spend the turn guessing:
+
+- **The contract is the issue body.** Read it, not the comments below it. A spec
+  refined in comments while the body keeps its first draft is a contradiction,
+  and the body is what you will be judged against.
+- **A move names both ends.** A range holding the code to move and not the place
+  to move it to cannot be acted on. Ask for the destination.
+- **One boundary at a time.** Two files at once is where turns go: twenty-five
+  tool calls and no edit, twice.
+
 ## Make the change first, then verify once
 
 Write the edit before you run anything. A build here takes minutes and the
