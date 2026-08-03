@@ -3882,3 +3882,21 @@ base `dev`, 2,017 files, never merged. Fails before, passes after.
 The bee having a shell is what made the difference. Three attempts blind, all
 wrong; four attempts with a compiler and a test runner, converging each time on
 the exact error I handed back.
+
+## Parallel is still a queue, and the refusal can be wrong
+
+Worktree isolation did not fix the parallel case: #1148 ran to merge, #1147 went
+to `running` and vanished. Delegated a queue fix, which broke three checks and
+dropped coverage to 573; handed the failures back verbatim and got 594 again.
+Then the proof run showed the real shape - both client log files carried the
+same task's events. `delegate-probe` is a client to the running app, and the
+second client takes the channel from the first. The task never reaches git at
+all, which is why the worktrees changed nothing here. #1150.
+
+And a false refusal, the mirror of the one tested earlier: `docs/par-c.md` is
+2,225 bytes, the bee's own report said so, and the reviewer judged "not less
+than three hundred characters" unmet. A criterion that a command can check
+should not be a matter of opinion. #1151.
+
+What did land tonight: the bee has a shell, the merge reaches a real branch,
+and one task went issue to merged with a one-file diff.
