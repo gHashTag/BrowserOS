@@ -3092,7 +3092,8 @@ final class ChatViewModel: ObservableObject {
         case .salience:
             await reportSalience()
         case .choose:
-            await chooseNextOpenIssue()
+            let wantStart = originalText.range(of: "--start") != nil
+            await chooseNextOpenIssue(startAfterChoosing: wantStart)
         case .runSkill(let command, let arguments):
             await runQueenSkill(command: command, arguments: arguments)
         case .unknown:
@@ -3140,6 +3141,16 @@ final class ChatViewModel: ObservableObject {
                     + "\(issue.slug) is already delegated to \(existing.worker). "
                     + "Open that chat rather than starting a second one."
             )
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.delegate",
+                "Refused — \(issue.slug) already delegated to \(existing.worker)",
+                [
+                    "issue": issue.slug,
+                    "reason": "already delegated",
+                    "worker": existing.worker,
+                ]
+            )
             return
         }
         // The Queen proposes, the person decides. Checked before every other
@@ -3150,10 +3161,28 @@ final class ChatViewModel: ObservableObject {
             issue: issue, approved: registry.approvedIssues
         ) {
             await postQueenNotice(SystemNoticeClassifier.warningMarker + reason)
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.delegate",
+                "Refused — \(issue.slug) not approved: \(reason)",
+                [
+                    "issue": issue.slug,
+                    "reason": reason,
+                ]
+            )
             return
         }
         if let reason = registry.delegationBlockReason(paths: paths) {
             await postQueenNotice(SystemNoticeClassifier.warningMarker + "Cannot delegate: \(reason)")
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.delegate",
+                "Refused — \(issue.slug) boundary conflict: \(reason)",
+                [
+                    "issue": issue.slug,
+                    "reason": reason,
+                ]
+            )
             return
         }
         // Refuse to *start* work past the ceiling. Stopping a bee already
@@ -3166,6 +3195,18 @@ final class ChatViewModel: ObservableObject {
                     + "I am not opening new work today. The swarm has spent about "
                     + "\(ModelPricing.format(spent)), which is \(ModelPricing.format(overBy)) past "
                     + "the daily ceiling. Anything already running continues."
+            )
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.delegate",
+                "Refused — \(issue.slug) budget exhausted (spent \(ModelPricing.format(spent)), "
+                    + "\(ModelPricing.format(overBy)) past ceiling)",
+                [
+                    "issue": issue.slug,
+                    "reason": "budget exhausted",
+                    "spent": ModelPricing.format(spent),
+                    "overBy": ModelPricing.format(overBy),
+                ]
             )
             return
         }
@@ -4883,109 +4924,169 @@ final class ChatViewModel: ObservableObject {
 
     /// Picks the next open sub-issue to act on and says why.
     ///
-    /// Reads the delegation registry, skips tasks that are blocked on external
-    /// data — a running worker is something the Queen waits for, not something
-    /// she can decide on — and names the issue that most needs her decision.
-    /// The choice is logged so it can be audited: a decision that is not
-    /// recorded might as well not have been made.
+    /// Reads the **open sub-issues of epic gHashTag/trios#1090 through `gh`**
+    /// (GitHub CLI), not the local delegation registry, so the choice reflects
+    /// what is actually open on GitHub — not what the registry happens to know.
+    /// Sub-issues already in flight (a running worker is attached) are excluded.
     ///
-    /// Priority is by urgency: awaitingReview needs a verdict now, failed needs
-    /// attention, and everything else (queued, rejected) can be picked up in
-    /// turn. Within the same urgency, the oldest updated task wins.
-    private func chooseNextOpenIssue() async {
-        let registry = delegationRegistry
-        let open = registry.open
-
-        guard !open.isEmpty else {
-            await postQueenNotice(
-                SystemNoticeClassifier.infoMarker
-                    + "No open sub-issues. The hive is empty."
+    /// Says distinctly when `gh` is unavailable (not installed, network error,
+    /// auth failure) versus when there is genuinely nothing to choose.
+    ///
+    /// The choice is logged as a separate event so it can be audited: a
+    /// decision that is not recorded might as well not have been made.
+    private func chooseNextOpenIssue(startAfterChoosing: Bool = false) async {
+        // ── 1. Locate gh ───────────────────────────────────────────
+        let ghPath = await Task.detached(priority: .utility) {
+            QueenStatusViewModel.runProcess(
+                "/bin/sh",
+                arguments: ["-c", "command -v gh"],
+                workDir: ProjectPaths.root,
+                timeout: 5
             )
-            TriosLogBus.shared.info(
+        }.value
+
+        guard !ghPath.isEmpty else {
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "Cannot choose: `gh` is not installed or not on PATH. "
+                    + "Install the GitHub CLI to read open sub-issues of epic #1090."
+            )
+            TriosLogBus.shared.error(
                 .queen,
                 "queen.choose",
-                "Nothing to choose — no open sub-issues",
-                ["considered": "0", "chosen": "(none)"]
+                "gh unavailable — cannot read sub-issues",
+                ["epic": "gHashTag/trios#1090", "gh": "not found", "chosen": "(none)"]
             )
             return
         }
 
-        // Skip tasks blocked on external data. A running worker is not
-        // something the Queen can act on; she waits for it to report.
-        let blocked = open.filter { $0.state == .running }
-        let actionable = open.filter { $0.state != .running }
+        // ── 2. Read open sub-issues of epic #1090 through gh ──────
+        // The timeline CROSS_REFERENCED_EVENT entries are the sub-issues the
+        // epic links to. We filter for OPEN state in jq and emit "num\ttitle".
+        let query = "{ repository(owner: \"gHashTag\", name: \"trios\") { issue(number: 1090) { timelineItems(first: 100, itemTypes: CROSS_REFERENCED_EVENT) { nodes { ... on CrossReferencedEvent { source { ... on Issue { number title state } } } } } } } }"
+        let raw = await Task.detached(priority: .utility) {
+            QueenStatusViewModel.runProcess(
+                ghPath,
+                arguments: [
+                    "api", "graphql",
+                    "-f", "query=\(query)",
+                    "--jq", ".data.repository.issue.timelineItems.nodes[].source | select(.state == \"OPEN\") | \"\\(.number)\\t\\(.title)\""
+                ],
+                workDir: ProjectPaths.root,
+                timeout: 15
+            )
+        }.value
 
-        guard !actionable.isEmpty else {
-            let names = blocked.map(\.issue.slug).joined(separator: ", ")
+        // ── 3. Parse: each line is "number\ttitle" ─────────────────
+        var seen = Set<Int>()
+        var subIssues: [(number: Int, title: String)] = []
+        for line in raw.split(separator: "\n", omittingEmptySubsequences: true) {
+            let parts = line.split(separator: "\t", maxSplits: 1).map(String.init)
+            guard parts.count == 2,
+                  let num = Int(parts[0].trimmingCharacters(in: .whitespaces)) else {
+                continue
+            }
+            if seen.insert(num).inserted {
+                subIssues.append((num, parts[1].trimmingCharacters(in: .whitespaces)))
+            }
+        }
+
+        // If gh produced output but none of it parsed, the API call itself
+        // failed (network error, auth error, rate limit) — that is different
+        // from "there are no open sub-issues."
+        if subIssues.isEmpty && !raw.isEmpty {
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "Cannot choose: `gh` ran but returned unexpected output "
+                    + "(network, auth, or rate limit).\n" + raw
+            )
+            TriosLogBus.shared.error(
+                .queen,
+                "queen.choose",
+                "gh returned unexpected output",
+                ["epic": "gHashTag/trios#1090", "ghOutput": raw, "chosen": "(none)"]
+            )
+            return
+        }
+
+        guard !subIssues.isEmpty else {
             await postQueenNotice(
                 SystemNoticeClassifier.infoMarker
-                    + "\(open.count) open sub-issue\(open.count == 1 ? "" : "s"), "
-                    + "but \(blocked.count) \(blocked.count == 1 ? "is" : "are") running. "
-                    + "Nothing to act on until a worker reports back"
-                    + (names.isEmpty ? "." : ":\n" + names)
+                    + "No open sub-issues under gHashTag/trios#1090. The hive is empty."
             )
             TriosLogBus.shared.info(
                 .queen,
                 "queen.choose",
-                "All \(open.count) open sub-issues are running — nothing to choose",
+                "Nothing to choose — no open sub-issues on #1090",
+                ["epic": "gHashTag/trios#1090", "considered": "0", "chosen": "(none)"]
+            )
+            return
+        }
+
+        // ── 4. Exclude in-flight issues ───────────────────────────
+        let inFlightNumbers = Set(delegationRegistry.running.map { $0.issue.number })
+        let actionable = subIssues.filter { !inFlightNumbers.contains($0.number) }
+
+        guard !actionable.isEmpty else {
+            let names = subIssues.map { "#\($0.number)" }.joined(separator: ", ")
+            await postQueenNotice(
+                SystemNoticeClassifier.infoMarker
+                    + "\(subIssues.count) open sub-issue\(subIssues.count == 1 ? "" : "s") "
+                    + "under #1090, but \(inFlightNumbers.count) "
+                    + "\(inFlightNumbers.count == 1 ? "is" : "are") in flight. "
+                    + "Nothing to act on until a worker reports back:\n" + names
+            )
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.choose",
+                "All \(subIssues.count) open sub-issues are in flight — nothing to choose",
                 [
-                    "considered": String(open.count),
+                    "considered": String(subIssues.count),
+                    "inFlight": String(inFlightNumbers.count),
                     "chosen": "(none)",
-                    "running": String(blocked.count),
                 ]
             )
             return
         }
 
-        func priority(_ state: DelegatedTaskState) -> Int {
-            switch state {
-            case .awaitingReview: return 0
-            case .failed: return 1
-            case .rejected: return 2
-            case .queued: return 3
-            default: return 4
-            }
-        }
-
-        let sorted = actionable.sorted {
-            if priority($0.state) != priority($1.state) {
-                return priority($0.state) < priority($1.state)
-            }
-            return $0.updatedAt < $1.updatedAt
-        }
-
+        // ── 5. Pick the lowest-numbered (oldest) sub-issue ─────────
+        let sorted = actionable.sorted { $0.number < $1.number }
         let chosen = sorted[0]
-        let reason: String
-        switch chosen.state {
-        case .awaitingReview:
-            reason = "awaiting your review — the most urgent open sub-issue."
-        case .failed:
-            reason = "failed and needs your decision: retry or cancel."
-        case .rejected:
-            reason = "was sent back and has not reported since."
-        case .queued:
-            reason = "queued and not started — next in line."
-        default:
-            reason = "the next open sub-issue."
-        }
+        let reason = "lowest-numbered open sub-issue of epic #1090 not already in flight."
 
         await postQueenNotice(
             SystemNoticeClassifier.successMarker
-                + "Choose \(chosen.issue.slug) (#\(chosen.issue.number)). "
+                + "Choose gHashTag/trios#\(chosen.number): \(chosen.title). "
                 + reason
-                + " Considered \(open.count) open sub-issue\(open.count == 1 ? "" : "s")."
+                + " Considered \(subIssues.count) open sub-issue\(subIssues.count == 1 ? "" : "s"), "
+                + "\(inFlightNumbers.count) in flight."
         )
         TriosLogBus.shared.info(
             .queen,
             "queen.choose",
-            "Chose \(chosen.issue.slug) out of \(open.count) open sub-issues",
+            "Chose gHashTag/trios#\(chosen.number) out of \(subIssues.count) open sub-issues",
             [
-                "chosen": chosen.issue.slug,
-                "issueNumber": String(chosen.issue.number),
-                "considered": String(open.count),
-                "state": chosen.state.rawValue,
+                "chosen": "gHashTag/trios#\(chosen.number)",
+                "issueNumber": String(chosen.number),
+                "considered": String(subIssues.count),
+                "inFlight": String(inFlightNumbers.count),
+                "reason": reason,
             ]
         )
+
+        // ── 6. Delegate if --start was given ──────────────────────
+        // `/choose` names and stops. `/choose --start` names then opens
+        // the same work `/delegate` would, going through the identical
+        // path — approval gate, capacity, budget, branch creation, worker
+        // dispatch — so every refusal that applies to an explicit
+        // delegation applies here too.
+        if startAfterChoosing {
+            await delegateIssueToWorker(
+                issue: IssueReference(owner: "gHashTag", repo: "trios", number: chosen.number),
+                worker: "queen-swift",
+                title: chosen.title
+            )
+        }
     }
 
     // MARK: - Review Loop
