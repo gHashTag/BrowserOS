@@ -3091,6 +3091,8 @@ final class ChatViewModel: ObservableObject {
             await runSelfAudit()
         case .salience:
             await reportSalience()
+        case .choose:
+            await chooseNextOpenIssue()
         case .runSkill(let command, let arguments):
             await runQueenSkill(command: command, arguments: arguments)
         case .unknown:
@@ -4877,6 +4879,113 @@ final class ChatViewModel: ObservableObject {
     /// the case worth proving.
     func postQueenNotice(_ text: String) async {
         await appendSystemMessageToQueenChat(text)
+    }
+
+    /// Picks the next open sub-issue to act on and says why.
+    ///
+    /// Reads the delegation registry, skips tasks that are blocked on external
+    /// data — a running worker is something the Queen waits for, not something
+    /// she can decide on — and names the issue that most needs her decision.
+    /// The choice is logged so it can be audited: a decision that is not
+    /// recorded might as well not have been made.
+    ///
+    /// Priority is by urgency: awaitingReview needs a verdict now, failed needs
+    /// attention, and everything else (queued, rejected) can be picked up in
+    /// turn. Within the same urgency, the oldest updated task wins.
+    private func chooseNextOpenIssue() async {
+        let registry = delegationRegistry
+        let open = registry.open
+
+        guard !open.isEmpty else {
+            await postQueenNotice(
+                SystemNoticeClassifier.infoMarker
+                    + "No open sub-issues. The hive is empty."
+            )
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.choose",
+                "Nothing to choose — no open sub-issues",
+                ["considered": "0", "chosen": "(none)"]
+            )
+            return
+        }
+
+        // Skip tasks blocked on external data. A running worker is not
+        // something the Queen can act on; she waits for it to report.
+        let blocked = open.filter { $0.state == .running }
+        let actionable = open.filter { $0.state != .running }
+
+        guard !actionable.isEmpty else {
+            let names = blocked.map(\.issue.slug).joined(separator: ", ")
+            await postQueenNotice(
+                SystemNoticeClassifier.infoMarker
+                    + "\(open.count) open sub-issue\(open.count == 1 ? "" : "s"), "
+                    + "but \(blocked.count) \(blocked.count == 1 ? "is" : "are") running. "
+                    + "Nothing to act on until a worker reports back"
+                    + (names.isEmpty ? "." : ":\n" + names)
+            )
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.choose",
+                "All \(open.count) open sub-issues are running — nothing to choose",
+                [
+                    "considered": String(open.count),
+                    "chosen": "(none)",
+                    "running": String(blocked.count),
+                ]
+            )
+            return
+        }
+
+        func priority(_ state: DelegatedTaskState) -> Int {
+            switch state {
+            case .awaitingReview: return 0
+            case .failed: return 1
+            case .rejected: return 2
+            case .queued: return 3
+            default: return 4
+            }
+        }
+
+        let sorted = actionable.sorted {
+            if priority($0.state) != priority($1.state) {
+                return priority($0.state) < priority($1.state)
+            }
+            return $0.updatedAt < $1.updatedAt
+        }
+
+        let chosen = sorted[0]
+        let reason: String
+        switch chosen.state {
+        case .awaitingReview:
+            reason = "awaiting your review — the most urgent open sub-issue."
+        case .failed:
+            reason = "failed and needs your decision: retry or cancel."
+        case .rejected:
+            reason = "was sent back and has not reported since."
+        case .queued:
+            reason = "queued and not started — next in line."
+        default:
+            reason = "the next open sub-issue."
+        }
+
+        await postQueenNotice(
+            SystemNoticeClassifier.successMarker
+                + "Choose \(chosen.issue.slug) (#\(chosen.issue.number)). "
+                + reason
+                + " Considered \(open.count) open sub-issue\(open.count == 1 ? "" : "s")."
+        )
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.choose",
+            "Chose \(chosen.issue.slug) out of \(open.count) open sub-issues",
+            [
+                "chosen": chosen.issue.slug,
+                "issueNumber": String(chosen.issue.number),
+                "considered": String(open.count),
+                "state": chosen.state.rawValue,
+            ]
+        )
     }
 
     // MARK: - Review Loop
