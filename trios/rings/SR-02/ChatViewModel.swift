@@ -3259,13 +3259,26 @@ final class ChatViewModel: ObservableObject {
             title: "\(issue.slug) \(title)"
         )
         await loadConversations()
-        registry.transition(taskID: task.id, to: .running)
+
+        // Take the baseline BEFORE the transition to .running, so no await
+        // separates the transition from runner.start. Two delegations arriving
+        // seconds apart interleave at every await on the main actor; without
+        // this ordering, the first task transitions to .running, yields at the
+        // snapshot, and the second delegation starts and completes while the
+        // first sits in .running with no worker (#1139).
+        let baseline = await QueenBranchCommitter.snapshotWorkingTree()
 
         // Actually start the bee. Saving the briefing and stopping there left a
         // chat that looked delegated and did nothing, which is worse than
         // refusing to delegate at all.
         guard let runner = workerRunner else {
-            registry.transition(taskID: task.id, to: .failed)
+            // .cancelled, not .failed: the task is still in .queued (the
+            // transition to .running happens below, after this guard), and
+            // the state machine allows .queued → .cancelled but not
+            // .queued → .failed. Using .failed here was silently rejected,
+            // leaving the task orphaned in .queued — visible to every
+            // subsequent delegation as a live task holding its paths (#1139).
+            registry.transition(taskID: task.id, to: .cancelled)
             await postQueenNotice(
                 SystemNoticeClassifier.failureMarker
                     + "Delegation aborted: no worker runner is configured, so \(worker) could not be started."
@@ -3273,9 +3286,19 @@ final class ChatViewModel: ObservableObject {
             await loadConversations()
             return
         }
-        // Take the baseline before the bee touches anything.
-        workerBaselineTrees[conversationId] = await QueenBranchCommitter.snapshotWorkingTree()
+
+        // Transition and start are now synchronous-adjacent: no yield between
+        // them, so a second delegation arriving while this one runs cannot
+        // interleave between marking .running and launching the worker.
+        registry.transition(taskID: task.id, to: .running)
+        workerBaselineTrees[conversationId] = baseline
         runner.start(task: task, brief: brief)
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.worker.dispatched",
+            "Dispatched worker for \(issue.slug)",
+            ["issue": issue.slug, "conversation": conversationId.uuidString.prefix(8).description]
+        )
 
         await postQueenNotice(
             SystemNoticeClassifier.successMarker
@@ -3685,6 +3708,11 @@ final class ChatViewModel: ObservableObject {
         // worker chat is lost.
         await appendSystemMessageToQueenChat(notice)
         await autoAcceptIfUnambiguous(taskID: task.id)
+        // When a worker finishes, immediately check for orphans left behind by
+        // a concurrent delegation that was transitioned to .running but never
+        // dispatched. Without this, the orphan waits up to 30 minutes for the
+        // scheduler's next sweep (#1139).
+        await reapStalledWorkers()
         await loadConversations()
     }
 
@@ -4548,13 +4576,29 @@ final class ChatViewModel: ObservableObject {
     /// Cancels bees that stopped without saying so, and reports each one.
     ///
     /// A task stuck in `running` forever occupies a worker slot and hides real
-    /// capacity, so the swarm quietly shrinks to nothing.
+    /// capacity, so the swarm quietly shrinks to nothing. This also catches
+    /// **orphans** — tasks the registry shows as `.running` but whose worker
+    /// runner has no active run. A task transitioned to `.running` whose worker
+    /// was never dispatched looks "working" to the sidebar, the slot counter,
+    /// and the stall timer, while doing nothing at all (#1139).
     func reapStalledWorkers(now: Date = Date()) async {
         let registry = delegationRegistry
-        let stalled = registry.stalled(now: now)
-        guard !stalled.isEmpty else { return }
 
-        for task in stalled {
+        // Orphans: the registry says .running but the runner has no active
+        // task for the conversation. Caught immediately rather than waiting
+        // the stall threshold, because a task that was never started looks
+        // "working" to every other part of the system while doing nothing.
+        let orphaned = registry.running.filter {
+            workerRunner?.isRunning(conversationId: $0.conversationId) != true
+        }
+        let stalled = registry.stalled(now: now)
+        // Deduplicate: a task can be both orphaned and stalled, but it only
+        // needs to be processed once.
+        var seen = Set<UUID>()
+        let toProcess = (orphaned + stalled).filter { seen.insert($0.id).inserted }
+        guard !toProcess.isEmpty else { return }
+
+        for task in toProcess {
             // Only reap what has genuinely stopped. A long stream is not a stall.
             guard workerRunner?.isRunning(conversationId: task.conversationId) != true else { continue }
 
