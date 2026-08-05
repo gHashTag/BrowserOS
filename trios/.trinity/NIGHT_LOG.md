@@ -4417,3 +4417,25 @@ And the silence on #1156 explains the earlier scores: its body never names
 The narrowing was reading my instructions, not her spec. Which puts the real
 work back where the measurement pointed two passes ago: the spec has to name the
 culprit, and today it usually does not.
+
+## Two hypotheses tested, two refuted, and one correction to make
+
+I wrote last pass that the name rule never matches. That was wrong, and the
+correction matters: #1158 narrows to `acceptanceBlockReasonDistinguishingEmpty
+Answers`, which its body does name. The rule matches there.
+
+What it does not do is fire for #1117, whose body names `requestReviewerVerdicts`
+and whose declaration sits at line 4392. Two explanations were tested by driving:
+
+    two names in one body confuse it   — refuted, one name is still silent
+    backticks are not read as prose    — refuted, prose is still silent
+
+So the rule works for one issue and not another and I cannot say why from
+outside. A self-check was added — the first line of the range must declare the
+matched name — and it changed nothing observable, which is consistent with the
+match never being wrong when it happens.
+
+Where that leaves it, plainly: one issue in four gets a range, that range is
+right, and three get silence. No wrong pointers. But the mechanism is not
+predictable from reading a spec, and until it is, writing a spec that names the
+function is not a reliable way to get the bee sent to the right place.
