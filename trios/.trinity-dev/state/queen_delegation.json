@@ -1,0 +1,37 @@
+[
+  {
+    "acceptanceCriteria" : [
+      "Пустой ответ ревьюера отличается в журнале и в причине блокировки от «критерий не проверяли».",
+      "Пустой ответ приводит к повторному запросу — один раз, не в цикле.",
+      "Проверка ломается, если пустой ответ снова становится неотличим от отсутствия вопроса."
+    ],
+    "conversationId" : "D95C557E-084B-4197-8E9B-349F898E8783",
+    "createdAt" : "2026-08-05T14:27:51Z",
+    "criterionVerdicts" : {
+
+    },
+    "id" : "80A451B3-450D-45C4-B4B2-8C078A7D6D15",
+    "inputTokens" : 0,
+    "interventions" : [
+
+    ],
+    "issue" : {
+      "number" : 1117,
+      "owner" : "gHashTag",
+      "repo" : "trios"
+    },
+    "model" : "glm-5.2",
+    "outputTokens" : 0,
+    "ownedPaths" : [
+
+    ],
+    "provider" : "zai",
+    "resumeAttempts" : 1,
+    "state" : "running",
+    "title" : "Пустой ответ ревьюера записывается как ноль вердиктов, без единого слова",
+    "toolCalls" : 15,
+    "updatedAt" : "2026-08-05T14:30:26Z",
+    "virtualBranch" : "queen\/1117",
+    "worker" : "queen-swift"
+  }
+]
