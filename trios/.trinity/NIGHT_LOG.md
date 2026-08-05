@@ -4169,3 +4169,33 @@ Worth saying about the rule itself: *lowest-numbered not in flight* means she
 always reaches for the oldest thing on the list, which is reliably the one
 everybody else has skipped. It is a defensible rule and it is the worst possible
 first task.
+
+## She reaches for what fits now, and the circle nearly closes
+
+The rule was *lowest-numbered not in flight*, which reliably picks the thing
+everybody skipped — #1111, architectural, and the bee never came back from it.
+The measurement in the literature is blunt: task length against success rate is
+R² = 0.83, near-certain under four human-minutes and under one in ten past four
+hours. Narrow and verifiable is not a preference, it is where the success lives.
+
+So the sort now counts the files named under `## Границы`, treats a directory as
+large, and falls back to the number only on a tie. Both directions driven:
+
+    by size:    Chose #1117, fileCount 1
+    by number:  Chose #1111, fileCount none
+
+Same epic, same command, one line of sort between them.
+
+And on a task that fits, the circle went further than it ever has without a
+human naming anything:
+
+    14:27:50  queen.choose      Chose #1117 out of 24
+    14:27:51  queen.delegate
+    14:30:25  worker.finish
+    14:30:28  Committed 1 file(s)
+    14:31:13  Reviewer returned 2 verdict(s) for 3 criterion(s)
+    14:31:14  running -> awaitingReview
+
+It stops there, correctly: two of three criteria answered is not a pass, and the
+gate holds. The unanswered one is the third — which is, with some irony, the
+criterion of the issue about a reviewer that answers with nothing.

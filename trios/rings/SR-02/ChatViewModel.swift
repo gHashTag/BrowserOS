@@ -5049,10 +5049,51 @@ final class ChatViewModel: ObservableObject {
             return
         }
 
-        // ── 5. Pick the lowest-numbered (oldest) sub-issue ─────────
-        let sorted = actionable.sorted { $0.number < $1.number }
+        // ── 5. Score by boundary size, then issue number ───────────
+        // Fewest files in Границы wins; ties break by lowest number.
+        // A directory path (trailing /) counts as 9999 — it is a
+        // region, not a boundary.  No Границы section → Int.max (last).
+        struct ScoredIssue {
+            let number: Int
+            let title: String
+            let fileCount: Int
+        }
+
+        var scored: [ScoredIssue] = []
+        for issue in actionable {
+            let body = await Task.detached(priority: .utility) {
+                QueenStatusViewModel.runProcess(
+                    ghPath,
+                    arguments: [
+                        "issue", "view", String(issue.number),
+                        "--repo", "gHashTag/trios",
+                        "--json", "body",
+                        "-q", ".body",
+                    ],
+                    workDir: ProjectPaths.root,
+                    timeout: 10,
+                )
+            }.value
+
+            scored.append(ScoredIssue(
+                number: issue.number,
+                title: issue.title,
+                fileCount: ChatViewModel.countBoundaryFiles(in: body)
+            ))
+        }
+
+        let sorted = scored.sorted { a, b in
+            if a.fileCount != b.fileCount { return a.fileCount < b.fileCount }
+            return a.number < b.number
+        }
         let chosen = sorted[0]
-        let reason = "lowest-numbered open sub-issue of epic #1090 not already in flight."
+
+        let reason: String
+        if chosen.fileCount == Int.max {
+            reason = "no Границы section (treats as ∞ files); lowest number among such issues."
+        } else {
+            reason = "smallest boundary: \(chosen.fileCount) file\(chosen.fileCount == 1 ? "" : "s") under Границы; ties break by lowest number."
+        }
 
         await postQueenNotice(
             SystemNoticeClassifier.successMarker
@@ -5070,6 +5111,7 @@ final class ChatViewModel: ObservableObject {
                 "issueNumber": String(chosen.number),
                 "considered": String(subIssues.count),
                 "inFlight": String(inFlightNumbers.count),
+                "fileCount": chosen.fileCount == Int.max ? "none" : String(chosen.fileCount),
                 "reason": reason,
             ]
         )
@@ -5087,6 +5129,40 @@ final class ChatViewModel: ObservableObject {
                 title: chosen.title
             )
         }
+    }
+
+    /// Count files listed under `## Границы` in an issue body.
+    /// A directory path (trailing /) counts as 9999 — it is a region,
+    /// not a boundary.  No `## Границы` section → Int.max (sorts last).
+    private static func countBoundaryFiles(in body: String) -> Int {
+        let lines = body.split(separator: "\n", omittingEmptySubsequences: false)
+        var inBounds = false
+        var count = 0
+        var found = false
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("## ") {
+                if inBounds { break }
+                inBounds = trimmed.hasPrefix("## Границы")
+                if inBounds { found = true }
+                continue
+            }
+            guard inBounds else { continue }
+
+            let cleaned = trimmed
+                .trimmingCharacters(in: CharacterSet(charactersIn: "`"))
+                .trimmingCharacters(in: .whitespaces)
+            if cleaned.isEmpty { continue }
+
+            if cleaned.hasSuffix("/") {
+                count += 9999
+            } else {
+                count += 1
+            }
+        }
+
+        return found ? count : Int.max
     }
 
     // MARK: - Review Loop
