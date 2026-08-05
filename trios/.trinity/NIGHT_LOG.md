@@ -4143,3 +4143,29 @@ What made the proof possible was two commands in one run — the probe wipes
 approvals at startup, so approving and choosing had to happen in the same launch.
 That is the third time this epic that a capability existed and could not be
 reached by any run, and the third time the fix was a way to ask.
+
+## The run she starts herself has no host that outlives it
+
+The circle was driven for real, on the issue she actually picks:
+
+    12:21:13  queen.choose      Chose #1111 out of 21 open sub-issues
+    12:21:14  queen.delegate    Delegated #1111 to queen-swift
+    12:21:17  worker.start
+    12:21:18  queen.selftest.failed — "Delegation did not register a task"
+              (and the app is gone)
+
+The self-test looks a task up by the issue a human named, and with `/choose
+--start` that variable is empty. So the two capabilities proven separately —
+choosing her own work, and seeing work through — had never been asked to hold
+at the same time, and they did not. #1162.
+
+Delegated, and the immediate failure is gone: the worker now starts and the app
+stays past the check that used to end the run. But the circle still does not
+close. #1111 is the lowest-numbered open sub-issue, which is what the rule
+picks, and it is an architectural one — the bee produced nothing before the run
+ended, and the app did not outlive the harness.
+
+Worth saying about the rule itself: *lowest-numbered not in flight* means she
+always reaches for the oldest thing on the list, which is reliably the one
+everybody else has skipped. It is a defensible rule and it is the worst possible
+first task.
