@@ -125,6 +125,15 @@ final class ChatViewModel: ObservableObject {
     /// different fixes (#1117).
     @Published private(set) var askedButUnanswered: [UUID: Set<String>] = [:]
 
+    /// Criteria the reviewer was asked about but declined to judge because
+    /// the diff was empty — the third state (#1165). Not "never checked"
+    /// (a question was never posed) and not "asked but no answer" (the
+    /// reviewer would answer "there is nothing to review"): here the
+    /// reviewer had no subject to evaluate. Keeping this separate lets the
+    /// block reason say "there was no diff" instead of conflating it with
+    /// a missing question or a missing answer.
+    @Published private(set) var declinedNoDiff: [UUID: Set<String>] = [:]
+
     /// How many times `sendOneShotReviewerRequest` was called per task.
     /// Populated in `requestReviewerVerdicts`, checked by the assertion
     /// that proves the retry was actually performed when the reviewer
@@ -4355,6 +4364,49 @@ final class ChatViewModel: ObservableObject {
                 recorded += 1
             }
         }
+        // Third state (#1165): the diff was empty and the reviewer returned
+        // a non-empty response that produced zero verdicts. The reviewer
+        // was asked, looked at the brief, saw "(no changes detected)",
+        // and declined to judge — not because it could not reach a verdict
+        // on the merits, but because there was nothing to judge. This is
+        // distinct from "asked but no answer" (the reviewer said nothing)
+        // and from "never checked" (the question was never posed).
+        // Recording the criteria in `declinedNoDiff` lets the block reason
+        // say "the diff was empty" instead of the misleading "asked but
+        // no answer" or "never checked." No retry was made: the reviewer
+        // answered, and the answer was "there is nothing to review."
+        // The check fires only when the response is non-empty (`!isStillEmpty`)
+        // and the parser found nothing — an empty response already went
+        // through the askedButUnanswered path above. Merging this branch
+        // with the empty-answer path collapses the distinction this state
+        // exists to maintain (#1165 criterion 5).
+        if diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !isStillEmpty
+            && verdicts.isEmpty {
+            declinedNoDiff[task.id] = Set(criteria)
+            // Prevent overlap with askedButUnanswered (#1165 criterion 5):
+            // if a prior call put these criteria there, move them now.
+            if var existing = askedButUnanswered[task.id], !existing.isEmpty {
+                existing.subtract(Set(criteria))
+                if existing.isEmpty {
+                    askedButUnanswered.removeValue(forKey: task.id)
+                } else {
+                    askedButUnanswered[task.id] = existing
+                }
+            }
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.review.no_diff",
+                "Reviewer declined — diff was empty; "
+                    + "\(criteria.count) criterion(s) not reviewable without a diff",
+                [
+                    "issue": task.issue.slug,
+                    "asked": String(criteria.count)
+                ]
+            )
+            return 0
+        }
+
         // Record the boundary-scoped fingerprint at the moment the reviewer's
         // verdicts are carved (#1131). Only the task's own files are hashed,
         // so the Queen's state writes cannot age a verdict. The reviewer saw
@@ -4512,14 +4564,20 @@ final class ChatViewModel: ObservableObject {
 
         guard !unmet.isEmpty || !stale.isEmpty || !unchecked.isEmpty else { return nil }
 
-        // Split unchecked into "asked but no answer" and "genuinely never
-        // asked". The `askedButUnanswered` set is populated by
+        // Split unchecked into three groups: "declined because no diff"
+        // (#1165), "asked but no answer", and "genuinely never asked".
+        // The `askedButUnanswered` set is populated by
         // `requestReviewerVerdicts` when the reviewer returns empty after
         // a retry, or when the response omits some criteria it was asked
-        // about.
+        // about. The `declinedNoDiff` set is populated when the diff was
+        // empty and the reviewer returned a non-empty response that
+        // produced zero verdicts — a decline for want of a subject (#1165).
+        let declinedSet = declinedNoDiff[task.id] ?? []
+        let declined = unchecked.filter { declinedSet.contains($0.criterion) }
+        let notDeclined = unchecked.filter { !declinedSet.contains($0.criterion) }
         let askedSet = askedButUnanswered[task.id] ?? []
-        let askedNoAnswer = unchecked.filter { askedSet.contains($0.criterion) }
-        let neverAsked = unchecked.filter { !askedSet.contains($0.criterion) }
+        let askedNoAnswer = notDeclined.filter { askedSet.contains($0.criterion) }
+        let neverAsked = notDeclined.filter { !askedSet.contains($0.criterion) }
 
         // Regression guard: a criterion tracked as asked-but-unanswered
         // must not have a recorded verdict. The check uses askedSet — the
@@ -4536,6 +4594,24 @@ final class ChatViewModel: ObservableObject {
             + "from a real verdict"
         )
 
+        // Regression guard (#1165 criterion 5): declinedNoDiff and
+        // askedButUnanswered must not overlap. If a criterion appears in
+        // both, the third state (reviewer declined, no diff) has been
+        // merged with the second (asked but no answer) — the distinction
+        // this function exists to maintain is gone.
+        assert(
+            declinedSet.isDisjoint(with: askedSet),
+            "declinedNoDiff and askedButUnanswered overlap — "
+            + "the third state (no diff) is merged with asked-but-unanswered "
+            + "(#1165 regression)"
+        )
+        assert(
+            declinedSet.allSatisfy { task.criterionVerdicts[$0] == nil },
+            "declinedNoDiff contains a criterion that now has a verdict — "
+            + "tracking is stale; a declined review may be indistinguishable "
+            + "from a real verdict"
+        )
+
         var parts: [String] = []
 
         if !unmet.isEmpty {
@@ -4549,6 +4625,13 @@ final class ChatViewModel: ObservableObject {
                 "\(stale.count) criterion(s) were checked against different code: "
                 + stale.map(\.criterion).joined(separator: "; ")
                 + ". They need re-checking against the current tree."
+            )
+        }
+        if !declined.isEmpty {
+            parts.append(
+                "\(declined.count) criterion(s) could not be reviewed because the diff was empty: "
+                + declined.map(\.criterion).joined(separator: "; ")
+                + ". There was nothing to review."
             )
         }
         if !askedNoAnswer.isEmpty {
@@ -4583,6 +4666,26 @@ final class ChatViewModel: ObservableObject {
                 "Block reason omits the asked-but-unanswered distinction — "
                 + "an empty answer is indistinguishable from the absence of "
                 + "a question (#1117 regression)"
+            )
+        }
+
+        // Regression guard (#1165 criterion 5): if any declined-no-diff
+        // criterion is still unchecked, the block reason must carry the
+        // "diff was empty" language. Without it the declined review is
+        // indistinguishable from "never checked" or "asked but no answer"
+        // — the exact merge this function exists to prevent. Mirrors the
+        // #1117 guard above: if the declined split is removed, declined
+        // criteria fall into neverAsked or askedNoAnswer, neither of which
+        // contains "diff was empty," and this assertion fires.
+        if !declinedSet.isEmpty {
+            let uncheckedCriteria = Set(unchecked.map(\.criterion))
+            let declinedStillUnchecked = declinedSet.intersection(uncheckedCriteria)
+            assert(
+                declinedStillUnchecked.isEmpty
+                    || result.contains("diff was empty"),
+                "Block reason omits the no-diff distinction — "
+                + "a declined review (empty diff) is indistinguishable from "
+                + "a missing question or a missing answer (#1165 regression)"
             )
         }
 
@@ -4681,12 +4784,29 @@ final class ChatViewModel: ObservableObject {
             task,
             committedFiles: task.committedFiles ?? 0
         ) else {
+            // Name the first condition that failed, so the log says why
+            // the task was refused, not just that it was.
+            let failedCondition: String
+            if task.state != .awaitingReview {
+                failedCondition = "state is \(task.state.rawValue), not awaitingReview"
+            } else if (task.committedFiles ?? 0) == 0 {
+                failedCondition = "no committed files"
+            } else if task.ownedPaths.isEmpty {
+                failedCondition = "no boundary (ownedPaths is empty)"
+            } else if QueenDelegationPolicy.isExpensive(task) {
+                failedCondition = "task is expensive"
+            } else {
+                failedCondition = "unknown"
+            }
             TriosLogBus.shared.info(
                 .queen, "queen.auto_accept.not_qualified",
-                "Auto-accept skipped: task does not qualify for auto-accept",
+                "Auto-accept skipped: \(failedCondition)",
                 [
                     "issue": task.issue.slug,
-                    "committed_files": String(task.committedFiles ?? 0)
+                    "committed_files": String(task.committedFiles ?? 0),
+                    "failed_condition": failedCondition,
+                    "state": task.state.rawValue,
+                    "owned_paths_count": String(task.ownedPaths.count),
                 ]
             )
             return
@@ -5057,6 +5177,7 @@ final class ChatViewModel: ObservableObject {
             let number: Int
             let title: String
             let fileCount: Int
+            let paths: [String]?
         }
 
         var scored: [ScoredIssue] = []
@@ -5078,7 +5199,8 @@ final class ChatViewModel: ObservableObject {
             scored.append(ScoredIssue(
                 number: issue.number,
                 title: issue.title,
-                fileCount: ChatViewModel.countBoundaryFiles(in: body)
+                fileCount: ChatViewModel.countBoundaryFiles(in: body),
+                paths: ChatViewModel.boundaryPaths(from: body)
             ))
         }
 
@@ -5123,10 +5245,33 @@ final class ChatViewModel: ObservableObject {
         // dispatch — so every refusal that applies to an explicit
         // delegation applies here too.
         if startAfterChoosing {
+            // A task with no boundary cannot be auto-accepted: one of the
+            // four gates in qualifiesForAutoAccept is !ownedPaths.isEmpty,
+            // and work the Queen started but cannot close herself is work
+            // that sits until a human notices.  The paths are already parsed
+            // from the Границы section during scoring — pass them through.
+            guard let paths = chosen.paths, !paths.isEmpty else {
+                await postQueenNotice(
+                    SystemNoticeClassifier.warningMarker
+                        + "Cannot start gHashTag/trios#\(chosen.number): the issue has no "
+                        + "Границы section, so there is no boundary to delegate. Add one "
+                        + "and run /choose --start again."
+                )
+                TriosLogBus.shared.warn(
+                    .queen, "queen.choose",
+                    "Refused --start: \(chosen.number) has no Границы section",
+                    [
+                        "chosen": "gHashTag/trios#\(chosen.number)",
+                        "reason": "no boundary",
+                    ]
+                )
+                return
+            }
             await delegateIssueToWorker(
                 issue: IssueReference(owner: "gHashTag", repo: "trios", number: chosen.number),
                 worker: "queen-swift",
-                title: chosen.title
+                title: chosen.title,
+                paths: paths
             )
         }
     }
@@ -5163,6 +5308,36 @@ final class ChatViewModel: ObservableObject {
         }
 
         return found ? count : Int.max
+    }
+
+    /// Extracts the file paths listed under `## Границы` in an issue body.
+    /// Returns nil when the section is absent — the caller must refuse to
+    /// delegate, because a task with no boundary cannot be auto-accepted.
+    private static func boundaryPaths(from body: String) -> [String]? {
+        let lines = body.split(separator: "\n", omittingEmptySubsequences: false)
+        var inBounds = false
+        var paths: [String] = []
+        var found = false
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("## ") {
+                if inBounds { break }
+                inBounds = trimmed.hasPrefix("## Границы")
+                if inBounds { found = true }
+                continue
+            }
+            guard inBounds else { continue }
+
+            let cleaned = trimmed
+                .trimmingCharacters(in: CharacterSet(charactersIn: "`"))
+                .trimmingCharacters(in: .whitespaces)
+            if cleaned.isEmpty { continue }
+
+            paths.append(cleaned)
+        }
+
+        return found ? paths : nil
     }
 
     // MARK: - Review Loop
@@ -5281,7 +5456,8 @@ final class ChatViewModel: ObservableObject {
                         "reason": reason,
                         "criteria": String(task.acceptanceCriteria.count),
                         "verdicts": String(task.criterionVerdicts.count),
-                        "asked_unanswered": String(askedButUnanswered[task.id]?.count ?? 0)
+                        "asked_unanswered": String(askedButUnanswered[task.id]?.count ?? 0),
+                        "declined_no_diff": String(declinedNoDiff[task.id]?.count ?? 0)
                     ]
                 )
                 await postQueenNotice(
@@ -5628,6 +5804,17 @@ final class ChatViewModel: ObservableObject {
                 askedButUnanswered.removeValue(forKey: task.id)
             } else {
                 askedButUnanswered[task.id] = unanswered
+            }
+        }
+        // A criterion that was declined (no diff) and now has a recorded
+        // verdict is no longer declined — the diff must have changed.
+        // Clearing it here keeps the tracking from going stale (#1165).
+        if var declined = declinedNoDiff[task.id], !declined.isEmpty {
+            declined.remove(criterion)
+            if declined.isEmpty {
+                declinedNoDiff.removeValue(forKey: task.id)
+            } else {
+                declinedNoDiff[task.id] = declined
             }
         }
         let updated = registry.task(forIssue: issue) ?? task

@@ -4199,3 +4199,27 @@ human naming anything:
 It stops there, correctly: two of three criteria answered is not a pass, and the
 gate holds. The unanswered one is the third — which is, with some irony, the
 criterion of the issue about a reviewer that answers with nothing.
+
+## The third state, and the boundary she read but did not pass
+
+Two links found by driving the circle she starts herself.
+
+**A reviewer that answers and declines.** 1157 characters saying *the diff is
+empty, there is literally nothing to review* parsed to zero verdicts and was
+recorded as "never checked". That is a third state: not silence (#1117, which
+retries), not a verdict. Retrying it is pointless — the diff will be empty
+again. Delegated; the first attempt merged it into the silence case and broke
+two of #1117's own checks, which is exactly the confusion being fixed. Handed
+back, and all 594 pass with the two kept apart.
+
+**She read the boundary and did not pass it.** `qualifiesForAutoAccept` refuses a
+task with no owned paths, and `/choose --start` delegated with none — while
+having just parsed `## Границы` to count the files it ranks by. Read it,
+counted it, chose by it, dropped it. So she could not accept work she had
+started. Fixed, and the guard now names which of its four conditions failed.
+
+Still open, and it is the same wall in a new place: the spec she writes from an
+issue body names the file, not the region. Naming the function and the line
+range is what makes a 6,000-line file workable — I do it by hand every time and
+she does not do it at all. Her bee on #1117 took fifteen minutes and the app did
+not outlive the run.
