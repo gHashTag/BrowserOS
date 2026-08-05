@@ -3161,11 +3161,22 @@ final class ChatViewModel: ObservableObject {
         var hints: [String] = []
         let identifiers = ChatViewModel.identifiers(from: issueBody)
         for path in paths {
+            // The token may still carry a trailing backtick when the
+            // comma sits outside the closing backtick (`path`,);
+            // strip both before treating it as a path.
+            let path = path.trimmingCharacters(
+                in: CharacterSet(charactersIn: "`),;:!?")
+            )
             let fullPath = "\(ProjectPaths.root)/\(path)"
             guard FileManager.default.fileExists(atPath: fullPath),
-                  let source = try? String(contentsOfFile: fullPath, encoding: .utf8),
-                  source.components(separatedBy: "\n").count > QueenLocalisation.maxRegionWidth
+                  let source = try? String(contentsOfFile: fullPath, encoding: .utf8)
             else { continue }
+            // Count actual lines: components(separatedBy:) over-counts by one
+            // when the file ends with a newline, so a 300-line file reports
+            // 301 and gets narrowed when the contract says "longer than 300".
+            let lineCount = source.components(separatedBy: "\n").count
+                - (source.hasSuffix("\n") ? 1 : 0)
+            guard lineCount > QueenLocalisation.maxRegionWidth else { continue }
             if let range = QueenLocalisation.region(in: source, mentioning: identifiers) {
                 hints.append(
                     "В \(path) читай только строки \(range.lowerBound)-\(range.upperBound)."
@@ -5440,15 +5451,46 @@ final class ChatViewModel: ObservableObject {
             }
             guard inBounds else { continue }
 
-            let cleaned = trimmed
-                .trimmingCharacters(in: CharacterSet(charactersIn: "`"))
-                .trimmingCharacters(in: .whitespaces)
-            if cleaned.isEmpty { continue }
+            if trimmed.isEmpty { continue }
 
-            paths.append(cleaned)
+            // Extract only the path-shaped token — no spaces, containing "/"
+            // or ending in a file extension. A boundary line may carry prose
+            // after the path ("rings/SR-02/Foo.swift, see notes"), so taking
+            // the whole line yields a non-existent path and narrowing fails
+            // silently.
+            if let token = boundaryPathToken(from: trimmed) {
+                paths.append(token)
+            } else {
+                TriosLogBus.shared.info(
+                    .queen, "queen.brief.no_path",
+                    "Границы line yielded no path: \(trimmed)",
+                    ["line": trimmed]
+                )
+            }
         }
 
         return found ? paths : nil
+    }
+
+    /// Extracts the path-shaped token from a boundary line. The token has no
+    /// spaces, contains "/" or ends in a dotted file extension, and is stripped
+    /// of trailing prose punctuation (commas, semicolons, backticks, etc.).
+    private static func boundaryPathToken(from line: String) -> String? {
+        for raw in line.split(separator: " ", omittingEmptySubsequences: true) {
+            let debacked = String(raw)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "`"))
+            // Strip trailing prose punctuation glued to the path end.
+            var cleaned = debacked
+            while let last = cleaned.last, ",;:!?)".contains(last) {
+                cleaned.removeLast()
+            }
+            guard !cleaned.isEmpty else { continue }
+            if cleaned.contains("/")
+                || cleaned.range(of: #"\.\w{1,10}$"#, options: .regularExpression) != nil {
+                return cleaned
+            }
+        }
+        return nil
     }
 
     /// Identifiers an issue body uses to name code: backtick-quoted spans
