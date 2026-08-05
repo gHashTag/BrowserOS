@@ -3103,6 +3103,53 @@ final class ChatViewModel: ObservableObject {
         case .choose:
             let wantStart = originalText.range(of: "--start") != nil
             await chooseNextOpenIssue(startAfterChoosing: wantStart)
+        case .brief(let issue):
+            // Preview only — this is not a security boundary. It builds the
+            // brief the same way /delegate does (reads the contract from the
+            // issue, parses Границы, applies QueenLocalisation narrowing) but
+            // prints it to the Queen chat instead of opening a worker. No task
+            // is created, no chat is opened, no branch is taken: nothing here
+            // enters the registry.
+            guard let body = await fetchIssueBody(issue) else {
+                await postQueenNotice(
+                    SystemNoticeClassifier.warningMarker
+                        + "Cannot read \(issue.slug) to preview the brief."
+                )
+                return
+            }
+            let criteria = QueenTaskSpec.criteriaFromIssue(body: body)
+            let paths = ChatViewModel.boundaryPaths(from: body) ?? []
+            let task = DelegatedTask(
+                issue: issue,
+                title: "Brief preview for \(issue.slug)",
+                worker: "(preview)",
+                ownedPaths: paths,
+                acceptanceCriteria: criteria
+            )
+            // Narrow large files to the relevant region exactly as delegation
+            // does — the preview must match what a worker would receive.
+            var narrowedHints: [String] = []
+            let identifiers = ChatViewModel.identifiers(from: body)
+            for path in paths {
+                let fullPath = "\(ProjectPaths.root)/\(path)"
+                guard FileManager.default.fileExists(atPath: fullPath),
+                      let source = try? String(contentsOfFile: fullPath, encoding: .utf8),
+                      source.components(separatedBy: "\n").count > QueenLocalisation.maxRegionWidth
+                else { continue }
+                if let range = QueenLocalisation.region(in: source, mentioning: identifiers) {
+                    narrowedHints.append(
+                        "В \(path) читай только строки \(range.lowerBound)-\(range.upperBound)."
+                    )
+                }
+            }
+            let brief = QueenBriefing.text(for: task)
+                + (narrowedHints.isEmpty ? "" : "\n" + narrowedHints.joined(separator: "\n"))
+            await appendSystemMessageToQueenChat(brief)
+            TriosLogBus.shared.info(
+                .queen, "queen.brief.preview",
+                "Brief preview for \(issue.slug) (\(brief.count) chars)",
+                ["issue": issue.slug, "length": String(brief.count)]
+            )
         case .runSkill(let command, let arguments):
             await runQueenSkill(command: command, arguments: arguments)
         case .unknown:

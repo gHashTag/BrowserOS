@@ -4267,3 +4267,27 @@ And four checks of #1117 went red mid-cycle because I had been using real
 delegations as probes: the bees edited the reviewer code for real while I was
 only asking what range the brief carried. Handed back, 594 pass again. A probe
 that changes the thing it measures is not a probe.
+
+## A probe that does not change what it measures
+
+Last pass four checks went red because I had been using real delegations to ask
+what range the brief carried: the bees edited the reviewer code for real while I
+was only looking. The prior art is clear about the shape — build the prompt for
+real, stub everything that reaches outward — and it is equally clear that a dry
+run is a preview, not a security boundary.
+
+`/brief owner/repo#N` now does that, and the run says so:
+
+    queen.brief.preview — 1306 chars
+    delegations: 0
+    worker starts: 0
+
+Where every real delegation writes `queen.delegate` and `queen.worker.start`,
+this writes neither. That contrast is the proof, and it is already all over the
+log from the runs that came before it.
+
+One thing short of the contract: `queen.brief.narrowed` does not appear in the
+preview, though the boundary is the 6,000-line file and a real delegation
+narrows it. So the preview builds *a* brief, not yet the same brief. Said here
+rather than counted as done — a probe that shows something other than what would
+be sent is the defect it exists to prevent.
