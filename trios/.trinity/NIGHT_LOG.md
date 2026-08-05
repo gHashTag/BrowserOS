@@ -4361,3 +4361,30 @@ The bar set in the contract was three of four. It was not met, and saying so is
 the point of having set it. What the numbers actually show is that the quality
 of the narrowing is bounded by whether the spec names the function — which makes
 this a defect in how the Queen writes specs, not in how she reads files.
+
+## A change that made the measurement worse, and was taken back
+
+The last measurement said the narrowing lands right once in four, and pointed at
+the reason: the spec has to name the function. The obvious next evidence was the
+log event name — `queen.review.verdicts` is unique, and it sits as a string
+literal at line 4595, inside exactly the function a human had named by hand. The
+localiser could not see it, because it blanks string literals along with
+comments before searching.
+
+So: keep masking comments, stop masking literals, and treat an event name found
+in a literal as strong evidence. Measured after:
+
+    #1156  reset()                       was handleWorkerFinished   worse
+    #1158  acceptanceBlockReason…        unchanged
+    #1165  reset()                       was chooseNextOpenIssue    worse
+    #1166  reset()                       unchanged, still wrong
+
+Three of four in `reset()`. String literals carry a great many ordinary words, so
+unmasking them fed the density rule exactly the noise the comment-masking was
+added to remove. The reasoning was sound and the result was worse, which is what
+measuring is for.
+
+Taken back to the committed version and re-measured to confirm the restoration:
+#1156 is `handleWorkerFinished` again. The score stands where it stood — one
+clean hit and one useful neighbour out of four — and the next attempt should not
+start by unmasking anything.
