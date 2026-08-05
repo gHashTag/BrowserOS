@@ -4223,3 +4223,25 @@ issue body names the file, not the region. Naming the function and the line
 range is what makes a 6,000-line file workable — I do it by hand every time and
 she does not do it at all. Her bee on #1117 took fifteen minutes and the app did
 not outlive the run.
+
+## She narrows the boundary now, and narrows it to the wrong place
+
+Localisation is the binding constraint on repair — file-level accuracy is
+already high everywhere and line-level coverage is what separates the good
+systems from the rest. Three delegations died on the whole 6,000-line file this
+week and one succeeded the moment a function and a range were named. The trick
+worked and lived only in my hands.
+
+So it is hers now: `QueenLocalisation.region(in:mentioning:)` reads the
+identifiers out of the issue body, finds the enclosing declaration, caps it at
+three hundred lines, and the brief carries the range. It fires and it says so:
+
+    queen.brief.narrowed — ChatViewModel.swift to lines 1-300
+
+Which is the file header. The first mention of a common identifier is almost
+always a doc comment at the top, so the region it picks is the one place in the
+file where nothing happens. Ranking by mention density instead of first hit was
+delegated and returned the same range, twice.
+
+So the capability is real and observable, and the answer it gives is not yet
+useful. Both halves are worth saying: the wiring is proven, the choosing is not.

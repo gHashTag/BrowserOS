@@ -3296,7 +3296,39 @@ final class ChatViewModel: ObservableObject {
             }
             skillBody = body
         }
+        // Narrow each boundary path to the region the issue talks about
+        // before the brief goes out. A file handed whole at six thousand
+        // lines buries the signal — the worker burns context finding the
+        // function the issue names. Only when the file is larger than
+        // maxRegionWidth and a region is actually found; a small file or a
+        // miss is left as-is rather than narrowed to the wrong place (#1168).
+        var narrowedHints: [String] = []
+        if let issueBody = await fetchIssueBody(issue) {
+            let identifiers = ChatViewModel.identifiers(from: issueBody)
+            for path in task.ownedPaths {
+                let fullPath = "\(ProjectPaths.root)/\(path)"
+                guard FileManager.default.fileExists(atPath: fullPath),
+                      let source = try? String(contentsOfFile: fullPath, encoding: .utf8),
+                      source.components(separatedBy: "\n").count > QueenLocalisation.maxRegionWidth
+                else { continue }
+                if let range = QueenLocalisation.region(in: source, mentioning: identifiers) {
+                    narrowedHints.append(
+                        "В \(path) читай только строки \(range.lowerBound)-\(range.upperBound)."
+                    )
+                    TriosLogBus.shared.info(
+                        .queen, "queen.brief.narrowed",
+                        "Narrowed \(path) to lines \(range.lowerBound)-\(range.upperBound)",
+                        [
+                            "issue": issue.slug,
+                            "file": path,
+                            "range": "\(range.lowerBound)-\(range.upperBound)",
+                        ]
+                    )
+                }
+            }
+        }
         let brief = QueenBriefing.text(for: task, skillBody: skillBody)
+            + (narrowedHints.isEmpty ? "" : "\n" + narrowedHints.joined(separator: "\n"))
         // Materialise the chat before naming it. renameConversation renames a
         // record that exists; the comment above claimed the persister creates
         // one "the moment messages are saved against a fresh id", which is true
@@ -5338,6 +5370,43 @@ final class ChatViewModel: ObservableObject {
         }
 
         return found ? paths : nil
+    }
+
+    /// Identifiers an issue body uses to name code: backtick-quoted spans
+    /// and CamelCase words. Fed to `QueenLocalisation.region` so the worker
+    /// is pointed at the declaration the issue talks about, not the whole file.
+    private static func identifiers(from body: String) -> [String] {
+        var found = Set<String>()
+
+        // Backtick-quoted spans: `QueenLocalisation`, `ChatViewModel.swift`, etc.
+        if let regex = try? NSRegularExpression(pattern: "`([^`]+)`") {
+            let nsBody = body as NSString
+            regex.enumerateMatches(
+                in: body,
+                range: NSRange(location: 0, length: nsBody.length)
+            ) { match, _, _ in
+                guard let match else { return }
+                let captured = nsBody.substring(with: match.range(at: 1))
+                if !captured.isEmpty { found.insert(captured) }
+            }
+        }
+
+        // CamelCase words: QueenLocalisation, ChatViewModel, QueenBriefing, etc.
+        if let regex = try? NSRegularExpression(
+            pattern: "\\b[A-Z][a-zA-Z]*[A-Z][a-zA-Z]*\\b"
+        ) {
+            let nsBody = body as NSString
+            regex.enumerateMatches(
+                in: body,
+                range: NSRange(location: 0, length: nsBody.length)
+            ) { match, _, _ in
+                guard let match else { return }
+                let captured = nsBody.substring(with: match.range)
+                if !captured.isEmpty { found.insert(captured) }
+            }
+        }
+
+        return Array(found)
     }
 
     // MARK: - Review Loop
