@@ -4492,3 +4492,29 @@ its one apparent hit was the keyword `return`.
 What made the difference was not a better guess. It was making the mechanism log
 what it extracted, which turned two passes of hypotheses into two passes of
 reading the answer.
+
+## The circle runs, and stops on a refusal that is correct
+
+First full pass with nobody naming anything:
+
+    22:54:38  queen.choose          Chose #1117 out of 40
+    22:54:39  queen.delegate
+    22:54:39  queen.brief.narrowed  lines 4430-4680
+    22:57:57  queen.review.verdicts asked=3 parsed=3 recorded=3 unchecked=none
+    22:57:58  queen.auto_accept.gated
+              «1 criterion(s) were not met: Проверка ломается, если пустой
+               ответ снова станет неотличим от отсутствия вопроса»
+
+She chose the issue, aimed the brief at the right function, opened the work,
+and the reviewer answered every criterion. The stop is a judgement about the
+work, not a hole in the machine — the criterion asks for a test that fails when
+the distinction collapses, and nobody has written it.
+
+What moved on the way there: the loop used to dead-end at *no committed files*,
+which made "already done by an earlier pass" indistinguishable from "the bee did
+nothing". #1117's work was in fact done three passes ago, so the task could
+never be accepted however good the verdicts were. Acceptance now turns on the
+verdicts, and the file count only when they are missing.
+
+That is the whole chain running for the first time: choose, aim, delegate,
+review, decide. The decision was no, and it was the right no.

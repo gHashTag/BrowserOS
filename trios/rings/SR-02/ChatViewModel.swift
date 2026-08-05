@@ -4497,6 +4497,20 @@ final class ChatViewModel: ObservableObject {
             var existing = askedButUnanswered[task.id] ?? []
             existing.formUnion(criteria)
             askedButUnanswered[task.id] = existing
+            // Regression guard (#1117 criterion 3): the empty
+            // response must be recorded as asked-but-unanswered so
+            // it stays distinct from "never checked" downstream.
+            // If the formUnion above is removed or bypassed, the
+            // distinction collapses and this assertion fires — that
+            // is the sense in which "the check breaks if the empty
+            // answer becomes indistinguishable from the absence of
+            // a question."
+            assert(
+                Set(criteria).isSubset(of: askedButUnanswered[task.id] ?? []),
+                "Empty reviewer response was not recorded as "
+                    + "asked-but-unanswered — silence is now "
+                    + "indistinguishable from 'never checked' (#1117)"
+            )
             TriosLogBus.shared.warn(
                 .queen,
                 "queen.review.empty_response",
@@ -4958,6 +4972,49 @@ final class ChatViewModel: ObservableObject {
             } else {
                 failedCondition = "unknown"
             }
+
+            // When the only failure is "no committed files" but every
+            // criterion has a verdict and every verdict is met, the work
+            // was already done by an earlier pass — accept anyway so an
+            // already-done task is not stuck forever (#1180). An unmet
+            // criterion keeps the old refusal below.
+            if failedCondition == "no committed files" {
+                let verdictTreeState = verdictTreeStates[task.id] ?? task.treeStateFingerprint
+                let currentBoundaryState = await QueenBranchCommitter.fingerprintBoundary(
+                    ownedPaths: task.ownedPaths
+                )
+                let currentTreeState = currentBoundaryState ?? ""
+                if acceptanceBlockReasonDistinguishingEmptyAnswers(
+                    for: task,
+                    verdictTreeState: verdictTreeState,
+                    currentTreeState: currentTreeState
+                ) == nil {
+                    guard registry.transition(taskID: task.id, to: .accepted) else {
+                        TriosLogBus.shared.info(
+                            .queen, "queen.auto_accept.transition_failed",
+                            "Auto-accept skipped: state transition to .accepted failed",
+                            ["issue": task.issue.slug]
+                        )
+                        return
+                    }
+                    await appendSystemMessageToQueenChat(
+                        SystemNoticeClassifier.successMarker
+                            + "I accepted \(task.issue.slug) myself. Every criterion was "
+                            + "already met with no new file changes, so the work was done "
+                            + "by an earlier pass. Undo with "
+                            + "/review \(task.issue.slug) reject <why>."
+                    )
+                    registry.pruneArchive()
+                    TriosLogBus.shared.info(
+                        .queen,
+                        "queen.auto_accept.nothingToDo",
+                        "Accepted without a human: work was already done",
+                        ["issue": task.issue.slug, "files": String(task.committedFiles ?? 0)]
+                    )
+                    return
+                }
+            }
+
             TriosLogBus.shared.info(
                 .queen, "queen.auto_accept.not_qualified",
                 "Auto-accept skipped: \(failedCondition)",
