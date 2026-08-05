@@ -4313,3 +4313,23 @@ not exist. And the threshold is off by one — a file of exactly 300 lines is
 narrowed where the contract says *longer than three hundred*.
 
 Neither is the probe lying any more, which was the point.
+
+## The narrowing stops depending on how carefully a line was typed
+
+Two findings from the probe, both fixed and both driven, and the before and
+after are in this cycle's own record rather than argued:
+
+    before:  #1165 (path, then prose)      no narrowing
+             #1167 (exactly 300 lines)     narrowed
+    after:   #1165  lines 5301-5323
+             #1167  no narrowing
+
+The first is the one that mattered. A boundary written as `` `path.swift`, строки
+4253-4440 `` yielded a path with a trailing comma still attached once the
+backticks came off, so the file did not exist and the narrowing did nothing —
+silently. Half a delegation fixed the threshold and left this; handing back the
+exact string, comma and all, fixed it on the next attempt.
+
+Worth keeping: the narrowing had been working only for boundaries typed without
+a single extra word. Nothing said so, because a path that does not exist and a
+file that needs no narrowing produced the same silence.
