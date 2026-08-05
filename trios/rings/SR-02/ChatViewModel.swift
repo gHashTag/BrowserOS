@@ -125,6 +125,15 @@ final class ChatViewModel: ObservableObject {
     /// different fixes (#1117).
     @Published private(set) var askedButUnanswered: [UUID: Set<String>] = [:]
 
+    /// Criteria the reviewer was asked about but declined to judge because
+    /// the diff was empty — the third state (#1165). Not "never checked"
+    /// (a question was never posed) and not "asked but no answer" (the
+    /// reviewer would answer "there is nothing to review"): here the
+    /// reviewer had no subject to evaluate. Keeping this separate lets the
+    /// block reason say "there was no diff" instead of conflating it with
+    /// a missing question or a missing answer.
+    @Published private(set) var declinedNoDiff: [UUID: Set<String>] = [:]
+
     /// How many times `sendOneShotReviewerRequest` was called per task.
     /// Populated in `requestReviewerVerdicts`, checked by the assertion
     /// that proves the retry was actually performed when the reviewer
@@ -3094,6 +3103,42 @@ final class ChatViewModel: ObservableObject {
         case .choose:
             let wantStart = originalText.range(of: "--start") != nil
             await chooseNextOpenIssue(startAfterChoosing: wantStart)
+        case .brief(let issue):
+            // Preview only — this is not a security boundary. It builds the
+            // brief the same way /delegate does (reads the contract from the
+            // issue, parses Границы, applies QueenLocalisation narrowing) but
+            // prints it to the Queen chat instead of opening a worker. No task
+            // is created, no chat is opened, no branch is taken: nothing here
+            // enters the registry.
+            guard let body = await fetchIssueBody(issue) else {
+                await postQueenNotice(
+                    SystemNoticeClassifier.warningMarker
+                        + "Cannot read \(issue.slug) to preview the brief."
+                )
+                return
+            }
+            let criteria = QueenTaskSpec.criteriaFromIssue(body: body)
+            let paths = ChatViewModel.boundaryPaths(from: body) ?? []
+            let task = DelegatedTask(
+                issue: issue,
+                title: "Brief preview for \(issue.slug)",
+                worker: "(preview)",
+                ownedPaths: paths,
+                acceptanceCriteria: criteria
+            )
+            // Narrow large files exactly as delegation does — the shared
+            // function guarantees identical hints and identical logging.
+            let narrowedHints = ChatViewModel.narrowedHints(
+                for: paths, from: body, issueSlug: issue.slug
+            )
+            let brief = QueenBriefing.text(for: task)
+                + (narrowedHints.isEmpty ? "" : "\n" + narrowedHints.joined(separator: "\n"))
+            await appendSystemMessageToQueenChat(brief)
+            TriosLogBus.shared.info(
+                .queen, "queen.brief.preview",
+                "Brief preview for \(issue.slug) (\(brief.count) chars)",
+                ["issue": issue.slug, "length": String(brief.count)]
+            )
         case .runSkill(let command, let arguments):
             await runQueenSkill(command: command, arguments: arguments)
         case .unknown:
@@ -3102,6 +3147,90 @@ final class ChatViewModel: ObservableObject {
                     + "I do not know `\(originalText)`.\n\(QueenCommandParser.helpText)"
             )
         }
+    }
+
+    /// Narrows each boundary path to the region the issue mentions, returning
+    /// one hint string per narrowed file. Shared by the `/brief` preview and
+    /// real delegation so both produce identical hints and emit
+    /// `queen.brief.narrowed` for every file that gets narrowed.
+    private static func narrowedHints(
+        for paths: [String],
+        from issueBody: String,
+        issueSlug: String
+    ) -> [String] {
+        var hints: [String] = []
+        let identifiers = ChatViewModel.identifiers(from: issueBody)
+        for path in paths {
+            // The token may still carry a trailing backtick when the
+            // comma sits outside the closing backtick (`path`,);
+            // strip both before treating it as a path.
+            let path = path.trimmingCharacters(
+                in: CharacterSet(charactersIn: "`),;:!?")
+            )
+            let fullPath = "\(ProjectPaths.root)/\(path)"
+            guard FileManager.default.fileExists(atPath: fullPath),
+                  let source = try? String(contentsOfFile: fullPath, encoding: .utf8)
+            else { continue }
+            // Count actual lines: components(separatedBy:) over-counts by one
+            // when the file ends with a newline, so a 300-line file reports
+            // 301 and gets narrowed when the contract says "longer than 300".
+            let lineCount = source.components(separatedBy: "\n").count
+                - (source.hasSuffix("\n") ? 1 : 0)
+            guard lineCount > QueenLocalisation.maxRegionWidth else { continue }
+            // Before asking QueenLocalisation to narrow, record what we are
+            // about to search for and where. Without this log, silence from
+            // region(in:mentioning:) is indistinguishable from "never tried"
+            // (#1177 criterion 2).
+            TriosLogBus.shared.info(
+                .queen, "queen.brief.localising",
+                "Localising in \(path) (\(lineCount) lines) with \(identifiers.count) identifier(s)",
+                [
+                    "issue": issueSlug,
+                    "file": path,
+                    "lines": String(lineCount),
+                    "identifiers": identifiers.joined(separator: " | "),
+                ]
+            )
+            if let range = QueenLocalisation.region(in: source, mentioning: identifiers) {
+                hints.append(
+                    "В \(path) читай только строки \(range.lowerBound)-\(range.upperBound)."
+                )
+                // Which identifier actually caused the hit? region() returns
+                // only the line range; scan the narrowed slice to name the
+                // identifier that matched (#1177 criterion 3).
+                let sourceLines = source.components(separatedBy: "\n")
+                let regionStart = max(0, range.lowerBound - 1)
+                let regionEnd = min(sourceLines.count, range.upperBound)
+                let matched = identifiers.first { id in
+                    sourceLines[regionStart..<regionEnd].contains { $0.contains(id) }
+                }
+                TriosLogBus.shared.info(
+                    .queen, "queen.brief.narrowed",
+                    "Narrowed \(path) to lines \(range.lowerBound)-\(range.upperBound)",
+                    [
+                        "issue": issueSlug,
+                        "file": path,
+                        "range": "\(range.lowerBound)-\(range.upperBound)",
+                        "matched": matched ?? "unknown",
+                    ]
+                )
+            } else {
+                // nil from region(): the identifiers were tried against this
+                // file but none landed. Recording them here keeps "tried and
+                // failed" separate from "never tried" (#1177 criterion 2).
+                TriosLogBus.shared.warn(
+                    .queen, "queen.brief.notNarrowed",
+                    "Could not narrow \(path) (\(lineCount) lines); tried \(identifiers.count) identifier(s)",
+                    [
+                        "issue": issueSlug,
+                        "file": path,
+                        "lines": String(lineCount),
+                        "identifiers": identifiers.joined(separator: " | "),
+                    ]
+                )
+            }
+        }
+        return hints
     }
 
     private func listQueenAgents() async {
@@ -3287,7 +3416,17 @@ final class ChatViewModel: ObservableObject {
             }
             skillBody = body
         }
+        // Narrow each boundary path to the region the issue talks about
+        // before the brief goes out. Shared with the `/brief` preview so
+        // both produce identical hints and emit `queen.brief.narrowed`.
+        var narrowedHints: [String] = []
+        if let issueBody = await fetchIssueBody(issue) {
+            narrowedHints = ChatViewModel.narrowedHints(
+                for: task.ownedPaths, from: issueBody, issueSlug: issue.slug
+            )
+        }
         let brief = QueenBriefing.text(for: task, skillBody: skillBody)
+            + (narrowedHints.isEmpty ? "" : "\n" + narrowedHints.joined(separator: "\n"))
         // Materialise the chat before naming it. renameConversation renames a
         // record that exists; the comment above claimed the persister creates
         // one "the moment messages are saved against a fresh id", which is true
@@ -3787,23 +3926,46 @@ final class ChatViewModel: ObservableObject {
         // criterion 2). The task never looks "working" — `.running` is gone,
         // `.awaitingReview` is visible, and the notice names the silence.
         if failure == nil, askedReviewer, reviewerVerdictsRecorded == 0 {
-            TriosLogBus.shared.warn(
-                .queen,
-                "queen.review.silent_after_retry",
-                "Reviewer returned zero verdicts after retry; task left in "
-                    + "awaitingReview with all criteria marked asked-but-unanswered",
-                [
-                    "issue": task.issue.slug,
-                    "asked": String(askedCriteriaCount)
-                ]
-            )
-            notice += "\n" + SystemNoticeClassifier.warningMarker
-                + "I could not verify \(task.issue.slug): the reviewer was "
-                + "asked about \(askedCriteriaCount) criterion(s) but returned "
-                + "no answer after a retry. The task is awaiting your decision "
-                + "— every automated check has run its course. The branch and "
-                + "chat survive, but this work is not verified and should not "
-                + "be mistaken for done."
+            // Distinguish "no diff" (#1165) from "silent reviewer" (#1144):
+            // when the diff was empty, the reviewer had nothing to evaluate,
+            // not nothing to say. The notice and log should reflect the actual
+            // cause so a reader does not chase a retry that never happened.
+            let declinedSet = declinedNoDiff[task.id]
+            if let declinedSet, !declinedSet.isEmpty {
+                TriosLogBus.shared.warn(
+                    .queen,
+                    "queen.review.no_diff",
+                    "Reviewer declined — diff was empty; task left in "
+                        + "awaitingReview with criteria marked declined-no-diff",
+                    [
+                        "issue": task.issue.slug,
+                        "asked": String(askedCriteriaCount)
+                    ]
+                )
+                notice += "\n" + SystemNoticeClassifier.warningMarker
+                    + "I could not verify \(task.issue.slug): the diff was "
+                    + "empty, so the reviewer had nothing to evaluate. The "
+                    + "task is awaiting your decision — there was no code "
+                    + "change to review."
+            } else {
+                TriosLogBus.shared.warn(
+                    .queen,
+                    "queen.review.silent_after_retry",
+                    "Reviewer returned zero verdicts after retry; task left in "
+                        + "awaitingReview with all criteria marked asked-but-unanswered",
+                    [
+                        "issue": task.issue.slug,
+                        "asked": String(askedCriteriaCount)
+                    ]
+                )
+                notice += "\n" + SystemNoticeClassifier.warningMarker
+                    + "I could not verify \(task.issue.slug): the reviewer was "
+                    + "asked about \(askedCriteriaCount) criterion(s) but returned "
+                    + "no answer after a retry. The task is awaiting your decision "
+                    + "— every automated check has run its course. The branch and "
+                    + "chat survive, but this work is not verified and should not "
+                    + "be mistaken for done."
+            }
         }
         registry.transition(taskID: task.id, to: failure == nil ? .awaitingReview : .failed)
         // The notice belongs in the Queen's chat even when she is not the open
@@ -4286,6 +4448,12 @@ final class ChatViewModel: ObservableObject {
         // transport blip that a second try settles. If the second try is
         // also empty, the criteria are recorded as "asked but unanswered"
         // so the distinction from "never checked" stays alive downstream (#1117).
+        //
+        // The retry fires on ANY empty answer, regardless of diff content.
+        // Only a NON-EMPTY answer declining for want of a subject skips the
+        // retry (handled by declinedNoDiff below). An empty diff does not
+        // exempt the reviewer from answering — the question was asked (#1117).
+        let diffIsEmpty = diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             reviewerRequestCounts[task.id, default: 0] += 1
             TriosLogBus.shared.warn(
@@ -4309,6 +4477,10 @@ final class ChatViewModel: ObservableObject {
         // question. Recording the unanswered criteria here keeps that
         // distinction in the block reason and the log, so a reader does not
         // have to infer it from `response_chars=0` (#1117).
+        // An empty answer populates askedButUnanswered regardless of diff:
+        // the question was asked, the reviewer gave nothing back. The diff
+        // content does not change whether the reviewer answered — only a
+        // non-empty declining response routes to declinedNoDiff below (#1117).
         if isStillEmpty {
             // Regression guard (#1144 criterion 5): the retry must have been
             // attempted before the task is declared silent. Removing the retry
@@ -4325,6 +4497,20 @@ final class ChatViewModel: ObservableObject {
             var existing = askedButUnanswered[task.id] ?? []
             existing.formUnion(criteria)
             askedButUnanswered[task.id] = existing
+            // Regression guard (#1117 criterion 3): the empty
+            // response must be recorded as asked-but-unanswered so
+            // it stays distinct from "never checked" downstream.
+            // If the formUnion above is removed or bypassed, the
+            // distinction collapses and this assertion fires — that
+            // is the sense in which "the check breaks if the empty
+            // answer becomes indistinguishable from the absence of
+            // a question."
+            assert(
+                Set(criteria).isSubset(of: askedButUnanswered[task.id] ?? []),
+                "Empty reviewer response was not recorded as "
+                    + "asked-but-unanswered — silence is now "
+                    + "indistinguishable from 'never checked' (#1117)"
+            )
             TriosLogBus.shared.warn(
                 .queen,
                 "queen.review.empty_response",
@@ -4355,6 +4541,46 @@ final class ChatViewModel: ObservableObject {
                 recorded += 1
             }
         }
+        // Third state (#1165): the diff was empty and the reviewer produced
+        // zero verdicts — whether the response was a non-empty decline ("I
+        // see nothing to review") or complete silence. The reviewer was
+        // asked, looked at the brief, saw "(no changes detected)", and had
+        // nothing to judge. This is distinct from "asked but no answer"
+        // (the reviewer was asked about a real diff and said nothing) and
+        // from "never checked" (the question was never posed). Recording
+        // the criteria in `declinedNoDiff` lets the block reason say "the
+        // diff was empty" instead of the misleading "asked but no answer"
+        // or "never checked." No retry was made: the reviewer had no
+        // subject, and asking again would not produce one (#1165 criterion 2).
+        // This state applies ONLY to a non-empty declining response — the
+        // reviewer answered but the answer carried no verdicts. An empty
+        // response (isStillEmpty) is askedButUnanswered, not declinedNoDiff,
+        // because the question was asked and the reviewer gave no answer (#1117).
+        if diffIsEmpty && verdicts.isEmpty && !isStillEmpty {
+            declinedNoDiff[task.id] = Set(criteria)
+            // Prevent overlap with askedButUnanswered (#1165 criterion 5):
+            // if a prior call put these criteria there, move them now.
+            if var existing = askedButUnanswered[task.id], !existing.isEmpty {
+                existing.subtract(Set(criteria))
+                if existing.isEmpty {
+                    askedButUnanswered.removeValue(forKey: task.id)
+                } else {
+                    askedButUnanswered[task.id] = existing
+                }
+            }
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.review.no_diff",
+                "Reviewer declined — diff was empty; "
+                    + "\(criteria.count) criterion(s) not reviewable without a diff",
+                [
+                    "issue": task.issue.slug,
+                    "asked": String(criteria.count)
+                ]
+            )
+            return 0
+        }
+
         // Record the boundary-scoped fingerprint at the moment the reviewer's
         // verdicts are carved (#1131). Only the task's own files are hashed,
         // so the Queen's state writes cannot age a verdict. The reviewer saw
@@ -4512,14 +4738,20 @@ final class ChatViewModel: ObservableObject {
 
         guard !unmet.isEmpty || !stale.isEmpty || !unchecked.isEmpty else { return nil }
 
-        // Split unchecked into "asked but no answer" and "genuinely never
-        // asked". The `askedButUnanswered` set is populated by
+        // Split unchecked into three groups: "declined because no diff"
+        // (#1165), "asked but no answer", and "genuinely never asked".
+        // The `askedButUnanswered` set is populated by
         // `requestReviewerVerdicts` when the reviewer returns empty after
         // a retry, or when the response omits some criteria it was asked
-        // about.
+        // about. The `declinedNoDiff` set is populated when the diff was
+        // empty and the reviewer returned a non-empty response that
+        // produced zero verdicts — a decline for want of a subject (#1165).
+        let declinedSet = declinedNoDiff[task.id] ?? []
+        let declined = unchecked.filter { declinedSet.contains($0.criterion) }
+        let notDeclined = unchecked.filter { !declinedSet.contains($0.criterion) }
         let askedSet = askedButUnanswered[task.id] ?? []
-        let askedNoAnswer = unchecked.filter { askedSet.contains($0.criterion) }
-        let neverAsked = unchecked.filter { !askedSet.contains($0.criterion) }
+        let askedNoAnswer = notDeclined.filter { askedSet.contains($0.criterion) }
+        let neverAsked = notDeclined.filter { !askedSet.contains($0.criterion) }
 
         // Regression guard: a criterion tracked as asked-but-unanswered
         // must not have a recorded verdict. The check uses askedSet — the
@@ -4536,6 +4768,24 @@ final class ChatViewModel: ObservableObject {
             + "from a real verdict"
         )
 
+        // Regression guard (#1165 criterion 5): declinedNoDiff and
+        // askedButUnanswered must not overlap. If a criterion appears in
+        // both, the third state (reviewer declined, no diff) has been
+        // merged with the second (asked but no answer) — the distinction
+        // this function exists to maintain is gone.
+        assert(
+            declinedSet.isDisjoint(with: askedSet),
+            "declinedNoDiff and askedButUnanswered overlap — "
+            + "the third state (no diff) is merged with asked-but-unanswered "
+            + "(#1165 regression)"
+        )
+        assert(
+            declinedSet.allSatisfy { task.criterionVerdicts[$0] == nil },
+            "declinedNoDiff contains a criterion that now has a verdict — "
+            + "tracking is stale; a declined review may be indistinguishable "
+            + "from a real verdict"
+        )
+
         var parts: [String] = []
 
         if !unmet.isEmpty {
@@ -4549,6 +4799,13 @@ final class ChatViewModel: ObservableObject {
                 "\(stale.count) criterion(s) were checked against different code: "
                 + stale.map(\.criterion).joined(separator: "; ")
                 + ". They need re-checking against the current tree."
+            )
+        }
+        if !declined.isEmpty {
+            parts.append(
+                "\(declined.count) criterion(s) could not be reviewed because the diff was empty: "
+                + declined.map(\.criterion).joined(separator: "; ")
+                + ". There was nothing to review."
             )
         }
         if !askedNoAnswer.isEmpty {
@@ -4583,6 +4840,26 @@ final class ChatViewModel: ObservableObject {
                 "Block reason omits the asked-but-unanswered distinction — "
                 + "an empty answer is indistinguishable from the absence of "
                 + "a question (#1117 regression)"
+            )
+        }
+
+        // Regression guard (#1165 criterion 5): if any declined-no-diff
+        // criterion is still unchecked, the block reason must carry the
+        // "diff was empty" language. Without it the declined review is
+        // indistinguishable from "never checked" or "asked but no answer"
+        // — the exact merge this function exists to prevent. Mirrors the
+        // #1117 guard above: if the declined split is removed, declined
+        // criteria fall into neverAsked or askedNoAnswer, neither of which
+        // contains "diff was empty," and this assertion fires.
+        if !declinedSet.isEmpty {
+            let uncheckedCriteria = Set(unchecked.map(\.criterion))
+            let declinedStillUnchecked = declinedSet.intersection(uncheckedCriteria)
+            assert(
+                declinedStillUnchecked.isEmpty
+                    || result.contains("diff was empty"),
+                "Block reason omits the no-diff distinction — "
+                + "a declined review (empty diff) is indistinguishable from "
+                + "a missing question or a missing answer (#1165 regression)"
             )
         }
 
@@ -4681,12 +4958,72 @@ final class ChatViewModel: ObservableObject {
             task,
             committedFiles: task.committedFiles ?? 0
         ) else {
+            // Name the first condition that failed, so the log says why
+            // the task was refused, not just that it was.
+            let failedCondition: String
+            if task.state != .awaitingReview {
+                failedCondition = "state is \(task.state.rawValue), not awaitingReview"
+            } else if (task.committedFiles ?? 0) == 0 {
+                failedCondition = "no committed files"
+            } else if task.ownedPaths.isEmpty {
+                failedCondition = "no boundary (ownedPaths is empty)"
+            } else if QueenDelegationPolicy.isExpensive(task) {
+                failedCondition = "task is expensive"
+            } else {
+                failedCondition = "unknown"
+            }
+
+            // When the only failure is "no committed files" but every
+            // criterion has a verdict and every verdict is met, the work
+            // was already done by an earlier pass — accept anyway so an
+            // already-done task is not stuck forever (#1180). An unmet
+            // criterion keeps the old refusal below.
+            if failedCondition == "no committed files" {
+                let verdictTreeState = verdictTreeStates[task.id] ?? task.treeStateFingerprint
+                let currentBoundaryState = await QueenBranchCommitter.fingerprintBoundary(
+                    ownedPaths: task.ownedPaths
+                )
+                let currentTreeState = currentBoundaryState ?? ""
+                if acceptanceBlockReasonDistinguishingEmptyAnswers(
+                    for: task,
+                    verdictTreeState: verdictTreeState,
+                    currentTreeState: currentTreeState
+                ) == nil {
+                    guard registry.transition(taskID: task.id, to: .accepted) else {
+                        TriosLogBus.shared.info(
+                            .queen, "queen.auto_accept.transition_failed",
+                            "Auto-accept skipped: state transition to .accepted failed",
+                            ["issue": task.issue.slug]
+                        )
+                        return
+                    }
+                    await appendSystemMessageToQueenChat(
+                        SystemNoticeClassifier.successMarker
+                            + "I accepted \(task.issue.slug) myself. Every criterion was "
+                            + "already met with no new file changes, so the work was done "
+                            + "by an earlier pass. Undo with "
+                            + "/review \(task.issue.slug) reject <why>."
+                    )
+                    registry.pruneArchive()
+                    TriosLogBus.shared.info(
+                        .queen,
+                        "queen.auto_accept.nothingToDo",
+                        "Accepted without a human: work was already done",
+                        ["issue": task.issue.slug, "files": String(task.committedFiles ?? 0)]
+                    )
+                    return
+                }
+            }
+
             TriosLogBus.shared.info(
                 .queen, "queen.auto_accept.not_qualified",
-                "Auto-accept skipped: task does not qualify for auto-accept",
+                "Auto-accept skipped: \(failedCondition)",
                 [
                     "issue": task.issue.slug,
-                    "committed_files": String(task.committedFiles ?? 0)
+                    "committed_files": String(task.committedFiles ?? 0),
+                    "failed_condition": failedCondition,
+                    "state": task.state.rawValue,
+                    "owned_paths_count": String(task.ownedPaths.count),
                 ]
             )
             return
@@ -5049,10 +5386,53 @@ final class ChatViewModel: ObservableObject {
             return
         }
 
-        // ── 5. Pick the lowest-numbered (oldest) sub-issue ─────────
-        let sorted = actionable.sorted { $0.number < $1.number }
+        // ── 5. Score by boundary size, then issue number ───────────
+        // Fewest files in Границы wins; ties break by lowest number.
+        // A directory path (trailing /) counts as 9999 — it is a
+        // region, not a boundary.  No Границы section → Int.max (last).
+        struct ScoredIssue {
+            let number: Int
+            let title: String
+            let fileCount: Int
+            let paths: [String]?
+        }
+
+        var scored: [ScoredIssue] = []
+        for issue in actionable {
+            let body = await Task.detached(priority: .utility) {
+                QueenStatusViewModel.runProcess(
+                    ghPath,
+                    arguments: [
+                        "issue", "view", String(issue.number),
+                        "--repo", "gHashTag/trios",
+                        "--json", "body",
+                        "-q", ".body",
+                    ],
+                    workDir: ProjectPaths.root,
+                    timeout: 10,
+                )
+            }.value
+
+            scored.append(ScoredIssue(
+                number: issue.number,
+                title: issue.title,
+                fileCount: ChatViewModel.countBoundaryFiles(in: body),
+                paths: ChatViewModel.boundaryPaths(from: body)
+            ))
+        }
+
+        let sorted = scored.sorted { a, b in
+            if a.fileCount != b.fileCount { return a.fileCount < b.fileCount }
+            return a.number < b.number
+        }
         let chosen = sorted[0]
-        let reason = "lowest-numbered open sub-issue of epic #1090 not already in flight."
+
+        let reason: String
+        if chosen.fileCount == Int.max {
+            reason = "no Границы section (treats as ∞ files); lowest number among such issues."
+        } else {
+            reason = "smallest boundary: \(chosen.fileCount) file\(chosen.fileCount == 1 ? "" : "s") under Границы; ties break by lowest number."
+        }
 
         await postQueenNotice(
             SystemNoticeClassifier.successMarker
@@ -5070,6 +5450,7 @@ final class ChatViewModel: ObservableObject {
                 "issueNumber": String(chosen.number),
                 "considered": String(subIssues.count),
                 "inFlight": String(inFlightNumbers.count),
+                "fileCount": chosen.fileCount == Int.max ? "none" : String(chosen.fileCount),
                 "reason": reason,
             ]
         )
@@ -5081,11 +5462,185 @@ final class ChatViewModel: ObservableObject {
         // dispatch — so every refusal that applies to an explicit
         // delegation applies here too.
         if startAfterChoosing {
+            // A task with no boundary cannot be auto-accepted: one of the
+            // four gates in qualifiesForAutoAccept is !ownedPaths.isEmpty,
+            // and work the Queen started but cannot close herself is work
+            // that sits until a human notices.  The paths are already parsed
+            // from the Границы section during scoring — pass them through.
+            guard let paths = chosen.paths, !paths.isEmpty else {
+                await postQueenNotice(
+                    SystemNoticeClassifier.warningMarker
+                        + "Cannot start gHashTag/trios#\(chosen.number): the issue has no "
+                        + "Границы section, so there is no boundary to delegate. Add one "
+                        + "and run /choose --start again."
+                )
+                TriosLogBus.shared.warn(
+                    .queen, "queen.choose",
+                    "Refused --start: \(chosen.number) has no Границы section",
+                    [
+                        "chosen": "gHashTag/trios#\(chosen.number)",
+                        "reason": "no boundary",
+                    ]
+                )
+                return
+            }
             await delegateIssueToWorker(
                 issue: IssueReference(owner: "gHashTag", repo: "trios", number: chosen.number),
                 worker: "queen-swift",
-                title: chosen.title
+                title: chosen.title,
+                paths: paths
             )
+        }
+    }
+
+    /// Count files listed under `## Границы` in an issue body.
+    /// A directory path (trailing /) counts as 9999 — it is a region,
+    /// not a boundary.  No `## Границы` section → Int.max (sorts last).
+    private static func countBoundaryFiles(in body: String) -> Int {
+        let lines = body.split(separator: "\n", omittingEmptySubsequences: false)
+        var inBounds = false
+        var count = 0
+        var found = false
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("## ") {
+                if inBounds { break }
+                inBounds = trimmed.hasPrefix("## Границы")
+                if inBounds { found = true }
+                continue
+            }
+            guard inBounds else { continue }
+
+            let cleaned = trimmed
+                .trimmingCharacters(in: CharacterSet(charactersIn: "`"))
+                .trimmingCharacters(in: .whitespaces)
+            if cleaned.isEmpty { continue }
+
+            if cleaned.hasSuffix("/") {
+                count += 9999
+            } else {
+                count += 1
+            }
+        }
+
+        return found ? count : Int.max
+    }
+
+    /// Extracts the file paths listed under `## Границы` in an issue body.
+    /// Returns nil when the section is absent — the caller must refuse to
+    /// delegate, because a task with no boundary cannot be auto-accepted.
+    private static func boundaryPaths(from body: String) -> [String]? {
+        let lines = body.split(separator: "\n", omittingEmptySubsequences: false)
+        var inBounds = false
+        var paths: [String] = []
+        var found = false
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("## ") {
+                if inBounds { break }
+                inBounds = trimmed.hasPrefix("## Границы")
+                if inBounds { found = true }
+                continue
+            }
+            guard inBounds else { continue }
+
+            if trimmed.isEmpty { continue }
+
+            // Extract only the path-shaped token — no spaces, containing "/"
+            // or ending in a file extension. A boundary line may carry prose
+            // after the path ("rings/SR-02/Foo.swift, see notes"), so taking
+            // the whole line yields a non-existent path and narrowing fails
+            // silently.
+            if let token = boundaryPathToken(from: trimmed) {
+                paths.append(token)
+            } else {
+                TriosLogBus.shared.info(
+                    .queen, "queen.brief.no_path",
+                    "Границы line yielded no path: \(trimmed)",
+                    ["line": trimmed]
+                )
+            }
+        }
+
+        return found ? paths : nil
+    }
+
+    /// Extracts the path-shaped token from a boundary line. The token has no
+    /// spaces, contains "/" or ends in a dotted file extension, and is stripped
+    /// of trailing prose punctuation (commas, semicolons, backticks, etc.).
+    private static func boundaryPathToken(from line: String) -> String? {
+        for raw in line.split(separator: " ", omittingEmptySubsequences: true) {
+            let debacked = String(raw)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "`"))
+            // Strip trailing prose punctuation glued to the path end.
+            var cleaned = debacked
+            while let last = cleaned.last, ",;:!?)".contains(last) {
+                cleaned.removeLast()
+            }
+            guard !cleaned.isEmpty else { continue }
+            if cleaned.contains("/")
+                || cleaned.range(of: #"\.\w{1,10}$"#, options: .regularExpression) != nil {
+                return cleaned
+            }
+        }
+        return nil
+    }
+
+    /// Identifiers an issue body uses to name code: backtick-quoted spans
+    /// and CamelCase words. Fed to `QueenLocalisation.region` so the worker
+    /// is pointed at the declaration the issue talks about, not the whole file.
+    private static func identifiers(from body: String) -> [String] {
+        var found = Set<String>()
+
+        // Backtick-quoted spans: `QueenLocalisation`, `ChatViewModel.swift`, etc.
+        if let regex = try? NSRegularExpression(pattern: "`([^`]+)`") {
+            let nsBody = body as NSString
+            regex.enumerateMatches(
+                in: body,
+                range: NSRange(location: 0, length: nsBody.length)
+            ) { match, _, _ in
+                guard let match else { return }
+                let captured = nsBody.substring(with: match.range(at: 1))
+                if !captured.isEmpty { found.insert(captured) }
+            }
+        }
+
+        // Bare words from prose: requestReviewerVerdicts,
+        // ChatViewModel, QueenLocalisation, etc. Matches runs of
+        // Latin letters and digits that contain an uppercase letter
+        // which is not the first character (#1179).
+        if let regex = try? NSRegularExpression(
+            pattern: "\\b[a-zA-Z0-9]+[A-Z][a-zA-Z0-9]*\\b"
+        ) {
+            let nsBody = body as NSString
+            regex.enumerateMatches(
+                in: body,
+                range: NSRange(location: 0, length: nsBody.length)
+            ) { match, _, _ in
+                guard let match else { return }
+                let captured = nsBody.substring(with: match.range)
+                if !captured.isEmpty { found.insert(captured) }
+            }
+        }
+
+        // Filter to identifier-shaped tokens only: reject prose, keywords,
+        // paths, and file extensions (#1178).
+        let swiftKeywords: Set<String> = [
+            "return", "func", "let", "var", "guard", "where",
+            "case", "class", "struct", "enum", "self",
+            "true", "false", "nil", "async", "await", "throws",
+        ]
+        return found.filter { token in
+            // ≥6 chars, starts with a letter, only letters and digits
+            // (no spaces, slashes, dots / file extensions).
+            guard token.count >= 6,
+                  let first = token.first,
+                  first.isLetter,
+                  token.allSatisfy({ $0.isLetter || $0.isNumber })
+            else { return false }
+            return !swiftKeywords.contains(token)
         }
     }
 
@@ -5205,7 +5760,8 @@ final class ChatViewModel: ObservableObject {
                         "reason": reason,
                         "criteria": String(task.acceptanceCriteria.count),
                         "verdicts": String(task.criterionVerdicts.count),
-                        "asked_unanswered": String(askedButUnanswered[task.id]?.count ?? 0)
+                        "asked_unanswered": String(askedButUnanswered[task.id]?.count ?? 0),
+                        "declined_no_diff": String(declinedNoDiff[task.id]?.count ?? 0)
                     ]
                 )
                 await postQueenNotice(
@@ -5552,6 +6108,17 @@ final class ChatViewModel: ObservableObject {
                 askedButUnanswered.removeValue(forKey: task.id)
             } else {
                 askedButUnanswered[task.id] = unanswered
+            }
+        }
+        // A criterion that was declined (no diff) and now has a recorded
+        // verdict is no longer declined — the diff must have changed.
+        // Clearing it here keeps the tracking from going stale (#1165).
+        if var declined = declinedNoDiff[task.id], !declined.isEmpty {
+            declined.remove(criterion)
+            if declined.isEmpty {
+                declinedNoDiff.removeValue(forKey: task.id)
+            } else {
+                declinedNoDiff[task.id] = declined
             }
         }
         let updated = registry.task(forIssue: issue) ?? task
