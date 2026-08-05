@@ -4266,6 +4266,69 @@ final class ChatViewModel: ObservableObject {
                 }
             }
 
+            // --- Test files for test-related criteria (#1181) ---
+            // A criterion that says "the check must break" cannot be judged
+            // without the test file, yet that file sits outside the task
+            // boundary. When a criterion mentions проверка, тест, ломается
+            // or test, we pull the matching test directory (tests/swift for
+            // rings/SR-02), narrowed to regions naming the identifiers the
+            // criteria talk about, so the reviewer can see the breaking check.
+            if result.count < maxFiles {
+                let triggers = ["проверка", "тест", "ломается", "test"]
+                let needsTests = criteria.contains { c in
+                    let lower = c.lowercased()
+                    return triggers.contains { lower.contains($0) }
+                }
+                if needsTests {
+                    let testDir = ownedPaths.contains {
+                        $0.hasPrefix("rings/SR-02")
+                    } ? "tests/swift" : ""
+                    if !testDir.isEmpty {
+                        let listing = QueenStatusViewModel.runProcess(
+                            "/usr/bin/find",
+                            arguments: [
+                                "\(projectRoot)/\(testDir)",
+                                "-name", "*.swift", "-type", "f"
+                            ],
+                            workDir: ProjectPaths.root,
+                            timeout: 10
+                        )
+                        let testFiles = listing.split(separator: "\n")
+                            .map { String($0).trimmingCharacters(in: .whitespaces) }
+                            .filter { !$0.isEmpty }
+                        var testsShown = 0
+                        for absPath in testFiles {
+                            if result.count >= maxFiles { break }
+                            let relative = absPath.replacingOccurrences(
+                                of: "\(projectRoot)/", with: ""
+                            )
+                            guard result[relative] == nil else { continue }
+                            let content = QueenStatusViewModel.runProcess(
+                                "/bin/cat",
+                                arguments: [absPath],
+                                workDir: ProjectPaths.root,
+                                timeout: 10
+                            )
+                            let extracted = ChatViewModel.regionExtractedContent(
+                                fullContent: content, criteria: criteria
+                            )
+                            if !extracted.trimmingCharacters(
+                                in: .whitespacesAndNewlines
+                            ).isEmpty {
+                                result[relative] = extracted
+                                testsShown += 1
+                            }
+                        }
+                        TriosLogBus.shared.info(
+                            .queen,
+                            "queen.review.testsShown",
+                            "Test files shown for criteria about checks (#1181)",
+                            ["count": String(testsShown)]
+                        )
+                    }
+                }
+            }
+
             return result
         }.value
     }
