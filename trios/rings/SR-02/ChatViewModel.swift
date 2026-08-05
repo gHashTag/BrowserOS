@@ -3828,23 +3828,46 @@ final class ChatViewModel: ObservableObject {
         // criterion 2). The task never looks "working" — `.running` is gone,
         // `.awaitingReview` is visible, and the notice names the silence.
         if failure == nil, askedReviewer, reviewerVerdictsRecorded == 0 {
-            TriosLogBus.shared.warn(
-                .queen,
-                "queen.review.silent_after_retry",
-                "Reviewer returned zero verdicts after retry; task left in "
-                    + "awaitingReview with all criteria marked asked-but-unanswered",
-                [
-                    "issue": task.issue.slug,
-                    "asked": String(askedCriteriaCount)
-                ]
-            )
-            notice += "\n" + SystemNoticeClassifier.warningMarker
-                + "I could not verify \(task.issue.slug): the reviewer was "
-                + "asked about \(askedCriteriaCount) criterion(s) but returned "
-                + "no answer after a retry. The task is awaiting your decision "
-                + "— every automated check has run its course. The branch and "
-                + "chat survive, but this work is not verified and should not "
-                + "be mistaken for done."
+            // Distinguish "no diff" (#1165) from "silent reviewer" (#1144):
+            // when the diff was empty, the reviewer had nothing to evaluate,
+            // not nothing to say. The notice and log should reflect the actual
+            // cause so a reader does not chase a retry that never happened.
+            let declinedSet = declinedNoDiff[task.id]
+            if let declinedSet, !declinedSet.isEmpty {
+                TriosLogBus.shared.warn(
+                    .queen,
+                    "queen.review.no_diff",
+                    "Reviewer declined — diff was empty; task left in "
+                        + "awaitingReview with criteria marked declined-no-diff",
+                    [
+                        "issue": task.issue.slug,
+                        "asked": String(askedCriteriaCount)
+                    ]
+                )
+                notice += "\n" + SystemNoticeClassifier.warningMarker
+                    + "I could not verify \(task.issue.slug): the diff was "
+                    + "empty, so the reviewer had nothing to evaluate. The "
+                    + "task is awaiting your decision — there was no code "
+                    + "change to review."
+            } else {
+                TriosLogBus.shared.warn(
+                    .queen,
+                    "queen.review.silent_after_retry",
+                    "Reviewer returned zero verdicts after retry; task left in "
+                        + "awaitingReview with all criteria marked asked-but-unanswered",
+                    [
+                        "issue": task.issue.slug,
+                        "asked": String(askedCriteriaCount)
+                    ]
+                )
+                notice += "\n" + SystemNoticeClassifier.warningMarker
+                    + "I could not verify \(task.issue.slug): the reviewer was "
+                    + "asked about \(askedCriteriaCount) criterion(s) but returned "
+                    + "no answer after a retry. The task is awaiting your decision "
+                    + "— every automated check has run its course. The branch and "
+                    + "chat survive, but this work is not verified and should not "
+                    + "be mistaken for done."
+            }
         }
         registry.transition(taskID: task.id, to: failure == nil ? .awaitingReview : .failed)
         // The notice belongs in the Queen's chat even when she is not the open
@@ -4327,6 +4350,12 @@ final class ChatViewModel: ObservableObject {
         // transport blip that a second try settles. If the second try is
         // also empty, the criteria are recorded as "asked but unanswered"
         // so the distinction from "never checked" stays alive downstream (#1117).
+        //
+        // The retry fires on ANY empty answer, regardless of diff content.
+        // Only a NON-EMPTY answer declining for want of a subject skips the
+        // retry (handled by declinedNoDiff below). An empty diff does not
+        // exempt the reviewer from answering — the question was asked (#1117).
+        let diffIsEmpty = diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         if response.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             reviewerRequestCounts[task.id, default: 0] += 1
             TriosLogBus.shared.warn(
@@ -4350,6 +4379,10 @@ final class ChatViewModel: ObservableObject {
         // question. Recording the unanswered criteria here keeps that
         // distinction in the block reason and the log, so a reader does not
         // have to infer it from `response_chars=0` (#1117).
+        // An empty answer populates askedButUnanswered regardless of diff:
+        // the question was asked, the reviewer gave nothing back. The diff
+        // content does not change whether the reviewer answered — only a
+        // non-empty declining response routes to declinedNoDiff below (#1117).
         if isStillEmpty {
             // Regression guard (#1144 criterion 5): the retry must have been
             // attempted before the task is declared silent. Removing the retry
@@ -4396,25 +4429,22 @@ final class ChatViewModel: ObservableObject {
                 recorded += 1
             }
         }
-        // Third state (#1165): the diff was empty and the reviewer returned
-        // a non-empty response that produced zero verdicts. The reviewer
-        // was asked, looked at the brief, saw "(no changes detected)",
-        // and declined to judge — not because it could not reach a verdict
-        // on the merits, but because there was nothing to judge. This is
-        // distinct from "asked but no answer" (the reviewer said nothing)
-        // and from "never checked" (the question was never posed).
-        // Recording the criteria in `declinedNoDiff` lets the block reason
-        // say "the diff was empty" instead of the misleading "asked but
-        // no answer" or "never checked." No retry was made: the reviewer
-        // answered, and the answer was "there is nothing to review."
-        // The check fires only when the response is non-empty (`!isStillEmpty`)
-        // and the parser found nothing — an empty response already went
-        // through the askedButUnanswered path above. Merging this branch
-        // with the empty-answer path collapses the distinction this state
-        // exists to maintain (#1165 criterion 5).
-        if diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !isStillEmpty
-            && verdicts.isEmpty {
+        // Third state (#1165): the diff was empty and the reviewer produced
+        // zero verdicts — whether the response was a non-empty decline ("I
+        // see nothing to review") or complete silence. The reviewer was
+        // asked, looked at the brief, saw "(no changes detected)", and had
+        // nothing to judge. This is distinct from "asked but no answer"
+        // (the reviewer was asked about a real diff and said nothing) and
+        // from "never checked" (the question was never posed). Recording
+        // the criteria in `declinedNoDiff` lets the block reason say "the
+        // diff was empty" instead of the misleading "asked but no answer"
+        // or "never checked." No retry was made: the reviewer had no
+        // subject, and asking again would not produce one (#1165 criterion 2).
+        // This state applies ONLY to a non-empty declining response — the
+        // reviewer answered but the answer carried no verdicts. An empty
+        // response (isStillEmpty) is askedButUnanswered, not declinedNoDiff,
+        // because the question was asked and the reviewer gave no answer (#1117).
+        if diffIsEmpty && verdicts.isEmpty && !isStillEmpty {
             declinedNoDiff[task.id] = Set(criteria)
             // Prevent overlap with askedButUnanswered (#1165 criterion 5):
             // if a prior call put these criteria there, move them now.

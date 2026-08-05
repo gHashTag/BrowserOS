@@ -4245,3 +4245,25 @@ delegated and returned the same range, twice.
 
 So the capability is real and observable, and the answer it gives is not yet
 useful. Both halves are worth saying: the wiring is proven, the choosing is not.
+
+## The narrowing lands in code at last
+
+Third attempt, and the cause had been named by the second failing the same way:
+identifiers appear in the leading doc comments, and the enclosing declaration for
+a comment is the file. Ranking between declarations could not help while the
+whole top of the file counted as one. Blank the comments first, and let only a
+`func`, `init` or `var` that opens a body count as a declaration:
+
+    before:  Narrowed ChatViewModel.swift to lines 1-300   (twice)
+    after:   Narrowed ChatViewModel.swift to lines 5211-5233
+
+A real twenty-three-line region inside the file rather than the header. Whether
+it is the *most useful* region is a different question and unproven — the
+contract asked for a declaration rather than the file header, and that is met.
+
+Two honest notes. The deliberate break — leaving comments in — would not
+compile, so there is no negative proof this pass, only the before and after.
+And four checks of #1117 went red mid-cycle because I had been using real
+delegations as probes: the bees edited the reviewer code for real while I was
+only asking what range the brief carried. Handed back, 594 pass again. A probe
+that changes the thing it measures is not a probe.
