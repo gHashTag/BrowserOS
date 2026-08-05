@@ -25,21 +25,14 @@ enum QueenLocalisation {
 
     // MARK: - Public
 
-    /// Returns the range of the declaration that best matches the given
-    /// identifiers (1-indexed).
-    ///
-    /// When an identifier equals a declaration **name** in the file, that
-    /// declaration wins outright — an exact name beats any mention count.
-    /// Otherwise the declaration with the most identifier mentions wins.
+    /// Returns the range of the declaration whose **name** matches one of
+    /// the given identifiers (1-indexed), or `nil` when no name matches.
     ///
     /// - Parameters:
     ///   - source: Swift source text.
     ///   - identifiers: Whole words to search for (case-sensitive).
-    /// - Returns: A 1-indexed `ClosedRange`, or `nil` when no identifier is
-    ///   mentioned outside comments. Ties are broken in favour of the later
-    ///   declaration. Ranges wider than `maxRegionWidth` lines are trimmed
-    ///   to a window of that width centred on the first hit in the winning
-    ///   declaration.
+    /// - Returns: A 1-indexed `ClosedRange`, or `nil` when none of the
+    ///   identifiers matches a declaration name.
     static func region(
         in source: String,
         mentioning identifiers: [String]
@@ -54,9 +47,8 @@ enum QueenLocalisation {
         let lines = masked.components(separatedBy: "\n")
         let depths = braceDepths(lines: lines)
 
-        // A declaration whose name matches one of the identifiers wins
-        // outright — an exact name is stronger evidence than any count.
-        // Density stays as the fallback when no name matches.
+        // A declaration whose name matches one of the identifiers is
+        // the only evidence used — no density counting.
         if let named = namedDeclaration(
             in: lines,
             depths: depths,
@@ -65,39 +57,7 @@ enum QueenLocalisation {
             return named
         }
 
-        let mentionLines = allMentionLines(lines: lines, identifiers: identifiers)
-        guard !mentionLines.isEmpty else { return nil }
-
-        var bestRange: ClosedRange<Int>?
-        var bestCount = 0
-
-        for hitLine in mentionLines {
-            guard let raw = enclosingDeclaration(
-                hitLine: hitLine,
-                depths: depths,
-                lines: lines
-            ) else { continue }
-
-            let count = totalMentions(
-                in: raw,
-                lines: lines,
-                identifiers: identifiers
-            )
-
-            if count > bestCount
-                || (count == bestCount && (bestRange == nil || raw.lowerBound > bestRange!.lowerBound))
-            {
-                bestCount = count
-                bestRange = raw
-            }
-        }
-
-        guard let raw = bestRange else { return nil }
-
-        let hitInBest = mentionLines.first { raw.contains($0) } ?? mentionLines[0]
-        let capped = capToWidth(raw, around: hitInBest)
-
-        return (capped.lowerBound + 1)...(capped.upperBound + 1)
+        return nil
     }
 
     // MARK: - Comment & string masking
