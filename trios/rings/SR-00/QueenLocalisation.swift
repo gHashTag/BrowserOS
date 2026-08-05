@@ -16,12 +16,11 @@ enum QueenLocalisation {
     /// around the mention is enough context without burying the signal.
     static let maxRegionWidth = 300
 
-    /// Keywords that announce a Swift declaration, used to anchor the start of
-    /// the enclosing scope.
+    /// Keywords that open a declaration body, used to anchor the start of
+    /// the enclosing scope. Only declarations with a brace-delimited body
+    /// qualify — never the file itself.
     private static let declarationKeywords: [String] = [
-        "func", "class", "struct", "enum", "protocol",
-        "extension", "init", "deinit", "subscript",
-        "typealias", "var", "let",
+        "func", "init", "var",
     ]
 
     // MARK: - Public
@@ -58,11 +57,11 @@ enum QueenLocalisation {
         var bestCount = 0
 
         for hitLine in mentionLines {
-            let raw = enclosingDeclaration(
+            guard let raw = enclosingDeclaration(
                 hitLine: hitLine,
                 depths: depths,
                 lines: lines
-            )
+            ) else { continue }
 
             let count = totalMentions(
                 in: raw,
@@ -217,17 +216,18 @@ enum QueenLocalisation {
     // MARK: - Enclosing declaration
 
     /// Given a hit line and per-line depths, returns the 0-based closed range
-    /// of the enclosing declaration.
+    /// of the enclosing declaration, or `nil` when the hit is not inside a
+    /// `func`, `init`, or `var` body.
     private static func enclosingDeclaration(
         hitLine: Int,
         depths: [Int],
         lines: [String]
-    ) -> ClosedRange<Int> {
+    ) -> ClosedRange<Int>? {
         let hitDepth = depths[hitLine]
 
-        // Mention at file scope — return the whole file.
+        // Mention at file scope — no enclosing func/init/var.
         if hitDepth == 0 {
-            return 0...(lines.count - 1)
+            return nil
         }
 
         // Walk backwards: first line whose start-depth < hitDepth is the scope
@@ -242,6 +242,12 @@ enum QueenLocalisation {
         var declStart = scopeEntry
         while declStart > 0, !containsDeclarationKeyword(lines[declStart]) {
             declStart -= 1
+        }
+
+        // No declaration keyword on the anchor line means the enclosing scope
+        // is not a func/init/var (e.g. a type body) — skip this mention.
+        guard containsDeclarationKeyword(lines[declStart]) else {
+            return nil
         }
 
         // Walk forwards: last line before depth drops below hitDepth is the
