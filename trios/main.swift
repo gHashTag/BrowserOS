@@ -144,8 +144,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         await runE2EQueenCommand(environment: environment)
 
-        guard let issue = IssueReference.parse(issueText),
-              let task = QueenDelegationRegistry.shared.task(forIssue: issue) else {
+        // When the Queen chose the work herself (`/choose --start`),
+        // issueText is empty. The registry still holds the task it
+        // registered, so fall back to the most recent non-terminal one
+        // instead of declaring failure. An empty registry stays a
+        // failure with the same record.
+        let task: DelegatedTask? = {
+            if let issue = IssueReference.parse(issueText) {
+                return QueenDelegationRegistry.shared.task(forIssue: issue)
+            }
+            return QueenDelegationRegistry.shared.tasks
+                .filter { !$0.state.isTerminal }
+                .max { $0.createdAt < $1.createdAt }
+        }()
+
+        guard let task else {
             TriosLogBus.shared.error(
                 .queen,
                 "queen.selftest.failed",
@@ -186,7 +199,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             answered ? "queen.selftest.passed" : "queen.selftest.failed",
             verdict,
             [
-                "issue": issue.slug,
+                "issue": task.issue.slug,
                 "worker": worker,
                 "messages": String(transcript.count),
                 "tools": String(tools),
