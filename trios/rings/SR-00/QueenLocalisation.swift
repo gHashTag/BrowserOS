@@ -136,14 +136,14 @@ enum QueenLocalisation {
                 }
             } else if inString {
                 if c == "\\", next != nil {
-                    output.append(" "); output.append(" ")
+                    output.append(c); output.append(next!)
                     i += 2
                 } else if c == "\"" {
                     inString = false
-                    output.append(" ")
+                    output.append(c)
                     i += 1
                 } else {
-                    output.append(c == "\n" ? c : " ")
+                    output.append(c)
                     i += 1
                 }
             } else {
@@ -158,7 +158,7 @@ enum QueenLocalisation {
                     i += 2
                 } else if c == "\"" {
                     inString = true
-                    output.append(" ")
+                    output.append(c)
                     i += 1
                 } else {
                     output.append(c)
