@@ -4518,3 +4518,26 @@ verdicts, and the file count only when they are missing.
 
 That is the whole chain running for the first time: choose, aim, delegate,
 review, decide. The decision was no, and it was the right no.
+
+## The reviewer was being asked about a test it could not see
+
+#1117's third criterion says a check must break if the distinction collapses.
+That check exists — `ChatSSEEndToEndTest.swift:5597`, asserting the block reason
+never says *never checked*. The reviewer marked the criterion unmet, and was
+right within what it had been given: the boundary is `rings/SR-02/…` and the
+test file is not in it. It was asked about something nobody showed it.
+
+That shape is everywhere in this epic. Nearly every issue here ends with *the
+check breaks if…*, and none of them could ever be confirmed.
+
+Fixed: when a criterion mentions a check, the matching test files come with the
+diff, narrowed to the regions naming the identifiers. Driven:
+
+    queen.review.testsShown — 19 regions
+
+Nineteen pieces of test the reviewer had never been shown before.
+
+The circle did not finish this time — the worker failed at 23:35 and acceptance
+skipped with *state is failed, not awaitingReview*, which is the right refusal
+for a run that died. So the gap is closed and observable, and the pass it was
+meant to unblock still has not run to the end.
