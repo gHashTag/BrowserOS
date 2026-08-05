@@ -4439,3 +4439,32 @@ Where that leaves it, plainly: one issue in four gets a range, that range is
 right, and three get silence. No wrong pointers. But the mechanism is not
 predictable from reading a spec, and until it is, writing a spec that names the
 function is not a reliable way to get the bee sent to the right place.
+
+## Made it speak, and the answer was that it had never worked
+
+Two passes of guessing from outside ended by making the mechanism say what it
+does. Both answers were bad:
+
+    #1117  identifiers: "\n\nРевьюер не ответил вообще. Королева записала…"
+    #1158  identifiers: "awaitingReview | return | acceptanceBlockReason… | …"
+           matched: "return"
+
+The first was extracting nothing — a paragraph of prose in the field where names
+belong, so there was never anything to compare. The second matched on `return`,
+a keyword that appears in almost every function. The one hit in five
+measurements had been luck. The real score was zero, and every earlier report of
+"one in four" was that luck being counted.
+
+Fixed both: identifier-shaped tokens only, Swift keywords dropped, paths dropped.
+Measured after:
+
+    #1158  matched acceptanceBlockReasonDistinguishingEmptyAnswers, 4703-4853
+    #1117  identifiers: ChatViewModel — still silent
+
+So #1158 now matches for the right reason, which is the first true match this
+feature has produced. #1117 stays silent because a bare lowerCamelCase word in
+Russian prose is not picked up — one more precise step, and the first one in six
+passes that is diagnosable rather than guessed.
+
+The lesson is the one this repository keeps relearning: two passes of clever
+hypotheses lost to fifteen minutes of making the thing report itself.
