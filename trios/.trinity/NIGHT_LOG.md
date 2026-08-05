@@ -4333,3 +4333,31 @@ exact string, comma and all, fixed it on the next attempt.
 Worth keeping: the narrowing had been working only for boundaries typed without
 a single extra word. Nothing said so, because a path that does not exist and a
 file that needs no narrowing produced the same silence.
+
+## Measured: the narrowing helps once in four, and the reason is the spec
+
+The question the last three passes deferred: does the narrowing point at the
+right place? Measured against the regions a human named on delegations that
+succeeded:
+
+    #1156  handleWorkerFinished     named the same        ✓
+    #1158  reset(), lines 66-365    named autoAccept…     ✗
+    #1165  chooseNextOpenIssue      named requestReviewer…✗
+    #1166  reset(), lines 66-365    named startAfterChoos…✗
+
+One in four, and both misses landed in `reset()` near the top — the original
+"narrowed to the header" defect, one function down. Density picks where common
+words are thickest, which is wherever there are most of them.
+
+The single hit was the one case where the issue body names the function. So the
+rule became: a matching declaration name beats any density. Re-measured:
+
+    #1156  handleWorkerFinished                  ✓
+    #1158  acceptanceBlockReasonDistinguishing…  a neighbour the body names
+    #1165  unchanged                             ✗
+    #1166  unchanged                             ✗
+
+The bar set in the contract was three of four. It was not met, and saying so is
+the point of having set it. What the numbers actually show is that the quality
+of the narrowing is bounded by whether the spec names the function — which makes
+this a defect in how the Queen writes specs, not in how she reads files.
