@@ -4468,3 +4468,27 @@ passes that is diagnosable rather than guessed.
 
 The lesson is the one this repository keeps relearning: two passes of clever
 hypotheses lost to fifteen minutes of making the thing report itself.
+
+## Two of four, and every match is the right one
+
+The last thing in the way was that a function name written as a bare word inside
+Russian prose was invisible. #1117 says *«Вердикты запрашивает и разбирает
+requestReviewerVerdicts»*, and only `ChatViewModel` — pulled from the boundary
+path — came out. Extraction now reads the whole body for Latin runs of six
+characters or more carrying an interior capital, so a Russian sentence yields the
+one word in it that is a name.
+
+Driven, before and after in this cycle's record:
+
+    before  #1117  identifiers: ChatViewModel                 silent
+    after   #1117  matched requestReviewerVerdicts   4430-4680
+            #1158  matched acceptanceBlockReason…    4703-4853
+            #1156, #1165                             silent
+
+Two right, none wrong, two silent — and the two silences are honest: neither body
+names a function. Six passes ago this feature had never made a correct match and
+its one apparent hit was the keyword `return`.
+
+What made the difference was not a better guess. It was making the mechanism log
+what it extracted, which turned two passes of hypotheses into two passes of
+reading the answer.

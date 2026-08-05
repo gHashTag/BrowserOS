@@ -5550,9 +5550,12 @@ final class ChatViewModel: ObservableObject {
             }
         }
 
-        // CamelCase words: QueenLocalisation, ChatViewModel, QueenBriefing, etc.
+        // Bare words from prose: requestReviewerVerdicts,
+        // ChatViewModel, QueenLocalisation, etc. Matches runs of
+        // Latin letters and digits that contain an uppercase letter
+        // which is not the first character (#1179).
         if let regex = try? NSRegularExpression(
-            pattern: "\\b[A-Z][a-zA-Z]*[A-Z][a-zA-Z]*\\b"
+            pattern: "\\b[a-zA-Z0-9]+[A-Z][a-zA-Z0-9]*\\b"
         ) {
             let nsBody = body as NSString
             regex.enumerateMatches(
@@ -5573,9 +5576,9 @@ final class ChatViewModel: ObservableObject {
             "true", "false", "nil", "async", "await", "throws",
         ]
         return found.filter { token in
-            // ≥4 chars, starts with a letter, only letters and digits
+            // ≥6 chars, starts with a letter, only letters and digits
             // (no spaces, slashes, dots / file extensions).
-            guard token.count >= 4,
+            guard token.count >= 6,
                   let first = token.first,
                   first.isLetter,
                   token.allSatisfy({ $0.isLetter || $0.isNumber })
