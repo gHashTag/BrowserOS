@@ -4388,3 +4388,32 @@ Taken back to the committed version and re-measured to confirm the restoration:
 #1156 is `handleWorkerFinished` again. The score stands where it stood — one
 clean hit and one useful neighbour out of four — and the next attempt should not
 start by unmasking anything.
+
+## Four measurements later: narrow only when you know, and otherwise say nothing
+
+Every rule tried scored the same:
+
+    density                          1 of 4, two misses into reset()
+    declaration name beats density   1 of 4 plus a neighbour
+    unmask string literals           1 of 4, three misses into reset()
+    dotted names only                1 of 4, and #1158 regressed
+
+Each attempt traded one hit for another. Density points at whichever function
+holds the most ordinary words, which in a 6,000-line file is a large early one,
+every time.
+
+So the rule is now the only thing that ever worked — a declaration whose name the
+spec actually writes — and `nil` otherwise. Measured:
+
+    #1156  silent      #1158  acceptanceBlockReason…  (its body names it)
+    #1165  silent      #1166  silent
+
+One right range, three silences, and **no wrong ranges at all**. A brief without
+a range is what worked before; a brief with a wrong range walks the bee
+somewhere confidently wrong, which is worse than saying nothing.
+
+And the silence on #1156 explains the earlier scores: its body never names
+`handleWorkerFinished` — I had been naming it in the delegation text by hand.
+The narrowing was reading my instructions, not her spec. Which puts the real
+work back where the measurement pointed two passes ago: the spec has to name the
+culprit, and today it usually does not.
