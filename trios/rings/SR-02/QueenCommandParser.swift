@@ -59,6 +59,8 @@ enum QueenCommand: Equatable {
     /// Picks the next open sub-issue and names it with a reason.
     /// Pass `--start` to also delegate the work immediately.
     case choose(start: Bool)
+    /// Shows a brief summary of a delegated task bound to a GitHub issue.
+    case brief(issue: IssueReference)
     /// Any skill discovered from a SKILL.md file.
     case runSkill(command: String, arguments: [String])
     case unknown(String)
@@ -272,6 +274,10 @@ struct QueenCommandParser {
         case "choose", "pick":
             let start = components.contains("--start")
             return .choose(start: start)
+        case "brief":
+            guard let first = components.first,
+                  let issue = IssueReference.parse(first) else { return .unknown(trimmed) }
+            return .brief(issue: issue)
         default:
             // Anything else may be a skill on disk. The parser cannot know -
             // the catalog is read at runtime - so it hands the name on and the
@@ -295,6 +301,7 @@ struct QueenCommandParser {
         /delegate <owner/repo#N> <worker> [--paths a,b] <title> — open a worker chat on its own branch
         /swarm               — show every delegated task and what awaits review
         /choose [--start]    — pick the next open sub-issue and say why (--start also opens work on it)
+        /brief <owner/repo#N> — show a summary of a delegated task
         /accept <owner/repo#N> [note] — accept a worker's result
         /review <owner/repo#N> reject <why> — send the work back to the same worker
         /broadcast <message> — message all online agents
