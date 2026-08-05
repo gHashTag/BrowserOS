@@ -4291,3 +4291,25 @@ preview, though the boundary is the 6,000-line file and a real delegation
 narrows it. So the preview builds *a* brief, not yet the same brief. Said here
 rather than counted as done — a probe that shows something other than what would
 be sent is the defect it exists to prevent.
+
+## One statement of the rule, and the probe tells the truth
+
+The preview showed a different brief from the one that would be sent, and the
+cause was the repository's oldest complaint about itself: the narrowing was
+written twice in one file, and only the delegation copy logged. Two statements
+of a rule agree until one is edited, and these had already diverged.
+
+Extracted to one function both call, and the probe now says what a delegation
+says:
+
+    /brief #1168 → queen.brief.narrowed  lines 3161-3183
+                   queen.brief.preview   1260 chars
+                   delegations 0, worker starts 0
+
+Two smaller things found by driving it. `/brief #1165` still does not narrow,
+and that one is mine: its boundary line reads `ChatViewModel.swift, строки
+4253-4440`, so the parser takes the prose as part of the path and the file does
+not exist. And the threshold is off by one — a file of exactly 300 lines is
+narrowed where the contract says *longer than three hundred*.
+
+Neither is the probe lying any more, which was the point.

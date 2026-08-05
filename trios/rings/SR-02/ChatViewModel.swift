@@ -3126,22 +3126,11 @@ final class ChatViewModel: ObservableObject {
                 ownedPaths: paths,
                 acceptanceCriteria: criteria
             )
-            // Narrow large files to the relevant region exactly as delegation
-            // does — the preview must match what a worker would receive.
-            var narrowedHints: [String] = []
-            let identifiers = ChatViewModel.identifiers(from: body)
-            for path in paths {
-                let fullPath = "\(ProjectPaths.root)/\(path)"
-                guard FileManager.default.fileExists(atPath: fullPath),
-                      let source = try? String(contentsOfFile: fullPath, encoding: .utf8),
-                      source.components(separatedBy: "\n").count > QueenLocalisation.maxRegionWidth
-                else { continue }
-                if let range = QueenLocalisation.region(in: source, mentioning: identifiers) {
-                    narrowedHints.append(
-                        "В \(path) читай только строки \(range.lowerBound)-\(range.upperBound)."
-                    )
-                }
-            }
+            // Narrow large files exactly as delegation does — the shared
+            // function guarantees identical hints and identical logging.
+            let narrowedHints = ChatViewModel.narrowedHints(
+                for: paths, from: body, issueSlug: issue.slug
+            )
             let brief = QueenBriefing.text(for: task)
                 + (narrowedHints.isEmpty ? "" : "\n" + narrowedHints.joined(separator: "\n"))
             await appendSystemMessageToQueenChat(brief)
@@ -3158,6 +3147,41 @@ final class ChatViewModel: ObservableObject {
                     + "I do not know `\(originalText)`.\n\(QueenCommandParser.helpText)"
             )
         }
+    }
+
+    /// Narrows each boundary path to the region the issue mentions, returning
+    /// one hint string per narrowed file. Shared by the `/brief` preview and
+    /// real delegation so both produce identical hints and emit
+    /// `queen.brief.narrowed` for every file that gets narrowed.
+    private static func narrowedHints(
+        for paths: [String],
+        from issueBody: String,
+        issueSlug: String
+    ) -> [String] {
+        var hints: [String] = []
+        let identifiers = ChatViewModel.identifiers(from: issueBody)
+        for path in paths {
+            let fullPath = "\(ProjectPaths.root)/\(path)"
+            guard FileManager.default.fileExists(atPath: fullPath),
+                  let source = try? String(contentsOfFile: fullPath, encoding: .utf8),
+                  source.components(separatedBy: "\n").count > QueenLocalisation.maxRegionWidth
+            else { continue }
+            if let range = QueenLocalisation.region(in: source, mentioning: identifiers) {
+                hints.append(
+                    "В \(path) читай только строки \(range.lowerBound)-\(range.upperBound)."
+                )
+                TriosLogBus.shared.info(
+                    .queen, "queen.brief.narrowed",
+                    "Narrowed \(path) to lines \(range.lowerBound)-\(range.upperBound)",
+                    [
+                        "issue": issueSlug,
+                        "file": path,
+                        "range": "\(range.lowerBound)-\(range.upperBound)",
+                    ]
+                )
+            }
+        }
+        return hints
     }
 
     private func listQueenAgents() async {
@@ -3344,35 +3368,13 @@ final class ChatViewModel: ObservableObject {
             skillBody = body
         }
         // Narrow each boundary path to the region the issue talks about
-        // before the brief goes out. A file handed whole at six thousand
-        // lines buries the signal — the worker burns context finding the
-        // function the issue names. Only when the file is larger than
-        // maxRegionWidth and a region is actually found; a small file or a
-        // miss is left as-is rather than narrowed to the wrong place (#1168).
+        // before the brief goes out. Shared with the `/brief` preview so
+        // both produce identical hints and emit `queen.brief.narrowed`.
         var narrowedHints: [String] = []
         if let issueBody = await fetchIssueBody(issue) {
-            let identifiers = ChatViewModel.identifiers(from: issueBody)
-            for path in task.ownedPaths {
-                let fullPath = "\(ProjectPaths.root)/\(path)"
-                guard FileManager.default.fileExists(atPath: fullPath),
-                      let source = try? String(contentsOfFile: fullPath, encoding: .utf8),
-                      source.components(separatedBy: "\n").count > QueenLocalisation.maxRegionWidth
-                else { continue }
-                if let range = QueenLocalisation.region(in: source, mentioning: identifiers) {
-                    narrowedHints.append(
-                        "В \(path) читай только строки \(range.lowerBound)-\(range.upperBound)."
-                    )
-                    TriosLogBus.shared.info(
-                        .queen, "queen.brief.narrowed",
-                        "Narrowed \(path) to lines \(range.lowerBound)-\(range.upperBound)",
-                        [
-                            "issue": issue.slug,
-                            "file": path,
-                            "range": "\(range.lowerBound)-\(range.upperBound)",
-                        ]
-                    )
-                }
-            }
+            narrowedHints = ChatViewModel.narrowedHints(
+                for: task.ownedPaths, from: issueBody, issueSlug: issue.slug
+            )
         }
         let brief = QueenBriefing.text(for: task, skillBody: skillBody)
             + (narrowedHints.isEmpty ? "" : "\n" + narrowedHints.joined(separator: "\n"))
