@@ -3177,10 +3177,33 @@ final class ChatViewModel: ObservableObject {
             let lineCount = source.components(separatedBy: "\n").count
                 - (source.hasSuffix("\n") ? 1 : 0)
             guard lineCount > QueenLocalisation.maxRegionWidth else { continue }
+            // Before asking QueenLocalisation to narrow, record what we are
+            // about to search for and where. Without this log, silence from
+            // region(in:mentioning:) is indistinguishable from "never tried"
+            // (#1177 criterion 2).
+            TriosLogBus.shared.info(
+                .queen, "queen.brief.localising",
+                "Localising in \(path) (\(lineCount) lines) with \(identifiers.count) identifier(s)",
+                [
+                    "issue": issueSlug,
+                    "file": path,
+                    "lines": String(lineCount),
+                    "identifiers": identifiers.joined(separator: " | "),
+                ]
+            )
             if let range = QueenLocalisation.region(in: source, mentioning: identifiers) {
                 hints.append(
                     "В \(path) читай только строки \(range.lowerBound)-\(range.upperBound)."
                 )
+                // Which identifier actually caused the hit? region() returns
+                // only the line range; scan the narrowed slice to name the
+                // identifier that matched (#1177 criterion 3).
+                let sourceLines = source.components(separatedBy: "\n")
+                let regionStart = max(0, range.lowerBound - 1)
+                let regionEnd = min(sourceLines.count, range.upperBound)
+                let matched = identifiers.first { id in
+                    sourceLines[regionStart..<regionEnd].contains { $0.contains(id) }
+                }
                 TriosLogBus.shared.info(
                     .queen, "queen.brief.narrowed",
                     "Narrowed \(path) to lines \(range.lowerBound)-\(range.upperBound)",
@@ -3188,6 +3211,21 @@ final class ChatViewModel: ObservableObject {
                         "issue": issueSlug,
                         "file": path,
                         "range": "\(range.lowerBound)-\(range.upperBound)",
+                        "matched": matched ?? "unknown",
+                    ]
+                )
+            } else {
+                // nil from region(): the identifiers were tried against this
+                // file but none landed. Recording them here keeps "tried and
+                // failed" separate from "never tried" (#1177 criterion 2).
+                TriosLogBus.shared.warn(
+                    .queen, "queen.brief.notNarrowed",
+                    "Could not narrow \(path) (\(lineCount) lines); tried \(identifiers.count) identifier(s)",
+                    [
+                        "issue": issueSlug,
+                        "file": path,
+                        "lines": String(lineCount),
+                        "identifiers": identifiers.joined(separator: " | "),
                     ]
                 )
             }
