@@ -25,8 +25,12 @@ enum QueenLocalisation {
 
     // MARK: - Public
 
-    /// Counts mentions of every identifier per declaration and returns the
-    /// range of the declaration with the most mentions (1-indexed).
+    /// Returns the range of the declaration that best matches the given
+    /// identifiers (1-indexed).
+    ///
+    /// When an identifier equals a declaration **name** in the file, that
+    /// declaration wins outright — an exact name beats any mention count.
+    /// Otherwise the declaration with the most identifier mentions wins.
     ///
     /// - Parameters:
     ///   - source: Swift source text.
@@ -49,6 +53,17 @@ enum QueenLocalisation {
         let masked = maskCommentsAndStrings(cleaned)
         let lines = masked.components(separatedBy: "\n")
         let depths = braceDepths(lines: lines)
+
+        // A declaration whose name matches one of the identifiers wins
+        // outright — an exact name is stronger evidence than any count.
+        // Density stays as the fallback when no name matches.
+        if let named = namedDeclaration(
+            in: lines,
+            depths: depths,
+            identifiers: identifiers
+        ) {
+            return named
+        }
 
         let mentionLines = allMentionLines(lines: lines, identifiers: identifiers)
         guard !mentionLines.isEmpty else { return nil }
@@ -296,5 +311,72 @@ enum QueenLocalisation {
         }
 
         return start...end
+    }
+
+    // MARK: - Name matching
+
+    /// Returns the 1-indexed range of the first declaration whose name
+    /// matches one of the identifiers, or `nil` when no name matches.
+    private static func namedDeclaration(
+        in lines: [String],
+        depths: [Int],
+        identifiers: [String]
+    ) -> ClosedRange<Int>? {
+        let idSet = Set(identifiers)
+        for (idx, line) in lines.enumerated() {
+            guard let name = declarationName(on: line) else { continue }
+            guard idSet.contains(name) else { continue }
+
+            // Found a name match — compute the full declaration range
+            // (keyword line through closing brace).
+            let startDepth = depths[idx]
+            var end = idx
+
+            // Walk forward through signature lines (same depth) until
+            // the body opens (depth increases), then through the body
+            // until the closing brace brings depth back down.
+            while end + 1 < depths.count, depths[end + 1] >= startDepth {
+                if depths[end + 1] > startDepth {
+                    end += 1
+                } else if depths[end] > startDepth {
+                    // Just left the body — stop.
+                    break
+                } else {
+                    // Still in the signature — keep scanning for `{`.
+                    // Bail out if we wander too far (no body found).
+                    if end - idx > 50 { break }
+                    end += 1
+                }
+            }
+
+            // If we never entered the body (e.g. protocol stub), trim back.
+            if depths[end] <= startDepth && end > idx {
+                end = idx
+            }
+
+            let raw = idx...end
+            let capped = capToWidth(raw, around: idx)
+            return (capped.lowerBound + 1)...(capped.upperBound + 1)
+        }
+        return nil
+    }
+
+    /// Extracts the name token from a declaration line.
+    /// Only `func` and `init` names qualify — `var`/`let` property names
+    /// (state, task, worker, …) are too common to win on name alone.
+    /// For `func foo()` → `foo`, for `init` → `init`.
+    private static func declarationName(on line: String) -> String? {
+        let nsLine = line as NSString
+        let fullRange = NSRange(location: 0, length: nsLine.length)
+        if let regex = try? NSRegularExpression(pattern: "\\bfunc\\s+([a-zA-Z_]\\w*)"),
+           let m = regex.firstMatch(in: line, range: fullRange),
+           m.numberOfRanges > 1
+        {
+            return nsLine.substring(with: m.range(at: 1))
+        }
+        if line.range(of: "\\binit\\b", options: .regularExpression) != nil {
+            return "init"
+        }
+        return nil
     }
 }
