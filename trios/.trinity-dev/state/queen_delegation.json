@@ -5,6 +5,7 @@
       "Пустой ответ приводит к повторному запросу — один раз, не в цикле.",
       "Проверка ломается, если пустой ответ снова становится неотличим от отсутствия вопроса."
     ],
+    "committedFiles" : 1,
     "conversationId" : "E3997FF7-CD42-4859-9DEA-FFFC83FD5B40",
     "createdAt" : "2026-08-05T15:21:34Z",
     "criterionVerdicts" : {
@@ -29,8 +30,8 @@
     "resumeAttempts" : 1,
     "state" : "running",
     "title" : "Пустой ответ ревьюера записывается как ноль вердиктов, без единого слова",
-    "toolCalls" : 37,
-    "updatedAt" : "2026-08-05T15:27:06Z",
+    "toolCalls" : 74,
+    "updatedAt" : "2026-08-05T15:27:19Z",
     "virtualBranch" : "queen\/1117",
     "worker" : "queen-swift"
   }
