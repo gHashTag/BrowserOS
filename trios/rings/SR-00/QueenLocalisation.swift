@@ -54,6 +54,19 @@ enum QueenLocalisation {
         let lines = masked.components(separatedBy: "\n")
         let depths = braceDepths(lines: lines)
 
+        // Dotted identifiers (word.word.word) in the unmasked source are the
+        // strongest localisation signal — stronger even than a name match —
+        // because a dotted key like "queen.review.verdicts" lives inside a
+        // string literal and is invisible to the masked density count.
+        if let dotted = dottedDeclaration(
+            source: cleaned,
+            lines: lines,
+            depths: depths,
+            identifiers: identifiers
+        ) {
+            return dotted
+        }
+
         // A declaration whose name matches one of the identifiers wins
         // outright — an exact name is stronger evidence than any count.
         // Density stays as the fallback when no name matches.
@@ -376,6 +389,50 @@ enum QueenLocalisation {
         }
         if line.range(of: "\\binit\\b", options: .regularExpression) != nil {
             return "init"
+        }
+        return nil
+    }
+
+    // MARK: - Dotted identifier search
+
+    /// Searches the **unmasked** source for dotted identifiers
+    /// (`word.word.word`) whose components overlap with the given
+    /// identifiers. When found, returns the enclosing declaration range.
+    ///
+    /// This is the strongest localisation signal — stronger than a
+    /// declaration-name match — because dotted keys like
+    /// `"queen.review.verdicts"` live inside string literals and are
+    /// invisible to the masked density count.
+    ///
+    /// Dotted names never contribute to the density count.
+    private static func dottedDeclaration(
+        source: String,
+        lines: [String],
+        depths: [Int],
+        identifiers: [String]
+    ) -> ClosedRange<Int>? {
+        let idSet = Set(identifiers)
+        let rawLines = source.components(separatedBy: "\n")
+        let pattern = "\\w+(\\.\\w+){2,}"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
+
+        for (idx, line) in rawLines.enumerated() {
+            let nsLine = line as NSString
+            let fullRange = NSRange(location: 0, length: nsLine.length)
+            guard let m = regex.firstMatch(in: line, range: fullRange) else { continue }
+
+            let dotted = nsLine.substring(with: m.range)
+            let components = Set(dotted.components(separatedBy: "."))
+            guard !components.isDisjoint(with: idSet) else { continue }
+
+            guard let raw = enclosingDeclaration(
+                hitLine: idx,
+                depths: depths,
+                lines: lines
+            ) else { continue }
+
+            let capped = capToWidth(raw, around: idx)
+            return (capped.lowerBound + 1)...(capped.upperBound + 1)
         }
         return nil
     }
