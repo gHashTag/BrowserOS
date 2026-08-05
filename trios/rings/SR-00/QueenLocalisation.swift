@@ -316,6 +316,15 @@ enum QueenLocalisation {
 
             let raw = idx...end
             let capped = capToWidth(raw, around: idx)
+
+            // Self-check: the first line of the returned range must
+            // still declare the name that was matched.  If capping or
+            // any other step shifted the start, the range points at
+            // the wrong function — silence it rather than mislead.
+            guard declarationName(on: lines[capped.lowerBound]) == name else {
+                return nil
+            }
+
             return (capped.lowerBound + 1)...(capped.upperBound + 1)
         }
         return nil
