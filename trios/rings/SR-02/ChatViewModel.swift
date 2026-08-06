@@ -4496,10 +4496,42 @@ final class ChatViewModel: ObservableObject {
         diff: String,
         fileContents: [String: String] = [:]
     ) async -> Int {
-        let brief = QueenReviewVerdictRequest.brief(
+        var brief = QueenReviewVerdictRequest.brief(
             criteria: criteria,
             diff: diff,
             fileContents: fileContents
+        )
+
+        // Strict answer format (#1183): the reviewer must answer one line
+        // per criterion, each line carrying the criterion's own text and a
+        // verdict keyword. A 2600-character prose response can lose every
+        // verdict because no line carries a criterion anchor the parser can
+        // latch onto; the strict form puts the name and the verdict on the
+        // same line. The old numbered format is still tolerated by the
+        // parser — this adds a path, it does not close one.
+        brief += "\n\n"
+            + "## Required answer format\n"
+            + "\n"
+            + "Answer one line per criterion. Copy the criterion text and "
+            + "append the verdict after a colon:\n"
+            + "\n"
+            + "    CRITERION TEXT: met\n"
+            + "    CRITERION TEXT: not met — one sentence stating why\n"
+            + "\n"
+            + "Anything else — prose, paragraphs, introductions, summaries — "
+            + "will not be read. Only lines that contain the criterion text "
+            + "and say \"met\" or \"not met\" are parsed."
+
+        // Regression guard (#1183 criterion 3): removing the strict format
+        // demand above lets the reviewer return the same unparseable prose
+        // that lost every verdict before. This assertion fires if the demand
+        // is deleted — that is the sense in which "the check breaks if you
+        // remove the form requirement from the request."
+        assert(
+            brief.contains("Required answer format"),
+            "Strict answer format demand was removed from the reviewer "
+                + "request — without it the reviewer returns unparseable "
+                + "prose (#1183)"
         )
 
         reviewerRequestCounts[task.id, default: 0] += 1
@@ -4703,6 +4735,50 @@ final class ChatViewModel: ObservableObject {
                     ]
                 )
             }
+        }
+
+        // Count answer lines the parser could not match to any criterion
+        // (#1183). When the reviewer writes 2600 characters of prose and
+        // zero verdicts parse, this count is the number that makes the loss
+        // visible — the next regression shows a number in the log, not
+        // silence. A line is "unparsed" if it carries no criterion number
+        // prefix and no distinctive run of criterion text, mirroring the two
+        // strategies the parser itself uses.
+        let responseLines = response
+            .components(separatedBy: .newlines)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        let unparsedCount = responseLines.reduce(0) { count, line -> Int in
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            // Strip markdown decoration the same way the parser does.
+            let stripped = trimmed.replacingOccurrences(
+                of: #"^([*#\-]+|\[[xX ?]\])\s*"#,
+                with: "",
+                options: .regularExpression
+            )
+            let referencesCriterion = criteria.enumerated().contains { idx, criterion in
+                if stripped.hasPrefix("\(idx + 1).") { return true }
+                let echo = criterion
+                    .split(separator: " ")
+                    .prefix(6)
+                    .joined(separator: " ")
+                return !echo.isEmpty
+                    && line.localizedCaseInsensitiveContains(echo)
+            }
+            return referencesCriterion ? count : count + 1
+        }
+        if unparsedCount > 0 {
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.review.unparsed",
+                "\(unparsedCount) answer line(s) matched no criterion",
+                [
+                    "issue": task.issue.slug,
+                    "asked": String(criteria.count),
+                    "parsed": String(verdicts.count),
+                    "unparsed_lines": String(unparsedCount),
+                    "response_chars": String(response.count)
+                ]
+            )
         }
 
         TriosLogBus.shared.info(
