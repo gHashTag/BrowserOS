@@ -81,6 +81,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // self-improvement audit loop. It survives chat switches and panel close.
             await QueenBackgroundService.shared.start()
             await runDelegationSelfTestIfRequested()
+            // When TRIOS_E2E_DELEGATE is absent the self-test returns at its
+            // first guard and runE2EQueenCommand never runs. Call it here for
+            // that case; the existing call inside the self-test handles the rest.
+            let e2eEnv = ProcessInfo.processInfo.environment
+            if e2eEnv["TRIOS_E2E_DELEGATE"]?.isEmpty ?? true {
+                await runE2EQueenCommand(environment: e2eEnv)
+            }
             await runAcceptanceGateSelfTestIfRequested()
             await runQueenReportSelfTestIfRequested()
         }
