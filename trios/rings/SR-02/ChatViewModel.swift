@@ -5597,16 +5597,16 @@ final class ChatViewModel: ObservableObject {
         }.value
 
         guard !ghPath.isEmpty else {
-            await postQueenNotice(
-                SystemNoticeClassifier.warningMarker
-                    + "Cannot choose: `gh` is not installed or not on PATH. "
-                    + "Install the GitHub CLI to read open sub-issues of epic #1090."
-            )
             TriosLogBus.shared.error(
                 .queen,
                 "queen.choose",
                 "gh unavailable — cannot read sub-issues",
                 ["epic": "gHashTag/trios#1090", "gh": "not found", "chosen": "(none)"]
+            )
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "Cannot choose: `gh` is not installed or not on PATH. "
+                    + "Install the GitHub CLI to read open sub-issues of epic #1090."
             )
             return
         }
@@ -5646,30 +5646,30 @@ final class ChatViewModel: ObservableObject {
         // failed (network error, auth error, rate limit) — that is different
         // from "there are no open sub-issues."
         if subIssues.isEmpty && !raw.isEmpty {
-            await postQueenNotice(
-                SystemNoticeClassifier.warningMarker
-                    + "Cannot choose: `gh` ran but returned unexpected output "
-                    + "(network, auth, or rate limit).\n" + raw
-            )
             TriosLogBus.shared.error(
                 .queen,
                 "queen.choose",
                 "gh returned unexpected output",
                 ["epic": "gHashTag/trios#1090", "ghOutput": raw, "chosen": "(none)"]
             )
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "Cannot choose: `gh` ran but returned unexpected output "
+                    + "(network, auth, or rate limit).\n" + raw
+            )
             return
         }
 
         guard !subIssues.isEmpty else {
-            await postQueenNotice(
-                SystemNoticeClassifier.infoMarker
-                    + "No open sub-issues under gHashTag/trios#1090. The hive is empty."
-            )
             TriosLogBus.shared.info(
                 .queen,
                 "queen.choose",
                 "Nothing to choose — no open sub-issues on #1090",
                 ["epic": "gHashTag/trios#1090", "considered": "0", "chosen": "(none)"]
+            )
+            await postQueenNotice(
+                SystemNoticeClassifier.infoMarker
+                    + "No open sub-issues under gHashTag/trios#1090. The hive is empty."
             )
             return
         }
@@ -5680,13 +5680,6 @@ final class ChatViewModel: ObservableObject {
 
         guard !actionable.isEmpty else {
             let names = subIssues.map { "#\($0.number)" }.joined(separator: ", ")
-            await postQueenNotice(
-                SystemNoticeClassifier.infoMarker
-                    + "\(subIssues.count) open sub-issue\(subIssues.count == 1 ? "" : "s") "
-                    + "under #1090, but \(inFlightNumbers.count) "
-                    + "\(inFlightNumbers.count == 1 ? "is" : "are") in flight. "
-                    + "Nothing to act on until a worker reports back:\n" + names
-            )
             TriosLogBus.shared.info(
                 .queen,
                 "queen.choose",
@@ -5696,6 +5689,13 @@ final class ChatViewModel: ObservableObject {
                     "inFlight": String(inFlightNumbers.count),
                     "chosen": "(none)",
                 ]
+            )
+            await postQueenNotice(
+                SystemNoticeClassifier.infoMarker
+                    + "\(subIssues.count) open sub-issue\(subIssues.count == 1 ? "" : "s") "
+                    + "under #1090, but \(inFlightNumbers.count) "
+                    + "\(inFlightNumbers.count == 1 ? "is" : "are") in flight. "
+                    + "Nothing to act on until a worker reports back:\n" + names
             )
             return
         }
@@ -5748,13 +5748,6 @@ final class ChatViewModel: ObservableObject {
             reason = "smallest boundary: \(chosen.fileCount) file\(chosen.fileCount == 1 ? "" : "s") under Границы; ties break by lowest number."
         }
 
-        await postQueenNotice(
-            SystemNoticeClassifier.successMarker
-                + "Choose gHashTag/trios#\(chosen.number): \(chosen.title). "
-                + reason
-                + " Considered \(subIssues.count) open sub-issue\(subIssues.count == 1 ? "" : "s"), "
-                + "\(inFlightNumbers.count) in flight."
-        )
         TriosLogBus.shared.info(
             .queen,
             "queen.choose",
@@ -5767,6 +5760,13 @@ final class ChatViewModel: ObservableObject {
                 "fileCount": chosen.fileCount == Int.max ? "none" : String(chosen.fileCount),
                 "reason": reason,
             ]
+        )
+        await postQueenNotice(
+            SystemNoticeClassifier.successMarker
+                + "Choose gHashTag/trios#\(chosen.number): \(chosen.title). "
+                + reason
+                + " Considered \(subIssues.count) open sub-issue\(subIssues.count == 1 ? "" : "s"), "
+                + "\(inFlightNumbers.count) in flight."
         )
 
         // ── 6. Delegate if --start was given ──────────────────────
