@@ -6218,7 +6218,7 @@ final class ChatViewModel: ObservableObject {
         do {
             let pr = try await GitHubAPIClient().createPR(
                 repo: prRepo,
-                title: task.title,
+                title: QueenDelegationPolicy.conventionalPRTitle(for: task),
                 body: "For \(issue.url)\n\nOpened by the Queen for \(task.worker).",
                 head: branch,
                 base: prBase
