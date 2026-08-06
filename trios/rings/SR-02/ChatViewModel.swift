@@ -3656,7 +3656,7 @@ final class ChatViewModel: ObservableObject {
                     "No active tasks at launch — choosing next open issue to start",
                     [:]
                 )
-                await self.chooseNextOpenIssue(startAfterChoosing: true)
+                await self.chooseNextOpenIssue(startAfterChoosing: false, isLaunchBootstrap: true)
             }
         }
     }
@@ -5585,7 +5585,7 @@ final class ChatViewModel: ObservableObject {
     ///
     /// The choice is logged as a separate event so it can be audited: a
     /// decision that is not recorded might as well not have been made.
-    private func chooseNextOpenIssue(startAfterChoosing: Bool = false) async {
+    private func chooseNextOpenIssue(startAfterChoosing: Bool = false, isLaunchBootstrap: Bool = false) async {
         // ── 1. Locate gh ───────────────────────────────────────────
         let ghPath = await Task.detached(priority: .utility) {
             QueenStatusViewModel.runProcess(
@@ -5709,6 +5709,7 @@ final class ChatViewModel: ObservableObject {
             let title: String
             let fileCount: Int
             let paths: [String]?
+            let body: String
         }
 
         var scored: [ScoredIssue] = []
@@ -5731,7 +5732,8 @@ final class ChatViewModel: ObservableObject {
                 number: issue.number,
                 title: issue.title,
                 fileCount: ChatViewModel.countBoundaryFiles(in: body),
-                paths: ChatViewModel.boundaryPaths(from: body)
+                paths: ChatViewModel.boundaryPaths(from: body),
+                body: body
             ))
         }
 
@@ -5768,6 +5770,37 @@ final class ChatViewModel: ObservableObject {
                 + " Considered \(subIssues.count) open sub-issue\(subIssues.count == 1 ? "" : "s"), "
                 + "\(inFlightNumbers.count) in flight."
         )
+
+        // ── 6a. Launch: post acceptance criteria and approve command ─
+        // When the bootstrap at launch chooses without starting, post
+        // the chosen issue's acceptance criteria, file boundary, and
+        // the single approve command so the human can review and start
+        // in one step — without tripping the approval gate's refusal.
+        if isLaunchBootstrap && !startAfterChoosing {
+            let criteriaList = QueenTaskSpec.criteriaFromIssue(body: chosen.body)
+            let criteriaBlock: String
+            if criteriaList.isEmpty {
+                criteriaBlock = "(no «Готово, когда» / «Acceptance criteria» section found in the issue body)"
+            } else {
+                criteriaBlock = criteriaList.map { "- " + $0 }.joined(separator: "\n")
+            }
+            let boundary: String
+            if let paths = chosen.paths, !paths.isEmpty {
+                boundary = paths.joined(separator: "\n")
+            } else {
+                boundary = "(no Границы section)"
+            }
+            await postQueenNotice(
+                SystemNoticeClassifier.infoMarker
+                    + "Launch proposal — gHashTag/trios#\(chosen.number): \(chosen.title)\n"
+                    + "## Acceptance criteria\n"
+                    + criteriaBlock + "\n\n"
+                    + "## File boundary\n"
+                    + boundary + "\n\n"
+                    + "To start: `/delegate gHashTag/trios#\(chosen.number)`"
+            )
+            return
+        }
 
         // ── 6. Delegate if --start was given ──────────────────────
         // `/choose` names and stops. `/choose --start` names then opens
