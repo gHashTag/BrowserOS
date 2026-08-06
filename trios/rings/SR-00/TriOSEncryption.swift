@@ -42,6 +42,8 @@ final class TriOSEncryption {
     private let keyName: String?
     private let lock = NSLock()
     private var cachedKey: SymmetricKey?
+    private var readInFlight = false
+    private var unavailableSince: Date?
 
     /// Creates an encryption helper with a fully specified key file URL.
     /// This path is used for direct file-based access and for migrating legacy
@@ -132,14 +134,35 @@ final class TriOSEncryption {
             lock.unlock()
             return key
         }
+
+        // At most one keychain read in flight at a time.  In the shipped
+        // (non-test) app the keychain read can hang indefinitely; without
+        // this guard every cache-miss call dispatches another read that
+        // never returns, exhausting the GCD thread pool.
+        if readInFlight {
+            lock.unlock()
+            throw TriOSEncryptionError.keyUnavailableLocked
+        }
+
+        // After a read has timed out the key is effectively unavailable.
+        // Stop spawning new reads for a cool-down period so the pool can
+        // drain instead of filling with blocked keychain work.
+        if let unavailableSince,
+           Date().timeIntervalSince(unavailableSince) < 60
+        {
+            lock.unlock()
+            throw TriOSEncryptionError.keyUnavailableLocked
+        }
+
+        unavailableSince = nil
+        readInFlight = true
         lock.unlock()
 
-        // Always perform the keychain read on a background queue.  The
-        // caller waits for it with a bounded timeout (~2 s) instead of
-        // refusing on the main thread outright.  When the read answers
-        // in time the key is cached and returned exactly as before;
-        // when it does not, we throw keyUnavailableLocked and leave the
-        // background read running so it still caches for later callers.
+        // Perform the keychain read on a background queue.  The caller
+        // waits with a bounded timeout (~2 s).  When the read answers in
+        // time the key is cached and returned; when it does not, we throw
+        // keyUnavailableLocked and leave the background read running so it
+        // can still cache for later callers — but only this one read.
         let semaphore = DispatchSemaphore(value: 0)
         var result: SymmetricKey?
 
@@ -149,14 +172,15 @@ final class TriOSEncryption {
                 return
             }
             let key = try? self.loadOrCreateSymmetricKey()
+            self.lock.lock()
             if let key {
-                self.lock.lock()
                 if self.cachedKey == nil {
                     self.cachedKey = key
                 }
-                self.lock.unlock()
                 result = key
             }
+            self.readInFlight = false
+            self.lock.unlock()
             semaphore.signal()
         }
 
@@ -164,9 +188,12 @@ final class TriOSEncryption {
             return key
         }
 
-        // Timed out (or the read threw): the background work is still
-        // in flight and will cache the key when it lands.  Never mint a
-        // replacement key on this path.
+        // Timed out: the background read is still in flight (and may never
+        // return).  Record the cool-down timestamp so repeated callers don't
+        // pile up blocked reads.  Never mint a replacement key on this path.
+        lock.lock()
+        unavailableSince = Date()
+        lock.unlock()
         throw TriOSEncryptionError.keyUnavailableLocked
     }
 
