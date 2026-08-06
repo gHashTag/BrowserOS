@@ -263,49 +263,45 @@ final class ChatViewModel: ObservableObject {
                 return body
             }
 
-            // Fallback: gh CLI carries its own auth and works in the
-            // shipped app where the Keychain token is unavailable.
-            let ghPath = await Task.detached(priority: .utility) {
-                Self.resolveGhPath()
-            }.value
+            // Fallback: plain HTTPS GET — the repository is public, so
+            // no token is required.  Replaces the gh CLI subprocess that
+            // added ~38 s to scoring and broke Finder launches.
+            var req = URLRequest(
+                url: URL(string: "https://api.github.com/repos/\(issue.owner)/\(issue.repo)/issues/\(issue.number)")!
+            )
+            req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
 
-            guard !ghPath.isEmpty else {
+            let (data, response): (Data, URLResponse)
+            do {
+                (data, response) = try await URLSession.shared.data(for: req)
+            } catch {
                 TriosLogBus.shared.warn(
                     .queen, "queen.fetchIssueBody",
-                    "Could not read issue contract: API empty, gh not found",
+                    "Could not read issue contract: API empty, HTTPS GET failed: \(error.localizedDescription)",
                     ["issue": "\(issue.owner)/\(issue.repo)#\(issue.number)", "source": "none"]
                 )
                 return nil
             }
 
-            let ghBody = await Task.detached(priority: .utility) {
-                QueenStatusViewModel.runProcess(
-                    ghPath,
-                    arguments: [
-                        "issue", "view", String(issue.number),
-                        "--repo", "\(issue.owner)/\(issue.repo)",
-                        "--json", "body",
-                        "-q", ".body",
-                    ],
-                    workDir: ProjectPaths.root,
-                    timeout: 10,
-                )
-            }.value
-
-            if !ghBody.isEmpty {
-                TriosLogBus.shared.info(
-                    .queen, "queen.fetchIssueBody",
-                    "Issue contract read via gh fallback",
-                    ["issue": "\(issue.owner)/\(issue.repo)#\(issue.number)", "source": "gh"]
-                )
-            } else {
+            let httpCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            guard (200...299).contains(httpCode),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let body = json["body"] as? String,
+                  !body.isEmpty else {
                 TriosLogBus.shared.warn(
                     .queen, "queen.fetchIssueBody",
-                    "Could not read issue contract from API or gh",
-                    ["issue": "\(issue.owner)/\(issue.repo)#\(issue.number)", "source": "none"]
+                    "Could not read issue contract from HTTPS GET (HTTP \(httpCode))",
+                    ["issue": "\(issue.owner)/\(issue.repo)#\(issue.number)", "source": "none", "httpStatus": String(httpCode)]
                 )
+                return nil
             }
-            return ghBody.isEmpty ? nil : ghBody
+
+            TriosLogBus.shared.info(
+                .queen, "queen.fetchIssueBody",
+                "Issue contract read via HTTPS GET",
+                ["issue": "\(issue.owner)/\(issue.repo)#\(issue.number)", "source": "https"]
+            )
+            return body
         }
         NSLog("ChatViewModel.init starting")
         self.transport = transport
@@ -5694,74 +5690,73 @@ final class ChatViewModel: ObservableObject {
     /// The choice is logged as a separate event so it can be audited: a
     /// decision that is not recorded might as well not have been made.
     private func chooseNextOpenIssue(startAfterChoosing: Bool = false, isLaunchBootstrap: Bool = false) async {
-        // ── 1. Locate gh ───────────────────────────────────────────
-        let ghPath = await Task.detached(priority: .utility) {
-            Self.resolveGhPath()
-        }.value
+        // ── 1. Read open sub-issues of epic #1090 via GitHub REST API ──
+        // The repo is public, so no token is needed.  The timeline endpoint
+        // returns cross-referenced events; those whose source issue state is
+        // "open" are the open sub-issues of the epic.
+        var timelineRequest = URLRequest(
+            url: URL(string: "https://api.github.com/repos/gHashTag/trios/issues/1090/timeline?per_page=100")!
+        )
+        timelineRequest.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
 
-        guard !ghPath.isEmpty else {
+        let (timelineData, timelineResponse): (Data, URLResponse)
+        do {
+            (timelineData, timelineResponse) = try await URLSession.shared.data(for: timelineRequest)
+        } catch {
             TriosLogBus.shared.error(
                 .queen,
                 "queen.choose",
-                "gh unavailable — cannot read sub-issues",
-                ["epic": "gHashTag/trios#1090", "gh": "not found", "chosen": "(none)"]
+                "Timeline request failed: \(error.localizedDescription)",
+                ["epic": "gHashTag/trios#1090", "chosen": "(none)"]
             )
             await postQueenNotice(
                 SystemNoticeClassifier.warningMarker
-                    + "Cannot choose: `gh` is not installed or not on PATH. "
-                    + "Install the GitHub CLI to read open sub-issues of epic #1090."
+                    + "Cannot choose: failed to read sub-issues of epic #1090 "
+                    + "(\(error.localizedDescription))."
             )
             return
         }
 
-        // ── 2. Read open sub-issues of epic #1090 through gh ──────
-        // The timeline CROSS_REFERENCED_EVENT entries are the sub-issues the
-        // epic links to. We filter for OPEN state in jq and emit "num\ttitle".
-        let query = "{ repository(owner: \"gHashTag\", name: \"trios\") { issue(number: 1090) { timelineItems(first: 100, itemTypes: CROSS_REFERENCED_EVENT) { nodes { ... on CrossReferencedEvent { source { ... on Issue { number title state } } } } } } } }"
-        let raw = await Task.detached(priority: .utility) {
-            QueenStatusViewModel.runProcess(
-                ghPath,
-                arguments: [
-                    "api", "graphql",
-                    "-f", "query=\(query)",
-                    "--jq", ".data.repository.issue.timelineItems.nodes[].source | select(.state == \"OPEN\") | \"\\(.number)\\t\\(.title)\""
-                ],
-                workDir: ProjectPaths.root,
-                timeout: 15
+        guard let httpResp = timelineResponse as? HTTPURLResponse,
+              (200...299).contains(httpResp.statusCode) else {
+            let code = (timelineResponse as? HTTPURLResponse)?.statusCode ?? -1
+            TriosLogBus.shared.error(
+                .queen,
+                "queen.choose",
+                "Timeline request returned HTTP \(code)",
+                ["epic": "gHashTag/trios#1090", "httpStatus": String(code), "chosen": "(none)"]
             )
-        }.value
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "Cannot choose: timeline request for epic #1090 returned HTTP \(code)."
+            )
+            return
+        }
 
-        // ── 3. Parse: each line is "number\ttitle" ─────────────────
+        // ── 2. Parse cross-referenced events for open sub-issues ───────
         var seen = Set<Int>()
         var subIssues: [(number: Int, title: String)] = []
-        for line in raw.split(separator: "\n", omittingEmptySubsequences: true) {
-            let parts = line.split(separator: "\t", maxSplits: 1).map(String.init)
-            guard parts.count == 2,
-                  let num = Int(parts[0].trimmingCharacters(in: .whitespaces)) else {
-                continue
-            }
-            if seen.insert(num).inserted {
-                subIssues.append((num, parts[1].trimmingCharacters(in: .whitespaces)))
+
+        if let events = try? JSONSerialization.jsonObject(with: timelineData) as? [[String: Any]] {
+            for event in events {
+                guard event["event"] as? String == "cross-referenced" else { continue }
+                guard let source = event["source"] as? [String: Any],
+                      let issue = source["issue"] as? [String: Any] else { continue }
+                guard issue["state"] as? String == "open" else { continue }
+                guard let number = issue["number"] as? Int else { continue }
+                let title = issue["title"] as? String ?? ""
+                if seen.insert(number).inserted {
+                    subIssues.append((number, title))
+                }
             }
         }
 
-        // If gh produced output but none of it parsed, the API call itself
-        // failed (network error, auth error, rate limit) — that is different
-        // from "there are no open sub-issues."
-        if subIssues.isEmpty && !raw.isEmpty {
-            TriosLogBus.shared.error(
-                .queen,
-                "queen.choose",
-                "gh returned unexpected output",
-                ["epic": "gHashTag/trios#1090", "ghOutput": raw, "chosen": "(none)"]
-            )
-            await postQueenNotice(
-                SystemNoticeClassifier.warningMarker
-                    + "Cannot choose: `gh` ran but returned unexpected output "
-                    + "(network, auth, or rate limit).\n" + raw
-            )
-            return
-        }
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.choose",
+            "Read \(subIssues.count) open sub-issue\(subIssues.count == 1 ? "" : "s") from #1090 timeline",
+            ["epic": "gHashTag/trios#1090", "count": String(subIssues.count)]
+        )
 
         guard !subIssues.isEmpty else {
             TriosLogBus.shared.info(
@@ -5804,6 +5799,10 @@ final class ChatViewModel: ObservableObject {
         }
 
         // ── 5. Score by boundary size, then issue number ───────────
+        // gh is still used here to read individual issue bodies.
+        let ghPath = await Task.detached(priority: .utility) {
+            Self.resolveGhPath()
+        }.value
         // Fewest files in Границы wins; ties break by lowest number.
         // A directory path (trailing /) counts as 9999 — it is a
         // region, not a boundary.  No Границы section → Int.max (last).
