@@ -4541,3 +4541,34 @@ The circle did not finish this time — the worker failed at 23:35 and acceptanc
 skipped with *state is failed, not awaitingReview*, which is the right refusal
 for a run that died. So the gap is closed and observable, and the pass it was
 meant to unblock still has not run to the end.
+
+## Sixteen cycles of "the app does not survive a long run" was my own assert
+
+Five crash reports in a day, every one the same:
+
+    EXC_BREAKPOINT (SIGTRAP)
+    _assertionFailure
+      ← acceptanceBlockReasonDistinguishingEmptyAnswers
+      ← autoAcceptIfUnambiguous
+      ← handleWorkerFinished
+
+Not memory, not a deliberate exit — a Swift trap. And the trap is a guard I
+wrote myself, working on #1117 and #1165:
+
+    assert(askedSet.allSatisfy { task.criterionVerdicts[$0] == nil })
+
+It fires when the reviewer answers *after* having been silent: the criterion
+went into `askedButUnanswered`, the retry brought a verdict, and nobody removed
+it from the set. So the guard kills the process on the retry succeeding — on
+precisely the behaviour the retry exists to produce. Every run that ended
+mid-work for sixteen cycles was this.
+
+Fixed both halves: the verdict now clears the entry, and the asserts are loud
+log lines instead of a trap. A supervisor that kills itself over a broken
+invariant takes the bee's work with it, which is a worse outcome than saying so
+and carrying on.
+
+Proven by counting: five crashes with that signature before, and a full run
+after with no new report at all.
+
+I spent sixteen cycles calling this "the environment".

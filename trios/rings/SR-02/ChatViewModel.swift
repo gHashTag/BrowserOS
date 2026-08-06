@@ -4816,38 +4816,58 @@ final class ChatViewModel: ObservableObject {
         let askedNoAnswer = notDeclined.filter { askedSet.contains($0.criterion) }
         let neverAsked = notDeclined.filter { !askedSet.contains($0.criterion) }
 
-        // Regression guard: a criterion tracked as asked-but-unanswered
-        // must not have a recorded verdict. The check uses askedSet — the
-        // source of truth — not askedNoAnswer, which is a subset of
-        // unchecked and whose verdicts are nil by definition. Checking
-        // askedNoAnswer was a tautology that could never fire; checking
-        // askedSet catches criteria that were given a verdict after the
-        // empty response, which means the cleanup in
-        // requestReviewerVerdicts or /verify did not run (#1117).
-        assert(
-            askedSet.allSatisfy { task.criterionVerdicts[$0] == nil },
-            "askedButUnanswered contains a criterion that now has a verdict — "
-            + "tracking is stale; an empty answer may be indistinguishable "
-            + "from a real verdict"
-        )
+        // Cleanup (#1182): when a reviewer answers after being silent —
+        // exactly the retry path — a criterion tracked as
+        // asked-but-unanswered now has a verdict but was never removed
+        // from the tracking set. The cleanup was supposed to run in
+        // requestReviewerVerdicts or /verify (#1117), but when it
+        // doesn't, the stale entry trips the regression guard and kills
+        // the debug build. Remove the stale criterion here and log the
+        // event so the tracking stays honest without crashing the
+        // supervisor over a bookkeeping lapse.
+        let staleAsked = askedSet.filter { task.criterionVerdicts[$0] != nil }
+        if !staleAsked.isEmpty {
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.acceptance.asked_stale_verdict",
+                "askedButUnanswered has criteria that now have verdicts — removing stale entries",
+                ["taskId": task.id.uuidString, "criteria": Array(staleAsked).joined(separator: ", ")]
+            )
+            if var updated = askedButUnanswered[task.id] {
+                updated.subtract(staleAsked)
+                askedButUnanswered[task.id] = updated
+            }
+        }
+
+        let staleDeclined = declinedSet.filter { task.criterionVerdicts[$0] != nil }
+        if !staleDeclined.isEmpty {
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.acceptance.declined_stale_verdict",
+                "declinedNoDiff has criteria that now have verdicts — removing stale entries",
+                ["taskId": task.id.uuidString, "criteria": Array(staleDeclined).joined(separator: ", ")]
+            )
+            if var updated = declinedNoDiff[task.id] {
+                updated.subtract(staleDeclined)
+                declinedNoDiff[task.id] = updated
+            }
+        }
 
         // Regression guard (#1165 criterion 5): declinedNoDiff and
         // askedButUnanswered must not overlap. If a criterion appears in
         // both, the third state (reviewer declined, no diff) has been
         // merged with the second (asked but no answer) — the distinction
-        // this function exists to maintain is gone.
-        assert(
-            declinedSet.isDisjoint(with: askedSet),
-            "declinedNoDiff and askedButUnanswered overlap — "
-            + "the third state (no diff) is merged with asked-but-unanswered "
-            + "(#1165 regression)"
-        )
-        assert(
-            declinedSet.allSatisfy { task.criterionVerdicts[$0] == nil },
-            "declinedNoDiff contains a criterion that now has a verdict — "
-            + "tracking is stale; a declined review may be indistinguishable "
-            + "from a real verdict"
-        )
+        // this function exists to maintain is gone. Logged, not
+        // asserted: a bookkeeping lapse must not kill the supervisor and
+        // lose the work in progress (#1182).
+        if !declinedSet.isDisjoint(with: askedSet) {
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.acceptance.declined_asked_overlap",
+                "declinedNoDiff and askedButUnanswered overlap — the third state (no diff) is merged with asked-but-unanswered (#1165 regression)",
+                ["taskId": task.id.uuidString, "overlap": Array(declinedSet.intersection(askedSet)).joined(separator: ", ")]
+            )
+        }
 
         var parts: [String] = []
 
