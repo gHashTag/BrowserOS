@@ -4599,3 +4599,28 @@ two more full circles — the assert removal holds. And
 `queen.acceptance.asked_stale_verdict` appeared in the log: that is the exact
 invariant that used to kill the process, firing in the wild and being written
 down instead.
+
+## The reviewer had been handed placeholders instead of code
+
+Reading its actual answer settled three passes of guessing at the parser:
+
+    «The file contents provided are empty placeholders
+     ("no criteria names found to search for in this file"),
+     so I can only work from the diff.»
+
+It was not silent, and it was not ignoring the format. It had no code. The
+assembler looked for criteria names in the file, found none, and sent a
+placeholder — so the reviewer did detective work on the diff and answered in
+narrative, which is what the parser kept failing to read. Last pass I demanded a
+stricter format from it: treating the symptom, since nothing can answer in one
+line about a thing it was not shown.
+
+Now a file with no name match shows its narrowed region, or its first three
+hundred lines saying so, and a placeholder is kept only for a file that is not
+there. Measured across four runs:
+
+    parsed 0 of 3  →  1 of 3  →  2 of 3  →  3 of 3
+
+Three of three, first time. Acceptance still refuses — #1117's work was finished
+three passes ago so there are no committed files — and no new crash report
+through two more circles.
