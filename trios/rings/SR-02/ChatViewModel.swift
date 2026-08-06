@@ -3610,6 +3610,38 @@ final class ChatViewModel: ObservableObject {
             delegationRegistry.pruneArchive()
         }
         scheduler.start()
+
+        // Orphans from a previous session died with the process, but their
+        // edits live on in the shared working tree with no branch to carry
+        // them. The registry gathered these at load; settle each one so the
+        // work is attributed rather than lost. The local list is drained as
+        // each task is processed so the settlement runs exactly once.
+        let launchOrphans = delegationRegistry.orphansReconciledAtLaunch
+        if !launchOrphans.isEmpty {
+            Task { [weak self] in
+                guard let self else { return }
+                var remaining = launchOrphans
+                var filesSettled = 0
+                let taskCount = remaining.count
+                while let task = remaining.popLast() {
+                    let changed = await QueenBranchCommitter.changedPaths(
+                        since: self.workerBaselineTrees[task.conversationId],
+                        ownedPaths: task.ownedPaths
+                    )
+                    filesSettled += changed.count
+                    _ = await self.settleFailedWorkerEdits(
+                        task: task,
+                        reason: "did not survive a restart"
+                    )
+                }
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.launch.orphans.settled",
+                    "Settled \(taskCount) orphaned task(s) from restart; \(filesSettled) file(s) attributed",
+                    ["tasks": "\(taskCount)", "files": "\(filesSettled)"]
+                )
+            }
+        }
     }
 
     /// Settles a dead worker's edits so the shared tree is not left with
