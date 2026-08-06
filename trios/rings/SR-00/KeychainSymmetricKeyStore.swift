@@ -79,6 +79,9 @@ enum KeychainSymmetricKeyStore {
             }
             return SymmetricKey(data: data)
         }
+        if KeychainSecrets.isLaunching {
+            return nil
+        }
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

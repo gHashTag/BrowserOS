@@ -1135,26 +1135,59 @@ final class ModelConfigurationStore: ObservableObject {
         isCheckingHealth = true
         defer { isCheckingHealth = false }
         let models = availableModels
+        let provider = selectedProvider
+        let url = baseURL
+        let environment = self.environment
+        let healthService = self.healthService
         var newUnhealthy: Set<ModelEndpointTuple> = []
         var newHealthy: Set<ModelEndpointTuple> = []
-        await withTaskGroup(of: (ModelEndpointTuple, ModelHealthResult).self) { group in
-            for model in models {
-                let tuple = ModelEndpointTuple(provider: selectedProvider, baseURL: baseURL, model: model)
-                group.addTask {
-                    let result = await self.healthStatus(for: model)
-                    return (tuple, result)
+        // Walk the models on a background queue so per-model credential
+        // reads never block the main actor. Hop back only to publish.
+        // Read the cheap main-actor-bound values up front so the
+        // keychain-backed read is the only credential access left
+        // inside the detached task.
+        let configKey = Self.apiKeyFromConfigFile(for: provider)
+        let envVar = Self.providerEnvironmentKey(provider)
+        let outcomes = await Task.detached {
+            let resolvedKey: String = {
+                if let keychain = ModelCredentialStore.read(for: provider), !keychain.isEmpty {
+                    return keychain
                 }
+                if let fileKey = configKey, !fileKey.isEmpty {
+                    return fileKey
+                }
+                return environment[envVar] ?? ""
+            }()
+            let apiKey: String? = resolvedKey.isEmpty ? nil : resolvedKey
+            return await withTaskGroup(of: (ModelEndpointTuple, ModelHealthResult).self) { group in
+                for model in models {
+                    let tuple = ModelEndpointTuple(provider: provider, baseURL: url, model: model)
+                    group.addTask {
+                        let result = await healthService.probe(
+                            model: model,
+                            provider: provider,
+                            baseURL: url,
+                            apiKey: apiKey
+                        )
+                        return (tuple, result)
+                    }
+                }
+                var collected: [(ModelEndpointTuple, ModelHealthResult)] = []
+                for await item in group {
+                    collected.append(item)
+                }
+                return collected
             }
-            for await (tuple, result) in group {
-                await recordHealthOutcome(model: tuple.model, result: result)
-                switch result.health {
-                case .unavailable:
-                    newUnhealthy.insert(tuple)
-                case .healthy:
-                    newHealthy.insert(tuple)
-                case .unknown:
-                    break
-                }
+        }.value
+        for (tuple, result) in outcomes {
+            await recordHealthOutcome(model: tuple.model, result: result)
+            switch result.health {
+            case .unavailable:
+                newUnhealthy.insert(tuple)
+            case .healthy:
+                newHealthy.insert(tuple)
+            case .unknown:
+                break
             }
         }
         // Remove healthy tuples from the unhealthy set so recovery is detected.
