@@ -251,9 +251,66 @@ final class ChatViewModel: ObservableObject {
         self.skillStore = skillStore ?? .shared
         self.delegationRegistry = delegationRegistry ?? .shared
         self.fetchIssueBody = fetchIssueBody ?? { issue in
-            try? await GitHubAPIClient().fetchIssue(
+            // Primary path: GitHub API (requires Keychain token).
+            if let body = try? await GitHubAPIClient().fetchIssue(
                 repo: "\(issue.owner)/\(issue.repo)", number: issue.number
-            ).body
+            ).body, !body.isEmpty {
+                TriosLogBus.shared.info(
+                    .queen, "queen.fetchIssueBody",
+                    "Issue contract read via API",
+                    ["issue": "\(issue.owner)/\(issue.repo)#\(issue.number)", "source": "api"]
+                )
+                return body
+            }
+
+            // Fallback: gh CLI carries its own auth and works in the
+            // shipped app where the Keychain token is unavailable.
+            let ghPath = await Task.detached(priority: .utility) {
+                QueenStatusViewModel.runProcess(
+                    "/bin/sh",
+                    arguments: ["-c", "command -v gh"],
+                    workDir: ProjectPaths.root,
+                    timeout: 5
+                )
+            }.value
+
+            guard !ghPath.isEmpty else {
+                TriosLogBus.shared.warn(
+                    .queen, "queen.fetchIssueBody",
+                    "Could not read issue contract: API empty, gh not found",
+                    ["issue": "\(issue.owner)/\(issue.repo)#\(issue.number)", "source": "none"]
+                )
+                return nil
+            }
+
+            let ghBody = await Task.detached(priority: .utility) {
+                QueenStatusViewModel.runProcess(
+                    ghPath,
+                    arguments: [
+                        "issue", "view", String(issue.number),
+                        "--repo", "\(issue.owner)/\(issue.repo)",
+                        "--json", "body",
+                        "-q", ".body",
+                    ],
+                    workDir: ProjectPaths.root,
+                    timeout: 10,
+                )
+            }.value
+
+            if !ghBody.isEmpty {
+                TriosLogBus.shared.info(
+                    .queen, "queen.fetchIssueBody",
+                    "Issue contract read via gh fallback",
+                    ["issue": "\(issue.owner)/\(issue.repo)#\(issue.number)", "source": "gh"]
+                )
+            } else {
+                TriosLogBus.shared.warn(
+                    .queen, "queen.fetchIssueBody",
+                    "Could not read issue contract from API or gh",
+                    ["issue": "\(issue.owner)/\(issue.repo)#\(issue.number)", "source": "none"]
+                )
+            }
+            return ghBody.isEmpty ? nil : ghBody
         }
         NSLog("ChatViewModel.init starting")
         self.transport = transport
