@@ -128,15 +128,46 @@ final class TriOSEncryption {
     /// SQLCipher databases decryptable across the lifetime of the app.
     private func symmetricKey() throws -> SymmetricKey {
         lock.lock()
-        defer { lock.unlock() }
-
         if let key = cachedKey {
+            lock.unlock()
+            return key
+        }
+        lock.unlock()
+
+        // Always perform the keychain read on a background queue.  The
+        // caller waits for it with a bounded timeout (~2 s) instead of
+        // refusing on the main thread outright.  When the read answers
+        // in time the key is cached and returned exactly as before;
+        // when it does not, we throw keyUnavailableLocked and leave the
+        // background read running so it still caches for later callers.
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: SymmetricKey?
+
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            guard let self else {
+                semaphore.signal()
+                return
+            }
+            let key = try? self.loadOrCreateSymmetricKey()
+            if let key {
+                self.lock.lock()
+                if self.cachedKey == nil {
+                    self.cachedKey = key
+                }
+                self.lock.unlock()
+                result = key
+            }
+            semaphore.signal()
+        }
+
+        if semaphore.wait(timeout: .now() + 2.0) == .success, let key = result {
             return key
         }
 
-        let key = try loadOrCreateSymmetricKey()
-        cachedKey = key
-        return key
+        // Timed out (or the read threw): the background work is still
+        // in flight and will cache the key when it lands.  Never mint a
+        // replacement key on this path.
+        throw TriOSEncryptionError.keyUnavailableLocked
     }
 
     private func loadOrCreateSymmetricKey() throws -> SymmetricKey {
