@@ -22,6 +22,15 @@ final class QueenDelegationRegistry: ObservableObject {
     /// how many files were rescued.
     private(set) var orphansReconciledAtLaunch: [DelegatedTask] = []
 
+    /// Atomically hands over the launch orphans and clears the registry's
+    /// own copy, so a second ChatViewModel built against the same shared
+    /// registry cannot settle the same orphans again.
+    func drainOrphansReconciledAtLaunch() -> [DelegatedTask] {
+        let drained = orphansReconciledAtLaunch
+        orphansReconciledAtLaunch = []
+        return drained
+    }
+
     private let storePath: String
     private let dateProvider: () -> Date
 
@@ -381,6 +390,15 @@ final class QueenDelegationRegistry: ObservableObject {
         tasks.removeAll { doomed.contains($0.id) }
         persist()
         return doomed.count
+    }
+
+    /// Persists the baseline tree hash for a task so that
+    /// `settleFailedWorkerEdits` can still measure the worker's changes after
+    /// a restart, when the in-memory `workerBaselineTrees` dictionary is gone.
+    func setBaselineTree(taskID: UUID, baselineTree: String?) {
+        guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        tasks[index].baselineTree = baselineTree
+        persist()
     }
 
     func updateOwnedPaths(taskID: UUID, paths: [String]) {
