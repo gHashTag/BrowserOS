@@ -5799,10 +5799,7 @@ final class ChatViewModel: ObservableObject {
         }
 
         // ── 5. Score by boundary size, then issue number ───────────
-        // gh is still used here to read individual issue bodies.
-        let ghPath = await Task.detached(priority: .utility) {
-            Self.resolveGhPath()
-        }.value
+        // Issue bodies are fetched via the GitHub REST API (public, no token).
         // Fewest files in Границы wins; ties break by lowest number.
         // A directory path (trailing /) counts as 9999 — it is a
         // region, not a boundary.  No Границы section → Int.max (last).
@@ -5816,18 +5813,35 @@ final class ChatViewModel: ObservableObject {
 
         var scored: [ScoredIssue] = []
         for issue in actionable {
-            let body = await Task.detached(priority: .utility) {
-                QueenStatusViewModel.runProcess(
-                    ghPath,
-                    arguments: [
-                        "issue", "view", String(issue.number),
-                        "--repo", "gHashTag/trios",
-                        "--json", "body",
-                        "-q", ".body",
-                    ],
-                    workDir: ProjectPaths.root,
-                    timeout: 10,
-                )
+            let body: String = await Task.detached(priority: .utility) {
+                let url = URL(string: "https://api.github.com/repos/gHashTag/trios/issues/\(issue.number)")!
+                var request = URLRequest(url: url)
+                request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+                do {
+                    let (data, response) = try await URLSession.shared.data(for: request)
+                    if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                        TriosLogBus.shared.warn(
+                            .queen,
+                            "queen.choose",
+                            "GitHub API returned \(http.statusCode) for issue #\(issue.number)",
+                            ["issue": String(issue.number), "status": String(http.statusCode)]
+                        )
+                        return ""
+                    }
+                    if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let body = json["body"] as? String {
+                        return body
+                    }
+                    return ""
+                } catch {
+                    TriosLogBus.shared.warn(
+                        .queen,
+                        "queen.choose",
+                        "Failed to fetch issue #\(issue.number): \(error.localizedDescription)",
+                        ["issue": String(issue.number)]
+                    )
+                    return ""
+                }
             }.value
 
             scored.append(ScoredIssue(
