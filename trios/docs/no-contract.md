@@ -1,2 +1,2 @@
-A contract defines what two components agree to send and receive so each can change independently without breaking the other.
-It is the cheapest place to catch integration mistakes — at the boundary, before they reach production or a human reviewer.
+A contract defines the expected behavior and obligations between two or more parties.
+It exists to make commitments explicit, verifiable, and enforceable before work begins or dependencies are relied upon.
