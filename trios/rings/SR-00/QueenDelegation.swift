@@ -167,6 +167,14 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// than decorative.
     var treeStateFingerprint: String?
 
+    /// The git write-tree hash captured when the worker started, persisted so
+    /// `settleFailedWorkerEdits` can measure the worker's changes after a
+    /// restart — when the in-memory `workerBaselineTrees` dictionary is gone.
+    ///
+    /// A write-tree object lives in `.git`, so the hash remains valid across
+    /// process restarts. Optional so older stores without this key still decode.
+    var baselineTree: String?
+
     /// The pull request opened for this task's branch, once one exists.
     ///
     /// Nil means no pull request has been opened - not that one failed. The
@@ -232,7 +240,8 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         resumeAttempts: Int? = nil,
         pullRequestNumber: Int? = nil,
         provider: String? = nil,
-        model: String? = nil
+        model: String? = nil,
+        baselineTree: String? = nil
     ) {
         self.id = id
         self.conversationId = conversationId
@@ -256,6 +265,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         self.pullRequestNumber = pullRequestNumber
         self.provider = provider
         self.model = model
+        self.baselineTree = baselineTree
     }
 }
 

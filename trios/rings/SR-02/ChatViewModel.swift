@@ -3474,6 +3474,7 @@ final class ChatViewModel: ObservableObject {
         // interleave between marking .running and launching the worker.
         registry.transition(taskID: task.id, to: .running)
         workerBaselineTrees[conversationId] = baseline
+        registry.setBaselineTree(taskID: task.id, baselineTree: baseline)
         runner.start(task: task, brief: brief)
         TriosLogBus.shared.info(
             .queen,
@@ -3610,6 +3611,35 @@ final class ChatViewModel: ObservableObject {
             delegationRegistry.pruneArchive()
         }
         scheduler.start()
+
+        // Orphans from a previous session died with the process, but their
+        // edits live on in the shared working tree with no branch to carry
+        // them. The registry gathered these at load; settle each one so the
+        // work is attributed rather than lost. The registry hands the list
+        // over and empties its own copy, so even if a second ChatViewModel
+        // is built against the same shared registry the orphans settle once.
+        let launchOrphans = delegationRegistry.drainOrphansReconciledAtLaunch()
+        if !launchOrphans.isEmpty {
+            Task { [weak self] in
+                guard let self else { return }
+                var remaining = launchOrphans
+                var filesSettled = 0
+                let taskCount = remaining.count
+                while let task = remaining.popLast() {
+                    let (_, rescued) = await self.settleFailedWorkerEdits(
+                        task: task,
+                        reason: "did not survive a restart"
+                    )
+                    filesSettled += rescued
+                }
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.launch.orphans.settled",
+                    "Settled \(taskCount) orphaned task(s) from restart; \(filesSettled) file(s) attributed",
+                    ["tasks": "\(taskCount)", "files": "\(filesSettled)"]
+                )
+            }
+        }
     }
 
     /// Settles a dead worker's edits so the shared tree is not left with
@@ -3627,8 +3657,8 @@ final class ChatViewModel: ObservableObject {
     private func settleFailedWorkerEdits(
         task: DelegatedTask,
         reason: String
-    ) async -> String {
-        let baselineTree = workerBaselineTrees[task.conversationId]
+    ) async -> (summary: String, filesRescued: Int) {
+        let baselineTree = workerBaselineTrees[task.conversationId] ?? task.baselineTree
         let measured = await QueenBranchCommitter.changedPaths(since: baselineTree, ownedPaths: task.ownedPaths)
         let measuredRelative = measured.map { QueenBranchCommitter.projectRelative($0) }
 
@@ -3640,7 +3670,7 @@ final class ChatViewModel: ObservableObject {
                 "\(task.worker) died but changed no files; the tree is clean",
                 ["issue": task.issue.slug, "worker": task.worker, "reason": reason]
             )
-            return "\(task.worker) changed no files before it stopped."
+            return ("\(task.worker) changed no files before it stopped.", 0)
         }
 
         guard let branch = task.virtualBranch else {
@@ -3659,9 +3689,10 @@ final class ChatViewModel: ObservableObject {
                     "files": measuredRelative.joined(separator: ", ")
                 ]
             )
-            return "\(task.worker) left \(measuredRelative.count) file(s) changed "
+            return ("\(task.worker) left \(measuredRelative.count) file(s) changed "
                 + "but has no branch to attribute them to — the tree needs "
-                + "manual attention: \(measuredRelative.joined(separator: ", "))."
+                + "manual attention: \(measuredRelative.joined(separator: ", ")).",
+                measuredRelative.count)
         }
 
         // Commit the changes with an incompleteness marker so the partial work
@@ -3687,7 +3718,7 @@ final class ChatViewModel: ObservableObject {
             ]
         )
 
-        return outcome.summary
+        return (outcome.summary, measuredRelative.count)
     }
 
     private func handleWorkerFinished(
@@ -3906,7 +3937,7 @@ final class ChatViewModel: ObservableObject {
             // A dead worker's edits are still in the shared tree. Settle them
             // so they are attributed to its branch with an incompleteness
             // marker, or reported loudly if they cannot be.
-            let settlement = await settleFailedWorkerEdits(task: task, reason: failure!)
+            let (settlement, _) = await settleFailedWorkerEdits(task: task, reason: failure!)
             notice += "\n" + settlement
         }
         workerBaselineTrees[task.conversationId] = nil
@@ -5450,7 +5481,7 @@ final class ChatViewModel: ObservableObject {
             guard registry.transition(taskID: task.id, to: .cancelled) else { continue }
             // A cancelled worker's edits are as unattributed as a failed one's.
             // Settle them the same way before clearing the baseline.
-            let settlement = await settleFailedWorkerEdits(
+            let (settlement, _) = await settleFailedWorkerEdits(
                 task: task,
                 reason: "cancelled after exhausting restarts"
             )
