@@ -520,6 +520,41 @@ enum QueenDelegationPolicy {
             return false
         }
     }
+
+    /// Builds a conventional-commit PR title from a delegated task.
+    ///
+    /// The forge's `validate-pr-title` check rejects raw task titles because they
+    /// are not conventional-commit subjects. This function infers the type from
+    /// the task's owned paths — `docs` when every path is under `docs/`, `test`
+    /// when every path is under `tests/`, `feat` otherwise — fixes the scope to
+    /// `trios`, and appends the task's own title unchanged. The whole line is
+    /// truncated to 72 characters on a word boundary so the subject stays within
+    /// the conventional-commit limit.
+    static func conventionalPRTitle(for task: DelegatedTask) -> String {
+        let type: String
+        if !task.ownedPaths.isEmpty, task.ownedPaths.allSatisfy({ path in
+            let p = normalizePath(path)
+            return p == "docs" || p.hasPrefix("docs/")
+        }) {
+            type = "docs"
+        } else if !task.ownedPaths.isEmpty, task.ownedPaths.allSatisfy({ path in
+            let p = normalizePath(path)
+            return p == "tests" || p.hasPrefix("tests/")
+        }) {
+            type = "test"
+        } else {
+            type = "feat"
+        }
+
+        let full = "\(type)(trios): \(task.title)"
+        guard full.count > 72 else { return full }
+
+        let head = String(full.prefix(72))
+        if let lastSpace = head.lastIndex(of: " ") {
+            return String(head[..<lastSpace])
+        }
+        return head
+    }
 }
 
 /// Names the GitButler virtual branch that isolates a task.
