@@ -4648,3 +4648,26 @@ proven. In the live run parsed and recorded now agree, which they never did.
 
 Still short of a merge: #1117 has nothing to commit, and the reviewer's coverage
 still swings between one and three across runs.
+
+## First circle on work that needed doing, and it stopped somewhere new
+
+#1117 was closed — its three criteria are met in code and test, the reviewer
+confirmed 3 of 3, and the bee had nothing to change for four circles running. It
+had been holding first place in the Queen's choosing and hiding the interesting
+case behind itself.
+
+With it out of the way she chose #1124, a real one-file task, and the run went:
+
+    02:30:43  Chose #1124 out of 45
+    02:30:44  Could not narrow — its body names no function
+    02:30:46  worker.start
+    02:38:18  queen.worker.orphaned — «Worker did not survive a restart»
+
+Eight minutes of work and then an orphan. The edit is in the shared tree: 53
+lines added, 22 removed, compiling, 594 checks green. Done and delivered to
+nobody — no branch, no verdicts, no acceptance.
+
+This is a different stop from every earlier one. The supervisor is alive and the
+crash count is still six; it is the worker that died. Work made and lost in
+silence is worse than work not attempted, because the second at least gets tried
+again. #1187.

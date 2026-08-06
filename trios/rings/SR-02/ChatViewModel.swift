@@ -4332,6 +4332,16 @@ final class ChatViewModel: ObservableObject {
                 }
             }
 
+            // Regression guard (#1124 criterion 4): if any excerpt contains
+            // the "(showing first" marker, the old file-start fallback has
+            // been restored in `regionExtractedContent`. That behaviour
+            // produced zero verdicts on a re-review with an empty diff, and
+            // this assertion is the tripwire that fires when it returns.
+            assert(
+                !result.values.contains { $0.contains("showing first") },
+                "fileContentsForReview produced a first-N-lines excerpt — "
+                + "the exact behaviour #1124 removed (criterion 4)"
+            )
             return result
         }.value
     }
@@ -4398,12 +4408,13 @@ final class ChatViewModel: ObservableObject {
     ///
     /// When no criteria names appear in the file — or no criteria names
     /// were extracted at all — the QueenLocalisation region is tried
-    /// first; if that finds nothing, the first `maxRegionWidth` lines are
-    /// shown so the reviewer has actual content to judge from, instead of
-    /// a placeholder that forced a prose-only answer (#1184). A file with
-    /// no content at all logs `queen.review.contentsEmpty` and returns an
-    /// empty string; a truly missing file keeps its placeholder at the
-    /// call site.
+    /// first; if that also finds nothing, the excerpt states the gap
+    /// directly ("no criteria names found in this file") rather than
+    /// substituting the file's opening lines, which misled the reviewer
+    /// into evaluating irrelevant code on an empty diff (#1124). A file
+    /// with no content at all logs `queen.review.contentsEmpty` and
+    /// returns an empty string; a truly missing file keeps its
+    /// placeholder at the call site.
     private nonisolated static func regionExtractedContent(
         fullContent: String,
         criteria: [String],
@@ -4441,12 +4452,20 @@ final class ChatViewModel: ObservableObject {
         }
 
         if names.isEmpty || hitLines.isEmpty {
-            // No criteria names matched in this file. Previously this
-            // returned a placeholder that left the reviewer working from
-            // the diff alone — prose answers, not verdicts (#1184). Try
-            // QueenLocalisation first; if it finds a declaration region,
-            // show that. Otherwise show the first maxRegionWidth lines
-            // so the reviewer has actual file content to judge from.
+            // No criteria names matched in this file. QueenLocalisation is
+            // tried first: it can locate a declaration by name even when the
+            // raw substring search missed it (whole-word matching with
+            // brace-depth tracking). If it finds a declaration region, that
+            // is the code the criteria actually talk about — show it.
+            //
+            // When QueenLocalisation also comes up empty, the excerpt states
+            // this directly rather than substituting the file's opening lines.
+            // Showing the first N lines was the original behaviour, and it
+            // produced zero verdicts on a re-review with an empty diff: the
+            // reviewer saw irrelevant code, could not connect it to the
+            // criteria, and declined (#1124 criterion 2). Saying so plainly
+            // lets the reviewer judge from the diff and criteria text without
+            // being misled by plausible-looking but irrelevant content.
             if !names.isEmpty,
                let range = QueenLocalisation.region(
                    in: fullContent, mentioning: names
@@ -4467,17 +4486,29 @@ final class ChatViewModel: ObservableObject {
                 }
                 return region.joined(separator: "\n")
             }
-            let limit = min(QueenLocalisation.maxRegionWidth, allLines.count)
-            var output: [String] = []
-            output.append(
-                "(showing first \(limit) of \(allLines.count) lines — "
-                + "no criteria names found in this file)"
-            )
-            for i in 0..<limit {
-                let displayNum = String(format: "%5d", i + 1)
-                output.append("\(displayNum) | \(allLines[i])")
+            // No criteria names appear anywhere in this file, and no
+            // declaration could be located. State the gap plainly so the
+            // reviewer sees it instead of being misled by the file's opening
+            // lines (#1124 criterion 2).
+            if !filePath.isEmpty {
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.review.noCriteriaNames",
+                    "No criteria names found in file — stating the gap "
+                    + "instead of showing opening lines (#1124)",
+                    [
+                        "path": filePath,
+                        "names": names.isEmpty
+                            ? "(none extracted)"
+                            : names.sorted().joined(separator: ", "),
+                    ]
+                )
             }
-            return output.joined(separator: "\n")
+            let searched = names.isEmpty
+                ? "(no code identifiers extracted from the criteria)"
+                : "names searched: "
+                    + names.sorted().joined(separator: ", ")
+            return "(no criteria names found in this file; \(searched))"
         }
 
         // Build and merge regions: ±contextLines around each hit.
