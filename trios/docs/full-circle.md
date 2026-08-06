@@ -1,4 +1,4 @@
 # Full Circle
 
-Every project comes full circle eventually.
-The circle of development never truly closes — it spirals.
+The life cycle of every feature eventually comes full circle.
+A circle has no beginning and no end.
