@@ -1,4 +1,5 @@
 # Full Circle
 
-The life cycle of every feature eventually comes full circle.
-A circle has no beginning and no end.
+The journey goes round and round — this is a full circle moment.
+
+Remember: every circle eventually comes back to where it began.
