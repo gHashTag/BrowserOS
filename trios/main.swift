@@ -51,6 +51,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupGlobalHotkey()
         serverManager.startIfNeeded()
 
+        // Lower the keychain launch gate after bootstrap settles.  The gate
+        // starts raised so no keychain read can block the main thread during
+        // launch; five seconds in, a detached task clears it, logs the event,
+        // and does one warm-up read so the key is cached for later callers.
+        Task.detached {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            KeychainSecrets.clearLaunchGate()
+            TriosLogBus.shared.info(
+                .security,
+                "keychain.launch_gate.cleared",
+                "Launch gate lowered; keychain operations are now live",
+                [:]
+            )
+            _ = try? TriOSEncryption.memory.rawKeyData()
+        }
+
         Task { @MainActor in
             if let vm = chatViewModel {
                 let guard_ = compositionRoot.makeSessionGuard(for: vm)
