@@ -1,5 +1,7 @@
 # Full Circle
 
-The journey goes round and round — this is a full circle moment.
+Every great journey eventually comes full circle.
 
-Remember: every circle eventually comes back to where it began.
+The circle of development never truly closes — it only widens.
+
+This document marks one complete circle in the trios project.
