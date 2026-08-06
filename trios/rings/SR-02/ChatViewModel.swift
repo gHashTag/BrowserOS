@@ -4382,15 +4382,18 @@ final class ChatViewModel: ObservableObject {
                 }
             }
 
-            // Regression guard (#1124 criterion 4): if any excerpt contains
-            // the "(showing first" marker, the old file-start fallback has
+            // Regression guard (#1124 criterion 3): if any excerpt contains
+            // the "FILE BEGINS" marker, the old file-start fallback has
             // been restored in `regionExtractedContent`. That behaviour
             // produced zero verdicts on a re-review with an empty diff, and
             // this assertion is the tripwire that fires when it returns.
+            // The marker checked here is "FILE BEGINS" — the exact string
+            // the old code emitted. A previous version checked "showing
+            // first", which never matched and so never fired.
             assert(
-                !result.values.contains { $0.contains("showing first") },
-                "fileContentsForReview produced a first-N-lines excerpt — "
-                + "the exact behaviour #1124 removed (criterion 4)"
+                !result.values.contains { $0.contains("FILE BEGINS") },
+                "fileContentsForReview produced a FILE BEGINS excerpt — "
+                + "the exact behaviour #1124 removed (criterion 3)"
             )
             return result
         }.value
@@ -4558,13 +4561,12 @@ final class ChatViewModel: ObservableObject {
                 ? "(no code identifiers extracted from the criteria)"
                 : "names searched: "
                     + names.sorted().joined(separator: ", ")
-            let note = "(no criteria names found in this file; \(searched))"
-            var opening: [String] = []
-            for i in 0..<min(40, allLines.count) {
-                let displayNum = String(format: "%5d", i + 1)
-                opening.append("\(displayNum) | \(allLines[i])")
-            }
-            return note + "\n\nFILE BEGINS\n" + opening.joined(separator: "\n")
+            // Return the gap note alone — no file-opening fallback. Appending
+            // the first 40 lines was the original behaviour and is exactly the
+            // bug #1124 fixes: on an empty diff the reviewer saw irrelevant
+            // code from the top of the file, could not connect it to the
+            // criteria, and declined (#1124).
+            return "(no criteria names found in this file; \(searched))"
         }
 
         // Build and merge regions: ±contextLines around each hit.
@@ -6363,24 +6365,40 @@ final class ChatViewModel: ObservableObject {
             if QueenDelegationPolicy.outcome(
                 merged: pullRequest.isMerged, closedUnmerged: pullRequest.isClosedUnmerged
             ) == .pending {
-                let merged = (try? await client.mergePullRequest(
-                    repo: prRepo,
-                    number: number,
-                    title: "\(task.title) (\(task.issue.slug))"
-                )) ?? false
-                if merged {
-                    TriosLogBus.shared.info(
-                        .queen, "queen.pr.merged", "Merged a reviewed pull request",
-                        ["issue": task.issue.slug, "pr": "\(number)"]
+                TriosLogBus.shared.info(
+                    .queen, "queen.pr.merge_attempt", "Attempting to merge a reviewed pull request",
+                    ["issue": task.issue.slug, "pr": "\(number)"]
+                )
+                do {
+                    let merged = try await client.mergePullRequest(
+                        repo: prRepo,
+                        number: number,
+                        title: "\(task.title) (\(task.issue.slug))"
                     )
-                    registry.transition(taskID: task.id, to: .merged)
-                    await appendSystemMessageToQueenChat(
-                        SystemNoticeClassifier.successMarker
-                            + "Merged #\(number) for \(task.issue.slug). The work is in, and "
-                            + "the chat is archived because the forge says so - not because "
-                            + "I liked the result."
+                    if merged {
+                        TriosLogBus.shared.info(
+                            .queen, "queen.pr.merged", "Merged a reviewed pull request",
+                            ["issue": task.issue.slug, "pr": "\(number)"]
+                        )
+                        registry.transition(taskID: task.id, to: .merged)
+                        await appendSystemMessageToQueenChat(
+                            SystemNoticeClassifier.successMarker
+                                + "Merged #\(number) for \(task.issue.slug). The work is in, and "
+                                + "the chat is archived because the forge says so - not because "
+                                + "I liked the result."
+                        )
+                        continue
+                    } else {
+                        TriosLogBus.shared.warn(
+                            .queen, "queen.pr.merge_refused", "The forge refused the merge",
+                            ["issue": task.issue.slug, "pr": "\(number)"]
+                        )
+                    }
+                } catch {
+                    TriosLogBus.shared.warn(
+                        .queen, "queen.pr.merge_refused", "The forge refused the merge",
+                        ["issue": task.issue.slug, "pr": "\(number)", "error": "\(error)"]
                     )
-                    continue
                 }
             }
 
