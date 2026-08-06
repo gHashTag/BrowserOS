@@ -1,5 +1,5 @@
 # Full Circle
 
-The design process goes full circle — research, prototype, and iterate back to the start.
+Every journey comes full circle eventually.
 
-Every great idea eventually completes its circle of refinement.
+The circle of development never truly closes — it spirals.
