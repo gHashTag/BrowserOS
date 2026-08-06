@@ -3474,6 +3474,7 @@ final class ChatViewModel: ObservableObject {
         // interleave between marking .running and launching the worker.
         registry.transition(taskID: task.id, to: .running)
         workerBaselineTrees[conversationId] = baseline
+        registry.setBaselineTree(taskID: task.id, baselineTree: baseline)
         runner.start(task: task, brief: brief)
         TriosLogBus.shared.info(
             .queen,
@@ -3610,6 +3611,54 @@ final class ChatViewModel: ObservableObject {
             delegationRegistry.pruneArchive()
         }
         scheduler.start()
+
+        // Orphans from a previous session died with the process, but their
+        // edits live on in the shared working tree with no branch to carry
+        // them. The registry gathered these at load; settle each one so the
+        // work is attributed rather than lost. The registry hands the list
+        // over and empties its own copy, so even if a second ChatViewModel
+        // is built against the same shared registry the orphans settle once.
+        let launchOrphans = delegationRegistry.drainOrphansReconciledAtLaunch()
+        if !launchOrphans.isEmpty {
+            Task { [weak self] in
+                guard let self else { return }
+                var remaining = launchOrphans
+                var filesSettled = 0
+                let taskCount = remaining.count
+                while let task = remaining.popLast() {
+                    let (_, rescued) = await self.settleFailedWorkerEdits(
+                        task: task,
+                        reason: "did not survive a restart"
+                    )
+                    filesSettled += rescued
+                }
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.launch.orphans.settled",
+                    "Settled \(taskCount) orphaned task(s) from restart; \(filesSettled) file(s) attributed",
+                    ["tasks": "\(taskCount)", "files": "\(filesSettled)"]
+                )
+            }
+        }
+
+        // If nothing is queued or running at launch, the Queen picks the
+        // next open sub-issue of #1090 and starts it, so a plain `open
+        // trios.app` opens a chat without a human typing /choose (#1197).
+        let hasActiveWork = delegationRegistry.tasks.contains {
+            $0.state == .queued || $0.state == .running
+        }
+        if !hasActiveWork {
+            Task { [weak self] in
+                guard let self else { return }
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.launch.bootstrap",
+                    "No active tasks at launch — choosing next open issue to start",
+                    [:]
+                )
+                await self.chooseNextOpenIssue(startAfterChoosing: false, isLaunchBootstrap: true)
+            }
+        }
     }
 
     /// Settles a dead worker's edits so the shared tree is not left with
@@ -3627,8 +3676,8 @@ final class ChatViewModel: ObservableObject {
     private func settleFailedWorkerEdits(
         task: DelegatedTask,
         reason: String
-    ) async -> String {
-        let baselineTree = workerBaselineTrees[task.conversationId]
+    ) async -> (summary: String, filesRescued: Int) {
+        let baselineTree = workerBaselineTrees[task.conversationId] ?? task.baselineTree
         let measured = await QueenBranchCommitter.changedPaths(since: baselineTree, ownedPaths: task.ownedPaths)
         let measuredRelative = measured.map { QueenBranchCommitter.projectRelative($0) }
 
@@ -3640,7 +3689,7 @@ final class ChatViewModel: ObservableObject {
                 "\(task.worker) died but changed no files; the tree is clean",
                 ["issue": task.issue.slug, "worker": task.worker, "reason": reason]
             )
-            return "\(task.worker) changed no files before it stopped."
+            return ("\(task.worker) changed no files before it stopped.", 0)
         }
 
         guard let branch = task.virtualBranch else {
@@ -3659,9 +3708,10 @@ final class ChatViewModel: ObservableObject {
                     "files": measuredRelative.joined(separator: ", ")
                 ]
             )
-            return "\(task.worker) left \(measuredRelative.count) file(s) changed "
+            return ("\(task.worker) left \(measuredRelative.count) file(s) changed "
                 + "but has no branch to attribute them to — the tree needs "
-                + "manual attention: \(measuredRelative.joined(separator: ", "))."
+                + "manual attention: \(measuredRelative.joined(separator: ", ")).",
+                measuredRelative.count)
         }
 
         // Commit the changes with an incompleteness marker so the partial work
@@ -3687,7 +3737,7 @@ final class ChatViewModel: ObservableObject {
             ]
         )
 
-        return outcome.summary
+        return (outcome.summary, measuredRelative.count)
     }
 
     private func handleWorkerFinished(
@@ -3906,7 +3956,7 @@ final class ChatViewModel: ObservableObject {
             // A dead worker's edits are still in the shared tree. Settle them
             // so they are attributed to its branch with an incompleteness
             // marker, or reported loudly if they cannot be.
-            let settlement = await settleFailedWorkerEdits(task: task, reason: failure!)
+            let (settlement, _) = await settleFailedWorkerEdits(task: task, reason: failure!)
             notice += "\n" + settlement
         }
         workerBaselineTrees[task.conversationId] = nil
@@ -4332,15 +4382,18 @@ final class ChatViewModel: ObservableObject {
                 }
             }
 
-            // Regression guard (#1124 criterion 4): if any excerpt contains
-            // the "(showing first" marker, the old file-start fallback has
+            // Regression guard (#1124 criterion 3): if any excerpt contains
+            // the "FILE BEGINS" marker, the old file-start fallback has
             // been restored in `regionExtractedContent`. That behaviour
             // produced zero verdicts on a re-review with an empty diff, and
             // this assertion is the tripwire that fires when it returns.
+            // The marker checked here is "FILE BEGINS" — the exact string
+            // the old code emitted. A previous version checked "showing
+            // first", which never matched and so never fired.
             assert(
-                !result.values.contains { $0.contains("showing first") },
-                "fileContentsForReview produced a first-N-lines excerpt — "
-                + "the exact behaviour #1124 removed (criterion 4)"
+                !result.values.contains { $0.contains("FILE BEGINS") },
+                "fileContentsForReview produced a FILE BEGINS excerpt — "
+                + "the exact behaviour #1124 removed (criterion 3)"
             )
             return result
         }.value
@@ -4508,6 +4561,11 @@ final class ChatViewModel: ObservableObject {
                 ? "(no code identifiers extracted from the criteria)"
                 : "names searched: "
                     + names.sorted().joined(separator: ", ")
+            // Return the gap note alone — no file-opening fallback. Appending
+            // the first 40 lines was the original behaviour and is exactly the
+            // bug #1124 fixes: on an empty diff the reviewer saw irrelevant
+            // code from the top of the file, could not connect it to the
+            // criteria, and declined (#1124).
             return "(no criteria names found in this file; \(searched))"
         }
 
@@ -4590,8 +4648,8 @@ final class ChatViewModel: ObservableObject {
             + "Answer one line per criterion. Copy the criterion text and "
             + "append the verdict after a colon:\n"
             + "\n"
-            + "    CRITERION TEXT: met\n"
-            + "    CRITERION TEXT: not met — one sentence stating why\n"
+            + "    \(criteria.first ?? "CRITERION TEXT"): met\n"
+            + "    \(criteria.first ?? "CRITERION TEXT"): not met — one sentence stating why\n"
             + "\n"
             + "Anything else — prose, paragraphs, introductions, summaries — "
             + "will not be read. Only lines that contain the criterion text "
@@ -4701,7 +4759,24 @@ final class ChatViewModel: ObservableObject {
             reviewerResponses[task.id] = response
         }
 
-        let verdicts = QueenReviewVerdictRequest.parse(response, criteria: criteria)
+        // Strip a leading "CRITERION TEXT" label the reviewer may have echoed
+        // from the format example, with optional colon and whitespace, before
+        // parsing (#1189). A reviewer that copies the example's structure but
+        // keeps the placeholder glued to the front of the real criterion
+        // leaves the parser unable to match the line — the criterion's own
+        // words are buried under the label. Case-insensitive so capitalisation
+        // variants are caught too.
+        let labelStrippedResponse = response.components(separatedBy: .newlines)
+            .map { line in
+                line.replacingOccurrences(
+                    of: "^\\s*CRITERION TEXT\\s*:?\\s*",
+                    with: "",
+                    options: [.regularExpression, .caseInsensitive]
+                )
+            }
+            .joined(separator: "\n")
+
+        let verdicts = QueenReviewVerdictRequest.parse(labelStrippedResponse, criteria: criteria)
         let registry = delegationRegistry
         var recorded = 0
         for (criterion, verdict) in verdicts {
@@ -5171,7 +5246,13 @@ final class ChatViewModel: ObservableObject {
     /// because an orchestrator that rubber-stamps its own workers has no
     /// reviewer at all. Off unless `TRIOS_QUEEN_AUTONOMY=1`.
     private func autoAcceptIfUnambiguous(taskID: UUID) async {
-        guard ProcessInfo.processInfo.environment["TRIOS_QUEEN_AUTONOMY"] == "1" else {
+        let autonomy: Bool
+        if let envValue = ProcessInfo.processInfo.environment["TRIOS_QUEEN_AUTONOMY"] {
+            autonomy = envValue == "1"
+        } else {
+            autonomy = UserDefaults.standard.object(forKey: "TriosQueenAutonomy") as? Bool ?? true
+        }
+        guard autonomy else {
             TriosLogBus.shared.info(
                 .queen, "queen.auto_accept.autonomy_disabled",
                 "Auto-accept skipped: autonomy is off",
@@ -5330,6 +5411,7 @@ final class ChatViewModel: ObservableObject {
             "Accepted without a human",
             ["issue": task.issue.slug, "files": String(task.committedFiles ?? 0)]
         )
+        await openPullRequestForTask(issue: task.issue)
     }
 
     /// Reports a worker going wrong, once per kind of concern per task.
@@ -5450,7 +5532,7 @@ final class ChatViewModel: ObservableObject {
             guard registry.transition(taskID: task.id, to: .cancelled) else { continue }
             // A cancelled worker's edits are as unattributed as a failed one's.
             // Settle them the same way before clearing the baseline.
-            let settlement = await settleFailedWorkerEdits(
+            let (settlement, _) = await settleFailedWorkerEdits(
                 task: task,
                 reason: "cancelled after exhausting restarts"
             )
@@ -5505,7 +5587,7 @@ final class ChatViewModel: ObservableObject {
     ///
     /// The choice is logged as a separate event so it can be audited: a
     /// decision that is not recorded might as well not have been made.
-    private func chooseNextOpenIssue(startAfterChoosing: Bool = false) async {
+    private func chooseNextOpenIssue(startAfterChoosing: Bool = false, isLaunchBootstrap: Bool = false) async {
         // ── 1. Locate gh ───────────────────────────────────────────
         let ghPath = await Task.detached(priority: .utility) {
             QueenStatusViewModel.runProcess(
@@ -5517,16 +5599,16 @@ final class ChatViewModel: ObservableObject {
         }.value
 
         guard !ghPath.isEmpty else {
-            await postQueenNotice(
-                SystemNoticeClassifier.warningMarker
-                    + "Cannot choose: `gh` is not installed or not on PATH. "
-                    + "Install the GitHub CLI to read open sub-issues of epic #1090."
-            )
             TriosLogBus.shared.error(
                 .queen,
                 "queen.choose",
                 "gh unavailable — cannot read sub-issues",
                 ["epic": "gHashTag/trios#1090", "gh": "not found", "chosen": "(none)"]
+            )
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "Cannot choose: `gh` is not installed or not on PATH. "
+                    + "Install the GitHub CLI to read open sub-issues of epic #1090."
             )
             return
         }
@@ -5566,30 +5648,30 @@ final class ChatViewModel: ObservableObject {
         // failed (network error, auth error, rate limit) — that is different
         // from "there are no open sub-issues."
         if subIssues.isEmpty && !raw.isEmpty {
-            await postQueenNotice(
-                SystemNoticeClassifier.warningMarker
-                    + "Cannot choose: `gh` ran but returned unexpected output "
-                    + "(network, auth, or rate limit).\n" + raw
-            )
             TriosLogBus.shared.error(
                 .queen,
                 "queen.choose",
                 "gh returned unexpected output",
                 ["epic": "gHashTag/trios#1090", "ghOutput": raw, "chosen": "(none)"]
             )
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "Cannot choose: `gh` ran but returned unexpected output "
+                    + "(network, auth, or rate limit).\n" + raw
+            )
             return
         }
 
         guard !subIssues.isEmpty else {
-            await postQueenNotice(
-                SystemNoticeClassifier.infoMarker
-                    + "No open sub-issues under gHashTag/trios#1090. The hive is empty."
-            )
             TriosLogBus.shared.info(
                 .queen,
                 "queen.choose",
                 "Nothing to choose — no open sub-issues on #1090",
                 ["epic": "gHashTag/trios#1090", "considered": "0", "chosen": "(none)"]
+            )
+            await postQueenNotice(
+                SystemNoticeClassifier.infoMarker
+                    + "No open sub-issues under gHashTag/trios#1090. The hive is empty."
             )
             return
         }
@@ -5600,13 +5682,6 @@ final class ChatViewModel: ObservableObject {
 
         guard !actionable.isEmpty else {
             let names = subIssues.map { "#\($0.number)" }.joined(separator: ", ")
-            await postQueenNotice(
-                SystemNoticeClassifier.infoMarker
-                    + "\(subIssues.count) open sub-issue\(subIssues.count == 1 ? "" : "s") "
-                    + "under #1090, but \(inFlightNumbers.count) "
-                    + "\(inFlightNumbers.count == 1 ? "is" : "are") in flight. "
-                    + "Nothing to act on until a worker reports back:\n" + names
-            )
             TriosLogBus.shared.info(
                 .queen,
                 "queen.choose",
@@ -5616,6 +5691,13 @@ final class ChatViewModel: ObservableObject {
                     "inFlight": String(inFlightNumbers.count),
                     "chosen": "(none)",
                 ]
+            )
+            await postQueenNotice(
+                SystemNoticeClassifier.infoMarker
+                    + "\(subIssues.count) open sub-issue\(subIssues.count == 1 ? "" : "s") "
+                    + "under #1090, but \(inFlightNumbers.count) "
+                    + "\(inFlightNumbers.count == 1 ? "is" : "are") in flight. "
+                    + "Nothing to act on until a worker reports back:\n" + names
             )
             return
         }
@@ -5629,6 +5711,7 @@ final class ChatViewModel: ObservableObject {
             let title: String
             let fileCount: Int
             let paths: [String]?
+            let body: String
         }
 
         var scored: [ScoredIssue] = []
@@ -5651,7 +5734,8 @@ final class ChatViewModel: ObservableObject {
                 number: issue.number,
                 title: issue.title,
                 fileCount: ChatViewModel.countBoundaryFiles(in: body),
-                paths: ChatViewModel.boundaryPaths(from: body)
+                paths: ChatViewModel.boundaryPaths(from: body),
+                body: body
             ))
         }
 
@@ -5668,13 +5752,6 @@ final class ChatViewModel: ObservableObject {
             reason = "smallest boundary: \(chosen.fileCount) file\(chosen.fileCount == 1 ? "" : "s") under Границы; ties break by lowest number."
         }
 
-        await postQueenNotice(
-            SystemNoticeClassifier.successMarker
-                + "Choose gHashTag/trios#\(chosen.number): \(chosen.title). "
-                + reason
-                + " Considered \(subIssues.count) open sub-issue\(subIssues.count == 1 ? "" : "s"), "
-                + "\(inFlightNumbers.count) in flight."
-        )
         TriosLogBus.shared.info(
             .queen,
             "queen.choose",
@@ -5688,6 +5765,44 @@ final class ChatViewModel: ObservableObject {
                 "reason": reason,
             ]
         )
+        await postQueenNotice(
+            SystemNoticeClassifier.successMarker
+                + "Choose gHashTag/trios#\(chosen.number): \(chosen.title). "
+                + reason
+                + " Considered \(subIssues.count) open sub-issue\(subIssues.count == 1 ? "" : "s"), "
+                + "\(inFlightNumbers.count) in flight."
+        )
+
+        // ── 6a. Launch: post acceptance criteria and approve command ─
+        // When the bootstrap at launch chooses without starting, post
+        // the chosen issue's acceptance criteria, file boundary, and
+        // the single approve command so the human can review and start
+        // in one step — without tripping the approval gate's refusal.
+        if isLaunchBootstrap && !startAfterChoosing {
+            let criteriaList = QueenTaskSpec.criteriaFromIssue(body: chosen.body)
+            let criteriaBlock: String
+            if criteriaList.isEmpty {
+                criteriaBlock = "(no «Готово, когда» / «Acceptance criteria» section found in the issue body)"
+            } else {
+                criteriaBlock = criteriaList.map { "- " + $0 }.joined(separator: "\n")
+            }
+            let boundary: String
+            if let paths = chosen.paths, !paths.isEmpty {
+                boundary = paths.joined(separator: "\n")
+            } else {
+                boundary = "(no Границы section)"
+            }
+            await postQueenNotice(
+                SystemNoticeClassifier.infoMarker
+                    + "Launch proposal — gHashTag/trios#\(chosen.number): \(chosen.title)\n"
+                    + "## Acceptance criteria\n"
+                    + criteriaBlock + "\n\n"
+                    + "## File boundary\n"
+                    + boundary + "\n\n"
+                    + "To start: `/delegate gHashTag/trios#\(chosen.number)`"
+            )
+            return
+        }
 
         // ── 6. Delegate if --start was given ──────────────────────
         // `/choose` names and stops. `/choose --start` names then opens
@@ -6169,7 +6284,7 @@ final class ChatViewModel: ObservableObject {
         do {
             let pr = try await GitHubAPIClient().createPR(
                 repo: prRepo,
-                title: task.title,
+                title: QueenDelegationPolicy.conventionalPRTitle(for: task),
                 body: "For \(issue.url)\n\nOpened by the Queen for \(task.worker).",
                 head: branch,
                 base: prBase
@@ -6186,6 +6301,13 @@ final class ChatViewModel: ObservableObject {
                 ["issue": issue.slug, "pr": "\(pr.number)", "branch": branch,
                  "base": prBase]
             )
+            // The thirty-minute scheduler wake polls on a steady cadence, but a
+            // pull request that just opened should not wait half an hour for its
+            // first outcome. Sleep long enough for checks to start, then poll once.
+            Task.detached { [weak self] in
+                try? await Task.sleep(nanoseconds: 90_000_000_000)
+                await self?.pollPullRequests()
+            }
         } catch {
             TriosLogBus.shared.error(
                 .queen, "queen.pr.failed", "Could not open a pull request",
