@@ -4624,3 +4624,27 @@ there. Measured across four runs:
 Three of three, first time. Acceptance still refuses — #1117's work was finished
 three passes ago so there are no committed files — and no new crash report
 through two more circles.
+
+## parsed=3, recorded=0, and the difference was a string comparison
+
+A run logged three verdicts of three, and two minutes later the sweep asked
+about all three again. The sweep only asks about unanswered criteria, so the
+three had never been stored.
+
+`recordVerdict` guarded on `acceptanceCriteria.contains(criterion)` — an exact
+string match — and returned false without a word when the reviewer's label
+differed by a quote or a trimmed tail. The counter said `parsed`, which counts
+what was read, not what was kept. Three read, none kept, nothing said.
+
+Now the comparison is normalised — trimmed, unquoted, case-insensitive, exact
+first — and a label matching nothing is written down:
+
+    queen.verdict.unmatched — received "a criterion nobody set",
+                              expected "make check passes"
+    queen.review.verdicts   — parsed=1 recorded=1
+
+The unmatched line comes from the suite's own fixture, which is how it is
+proven. In the live run parsed and recorded now agree, which they never did.
+
+Still short of a merge: #1117 has nothing to commit, and the reviewer's coverage
+still swings between one and three across runs.
