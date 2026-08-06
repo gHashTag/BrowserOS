@@ -266,12 +266,7 @@ final class ChatViewModel: ObservableObject {
             // Fallback: gh CLI carries its own auth and works in the
             // shipped app where the Keychain token is unavailable.
             let ghPath = await Task.detached(priority: .utility) {
-                QueenStatusViewModel.runProcess(
-                    "/bin/sh",
-                    arguments: ["-c", "command -v gh"],
-                    workDir: ProjectPaths.root,
-                    timeout: 5
-                )
+                Self.resolveGhPath()
             }.value
 
             guard !ghPath.isEmpty else {
@@ -5627,6 +5622,65 @@ final class ChatViewModel: ObservableObject {
         await appendSystemMessageToQueenChat(text)
     }
 
+    // MARK: - gh binary resolution
+
+    nonisolated(unsafe) private static var _cachedGhPath: String?
+    nonisolated(unsafe) private static var _ghPathResolved = false
+    nonisolated private static let _ghLock = NSLock()
+
+    /// Resolves the `gh` binary path without relying on the process PATH.
+    ///
+    /// Apps launched via `open` (Finder) inherit a minimal PATH that omits
+    /// `/opt/homebrew/bin`, so `command -v gh` returns empty and the Queen
+    /// goes silent forever.  This helper checks three well-known locations
+    /// first, falls back to the shell probe only when none exist, caches
+    /// the result, and logs where `gh` was found — or that it was nowhere.
+    nonisolated private static func resolveGhPath() -> String {
+        _ghLock.lock()
+        defer { _ghLock.unlock() }
+        if _ghPathResolved { return _cachedGhPath ?? "" }
+        _ghPathResolved = true
+
+        for path in ["/opt/homebrew/bin/gh",
+                     "/usr/local/bin/gh",
+                     "/usr/bin/gh"]
+        {
+            if FileManager.default.fileExists(atPath: path) {
+                _cachedGhPath = path
+                TriosLogBus.shared.info(
+                    .queen, "queen.gh",
+                    "gh found at \(path)",
+                    ["path": path, "source": "FileManager"]
+                )
+                return path
+            }
+        }
+
+        // Last resort: the inherited PATH may still find it.
+        let probed = QueenStatusViewModel.runProcess(
+            "/bin/sh",
+            arguments: ["-c", "command -v gh"],
+            workDir: ProjectPaths.root,
+            timeout: 5
+        )
+        if !probed.isEmpty {
+            _cachedGhPath = probed
+            TriosLogBus.shared.info(
+                .queen, "queen.gh",
+                "gh found at \(probed) via command -v",
+                ["path": probed, "source": "PATH"]
+            )
+            return probed
+        }
+
+        TriosLogBus.shared.warn(
+            .queen, "queen.gh",
+            "gh not found in any known location or on PATH",
+            ["source": "nowhere"]
+        )
+        return ""
+    }
+
     /// Picks the next open sub-issue to act on and says why.
     ///
     /// Reads the **open sub-issues of epic gHashTag/trios#1090 through `gh`**
@@ -5642,12 +5696,7 @@ final class ChatViewModel: ObservableObject {
     private func chooseNextOpenIssue(startAfterChoosing: Bool = false, isLaunchBootstrap: Bool = false) async {
         // ── 1. Locate gh ───────────────────────────────────────────
         let ghPath = await Task.detached(priority: .utility) {
-            QueenStatusViewModel.runProcess(
-                "/bin/sh",
-                arguments: ["-c", "command -v gh"],
-                workDir: ProjectPaths.root,
-                timeout: 5
-            )
+            Self.resolveGhPath()
         }.value
 
         guard !ghPath.isEmpty else {
