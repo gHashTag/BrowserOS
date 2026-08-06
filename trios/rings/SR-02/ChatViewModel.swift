@@ -5677,6 +5677,55 @@ final class ChatViewModel: ObservableObject {
         return ""
     }
 
+    /// Returns a GitHub token for the timeline read, trying each source in
+    /// order and stopping at the first that has one:
+    ///
+    /// 1. The Keychain item `GitHubAPIClient` reads (same service and account).
+    /// 2. The value of `TRIOS_GITHUB_TOKEN` in `~/.trios/config.json`, read
+    ///    only when that file is readable by its owner alone.
+    ///
+    /// Returns `nil` when neither source has a token. The token itself is
+    /// never logged — only which source supplied it.
+    nonisolated func githubTokenForTimeline() -> String? {
+        // 1. Keychain — same service/account as GitHubAPIClient.
+        if let token = try? KeychainSecrets.read(
+            service: "ai.browseros.trios",
+            account: "github-token"
+        ), !token.filter({ !$0.isWhitespace }).isEmpty {
+            TriosLogBus.shared.info(
+                .queen, "queen.choose",
+                "Timeline token sourced from Keychain",
+                [:]
+            )
+            return token
+        }
+
+        // 2. ~/.trios/config.json — owner-only readable.
+        let configPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".trios/config.json")
+        guard FileManager.default.fileExists(atPath: configPath.path) else { return nil }
+        do {
+            let attrs = try FileManager.default.attributesOfItem(atPath: configPath.path)
+            guard let permNumber = attrs[.posixPermissions] as? NSNumber else { return nil }
+            let perms = UInt16(permNumber.intValue)
+            // Owner-only: no group read (0o040), no other read (0o004).
+            guard perms & 0o044 == 0 else { return nil }
+            let data = try Data(contentsOf: configPath)
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let token = json["TRIOS_GITHUB_TOKEN"] as? String,
+                  !token.filter({ !$0.isWhitespace }).isEmpty
+            else { return nil }
+            TriosLogBus.shared.info(
+                .queen, "queen.choose",
+                "Timeline token sourced from config file",
+                [:]
+            )
+            return token
+        } catch {
+            return nil
+        }
+    }
+
     /// Picks the next open sub-issue to act on and says why.
     ///
     /// Reads the **open sub-issues of epic gHashTag/trios#1090 through `gh`**
@@ -5691,13 +5740,18 @@ final class ChatViewModel: ObservableObject {
     /// decision that is not recorded might as well not have been made.
     private func chooseNextOpenIssue(startAfterChoosing: Bool = false, isLaunchBootstrap: Bool = false) async {
         // ── 1. Read open sub-issues of epic #1090 via GitHub REST API ──
-        // The repo is public, so no token is needed.  The timeline endpoint
-        // returns cross-referenced events; those whose source issue state is
-        // "open" are the open sub-issues of the epic.
+        // The timeline endpoint is rate-limited at 60 requests/hour without a
+        // token; attaching one when available lifts the ceiling and avoids
+        // HTTP 403 after a few relaunches.  The endpoint returns cross-
+        // referenced events; those whose source issue state is "open" are the
+        // open sub-issues of the epic.
         var timelineRequest = URLRequest(
             url: URL(string: "https://api.github.com/repos/gHashTag/trios/issues/1090/timeline?per_page=100")!
         )
         timelineRequest.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        if let token = githubTokenForTimeline() {
+            timelineRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        }
 
         let (timelineData, timelineResponse): (Data, URLResponse)
         do {
@@ -5735,7 +5789,7 @@ final class ChatViewModel: ObservableObject {
 
         // ── 2. Parse cross-referenced events for open sub-issues ───────
         var seen = Set<Int>()
-        var subIssues: [(number: Int, title: String)] = []
+        var subIssues: [(number: Int, title: String, body: String)] = []
 
         if let events = try? JSONSerialization.jsonObject(with: timelineData) as? [[String: Any]] {
             for event in events {
@@ -5745,8 +5799,9 @@ final class ChatViewModel: ObservableObject {
                 guard issue["state"] as? String == "open" else { continue }
                 guard let number = issue["number"] as? Int else { continue }
                 let title = issue["title"] as? String ?? ""
+                let body = issue["body"] as? String ?? ""
                 if seen.insert(number).inserted {
-                    subIssues.append((number, title))
+                    subIssues.append((number, title, body))
                 }
             }
         }
@@ -5799,10 +5854,7 @@ final class ChatViewModel: ObservableObject {
         }
 
         // ── 5. Score by boundary size, then issue number ───────────
-        // gh is still used here to read individual issue bodies.
-        let ghPath = await Task.detached(priority: .utility) {
-            Self.resolveGhPath()
-        }.value
+        // Issue bodies are fetched via the GitHub REST API (public, no token).
         // Fewest files in Границы wins; ties break by lowest number.
         // A directory path (trailing /) counts as 9999 — it is a
         // region, not a boundary.  No Границы section → Int.max (last).
@@ -5815,20 +5867,44 @@ final class ChatViewModel: ObservableObject {
         }
 
         var scored: [ScoredIssue] = []
+        var extraRequests = 0
         for issue in actionable {
-            let body = await Task.detached(priority: .utility) {
-                QueenStatusViewModel.runProcess(
-                    ghPath,
-                    arguments: [
-                        "issue", "view", String(issue.number),
-                        "--repo", "gHashTag/trios",
-                        "--json", "body",
-                        "-q", ".body",
-                    ],
-                    workDir: ProjectPaths.root,
-                    timeout: 10,
-                )
-            }.value
+            // Use the body from the timeline entry; fall back to a
+            // per-issue HTTPS request only when it is missing.
+            var body = issue.body
+            if body.isEmpty {
+                extraRequests += 1
+                body = await Task.detached(priority: .utility) {
+                let url = URL(string: "https://api.github.com/repos/gHashTag/trios/issues/\(issue.number)")!
+                var request = URLRequest(url: url)
+                request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+                do {
+                    let (data, response) = try await URLSession.shared.data(for: request)
+                    if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                        TriosLogBus.shared.warn(
+                            .queen,
+                            "queen.choose",
+                            "GitHub API returned \(http.statusCode) for issue #\(issue.number)",
+                            ["issue": String(issue.number), "status": String(http.statusCode)]
+                        )
+                        return ""
+                    }
+                    if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                       let body = json["body"] as? String {
+                        return body
+                    }
+                    return ""
+                } catch {
+                    TriosLogBus.shared.warn(
+                        .queen,
+                        "queen.choose",
+                        "Failed to fetch issue #\(issue.number): \(error.localizedDescription)",
+                        ["issue": String(issue.number)]
+                    )
+                    return ""
+                }
+                }.value
+            }
 
             scored.append(ScoredIssue(
                 number: issue.number,
@@ -5837,6 +5913,15 @@ final class ChatViewModel: ObservableObject {
                 paths: ChatViewModel.boundaryPaths(from: body),
                 body: body
             ))
+        }
+
+        if extraRequests > 0 {
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.choose",
+                "Made \(extraRequests) extra request(s) for issue(s) whose body was missing from the timeline",
+                ["extraRequests": String(extraRequests)]
+            )
         }
 
         let sorted = scored.sorted { a, b in
