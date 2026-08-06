@@ -4222,7 +4222,7 @@ final class ChatViewModel: ObservableObject {
                 guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 else { continue }
                 result[path] = ChatViewModel.regionExtractedContent(
-                    fullContent: content, criteria: criteria
+                    fullContent: content, criteria: criteria, filePath: path
                 )
                 if result.count >= maxFiles { break }
             }
@@ -4253,13 +4253,15 @@ final class ChatViewModel: ObservableObject {
                             workDir: ProjectPaths.root,
                             timeout: 10
                         )
-                        result[normalized] = content
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-                            .isEmpty
-                            ? "(file exists but is empty)"
-                            : ChatViewModel.regionExtractedContent(
-                                fullContent: content, criteria: criteria
-                            )
+                        let extracted = ChatViewModel.regionExtractedContent(
+                            fullContent: content, criteria: criteria,
+                            filePath: normalized
+                        )
+                        if !extracted.trimmingCharacters(
+                            in: .whitespacesAndNewlines
+                        ).isEmpty {
+                            result[normalized] = extracted
+                        }
                     } else {
                         result[normalized] = "(file not found)"
                     }
@@ -4310,7 +4312,8 @@ final class ChatViewModel: ObservableObject {
                                 timeout: 10
                             )
                             let extracted = ChatViewModel.regionExtractedContent(
-                                fullContent: content, criteria: criteria
+                                fullContent: content, criteria: criteria,
+                                filePath: relative
                             )
                             if !extracted.trimmingCharacters(
                                 in: .whitespacesAndNewlines
@@ -4394,46 +4397,87 @@ final class ChatViewModel: ObservableObject {
     /// non-adjacent regions.
     ///
     /// When no criteria names appear in the file — or no criteria names
-    /// were extracted at all — an explicit notice replaces the content so
-    /// the reviewer knows the file was scanned and nothing matched, rather
-    /// than reading the first lines of an unrelated section (#1124). The
-    /// notice names what was looked for so the gap is visible, not hidden
-    /// behind a plausible-looking excerpt.
+    /// were extracted at all — the QueenLocalisation region is tried
+    /// first; if that finds nothing, the first `maxRegionWidth` lines are
+    /// shown so the reviewer has actual content to judge from, instead of
+    /// a placeholder that forced a prose-only answer (#1184). A file with
+    /// no content at all logs `queen.review.contentsEmpty` and returns an
+    /// empty string; a truly missing file keeps its placeholder at the
+    /// call site.
     private nonisolated static func regionExtractedContent(
         fullContent: String,
-        criteria: [String]
+        criteria: [String],
+        filePath: String = ""
     ) -> String {
         let allLines = fullContent.components(separatedBy: "\n")
         let names = criteriaNames(in: criteria)
 
-        if names.isEmpty {
-            // No code-like identifiers were extracted from the criteria.
-            // Returning the full content would give the reviewer the
-            // first lines of the file — which look like relevant context
-            // but are not, because nothing in the criteria pointed there.
-            // An explicit notice makes the gap visible (#1124).
-            return "(no criteria names found to search for in this file)"
+        // Nothing to show — the file exists but every line is blank.
+        // Callers skip truly empty content, but whitespace-only files
+        // slip through and would produce a header with no body. Log it
+        // so the silence is traceable (#1184).
+        if allLines.allSatisfy({
+            $0.trimmingCharacters(in: .whitespaces).isEmpty
+        }) {
+            if !filePath.isEmpty {
+                TriosLogBus.shared.warn(
+                    .queen,
+                    "queen.review.contentsEmpty",
+                    "File exists but has no content to show",
+                    ["path": filePath]
+                )
+            }
+            return ""
         }
 
         // Find all line indices where any name appears.
         var hitLines = Set<Int>()
-        for (index, line) in allLines.enumerated() {
-            if names.contains(where: { line.contains($0) }) {
-                hitLines.insert(index)
+        if !names.isEmpty {
+            for (index, line) in allLines.enumerated() {
+                if names.contains(where: { line.contains($0) }) {
+                    hitLines.insert(index)
+                }
             }
         }
 
-        if hitLines.isEmpty {
-            // Names were extracted from the criteria but none appear in
-            // this file. Returning the full content would substitute the
-            // file's opening lines — which read as context but are not,
-            // because no criterion name anchored them. The notice names
-            // what was looked for so the reviewer sees the gap, not a
-            // plausible-looking excerpt (#1124).
-            return "(none of the criteria names found in this file — "
-                + "looked for: "
-                + names.sorted().joined(separator: ", ")
-                + ")"
+        if names.isEmpty || hitLines.isEmpty {
+            // No criteria names matched in this file. Previously this
+            // returned a placeholder that left the reviewer working from
+            // the diff alone — prose answers, not verdicts (#1184). Try
+            // QueenLocalisation first; if it finds a declaration region,
+            // show that. Otherwise show the first maxRegionWidth lines
+            // so the reviewer has actual file content to judge from.
+            if !names.isEmpty,
+               let range = QueenLocalisation.region(
+                   in: fullContent, mentioning: names
+               )
+            {
+                let start = max(0, range.lowerBound - 1)
+                let end = min(allLines.count - 1, range.upperBound - 1)
+                var region: [String] = []
+                region.append(
+                    "(\(end - start + 1) of \(allLines.count) lines — "
+                    + "QueenLocalisation region for: "
+                    + names.sorted().joined(separator: ", ")
+                    + ")"
+                )
+                for i in start...end {
+                    let displayNum = String(format: "%5d", i + 1)
+                    region.append("\(displayNum) | \(allLines[i])")
+                }
+                return region.joined(separator: "\n")
+            }
+            let limit = min(QueenLocalisation.maxRegionWidth, allLines.count)
+            var output: [String] = []
+            output.append(
+                "(showing first \(limit) of \(allLines.count) lines — "
+                + "no criteria names found in this file)"
+            )
+            for i in 0..<limit {
+                let displayNum = String(format: "%5d", i + 1)
+                output.append("\(displayNum) | \(allLines[i])")
+            }
+            return output.joined(separator: "\n")
         }
 
         // Build and merge regions: ±contextLines around each hit.
