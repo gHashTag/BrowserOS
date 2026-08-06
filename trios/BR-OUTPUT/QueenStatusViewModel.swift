@@ -483,6 +483,15 @@ final class QueenStatusViewModel: ObservableObject {
         let watchdog = DispatchWorkItem {
             if task.isRunning {
                 task.terminate()
+                kill(task.processIdentifier, SIGKILL)
+                NSLog("[QueenStatus] process.timeout: \(executable) exceeded \(Int(timeout))s")
+                TriosLogBus.shared.warn(
+                    .queen,
+                    "process.timeout",
+                    "\(executable) exceeded \(Int(timeout))s",
+                    ["executable": executable, "seconds": String(Int(timeout))]
+                )
+                try? pipe.fileHandleForReading.close()
             }
         }
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + timeout, execute: watchdog)
