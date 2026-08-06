@@ -4572,3 +4572,30 @@ Proven by counting: five crashes with that signature before, and a full run
 after with no new report at all.
 
 I spent sixteen cycles calling this "the environment".
+
+## The ceiling is the parser, and now the loss has a number
+
+With the crash gone, the circle runs to the end every time and stops at the same
+place. The reason turned out not to be a silent reviewer:
+
+    asked=3  parsed=0  response_chars=2629
+    asked=3  parsed=1  response_chars=2346
+
+Two and a half thousand characters of considered answer, and the parser took
+none of it, then a third of it. The retry asked the same whole question and got
+the same unreadable shape.
+
+So the request now demands one line per criterion and says plainly that anything
+else will not be read, and the parser counts what it could not place:
+
+    parsed=2 of 3
+    queen.review.unparsed — 6 answer line(s) matched no criterion
+
+Not three yet. But the loss is a number now instead of a silence, which is the
+difference between a ceiling you can push and one you keep walking into.
+
+Two other things worth recording from the same run. No new crash report through
+two more full circles — the assert removal holds. And
+`queen.acceptance.asked_stale_verdict` appeared in the log: that is the exact
+invariant that used to kill the process, firing in the wild and being written
+down instead.
