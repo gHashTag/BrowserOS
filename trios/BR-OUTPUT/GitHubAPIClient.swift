@@ -102,8 +102,35 @@ actor GitHubAPIClient {
             "base": base,
         ]
         req.httpBody = try JSONSerialization.data(withJSONObject: payload)
-        let (data, _) = try await URLSession.shared.data(for: req)
-        return try JSONDecoder().decode(GitHubPullRequest.self, from: data)
+        let (data, response) = try await URLSession.shared.data(for: req)
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+
+        if (200..<300).contains(statusCode) {
+            return try JSONDecoder().decode(GitHubPullRequest.self, from: data)
+        }
+
+        if statusCode == 422,
+           let bodyString = String(data: data, encoding: .utf8),
+           bodyString.localizedCaseInsensitiveContains("pull request already exists") {
+            let listPath = try GitHubEndpoint.repositoryPath(repo, "/pulls?head=\(head)&state=open")
+            let (listData, listResponse) = try await URLSession.shared.data(for: try request(listPath))
+            try validate(listResponse, endpoint: listPath)
+            let existing = try JSONDecoder().decode([GitHubPullRequest].self, from: listData)
+            if let pr = existing.first {
+                return pr
+            }
+        }
+
+        let message: String
+        if let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let msg = json["message"] as? String {
+            message = msg
+        } else if let bodyString = String(data: data, encoding: .utf8), !bodyString.isEmpty {
+            message = String(bodyString.prefix(200))
+        } else {
+            message = "HTTP \(statusCode)"
+        }
+        throw GitHubAPIError.createPRFailed(statusCode: statusCode, message: message)
     }
 
     /// Merges a pull request.
@@ -226,6 +253,7 @@ enum GitHubAPIError: Error, LocalizedError {
     case badURL(endpoint: String)
     case badServerResponse(endpoint: String)
     case cannotParseResponse(endpoint: String)
+    case createPRFailed(statusCode: Int, message: String)
 
     var errorDescription: String? {
         switch self {
@@ -237,6 +265,8 @@ enum GitHubAPIError: Error, LocalizedError {
             return "Unexpected GitHub response for endpoint \(endpoint)"
         case .cannotParseResponse(let endpoint):
             return "Could not parse GitHub response for endpoint \(endpoint)"
+        case .createPRFailed(let statusCode, let message):
+            return "GitHub createPR failed (\(statusCode)): \(message)"
         }
     }
 }
