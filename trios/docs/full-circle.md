@@ -1,5 +1,5 @@
 # Full Circle
 
-Every project comes full circle eventually.
-The cycle of code: write, review, ship — then refine.
-This doc marks the completion of that circle.
+A circle is a shape with all points equidistant from its center.
+
+This document describes the concept of a full circle.
