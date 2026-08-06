@@ -41,6 +41,18 @@ enum KeychainSecrets {
     private static var writesInFlight: Set<String> = []
     private static var writeTimeouts: [String: Date] = [:]
 
+    /// True while the app is still coming up. While raised, every keychain
+    /// operation returns immediately without touching the Security framework:
+    /// reads throw the ordinary not-found result, writes report failure.
+    /// Lowered once by ``clearLaunchGate()`` after bootstrap completes.
+    static var isLaunching: Bool = true
+
+    /// Lower the launch gate. After this call keychain operations proceed
+    /// normally.
+    static func clearLaunchGate() {
+        isLaunching = false
+    }
+
     private static func readKey(service: String, account: String) -> String {
         "\(service)\u{0}\(account)"
     }
@@ -69,6 +81,10 @@ enum KeychainSecrets {
                 throw KeychainSecretsError.itemNotFound(service: service, account: account)
             }
             return data
+        }
+
+        if isLaunching {
+            throw KeychainSecretsError.itemNotFound(service: service, account: account)
         }
 
         let key = readKey(service: service, account: account)
@@ -173,6 +189,10 @@ enum KeychainSecrets {
                 throw KeychainSecretsError.invalidItemType
             }
             return
+        }
+
+        if isLaunching {
+            throw KeychainSecretsError.osStatus(OSStatus(-4093))
         }
 
         let key = readKey(service: service, account: account)
