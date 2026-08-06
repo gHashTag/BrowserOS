@@ -4,11 +4,13 @@ import Foundation
 enum BuildVariant: String, Equatable, Sendable {
     case dev
     case prod
+    case test
 
     var bundleIdentifier: String {
         switch self {
         case .dev: return "com.browseros.trios.dev"
         case .prod: return "com.browseros.trios"
+        case .test: return "com.browseros.trios.test"
         }
     }
 
@@ -16,6 +18,7 @@ enum BuildVariant: String, Equatable, Sendable {
         switch self {
         case .dev: return "trios-dev.app"
         case .prod: return "trios.app"
+        case .test: return "trios-test.app"
         }
     }
 
@@ -23,6 +26,7 @@ enum BuildVariant: String, Equatable, Sendable {
         switch self {
         case .dev: return "trios_dev_app"
         case .prod: return "trios_app"
+        case .test: return "trios_test_app"
         }
     }
 
@@ -30,6 +34,7 @@ enum BuildVariant: String, Equatable, Sendable {
         switch self {
         case .dev: return "Frameworks-dev"
         case .prod: return "Frameworks"
+        case .test: return "Frameworks-test"
         }
     }
 
@@ -37,6 +42,7 @@ enum BuildVariant: String, Equatable, Sendable {
         switch self {
         case .dev: return ".trinity-dev"
         case .prod: return ".trinity"
+        case .test: return ".trinity-test"
         }
     }
 
@@ -44,6 +50,7 @@ enum BuildVariant: String, Equatable, Sendable {
         switch self {
         case .dev: return "9205"
         case .prod: return "9105"
+        case .test: return "9305"
         }
     }
 }

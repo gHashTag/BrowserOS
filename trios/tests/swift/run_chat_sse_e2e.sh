@@ -7,13 +7,14 @@ set -euo pipefail
 # The SSE end-to-end test exercises ChatViewModel in-process and must not make
 # real A2A registration calls to the BrowserOS server.
 export TRIOS_SKIP_A2A_STARTUP=1
+export TRIOS_VARIANT=test
 # Keep the run independent of which models this machine happens to have.
 export TRIOS_E2E_DISABLE_WARMUP=1
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 OUTPUT="/tmp/trios_chat_sse_e2e_test"
-LOG_DIR="$PROJECT_DIR/.trinity/logs"
+LOG_DIR="$PROJECT_DIR/.trinity-test/logs"
 LOG_FILE="$LOG_DIR/chat_sse_e2e_build_$(date +%s).log"
 SWIFT_TEST_OPTIMIZATION="${TRIOS_TEST_OPTIMIZATION:--Onone}"
 
