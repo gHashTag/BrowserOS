@@ -134,6 +134,22 @@ final class TriOSEncryption {
             return key
         }
 
+        if Thread.isMainThread {
+            // The keychain read can block the main run loop and freeze
+            // the app at launch.  Kick off a background read so the next
+            // caller finds the key cached, then refuse to mint a
+            // replacement on this thread.
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                guard let self else { return }
+                self.lock.lock()
+                defer { self.lock.unlock() }
+                if self.cachedKey == nil {
+                    self.cachedKey = try? self.loadOrCreateSymmetricKey()
+                }
+            }
+            throw TriOSEncryptionError.keyUnavailableLocked
+        }
+
         let key = try loadOrCreateSymmetricKey()
         cachedKey = key
         return key
