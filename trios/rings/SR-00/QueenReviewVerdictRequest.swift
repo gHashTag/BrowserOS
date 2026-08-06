@@ -289,9 +289,13 @@ enum QueenReviewVerdictRequest {
         // The reviewer may abbreviate a long criterion, so only the first few
         // words need to appear.
         if !echo.isEmpty {
-            if let line = lines.first(where: {
-                $0.localizedCaseInsensitiveContains(echo)
-            }) {
+            let needle = echo.trimmingCharacters(
+                in: CharacterSet.punctuationCharacters.union(.whitespaces)
+            )
+            if !needle.isEmpty,
+               let line = lines.first(where: {
+                   $0.localizedCaseInsensitiveContains(needle)
+               }) {
                 return verdictKeyword(in: line, stripping: echo)
             }
         }
@@ -314,7 +318,7 @@ enum QueenReviewVerdictRequest {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         if trimmed.hasPrefix(prefix) { return true }
         let stripped = trimmed.replacingOccurrences(
-            of: #"^([*#\-]+|\[[xX ?]\])\s*"#,
+            of: #"^([*#\-|]+|\[[xX ?]\])\s*"#,
             with: "",
             options: .regularExpression
         )

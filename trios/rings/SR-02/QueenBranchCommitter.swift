@@ -267,18 +267,31 @@ enum QueenBranchCommitter {
         _ branch: String,
         projectRoot: String = ProjectPaths.root
     ) async -> String? {
-        await Task.detached(priority: .utility) {
-            let index = temporaryIndexPath()
-            defer { try? FileManager.default.removeItem(atPath: index) }
-            let output = runGit(
-                ["push", "--force-with-lease", "-u", "origin", "\(branch):\(branch)"],
-                index: index, projectRoot: projectRoot
-            )
-            guard output != nil else {
-                return "git push failed for \(branch)"
+        // Race the push against a deadline.  Without it, a process stuck
+        // waiting on a network hiccup or a half-open socket keeps the whole
+        // pull-request step hostage; the 90 s ceiling is generous for any
+        // real push and merciless for one that has stalled.
+        await withTaskGroup(of: String?.self) { group in
+            group.addTask(priority: .utility) {
+                let index = temporaryIndexPath()
+                defer { try? FileManager.default.removeItem(atPath: index) }
+                let output = runGit(
+                    ["push", "--force-with-lease", "-u", "origin", "\(branch):\(branch)"],
+                    index: index, projectRoot: projectRoot
+                )
+                guard output != nil else {
+                    return "git push failed for \(branch)"
+                }
+                return nil
             }
-            return nil
-        }.value
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 90_000_000_000)
+                return "git push for \(branch) did not finish within 90 seconds"
+            }
+            let result = await group.next() ?? "git push for \(branch) did not finish within 90 seconds"
+            group.cancelAll()
+            return result
+        }
     }
 
     /// Which repository-relative paths differ from `baselineTree` right now.
@@ -1028,6 +1041,13 @@ enum QueenBranchCommitter {
         process.currentDirectoryURL = URL(fileURLWithPath: repositoryRoot(projectRoot: projectRoot))
         var environment = ProcessInfo.processInfo.environment
         environment["GIT_INDEX_FILE"] = index
+        // Credentials are the dead end of an automated pipeline: git waits
+        // for a username at a prompt nobody can see, and every step that
+        // follows the push never runs.  Forbid the prompt outright.
+        environment["GIT_TERMINAL_PROMPT"] = "0"
+        environment["GIT_ASKPASS"] = ""
+        environment["SSH_ASKPASS"] = ""
+        environment["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
         process.environment = environment
 
         let output = Pipe()
