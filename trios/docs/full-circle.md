@@ -1,5 +1,3 @@
 # Full Circle
 
-A circle is a shape with all points equidistant from its center.
-
-This document describes the concept of a full circle.
+Every journey returns to where it began, completing the circle of understanding.
