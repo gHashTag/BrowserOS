@@ -4539,7 +4539,13 @@ final class ChatViewModel: ObservableObject {
                 ? "(no code identifiers extracted from the criteria)"
                 : "names searched: "
                     + names.sorted().joined(separator: ", ")
-            return "(no criteria names found in this file; \(searched))"
+            let note = "(no criteria names found in this file; \(searched))"
+            var opening: [String] = []
+            for i in 0..<min(40, allLines.count) {
+                let displayNum = String(format: "%5d", i + 1)
+                opening.append("\(displayNum) | \(allLines[i])")
+            }
+            return note + "\n\nFILE BEGINS\n" + opening.joined(separator: "\n")
         }
 
         // Build and merge regions: ±contextLines around each hit.
@@ -6218,7 +6224,7 @@ final class ChatViewModel: ObservableObject {
         do {
             let pr = try await GitHubAPIClient().createPR(
                 repo: prRepo,
-                title: task.title,
+                title: QueenDelegationPolicy.conventionalPRTitle(for: task),
                 body: "For \(issue.url)\n\nOpened by the Queen for \(task.worker).",
                 head: branch,
                 base: prBase
@@ -6235,6 +6241,13 @@ final class ChatViewModel: ObservableObject {
                 ["issue": issue.slug, "pr": "\(pr.number)", "branch": branch,
                  "base": prBase]
             )
+            // The thirty-minute scheduler wake polls on a steady cadence, but a
+            // pull request that just opened should not wait half an hour for its
+            // first outcome. Sleep long enough for checks to start, then poll once.
+            Task.detached { [weak self] in
+                try? await Task.sleep(nanoseconds: 90_000_000_000)
+                await self?.pollPullRequests()
+            }
         } catch {
             TriosLogBus.shared.error(
                 .queen, "queen.pr.failed", "Could not open a pull request",
