@@ -3640,6 +3640,25 @@ final class ChatViewModel: ObservableObject {
                 )
             }
         }
+
+        // If nothing is queued or running at launch, the Queen picks the
+        // next open sub-issue of #1090 and starts it, so a plain `open
+        // trios.app` opens a chat without a human typing /choose (#1197).
+        let hasActiveWork = delegationRegistry.tasks.contains {
+            $0.state == .queued || $0.state == .running
+        }
+        if !hasActiveWork {
+            Task { [weak self] in
+                guard let self else { return }
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.launch.bootstrap",
+                    "No active tasks at launch — choosing next open issue to start",
+                    [:]
+                )
+                await self.chooseNextOpenIssue(startAfterChoosing: true)
+            }
+        }
     }
 
     /// Settles a dead worker's edits so the shared tree is not left with
@@ -5225,7 +5244,13 @@ final class ChatViewModel: ObservableObject {
     /// because an orchestrator that rubber-stamps its own workers has no
     /// reviewer at all. Off unless `TRIOS_QUEEN_AUTONOMY=1`.
     private func autoAcceptIfUnambiguous(taskID: UUID) async {
-        guard ProcessInfo.processInfo.environment["TRIOS_QUEEN_AUTONOMY"] == "1" else {
+        let autonomy: Bool
+        if let envValue = ProcessInfo.processInfo.environment["TRIOS_QUEEN_AUTONOMY"] {
+            autonomy = envValue == "1"
+        } else {
+            autonomy = UserDefaults.standard.object(forKey: "TriosQueenAutonomy") as? Bool ?? true
+        }
+        guard autonomy else {
             TriosLogBus.shared.info(
                 .queen, "queen.auto_accept.autonomy_disabled",
                 "Auto-accept skipped: autonomy is off",
