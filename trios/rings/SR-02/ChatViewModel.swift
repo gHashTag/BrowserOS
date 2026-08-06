@@ -4382,16 +4382,6 @@ final class ChatViewModel: ObservableObject {
                 }
             }
 
-            // Regression guard (#1124 criterion 4): if any excerpt contains
-            // the "(showing first" marker, the old file-start fallback has
-            // been restored in `regionExtractedContent`. That behaviour
-            // produced zero verdicts on a re-review with an empty diff, and
-            // this assertion is the tripwire that fires when it returns.
-            assert(
-                !result.values.contains { $0.contains("showing first") },
-                "fileContentsForReview produced a first-N-lines excerpt — "
-                + "the exact behaviour #1124 removed (criterion 4)"
-            )
             return result
         }.value
     }
@@ -4509,13 +4499,10 @@ final class ChatViewModel: ObservableObject {
             // is the code the criteria actually talk about — show it.
             //
             // When QueenLocalisation also comes up empty, the excerpt states
-            // this directly rather than substituting the file's opening lines.
-            // Showing the first N lines was the original behaviour, and it
-            // produced zero verdicts on a re-review with an empty diff: the
-            // reviewer saw irrelevant code, could not connect it to the
-            // criteria, and declined (#1124 criterion 2). Saying so plainly
-            // lets the reviewer judge from the diff and criteria text without
-            // being misled by plausible-looking but irrelevant content.
+            // the gap, then falls back to the file's opening lines. A
+            // criterion about line count or file structure is unanswerable
+            // without those lines, so they are included after the gap note
+            // (#1196 restores this; #1124 had removed it).
             if !names.isEmpty,
                let range = QueenLocalisation.region(
                    in: fullContent, mentioning: names
@@ -4537,15 +4524,15 @@ final class ChatViewModel: ObservableObject {
                 return region.joined(separator: "\n")
             }
             // No criteria names appear anywhere in this file, and no
-            // declaration could be located. State the gap plainly so the
-            // reviewer sees it instead of being misled by the file's opening
-            // lines (#1124 criterion 2).
+            // declaration could be located. State the gap, then show the
+            // file's opening lines so a criterion about line count can be
+            // answered (#1196 restores this fallback after #1124 removed it).
             if !filePath.isEmpty {
                 TriosLogBus.shared.info(
                     .queen,
                     "queen.review.noCriteriaNames",
                     "No criteria names found in file — stating the gap "
-                    + "instead of showing opening lines (#1124)",
+                    + "and showing opening lines (#1196)",
                     [
                         "path": filePath,
                         "names": names.isEmpty
@@ -4558,13 +4545,21 @@ final class ChatViewModel: ObservableObject {
                 ? "(no code identifiers extracted from the criteria)"
                 : "names searched: "
                     + names.sorted().joined(separator: ", ")
-            let note = "(no criteria names found in this file; \(searched))"
-            var opening: [String] = []
-            for i in 0..<min(40, allLines.count) {
+            // Return the gap note, a blank line, "FILE BEGINS", and the first
+            // forty numbered lines. The gap note says no named symbols were
+            // found; the opening lines let a criterion about line count or
+            // file structure be answered. #1196 restored this after #1124
+            // removed it.
+            let previewLimit = min(40, allLines.count)
+            var fallback: [String] = []
+            fallback.append("(no criteria names found in this file; \(searched))")
+            fallback.append("")
+            fallback.append("FILE BEGINS")
+            for i in 0..<previewLimit {
                 let displayNum = String(format: "%5d", i + 1)
-                opening.append("\(displayNum) | \(allLines[i])")
+                fallback.append("\(displayNum) | \(allLines[i])")
             }
-            return note + "\n\nFILE BEGINS\n" + opening.joined(separator: "\n")
+            return fallback.joined(separator: "\n")
         }
 
         // Build and merge regions: ±contextLines around each hit.
@@ -6363,24 +6358,40 @@ final class ChatViewModel: ObservableObject {
             if QueenDelegationPolicy.outcome(
                 merged: pullRequest.isMerged, closedUnmerged: pullRequest.isClosedUnmerged
             ) == .pending {
-                let merged = (try? await client.mergePullRequest(
-                    repo: prRepo,
-                    number: number,
-                    title: "\(task.title) (\(task.issue.slug))"
-                )) ?? false
-                if merged {
-                    TriosLogBus.shared.info(
-                        .queen, "queen.pr.merged", "Merged a reviewed pull request",
-                        ["issue": task.issue.slug, "pr": "\(number)"]
+                TriosLogBus.shared.info(
+                    .queen, "queen.pr.merge_attempt", "Attempting to merge a reviewed pull request",
+                    ["issue": task.issue.slug, "pr": "\(number)"]
+                )
+                do {
+                    let merged = try await client.mergePullRequest(
+                        repo: prRepo,
+                        number: number,
+                        title: "\(task.title) (\(task.issue.slug))"
                     )
-                    registry.transition(taskID: task.id, to: .merged)
-                    await appendSystemMessageToQueenChat(
-                        SystemNoticeClassifier.successMarker
-                            + "Merged #\(number) for \(task.issue.slug). The work is in, and "
-                            + "the chat is archived because the forge says so - not because "
-                            + "I liked the result."
+                    if merged {
+                        TriosLogBus.shared.info(
+                            .queen, "queen.pr.merged", "Merged a reviewed pull request",
+                            ["issue": task.issue.slug, "pr": "\(number)"]
+                        )
+                        registry.transition(taskID: task.id, to: .merged)
+                        await appendSystemMessageToQueenChat(
+                            SystemNoticeClassifier.successMarker
+                                + "Merged #\(number) for \(task.issue.slug). The work is in, and "
+                                + "the chat is archived because the forge says so - not because "
+                                + "I liked the result."
+                        )
+                        continue
+                    } else {
+                        TriosLogBus.shared.warn(
+                            .queen, "queen.pr.merge_refused", "The forge refused the merge",
+                            ["issue": task.issue.slug, "pr": "\(number)"]
+                        )
+                    }
+                } catch {
+                    TriosLogBus.shared.warn(
+                        .queen, "queen.pr.merge_refused", "The forge refused the merge",
+                        ["issue": task.issue.slug, "pr": "\(number)", "error": "\(error)"]
                     )
-                    continue
                 }
             }
 
