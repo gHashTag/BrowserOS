@@ -4621,8 +4621,8 @@ final class ChatViewModel: ObservableObject {
             + "Answer one line per criterion. Copy the criterion text and "
             + "append the verdict after a colon:\n"
             + "\n"
-            + "    CRITERION TEXT: met\n"
-            + "    CRITERION TEXT: not met — one sentence stating why\n"
+            + "    \(criteria.first ?? "CRITERION TEXT"): met\n"
+            + "    \(criteria.first ?? "CRITERION TEXT"): not met — one sentence stating why\n"
             + "\n"
             + "Anything else — prose, paragraphs, introductions, summaries — "
             + "will not be read. Only lines that contain the criterion text "
@@ -4732,7 +4732,24 @@ final class ChatViewModel: ObservableObject {
             reviewerResponses[task.id] = response
         }
 
-        let verdicts = QueenReviewVerdictRequest.parse(response, criteria: criteria)
+        // Strip a leading "CRITERION TEXT" label the reviewer may have echoed
+        // from the format example, with optional colon and whitespace, before
+        // parsing (#1189). A reviewer that copies the example's structure but
+        // keeps the placeholder glued to the front of the real criterion
+        // leaves the parser unable to match the line — the criterion's own
+        // words are buried under the label. Case-insensitive so capitalisation
+        // variants are caught too.
+        let labelStrippedResponse = response.components(separatedBy: .newlines)
+            .map { line in
+                line.replacingOccurrences(
+                    of: "^\\s*CRITERION TEXT\\s*:?\\s*",
+                    with: "",
+                    options: [.regularExpression, .caseInsensitive]
+                )
+            }
+            .joined(separator: "\n")
+
+        let verdicts = QueenReviewVerdictRequest.parse(labelStrippedResponse, criteria: criteria)
         let registry = delegationRegistry
         var recorded = 0
         for (criterion, verdict) in verdicts {
@@ -5361,6 +5378,7 @@ final class ChatViewModel: ObservableObject {
             "Accepted without a human",
             ["issue": task.issue.slug, "files": String(task.committedFiles ?? 0)]
         )
+        await openPullRequestForTask(issue: task.issue)
     }
 
     /// Reports a worker going wrong, once per kind of concern per task.
