@@ -16,6 +16,12 @@ final class QueenDelegationRegistry: ObservableObject {
     @Published private(set) var tasks: [DelegatedTask] = []
     @Published private(set) var lastError: String?
 
+    /// Workers that were still `running` when the app launched — meaning they
+    /// died with the previous process. The view model reads this to settle
+    /// orphaned changes (stash the worker's virtual-branch edits) and report
+    /// how many files were rescued.
+    private(set) var orphansReconciledAtLaunch: [DelegatedTask] = []
+
     private let storePath: String
     private let dateProvider: () -> Date
 
@@ -395,7 +401,7 @@ final class QueenDelegationRegistry: ObservableObject {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
             tasks = try decoder.decode([DelegatedTask].self, from: data)
-            reconcileOrphanedWorkers()
+            orphansReconciledAtLaunch = reconcileOrphanedWorkers()
         } catch {
             lastError = "Could not read the delegation store: \(error.localizedDescription)"
         }
@@ -404,10 +410,11 @@ final class QueenDelegationRegistry: ObservableObject {
     /// A worker only exists as a live stream inside a running app. Anything the
     /// store calls `running` at launch died with the previous process, so it is
     /// marked failed rather than left holding a slot the Queen can never fill.
-    private func reconcileOrphanedWorkers() {
+    private func reconcileOrphanedWorkers() -> [DelegatedTask] {
         let orphans = tasks.indices.filter { tasks[$0].state == .running }
-        guard !orphans.isEmpty else { return }
+        guard !orphans.isEmpty else { return [] }
         let now = dateProvider()
+        var reconciled: [DelegatedTask] = []
         for index in orphans {
             tasks[index].state = .failed
             tasks[index].updatedAt = now
@@ -417,8 +424,10 @@ final class QueenDelegationRegistry: ObservableObject {
                 "Worker did not survive a restart",
                 ["issue": tasks[index].issue.slug, "worker": tasks[index].worker]
             )
+            reconciled.append(tasks[index])
         }
         persist()
+        return reconciled
     }
 
     private func persist() {

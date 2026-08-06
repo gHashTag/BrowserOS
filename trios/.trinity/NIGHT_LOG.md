@@ -4671,3 +4671,25 @@ This is a different stop from every earlier one. The supervisor is alive and the
 crash count is still six; it is the worker that died. Work made and lost in
 silence is worse than work not attempted, because the second at least gets tried
 again. #1187.
+
+## What loses the work is a restart, not a dying bee
+
+The orphan message reads *Worker did not survive a restart*, and I had taken it
+for a worker that died mid-task. It is not. `reconcileOrphanedWorkers` runs at
+**launch**: everything the store still calls `running` is marked failed, because
+a live stream cannot cross a process boundary. So the thing that lost 53 lines
+of #1124's work was the app being replaced — by my own probe, which kills it at
+the start of every run.
+
+The give-up path after exhausted restarts already settles a bee's edits into its
+branch. The launch path settled nothing, because the registry has no business
+reaching into git and so did nothing at all.
+
+It now returns what it reconciled, kept for the view model to settle. Two
+regressions on the way, both handed back with the exact words: the returned
+value went unused and broke the warning ceiling, then keeping it in a
+`@Published` property changed observable state during initialisation and took
+out a check. Plain property, 594 green.
+
+Still to do: the settling itself, one boundary over. The registry now says who
+was orphaned; nobody yet acts on it.
