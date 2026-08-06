@@ -479,6 +479,7 @@ enum QueenDelegationPolicy {
         guard committedFiles > 0 else { return false }
         guard !task.ownedPaths.isEmpty else { return false }
         guard !isExpensive(task) else { return false }
+        guard !task.acceptanceCriteria.isEmpty else { return false }
         return true
     }
 

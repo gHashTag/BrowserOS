@@ -5277,6 +5277,8 @@ final class ChatViewModel: ObservableObject {
                 failedCondition = "no boundary (ownedPaths is empty)"
             } else if QueenDelegationPolicy.isExpensive(task) {
                 failedCondition = "task is expensive"
+            } else if task.acceptanceCriteria.isEmpty {
+                failedCondition = "no acceptance criteria (task has no contract)"
             } else {
                 failedCondition = "unknown"
             }
