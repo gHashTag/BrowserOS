@@ -303,12 +303,43 @@ final class QueenDelegationRegistry: ObservableObject {
     /// exist - a verdict nobody can see is worse than none.
     @discardableResult
     func recordVerdict(taskID: UUID, criterion: String, verdict: QueenCriterionVerdict) -> Bool {
-        guard let index = tasks.firstIndex(where: { $0.id == taskID }),
-              tasks[index].acceptanceCriteria.contains(criterion) else { return false }
-        tasks[index].criterionVerdicts[criterion] = verdict
+        guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return false }
+        let criteria = tasks[index].acceptanceCriteria
+
+        // Exact match first — the common, cheapest path.
+        let matched: String? = if criteria.contains(criterion) {
+            criterion
+        } else {
+            criteria.first(where: { Self.normalised($0) == Self.normalised(criterion) })
+        }
+
+        guard let key = matched else {
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.verdict.unmatched",
+                "Verdict criterion did not match any acceptance criterion",
+                [
+                    "received": criterion,
+                    "expected": criteria.joined(separator: " | "),
+                ]
+            )
+            return false
+        }
+
+        tasks[index].criterionVerdicts[key] = verdict
         tasks[index].updatedAt = Date()
         persist()
         return true
+    }
+
+    /// Normalises a criterion string for fuzzy comparison: trims whitespace,
+    /// strips surrounding quotes and backticks, and folds case.
+    private static func normalised(_ text: String) -> String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "`", with: "")
+            .replacingOccurrences(of: "\"", with: "")
+            .replacingOccurrences(of: "'", with: "")
+            .lowercased()
     }
 
     func recordPullRequest(taskID: UUID, number: Int) {
