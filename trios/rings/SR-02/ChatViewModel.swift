@@ -5745,6 +5745,18 @@ final class ChatViewModel: ObservableObject {
         // HTTP 403 after a few relaunches.  The endpoint returns cross-
         // referenced events; those whose source issue state is "open" are the
         // open sub-issues of the epic.
+        //
+        // When the request fails (rate limit, network), the last list that was
+        // read successfully is loaded from a store so a single forge refusal
+        // does not wipe out the launch (#1214).
+        let storePath = "\(ProjectPaths.trinity)/state/queen_subissues.json"
+        var seen = Set<Int>()
+        var subIssues: [(number: Int, title: String, body: String)] = []
+        /// Non-nil when subIssues came from the store fallback — appended
+        /// to the log and the proposal so a choice made on yesterday's
+        /// list looks like one (#1214).
+        var storeDisclaimer: String? = nil
+
         var timelineRequest = URLRequest(
             url: URL(string: "https://api.github.com/repos/gHashTag/trios/issues/1090/timeline?per_page=100")!
         )
@@ -5753,65 +5765,110 @@ final class ChatViewModel: ObservableObject {
             timelineRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
-        let (timelineData, timelineResponse): (Data, URLResponse)
+        // ── 1a. Attempt the network read ────────────────────────────
+        var timelineData = Data()
+        var networkOK = false
+        var failureMessage = ""
         do {
-            (timelineData, timelineResponse) = try await URLSession.shared.data(for: timelineRequest)
+            let (data, response) = try await URLSession.shared.data(for: timelineRequest)
+            timelineData = data
+            if let httpResp = response as? HTTPURLResponse,
+               (200...299).contains(httpResp.statusCode) {
+                networkOK = true
+            } else {
+                let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+                failureMessage = "HTTP \(code)"
+            }
         } catch {
-            TriosLogBus.shared.error(
-                .queen,
-                "queen.choose",
-                "Timeline request failed: \(error.localizedDescription)",
-                ["epic": "gHashTag/trios#1090", "chosen": "(none)"]
-            )
-            await postQueenNotice(
-                SystemNoticeClassifier.warningMarker
-                    + "Cannot choose: failed to read sub-issues of epic #1090 "
-                    + "(\(error.localizedDescription))."
-            )
-            return
+            failureMessage = error.localizedDescription
         }
 
-        guard let httpResp = timelineResponse as? HTTPURLResponse,
-              (200...299).contains(httpResp.statusCode) else {
-            let code = (timelineResponse as? HTTPURLResponse)?.statusCode ?? -1
-            TriosLogBus.shared.error(
-                .queen,
-                "queen.choose",
-                "Timeline request returned HTTP \(code)",
-                ["epic": "gHashTag/trios#1090", "httpStatus": String(code), "chosen": "(none)"]
-            )
-            await postQueenNotice(
-                SystemNoticeClassifier.warningMarker
-                    + "Cannot choose: timeline request for epic #1090 returned HTTP \(code)."
-            )
-            return
-        }
-
-        // ── 2. Parse cross-referenced events for open sub-issues ───────
-        var seen = Set<Int>()
-        var subIssues: [(number: Int, title: String, body: String)] = []
-
-        if let events = try? JSONSerialization.jsonObject(with: timelineData) as? [[String: Any]] {
-            for event in events {
-                guard event["event"] as? String == "cross-referenced" else { continue }
-                guard let source = event["source"] as? [String: Any],
-                      let issue = source["issue"] as? [String: Any] else { continue }
-                guard issue["state"] as? String == "open" else { continue }
-                guard let number = issue["number"] as? Int else { continue }
-                let title = issue["title"] as? String ?? ""
-                let body = issue["body"] as? String ?? ""
-                if seen.insert(number).inserted {
-                    subIssues.append((number, title, body))
+        if networkOK {
+            // ── 2. Parse cross-referenced events for open sub-issues ──
+            if let events = try? JSONSerialization.jsonObject(with: timelineData) as? [[String: Any]] {
+                for event in events {
+                    guard event["event"] as? String == "cross-referenced" else { continue }
+                    guard let source = event["source"] as? [String: Any],
+                          let issue = source["issue"] as? [String: Any] else { continue }
+                    guard issue["state"] as? String == "open" else { continue }
+                    guard let number = issue["number"] as? Int else { continue }
+                    let title = issue["title"] as? String ?? ""
+                    let body = issue["body"] as? String ?? ""
+                    if seen.insert(number).inserted {
+                        subIssues.append((number, title, body))
+                    }
                 }
+            }
+
+            // ── 2a. Persist the list for future fallback (#1214) ──────
+            let storePayload: [String: Any] = [
+                "readAt": ISO8601DateFormatter().string(from: Date()),
+                "issues": subIssues.map { iss -> [String: Any] in
+                    [
+                        "number": iss.number,
+                        "title": iss.title,
+                        "body": iss.body,
+                        "state": "open",
+                    ]
+                },
+            ]
+            if let storeJSON = try? JSONSerialization.data(
+                withJSONObject: storePayload, options: [.prettyPrinted]
+            ) {
+                try? FileManager.default.createDirectory(
+                    atPath: (storePath as NSString).deletingLastPathComponent,
+                    withIntermediateDirectories: true
+                )
+                try? storeJSON.write(to: URL(fileURLWithPath: storePath))
+            }
+        } else {
+            // ── 1b. Network failed — try the store fallback (#1214) ───
+            if let loaded = Self.loadSubIssueStore(at: storePath) {
+                subIssues = loaded.issues
+                storeDisclaimer = loaded.disclaimer
+                TriosLogBus.shared.warn(
+                    .queen,
+                    "queen.choose",
+                    "Timeline request failed (\(failureMessage)); using \(subIssues.count) sub-issue\(subIssues.count == 1 ? "" : "s") from store — \(loaded.disclaimer)",
+                    [
+                        "epic": "gHashTag/trios#1090",
+                        "source": "store",
+                        "age": loaded.disclaimer,
+                        "count": String(subIssues.count),
+                    ]
+                )
+            } else {
+                // No store — refuse as now
+                TriosLogBus.shared.error(
+                    .queen,
+                    "queen.choose",
+                    "Timeline request failed: \(failureMessage)",
+                    ["epic": "gHashTag/trios#1090", "chosen": "(none)"]
+                )
+                await postQueenNotice(
+                    SystemNoticeClassifier.warningMarker
+                        + "Cannot choose: failed to read sub-issues of epic #1090 "
+                        + "(\(failureMessage))."
+                )
+                return
             }
         }
 
-        TriosLogBus.shared.info(
-            .queen,
-            "queen.choose",
-            "Read \(subIssues.count) open sub-issue\(subIssues.count == 1 ? "" : "s") from #1090 timeline",
-            ["epic": "gHashTag/trios#1090", "count": String(subIssues.count)]
-        )
+        if let disclaimer = storeDisclaimer {
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.choose",
+                "Using \(subIssues.count) sub-issue\(subIssues.count == 1 ? "" : "s") — \(disclaimer)",
+                ["epic": "gHashTag/trios#1090", "count": String(subIssues.count), "source": "store"]
+            )
+        } else {
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.choose",
+                "Read \(subIssues.count) open sub-issue\(subIssues.count == 1 ? "" : "s") from #1090 timeline",
+                ["epic": "gHashTag/trios#1090", "count": String(subIssues.count)]
+            )
+        }
 
         guard !subIssues.isEmpty else {
             TriosLogBus.shared.info(
@@ -5956,6 +6013,7 @@ final class ChatViewModel: ObservableObject {
                 + reason
                 + " Considered \(subIssues.count) open sub-issue\(subIssues.count == 1 ? "" : "s"), "
                 + "\(inFlightNumbers.count) in flight."
+                + (storeDisclaimer.map { " ⚠️ \($0)." } ?? "")
         )
 
         // ── 6a. Launch: post acceptance criteria and approve command ─
@@ -5980,6 +6038,7 @@ final class ChatViewModel: ObservableObject {
             await postQueenNotice(
                 SystemNoticeClassifier.infoMarker
                     + "Launch proposal — gHashTag/trios#\(chosen.number): \(chosen.title)\n"
+                    + (storeDisclaimer.map { "⚠️ \($0).\n" } ?? "")
                     + "## Acceptance criteria\n"
                     + criteriaBlock + "\n\n"
                     + "## File boundary\n"
@@ -6025,6 +6084,52 @@ final class ChatViewModel: ObservableObject {
                 paths: paths
             )
         }
+    }
+
+    /// Loads the last successfully read sub-issue list from the store file
+    /// created in `chooseNextOpenIssue`. Returns the parsed issues and a
+    /// human-readable disclaimer describing their age, or nil when the store
+    /// does not exist or is empty — in which case the caller refuses as
+    /// before the fallback existed (#1214).
+    private static func loadSubIssueStore(at path: String) -> (issues: [(number: Int, title: String, body: String)], disclaimer: String)? {
+        guard FileManager.default.fileExists(atPath: path),
+              let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let issueArray = json["issues"] as? [[String: Any]] else {
+            return nil
+        }
+
+        var issues: [(number: Int, title: String, body: String)] = []
+        for iss in issueArray {
+            guard let number = iss["number"] as? Int else { continue }
+            issues.append((
+                number: number,
+                title: iss["title"] as? String ?? "",
+                body: iss["body"] as? String ?? ""
+            ))
+        }
+
+        guard !issues.isEmpty else { return nil }
+
+        var ageDescription = "unknown age"
+        if let readAtString = json["readAt"] as? String,
+           let readAt = ISO8601DateFormatter().date(from: readAtString) {
+            let interval = Date().timeIntervalSince(readAt)
+            if interval < 60 {
+                ageDescription = "less than a minute"
+            } else if interval < 3600 {
+                let mins = Int(interval / 60)
+                ageDescription = "\(mins) minute\(mins == 1 ? "" : "s")"
+            } else if interval < 86400 {
+                let hours = Int(interval / 3600)
+                ageDescription = "\(hours) hour\(hours == 1 ? "" : "s")"
+            } else {
+                let days = Int(interval / 86400)
+                ageDescription = "\(days) day\(days == 1 ? "" : "s")"
+            }
+        }
+
+        return (issues, "list from backup, \(ageDescription) old")
     }
 
     /// Count files listed under `## Границы` in an issue body.
