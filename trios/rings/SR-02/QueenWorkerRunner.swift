@@ -127,7 +127,17 @@ final class QueenWorkerRunner: ObservableObject {
             return
         }
 
-        let transport = makeTransport()
+        // TESTING INSTRUMENT — not production behaviour. When the env var
+        // TRIOS_E2E_TRANSPORT_FAILURE is set to "connectivity" the runner uses
+        // a fake transport that throws on every send so the #1219 connectivity-
+        // loss path can be exercised without the network. With the variable
+        // unset nothing changes.
+        let transport: ChatTransportProtocol
+        if ProcessInfo.processInfo.environment["TRIOS_E2E_TRANSPORT_FAILURE"] == "connectivity" {
+            transport = E2EConnectivityFailureTransport()
+        } else {
+            transport = makeTransport()
+        }
         let parser = UIMessageStreamParser()
         do {
             let stream = try await transport.sendMessage(body: body)
@@ -240,6 +250,23 @@ final class QueenWorkerRunner: ObservableObject {
         lines.append(QueenBranchPolicy.boundaryRule(ownedPaths: task.ownedPaths))
         lines.append(QueenBranchPolicy.reportRule)
         return lines.joined(separator: " ")
+    }
+
+    // MARK: - E2E test instrument (not production behaviour)
+
+    /// Stand-in transport used only when `TRIOS_E2E_TRANSPORT_FAILURE` is set to
+    /// "connectivity". Its `sendMessage` always throws a connectivity error so
+    /// e2e tests can verify the #1219 lost-connection path without the network.
+    private struct E2EConnectivityFailureTransport: ChatTransportProtocol {
+        func sendMessage(body: Data) async throws -> AsyncStream<SSEEvent> {
+            throw E2EConnectivityFailure()
+        }
+
+        func cancel() async {}
+    }
+
+    private struct E2EConnectivityFailure: Error, LocalizedError {
+        var errorDescription: String? { "Could not connect to the server" }
     }
 
     private static func describe(_ error: Error) -> String {
