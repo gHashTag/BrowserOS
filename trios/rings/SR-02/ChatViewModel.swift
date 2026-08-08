@@ -371,6 +371,31 @@ final class ChatViewModel: ObservableObject {
             await loadHistory()
             await todoPlanner.load(conversationId: conversationId)
             await loadConversations()
+            // E2E testing instrument: when TRIOS_E2E_DUMP_QUEEN_CHAT=1, write
+            // the Queen conversation to a plaintext file inside the app's data
+            // directory so a test harness can verify what the Queen said without
+            // decrypting UserDefaults. WARNING: conversation content lands in
+            // plain text here — this is only acceptable because the environment
+            // variable explicitly opts in, and it must never be enabled in
+            // production.
+            if ProcessInfo.processInfo.environment["TRIOS_E2E_DUMP_QUEEN_CHAT"] == "1" {
+                let queenMessages = await persister.load(
+                    conversationId: ChatConversation.trinityQueenId
+                )
+                let dumpDir = FileManager.default
+                    .urls(for: .applicationSupportDirectory, in: .userDomainMask)
+                    .first!
+                    .appendingPathComponent("trios", isDirectory: true)
+                try? FileManager.default.createDirectory(
+                    at: dumpDir, withIntermediateDirectories: true
+                )
+                let dumpFile = dumpDir.appendingPathComponent(
+                    "e2e-queen-chat-dump.txt"
+                )
+                let lines = queenMessages.map { "\($0.role.rawValue): \($0.content)" }
+                try? lines.joined(separator: "\n")
+                    .write(to: dumpFile, atomically: true, encoding: .utf8)
+            }
             await checkHealth()
             let skipA2AStartup = ProcessInfo.processInfo.environment[
                 "TRIOS_SKIP_A2A_STARTUP"
