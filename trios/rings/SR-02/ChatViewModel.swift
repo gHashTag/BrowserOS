@@ -3521,6 +3521,40 @@ final class ChatViewModel: ObservableObject {
             return
         }
 
+        // #1223: The API key lives only in the Keychain, which answers
+        // intermittently. When resolvedAPIKey comes back empty the request
+        // is doomed to a 500 "z.ai provider requires apiKey" before it is
+        // sent, so dispatching is pointless. Check before transitioning to
+        // .running: leave the task in .queued — the same idea as a
+        // connectivity failure leaving a task in .running — so no resume
+        // attempt is spent and the task is not the worker's fault.
+        //
+        // Gate on the real network transport only: the test harness injects
+        // a stubbed transport with no API key, and the precheck would block
+        // every delegation in the suite.
+        if type(of: transport) is SSETransport.Type {
+            let resolvedKey = modelStore.resolvedAPIKey(for: modelStore.selectedProvider)
+            guard !resolvedKey.isEmpty else {
+                TriosLogBus.shared.warn(
+                    .queen,
+                    "queen.worker.api_key_unavailable",
+                    "API key is unavailable — the Keychain did not respond. "
+                        + "\(worker) is not dispatched for \(issue.slug); "
+                        + "the task stays where it is, no resume attempt counted.",
+                    ["issue": issue.slug, "worker": worker]
+                )
+                await postQueenNotice(
+                    SystemNoticeClassifier.warningMarker
+                        + "I did not dispatch \(worker) to \(issue.slug) — the API "
+                        + "key is unavailable (the Keychain did not respond). The "
+                        + "task is left where it is and no resume attempt is "
+                        + "counted. Try again when the key is reachable."
+                )
+                await loadConversations()
+                return
+            }
+        }
+
         // Transition and start are now synchronous-adjacent: no yield between
         // them, so a second delegation arriving while this one runs cannot
         // interleave between marking .running and launching the worker.
