@@ -202,6 +202,12 @@ final class ChatViewModel: ObservableObject {
     /// not on every precheck refusal. The first start fills the
     /// ModelCredentialStore cache; every later call is a no-op.
     private var providerKeyWarmupStarted = false
+
+    /// #1225: Once-per-session guards so the Queen says "key unavailable"
+    /// exactly once when the warm-up gives up, and "key available" exactly
+    /// once when a later warm-up finds it — not once per refusal.
+    private var providerKeyUnavailableNoticePosted = false
+    private var providerKeyAvailableNoticePosted = false
     private var stagedProposalIds: Set<UUID> = []
     private var stagedProposalBranches: [UUID: String] = [:]
     /// Runs delegated workers off to one side of the UI. Optional so tests and
@@ -3677,6 +3683,18 @@ final class ChatViewModel: ObservableObject {
                             + "(attempt \(attempt) of \(maxAttempts)).",
                         ["provider": provider.rawValue, "attempt": "\(attempt)"]
                     )
+                    // #1225: If the Queen already told the chat the key was
+                    // missing, close the loop with one line — silence after a
+                    // complaint reads as still broken.
+                    if self.providerKeyUnavailableNoticePosted,
+                       !self.providerKeyAvailableNoticePosted {
+                        self.providerKeyAvailableNoticePosted = true
+                        await self.postQueenNotice(
+                            SystemNoticeClassifier.successMarker
+                                + "The \(provider.rawValue) API key is now "
+                                + "available — I can start dispatching tasks again."
+                        )
+                    }
                     return
                 }
                 if attempt < maxAttempts {
@@ -3691,6 +3709,20 @@ final class ChatViewModel: ObservableObject {
                     + "the cache is still empty.",
                 ["provider": provider.rawValue]
             )
+            // #1225: Post once per session — the journal entry is invisible to
+            // someone watching the Queen chat who sees tasks chosen and nothing
+            // happening, with no reason given.
+            if !self.providerKeyUnavailableNoticePosted {
+                self.providerKeyUnavailableNoticePosted = true
+                await self.postQueenNotice(
+                    SystemNoticeClassifier.warningMarker
+                        + "I cannot dispatch tasks: the \(provider.rawValue) "
+                        + "API key is missing (the Keychain did not respond "
+                        + "after \(maxAttempts) attempts). Add the key in "
+                        + "Settings → Models for \(provider.rawValue) and the "
+                        + "next task dispatch will proceed normally."
+                )
+            }
             // Reset so the next precheck refusal can start a fresh warm-up.
             // A success leaves the flag set forever — no extra reads once the
             // key is cached.
