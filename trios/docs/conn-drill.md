@@ -1,2 +1,2 @@
-Connection-refusal events keep the task queued and do not consume a retry.
-True failure events consume a retry and move the task to failed, as before.
+A connection refusal keeps the task queued (no retry spent, no failed state), re-queues when link returns, and logs a distinct event — remove that distinction and a connection drop reverts to killing the task.
+A genuine failure consumes a retry and moves to failed, unchanged.
