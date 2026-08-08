@@ -19,7 +19,7 @@ DEV_APP     := $(ROOT)/trios-dev.app
 RELEASE_APP := $(ROOT)/trios.app
 
 .DEFAULT_GOAL := dev
-.PHONY: help dev release build check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard
+.PHONY: help dev release build keychain-doors check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard
 
 help:
 	@echo "TriOS targets:"
@@ -126,7 +126,41 @@ test:
 e2e:
 	@bash "$(ROOT)/tests/swift/run_chat_sse_e2e.sh"
 
-check: dev test cassettes
+# --- Keychain door guard ------------------------------------------------
+#
+# SecItemCopyMatching, SecItemAdd, SecItemUpdate and SecItemDelete are the
+# four doors into the system keychain.  Three times running I closed every
+# entrance I knew about and a fourth was left open.  This check replaces
+# vigilance with a gate: it fails if any of those calls appears in a Swift
+# file outside the allowlist below.
+#
+# Allowlist — each file is the sole place permitted to call keychain
+# functions, for the reason given:
+#   rings/SR-00/KeychainSecrets.swift           – canonical keychain abstraction
+#   rings/SR-00/KeychainSymmetricKeyStore.swift – symmetric-key storage
+#   rings/SR-00/ModelConfigurationStore.swift   – persists model secrets
+#   BR-OUTPUT/ProjectPaths.swift                – build-generated keychain identifiers
+KEYCHAIN_ALLOWLIST := rings/SR-00/KeychainSecrets.swift rings/SR-00/KeychainSymmetricKeyStore.swift rings/SR-00/ModelConfigurationStore.swift BR-OUTPUT/ProjectPaths.swift
+KEYCHAIN_ALLOW_PATTERNS := $(addprefix -e ,$(KEYCHAIN_ALLOWLIST))
+
+.PHONY: keychain-doors
+keychain-doors:
+	@offending=$$(/usr/bin/grep -rlE 'SecItem(CopyMatching|Add|Update|Delete)' \
+		--include='*.swift' --exclude-dir='.build' --exclude-dir='.git' \
+		--exclude-dir='.worktrees' --exclude-dir='trios_dev_app' --exclude-dir='trios_app' \
+		"$(ROOT)" \
+		| sed "s|$(ROOT)/||" | sort -u \
+		| grep -vxF $(KEYCHAIN_ALLOW_PATTERNS) || true); \
+	if [ -n "$$offending" ]; then \
+		echo "[FAIL] direct keychain API calls outside the allowlist:"; \
+		echo "$$offending" | sed 's/^/  /'; \
+		echo "Route keychain access through KeychainSecrets, or add the file to KEYCHAIN_ALLOWLIST on purpose."; \
+		exit 1; \
+	else \
+		echo "[OK] keychain doors are routed through the allowlist"; \
+	fi
+
+check: keychain-doors dev test cassettes
 
 # Replay every cassette and assert the expected signal appears in the log.
 #
