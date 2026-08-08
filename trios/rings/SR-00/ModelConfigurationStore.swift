@@ -39,6 +39,17 @@ enum ModelCredentialStore {
 
     // MARK: - Account encoding
 
+    /// Maps a KeychainSecretsError back to the OSStatus that
+    /// ModelCredentialError.keychain expects, so routing through
+    /// KeychainSecrets does not change the error callers see.
+    private static func mapKeychainError(_ error: KeychainSecretsError) -> OSStatus {
+        switch error {
+        case .itemNotFound: return errSecItemNotFound
+        case .invalidItemType: return errSecIO
+        case .osStatus(let status): return status
+        }
+    }
+
     private static func account(for provider: ModelProvider, entryID: String) -> String {
         entryID == legacyEntryID
             ? provider.rawValue
@@ -86,15 +97,11 @@ enum ModelCredentialStore {
         // "enter your login keychain password" dialog per key. The masked
         // preview is written to kSecAttrDescription at save time, so listing
         // reads metadata only and never prompts.
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecReturnAttributes as String: true,
-            kSecMatchLimit as String: kSecMatchLimitAll
-        ]
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let items = result as? [[String: Any]] else {
+        //
+        // Routed through KeychainSecrets so the global gate — launch check,
+        // bounded wait, cooldown — covers this listing path too.
+        let items = KeychainSecrets.readAllAttributes(service: service)
+        guard !items.isEmpty else {
             return []
         }
 
@@ -189,11 +196,12 @@ enum ModelCredentialStore {
             return DevSecretStore.read(service: service, account: cacheKey)
                 .flatMap { String(data: $0, encoding: .utf8) }
         }
-        // Headless runs must never touch the Keychain. `kSecUseAuthenticationUISkip`
-        // below is not enough: these items live in the legacy file keychain, so
-        // the read lands in SecKeychainItemCopyContent and blocks on securityd
-        // waiting for an ACL prompt that no one can answer. That hung the chat
-        // e2e for as long as the harness was allowed to run.
+        // Headless runs must never touch the Keychain. The
+        // `allowsInteraction: false` flag passed to KeychainSecrets below is
+        // not enough: these items live in the legacy file keychain, so the read
+        // lands in SecKeychainItemCopyContent and blocks on securityd waiting
+        // for an ACL prompt that no one can answer. That hung the chat e2e for
+        // as long as the harness was allowed to run.
         if ProcessInfo.processInfo.environment["TRIOS_E2E_DISABLE_KEYCHAIN"] == "1" {
             return nil
         }
@@ -203,32 +211,14 @@ enum ModelCredentialStore {
         cacheLock.unlock()
         if let cached { return cached }
 
-        // Never put up a password dialog from here. This runs on the main actor
-        // during view updates and sends, so a blocking prompt freezes the UI.
-        // If macOS wants approval we report "no key" and let the caller surface
-        // that, rather than hanging the app.
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: cacheKey,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip
-        ]
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        if status == errSecInteractionNotAllowed || status == errSecAuthFailed {
-            TriosLogBus.shared.warn(
-                .security,
-                "credentials.locked",
-                "Keychain needs approval before this API key can be read",
-                ["provider": provider.rawValue]
-            )
-            return nil
-        }
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let secret = String(data: data, encoding: .utf8) else {
+        // Routed through KeychainSecrets so the global gate — bounded wait,
+        // background dispatch, cooldown after a stall — covers this read.
+        guard let data = try? KeychainSecrets.readData(
+            service: service,
+            account: cacheKey,
+            allowsInteraction: false
+        ),
+        let secret = String(data: data, encoding: .utf8) else {
             return nil
         }
 
@@ -265,30 +255,18 @@ enum ModelCredentialStore {
     ) throws -> ModelKeyEntry {
         let trimmedLabel = label.trimmingCharacters(in: .whitespacesAndNewlines)
         let resolvedLabel = trimmedLabel.isEmpty ? defaultLabel(for: entryID) : trimmedLabel
-        let attributes: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account(for: provider, entryID: entryID),
-            kSecAttrLabel as String: resolvedLabel,
-            // Masked preview kept as metadata so the UI can list keys without
-            // unlocking any of them.
-            kSecAttrDescription as String: mask(key),
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
-            kSecValueData as String: Data(key.utf8)
-        ]
-        if ProjectPaths.isDevVariant {
-            guard DevSecretStore.write(
+        // Routed through KeychainSecrets so the global gate — launch check,
+        // bounded wait, background dispatch — covers this write.
+        do {
+            try KeychainSecrets.addEntry(
                 service: service,
                 account: account(for: provider, entryID: entryID),
+                label: resolvedLabel,
+                description: mask(key),
                 data: Data(key.utf8)
-            ) else {
-                throw ModelCredentialError.keychain(errSecIO)
-            }
-        } else {
-            let status = SecItemAdd(attributes as CFDictionary, nil)
-            guard status == errSecSuccess else {
-                throw ModelCredentialError.keychain(status)
-            }
+            )
+        } catch let error as KeychainSecretsError {
+            throw ModelCredentialError.keychain(mapKeychainError(error))
         }
         setActiveEntryID(entryID, for: provider)
         invalidateSecretCache()
@@ -303,15 +281,16 @@ enum ModelCredentialStore {
 
     /// Renames a stored key without touching the secret.
     static func rename(entryID: String, to label: String, for provider: ModelProvider) throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account(for: provider, entryID: entryID)
-        ]
-        let updates: [String: Any] = [kSecAttrLabel as String: label]
-        let status = SecItemUpdate(query as CFDictionary, updates as CFDictionary)
-        guard status == errSecSuccess else {
-            throw ModelCredentialError.keychain(status)
+        // Routed through KeychainSecrets so the global gate — launch check,
+        // bounded wait, background dispatch — covers this write.
+        do {
+            try KeychainSecrets.updateLabel(
+                service: service,
+                account: account(for: provider, entryID: entryID),
+                label: label
+            )
+        } catch let error as KeychainSecretsError {
+            throw ModelCredentialError.keychain(mapKeychainError(error))
         }
     }
 
@@ -320,18 +299,15 @@ enum ModelCredentialStore {
     /// Removes one key. If it was the active one, the next remaining key takes
     /// over so the provider does not silently lose its credentials.
     static func delete(entryID: String, for provider: ModelProvider) throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account(for: provider, entryID: entryID)
-        ]
-        if ProjectPaths.isDevVariant {
-            DevSecretStore.delete(service: service, account: account(for: provider, entryID: entryID))
-        } else {
-            let status = SecItemDelete(query as CFDictionary)
-            guard status == errSecSuccess || status == errSecItemNotFound else {
-                throw ModelCredentialError.keychain(status)
-            }
+        // Routed through KeychainSecrets so the dev-variant and error-handling
+        // paths are shared with every other keychain operation.
+        do {
+            try KeychainSecrets.delete(
+                service: service,
+                account: account(for: provider, entryID: entryID)
+            )
+        } catch let error as KeychainSecretsError {
+            throw ModelCredentialError.keychain(mapKeychainError(error))
         }
         invalidateSecretCache()
         if UserDefaults.standard.string(forKey: activeDefaultsKey(for: provider)) == entryID {
@@ -1897,3 +1873,92 @@ final class ModelConfigurationStore: ObservableObject {
 
 }
 
+
+// MARK: - KeychainSecrets listing extension
+
+extension KeychainSecrets {
+    /// Stores a generic-password item with label, masked-preview description,
+    /// and secret data. Dispatched on a background queue with a bounded wait
+    /// so a stalled keychain cannot block the caller.
+    ///
+    /// Mirrors the bounded-wait pattern in ``writeData``: ~2 s timeout,
+    /// reports failure on expiry.
+    static func addEntry(
+        service: String,
+        account: String,
+        label: String,
+        description: String,
+        data: Data
+    ) throws {
+        if ProjectPaths.isDevVariant {
+            guard DevSecretStore.write(service: service, account: account, data: data) else {
+                throw KeychainSecretsError.invalidItemType
+            }
+            return
+        }
+
+        if isLaunching {
+            throw KeychainSecretsError.osStatus(OSStatus(-4093))
+        }
+
+        let attributes: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecAttrLabel as String: label,
+            kSecAttrDescription as String: description,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            kSecValueData as String: data
+        ]
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var status: OSStatus = errSecSuccess
+
+        DispatchQueue.global(qos: .utility).async {
+            status = SecItemAdd(attributes as CFDictionary, nil)
+            semaphore.signal()
+        }
+
+        if semaphore.wait(timeout: .now() + 2.0) == .success {
+            guard status == errSecSuccess else {
+                throw KeychainSecretsError.osStatus(status)
+            }
+            return
+        }
+
+        throw KeychainSecretsError.osStatus(OSStatus(-4093))
+    }
+
+    /// Updates a keychain item's label without touching the secret.
+    /// Dispatched on a background queue with a bounded wait so a stalled
+    /// keychain cannot block the caller.
+    static func updateLabel(service: String, account: String, label: String) throws {
+        if isLaunching {
+            throw KeychainSecretsError.osStatus(OSStatus(-4093))
+        }
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        let updates: [String: Any] = [kSecAttrLabel as String: label]
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var status: OSStatus = errSecSuccess
+
+        DispatchQueue.global(qos: .utility).async {
+            status = SecItemUpdate(query as CFDictionary, updates as CFDictionary)
+            semaphore.signal()
+        }
+
+        if semaphore.wait(timeout: .now() + 2.0) == .success {
+            guard status == errSecSuccess else {
+                throw KeychainSecretsError.osStatus(status)
+            }
+            return
+        }
+
+        throw KeychainSecretsError.osStatus(OSStatus(-4093))
+    }
+}
