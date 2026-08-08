@@ -26,20 +26,20 @@ enum KeychainSecretsError: LocalizedError {
 /// TriOS credentials; env-variable fallbacks are intentionally absent.
 enum KeychainSecrets {
     // Bounded-wait machinery for keychain reads, mirroring the pattern in
-    // TriOSEncryption.symmetricKey(). At most one background read per
-    // (service, account) pair is allowed; a read that does not answer within
-    // the timeout arms a 60-second cooldown so blocked calls don't pile up.
+    // TriOSEncryption.symmetricKey(). At most one background read is allowed
+    // at a time, globally; a read that does not answer within the timeout arms
+    // a 60-second cooldown so blocked calls don't pile up.
     private static let readLock = NSLock()
-    private static var readsInFlight: Set<String> = []
-    private static var readTimeouts: [String: Date] = [:]
+    private static var readInFlight: Bool = false
+    private static var readUnavailableUntil: Date?
 
     // Bounded-wait machinery for keychain writes, mirroring the read pattern.
-    // At most one background write per (service, account) pair is allowed; a
-    // write that does not answer within the timeout arms a 60-second cooldown
-    // so blocked calls don't pile up.
+    // At most one background write is allowed at a time, globally; a write
+    // that does not answer within the timeout arms a 60-second cooldown so
+    // blocked calls don't pile up.
     private static let writeLock = NSLock()
-    private static var writesInFlight: Set<String> = []
-    private static var writeTimeouts: [String: Date] = [:]
+    private static var writeInFlight: Bool = false
+    private static var writeUnavailableUntil: Date?
 
     /// True while the app is still coming up. While raised, every keychain
     /// operation returns immediately without touching the Security framework:
@@ -51,10 +51,6 @@ enum KeychainSecrets {
     /// normally.
     static func clearLaunchGate() {
         isLaunching = false
-    }
-
-    private static func readKey(service: String, account: String) -> String {
-        "\(service)\u{0}\(account)"
     }
 
     /// Read an existing generic-password secret as raw bytes.
@@ -69,7 +65,7 @@ enum KeychainSecrets {
     /// The `SecItemCopyMatching` call runs on a background queue and the caller
     /// waits about two seconds. When the read does not answer in time we throw
     /// the ordinary not-found result rather than hanging the main thread, and
-    /// arm a 60-second cooldown for that (service, account) pair.
+    /// arm a 60-second cooldown.
     static func readData(
         service: String,
         account: String,
@@ -87,22 +83,20 @@ enum KeychainSecrets {
             throw KeychainSecretsError.itemNotFound(service: service, account: account)
         }
 
-        let key = readKey(service: service, account: account)
-
-        // After a timeout, do not start new reads for that pair for 60 seconds.
-        // At most one read in flight per (service, account) pair.
+        // After a timeout, refuse all reads globally for 60 seconds.
+        // At most one read in flight at a time.
         readLock.lock()
-        if let timedOutAt = readTimeouts[key],
-           Date().timeIntervalSince(timedOutAt) < 60
+        if let until = readUnavailableUntil,
+           Date() < until
         {
             readLock.unlock()
             throw KeychainSecretsError.itemNotFound(service: service, account: account)
         }
-        if readsInFlight.contains(key) {
+        if readInFlight {
             readLock.unlock()
             throw KeychainSecretsError.itemNotFound(service: service, account: account)
         }
-        readsInFlight.insert(key)
+        readInFlight = true
         readLock.unlock()
 
         var query: [String: Any] = [
@@ -127,7 +121,7 @@ enum KeychainSecrets {
         DispatchQueue.global(qos: .utility).async {
             status = SecItemCopyMatching(query as CFDictionary, &result)
             KeychainSecrets.readLock.lock()
-            KeychainSecrets.readsInFlight.remove(key)
+            KeychainSecrets.readInFlight = false
             KeychainSecrets.readLock.unlock()
             semaphore.signal()
         }
@@ -154,7 +148,7 @@ enum KeychainSecrets {
         // so repeated callers don't pile up blocked reads, and return the
         // ordinary not-found result rather than hanging the main thread.
         readLock.lock()
-        readTimeouts[key] = Date()
+        readUnavailableUntil = Date().addingTimeInterval(60)
         readLock.unlock()
         throw KeychainSecretsError.itemNotFound(service: service, account: account)
     }
@@ -182,7 +176,7 @@ enum KeychainSecrets {
     /// The `SecItemAdd` / `SecItemUpdate` call runs on a background queue and
     /// the caller waits about two seconds. When the write does not answer in
     /// time we report failure rather than hanging the main thread, and arm a
-    /// 60-second cooldown for that (service, account) pair.
+    /// 60-second cooldown.
     static func writeData(service: String, account: String, data: Data) throws {
         if ProjectPaths.isDevVariant {
             guard DevSecretStore.write(service: service, account: account, data: data) else {
@@ -195,23 +189,21 @@ enum KeychainSecrets {
             throw KeychainSecretsError.osStatus(OSStatus(-4093))
         }
 
-        let key = readKey(service: service, account: account)
-
-        // After a timeout, do not start new writes for that pair for 60 seconds.
-        // At most one write in flight per (service, account) pair.
+        // After a timeout, refuse all writes globally for 60 seconds.
+        // At most one write in flight at a time.
         // -4093 == errSecTimeout (not bridged to Swift).
         writeLock.lock()
-        if let timedOutAt = writeTimeouts[key],
-           Date().timeIntervalSince(timedOutAt) < 60
+        if let until = writeUnavailableUntil,
+           Date() < until
         {
             writeLock.unlock()
             throw KeychainSecretsError.osStatus(OSStatus(-4093))
         }
-        if writesInFlight.contains(key) {
+        if writeInFlight {
             writeLock.unlock()
             throw KeychainSecretsError.osStatus(OSStatus(-4093))
         }
-        writesInFlight.insert(key)
+        writeInFlight = true
         writeLock.unlock()
 
         let query: [String: Any] = [
@@ -248,7 +240,7 @@ enum KeychainSecrets {
                 status = addStatus
             }
             KeychainSecrets.writeLock.lock()
-            KeychainSecrets.writesInFlight.remove(key)
+            KeychainSecrets.writeInFlight = false
             KeychainSecrets.writeLock.unlock()
             semaphore.signal()
         }
@@ -264,7 +256,7 @@ enum KeychainSecrets {
         // so repeated callers don't pile up blocked writes, and report failure
         // rather than hanging the main thread.
         writeLock.lock()
-        writeTimeouts[key] = Date()
+        writeUnavailableUntil = Date().addingTimeInterval(60)
         writeLock.unlock()
         throw KeychainSecretsError.osStatus(OSStatus(-4093))
     }
