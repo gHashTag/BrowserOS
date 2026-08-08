@@ -3707,6 +3707,40 @@ final class ChatViewModel: ObservableObject {
                 await self.chooseNextOpenIssue(startAfterChoosing: false, isLaunchBootstrap: true)
             }
         }
+
+        // Hourly background refresh of the sub-issue store (#1215).  The store
+        // is written at launch and on every /choose, but a long-lived app that
+        // never chooses grows stale.  This detached repeating task re-reads
+        // the #1090 timeline and rewrites the store on success, logging the
+        // count or the error.  It does not choose, propose, or delegate — it
+        // only refreshes the list.
+        Task.detached { [weak self] in
+            // Short-lived first run so the effect is observable without
+            // waiting an hour, then hourly thereafter.
+            var delay: UInt64 = 30_000_000_000
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: delay)
+                guard !Task.isCancelled, let self else { break }
+                delay = 3_600_000_000_000
+                let (subIssues, networkOK, failureMessage) =
+                    await self.fetchAndStoreSubIssues()
+                if networkOK {
+                    TriosLogBus.shared.info(
+                        .queen,
+                        "queen.subissue.refresh",
+                        "Background refresh updated store: \(subIssues.count) sub-issue\(subIssues.count == 1 ? "" : "s")",
+                        ["epic": "gHashTag/trios#1090", "count": String(subIssues.count)]
+                    )
+                } else {
+                    TriosLogBus.shared.warn(
+                        .queen,
+                        "queen.subissue.refresh",
+                        "Background refresh failed (\(failureMessage)); store left untouched",
+                        ["epic": "gHashTag/trios#1090", "error": failureMessage]
+                    )
+                }
+            }
+        }
     }
 
     /// Settles a dead worker's edits so the shared tree is not left with
@@ -5726,36 +5760,20 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
-    /// Picks the next open sub-issue to act on and says why.
-    ///
-    /// Reads the **open sub-issues of epic gHashTag/trios#1090 through `gh`**
-    /// (GitHub CLI), not the local delegation registry, so the choice reflects
-    /// what is actually open on GitHub — not what the registry happens to know.
-    /// Sub-issues already in flight (a running worker is attached) are excluded.
-    ///
-    /// Says distinctly when `gh` is unavailable (not installed, network error,
-    /// auth failure) versus when there is genuinely nothing to choose.
-    ///
-    /// The choice is logged as a separate event so it can be audited: a
-    /// decision that is not recorded might as well not have been made.
-    private func chooseNextOpenIssue(startAfterChoosing: Bool = false, isLaunchBootstrap: Bool = false) async {
-        // ── 1. Read open sub-issues of epic #1090 via GitHub REST API ──
-        // The timeline endpoint is rate-limited at 60 requests/hour without a
-        // token; attaching one when available lifts the ceiling and avoids
-        // HTTP 403 after a few relaunches.  The endpoint returns cross-
-        // referenced events; those whose source issue state is "open" are the
-        // open sub-issues of the epic.
-        //
-        // When the request fails (rate limit, network), the last list that was
-        // read successfully is loaded from a store so a single forge refusal
-        // does not wipe out the launch (#1214).
+    /// Reads open sub-issues of epic #1090 from the GitHub timeline over HTTPS
+    /// and, on success, persists them to the sub-issue store with a fresh
+    /// `readAt`.  Returns the parsed sub-issues, whether the network call
+    /// succeeded, and a failure message.  Used by both `chooseNextOpenIssue`
+    /// and the hourly background refresh in `configureWorkerRunner` (#1215).
+    /// Does not choose, propose, or delegate — it only reads and stores.
+    private func fetchAndStoreSubIssues() async -> (
+        subIssues: [(number: Int, title: String, body: String)],
+        networkOK: Bool,
+        failureMessage: String
+    ) {
         let storePath = "\(ProjectPaths.trinity)/state/queen_subissues.json"
         var seen = Set<Int>()
         var subIssues: [(number: Int, title: String, body: String)] = []
-        /// Non-nil when subIssues came from the store fallback — appended
-        /// to the log and the proposal so a choice made on yesterday's
-        /// list looks like one (#1214).
-        var storeDisclaimer: String? = nil
 
         var timelineRequest = URLRequest(
             url: URL(string: "https://api.github.com/repos/gHashTag/trios/issues/1090/timeline?per_page=100")!
@@ -5765,7 +5783,6 @@ final class ChatViewModel: ObservableObject {
             timelineRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
 
-        // ── 1a. Attempt the network read ────────────────────────────
         var timelineData = Data()
         var networkOK = false
         var failureMessage = ""
@@ -5784,7 +5801,6 @@ final class ChatViewModel: ObservableObject {
         }
 
         if networkOK {
-            // ── 2. Parse cross-referenced events for open sub-issues ──
             if let events = try? JSONSerialization.jsonObject(with: timelineData) as? [[String: Any]] {
                 for event in events {
                     guard event["event"] as? String == "cross-referenced" else { continue }
@@ -5800,7 +5816,6 @@ final class ChatViewModel: ObservableObject {
                 }
             }
 
-            // ── 2a. Persist the list for future fallback (#1214) ──────
             let storePayload: [String: Any] = [
                 "readAt": ISO8601DateFormatter().string(from: Date()),
                 "issues": subIssues.map { iss -> [String: Any] in
@@ -5821,7 +5836,41 @@ final class ChatViewModel: ObservableObject {
                 )
                 try? storeJSON.write(to: URL(fileURLWithPath: storePath))
             }
-        } else {
+        }
+
+        return (subIssues, networkOK, failureMessage)
+    }
+
+    /// Picks the next open sub-issue to act on and says why.
+    ///
+    /// Reads the **open sub-issues of epic gHashTag/trios#1090 through `gh`**
+    /// (GitHub CLI), not the local delegation registry, so the choice reflects
+    /// what is actually open on GitHub — not what the registry happens to know.
+    /// Sub-issues already in flight (a running worker is attached) are excluded.
+    ///
+    /// Says distinctly when `gh` is unavailable (not installed, network error,
+    /// auth failure) versus when there is genuinely nothing to choose.
+    ///
+    /// The choice is logged as a separate event so it can be audited: a
+    /// decision that is not recorded might as well not have been made.
+    private func chooseNextOpenIssue(startAfterChoosing: Bool = false, isLaunchBootstrap: Bool = false) async {
+        // ── 1. Read open sub-issues of epic #1090 via GitHub REST API ──
+        // The timeline read and store persistence are handled by
+        // `fetchAndStoreSubIssues`, shared with the hourly background
+        // refresh in `configureWorkerRunner` (#1215).  When the request
+        // fails, the last list that was read successfully is loaded from
+        // the store so a single forge refusal does not wipe out the
+        // launch (#1214).
+        let storePath = "\(ProjectPaths.trinity)/state/queen_subissues.json"
+        /// Non-nil when subIssues came from the store fallback — appended
+        /// to the log and the proposal so a choice made on yesterday's
+        /// list looks like one (#1214).
+        var storeDisclaimer: String? = nil
+
+        let (fetched, networkOK, failureMessage) = await fetchAndStoreSubIssues()
+        var subIssues = fetched
+
+        if !networkOK {
             // ── 1b. Network failed — try the store fallback (#1214) ───
             if let loaded = Self.loadSubIssueStore(at: storePath) {
                 subIssues = loaded.issues
