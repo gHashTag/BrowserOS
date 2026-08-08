@@ -208,6 +208,10 @@ final class ChatViewModel: ObservableObject {
     /// Working-tree snapshot taken when each worker started, so its edits can be
     /// told apart from everything else happening in the shared checkout.
     private var workerBaselineTrees: [UUID: String] = [:]
+    /// Task IDs whose last failure was a connectivity issue, not a
+    /// genuine worker failure. Left in .running so reapStalledWorkers
+    /// retries them without spending a resume attempt (#1219).
+    private var connectivityFailedTasks: Set<UUID> = []
 
     /// The boundary-scoped fingerprint of the task's own files at the moment
     /// verdicts were recorded, keyed by task ID. Snapshotted when the Queen
@@ -3833,6 +3837,19 @@ final class ChatViewModel: ObservableObject {
         return (outcome.summary, measuredRelative.count)
     }
 
+    /// #1219: recognises failure messages that describe connectivity
+    /// problems — the worker could not reach the network, not that it
+    /// did the work wrong. The wording comes from URLSession /
+    /// URLError localised descriptions on macOS: "Could not connect to
+    /// the server", "A server with the specified hostname could not be
+    /// found."
+    private static func isConnectivityFailure(_ message: String) -> Bool {
+        let lowercased = message.lowercased()
+        return lowercased.contains("could not connect")
+            || lowercased.contains("unable to connect")
+            || lowercased.contains("could not be found")
+    }
+
     private func handleWorkerFinished(
         task: DelegatedTask,
         failure: String?,
@@ -3845,6 +3862,27 @@ final class ChatViewModel: ObservableObject {
             outputTokens: usage.outputTokens,
             toolCalls: usage.toolCalls
         )
+
+        // #1219: A connectivity failure is outside the worker's control.
+        // The task stays in .running so reapStalledWorkers retries it
+        // without counting a resume attempt. A genuine failure proceeds
+        // through the normal path below — nothing changes for it.
+        if let failure, Self.isConnectivityFailure(failure) {
+            connectivityFailedTasks.insert(task.id)
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.worker.connectivity_failed",
+                "\(task.worker) could not reach the network on \(task.issue.slug); the task stays in place for retry",
+                ["issue": task.issue.slug, "worker": task.worker, "failure": failure]
+            )
+            await appendSystemMessageToQueenChat(
+                SystemNoticeClassifier.warningMarker
+                    + "\(task.worker) could not reach the network on \(task.issue.slug). "
+                    + "The task is left where it is and will be retried when the "
+                    + "connection is back — no resume attempt is counted."
+            )
+            return
+        }
 
         var notice: String
         if let failure {
@@ -5584,6 +5622,31 @@ final class ChatViewModel: ObservableObject {
         for task in toProcess {
             // Only reap what has genuinely stopped. A long stream is not a stall.
             guard workerRunner?.isRunning(conversationId: task.conversationId) != true else { continue }
+
+            // #1219: A connectivity failure is not the worker's fault. Retry
+            // without counting a resume attempt — the stall was outside its
+            // control. The task was left in .running by handleWorkerFinished
+            // specifically so this path would pick it up.
+            if connectivityFailedTasks.contains(task.id), let runner = workerRunner {
+                connectivityFailedTasks.remove(task.id)
+                let brief = QueenBriefing.text(for: task)
+                    + "\n\nYour previous attempt could not reach the network. "
+                    + "Continue from where you left off in this same chat and on "
+                    + "the same branch."
+                runner.start(task: task, brief: brief)
+                await appendSystemMessageToQueenChat(
+                    SystemNoticeClassifier.infoMarker
+                        + "\(task.worker) is being retried on \(task.issue.slug) after "
+                        + "a connectivity failure — no resume attempt counted."
+                )
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.worker.connectivity_retry",
+                    "Retrying a worker that failed on connectivity",
+                    ["issue": task.issue.slug, "worker": task.worker]
+                )
+                continue
+            }
 
             // Try to finish the work before writing it off. A silent worker is
             // a chat left mid-sentence, and closing it converts "unfinished"
