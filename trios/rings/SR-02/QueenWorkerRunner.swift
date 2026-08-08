@@ -195,10 +195,16 @@ final class QueenWorkerRunner: ObservableObject {
         }
         runs[task.conversationId] = nil
         runningConversationIds.remove(task.conversationId)
+        // #1219: A connectivity failure is not a worker failure. Log it
+        // as queen.worker.finish here — not queen.worker.failed — so that
+        // anyone filtering the journal for worker.failed sees only
+        // genuine failures. ChatViewModel.handleWorkerFinished emits the
+        // detailed queen.worker.connectivity_failed event separately.
+        let isConnectivity = failure.map { Self.isConnectivityFailure($0) } ?? false
         TriosLogBus.shared.info(
             .queen,
-            failure == nil ? "queen.worker.finish" : "queen.worker.failed",
-            failure ?? "Worker turn finished",
+            (failure == nil || isConnectivity) ? "queen.worker.finish" : "queen.worker.failed",
+            isConnectivity ? "Worker turn ended — could not reach the network" : (failure ?? "Worker turn finished"),
             [
                 "issue": task.issue.slug,
                 "worker": task.worker,
@@ -274,5 +280,16 @@ final class QueenWorkerRunner: ObservableObject {
             return "\(transportError)"
         }
         return error.localizedDescription
+    }
+
+    /// #1219: recognises failure messages that describe connectivity
+    /// problems rather than genuine worker failures. Mirrors the check
+    /// in ChatViewModel so the runner can pick the right log event
+    /// before `onFinish` is called.
+    private static func isConnectivityFailure(_ message: String) -> Bool {
+        let lowercased = message.lowercased()
+        return lowercased.contains("could not connect")
+            || lowercased.contains("unable to connect")
+            || lowercased.contains("could not be found")
     }
 }
