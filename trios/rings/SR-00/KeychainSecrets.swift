@@ -170,6 +170,62 @@ enum KeychainSecrets {
         return value
     }
 
+    /// List all generic-password items for a service, returning their
+    /// attributes without secret data.
+    ///
+    /// Shares the same read guard as ``readData``: at most one read in
+    /// flight globally, a 60-second cooldown after a timeout, empty array
+    /// on expiry.
+    static func readAllAttributes(service: String) -> [[String: Any]] {
+        if isLaunching { return [] }
+
+        readLock.lock()
+        if let until = readUnavailableUntil,
+           Date() < until
+        {
+            readLock.unlock()
+            return []
+        }
+        if readInFlight {
+            readLock.unlock()
+            return []
+        }
+        readInFlight = true
+        readLock.unlock()
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll
+        ]
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: CFTypeRef?
+        var status: OSStatus = errSecSuccess
+
+        DispatchQueue.global(qos: .utility).async {
+            status = SecItemCopyMatching(query as CFDictionary, &result)
+            KeychainSecrets.readLock.lock()
+            KeychainSecrets.readInFlight = false
+            KeychainSecrets.readLock.unlock()
+            semaphore.signal()
+        }
+
+        if semaphore.wait(timeout: .now() + 2.0) == .success {
+            guard status == errSecSuccess,
+                  let items = result as? [[String: Any]] else {
+                return []
+            }
+            return items
+        }
+
+        readLock.lock()
+        readUnavailableUntil = Date().addingTimeInterval(60)
+        readLock.unlock()
+        return []
+    }
+
     /// Store or overwrite raw generic-password data. Replaces an existing item
     /// with the same (service, account) pair.
     ///
