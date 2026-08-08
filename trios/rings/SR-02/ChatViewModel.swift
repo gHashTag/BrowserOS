@@ -198,6 +198,10 @@ final class ChatViewModel: ObservableObject {
     private var historyWriteRevisions: [UUID: UInt64] = [:]
     private var historyDeletionCounts: [UUID: Int] = [:]
     private var isConversationTransitioning = false
+    /// #1224: Guards the provider-key warm-up so it starts once per session,
+    /// not on every precheck refusal. The first start fills the
+    /// ModelCredentialStore cache; every later call is a no-op.
+    private var providerKeyWarmupStarted = false
     private var stagedProposalIds: Set<UUID> = []
     private var stagedProposalBranches: [UUID: String] = [:]
     /// Runs delegated workers off to one side of the UI. Optional so tests and
@@ -3551,6 +3555,10 @@ final class ChatViewModel: ObservableObject {
                         + "counted. Try again when the key is reachable."
                 )
                 await loadConversations()
+                // #1224: A refusal is a chance to warm the key — the next
+                // dispatch attempt may find it in the cache. Idempotent: if
+                // the bootstrap already started the warm-up this is a no-op.
+                warmupProviderKey()
                 return
             }
         }
@@ -3627,6 +3635,68 @@ final class ChatViewModel: ObservableObject {
     }
 
     // MARK: - Worker Runner
+
+    /// #1224: Reads the selected provider's API key once in the background so
+    /// the ModelCredentialStore cache is filled without any request triggering
+    /// it. The Keychain answers intermittently at launch, so the read is
+    /// retried after a short delay with a sensible cap on attempts. A
+    /// successful read populates the in-process cache for the whole session;
+    /// only the first read is the problem, and this is the fix for it.
+    ///
+    /// Idempotent — `providerKeyWarmupStarted` ensures only one background
+    /// task ever runs. Called from the bootstrap at launch (after the keychain
+    /// gate lowers) and from the dispatch precheck (when it refuses because
+    /// the key is empty), so a refusal brings the next success closer.
+    /// Logs only whether the warm-up succeeded, never the key itself.
+    private func warmupProviderKey() {
+        guard !providerKeyWarmupStarted else { return }
+        providerKeyWarmupStarted = true
+
+        let maxAttempts = 10
+        let retryDelayNanos: UInt64 = 500_000_000  // 500ms
+        let provider = modelStore.selectedProvider
+
+        Task { [weak self, modelStore] in
+            guard let self else { return }
+
+            // Wait for the keychain launch gate to lower before the first
+            // read. From the bootstrap the gate may still be up; from the
+            // precheck it is already down — either way the poll is short.
+            let gateDeadline = Date().addingTimeInterval(10)
+            while KeychainSecrets.isLaunching, Date() < gateDeadline {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+
+            for attempt in 1...maxAttempts {
+                let key = modelStore.resolvedAPIKey(for: provider)
+                if !key.isEmpty {
+                    TriosLogBus.shared.info(
+                        .queen,
+                        "queen.key.warmup",
+                        "Provider key warm-up succeeded "
+                            + "(attempt \(attempt) of \(maxAttempts)).",
+                        ["provider": provider.rawValue, "attempt": "\(attempt)"]
+                    )
+                    return
+                }
+                if attempt < maxAttempts {
+                    try? await Task.sleep(nanoseconds: retryDelayNanos)
+                }
+            }
+
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.key.warmup",
+                "Provider key warm-up failed after \(maxAttempts) attempts; "
+                    + "the cache is still empty.",
+                ["provider": provider.rawValue]
+            )
+            // Reset so the next precheck refusal can start a fresh warm-up.
+            // A success leaves the flag set forever — no extra reads once the
+            // key is cached.
+            self.providerKeyWarmupStarted = false
+        }
+    }
 
     private func configureWorkerRunner() {
         guard let runner = workerRunner else { return }
@@ -3756,6 +3826,11 @@ final class ChatViewModel: ObservableObject {
                 await self.chooseNextOpenIssue(startAfterChoosing: false, isLaunchBootstrap: true)
             }
         }
+
+        // #1224: Warm the provider key in the background after the keychain
+        // gate lowers, so the ModelCredentialStore cache is filled at launch
+        // without any request triggering it. Runs regardless of active work.
+        warmupProviderKey()
 
         // Hourly background refresh of the sub-issue store (#1215).  The store
         // is written at launch and on every /choose, but a long-lived app that
