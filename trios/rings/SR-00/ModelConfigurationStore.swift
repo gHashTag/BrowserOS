@@ -86,15 +86,11 @@ enum ModelCredentialStore {
         // "enter your login keychain password" dialog per key. The masked
         // preview is written to kSecAttrDescription at save time, so listing
         // reads metadata only and never prompts.
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecReturnAttributes as String: true,
-            kSecMatchLimit as String: kSecMatchLimitAll
-        ]
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-              let items = result as? [[String: Any]] else {
+        //
+        // Routed through KeychainSecrets so the global gate — launch check,
+        // bounded wait, cooldown — covers this listing path too.
+        let items = KeychainSecrets.readAllAttributes(service: service)
+        guard !items.isEmpty else {
             return []
         }
 
@@ -189,11 +185,12 @@ enum ModelCredentialStore {
             return DevSecretStore.read(service: service, account: cacheKey)
                 .flatMap { String(data: $0, encoding: .utf8) }
         }
-        // Headless runs must never touch the Keychain. `kSecUseAuthenticationUISkip`
-        // below is not enough: these items live in the legacy file keychain, so
-        // the read lands in SecKeychainItemCopyContent and blocks on securityd
-        // waiting for an ACL prompt that no one can answer. That hung the chat
-        // e2e for as long as the harness was allowed to run.
+        // Headless runs must never touch the Keychain. The
+        // `allowsInteraction: false` flag passed to KeychainSecrets below is
+        // not enough: these items live in the legacy file keychain, so the read
+        // lands in SecKeychainItemCopyContent and blocks on securityd waiting
+        // for an ACL prompt that no one can answer. That hung the chat e2e for
+        // as long as the harness was allowed to run.
         if ProcessInfo.processInfo.environment["TRIOS_E2E_DISABLE_KEYCHAIN"] == "1" {
             return nil
         }
@@ -203,32 +200,14 @@ enum ModelCredentialStore {
         cacheLock.unlock()
         if let cached { return cached }
 
-        // Never put up a password dialog from here. This runs on the main actor
-        // during view updates and sends, so a blocking prompt freezes the UI.
-        // If macOS wants approval we report "no key" and let the caller surface
-        // that, rather than hanging the app.
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: cacheKey,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip
-        ]
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        if status == errSecInteractionNotAllowed || status == errSecAuthFailed {
-            TriosLogBus.shared.warn(
-                .security,
-                "credentials.locked",
-                "Keychain needs approval before this API key can be read",
-                ["provider": provider.rawValue]
-            )
-            return nil
-        }
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let secret = String(data: data, encoding: .utf8) else {
+        // Routed through KeychainSecrets so the global gate — bounded wait,
+        // background dispatch, cooldown after a stall — covers this read.
+        guard let data = try? KeychainSecrets.readData(
+            service: service,
+            account: cacheKey,
+            allowsInteraction: false
+        ),
+        let secret = String(data: data, encoding: .utf8) else {
             return nil
         }
 
@@ -1897,3 +1876,43 @@ final class ModelConfigurationStore: ObservableObject {
 
 }
 
+
+// MARK: - KeychainSecrets listing extension
+
+extension KeychainSecrets {
+    /// Lists all generic-password items for a service, returning their
+    /// attributes without secret data. Dispatched on a background queue with
+    /// a bounded wait so a stalled keychain cannot block the caller.
+    ///
+    /// Mirrors the bounded-wait pattern in ``readData``: ~2 s timeout,
+    /// returns an empty array on expiry.
+    static func readAllAttributes(service: String) -> [[String: Any]] {
+        if isLaunching { return [] }
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll
+        ]
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: CFTypeRef?
+        var status: OSStatus = errSecSuccess
+
+        DispatchQueue.global(qos: .utility).async {
+            status = SecItemCopyMatching(query as CFDictionary, &result)
+            semaphore.signal()
+        }
+
+        if semaphore.wait(timeout: .now() + 2.0) == .success {
+            guard status == errSecSuccess,
+                  let items = result as? [[String: Any]] else {
+                return []
+            }
+            return items
+        }
+
+        return []
+    }
+}
