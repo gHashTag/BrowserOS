@@ -3698,6 +3698,12 @@ final class ChatViewModel: ObservableObject {
         if !hasActiveWork {
             Task { [weak self] in
                 guard let self else { return }
+                // Wait for the keychain launch gate to lower before reading
+                // the timeline and the contract — the same 5-second gate
+                // main.swift raises. Firing immediately means the token read
+                // comes back empty, the requests hit the 60/hour ceiling, and
+                // the task is delegated with no criteria (#1218).
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
                 TriosLogBus.shared.info(
                     .queen,
                     "queen.launch.bootstrap",
