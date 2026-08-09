@@ -606,8 +606,12 @@ backlog-audit:
 		'        page += 1' \
 		'    return results' \
 		'' \
+		'fixture = os.environ.get("BACKLOG_FIXTURE")' \
 		'try:' \
-		'    timeline = fetch_timeline("https://api.github.com/repos/gHashTag/trios/issues/1090/timeline")' \
+		'    if fixture:' \
+		'        timeline = json.loads(open(fixture).read())' \
+		'    else:' \
+		'        timeline = fetch_timeline("https://api.github.com/repos/gHashTag/trios/issues/1090/timeline")' \
 		'except Exception:' \
 		'    print("cannot-tell: timeline fetch failed")' \
 		'    sys.exit(0)' \
@@ -704,8 +708,10 @@ check-selftest:
 	backup=$$(mktemp); \
 	sf="$(ROOT)/.selftest_boundary.swift"; \
 	ba=$$(mktemp /tmp/trios_selftest_ba.XXXXXX); \
+	fx_good=$$(mktemp /tmp/trios_selftest_fx_good.XXXXXX); \
+	fx_bad=$$(mktemp /tmp/trios_selftest_fx_bad.XXXXXX); \
 	cp "$$victim" "$$backup"; \
-	trap 'cp "$$backup" "$$victim" 2>/dev/null; rm -f "$$backup" "$$sf" "$$ba" 2>/dev/null' EXIT INT TERM; \
+	trap 'cp "$$backup" "$$victim" 2>/dev/null; rm -f "$$backup" "$$sf" "$$ba" "$$fx_good" "$$fx_bad" 2>/dev/null' EXIT INT TERM; \
 	printf '\n// check-selftest SecItemAdd\n' >> "$$victim"; \
 	if $(MAKE) --no-print-directory keychain-doors >/dev/null 2>&1; then \
 		kd_caught=0; \
@@ -724,16 +730,14 @@ check-selftest:
 	else \
 		echo "keychain-doors: FAILED (caught=$$kd_caught clean=$$kd_clean)"; fail=1; \
 	fi; \
-	printf 'knownToken\n' > "$$sf"; \
-	if $(MAKE) --no-print-directory backlog-audit > "$$ba" 2>&1; then \
-		ba_run=1; \
+	printf '%s\n' '[{"event":"cross-referenced","source":{"issue":{"number":9001,"state":"open","body":"## \u0413\u0440\u0430\u043d\u0438\u0446\u044b\n`rings/SR-00/QueenObserver.swift`\n\n## \u0413\u043e\u0442\u043e\u0432\u043e\n`QueenObserver`\n"}}}]' > "$$fx_good"; \
+	printf '%s\n' '[{"event":"cross-referenced","source":{"issue":{"number":9002,"state":"open","body":"## \u0413\u0440\u0430\u043d\u0438\u0446\u044b\n`rings/SR-00/QueenObserver.swift`\n\n## \u0413\u043e\u0442\u043e\u0432\u043e\n`zzzNoSuchToken`\n"}}}]' > "$$fx_bad"; \
+	ba_good=$$(BACKLOG_FIXTURE="$$fx_good" $(MAKE) --no-print-directory backlog-audit 2>&1); \
+	ba_bad=$$(BACKLOG_FIXTURE="$$fx_bad" $(MAKE) --no-print-directory backlog-audit 2>&1); \
+	if echo "$$ba_good" | grep -q "verdict=looks-done" && echo "$$ba_bad" | grep -q "verdict=looks-open"; then \
+		echo "backlog-audit: distinguished good fixture (looks-done) from bad (looks-open)"; \
 	else \
-		ba_run=0; \
-	fi; \
-	if [ $$ba_run -eq 1 ]; then \
-		echo "backlog-audit: target ran"; \
-	else \
-		echo "backlog-audit: FAILED (target did not run)"; fail=1; \
+		echo "backlog-audit: FAILED"; fail=1; \
 	fi; \
 	if [ $$fail -ne 0 ]; then exit 1; fi
 
