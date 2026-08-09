@@ -3868,6 +3868,10 @@ final class ChatViewModel: ObservableObject {
 
         runner.onFinish = { [weak self] task, failure, usage in
             guard let self else { return }
+            // #1248: Record the completed turn synchronously, before the
+            // deferred Task, so the count is visible to reapStalledWorkers
+            // and the resume log line immediately.
+            delegationRegistry.recordCompletedTurn(taskID: task.id)
             Task { await self.handleWorkerFinished(task: task, failure: failure, usage: usage) }
         }
 
@@ -5870,8 +5874,12 @@ final class ChatViewModel: ObservableObject {
         // task for the conversation. Caught immediately rather than waiting
         // the stall threshold, because a task that was never started looks
         // "working" to every other part of the system while doing nothing.
+        // #1247: A worker that already completed a turn is not an orphan — it
+        // did real work. The stalled sweep below still catches it if it goes
+        // quiet long enough.
         let orphaned = registry.running.filter {
             workerRunner?.isRunning(conversationId: $0.conversationId) != true
+                && ($0.completedTurns ?? 0) == 0
         }
         let stalled = registry.stalled(now: now)
         // Deduplicate: a task can be both orphaned and stalled, but it only
@@ -5936,7 +5944,7 @@ final class ChatViewModel: ObservableObject {
                     .queen,
                     "queen.worker.resumed",
                     "Restarted a silent worker",
-                    ["issue": task.issue.slug, "worker": task.worker, "attempt": "\(attempt)"]
+                    ["issue": task.issue.slug, "worker": task.worker, "attempt": "\(attempt)", "completedTurns": "\(task.completedTurns ?? 0)"]
                 )
                 continue
             }
