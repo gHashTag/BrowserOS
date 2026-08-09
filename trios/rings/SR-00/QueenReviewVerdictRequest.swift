@@ -217,7 +217,28 @@ enum QueenReviewVerdictRequest {
             }
         }
 
-        return lines.joined(separator: "\n")
+        let result = lines.joined(separator: "\n")
+
+        // Regression guard (#1127 criterion 4): the brief must carry the
+        // adversary marker. If the adversarial framing were removed — the
+        // opening lines replaced with a neutral or worker-style prompt — the
+        // marker disappears and isAdversarialBrief returns false. This guard
+        // fires to make the breakage visible: a brief without the marker is
+        // a brief the caller must not trust, because the reviewer was prompted
+        // as a helper, not as an adversary. Placed here, not at the call site,
+        // so it is impossible to build a brief that bypasses it — the function
+        // self-verifies before returning.
+        if !isAdversarialBrief(result) {
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.assertion.adversarial_marker_missing",
+                "Reviewer brief does not carry the adversary marker — the "
+                    + "adversarial prompt was removed or replaced with a "
+                    + "worker's prompt (#1127)"
+            )
+        }
+
+        return result
     }
 
     /// Parses a reviewer's response into per-criterion verdicts.
