@@ -19,7 +19,7 @@ DEV_APP     := $(ROOT)/trios-dev.app
 RELEASE_APP := $(ROOT)/trios.app
 
 .DEFAULT_GOAL := dev
-.PHONY: help dev release build keychain-doors make-dollars check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard
+.PHONY: help dev release build keychain-doors make-dollars empty-sources check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard
 
 help:
 	@echo "TriOS targets:"
@@ -207,7 +207,29 @@ make-dollars:
 		echo "[OK] no single-dollar shell variables in recipes"; \
 	fi
 
-check: check-selftest keychain-doors make-dollars dev test cassettes
+# --- Empty-source guard ------------------------------------------------
+#
+# Mid-run on #1238, rings/SR-00/QueenObserver.swift turned up at zero bytes
+# with no known cause; the build died on "cannot find QueenObserver in scope"
+# while the worker boundary was the Makefile.  Until the cause is found, make
+# the loss loud: any tracked Swift file under rings/ or BR-OUTPUT/ that is
+# zero bytes fails the build by name.
+.PHONY: empty-sources
+empty-sources:
+	@empty=$$(git -C "$(ROOT)" ls-files -- 'rings/' 'BR-OUTPUT/' \
+		| grep '\.swift$$' \
+		| while IFS= read -r f; do \
+			[ ! -s "$(ROOT)/$$f" ] && echo "$$f"; \
+		done); \
+	if [ -n "$$empty" ]; then \
+		echo "[FAIL] zero-byte Swift source files:"; \
+		echo "$$empty" | sed 's/^/  /'; \
+		exit 1; \
+	else \
+		echo "[OK] no empty Swift source files under rings or BR-OUTPUT"; \
+	fi
+
+check: check-selftest keychain-doors make-dollars empty-sources dev test cassettes
 
 # Replay every cassette and assert the expected signal appears in the log.
 #
@@ -802,6 +824,25 @@ check-selftest:
 		echo "make-dollars: caught the bad case and passed the good one"; \
 	else \
 		echo "make-dollars: FAILED (caught=$$md_caught clean=$$md_clean)"; fail=1; \
+	fi; \
+	cp "$$backup" "$$victim"; \
+	: > "$$victim"; \
+	if $(MAKE) --no-print-directory empty-sources >/dev/null 2>&1; then \
+		es_caught=0; \
+	else \
+		es_caught=1; \
+	fi; \
+	cp "$$backup" "$$victim"; \
+	if $(MAKE) --no-print-directory empty-sources >/dev/null 2>&1; then \
+		es_clean=1; \
+	else \
+		es_clean=0; \
+	fi; \
+	cp "$$backup" "$$victim"; \
+	if [ $$es_caught -eq 1 ] && [ $$es_clean -eq 1 ]; then \
+		echo "empty-sources: caught the bad case and passed the good one"; \
+	else \
+		echo "empty-sources: FAILED (caught=$$es_caught clean=$$es_clean)"; fail=1; \
 	fi; \
 	if [ $$fail -ne 0 ]; then exit 1; fi
 
