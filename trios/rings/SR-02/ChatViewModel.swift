@@ -4098,6 +4098,7 @@ final class ChatViewModel: ObservableObject {
             outputTokens: usage.outputTokens,
             toolCalls: usage.toolCalls
         )
+        registry.recordCompletedTurn(taskID: task.id)
 
         // #1219: A connectivity failure is outside the worker's control.
         // The task stays in .running so reapStalledWorkers retries it
@@ -5870,8 +5871,12 @@ final class ChatViewModel: ObservableObject {
         // task for the conversation. Caught immediately rather than waiting
         // the stall threshold, because a task that was never started looks
         // "working" to every other part of the system while doing nothing.
+        // #1247: A worker that already completed a turn is not an orphan — it
+        // did real work. The stalled sweep below still catches it if it goes
+        // quiet long enough.
         let orphaned = registry.running.filter {
             workerRunner?.isRunning(conversationId: $0.conversationId) != true
+                && ($0.completedTurns ?? 0) == 0
         }
         let stalled = registry.stalled(now: now)
         // Deduplicate: a task can be both orphaned and stalled, but it only

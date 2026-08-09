@@ -181,6 +181,14 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// difference matters when deciding whether a task is waiting on a merge or
     /// waiting on somebody to open it.
     var pullRequestNumber: Int?
+    /// How many turns this worker has completed. A turn that produced output is
+    /// not an orphan even if its stream has gone silent between turns: the
+    /// worker did real work, and reaping it as if it was never dispatched would
+    /// throw that away (#1247). The stalled threshold still applies — a worker
+    /// that completed a turn but then went quiet for the full stall interval is
+    /// reaped like any other.
+    var completedTurns: Int?
+
     /// How many times the Queen has restarted this worker after it went silent.
     ///
     /// Optional so delegation stores written before resuming existed still
@@ -238,6 +246,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         toolCalls: Int? = nil,
         committedFiles: Int? = nil,
         resumeAttempts: Int? = nil,
+        completedTurns: Int? = nil,
         pullRequestNumber: Int? = nil,
         provider: String? = nil,
         model: String? = nil,
@@ -262,6 +271,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         self.toolCalls = toolCalls
         self.committedFiles = committedFiles
         self.resumeAttempts = resumeAttempts
+        self.completedTurns = completedTurns
         self.pullRequestNumber = pullRequestNumber
         self.provider = provider
         self.model = model
