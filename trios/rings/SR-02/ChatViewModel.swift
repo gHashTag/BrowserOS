@@ -4951,12 +4951,15 @@ final class ChatViewModel: ObservableObject {
         // that lost every verdict before. This assertion fires if the demand
         // is deleted — that is the sense in which "the check breaks if you
         // remove the form requirement from the request."
-        assert(
-            brief.contains("Required answer format"),
-            "Strict answer format demand was removed from the reviewer "
-                + "request — without it the reviewer returns unparseable "
-                + "prose (#1183)"
-        )
+        if !brief.contains("Required answer format") {
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.assertion.format_demand_missing",
+                "Strict answer format demand was removed from the reviewer "
+                    + "request — without it the reviewer returns unparseable "
+                    + "prose (#1183)"
+            )
+        }
 
         reviewerRequestCounts[task.id, default: 0] += 1
         var response = await sendOneShotReviewerRequest(brief) ?? ""
@@ -5008,11 +5011,14 @@ final class ChatViewModel: ObservableObject {
             // remove the retry." The guard is placed here, not at the retry
             // site, because the point is not "did the code execute" but "did
             // an empty first response actually trigger a second attempt."
-            assert(
-                (reviewerRequestCounts[task.id] ?? 0) >= 2,
-                "Reviewer returned empty but the retry was not attempted — "
-                + "removing the retry breaks this guard (#1144)"
-            )
+            if (reviewerRequestCounts[task.id] ?? 0) < 2 {
+                TriosLogBus.shared.warn(
+                    .queen,
+                    "queen.assertion.retry_skipped",
+                    "Reviewer returned empty but the retry was not attempted — "
+                        + "removing the retry breaks this guard (#1144)"
+                )
+            }
             var existing = askedButUnanswered[task.id] ?? []
             existing.formUnion(criteria)
             askedButUnanswered[task.id] = existing
@@ -5024,12 +5030,15 @@ final class ChatViewModel: ObservableObject {
             // is the sense in which "the check breaks if the empty
             // answer becomes indistinguishable from the absence of
             // a question."
-            assert(
-                Set(criteria).isSubset(of: askedButUnanswered[task.id] ?? []),
-                "Empty reviewer response was not recorded as "
-                    + "asked-but-unanswered — silence is now "
-                    + "indistinguishable from 'never checked' (#1117)"
-            )
+            if !Set(criteria).isSubset(of: askedButUnanswered[task.id] ?? []) {
+                TriosLogBus.shared.warn(
+                    .queen,
+                    "queen.assertion.silence_not_recorded",
+                    "Empty reviewer response was not recorded as "
+                        + "asked-but-unanswered — silence is now "
+                        + "indistinguishable from 'never checked' (#1117)"
+                )
+            }
             TriosLogBus.shared.warn(
                 .queen,
                 "queen.review.empty_response",
@@ -5434,13 +5443,16 @@ final class ChatViewModel: ObservableObject {
         if !askedSet.isEmpty {
             let uncheckedCriteria = Set(unchecked.map(\.criterion))
             let askedStillUnchecked = askedSet.intersection(uncheckedCriteria)
-            assert(
-                askedStillUnchecked.isEmpty
-                    || result.contains("asked but the reviewer gave no answer"),
-                "Block reason omits the asked-but-unanswered distinction — "
-                + "an empty answer is indistinguishable from the absence of "
-                + "a question (#1117 regression)"
-            )
+            if !askedStillUnchecked.isEmpty
+                && !result.contains("asked but the reviewer gave no answer") {
+                TriosLogBus.shared.warn(
+                    .queen,
+                    "queen.assertion.block_omits_unanswered",
+                    "Block reason omits the asked-but-unanswered distinction — "
+                        + "an empty answer is indistinguishable from the absence of "
+                        + "a question (#1117 regression)"
+                )
+            }
         }
 
         // Regression guard (#1165 criterion 5): if any declined-no-diff
@@ -5454,13 +5466,16 @@ final class ChatViewModel: ObservableObject {
         if !declinedSet.isEmpty {
             let uncheckedCriteria = Set(unchecked.map(\.criterion))
             let declinedStillUnchecked = declinedSet.intersection(uncheckedCriteria)
-            assert(
-                declinedStillUnchecked.isEmpty
-                    || result.contains("diff was empty"),
-                "Block reason omits the no-diff distinction — "
-                + "a declined review (empty diff) is indistinguishable from "
-                + "a missing question or a missing answer (#1165 regression)"
-            )
+            if !declinedStillUnchecked.isEmpty
+                && !result.contains("diff was empty") {
+                TriosLogBus.shared.warn(
+                    .queen,
+                    "queen.assertion.block_omits_nodiff",
+                    "Block reason omits the no-diff distinction — "
+                        + "a declined review (empty diff) is indistinguishable from "
+                        + "a missing question or a missing answer (#1165 regression)"
+                )
+            }
         }
 
         return parts.isEmpty ? nil : result
