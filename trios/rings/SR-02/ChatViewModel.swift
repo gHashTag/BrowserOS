@@ -4620,8 +4620,8 @@ final class ChatViewModel: ObservableObject {
             // A criterion that says "the check must break" cannot be judged
             // without the test file, yet that file sits outside the task
             // boundary. When a criterion mentions проверка, тест, ломается
-            // or test, we pull the matching test directory (tests/swift for
-            // rings/SR-02), narrowed to regions naming the identifiers the
+            // or test, we pull the test directory (tests/swift),
+            // narrowed to regions naming the identifiers the
             // criteria talk about, so the reviewer can see the breaking check.
             if result.count < maxFiles {
                 let triggers = ["проверка", "тест", "ломается", "test"]
@@ -4630,9 +4630,7 @@ final class ChatViewModel: ObservableObject {
                     return triggers.contains { lower.contains($0) }
                 }
                 if needsTests {
-                    let testDir = ownedPaths.contains {
-                        $0.hasPrefix("rings/SR-02")
-                    } ? "tests/swift" : ""
+                    let testDir = "tests/swift"
                     if !testDir.isEmpty {
                         let listing = QueenStatusViewModel.runProcess(
                             "/usr/bin/find",
