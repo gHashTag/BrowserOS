@@ -8,6 +8,9 @@ actor ConversationPersister: ChatPersisterProtocol {
     private let keyPrefix = "trios.conversation."
     private let titleKeyPrefix = "trios.conversationTitle."
     private let settingsKeyPrefix = "trios.conversationSettings."
+    /// Prefix prepended to unencrypted fallback payloads so load can tell
+    /// them apart from ciphertext.
+    private let plaintextMarker = "TRIOS-PLAIN:"
     private let currentIdKey = "trios.currentConversationId.encrypted"
     private let legacyCurrentIdKey = "trios.currentConversationId"
 
@@ -29,20 +32,57 @@ actor ConversationPersister: ChatPersisterProtocol {
             defaults.set(ciphertext, forKey: key)
         } catch {
             NSLog("[ConversationPersister] Failed to encrypt conversation \(conversationId): \(error)")
+            // Storing nothing silently loses the conversation. Instead, persist
+            // the JSON unencrypted with a marker so load can read it back and
+            // distinguish it from ciphertext.
+            if let plaintext = try? JSONEncoder().encode(messages) {
+                let marked = Data(plaintextMarker.utf8) + plaintext
+                defaults.set(marked, forKey: key)
+                TriosLogBus.shared.warn(
+                    .chat,
+                    "conversation.persist.encrypt_fallback",
+                    "Encryption failed; stored conversation \(conversationId) as plaintext fallback",
+                    ["error": error.localizedDescription]
+                )
+            } else {
+                TriosLogBus.shared.error(
+                    .chat,
+                    "conversation.persist.encode_failed",
+                    "Could not encode conversation \(conversationId) for plaintext fallback"
+                )
+            }
         }
     }
 
     func load(conversationId: UUID) async -> [ChatMessage] {
         let key = keyPrefix + conversationId.uuidString
-        guard let ciphertext = defaults.data(forKey: key) else { return [] }
-        do {
-            let plaintext = try ConversationEncryption.shared.decrypt(ciphertext)
-            let messages = try JSONDecoder().decode([ChatMessage].self, from: plaintext)
-            return messages
-        } catch {
-            NSLog("[ConversationPersister] Failed to decrypt conversation \(conversationId): \(error)")
-            return []
+        guard let stored = defaults.data(forKey: key) else { return [] }
+
+        // Try decryption first — the normal path when the key is available.
+        if let plaintext = try? ConversationEncryption.shared.decrypt(stored) {
+            return (try? JSONDecoder().decode([ChatMessage].self, from: plaintext)) ?? []
         }
+
+        // Decryption failed: check whether this is a marked plaintext record
+        // written by the fallback path in save.
+        if stored.starts(with: Data(plaintextMarker.utf8)) {
+            let payload = stored.dropFirst(plaintextMarker.utf8.count)
+            if let messages = try? JSONDecoder().decode([ChatMessage].self, from: payload) {
+                TriosLogBus.shared.warn(
+                    .chat,
+                    "conversation.persist.read_plaintext",
+                    "Loaded conversation \(conversationId) from unencrypted fallback"
+                )
+                return messages
+            }
+        }
+
+        TriosLogBus.shared.warn(
+            .chat,
+            "conversation.persist.decrypt_failed",
+            "Could not decrypt or decode conversation \(conversationId)"
+        )
+        return []
     }
 
     func saveSettings(_ settings: ConversationSettings, conversationId: UUID) async {
