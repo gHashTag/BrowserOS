@@ -378,6 +378,20 @@ final class QueenDelegationRegistry: ObservableObject {
         return next
     }
 
+    /// Marks that a worker completed another turn (#1247).
+    ///
+    /// A task with at least one completed turn is not an orphan even if the
+    /// runner has no active run for it: the worker did real work. The stalled
+    /// threshold still applies independently, so a worker that completed a turn
+    /// but then went silent is reaped after the full stall interval — this
+    /// method only protects against the orphan sweep, not against genuine
+    /// silence.
+    func recordCompletedTurn(taskID: UUID) {
+        guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        tasks[index].completedTurns = (tasks[index].completedTurns ?? 0) + 1
+        persist()
+    }
+
     /// Drops the oldest settled tasks once the archive grows past `limit`.
     ///
     /// Unbounded history turns the delegation store into a file that has to be
