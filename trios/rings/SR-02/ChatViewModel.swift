@@ -5298,6 +5298,12 @@ final class ChatViewModel: ObservableObject {
             )
         }
 
+        // Criterion 3 (#1127): the journal must show which model produced the
+        // verdicts. A verdict's independence is only as strong as the
+        // independence of the model behind it — logging the model and provider
+        // lets a reader judge that independence without re-running the review.
+        let reviewerConfig = await modelStore.runtimeConfiguration
+
         TriosLogBus.shared.info(
             .queen,
             "queen.review.verdicts",
@@ -5310,7 +5316,13 @@ final class ChatViewModel: ObservableObject {
                 "response_chars": String(response.count),
                 "unchecked": unmatched.isEmpty
                     ? "none"
-                    : unmatched.joined(separator: " | ")
+                    : unmatched.joined(separator: " | "),
+                "verdict_model": reviewerConfig.model,
+                "verdict_provider": reviewerConfig.provider.rawValue,
+                "verdict_model_line": QueenReviewVerdictRequest.journalModelLine(
+                    model: reviewerConfig.model,
+                    provider: nil
+                )
             ]
         )
 
