@@ -4012,6 +4012,7 @@ final class ChatViewModel: ObservableObject {
     private static func isConnectivityFailure(_ message: String) -> Bool {
         let lowercased = message.lowercased()
         return lowercased.contains("could not connect")
+            || lowercased.contains("cannot connect")
             || lowercased.contains("unable to connect")
             || lowercased.contains("could not be found")
     }
