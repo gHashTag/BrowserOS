@@ -6642,24 +6642,30 @@ final class ChatViewModel: ObservableObject {
     private static func looksAlreadyDone(body: String, paths: [String]?) -> String? {
         guard let paths, !paths.isEmpty else { return nil }
 
-        // Every boundary file must exist.
+        // Every boundary file must exist. Resolve against the project
+        // root because the app's working directory is not the repo when
+        // launched from Finder (#1180).
         for path in paths {
-            guard FileManager.default.fileExists(atPath: path) else { return nil }
+            let fullPath = "\(ProjectPaths.root)/\(path)"
+            guard FileManager.default.fileExists(atPath: fullPath) else { return nil }
         }
 
         // Extract acceptance criteria, then the code symbols they name.
         let criteria = QueenTaskSpec.criteriaFromIssue(body: body)
         let symbols = identifiers(from: criteria.joined(separator: "\n"))
 
-        // When criteria name no symbols, file existence alone is the signal.
+        // No named identifiers means no evidence: a behavioural task's
+        // files exist from day one, so their mere presence is not a
+        // signal that the work is done (#1180).
         if symbols.isEmpty {
-            return "boundary files present: \(paths.joined(separator: ", ")); no named identifiers in criteria"
+            return nil
         }
 
         // Read boundary file contents and check every named symbol is present.
         var fileContents = ""
         for path in paths {
-            if let text = try? String(contentsOfFile: path, encoding: .utf8) {
+            let fullPath = "\(ProjectPaths.root)/\(path)"
+            if let text = try? String(contentsOfFile: fullPath, encoding: .utf8) {
                 fileContents += "\n" + text
             }
         }
