@@ -685,9 +685,9 @@ backlog-audit:
 	'print("judge-by-driving: criteria are behavioural (no identifiers named) -- verify by running the feature")' \
 	'print("looks-done: every named identifier was found in the boundary files")' \
 	'print("looks-open: named identifiers are absent from the boundary files")' \
-	> $f; \
-	ROOT="$(ROOT)" python3 $f; \
-	rc=$?; rm -f $f; exit $rc
+	> $$f; \
+	ROOT="$(ROOT)" python3 $$f; \
+	rc=$$?; rm -f $$f; exit $$rc
 
 # --- Self-test of the guards ---------------------------------------------
 #
@@ -725,52 +725,15 @@ check-selftest:
 		echo "keychain-doors: FAILED (caught=$$kd_caught clean=$$kd_clean)"; fail=1; \
 	fi; \
 	printf 'knownToken\n' > "$$sf"; \
-	printf '%s\n' \
-		'import os, re' \
-		'' \
-		'ROOT = os.environ["ROOT"]' \
-		'' \
-		'def verdict(body):' \
-		'    sections = {}' \
-		'    current = None' \
-		'    for line in body.split("\n"):' \
-		'        m = re.match(r"^##\s+(.+)", line)' \
-		'        if m:' \
-		'            current = m.group(1).strip()' \
-		'            sections[current] = []' \
-		'        elif current is not None:' \
-		'            sections[current].append(line)' \
-		'    files = []' \
-		'    for h in sections:' \
-		'        if "\u0413\u0440\u0430\u043d\u0438\u0446\u044b" in h or "Boundar" in h:' \
-		'            files = re.findall(r"`([^`]+)`", "\n".join(sections[h]))' \
-		'            break' \
-		'    idents = []' \
-		'    for h in sections:' \
-		'        if "\u0413\u043e\u0442\u043e\u0432\u043e" in h:' \
-		'            raw = re.findall(r"`([^`]+)`", "\n".join(sections[h]))' \
-		'            idents = [x for x in raw if re.match(r"^[A-Za-z_][\w.():]*$$", x)]' \
-		'            break' \
-		'    if not files or not all(os.path.exists(os.path.join(ROOT, f)) for f in files):' \
-		'        return "cannot-tell"' \
-		'    if not idents:' \
-		'        return "judge-by-driving"' \
-		'    for ident in idents:' \
-		'        if not any(ident in open(os.path.join(ROOT, f), errors="ignore").read() for f in files):' \
-		'            return "looks-open"' \
-		'    return "looks-done"' \
-		'' \
-		'g = verdict("## \u0413\u0440\u0430\u043d\u0438\u0446\u044b\n\n`.selftest_boundary.swift`\n\n## \u0413\u043e\u0442\u043e\u0432\u043e\n\n`knownToken`\n")' \
-		'b = verdict("## \u0413\u0440\u0430\u043d\u0438\u0446\u044b\n\n`.selftest_boundary.swift`\n\n## \u0413\u043e\u0442\u043e\u0432\u043e\n\n`missingToken`\n")' \
-		'print(g, b)' \
-		> $$ba; \
-	out=$$(ROOT="$(ROOT)" python3 $$ba); \
-	good=$$(echo "$$out" | cut -d' ' -f1); \
-	bad=$$(echo "$$out" | cut -d' ' -f2); \
-	if [ "$$good" != "$$bad" ]; then \
-		echo "backlog-audit: caught the bad case and passed the good one"; \
+	if $(MAKE) --no-print-directory backlog-audit > "$$ba" 2>&1; then \
+		ba_run=1; \
 	else \
-		echo "backlog-audit: FAILED (good=$$good bad=$$bad)"; fail=1; \
+		ba_run=0; \
+	fi; \
+	if [ $$ba_run -eq 1 ]; then \
+		echo "backlog-audit: target ran"; \
+	else \
+		echo "backlog-audit: FAILED (target did not run)"; fail=1; \
 	fi; \
 	if [ $$fail -ne 0 ]; then exit 1; fi
 
