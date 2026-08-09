@@ -606,8 +606,12 @@ backlog-audit:
 		'        page += 1' \
 		'    return results' \
 		'' \
+		'fixture = os.environ.get("BACKLOG_FIXTURE")' \
 		'try:' \
-		'    timeline = fetch_timeline("https://api.github.com/repos/gHashTag/trios/issues/1090/timeline")' \
+		'    if fixture:' \
+		'        timeline = json.loads(open(fixture).read())' \
+		'    else:' \
+		'        timeline = fetch_timeline("https://api.github.com/repos/gHashTag/trios/issues/1090/timeline")' \
 		'except Exception:' \
 		'    print("cannot-tell: timeline fetch failed")' \
 		'    sys.exit(0)' \
@@ -724,16 +728,12 @@ check-selftest:
 	else \
 		echo "keychain-doors: FAILED (caught=$$kd_caught clean=$$kd_clean)"; fail=1; \
 	fi; \
-	printf 'knownToken\n' > "$$sf"; \
-	if $(MAKE) --no-print-directory backlog-audit > "$$ba" 2>&1; then \
-		ba_run=1; \
+	ba_good=$$(BACKLOG_FIXTURE="$(ROOT)/tests/fixtures/backlog-good.json" $(MAKE) --no-print-directory backlog-audit 2>&1); \
+	ba_bad=$$(BACKLOG_FIXTURE="$(ROOT)/tests/fixtures/backlog-bad.json" $(MAKE) --no-print-directory backlog-audit 2>&1); \
+	if echo "$$ba_good" | grep -q "verdict=looks-done" && echo "$$ba_bad" | grep -q "verdict=looks-open"; then \
+		echo "backlog-audit: distinguished good fixture (looks-done) from bad (looks-open)"; \
 	else \
-		ba_run=0; \
-	fi; \
-	if [ $$ba_run -eq 1 ]; then \
-		echo "backlog-audit: target ran"; \
-	else \
-		echo "backlog-audit: FAILED (target did not run)"; fail=1; \
+		echo "backlog-audit: FAILED"; fail=1; \
 	fi; \
 	if [ $$fail -ne 0 ]; then exit 1; fi
 
