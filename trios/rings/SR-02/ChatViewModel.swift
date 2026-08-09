@@ -6312,8 +6312,12 @@ final class ChatViewModel: ObservableObject {
                 )
                 continue
             }
-            chosenScored = candidate
-            break
+            // Do not break: keep checking every remaining candidate so
+            // the already-done judgement is logged for all of them, not
+            // just those before the chosen one (#1180).
+            if chosenScored == nil {
+                chosenScored = candidate
+            }
         }
 
         guard let chosen = chosenScored else {
@@ -6649,7 +6653,7 @@ final class ChatViewModel: ObservableObject {
 
         // When criteria name no symbols, file existence alone is the signal.
         if symbols.isEmpty {
-            return "all \(paths.count) boundary file(s) exist, no code symbols in criteria to verify"
+            return "boundary files present: \(paths.joined(separator: ", ")); no named identifiers in criteria"
         }
 
         // Read boundary file contents and check every named symbol is present.
@@ -6662,7 +6666,7 @@ final class ChatViewModel: ObservableObject {
         let missing = symbols.filter { !fileContents.contains($0) }
         guard missing.isEmpty else { return nil }
 
-        return "all \(paths.count) boundary file(s) exist, \(symbols.count) criteria symbol(s) found in them"
+        return "boundary files present: \(paths.joined(separator: ", ")); named identifiers found: \(symbols.joined(separator: ", "))"
     }
 
     // MARK: - Review Loop
