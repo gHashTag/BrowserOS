@@ -548,3 +548,137 @@ mutants-logic:
 # rather than silently slowing it down.
 drift-guard:
 	@TRIOS_RUN_DRIFT_GUARD=1 bash "$(ROOT)/tests/swift/run_chat_sse_e2e.sh"
+
+# --- Backlog audit ------------------------------------------------------
+#
+# The backlog the Queen chooses from is never reconciled with the tree, and an
+# issue finished cycles ago was still proposed at every launch (#1228).  This
+# target reads the open sub-issues of epic #1090 from the GitHub timeline API
+# and, for each one, prints one line: the issue number, whether every file
+# named under its Границы heading exists, whether identifiers from its Готово
+# когда section appear in those files, and a verdict.
+#
+#   looks-done    files exist and every identifier is found in them — the
+#                 suspicious case the audit exists to surface.
+#   looks-open    files listed under Границы are absent, or identifiers from
+#                 Готово когда are not found in the files.
+#   cannot-tell   the issue has no Границы heading (no files to check) or no
+#                 backtick-quoted identifiers in its Готово когда section.
+#
+# It only reports — it never closes an issue, writes to the forge, or fails the
+# build.  Authentication uses GITHUB_TOKEN, GH_TOKEN, or gh auth token in that
+# order; without any of them the call is unauthenticated and may hit the rate
+# limit.
+.PHONY: backlog-audit
+backlog-audit:
+	@f=$$(mktemp /tmp/trios_backlog.XXXXXX); \
+	printf '%s\n' \
+		'import json, subprocess, re, os, sys' \
+		'' \
+		'ROOT = os.environ.get("ROOT", ".")' \
+		'headers = ["-H", "Accept: application/vnd.github+json"]' \
+		'token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")' \
+		'if not token:' \
+		'    try:' \
+		'        r = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=5)' \
+		'        if r.returncode == 0 and r.stdout.strip():' \
+		'            token = r.stdout.strip()' \
+		'    except Exception:' \
+		'        pass' \
+		'if token:' \
+		'    headers += ["-H", "Authorization: Bearer " + token]' \
+		'' \
+		'def fetch(url):' \
+		'    r = subprocess.run(["curl", "-s"] + headers + [url], capture_output=True, text=True)' \
+		'    return json.loads(r.stdout)' \
+		'' \
+		'def fetch_timeline(base):' \
+		'    results = []' \
+		'    page = 1' \
+		'    while True:' \
+		'        sep = "&" if "?" in base else "?"' \
+		'        items = fetch(base + sep + "page=" + str(page) + "&per_page=100")' \
+		'        if not isinstance(items, list):' \
+		'            return items' \
+		'        results.extend(items)' \
+		'        if len(items) < 100:' \
+		'            break' \
+		'        page += 1' \
+		'    return results' \
+		'' \
+		'try:' \
+		'    timeline = fetch_timeline("https://api.github.com/repos/gHashTag/trios/issues/1090/timeline")' \
+		'except Exception:' \
+		'    print("cannot-tell: timeline fetch failed")' \
+		'    sys.exit(0)' \
+		'' \
+		'if not isinstance(timeline, list):' \
+		'    print("cannot-tell: " + str(timeline.get("message", "unknown error")))' \
+		'    sys.exit(0)' \
+		'' \
+		'issues = {}' \
+		'for e in timeline:' \
+		'    if e.get("event") != "cross-referenced":' \
+		'        continue' \
+		'    issue = e.get("source", {}).get("issue", {})' \
+		'    n = issue.get("number")' \
+		'    if n and n != 1090:' \
+		'        issues[n] = issue' \
+		'' \
+		'for n in sorted(issues):' \
+		'    issue = issues[n]' \
+		'    if issue.get("state") != "open":' \
+		'        continue' \
+		'    body = issue.get("body", "") or ""' \
+		'    sections = {}' \
+		'    current = None' \
+		'    for line in body.split("\n"):' \
+		'        m = re.match(r"^##\s+(.+)", line)' \
+		'        if m:' \
+		'            current = m.group(1).strip()' \
+		'            sections[current] = []' \
+		'        elif current is not None:' \
+		'            sections[current].append(line)' \
+		'    files = []' \
+		'    for heading in sections:' \
+		'        if "\u0413\u0440\u0430\u043d\u0438\u0446\u044b" in heading or "Boundar" in heading:' \
+		'            block = "\n".join(sections[heading])' \
+		'            files = re.findall(r"`([^`]+)`", block)' \
+		'            break' \
+		'    idents = []' \
+		'    for heading in sections:' \
+		'        if "\u0413\u043e\u0442\u043e\u0432\u043e" in heading:' \
+		'            block = "\n".join(sections[heading])' \
+		'            raw = re.findall(r"`([^`]+)`", block)' \
+		'            idents = [x for x in raw if re.match(r"^[A-Za-z_][\w.():]*$$", x)]' \
+		'            break' \
+		'    if not files:' \
+		'        print("#" + str(n) + "  files=none  identifiers=n/a  verdict=cannot-tell")' \
+		'        continue' \
+		'    all_files_exist = all(os.path.exists(os.path.join(ROOT, f)) for f in files)' \
+		'    if not all_files_exist:' \
+		'        print("#" + str(n) + "  files=missing  identifiers=n/a  verdict=looks-open")' \
+		'        continue' \
+		'    if not idents:' \
+		'        print("#" + str(n) + "  files=present  identifiers=none  verdict=cannot-tell")' \
+		'        continue' \
+		'    all_found = True' \
+		'    for ident in idents:' \
+		'        hit = False' \
+		'        for f in files:' \
+		'            path = os.path.join(ROOT, f)' \
+		'            if os.path.exists(path):' \
+		'                content = open(path, errors="ignore").read()' \
+		'                if ident in content:' \
+		'                    hit = True' \
+		'                    break' \
+		'        if not hit:' \
+		'            all_found = False' \
+		'            break' \
+		'    if all_found:' \
+		'        print("#" + str(n) + "  files=present  identifiers=found  verdict=looks-done")' \
+		'    else:' \
+		'        print("#" + str(n) + "  files=present  identifiers=not-found  verdict=looks-open")' \
+		> $$f; \
+	ROOT="$(ROOT)" python3 $$f; \
+	rc=$$?; rm -f $$f; exit $$rc
