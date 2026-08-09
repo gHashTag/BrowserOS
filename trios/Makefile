@@ -160,7 +160,7 @@ keychain-doors:
 		echo "[OK] keychain doors are routed through the allowlist"; \
 	fi
 
-check: keychain-doors dev test cassettes
+check: check-selftest keychain-doors dev test cassettes
 
 # Replay every cassette and assert the expected signal appears in the log.
 #
