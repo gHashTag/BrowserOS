@@ -6642,9 +6642,12 @@ final class ChatViewModel: ObservableObject {
     private static func looksAlreadyDone(body: String, paths: [String]?) -> String? {
         guard let paths, !paths.isEmpty else { return nil }
 
-        // Every boundary file must exist.
+        // Every boundary file must exist. Resolve against the project
+        // root because the app's working directory is not the repo when
+        // launched from Finder (#1180).
         for path in paths {
-            guard FileManager.default.fileExists(atPath: path) else { return nil }
+            let fullPath = "\(ProjectPaths.root)/\(path)"
+            guard FileManager.default.fileExists(atPath: fullPath) else { return nil }
         }
 
         // Extract acceptance criteria, then the code symbols they name.
@@ -6659,7 +6662,8 @@ final class ChatViewModel: ObservableObject {
         // Read boundary file contents and check every named symbol is present.
         var fileContents = ""
         for path in paths {
-            if let text = try? String(contentsOfFile: path, encoding: .utf8) {
+            let fullPath = "\(ProjectPaths.root)/\(path)"
+            if let text = try? String(contentsOfFile: fullPath, encoding: .utf8) {
                 fileContents += "\n" + text
             }
         }
