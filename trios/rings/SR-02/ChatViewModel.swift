@@ -6290,7 +6290,52 @@ final class ChatViewModel: ObservableObject {
             if a.fileCount != b.fileCount { return a.fileCount < b.fileCount }
             return a.number < b.number
         }
-        let chosen = sorted[0]
+
+        // ── 5b. Skip candidates that look already done (#1180) ────
+        // Before settling on a candidate, check whether its acceptance
+        // criteria already hold against the current tree — the cheapest
+        // honest signal is that every file named in its boundary exists
+        // and the criteria name symbols that are present in them. When
+        // they do, skip that candidate, journal why, and take the next.
+        // A candidate that is not done is proposed exactly as before.
+        var chosenScored: ScoredIssue!
+        for candidate in sorted {
+            if let evidence = Self.looksAlreadyDone(
+                body: candidate.body,
+                paths: candidate.paths
+            ) {
+                TriosLogBus.shared.info(
+                    .queen, "queen.choose.already_done",
+                    "Skipping #\(candidate.number): looks already done — \(evidence)",
+                    [
+                        "issue": "gHashTag/trios#\(candidate.number)",
+                        "evidence": evidence,
+                    ]
+                )
+                continue
+            }
+            chosenScored = candidate
+            break
+        }
+
+        guard let chosen = chosenScored else {
+            let doneIssues = sorted.map { "#\($0.number)" }.joined(separator: ", ")
+            TriosLogBus.shared.info(
+                .queen, "queen.choose",
+                "All \(sorted.count) candidate(s) look already done — nothing to choose",
+                [
+                    "considered": String(sorted.count),
+                    "chosen": "(none)",
+                    "skipped": doneIssues,
+                ]
+            )
+            await postQueenNotice(
+                SystemNoticeClassifier.infoMarker
+                    + "Every open sub-issue under #1090 looks already done "
+                    + "(\(doneIssues)). Nothing to act on."
+            )
+            return
+        }
 
         let reason: String
         if chosen.fileCount == Int.max {
@@ -6586,6 +6631,40 @@ final class ChatViewModel: ObservableObject {
             else { return false }
             return !swiftKeywords.contains(token)
         }
+    }
+
+    /// Heuristic: does this issue's work look already done against the current
+    /// tree? Returns evidence text when it does, nil when it does not (#1180).
+    /// The cheapest honest signal: every file named in its boundary exists on
+    /// disk, and the acceptance criteria name symbols that are present in them.
+    private static func looksAlreadyDone(body: String, paths: [String]?) -> String? {
+        guard let paths, !paths.isEmpty else { return nil }
+
+        // Every boundary file must exist.
+        for path in paths {
+            guard FileManager.default.fileExists(atPath: path) else { return nil }
+        }
+
+        // Extract acceptance criteria, then the code symbols they name.
+        let criteria = QueenTaskSpec.criteriaFromIssue(body: body)
+        let symbols = identifiers(from: criteria.joined(separator: "\n"))
+
+        // When criteria name no symbols, file existence alone is the signal.
+        if symbols.isEmpty {
+            return "all \(paths.count) boundary file(s) exist, no code symbols in criteria to verify"
+        }
+
+        // Read boundary file contents and check every named symbol is present.
+        var fileContents = ""
+        for path in paths {
+            if let text = try? String(contentsOfFile: path, encoding: .utf8) {
+                fileContents += "\n" + text
+            }
+        }
+        let missing = symbols.filter { !fileContents.contains($0) }
+        guard missing.isEmpty else { return nil }
+
+        return "all \(paths.count) boundary file(s) exist, \(symbols.count) criteria symbol(s) found in them"
     }
 
     // MARK: - Review Loop
