@@ -88,7 +88,7 @@ else
         QUEEN_BIN_DIR="$QUEEN_PACKAGE_ROOT/.build/arm64-apple-macosx/debug"
         echo "[REUSE] Using existing QueenUILib build: $QUEEN_BIN_DIR"
     else
-        swift build --package-path "$QUEEN_PACKAGE_ROOT" --product QueenUILib
+        swift build --package-path "$QUEEN_PACKAGE_ROOT" --target QueenUILib
         QUEEN_BIN_DIR="$(swift build --package-path "$QUEEN_PACKAGE_ROOT" --show-bin-path)"
     fi
     QUEEN_DYLIB="$QUEEN_BIN_DIR/libQueenUILib.dylib"
