@@ -1,23 +1,126 @@
-# Heartbeat Drill — Long Silences Made Visible
+# Heartbeat Drill
 
-Issue: gHashTag/trios#1246
+> Issue [gHashTag/trios#1246](https://github.com/gHashTag/trios/issues/1246)
 
-1. A worker that streams for ninety seconds without producing a single visible byte is indistinguishable from a worker that is stuck. The registry says `.running` in both cases. The live strip shows a green dot in both cases. The SSE transport holds the connection open in both cases. There is no signal — not in the chat, not in the strip, not in the transcript — that separates "the model is thinking" from "the model is dead." A heartbeat drill closes this gap by writing a small, periodic mark into the transcript while the stream is flowing. The mark proves liveness; its absence after a threshold proves death. Without the mark, silence is ambiguous. With it, silence is diagnostic.
+Ten paragraphs about long silences, the marks that break them, and what
+happens when the marks are gone.
 
-2. The heartbeat is a mark written into the worker's transcript at a fixed cadence while the stream is open and producing. It is not a message from the worker, and it is not a tool call — the worker does not know it is being written. It is an observation made by the transport layer, the same layer that parses SSE events in `SSETransport` (`rings/SR-01/SSETransport.swift`) and feeds them through `UIMessageStreamParser` (`rings/SR-01/UIMessageStreamParser.swift`). The transport already sees every chunk the server sends; it already knows how many bytes have arrived; it already knows how long the request has been open. The heartbeat is the transport choosing, at a fixed interval, to emit that knowledge as a visible record instead of holding it silently.
+---
 
-3. Each heartbeat mark carries three pieces of information: the task it belongs to, the wall-clock time elapsed since the stream opened, and the total character count received so far. The task identifier anchors the mark to a specific delegation — it is the same `task.issue.slug` the live strip uses, the same `owner/repo#N` that appears in `/swarm`. The elapsed time is measured from the moment the HTTP request was initiated, not from the first SSE event, because the gap between connection and first byte is itself a signal. The character count is cumulative: each heartbeat reports the running total, so a human reading the transcript can see whether the number is climbing (the model is producing, just slowly) or flat (the model is silent and the connection is idle). These three fields are the minimum that makes silence interpretable; anything less leaves the reader guessing, and anything more dilutes the signal with noise.
+1. A worker that streams has two states the outside world cares about:
+   *working* and *hung*. While output flows — tokens, characters, partial
+   results — the distinction is trivial: there is data, therefore the worker
+   is alive. The trouble begins the moment the data stops. A pause of ten
+   seconds might be the model thinking; a pause of five minutes might be a
+   dead socket. Without additional signal the observer is left guessing,
+   and a guess that the worker is still working is no better than a guess
+   that it has hung. Long silence is the gap in which certainty dies.
 
-4. The cadence is thirty seconds. A heartbeat every half-minute means that in any one-minute window there are at least two marks — enough to detect whether the character count is rising without making the transcript unreadable. A shorter interval — ten seconds, fifteen — would clutter the transcript with marks that carry no new information, because a model that is producing slowly can go twenty seconds between visible tokens and that is normal, not a failure. A longer interval — two minutes — defeats the purpose: a worker that hangs at second five is not diagnosed until second one-hundred-twenty, and by then the user has already assumed the worst and killed the task. Thirty seconds is the balance: frequent enough that silence is caught inside a minute, sparse enough that the transcript remains a record of work, not a record of watching.
+2. The heartbeat mark closes that gap. While the worker's stream is flowing
+   the system writes a periodic mark into the record — a small, structured
+   note that says three things: **which task** the worker is on, **how much
+   wall-clock time has elapsed** since the stream started, and **how many
+   characters have been received** so far. The mark is not content from the
+   model; it is infrastructure from the harness, stamped alongside the
+   stream so that every observer — human, dashboard, watchdog — can see that
+   the pipe is live even when the model has nothing to say.
 
-5. The marks stop the moment the stream ends. When the transport receives a terminal event — the `[DONE]` sentinel, a clean HTTP close, or a `finish_reason` on the final chunk — the heartbeats cease. They do not fire one last time. They do not fire on error. The absence of a closing mark is itself deliberate: a stream that ended cleanly has a real terminal event in the transcript (a `done` or `error` from the parser), and a heartbeat written after that event would be noise sitting between "finished" and whatever comes next. The rule is simple: heartbeats exist only while the stream is open. The stream opening starts them; the stream closing stops them. There is no third state. This is criterion 2: the marks are not a background timer that runs independently of the stream's lifecycle — they are bound to it, and they die with it.
+3. The cadence is half a minute. Every thirty seconds of active streaming
+   produces exactly one heartbeat mark, no more, no less. Thirty seconds is
+   long enough that the marks do not drown out real output, yet short enough
+   that two consecutive marks without a gap confirm the stream is still
+   advancing. If an observer sees a mark at *T + 0:30* and another at
+   *T + 1:00*, the stream ran continuously through that minute. The interval
+   is a contract: marks arrive on schedule because the stream is on
+   schedule, and their absence is meaningful precisely because their
+   presence is regular.
 
-6. Silence longer than one minute now means something precise. Before heartbeats, a minute of quiet in the transcript could mean five things: the model is thinking, the model produced nothing and the stream is idle, the connection is dead but not yet timed out, the transport hit an error that was swallowed, or nobody wrote anything at all because the worker never started. These are not distinguishable. With heartbeats, the interpretation collapses: if the last heartbeat was written at time T and it is now T+60 with no further heartbeat, then the stream is open and producing nothing — that is the only possibility, because a closed stream would have a terminal event and a dead connection would have a timeout. The heartbeat turns a minute of silence from a question into an answer. It is criterion 3 stated as a guarantee: silence after one minute is silence of the stream, not absence of a record.
+4. Each mark carries the task identifier so that concurrent workers can be
+   told apart. If two workers run in parallel and one falls silent, the
+   task name in the heartbeat trail makes it immediately clear *which*
+   worker has stopped, not just *that a* worker has stopped. The elapsed
+   counter gives the age of the stream — not the age of the task, not the
+   age of the process, but the age of *this particular stream*, measured
+   from the moment the first byte flowed. And the character count gives a
+   second axis of progress: even when wall-clock time keeps ticking, a
+   rising character count proves that the worker is not merely alive but
+   productive.
 
-7. Remove the heartbeat marks and the original ambiguity returns in full. A transcript with no heartbeats, read thirty seconds into a long pause, tells the reader nothing the registry does not already say: the task is `.running`. The reader cannot tell whether the model emitted a thousand characters and went quiet, or whether it emitted zero and the connection is hanging on the first-byte wait. The reader cannot tell whether the stream has been open for five seconds or fifty. The green dot on the live strip looks identical in both cases — `displayName` says "Working," and "Working" is the word for both "producing" and "waiting to produce." The heartbeat is the only instrument that separates these states without changing the state machine, without adding a new `DelegatedTaskState` case, and without polling the model. It is criterion 4 as a counterfactual: the drill's value is measured by what the system looks like without it, and without it the system is blind.
+5. The marks stop when the stream stops. This is not a configurable
+   timeout or a heuristic — it is a mechanical consequence of tying the
+   heartbeat to the stream lifecycle. The stream opens, the timer starts;
+   the stream closes, the timer stops. There is no trailing mark after the
+   final byte, no farewell pulse, no "done" heartbeat. The last mark the
+   observer sees is the last one that fired while the stream was still
+   open, and then silence — a silence that means *finished*, not *failed*.
+   The distinction between post-stream silence and mid-stream silence is
+   the distinction between a worker that has completed its work and one
+   that has stalled inside it, and it is the stream's open-or-closed state
+   that disambiguates them.
 
-8. The heartbeat does not interact with the live strip's reactive model, and this is intentional. The strip rides on `@Published` mutations to `QueenDelegationRegistry.tasks`; heartbeats ride on the transport's chunk counter. They are independent signals on independent wires. The strip answers "what state is this task in?" — a question with a small fixed answer set. The heartbeat answers "is this streaming task actually streaming right now?" — a question the state machine cannot answer because `.running` is the only state for active work, and `.running` does not encode throughput. A future version could surface the heartbeat on the strip itself — a sub-second pulse on the green dot, a faint character-count ticker — but that is presentation, not mechanism. The mechanism is the mark in the transcript, and the transcript is where a human looks when something seems slow. The strip is for triage; the heartbeat is for diagnosis.
+6. Before the heartbeat drill, a silence of any length was ambiguous. The
+   observer could see that no characters had arrived for ninety seconds,
+   but they could not tell whether the worker was thinking hard or had
+   crashed quietly. The absence of output was the only evidence, and
+   absence proves nothing: the stream might be slow, the network might be
+   congested, the model might be generating a long internal chain of
+   reasoning before emitting its first visible token. With the heartbeat
+   drill in place, silence longer than a minute takes on a precise meaning.
+   It no longer means *no record has been written*; it means *the stream
+   itself has gone quiet* — the pipe that should be carrying marks every
+   thirty seconds has stopped carrying anything at all, and the absence of
+   a mark that was expected at *T + 1:30* is now as informative as the
+   presence of the ones that came before.
 
-9. Three failure modes matter. First: the heartbeat fires but the character count is flat across two consecutive marks — sixty seconds of open stream with zero new bytes. This is the signal the drill was built to surface. It means the model is connected but producing nothing, and the response is either a very long reasoning chain that has not yet emitted a visible token or a genuine stall. Either way, the human now knows and can act. Second: the heartbeat fires but the elapsed time jumps by more than thirty seconds between marks — the process was suspended, the machine slept, or the event loop was blocked. The gap in the timeline is itself the diagnostic; the heartbeat makes it visible where a silent transport would hide it. Third: no heartbeat fires at all, but the stream eventually completes. This means the stream opened and closed inside a single thirty-second window — the worker finished fast. This is not a failure; it is the happy path, and the absence of heartbeats here is correct, because there was nothing to be silent about.
+7. The precision matters because it changes what a watchdog is allowed to
+   conclude. Before heartbeats, a watchdog that killed a worker after
+   sixty seconds of silence was guessing — it might be killing a worker
+   that was about to emit a megabyte of output. After heartbeats, the same
+   watchdog can reason causally: if the last heartbeat arrived at *T + 1:00*
+   and none has arrived by *T + 2:00*, the stream has missed two scheduled
+   marks. Two missed marks is not a guess; it is a measured failure of the
+   stream to advance, and acting on it is a response to evidence, not a
+   reaction to impatience. The heartbeat turns silence from a symptom into
+   a signal.
 
-10. The drill is verified by the counterfactual it eliminates. Run a worker whose stream produces content every five seconds for three minutes: the transcript should contain six heartbeats, each with a rising character count, and no heartbeat after the terminal event. Run a worker whose stream opens and then produces nothing for two minutes: the transcript should contain four heartbeats with a flat character count, and the gap between the last heartbeat and the present should be interpretable as "the stream is open and silent," not as "nobody is recording." Run a worker whose stream completes in ten seconds: the transcript should contain zero heartbeats, because the stream closed before the first interval. These three runs cover the three states the drill distinguishes — active, silent, and fast — and in each case the acceptance criteria hold: marks appear only while the stream flows, they stop when it ends, silence past a minute is unambiguous, and removing them makes "working" indistinguishable from "stuck."
+8. The indistinguishability test is the proof that the marks are doing
+   their job. Strip them out — remove every heartbeat from the record, let
+   the stream write only its model-produced content — and the two states
+   collapse back together. A worker that is thinking hard looks identical
+   to a worker that has hung: no output, no mark, no way to tell. The
+   heartbeat exists *because* the indistinguishability is the natural state
+   of a silent stream. It is not a convenience or a log-level preference;
+   it is the only mechanism that prevents silence from meaning two things
+   at once. If removing the marks does not restore ambiguity, the marks
+   were not the disambiguator and something else was already carrying the
+   signal — in which case the heartbeat is redundant and the drill has
+   failed to identify its own purpose.
+
+9. Consider what the character count in each mark reveals that the
+   wall-clock alone cannot. Two consecutive marks at *T + 2:00* and
+   *T + 2:30* might show elapsed time advancing normally, but if the
+   character count has not moved between them, the worker is alive but
+   stalled — the socket is open, the timer is firing, but no new bytes
+   have arrived. This is a third state, neither *working* nor *hung* but
+   *waiting*: the stream has not closed, yet it has not advanced. The
+   heartbeat surfaces this state by pairing time and data in every mark,
+   giving the observer two independent channels of progress. A mark with
+   rising characters and rising time means *productive*. A mark with
+   rising time and flat characters means *stuck*. A missing mark means
+   *dead*. Three diagnoses, one mechanism.
+
+10. The heartbeat drill is, in the end, a discipline of evidence. It does
+    not make workers faster, it does not prevent hangs, and it does not
+    add any capability the worker did not already have. What it does is
+    ensure that the gap between *working* and *hung* — a gap that is wide
+    and obvious when output flows — remains visible during the moments
+    when output does not flow. Every thirty seconds, the mark says: *the
+    stream is open, the task is this, the time is that, the bytes are
+    these many.* Remove that voice and the silence returns to its old
+    ambiguity. Keep it, and silence becomes legible: a pause is just a
+    pause while the marks keep coming, and only when they stop does the
+    silence become a problem worth acting on.
+
+---
+
+*Authored for `queen/1246-write-docs-hb-drill-md-with-ten-numbered`.*
