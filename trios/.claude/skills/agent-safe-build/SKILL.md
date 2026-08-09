@@ -118,3 +118,38 @@ rather than your own bug.
 - The Xcode license can block `swiftc` with no warning. Workaround:
   `DEVELOPER_DIR=/Library/Developer/CommandLineTools`. Everything compiles under
   it except the QueenUILib link, which needs XCTest.
+
+## The build stood on a stale module (2026-08-10)
+
+`make dev` compiles trios against `QueenUILib` from the **trinity** checkout at
+`$TRINITY_ROOT/apps/queen` (default `~/trinity`). Two facts about that
+dependency cost a night:
+
+**It had not been rebuilt since July.** trios linked the module already sitting
+in trinity's `.build`. That module exported `QueenHostedRoute` and the whole
+`QueenUI/Integration` surface. Trinity's *present* source has none of it — the
+navigation was redesigned to `MainView`, and `Integration/` was deleted. The
+build worked only because nothing forced a recompile.
+
+**Forcing a recompile destroys that.** `build.sh` asked for
+`swift build --product QueenUILib`; the package declares `products: []`, so the
+product error is real. Changing it to `--target` makes the compile happen — and
+the fresh module overwrites the stale one, taking the API trios needs with it.
+There is no backup. The vendored dylibs in `Frameworks/` and `Frameworks-dev/`
+carry the old symbols but no `.swiftmodule`, so `TRIOS_VENDORED=1` cannot save
+you either.
+
+**Before "fixing" a build error, ask why it was ever building.** That question,
+asked first, would have shown the crutch instead of removing it.
+
+Two genuine faults were found on the way and are worth keeping if trinity is
+ever repaired: `onKeyPress(.return, modifiers: .shift)` has no such parameter —
+the handler receives a `KeyPress` and reads `press.modifiers`; and
+`QueenUI/Cortex/Calibration/cerebellum_tests.swift` sits inside the library
+target, so the module demands `XCTest` from everyone who imports it. Add it to
+the target's `exclude` list.
+
+Restoring the deleted `Integration/` files from `a8fec1de5` is not enough: they
+need `QueenActionFeedback`, `QueenActionPhase` and `TrinityRuntimePaths`, which
+the current `Bridge/ActionQueue.swift` also dropped. Unpicking someone else's
+redesign one file at a time is the trap — stop and ask.
