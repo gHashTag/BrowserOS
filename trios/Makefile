@@ -657,10 +657,10 @@ backlog-audit:
 		'        continue' \
 		'    all_files_exist = all(os.path.exists(os.path.join(ROOT, f)) for f in files)' \
 		'    if not all_files_exist:' \
-		'        print("#" + str(n) + "  files=missing  identifiers=n/a  verdict=looks-open")' \
+		'        print("#" + str(n) + "  files=missing  identifiers=n/a  verdict=cannot-tell")' \
 		'        continue' \
 		'    if not idents:' \
-		'        print("#" + str(n) + "  files=present  identifiers=none  verdict=cannot-tell")' \
+		'        print("#" + str(n) + "  files=present  identifiers=none  verdict=judge-by-driving")' \
 		'        continue' \
 		'    all_found = True' \
 		'    for ident in idents:' \
@@ -678,7 +678,13 @@ backlog-audit:
 		'    if all_found:' \
 		'        print("#" + str(n) + "  files=present  identifiers=found  verdict=looks-done")' \
 		'    else:' \
-		'        print("#" + str(n) + "  files=present  identifiers=not-found  verdict=looks-open")' \
-		> $$f; \
+	'        print("#" + str(n) + "  files=present  identifiers=not-found  verdict=looks-open")' \
+	'' \
+	'print("")' \
+	'print("cannot-tell: no boundary section or boundary files are missing -- nothing to read")' \
+	'print("judge-by-driving: criteria are behavioural (no identifiers named) -- verify by running the feature")' \
+	'print("looks-done: every named identifier was found in the boundary files")' \
+	'print("looks-open: named identifiers are absent from the boundary files")' \
+	> $$f; \
 	ROOT="$(ROOT)" python3 $$f; \
 	rc=$$?; rm -f $$f; exit $$rc
