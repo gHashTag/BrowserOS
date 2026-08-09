@@ -139,12 +139,31 @@ final class QueenWorkerRunner: ObservableObject {
             transport = makeTransport()
         }
         let parser = UIMessageStreamParser()
+        // #1246: While the stream runs nothing else is written, so a working
+        // turn is indistinguishable from a hung one. This heartbeat fires every
+        // 30 seconds with the issue, elapsed seconds, and characters received.
+        let turnStart = Date()
+        let charsBox = HeartbeatCharCounter()
+        let heartbeat = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                if Task.isCancelled { break }
+                let elapsed = Int(Date().timeIntervalSince(turnStart))
+                self?.emitHeartbeat(
+                    issue: task.issue.slug,
+                    worker: task.worker,
+                    elapsed: elapsed,
+                    chars: charsBox.count
+                )
+            }
+        }
         do {
             let stream = try await transport.sendMessage(body: body)
             for await event in stream {
                 if Task.isCancelled { break }
                 if let action = await parser.parse(event) {
                     transcript.apply(action)
+                    charsBox.count = transcript.assistantText.count
                     publish(transcript, for: task.conversationId)
                     liveUsage[task.conversationId] = WorkerUsage(
                         inputTokens: transcript.inputTokens,
@@ -157,6 +176,7 @@ final class QueenWorkerRunner: ObservableObject {
         } catch {
             transcript.failWithoutStream(Self.describe(error))
         }
+        heartbeat.cancel()
 
         if !transcript.didComplete && !Task.isCancelled {
             // An unterminated stream must not be filed as a clean result; the
@@ -227,6 +247,30 @@ final class QueenWorkerRunner: ObservableObject {
 
     private func publish(_ transcript: QueenWorkerTranscript, for conversationId: UUID) {
         transcripts[conversationId] = transcript.messages
+    }
+
+    /// #1246: mutable char count safe to capture in a sendable closure.
+    /// The Task initializer requires @Sendable, which forbids capturing a
+    /// local var by reference. Both the heartbeat and the streaming loop
+    /// run on the main actor, so the unchecked Sendable is sound.
+    private final class HeartbeatCharCounter: @unchecked Sendable {
+        var count = 0
+    }
+
+    /// #1246: Emits a heartbeat while the worker stream is in flight so that
+    /// silence in the journal means stream silence, not missing logging.
+    private func emitHeartbeat(issue: String, worker: String, elapsed: Int, chars: Int) {
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.worker.heartbeat",
+            "Worker stream in flight",
+            [
+                "issue": issue,
+                "worker": worker,
+                "elapsed_s": String(elapsed),
+                "chars": String(chars)
+            ]
+        )
     }
 
     /// The worker's standing orders. Kept separate from the briefing so the
