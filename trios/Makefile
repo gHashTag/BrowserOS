@@ -19,7 +19,7 @@ DEV_APP     := $(ROOT)/trios-dev.app
 RELEASE_APP := $(ROOT)/trios.app
 
 .DEFAULT_GOAL := dev
-.PHONY: help dev release build keychain-doors check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard
+.PHONY: help dev release build keychain-doors make-dollars check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard
 
 help:
 	@echo "TriOS targets:"
@@ -178,7 +178,36 @@ keychain-doors:
 		echo "[OK] keychain doors are routed through the allowlist"; \
 	fi
 
-check: check-selftest keychain-doors dev test cassettes
+# --- Dollar-sign guard -------------------------------------------------
+#
+# A shell variable in a recipe needs $; a single $ is eaten by Make and
+# the recipe silently does the wrong thing ($E2E_DIR became 2E_DIR in
+# #1237).  This check walks every recipe line and flags a lone $ that is
+# neither $ nor a Make variable in the allowlist below.
+MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP WARNING_CEILING CASSETTE_DIR \
+	CASSETTE_BRANCHES SWEEP_CANARY LOG KEYCHAIN_ALLOW_PATTERNS MAKE VARIANT \
+	MSG ISSUE WORKER TASK PATHS CRITERIA SECOND REVIEW AUTONOMY CASSETTE \
+	SECOND_TURN QUEEN_COMMAND MUTANTS MUTANTS_LOGIC MAKE_DOLLAR_VARS
+
+.PHONY: make-dollars
+make-dollars:
+	@af=$$(mktemp /tmp/trios_md.XXXXXX); \
+	printf '%s\n' \
+		'BEGIN{n=split(allowed,a,/[ \t]+/);for(i=1;i<=n;i++)if(a[i]!="")vars[a[i]]=1}' \
+		'!/^\t/&&!/^#/&&/:/&&!/:=/{target=$$0;sub(/:.*/,"",target);gsub(/[ \t]+$$/,"",target)}' \
+		'/^\t/{s=$$0;while(s~/\$$\$$/)sub(/\$$\$$/,"",s);for(v in vars){gsub("\\$$\\("v"\\)","",s);gsub("\\$$\\{"v"\\}","",s)}if(s~/\$$[A-Za-z0-9_(]/)printf "  %s: line %d\n",target,NR}' \
+	> $$af; \
+	violations=$$(awk -v allowed='$(MAKE_DOLLAR_VARS)' -f $$af "$(ROOT)/Makefile"); \
+	rm -f $$af; \
+	if [ -n "$$violations" ]; then \
+		echo "[FAIL] single-dollar shell variables in Makefile recipes:"; \
+		echo "$$violations"; \
+		exit 1; \
+	else \
+		echo "[OK] no single-dollar shell variables in recipes"; \
+	fi
+
+check: check-selftest keychain-doors make-dollars dev test cassettes
 
 # Replay every cassette and assert the expected signal appears in the log.
 #
@@ -727,7 +756,10 @@ check-selftest:
 	sf="$(ROOT)/.selftest_boundary.swift"; \
 	ba=$$(mktemp /tmp/trios_selftest_ba.XXXXXX); \
 	cp "$$victim" "$$backup"; \
-	trap 'cp "$$backup" "$$victim" 2>/dev/null; rm -f "$$backup" "$$sf" "$$ba" 2>/dev/null' EXIT INT TERM; \
+	md_file="$(ROOT)/Makefile"; \
+	md_backup=$$(mktemp); \
+	cp "$$md_file" "$$md_backup"; \
+	trap 'cp "$$backup" "$$victim" 2>/dev/null; cp "$$md_backup" "$$md_file" 2>/dev/null; rm -f "$$backup" "$$sf" "$$ba" "$$md_backup" 2>/dev/null' EXIT INT TERM; \
 	printf '\n// check-selftest SecItemAdd\n' >> "$$victim"; \
 	if $(MAKE) --no-print-directory keychain-doors >/dev/null 2>&1; then \
 		kd_caught=0; \
@@ -752,6 +784,24 @@ check-selftest:
 		echo "backlog-audit: distinguished good fixture (looks-done) from bad (looks-open)"; \
 	else \
 		echo "backlog-audit: FAILED"; fail=1; \
+	fi; \
+	printf '\techo "$$PLANTED_BUG"\n' >> "$$md_file"; \
+	if $(MAKE) --no-print-directory make-dollars >/dev/null 2>&1; then \
+		md_caught=0; \
+	else \
+		md_caught=1; \
+	fi; \
+	cp "$$md_backup" "$$md_file"; \
+	if $(MAKE) --no-print-directory make-dollars >/dev/null 2>&1; then \
+		md_clean=1; \
+	else \
+		md_clean=0; \
+	fi; \
+	cp "$$md_backup" "$$md_file"; \
+	if [ $$md_caught -eq 1 ] && [ $$md_clean -eq 1 ]; then \
+		echo "make-dollars: caught the bad case and passed the good one"; \
+	else \
+		echo "make-dollars: FAILED (caught=$$md_caught clean=$$md_clean)"; fail=1; \
 	fi; \
 	if [ $$fail -ne 0 ]; then exit 1; fi
 
