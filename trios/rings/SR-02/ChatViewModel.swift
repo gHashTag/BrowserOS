@@ -3684,7 +3684,12 @@ final class ChatViewModel: ObservableObject {
         providerKeyWarmupStarted = true
 
         let maxAttempts = 10
-        let retryDelayNanos: UInt64 = 500_000_000  // 500ms
+        // #1240: 65 s — longer than the 60-second global cooldown in
+        // KeychainSecrets.  When a read times out, the cooldown refuses every
+        // subsequent read for 60 s; at 500 ms spacing all ten attempts were
+        // swallowed at once.  65 s guarantees the refusal has expired before
+        // the next attempt.
+        let retryDelayNanos: UInt64 = 65_000_000_000  // 65s
         let provider = modelStore.selectedProvider
 
         Task { [weak self, modelStore] in
@@ -3693,6 +3698,20 @@ final class ChatViewModel: ObservableObject {
             // Wait for the keychain launch gate to lower before the first
             // read. From the bootstrap the gate may still be up; from the
             // precheck it is already down — either way the poll is short.
+            // #1240: While the gate is up every keychain operation — including
+            // the entry listing that resolvedAPIKey relies on — returns empty,
+            // so retries before the gate lowers are wasted.  Log the wait so
+            // it is visible in the journal.
+            if KeychainSecrets.isLaunching {
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.key.warmup",
+                    "Provider key warm-up waiting for the keychain launch gate "
+                        + "to lower before first attempt — key reads return "
+                        + "empty while the gate is up (#1240).",
+                    ["provider": provider.rawValue]
+                )
+            }
             let gateDeadline = Date().addingTimeInterval(10)
             while KeychainSecrets.isLaunching, Date() < gateDeadline {
                 try? await Task.sleep(nanoseconds: 200_000_000)
@@ -3723,6 +3742,19 @@ final class ChatViewModel: ObservableObject {
                     return
                 }
                 if attempt < maxAttempts {
+                    // #1240: Log the inter-attempt wait so the journal shows
+                    // why the warm-up is pausing — the 60-second keychain
+                    // cooldown needs to expire before the next read can reach
+                    // the key.
+                    TriosLogBus.shared.info(
+                        .queen,
+                        "queen.key.warmup",
+                        "Provider key warm-up attempt \(attempt) of "
+                            + "\(maxAttempts) found no key; waiting 65 s "
+                            + "before retry so the keychain cooldown can "
+                            + "expire (#1240).",
+                        ["provider": provider.rawValue, "attempt": "\(attempt)"]
+                    )
                     try? await Task.sleep(nanoseconds: retryDelayNanos)
                 }
             }
