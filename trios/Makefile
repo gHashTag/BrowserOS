@@ -19,7 +19,7 @@ DEV_APP     := $(ROOT)/trios-dev.app
 RELEASE_APP := $(ROOT)/trios.app
 
 .DEFAULT_GOAL := dev
-.PHONY: help dev release build keychain-doors make-dollars empty-sources check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard
+.PHONY: help dev release build keychain-doors make-dollars empty-sources watch-empties check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard
 
 help:
 	@echo "TriOS targets:"
@@ -228,6 +228,38 @@ empty-sources:
 	else \
 		echo "[OK] no empty Swift source files under rings or BR-OUTPUT"; \
 	fi
+
+# --- Watch for empty sources --------------------------------------------
+#
+# Samples the byte size of every tracked Swift file under rings/ and BR-OUTPUT/
+# once a second.  When a file drops to zero, prints the timestamp, the path,
+# the previous size, and processes holding the file or repository open (lsof).
+# Read-only: never writes to the tree, so Ctrl+C leaves nothing behind.
+.PHONY: watch-empties
+watch-empties:
+	@files=$$(git -C "$(ROOT)" ls-files -- 'rings/' 'BR-OUTPUT/' \
+		| grep '\.swift$$'); \
+	i=0; \
+	while IFS= read -r f; do \
+		names[$$i]=$$f; \
+		i=$$((i+1)); \
+	done <<< "$$files"; \
+	count=$$i; \
+	while true; do \
+		for ((i=0; i<$$count; i++)); do \
+			now=$$(stat -f%z "$(ROOT)/$${names[$$i]}" 2>/dev/null || echo 0); \
+			if [ -n "$${sizes[$$i]}" ] && [ "$$now" = "0" ] \
+			   && [ "$${sizes[$$i]}" != "0" ]; then \
+				procs=$$( lsof "$(ROOT)/$${names[$$i]}" "$(ROOT)" 2>/dev/null | awk 'NR>1{print $$1}' | sort -u | tr '\n' ' ' ); \
+				if [ -z "$$procs" ]; then \
+					procs=$$( lsof -a -d cwd 2>/dev/null | grep -F "$(ROOT)/" | awk '{print $$1}' | sort -u | tr '\n' ' ' ); \
+				fi; \
+				echo "$$(date '+%Y-%m-%d %H:%M:%S') $${names[$$i]} was $${sizes[$$i]} bytes; processes: $$procs"; \
+			fi; \
+			sizes[$$i]=$$now; \
+		done; \
+		sleep 1; \
+	done
 
 check: check-selftest keychain-doors make-dollars empty-sources dev test cassettes
 
