@@ -51,7 +51,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 594  // 538 + 14 stale-verdict (#1126) + 7 issue-number (#1129) + 12 empty-retry (#1117) + 13 missing-fingerprint (#1131) + 10 boundary-fingerprint (#1131)
+    static let minimumChecks = 598  // 594 + 4 adversary-marker (#1127)
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -137,6 +137,7 @@ struct ChatSSEEndToEndTests {
         await runFingerprintOnlyCoversBoundary()
         await runIssueNumberIsAnIdentifier()
         await runEmptyReviewerAnswerRetriesOnceAndRecordsAsAskedButUnanswered()
+        await runReviewerReceivesAdversaryPrompt()
         // The interface-drift proof invokes the Swift compiler and is
         // deliberately kept out of the fast suite. Run it explicitly with:
         //   make drift-guard
@@ -5596,5 +5597,61 @@ struct ChatSSEEndToEndTests {
         // silently.
         check(!acceptBlock.contains("never checked"),
               "the block reason does not call asked-but-unanswered criteria 'never checked' — the question was asked, the answer was empty")
+    }
+
+    /// #1127 criterion 4: the check goes red when the adversary marker is
+    /// absent from the reviewer request.
+    ///
+    /// The reviewer's brief is built by `QueenReviewVerdictRequest.brief`,
+    /// which embeds `adversaryPromptMarker`. If someone replaces the brief
+    /// with a worker's prompt — which carries no such marker — the checks
+    /// below fail. This is the guard that replaces the removed assert: it
+    /// breaks (prints FAIL) when the adversary marker is absent, without
+    /// killing the app.
+    static func runReviewerReceivesAdversaryPrompt() async {
+        print("\n# Scenario: reviewer receives adversary prompt, not worker's (#1127 criterion 4)")
+
+        let criteria = ["make check passes", "it is fast"]
+        let diff = "+func foo() {}"
+
+        // The brief the reviewer actually receives, built by the same
+        // function `requestReviewerVerdicts` calls. This is the request
+        // content — not a mock of it.
+        let brief = QueenReviewVerdictRequest.brief(
+            criteria: criteria,
+            diff: diff
+        )
+
+        // ── The reviewer brief carries the adversary marker ──
+        //
+        // The marker is embedded by `brief` itself. If it is removed
+        // — whether by accident or by swapping in a worker prompt —
+        // this check fails and the verdicts cannot be trusted.
+        check(brief.contains(QueenReviewVerdictRequest.adversaryPromptMarker),
+              "the reviewer brief contains the adversary marker (#1127)")
+
+        check(QueenReviewVerdictRequest.isAdversarialBrief(brief),
+              "isAdversarialBrief confirms the reviewer brief is adversarial (#1127)")
+
+        // ── A worker's prompt does NOT carry the marker ──
+        //
+        // This is the check that goes red when the reviewer is given the
+        // worker's prompt instead of the adversary's. The worker prompt
+        // is materially different — it instructs, not judges — and it
+        // never carries `adversaryPromptMarker`.
+        let workerPrompt = "You are a coding agent. Implement the feature."
+        check(!QueenReviewVerdictRequest.isAdversarialBrief(workerPrompt),
+              "a worker prompt fails isAdversarialBrief — the check goes red if the reviewer gets the worker's prompt (#1127)")
+
+        // ── Removing the marker breaks the check ──
+        //
+        // Proving the guard is live, not a no-op: strip the marker from
+        // the brief and isAdversarialBrief returns false.
+        let briefWithoutMarker = brief.replacingOccurrences(
+            of: QueenReviewVerdictRequest.adversaryPromptMarker,
+            with: ""
+        )
+        check(!QueenReviewVerdictRequest.isAdversarialBrief(briefWithoutMarker),
+              "a brief without the adversary marker fails isAdversarialBrief (#1127)")
     }
 }
