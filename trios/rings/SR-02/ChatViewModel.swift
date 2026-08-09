@@ -3739,6 +3739,43 @@ final class ChatViewModel: ObservableObject {
                                 + "available — I can start dispatching tasks again."
                         )
                     }
+                    // #1241: A task stays in .queued only when the api-key
+                    // precheck in delegateIssueToWorker refused — every other
+                    // failure cancels the task and success runs it. Now that the
+                    // key is warm, send each held task through the same dispatch
+                    // tail the normal path uses: baseline snapshot before the
+                    // transition, then transition and runner.start with no await
+                    // between them (#1139).
+                    let heldTasks = self.delegationRegistry.tasks.filter {
+                        $0.state == .queued
+                    }
+                    for task in heldTasks {
+                        guard let runner = self.workerRunner else { break }
+                        let baseline = await QueenBranchCommitter
+                            .snapshotWorkingTree()
+                        let brief = QueenBriefing.text(for: task)
+                        guard self.delegationRegistry.transition(
+                            taskID: task.id, to: .running
+                        ) else { continue }
+                        self.workerBaselineTrees[task.conversationId] = baseline
+                        self.delegationRegistry.setBaselineTree(
+                            taskID: task.id, baselineTree: baseline
+                        )
+                        runner.start(task: task, brief: brief)
+                        TriosLogBus.shared.info(
+                            .queen,
+                            "queen.worker.dispatched",
+                            "Re-dispatched worker for \(task.issue.slug) "
+                                + "after key warm-up succeeded",
+                            [
+                                "issue": task.issue.slug,
+                                "worker": task.worker,
+                            ]
+                        )
+                    }
+                    if !heldTasks.isEmpty {
+                        await self.loadConversations()
+                    }
                     return
                 }
                 if attempt < maxAttempts {
