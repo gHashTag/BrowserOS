@@ -88,11 +88,11 @@ dev:
 		grep -q "swift test failed" /tmp/trios_build_dev.log && \
 			echo "[NOTE] XCTest suite still broken (pre-existing); run 'make xctest' for detail"; \
 		warnings=$$(awk '/Copied and signed/{exit} {print}' /tmp/trios_build_dev.log 2>/dev/null \
-			| /usr/bin/grep -oE "^/[^:]+\.swift:[0-9]+:[0-9]+: warning: " | sort -u | wc -l | tr -d ' '); \
+			| /usr/bin/grep -oE "^$(ROOT)/[^:]+\.swift:[0-9]+:[0-9]+: warning: " | sort -u | wc -l | tr -d ' '); \
 		if [ "$$warnings" -gt $(WARNING_CEILING) ]; then \
 			echo "[FAIL] $$warnings compiler warnings; the ceiling is $(WARNING_CEILING)."; \
 			awk '/Copied and signed/{exit} {print}' /tmp/trios_build_dev.log \
-				| /usr/bin/grep -oE "^/[^:]+\.swift:[0-9]+:[0-9]+: warning: .*" \
+				| /usr/bin/grep -oE "^$(ROOT)/[^:]+\.swift:[0-9]+:[0-9]+: warning: .*" \
 				| sort -u | sed 's|$(ROOT)/||' | head -25; \
 			exit 1; \
 		elif [ "$$warnings" -lt $(WARNING_CEILING) ]; then \

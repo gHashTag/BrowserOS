@@ -153,3 +153,25 @@ Restoring the deleted `Integration/` files from `a8fec1de5` is not enough: they
 need `QueenActionFeedback`, `QueenActionPhase` and `TrinityRuntimePaths`, which
 the current `Bridge/ActionQueue.swift` also dropped. Unpicking someone else's
 redesign one file at a time is the trap — stop and ask.
+
+## Do not call a UI change invisible if you cannot look at it (2026-08-10)
+
+I replaced the container type behind `BR-OUTPUT/QueenTabView.swift`, said the
+tabs would come out identical, and shipped it. The canonical 999 menu
+disappeared. In the same commit message I had written that I could prove the
+claim only by compiling, not by looking — and shipped anyway.
+
+**A build that succeeds says the types line up. It says nothing about what the
+window shows.** For anything under `BR-OUTPUT/` that renders, either look at it
+or say plainly that you did not.
+
+Recovery, if this happens again: `git revert` the change, then restore whatever
+the old code depended on. Here that meant `git checkout <old-commit> -- apps/queen`
+in the trinity checkout — the present design stays in that repository's history
+and comes back with `git checkout HEAD -- apps/queen`.
+
+The restored older trinity carries thirty deprecation warnings. `WARNING_CEILING`
+in the Makefile used to count every `.swift` path, dependency included, so a
+dependency's deprecations drowned the gate. It counts only files under this
+project root now — proved by planting five unused-value warnings in a ring file
+and watching the build fail at nine.
