@@ -124,7 +124,25 @@ test:
 	@cargo run --quiet --bin clade-e2e
 
 e2e:
-	@bash "$(ROOT)/tests/swift/run_chat_sse_e2e.sh"
+	@bash "$(ROOT)/tests/swift/run_chat_sse_e2e.sh"; e2e_status=$$?; \
+	E2E_DIR="$(ROOT)/.trinity/e2e"; \
+	if [ -d "$$E2E_DIR" ]; then \
+		before_count=$$(find "$$E2E_DIR" -maxdepth 1 -type f | wc -l | tr -d ' '); \
+		before_kb=$$(du -sk "$$E2E_DIR" 2>/dev/null | cut -f1); \
+		find "$$E2E_DIR" -maxdepth 1 -type f \( -name 'report_*' -o -name 'screenshot_*' \) \
+			| sed -E 's/.*_([0-9]+)\.[a-z]+$$/\1/' \
+			| grep -E '^[0-9]+$$' \
+			| sort -rn \
+			| uniq \
+			| tail -n +6 \
+			| while IFS= read -r ts; do \
+				rm -f "$$E2E_DIR"/*_"$$ts".md "$$E2E_DIR"/*_"$$ts".png; \
+			done; \
+		after_count=$$(find "$$E2E_DIR" -maxdepth 1 -type f | wc -l | tr -d ' '); \
+		after_kb=$$(du -sk "$$E2E_DIR" 2>/dev/null | cut -f1); \
+		echo "[prune] e2e: removed $$((before_count - after_count)) file(s), freed $$((before_kb - after_kb)) KB"; \
+	fi; \
+	exit $$e2e_status
 
 # --- Keychain door guard ------------------------------------------------
 #
