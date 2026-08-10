@@ -51,7 +51,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 673  // 610 + 6 branch-publish notice (#1251) + 2 push-stall log mirror (#1251) + 1 repetition loop (#1251) + 2 log-before-notice ordering and stall interval (#1251) + 19 conflict-is-not-a-not-yet (#1252) + 15 merge-the-reviewed-commit (#1254) + 8 mergePayload/outcome pure-function extraction (#1254) + 10 cursor-is-a-cache (#1260)
+    static let minimumChecks = 678  // 610 + 6 branch-publish notice (#1251) + 2 push-stall log mirror (#1251) + 1 repetition loop (#1251) + 2 log-before-notice ordering and stall interval (#1251) + 19 conflict-is-not-a-not-yet (#1252) + 15 merge-the-reviewed-commit (#1254) + 8 mergePayload/outcome pure-function extraction (#1254) + 10 cursor-is-a-cache (#1260) + 5 dispatch-inbox-entries-concurrently (#1150)
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -143,6 +143,7 @@ struct ChatSSEEndToEndTests {
         await runReviewerReceivesAdversaryPrompt()
             await runBranchPublishNoticeIsEmitted()
             await runCursorIsACache()
+            await runDispatchInboxEntriesConcurrently()
         // The interface-drift proof invokes the Swift compiler and is
         // deliberately kept out of the fast suite. Run it explicitly with:
         //   make drift-guard
@@ -6270,6 +6271,170 @@ struct ChatSSEEndToEndTests {
         check(
             occurrences("seekToEnd", in: source) >= 1,
             "criterion 4: seekToEnd measures the file before the seek — \(occurrences("seekToEnd", in: source)) occurrences (need ≥ 1)"
+        )
+    }
+
+    // MARK: - Scenario: dispatch inbox entries concurrently (#1150)
+
+    /// Inbox entries in one batch must be dispatched without waiting for
+    /// each other. The previous loop awaited each entry's approve +
+    /// delegate in sequence, so a slow `fetchIssueBody` on entry 1
+    /// blocked entry 2 from even starting.
+    ///
+    /// Three criteria:
+    /// 1. Entries dispatched concurrently (fetchIssueBody calls overlap).
+    /// 2. Concurrency respects the existing worker slot limit.
+    /// 3. A check fails if dispatch goes back to sequential.
+    static func runDispatchInboxEntriesConcurrently() async {
+        print("\n# Scenario: dispatch inbox entries concurrently (#1150)")
+
+        let source = (try? String(
+            contentsOfFile: "\(ProjectPaths.root)/rings/SR-02/ChatViewModel.swift",
+            encoding: .utf8
+        )) ?? ""
+
+        check(!source.isEmpty,
+              "ChatViewModel.swift is readable — the source guard has something to read")
+
+        // ── Criterion 3: dispatch uses withTaskGroup, not a sequential loop ──
+        //
+        // If someone reverts dispatchInboxEntries to a sequential `for`
+        // loop with `await` inside, `withTaskGroup` disappears from the
+        // source and this check fails.  Counting occurrences (not
+        // .contains) means removing the call while leaving a comment
+        // drops the count to zero.
+        check(
+            occurrences("withTaskGroup", in: source) >= 1,
+            "criterion 3: dispatchInboxEntries uses withTaskGroup for concurrent dispatch — \(occurrences("withTaskGroup", in: source)) occurrences (need ≥ 1)"
+        )
+        check(
+            occurrences("dispatchInboxEntries", in: source) >= 2,
+            "criterion 3: dispatchInboxEntries is defined and called — \(occurrences("dispatchInboxEntries", in: source)) occurrences (need ≥ 2)"
+        )
+
+        // ── Criterion 1: entries dispatched without waiting for each other ──
+        //
+        // A concurrency probe tracks how many `fetchIssueBody` calls are
+        // in-flight simultaneously.  With concurrent dispatch, multiple
+        // calls overlap (maxInFlight ≥ 2).  With sequential dispatch,
+        // only one is ever in flight at a time (maxInFlight == 1).
+        actor ConcurrencyProbe {
+            private var inFlight = 0
+            private(set) var maxInFlight = 0
+            func enter() {
+                inFlight += 1
+                if inFlight > maxInFlight { maxInFlight = inFlight }
+            }
+            func leave() { inFlight -= 1 }
+        }
+        let probe = ConcurrencyProbe()
+
+        let testDefaults = UserDefaults(
+            suiteName: "trios-1150-conc-\(UUID().uuidString)"
+        ) ?? .standard
+        let modelStore = ModelConfigurationStore(
+            defaults: testDefaults, environment: [:],
+            reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
+        )
+        let sharedPersister = InMemoryPersister()
+        let regPath = NSTemporaryDirectory()
+            + "queen-1150-conc-reg-\(UUID().uuidString).json"
+        defer { try? FileManager.default.removeItem(atPath: regPath) }
+        let registry = QueenDelegationRegistry(storePath: regPath)
+
+        let vm = ChatViewModel(
+            transport: MockChatTransport(),
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: sharedPersister,
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: modelStore,
+            memoryService: AgentMemoryService(
+                store: VolatileMemoryStore(),
+                fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: TODOPlanner(store: VolatileMemoryStore(), preferences: testDefaults),
+            workerRunner: QueenWorkerRunner(
+                persister: sharedPersister,
+                modelStore: modelStore,
+                makeTransport: { MockChatTransport() }
+            ),
+            delegationRegistry: registry,
+            fetchIssueBody: { issue in
+                await probe.enter()
+                try? await Task.sleep(nanoseconds: 50_000_000) // 50ms
+                await probe.leave()
+                return "## Intent\n- test \(issue.slug)"
+            }
+        )
+        try? await Task.sleep(nanoseconds: 100_000_000)
+
+        // Three entries with different issues and non-overlapping paths.
+        // Empty criteria forces delegateIssueToWorker to call fetchIssueBody,
+        // which is where the probe records overlap.
+        let entries: [(issue: IssueReference, worker: String, title: String,
+                       paths: [String], skill: String?, criteria: [String])] = [
+            (IssueReference(owner: "test", repo: "triOS", number: 5001),
+             "queen-swift", "T1", ["tests/swift/Conc1.swift"], nil, []),
+            (IssueReference(owner: "test", repo: "triOS", number: 5002),
+             "queen-swift", "T2", ["tests/swift/Conc2.swift"], nil, []),
+            (IssueReference(owner: "test", repo: "triOS", number: 5003),
+             "queen-swift", "T3", ["tests/swift/Conc3.swift"], nil, []),
+        ]
+
+        // Clean up any git branches created by delegation.
+        defer {
+            for n in [5001, 5002, 5003] {
+                let list = Process()
+                list.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+                list.arguments = ["branch", "--list", "queen/\(n)-*",
+                                  "--format=%(refname:short)"]
+                list.currentDirectoryURL = URL(fileURLWithPath: ProjectPaths.root)
+                let pipe = Pipe()
+                list.standardOutput = pipe
+                list.standardError = Pipe()
+                if (try? list.run()) != nil {
+                    let out = String(
+                        data: pipe.fileHandleForReading.readDataToEndOfFile(),
+                        encoding: .utf8
+                    ) ?? ""
+                    list.waitUntilExit()
+                    for name in out.components(separatedBy: .newlines)
+                    where name.hasPrefix("queen/\(n)-") {
+                        let remove = Process()
+                        remove.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+                        remove.arguments = ["branch", "-D", name]
+                        remove.currentDirectoryURL = URL(fileURLWithPath: ProjectPaths.root)
+                        remove.standardOutput = Pipe()
+                        remove.standardError = Pipe()
+                        try? remove.run()
+                        remove.waitUntilExit()
+                    }
+                }
+            }
+        }
+
+        await vm.dispatchInboxEntries(entries)
+
+        let maxInFlight = await probe.maxInFlight
+        check(maxInFlight >= 2,
+              "criterion 1: at least 2 fetchIssueBody calls overlapped (maxInFlight=\(maxInFlight)) — sequential dispatch would give 1")
+
+        // ── Criterion 2: concurrency respects the slot limit ──
+        //
+        // Concurrent dispatch means multiple .queued tasks can pass the
+        // slot pre-check (delegationBlockReason) because the pre-check
+        // only counts .running tasks.  A re-check immediately before
+        // the transition to .running — in the synchronous section after
+        // the last await — closes the gap atomically.
+        //
+        // Source-level: canStartAnother must appear in ChatViewModel.swift
+        // as a direct call (the re-check), not just indirectly through
+        // delegationBlockReason in the registry.
+        check(
+            occurrences("canStartAnother", in: source) >= 1,
+            "criterion 2: a slot re-check (canStartAnother) guards the transition to .running in ChatViewModel — \(occurrences("canStartAnother", in: source)) occurrences (need ≥ 1)"
         )
     }
 }

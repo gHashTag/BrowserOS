@@ -553,6 +553,10 @@ final class ChatViewModel: ObservableObject {
         guard let text = String(data: data, encoding: .utf8) else { return }
         let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
 
+        // Parse every line before dispatching, so malformed lines are logged
+        // and skipped without blocking the valid ones. The entries are then
+        // dispatched concurrently rather than one waiting for the next (#1150).
+        var parsed: [(issue: IssueReference, entry: QueenInboxEntry)] = []
         for line in lines {
             guard let lineData = line.data(using: .utf8),
                   let entry = try? JSONDecoder().decode(
@@ -582,29 +586,60 @@ final class ChatViewModel: ObservableObject {
                 ["issue": issue.slug, "worker": entry.worker ?? "queen-swift"]
             )
 
-            // Each new line is auto-approved then delegated.  Approval
-            // must precede delegation because `delegateIssueToWorker`
-            // refuses to start work on an un-approved issue.  Each step
-            // is logged so the trail never goes cold after "entry read".
-            await approveDelegation(issue: issue)
-            TriosLogBus.shared.info(
-                .queen, "queen.inbox",
-                "Approved: \(issue.slug)",
-                ["issue": issue.slug]
-            )
-            await delegateIssueToWorker(
-                issue: issue,
-                worker: entry.worker ?? "queen-swift",
-                title: entry.title ?? "Work on \(issue.slug)",
-                paths: entry.paths ?? [],
-                skill: entry.skill,
-                criteria: entry.criteria ?? []
-            )
-            TriosLogBus.shared.info(
-                .queen, "queen.inbox",
-                "Delegated: \(issue.slug)",
-                ["issue": issue.slug, "worker": entry.worker ?? "queen-swift"]
-            )
+            parsed.append((issue, entry))
+        }
+
+        // Dispatch all valid entries concurrently, so one entry's network
+        // calls (fetchIssueBody, createVirtualBranch) do not block the next
+        // (#1150).  The slot limit is enforced inside delegateIssueToWorker
+        // and re-checked before the transition to .running.
+        await dispatchInboxEntries(parsed.map { issue, entry in
+            (issue: issue,
+             worker: entry.worker ?? "queen-swift",
+             title: entry.title ?? "Work on \(issue.slug)",
+             paths: entry.paths ?? [],
+             skill: entry.skill,
+             criteria: entry.criteria ?? [])
+        })
+    }
+
+    /// Dispatches a batch of inbox entries concurrently, so one entry's
+    /// network calls do not block the next (#1150).  Each entry is approved
+    /// and delegated in its own child task; the worker slot limit is enforced
+    /// inside `delegateIssueToWorker` (pre-check) and re-checked atomically
+    /// before the transition to `.running`.
+    ///
+    /// Internal so the test suite can verify concurrency and slot-limit
+    /// enforcement without writing to the inbox file.
+    internal func dispatchInboxEntries(
+        _ entries: [(issue: IssueReference, worker: String, title: String,
+                     paths: [String], skill: String?, criteria: [String])]
+    ) async {
+        await withTaskGroup(of: Void.self) { group in
+            for e in entries {
+                group.addTask { [weak self] in
+                    guard let self else { return }
+                    await self.approveDelegation(issue: e.issue)
+                    TriosLogBus.shared.info(
+                        .queen, "queen.inbox",
+                        "Approved: \(e.issue.slug)",
+                        ["issue": e.issue.slug]
+                    )
+                    await self.delegateIssueToWorker(
+                        issue: e.issue,
+                        worker: e.worker,
+                        title: e.title,
+                        paths: e.paths,
+                        skill: e.skill,
+                        criteria: e.criteria
+                    )
+                    TriosLogBus.shared.info(
+                        .queen, "queen.inbox",
+                        "Delegated: \(e.issue.slug)",
+                        ["issue": e.issue.slug, "worker": e.worker]
+                    )
+                }
+            }
         }
     }
 
@@ -3779,6 +3814,24 @@ final class ChatViewModel: ObservableObject {
             }
         }
 
+        // #1150: Concurrent inbox dispatch means multiple tasks can pass the
+        // slot pre-check (delegationBlockReason) while still in .queued, then
+        // all reach this point and transition to .running at once — exceeding
+        // the limit.  This re-check runs in the synchronous section after the
+        // last await (snapshotWorkingTree), so on the main actor it is atomic
+        // with the transition below: no other child task can interleave
+        // between the check and the transition.
+        if !QueenDelegationPolicy.canStartAnother(running: registry.running.count) {
+            registry.transition(taskID: task.id, to: .cancelled)
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "All \(QueenDelegationPolicy.maximumConcurrentWorkers) worker "
+                    + "slots are full, so \(issue.slug) is not started yet. "
+                    + "It will be retried on the next inbox poll."
+            )
+            await loadConversations()
+            return
+        }
         // Transition and start are now synchronous-adjacent: no yield between
         // them, so a second delegation arriving while this one runs cannot
         // interleave between marking .running and launching the worker.
