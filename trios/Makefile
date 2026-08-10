@@ -19,7 +19,7 @@ DEV_APP     := $(ROOT)/trios-dev.app
 RELEASE_APP := $(ROOT)/trios.app
 
 .DEFAULT_GOAL := dev
-.PHONY: help dev release build keychain-doors make-dollars empty-sources watch-empties check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard finish-mark-order
+.PHONY: help dev release build keychain-doors make-dollars empty-sources watch-empties check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard finish-mark-order parse-tests
 
 help:
 	@echo "TriOS targets:"
@@ -290,7 +290,55 @@ finish-mark-order:
 	fi; \
 	if [ $$fail -ne 0 ]; then exit 1; fi
 
-check: check-selftest keychain-doors make-dollars empty-sources finish-mark-order dev test cassettes
+# --- Parse-every-test-source guard --------------------------------------
+#
+# A green build proves the app compiled, not that every test source is
+# syntactically valid.  A broken func header or an unbalanced brace in a
+# test file that clade-e2e happened not to compile this run sits unnoticed
+# until the next time that suite runs — which may be never, if the build
+# appeared green.  This check runs `swiftc -parse` (syntax only, no type
+# resolution) on every Swift file under tests/swift/ so a syntax error is
+# caught and named before it hides behind a suite that did not run.
+#
+# Two arms, proven by a fixture:
+#
+#   1. Positive — every file under tests/swift/ must parse.  A real source
+#      with a syntax error is a FAIL.
+#
+#   2. Negative — tests/fixtures/parse-fixture.swift must NOT parse.  It is
+#      deliberately broken (missing func keyword).  If it ever parses, the
+#      check FAILS: the sentinel has been fixed, and the target can no
+#      longer prove it catches broken sources.
+#
+# If the fixture goes missing the check fails rather than silently passing
+# with one fewer file to check.
+.PHONY: parse-tests
+parse-tests:
+	@fail=0; \
+	if [ ! -f "$(ROOT)/tests/fixtures/parse-fixture.swift" ]; then \
+		echo "[FAIL] missing fixture: $(ROOT)/tests/fixtures/parse-fixture.swift"; \
+		exit 1; \
+	fi; \
+	for f in "$(ROOT)"/tests/swift/*.swift; do \
+		if ! err=$$(swiftc -parse "$$f" 2>&1); then \
+			echo "[FAIL] $$f does not parse:"; \
+			echo "$$err" | grep 'error:' | head -5 | sed 's/^/  /'; \
+			fail=1; \
+		fi; \
+	done; \
+	if err=$$(swiftc -parse "$(ROOT)/tests/fixtures/parse-fixture.swift" 2>&1); then \
+		echo "[FAIL] parse-fixture.swift parsed — expected it to be broken"; \
+		fail=1; \
+	else \
+		echo "[OK] parse-fixture.swift correctly fails to parse"; \
+	fi; \
+	if [ $$fail -eq 0 ]; then \
+		echo "[OK] every test source parses, broken fixture rejected"; \
+	else \
+		exit 1; \
+	fi
+
+check: check-selftest keychain-doors make-dollars empty-sources finish-mark-order parse-tests dev test cassettes
 
 # Replay every cassette and assert the expected signal appears in the log.
 #
