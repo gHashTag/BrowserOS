@@ -281,3 +281,37 @@ invocation over ~152 files with no `-incremental` and no output file map, so
 every run rebuilds everything whether one file changed or none. `make mutants`
 pays that cost once per mutation — sixteen mutations, twenty minutes, fourteen
 of them recompiling code that did not change. See gHashTag/trios#1261.
+
+## A gate that reads an exit code is scoring the wrong thing
+
+`make mutants` decided whether a mutation was caught like this:
+
+    if bash tests/swift/run_chat_sse_e2e.sh >/dev/null 2>&1; then SURVIVED else caught fi
+
+Any nonzero exit meant "caught". Driven proof: put `exit 1` at the top of the
+script so not one test runs, then run one mutation —
+
+      ok   - caught: a switched-off skill reports itself as on
+    [OK] every mutation was caught (1)
+
+The gate that guards every other guard scored a corpse as a victory. Missing
+SQLCipher, a compile error, a held lock, a full disk, a typo in the script — all
+of them read as proof that the suite noticed a defect.
+
+**Score on positive evidence that the work happened, never on an exit code.**
+Capture the output and require the marker that only a real run can produce:
+
+    output contains "test(s) failed"                     -> caught
+    output contains "All ChatSSEEndToEnd tests passed"   -> survived
+    neither                                              -> ERROR, the suite never ran
+
+The general shape: an exit code is a *claim about the process*, not about the
+work. Any harness whose verdict is "the thing failed, therefore my check works"
+must first establish that the thing ran at all — the same asymmetry as proving
+a negative result (see the release-inbox section above, where zero log lines
+proved nothing until thirty-eight unrelated ones established liveness).
+
+Corollary discovered immediately after: once `caught` keys on "test(s) failed",
+a **flaky** suite is indistinguishable from a caught mutation. Positive-evidence
+scoring is necessary but not sufficient; the suite itself has to be stable, or
+the score has to require the failure to repeat. See gHashTag/trios#1263.
