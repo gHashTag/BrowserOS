@@ -552,32 +552,43 @@ QUEEN_COMMAND ?=
 LOG := $(ROOT)/.trinity-dev/logs/trios-app.jsonl
 
 delegate-probe:
-	@pkill -x trios-dev 2>/dev/null || true
-	@pkill -f "trios-dev.app/Contents/MacOS" 2>/dev/null || true
-	@sleep 2
-	@rm -f "$(ROOT)/.trinity-dev/state/queen_delegation.json"
 	@# Remember where the log ends. Without this the wait loop matches the
 	@# PREVIOUS run's verdict and reports a stale result as if it were fresh.
 	@before=$$(wc -l < "$(LOG)" 2>/dev/null || echo 0); echo $$before > /tmp/trios_delegate_mark
-	@# `open` launches through LaunchServices, which does not inherit the shell
-	@# environment; --env is the only way the flag reaches the app.
-	@open --env TRIOS_E2E_DELEGATE="$(ISSUE)|$(WORKER)|$(TASK)|$(PATHS)|$(CRITERIA)" \
-		--env TRIOS_E2E_DELEGATE_SECOND="$(SECOND)" \
-		--env TRIOS_E2E_DELEGATE_REVIEW="$(REVIEW)" \
-		--env TRIOS_QUEEN_AUTONOMY="$(AUTONOMY)" \
-	--env TRIOS_REPLAY_CASSETTE="$(CASSETTE)" \
-	--env TRIOS_E2E_SECOND_TURN="$(SECOND_TURN)" \
-	--env TRIOS_E2E_QUEEN_COMMAND="$(QUEEN_COMMAND)" "$(DEV_APP)"
+	@# When trios-dev is already running, append to the inbox instead of
+	@# killing it. The app's inbox poller (every 5 s) picks up the entry.
+	@# When it is not running, launch it with the delegation env vars --
+	@# `open` goes through LaunchServices, which does not inherit the shell
+	@# environment, so --env is the only way the flags reach the app.
+	@if pgrep -f "trios-dev.app/Contents/MacOS" >/dev/null 2>&1; then \
+		echo "[probe] trios-dev already running -- appending to inbox"; \
+		mkdir -p "$(ROOT)/.trinity-dev/state"; \
+		python3 -c 'import json,sys; print(json.dumps({"issue":sys.argv[1],"worker":sys.argv[2] or None,"title":sys.argv[3] or None,"paths":sys.argv[4].split() or None,"criteria":[c.strip() for c in sys.argv[5].split(";") if c.strip()] or None}))' \
+			"$(ISSUE)" "$(WORKER)" "$(TASK)" "$(PATHS)" "$(CRITERIA)" \
+			>> "$(ROOT)/.trinity-dev/state/queen_inbox.jsonl"; \
+	else \
+		echo "[probe] trios-dev not running -- launching"; \
+		rm -f "$(ROOT)/.trinity-dev/state/queen_delegation.json"; \
+		open --env TRIOS_E2E_DELEGATE="$(ISSUE)|$(WORKER)|$(TASK)|$(PATHS)|$(CRITERIA)" \
+			--env TRIOS_E2E_DELEGATE_SECOND="$(SECOND)" \
+			--env TRIOS_E2E_DELEGATE_REVIEW="$(REVIEW)" \
+			--env TRIOS_QUEEN_AUTONOMY="$(AUTONOMY)" \
+			--env TRIOS_REPLAY_CASSETTE="$(CASSETTE)" \
+			--env TRIOS_E2E_SECOND_TURN="$(SECOND_TURN)" \
+			--env TRIOS_E2E_QUEEN_COMMAND="$(QUEEN_COMMAND)" "$(DEV_APP)"; \
+	fi
 	@echo "delegating $(ISSUE) to $(WORKER); waiting up to 16 min"
 	@before=$$(cat /tmp/trios_delegate_mark); \
+	issue="$(ISSUE)"; \
 	for i in $$(seq 1 192); do \
 		tail -n "+$$((before + 1))" "$(LOG)" 2>/dev/null \
-			| grep -q "queen.selftest.passed\|queen.selftest.failed" && break; \
+			| grep -F "$$issue" \
+			| grep -q "selftest.\(passed\|failed\)\|worker.\(finish\|failed\)" && break; \
 		sleep 5; \
 	done; \
 	tail -n "+$$((before + 1))" "$(LOG)" 2>/dev/null \
-		| grep "queen.selftest\|queen.worker\|queen.delegate\|queen.branch" \
-		|| echo "no self-test lines were written"
+		| grep -F "$$issue" \
+		|| echo "no lines were written for $$issue"
 
 # The XCTest target, reported honestly rather than folded into the app build.
 # Counts distinct errors, not lines mentioning one.
