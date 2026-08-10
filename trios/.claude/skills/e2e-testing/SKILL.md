@@ -252,3 +252,32 @@ is wrong, and when the test itself never ran — four failure modes wearing one
 face. Pick a moment when the subject is guaranteed to be busy (startup is
 usually the cheapest) and count its unrelated activity alongside the silence you
 care about.
+
+## Measure the parts before you believe the whole
+
+Asked to speed up the loop, the first thing I did was time an ad-hoc `swiftc`
+over the same sources and get **6 seconds** against the harness's 85. A 13×
+win, apparently, from two flags — `-j 1 -disable-batch-mode`.
+
+It was nonsense. I had redirected stderr to `/dev/null`, and the compile had
+*failed*; the six seconds were the time it took to give up. The binary was never
+produced, and I did not check. Removing the two flags for real: **1:54 → 1:43**,
+about ten percent.
+
+Two rules from that, both cheap:
+
+- **A timing measurement of a command whose exit status you did not check is not
+  a measurement.** Failure is always the fastest path. Time the command, then
+  assert its artifact exists — `ls -l` on the output, or the check count in the
+  log.
+- **Split the total before optimising it.** The useful number was not the 103 s
+  total but its parts: run the already-built binary alone (35 s), subtract, and
+  compilation is 70 s — two thirds of every iteration, and the only part worth
+  attacking. Getting that split cost one extra command and redirected the whole
+  investigation.
+
+Concretely for this repo: `tests/swift/run_chat_sse_e2e.sh` is a single `swiftc`
+invocation over ~152 files with no `-incremental` and no output file map, so
+every run rebuilds everything whether one file changed or none. `make mutants`
+pays that cost once per mutation — sixteen mutations, twenty minutes, fourteen
+of them recompiling code that did not change. See gHashTag/trios#1261.
