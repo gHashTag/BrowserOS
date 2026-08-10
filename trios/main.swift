@@ -93,13 +93,49 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// Drives one real `/delegate` through the Queen and reports what the worker
+    /// The fourth field of `TRIOS_E2E_DELEGATE` is the worker's file boundary.
+    /// Without one the brief tells it to ask before editing, so a write task
+    /// produces no writes.
+    ///
+    /// Splits on commas, which is exactly what `QueenCommandParser` did to
+    /// `--paths a,b` when this spec was flattened into a slash command. Returns
+    /// nil rather than an empty array so the emitted inbox line has the same
+    /// shape as the one the Makefile's running-app branch writes (#1090).
+    private static func inboxPaths(_ field: String) -> [String]? {
+        let parts = field
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts
+    }
+
+    /// The fifth field is the acceptance contract. Without one every probe has
+    /// delegated work nobody could judge finished, which is why the review gate
+    /// has never run against a real task.
+    ///
+    /// Splits on semicolons, matching `--criteria "a; b"` after the parser
+    /// stripped the quotes the old code wrapped around this field: an
+    /// acceptance criterion is a sentence and sentences contain commas (#1090).
+    private static func inboxCriteria(_ field: String) -> [String]? {
+        let parts = field
+            .split(separator: ";")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts
+    }
+
+    /// Drives one real delegation through the Queen and reports what the worker
     /// did, with no window and no clicking.
     ///
-    /// Delegation only ever runs from the chat UI, which made "the bee never
+    /// Delegation only ever ran from the chat UI, which made "the bee never
     /// started" impossible to prove without a human at the keyboard. Set
-    /// `TRIOS_E2E_DELEGATE="owner/repo#N|worker|title"` to exercise the same
-    /// code path the UI calls and read the verdict out of the log.
+    /// `TRIOS_E2E_DELEGATE="owner/repo#N|worker|title[|paths[|criteria]]"` to
+    /// exercise the same code path and read the verdict out of the log.
+    ///
+    /// The spec is written to the dev inbox and consumed there (#1090). It used
+    /// to be re-encoded as `/approve` + `/delegate` strings and pushed through
+    /// QueenCommandParser, which meant a delegation could reach the app by two
+    /// routes that disagreed about what a spec meant. There is one entrance now.
     @MainActor
     private func runDelegationSelfTestIfRequested() async {
         let environment = ProcessInfo.processInfo.environment
@@ -125,43 +161,89 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let issueText = fields[0]
         let worker = fields[1]
         let title = fields[2]
-        // A fourth field is the worker's file boundary. Without one the brief
-        // tells it to ask before editing, so a write task produces no writes.
-        let pathsFlag = fields.count >= 4 && !fields[3].isEmpty ? " --paths \(fields[3])" : ""
-        // A fifth field is the acceptance contract, semicolon-separated. Without
-        // one every probe has delegated work nobody could judge finished, which
-        // is why the review gate has never run against a real task.
-        let criteriaFlag = fields.count == 5 && !fields[4].isEmpty
-            ? " --criteria \"\(fields[4])\""
-            : ""
 
         TriosLogBus.shared.info(.queen, "queen.selftest.start", "Delegation self-test starting", ["spec": spec])
         // Setting TRIOS_E2E_DELEGATE is a person naming this exact issue and
         // asking for it, so it satisfies the approval the Queen now requires
         // before opening any chat. This is consent arriving by a different
         // route, not a bypass: no issue gets worked on that a human did not
-        // name.
-        await vm.runQueenCommand("/approve \(issueText)")
-        await vm.runQueenCommand("/delegate \(issueText) \(worker)\(pathsFlag)\(criteriaFlag) \(title)")
+        // name. The approval itself now happens inside the poller's
+        // `approveDelegation` - the same call the `/approve` line used to
+        // reach through the command parser.
+        //
+        // #1090: this used to build `/approve` + `/delegate` strings and push
+        // them through QueenCommandParser, which was a second implementation of
+        // what the dev inbox poller already does. The spec is written to the
+        // inbox instead and the poller consumes it, so there is one entrance
+        // and one set of bugs.
+        //
+        // An unparseable first field is not an error here: with
+        // TRIOS_QUEEN_AUTONOMY=1 the probe is launched with an EMPTY issue and
+        // the work arrives via TRIOS_E2E_QUEEN_COMMAND=/choose --start. The
+        // registry lookup below already covers that case, so skip the enqueue
+        // and carry on rather than failing.
+        if IssueReference.parse(issueText) != nil {
+            let queued = await vm.enqueueQueenInboxEntry(
+                issue: issueText,
+                worker: worker.isEmpty ? nil : worker,
+                title: title.isEmpty ? nil : title,
+                paths: Self.inboxPaths(fields.count >= 4 ? fields[3] : ""),
+                skill: nil,
+                criteria: Self.inboxCriteria(fields.count == 5 ? fields[4] : "")
+            )
+            if !queued {
+                TriosLogBus.shared.error(
+                    .queen,
+                    "queen.selftest.failed",
+                    "Could not write the delegation to the inbox",
+                    ["spec": spec]
+                )
+                return
+            }
+        }
 
         // A second bee, started before the first is waited on, so the two
         // genuinely overlap. Parallel work is the part of the design that has
         // never once been demonstrated: the concurrency bound, the file
         // boundaries and the one-owner-per-path rule are all written and have
         // never run together.
+        //
+        // Two sequential awaited enqueues, not one batch: today the first
+        // delegation is fully awaited before the second is asked for, and this
+        // change is not the place to make them concurrent.
         if let second = environment["TRIOS_E2E_DELEGATE_SECOND"], !second.isEmpty {
             let two = second.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
-            if two.count >= 3 {
-                let secondPaths = two.count >= 4 && !two[3].isEmpty ? " --paths \(two[3])" : ""
-                await vm.runQueenCommand("/approve \(two[0])")
-                await vm.runQueenCommand(
-                    "/delegate \(two[0]) \(two[1])\(secondPaths) \(two[2])"
+            if two.count >= 3, IssueReference.parse(two[0]) != nil {
+                // The enqueue answers whether the delegation actually reached
+                // the inbox. Discarding that answer made the log claim a
+                // second bee had started even when nothing was queued - a
+                // release build, an unwritable inbox and a successful append
+                // all read identically. Report what happened, not what was
+                // attempted.
+                let secondQueued = await vm.enqueueQueenInboxEntry(
+                    issue: two[0],
+                    worker: two[1].isEmpty ? nil : two[1],
+                    title: two[2].isEmpty ? nil : two[2],
+                    paths: Self.inboxPaths(two.count >= 4 ? two[3] : ""),
+                    skill: nil,
+                    criteria: nil
                 )
-                TriosLogBus.shared.info(
-                    .queen, "queen.selftest.secondStarted",
-                    "A second bee was started alongside the first",
-                    ["issue": two[0]]
-                )
+                if secondQueued {
+                    TriosLogBus.shared.info(
+                        .queen, "queen.selftest.secondStarted",
+                        "A second bee was started alongside the first",
+                        ["issue": two[0]]
+                    )
+                } else {
+                    // Not fatal to the probe: the first bee is already queued
+                    // and the run continues to verify it. Only the parallel
+                    // half is lost, and it must say so.
+                    TriosLogBus.shared.warn(
+                        .queen, "queen.selftest.secondNotStarted",
+                        "The second bee was not queued - the inbox refused the delegation",
+                        ["issue": two[0], "spec": second]
+                    )
+                }
             }
         }
 
@@ -172,16 +254,36 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // registered, so fall back to the most recent non-terminal one
         // instead of declaring failure. An empty registry stays a
         // failure with the same record.
-        let task: DelegatedTask? = {
+        let lookup: () -> DelegatedTask? = {
             if let issue = IssueReference.parse(issueText) {
                 return QueenDelegationRegistry.shared.task(forIssue: issue)
             }
             return QueenDelegationRegistry.shared.tasks
                 .filter { !$0.state.isTerminal }
                 .max { $0.createdAt < $1.createdAt }
-        }()
+        }
 
-        guard let task else {
+        // #1090: the inbox is now the only entrance, and it has two readers -
+        // the synchronous consume inside enqueueQueenInboxEntry and the 5 s
+        // background loop. They are separate awaiting calls on the same
+        // main-actor object, so the loop can take the line first and still be
+        // parked inside fetchIssueBody (2.1 s, measured) when the synchronous
+        // consume finds nothing new and returns. Without this wait the probe
+        // would report "Delegation did not register a task" for a delegation
+        // that is in flight and about to succeed.
+        //
+        // Bounded at 30 s and costing nothing on the happy path. Deliberately
+        // not applied to the empty-issue fallback: with `/choose --start` a
+        // genuinely empty registry must keep failing immediately.
+        var resolved = lookup()
+        if resolved == nil, IssueReference.parse(issueText) != nil {
+            for _ in 0..<120 where resolved == nil {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                resolved = lookup()
+            }
+        }
+
+        guard let task = resolved else {
             TriosLogBus.shared.error(
                 .queen,
                 "queen.selftest.failed",

@@ -513,6 +513,11 @@ final class ChatViewModel: ObservableObject {
     /// The byte offset is persisted to UserDefaults after each read, so a
     /// restart resumes from where it stopped without re-delegating.
     private func pollQueenInbox() async {
+        // The guard at the startup site stops the background loop from ever
+        // being created in a release build. This one guards the read itself,
+        // so no other caller - `enqueueQueenInboxEntry` included - can reach a
+        // dev inbox out of a release app (#1090).
+        guard ProjectPaths.isDevVariant else { return }
         let path = Self.queenInboxPath
         guard FileManager.default.fileExists(atPath: path),
               let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path))
@@ -603,6 +608,100 @@ final class ChatViewModel: ObservableObject {
         })
     }
 
+    /// The one entrance for a delegation that arrives from outside the chat UI
+    /// (#1090).
+    ///
+    /// There used to be two. The launch-environment probe
+    /// (`TRIOS_E2E_DELEGATE`, read in main.swift) carried its own approve +
+    /// delegate implementation while this file's poller called
+    /// `approveDelegation` and `delegateIssueToWorker` directly, and the two
+    /// already disagreed about what a spec meant. Callers now append the spec
+    /// here and the poller does the work: one file format, one consumer, one
+    /// set of bugs.
+    ///
+    /// The line is consumed synchronously rather than left for the next 5 s
+    /// tick. The background loop's latency was measured at 0.6-3.9 s per
+    /// entry, which a launch probe would pay on every run.
+    ///
+    /// Returns false when the entry could not be queued. A release build has
+    /// no inbox to write to, which is the whole point of the dev-variant
+    /// guard - the caller is told rather than left believing it delegated.
+    @discardableResult
+    internal func enqueueQueenInboxEntry(
+        issue: String,
+        worker: String?,
+        title: String?,
+        paths: [String]?,
+        skill: String?,
+        criteria: [String]?
+    ) async -> Bool {
+        guard ProjectPaths.isDevVariant else {
+            TriosLogBus.shared.warn(
+                .queen, "queen.inbox",
+                "No inbox in a release build - the delegation was not queued",
+                ["issue": issue]
+            )
+            return false
+        }
+
+        let entry = QueenInboxEntry(
+            issue: issue,
+            worker: worker,
+            title: title,
+            paths: paths,
+            skill: skill,
+            criteria: criteria
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard var data = try? encoder.encode(entry) else {
+            TriosLogBus.shared.warn(
+                .queen, "queen.inbox",
+                "Could not encode the delegation as an inbox line",
+                ["issue": issue]
+            )
+            return false
+        }
+        data.append(0x0A)
+
+        let path = Self.queenInboxPath
+        try? FileManager.default.createDirectory(
+            atPath: (path as NSString).deletingLastPathComponent,
+            withIntermediateDirectories: true
+        )
+        if !FileManager.default.fileExists(atPath: path) {
+            FileManager.default.createFile(atPath: path, contents: nil)
+        }
+        // O_APPEND, not seekToEnd: the Makefile's running-app branch appends
+        // with the shell's `>>`, and an atomic append is the only thing that
+        // keeps a human running both at once from interleaving a partial line.
+        let descriptor = Darwin.open(path, O_WRONLY | O_APPEND)
+        guard descriptor >= 0 else {
+            TriosLogBus.shared.warn(
+                .queen, "queen.inbox",
+                "Could not open the inbox for appending: \(path)",
+                ["issue": issue, "path": path]
+            )
+            return false
+        }
+        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+        do {
+            try handle.write(contentsOf: data)
+        } catch {
+            try? handle.close()
+            TriosLogBus.shared.warn(
+                .queen, "queen.inbox",
+                "Could not append the delegation to the inbox: \(error.localizedDescription)",
+                ["issue": issue, "path": path]
+            )
+            return false
+        }
+        try? handle.close()
+
+        await pollQueenInbox()
+        return true
+    }
+
     /// Dispatches a batch of inbox entries concurrently, so one entry's
     /// network calls do not block the next (#1150).  Each entry is approved
     /// and delegated in its own child task; the worker slot limit is enforced
@@ -633,9 +732,14 @@ final class ChatViewModel: ObservableObject {
                         skill: e.skill,
                         criteria: e.criteria
                     )
+                    // "Dispatched", not "Delegated": delegateIssueToWorker
+                    // refuses on a boundary conflict or a full slot table and
+                    // says so in its own `queen.delegate` record. This line
+                    // only witnesses that the entry was handed over, and
+                    // claiming more made a refusal read as a success (#1090).
                     TriosLogBus.shared.info(
                         .queen, "queen.inbox",
-                        "Delegated: \(e.issue.slug)",
+                        "Dispatched: \(e.issue.slug)",
                         ["issue": e.issue.slug, "worker": e.worker]
                     )
                 }
