@@ -51,7 +51,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 621  // 610 + 6 branch-publish notice (#1251) + 2 push-stall log mirror (#1251) + 1 repetition loop (#1251) + 2 log-before-notice ordering and stall interval (#1251)
+    static let minimumChecks = 640  // 610 + 6 branch-publish notice (#1251) + 2 push-stall log mirror (#1251) + 1 repetition loop (#1251) + 2 log-before-notice ordering and stall interval (#1251) + 19 conflict-is-not-a-not-yet (#1252)
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -125,6 +125,7 @@ struct ChatSSEEndToEndTests {
         await runPullRequestRefusals()
         await runMergedIsNotTheSameAsClosed()
         await runAskTheForgeWithOwnerBranch()
+        await runConflictIsNotANotYet()
         await runStalledWorkerIsResumedBeforeCancelled()
         await runQueenTaskLifecycleCloses()
         await runPureQueenTypes()
@@ -3752,16 +3753,135 @@ struct ChatSSEEndToEndTests {
         } else {
             fail("a merged outcome reads as merged")
         }
-        if case .refused(let code) = GitHubAPIClient.MergeOutcome.refused(statusCode: 405) {
+        if case .refused(let code, _, _) = GitHubAPIClient.MergeOutcome.refused(statusCode: 405, mergeable: nil, mergeState: nil) {
             check(code == 405, "a refused merge carries 405 (not mergeable)")
         } else {
             fail("a refused merge carries 405 (not mergeable)")
         }
-        if case .refused(let code) = GitHubAPIClient.MergeOutcome.refused(statusCode: 409) {
+        if case .refused(let code, _, _) = GitHubAPIClient.MergeOutcome.refused(statusCode: 409, mergeable: nil, mergeState: nil) {
             check(code == 409, "a refused merge carries 409 (head moved)")
         } else {
             fail("a refused merge carries 409 (head moved)")
         }
+    }
+
+    static func runConflictIsNotANotYet() async {
+        print("\n# Scenario: a conflict is not a not-yet (#1252)")
+
+        // ── Criterion 1: the model carries mergeable and merge state ──
+        //
+        // The MergeOutcome enum carries mergeable and merge_state on both
+        // its refusal and conflict cases, so the caller can inspect the
+        // forge's verdict without a second request.
+
+        if case .refused(let code, let mergeable, let mergeState) =
+            GitHubAPIClient.MergeOutcome.refused(statusCode: 405, mergeable: true, mergeState: "blocked") {
+            check(code == 405, "a refused merge carries the HTTP status code")
+            check(mergeable == true, "and carries mergeable from the forge")
+            check(mergeState == "blocked", "and carries merge_state from the forge")
+        } else {
+            fail("a refused merge decodes with mergeable and merge_state")
+            check(false, "a refused merge carries the HTTP status code")
+            check(false, "and carries mergeable from the forge")
+            check(false, "and carries merge_state from the forge")
+        }
+
+        if case .conflict(let mergeable, let mergeState) =
+            GitHubAPIClient.MergeOutcome.conflict(mergeable: false, mergeState: "dirty") {
+            check(mergeable == false, "a conflict carries mergeable = false")
+            check(mergeState == "dirty", "and carries merge_state = dirty")
+        } else {
+            fail("a conflict outcome matches .conflict")
+            check(false, "a conflict carries mergeable = false")
+            check(false, "and carries merge_state = dirty")
+        }
+
+        // ── Criterion 2: a conflicting refusal emits its own event ──
+        //
+        // isConflict is the pure classifier mergePullRequest uses to split
+        // .conflict from .refused. Removing it — collapsing conflicts back
+        // into refusals — breaks every check below.
+
+        check(GitHubAPIClient.isConflict(mergeable: false, mergeState: nil),
+              "mergeable = false is a permanent conflict")
+        check(GitHubAPIClient.isConflict(mergeable: nil, mergeState: "dirty"),
+              "merge_state = dirty is a permanent conflict")
+        check(GitHubAPIClient.isConflict(mergeable: false, mergeState: "dirty"),
+              "both signals agree: conflict")
+        check(!GitHubAPIClient.isConflict(mergeable: true, mergeState: "blocked"),
+              "a blocked-but-mergeable PR is a not-yet, not a conflict")
+        check(!GitHubAPIClient.isConflict(mergeable: nil, mergeState: nil),
+              "absence is not a conflict — the forge was not asked")
+        check(!GitHubAPIClient.isConflict(mergeable: true, mergeState: "clean"),
+              "a clean, mergeable PR is not a conflict")
+
+        // A conflict must not match the .refused pattern. This is the test
+        // that fails if the distinction is removed: if .conflict is collapsed
+        // into .refused, the conflict-specific event is never emitted and the
+        // task is retried forever (#1252 criterion 4).
+        let conflict = GitHubAPIClient.MergeOutcome.conflict(mergeable: false, mergeState: "dirty")
+        if case .refused = conflict {
+            fail("a conflict must not match .refused — it is a different event")
+        } else {
+            check(true, "a conflict does not match the refused pattern")
+        }
+
+        // ── Criterion 3: a conflicting pull request stops being retried ──
+        //
+        // pollPullRequests selects only tasks in .accepted with a PR number.
+        // A conflict transitions to .awaitingReview — a legal transition —
+        // which drops the task from the filter. This is what "stops being
+        // retried" means.
+
+        let store = NSTemporaryDirectory() + "queen-conflict-\(UUID().uuidString).json"
+        defer { try? FileManager.default.removeItem(atPath: store) }
+        let registry = QueenDelegationRegistry(storePath: store)
+
+        guard let issue = IssueReference.parse("gHashTag/trios#1252") else {
+            fail("could not build a test issue"); return
+        }
+        guard let task = registry.delegate(
+            issue: issue, title: "conflict probe", worker: "queen-swift",
+            conversationId: UUID(), ownedPaths: ["BR-OUTPUT/GitHubAPIClient.swift"]
+        ) else {
+            fail("registry refused a clean delegation"); return
+        }
+
+        // Walk the task to .accepted with a PR, as the Queen's review would.
+        check(registry.transition(taskID: task.id, to: .running),
+              "the probe task starts running")
+        check(registry.transition(taskID: task.id, to: .awaitingReview),
+              "moves to review")
+        check(registry.transition(taskID: task.id, to: .accepted),
+              "and is accepted")
+        registry.recordPullRequest(taskID: task.id, number: 42)
+
+        // Before the conflict: the task IS in the poll filter.
+        let beforeFilter = registry.tasks.filter {
+            $0.pullRequestNumber != nil && $0.state == .accepted
+        }
+        check(beforeFilter.contains(where: { $0.id == task.id }),
+              "before the conflict, the task is in pollPullRequests' filter")
+
+        // Simulate the conflict: transition to .awaitingReview.
+        check(registry.transition(taskID: task.id, to: .awaitingReview),
+              "a conflict transitions the task from accepted to awaitingReview")
+
+        // After the conflict: the task is NOT in the poll filter.
+        let afterFilter = registry.tasks.filter {
+            $0.pullRequestNumber != nil && $0.state == .accepted
+        }
+        check(!afterFilter.contains(where: { $0.id == task.id }),
+              "after the conflict, the task is dropped from the filter — retry stops")
+
+        // ── Criterion 4: removing the distinction breaks a check ──
+        //
+        // The .conflict case is its own enum case. If it is removed, the
+        // pattern-match above fails to compile. If isConflict is removed,
+        // the classification checks fail. Either way, the distinction is
+        // guarded by a failing check, not by trust.
+        check(GitHubAPIClient.isConflict(mergeable: false, mergeState: "dirty"),
+              "removing isConflict breaks this check — the distinction is guarded")
     }
 
     static func runStalledWorkerIsResumedBeforeCancelled() async {

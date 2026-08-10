@@ -7202,7 +7202,31 @@ final class ChatViewModel: ObservableObject {
                                 + "I liked the result."
                         )
                         continue
-                    case .refused(let statusCode):
+                    case .conflict(let mergeable, let mergeState):
+                        // A conflict is permanent: the branches diverge and
+                        // retrying will never succeed. Emit its own event
+                        // naming the conflict, then transition the task out
+                        // of .accepted so pollPullRequests stops picking it
+                        // up — the task is back in the review queue until
+                        // someone rebases (#1252).
+                        TriosLogBus.shared.warn(
+                            .queen, "queen.pr.conflict",
+                            "Pull request has merge conflicts and will not be retried",
+                            ["issue": task.issue.slug, "pr": "\(number)",
+                             "mergeable": "\(mergeable ?? false)",
+                             "merge_state": mergeState ?? "dirty"]
+                        )
+                        if registry.transition(taskID: task.id, to: .awaitingReview) {
+                            await appendSystemMessageToQueenChat(
+                                SystemNoticeClassifier.failureMarker
+                                    + "#\(number) for \(task.issue.slug) has merge conflicts "
+                                    + "(merge_state: \(mergeState ?? "dirty")). "
+                                    + "The task is back in the review queue - it will not be "
+                                    + "retried until the branch is rebased."
+                            )
+                        }
+                        continue
+                    case .refused(let statusCode, _, _):
                         TriosLogBus.shared.warn(
                             .queen, "queen.pr.merge_refused",
                             "The forge refused the merge (HTTP \(statusCode))",
