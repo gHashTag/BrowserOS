@@ -86,3 +86,42 @@ Diagnostic habit that found it: count the log's own verbs against each other.
 `21 pr.attempt, 14 pr.opened, 2 pr.refused` does not add up, and the missing
 five are where the truth is. Ratios between event names cost nothing to compute
 and point straight at the gap; reading any single line would not have.
+
+## Observability must not queue behind the thing it observes
+
+A stall notice that repeats every ten seconds emitted exactly once during an
+86-second push, and the number it carried said 11 s while the line landed on
+disk at 68 s. The loop was:
+
+    sleep 10 → compute elapsed → await postQueenNotice(...) → log the event
+
+`postQueenNotice` persists the conversation, and under load that await took
+~57 seconds. So the log line was 57 s stale, and every later iteration of the
+loop was eaten by the same await. Swapping two lines — log first, then post —
+made the repetition work and the timestamps honest.
+
+The general rule: **the cheap, structured record goes first; the expensive,
+user-facing one goes second.** Anything else makes your instrument depend on
+the health of the thing being instrumented, which is precisely backwards during
+an incident. A log line that waits on an encrypted store write is not
+telemetry, it is a second victim.
+
+Corollary worth checking whenever a periodic reporter under-reports: count the
+events you got against the events the interval implies. Two ticks in 86 seconds
+at a 10-second interval is not "roughly working", it is a factor of four, and
+the factor is the bug.
+
+## `make dev` passing does not mean the tree is whole
+
+A worker's edit swallowed the `static func` header of the function *next to*
+the one it was adding, leaving the test file one brace short so the enclosing
+type closed early. The app build stayed green through all of it: the app target
+does not compile `tests/swift/`. Only the e2e run surfaced it, as three
+"static methods may only be declared on a type" errors far below the real
+damage.
+
+So: after any worker touches a test file, the e2e suite is not optional and its
+compile step is the check that matters. And when the compiler points at line
+3942, the break is usually *above* it — walk the brace depth back from the
+first complaint to the last line where it was still correct rather than reading
+the reported line.
