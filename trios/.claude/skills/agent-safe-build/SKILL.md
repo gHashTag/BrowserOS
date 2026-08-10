@@ -175,3 +175,56 @@ in the Makefile used to count every `.swift` path, dependency included, so a
 dependency's deprecations drowned the gate. It counts only files under this
 project root now — proved by planting five unused-value warnings in a ring file
 and watching the build fail at nine.
+
+## Do not delegate a second task on a file whose first task is still uncommitted
+
+Two workers were sent at the same `Makefile`, one after the other. The first
+added nine mutation records; I was still verifying them, so they sat in the
+working tree uncommitted. The second worker read the file from its own baseline
+— which predated those nine records — did its work, and wrote the whole file
+back. The nine records vanished without a conflict, a warning, or a diff line
+saying so.
+
+Nothing here was a race in the usual sense. Each worker was correct in
+isolation. The destruction came from *my* sequencing: I handed out the second
+task before the first one's output was in git.
+
+**Commit (or stash) a worker's output before delegating anything that touches
+the same path.** The file boundary system stops two *concurrent* bees from
+colliding; it says nothing about a bee colliding with the uncommitted remains
+of its predecessor.
+
+Recovery, when it happens anyway: the Queen commits each task to its own branch,
+so the work is in git even when it is gone from the tree. Find it with
+`git log --all --oneline --grep=<issue>`, then lift only the hunk you need out
+of that commit — do not merge the branch, which would drag the rest of that
+worker's baseline back with it.
+
+## A mutation harness can leave its mutations behind
+
+`make mutants` edits real source files, runs the suite, and restores from a
+backup. Two runs overlapped — mine and a worker's — and each had its own
+`mktemp` backup directory. The second run snapshotted a file the first had
+already mutated, so its "pristine" copy was already broken, and its restore
+wrote the mutation back permanently.
+
+Three deliberate defects were left in the tree. One of them was the exact bug
+fixed hours earlier: the pull-request lookup adopting `list.first` without
+verifying the branch ref. All three compiled, and all three passed every gate —
+mutations are chosen precisely to be plausible.
+
+They were noticed only indirectly: the harness reported STALE for three needles,
+and the needles were missing because the replacement text was already sitting in
+the file.
+
+Two guards, both cheap:
+
+- **A lock.** `mkdir` is atomic; a second run must refuse to start rather than
+  interleave. Release on `EXIT INT TERM`.
+- **A checksum on restore.** Record each file's hash before mutating and compare
+  after restoring. A mismatch is a named, loud failure — `[FAIL] restore
+  checksum mismatch for <path>` — not silence.
+
+Prove both from the failing side: hold the lock and watch the run refuse; corrupt
+the recorded hash and watch the mismatch fire. A harness that guards everything
+else is the last place to accept an unproven guard.
