@@ -23,7 +23,7 @@ RELEASE_APP := $(ROOT)/trios.app
 HARNESS_LOCK := /tmp/trios_harness.lock
 
 .DEFAULT_GOAL := dev
-.PHONY: help dev release build keychain-doors make-dollars empty-sources watch-empties check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard finish-mark-order parse-tests
+.PHONY: help dev release build keychain-doors make-dollars empty-sources watch-empties check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard finish-mark-order guard-shapes parse-tests
 
 help:
 	@echo "TriOS targets:"
@@ -46,6 +46,7 @@ help:
 	@echo "  make mutants-changed - run mutations for guarded files dirty in the working tree"
 	@echo "  make drift-guard - run the interface-drift compiling proof (slow; not in the fast suite)"
 	@echo "  make finish-mark-order - check the completed-turn mark stays in the finish callback"
+	@echo "  make guard-shapes - check the load-bearing guards are still in their files"
 
 # --- Building -----------------------------------------------------------
 
@@ -193,7 +194,7 @@ keychain-doors:
 MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP WARNING_CEILING CASSETTE_DIR \
 	CASSETTE_BRANCHES SWEEP_CANARY LOG KEYCHAIN_ALLOW_PATTERNS MAKE VARIANT \
 	MSG ISSUE WORKER TASK PATHS CRITERIA SECOND REVIEW AUTONOMY CASSETTE \
-	SECOND_TURN QUEEN_COMMAND MUTANTS MUTANTS_LOGIC MAKE_DOLLAR_VARS HARNESS_LOCK
+	SECOND_TURN QUEEN_COMMAND MUTANTS MUTANTS_LOGIC MAKE_DOLLAR_VARS HARNESS_LOCK GUARDS
 
 .PHONY: make-dollars
 make-dollars:
@@ -295,6 +296,133 @@ finish-mark-order:
 	fi; \
 	if [ $$fail -ne 0 ]; then exit 1; fi
 
+# --- Load-bearing guard shapes -----------------------------------------
+#
+# Tonight `if ProjectPaths.isDevVariant {` and its closing brace vanished
+# from ChatViewModel.swift around the Queen inbox poller.  Nothing failed:
+# the body of an `if` is perfectly legal code on its own, so the build was
+# green with zero warnings and the release app would have started reading
+# the dev inbox.  A compiler cannot see a missing guard; only something
+# that greps for the guard's shape can.
+#
+# GUARDS is that list.  One row per guard, fields separated by `@@`, rows
+# by `~`:
+#
+#   source@@anchor@@needle@@window@@fixture@@consequence
+#
+# The check finds the first line containing `anchor` and looks up to
+# `window` lines above it for `needle`.  Both arms run on every invocation:
+# the real source must be GUARDED, and the deliberately broken fixture must
+# come back UNGUARDED -- not merely "fail".  A fixture that lost its anchor
+# would fail for the wrong reason and the negative arm would pass while
+# proving nothing, so NOANCHOR is reported separately from UNGUARDED.
+#
+# It also refuses to pass quietly when it has stopped being a check: an
+# empty table, a row that does not have six fields, a window outside
+# 1..40 (a wide enough window matches anything), a missing fixture, and a
+# fixture in tests/fixtures/guards/ that no row refers to are all failures.
+#
+# What this cannot do: a grep sees shape, not meaning.  A guard inverted to
+# `if !ProjectPaths.isDevVariant {`, or moved to wrap the wrong statement,
+# still contains the needle and still passes.  This catches deletion, which
+# is the failure that actually happened.
+#
+# Guard 1 is also asserted from Swift, in ChatSSEEndToEndTest.swift's
+# runInboxPollerIsDevVariantOnly, with a 5-line window against the 8 here.
+# The two are deliberate redundancy at different prices -- that one needs
+# the whole SSE harness, this one costs 0.1s and still runs when the
+# harness cannot -- so the differing windows are not a bug in either.
+#
+# One row per guard, not one row per file.  ChatViewModel.swift carries
+# three dev-variant guards -- the poller startup site, the read inside
+# pollQueenInbox, and the write inside enqueueQueenInboxEntry -- and rows
+# 1-3 anchor on each one separately.  Anchoring all three on the startup
+# site would leave the other two, 80-200 lines away, deletable in silence:
+# an anchor only proves the guard sitting within `window` lines above it.
+# Only row 1 has a Swift counterpart; rows 2 and 3 live here alone.
+#
+# Do not put a `#` in the table: inside a Make variable it starts a
+# comment and would silently truncate the row.
+GUARDS := \
+	rings/SR-02/ChatViewModel.swift@@queenInboxPollTask = Task@@if ProjectPaths.isDevVariant {@@8@@guards/inbox-poller-unguarded.swift@@a release build polls the dev Queen inbox (1150)~ \
+	rings/SR-02/ChatViewModel.swift@@let path = Self.queenInboxPath@@guard ProjectPaths.isDevVariant else { return }@@3@@guards/inbox-read-unguarded.swift@@a release build reads the dev Queen inbox from any caller (1090)~ \
+	rings/SR-02/ChatViewModel.swift@@let entry = QueenInboxEntry(@@guard ProjectPaths.isDevVariant else {@@10@@guards/inbox-enqueue-unguarded.swift@@a release build queues delegations into the dev Queen inbox (1090)~ \
+	rings/SR-00/KeychainSecrets.swift@@DevSecretStore.read(service: service, account: account)@@if ProjectPaths.isDevVariant {@@4@@guards/dev-secret-store-unguarded.swift@@a release build reads secrets from the plaintext dev store~ \
+	rings/SR-00/TriOSEncryption.swift@@return try loadOrCreateTestKey()@@if ProcessInfo.processInfo.environment["TRIOS_E2E_DISABLE_KEYCHAIN"] == "1" {@@4@@guards/test-key-unguarded.swift@@every build derives its data key from a volatile test file~ \
+	main.swift@@NSApplication.shared.run()@@guard RecursionGuard.shared.ensureSingleInstance() else {@@12@@guards/single-instance-unguarded.swift@@a second trios instance starts alongside the first~
+
+.PHONY: guard-shapes
+guard-shapes:
+	@fail=0; n=0; total=0; seen=""; \
+	af=$$(mktemp /tmp/trios_gs.XXXXXX); \
+	trap 'rm -f $$af' EXIT INT TERM; \
+	printf '%s\n' \
+		'{ L[NR] = $$0 }' \
+		'a == 0 && index($$0, anchor) { a = NR }' \
+		'END {' \
+		'  if (a == 0) { print "NOANCHOR"; exit 3 }' \
+		'  for (i = a - 1; i >= a - win && i >= 1; i--)' \
+		'    if (index(L[i], needle)) { print "GUARDED"; exit 0 }' \
+		'  print "UNGUARDED"; exit 4' \
+		'}' \
+	> $$af; \
+	while IFS= read -r raw; do \
+		entry=$$(printf '%s' "$$raw" | sed 's/^[[:space:]]*//; s/[[:space:]]*$$//'); \
+		[ -n "$$entry" ] || continue; \
+		total=$$((total + 1)); \
+		src=$${entry%%@@*};      rest=$${entry#*@@}; \
+		anchor=$${rest%%@@*};    rest=$${rest#*@@}; \
+		needle=$${rest%%@@*};    rest=$${rest#*@@}; \
+		win=$${rest%%@@*};       rest=$${rest#*@@}; \
+		fixture=$${rest%%@@*};   label=$${rest#*@@}; \
+		fields=$$(printf '%s' "$$entry" | awk -F'@@' '{print NF}'); \
+		if [ "$$fields" != "6" ]; then \
+			echo "  FAIL - malformed guard row ($$fields fields, want 6): $$entry"; fail=1; continue; \
+		fi; \
+		case "$$win" in \
+		''|*[!0-9]*) echo "  FAIL - window is not a number in row for $$src: '$$win'"; fail=1; continue ;; \
+		esac; \
+		if [ "$$win" -lt 1 ] || [ "$$win" -gt 40 ]; then \
+			echo "  FAIL - window $$win out of range 1..40 for $$src; a wide window makes the check vacuous"; fail=1; continue; \
+		fi; \
+		n=$$((n + 1)); seen="$$seen $$fixture"; \
+		if [ ! -f "$(ROOT)/$$src" ]; then \
+			echo "  FAIL - missing source: $$src"; fail=1; continue; \
+		fi; \
+		v=$$(awk -v anchor="$$anchor" -v needle="$$needle" -v win="$$win" -f $$af "$(ROOT)/$$src"); \
+		case "$$v" in \
+		GUARDED) echo "  ok   - $$src: guard holds above '$$anchor'" ;; \
+		NOANCHOR) echo "  FAIL - $$src: anchor '$$anchor' is gone; the guard table is stale"; fail=1 ;; \
+		*) echo "  FAIL - $$src: no '$$needle' within $$win lines above '$$anchor' -> $$label"; fail=1 ;; \
+		esac; \
+		if [ ! -f "$(ROOT)/tests/fixtures/$$fixture" ]; then \
+			echo "  FAIL - missing fixture: tests/fixtures/$$fixture"; fail=1; continue; \
+		fi; \
+		fv=$$(awk -v anchor="$$anchor" -v needle="$$needle" -v win="$$win" -f $$af "$(ROOT)/tests/fixtures/$$fixture"); \
+		case "$$fv" in \
+		UNGUARDED) echo "  ok   - fixture $$fixture correctly rejected" ;; \
+		NOANCHOR) echo "  FAIL - fixture $$fixture has no '$$anchor'; it fails for the wrong reason"; fail=1 ;; \
+		*) echo "  FAIL - fixture $$fixture passed; the check can no longer see this regression"; fail=1 ;; \
+		esac; \
+	done < <(printf '%s\n' '$(GUARDS)' | tr '~' '\n'); \
+	if [ $$total -eq 0 ]; then \
+		echo "[FAIL] the guard table is empty; this target would pass by doing nothing"; \
+		exit 1; \
+	fi; \
+	for f in "$(ROOT)"/tests/fixtures/guards/*.swift; do \
+		[ -e "$$f" ] || continue; \
+		base="guards/$$(basename "$$f")"; \
+		case " $$seen " in \
+		*" $$base "*) ;; \
+		*) echo "  FAIL - orphan fixture $$base: no row in GUARDS refers to it"; fail=1 ;; \
+		esac; \
+	done; \
+	if [ $$fail -eq 0 ]; then \
+		echo "[OK] $$n load-bearing guards present, $$n broken fixtures rejected"; \
+	else \
+		exit 1; \
+	fi
+
 # --- Parse-every-test-source guard --------------------------------------
 #
 # A green build proves the app compiled, not that every test source is
@@ -343,7 +471,7 @@ parse-tests:
 		exit 1; \
 	fi
 
-check: check-selftest keychain-doors make-dollars empty-sources finish-mark-order parse-tests dev test cassettes mutants-changed
+check: check-selftest keychain-doors make-dollars empty-sources finish-mark-order guard-shapes parse-tests dev test cassettes mutants-changed
 
 # Replay every cassette and assert the expected signal appears in the log.
 #
@@ -657,6 +785,26 @@ MUTANTS := \
 	BR-OUTPUT/GitHubAPIClient.swift@@list.first { $$0.head?.ref == expectedBranch }@@list.first@@the first pull request is adopted without verifying its branch ref \
 	BR-OUTPUT/GitHubAPIClient.swift@@"commit_title": title@@"commit_title": ""@@the merge payload loses its commit title
 
+# Scoring contract, shared by all three mutation targets (#1262).
+#
+# A non-zero exit is NOT evidence that a mutation was caught. The SSE script
+# exits non-zero when it cannot compile, cannot take the build lock, or dies
+# before a single test runs - and scoring that as "ok - caught" made a green
+# mutation run mean nothing. Proof: `exit 1` at the top of the script, so no
+# test ran at all, still printed "ok - caught" and "[OK] every mutation was
+# caught".
+#
+# So the output is captured and read, and only positive evidence counts:
+#   "test(s) failed"                     -> the suite ran and failed: caught.
+#   "All ChatSSEEndToEnd tests passed"   -> the suite ran and passed: SURVIVED.
+#   neither                              -> the suite never ran: ERROR, and the
+#                                           first lines of the captured output
+#                                           are printed so the cause is visible.
+# ERROR and SURVIVED both fail the target. Silence is not a pass.
+#
+# The logic targets read the same way from the clade-e2e report: only the
+# "(<suite>) FAILED" verdict is a catch, only "(<suite>): passed" is a
+# survivor, and "compile failed" or a missing report is a suite that never ran.
 .PHONY: mutants mutants-logic mutants-changed
 mutants:
 	@backup=$$(mktemp -d); \
@@ -711,10 +859,14 @@ mutants:
 			1) echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
 			   cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue ;; \
 		esac; \
-		if bash "$(ROOT)/tests/swift/run_chat_sse_e2e.sh" >/dev/null 2>&1; then \
+		out=$$(bash "$(ROOT)/tests/swift/run_chat_sse_e2e.sh" 2>&1 || true); \
+		if echo "$$out" | grep -qF "test(s) failed"; then \
+			echo "  ok   - caught: $$name"; \
+		elif echo "$$out" | grep -qF "All ChatSSEEndToEnd tests passed"; then \
 			echo "  SURVIVED - $$name"; fail=1; \
 		else \
-			echo "  ok   - caught: $$name"; \
+			echo "  ERROR - the suite never ran: $$name"; fail=1; \
+			echo "$$out" | head -5 | sed 's/^/         | /'; \
 		fi; \
 		cp "$$backup/$$n.bak" "$(ROOT)/$$src"; \
 	done; \
@@ -791,13 +943,19 @@ mutants-logic:
 			1) echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
 			   cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue ;; \
 		esac; \
-		report=$$(cd "$(ROOT)" && cargo run --quiet --bin clade-e2e 2>/dev/null | tail -1); \
-		if [ -f "$$report" ] && grep -q "\[FAIL\] Swift logic tests ($$suite)" "$$report"; then \
+		: "clade-e2e prints the report path on stdout and its own summary on \
+		   stderr AFTER it, so the two streams are captured separately: \
+		   merging them would make tail -1 the summary, not the path."; \
+		e2e_out="$$backup/$$n.clade-e2e.out"; e2e_err="$$backup/$$n.clade-e2e.err"; \
+		(cd "$(ROOT)" && cargo run --quiet --bin clade-e2e) >"$$e2e_out" 2>"$$e2e_err" || true; \
+		report=$$(tail -1 "$$e2e_out"); \
+		if [ -f "$$report" ] && grep -qF "[FAIL] Swift logic tests ($$suite) FAILED" "$$report"; then \
 			echo "  ok   - caught by $$suite: $$name"; \
-		elif [ ! -f "$$report" ]; then \
-			echo "  ERROR - clade-e2e wrote no report, so nothing was measured"; fail=1; \
-		else \
+		elif [ -f "$$report" ] && grep -qF "[OK] Swift logic tests ($$suite): passed" "$$report"; then \
 			echo "  SURVIVED - $$name"; fail=1; \
+		else \
+			echo "  ERROR - the $$suite suite never ran: $$name"; fail=1; \
+			cat "$$e2e_err" "$$e2e_out" | head -5 | sed 's/^/         | /'; \
 		fi; \
 		cp "$$backup/$$n.bak" "$(ROOT)/$$src"; \
 	done; \
@@ -896,10 +1054,14 @@ mutants-changed:
 			1) echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
 			   cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue ;; \
 		esac; \
-		if bash "$(ROOT)/tests/swift/run_chat_sse_e2e.sh" >/dev/null 2>&1; then \
+		out=$$(bash "$(ROOT)/tests/swift/run_chat_sse_e2e.sh" 2>&1 || true); \
+		if echo "$$out" | grep -qF "test(s) failed"; then \
+			echo "  ok   - caught: $$name"; \
+		elif echo "$$out" | grep -qF "All ChatSSEEndToEnd tests passed"; then \
 			echo "  SURVIVED - $$name"; fail=1; \
 		else \
-			echo "  ok   - caught: $$name"; \
+			echo "  ERROR - the suite never ran: $$name"; fail=1; \
+			echo "$$out" | head -5 | sed 's/^/         | /'; \
 		fi; \
 		cp "$$backup/$$n.bak" "$(ROOT)/$$src"; \
 	done; \
@@ -925,13 +1087,19 @@ mutants-changed:
 			1) echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
 			   cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue ;; \
 		esac; \
-		report=$$(cd "$(ROOT)" && cargo run --quiet --bin clade-e2e 2>/dev/null | tail -1); \
-		if [ -f "$$report" ] && grep -q "\[FAIL\] Swift logic tests ($$suite)" "$$report"; then \
+		: "clade-e2e prints the report path on stdout and its own summary on \
+		   stderr AFTER it, so the two streams are captured separately: \
+		   merging them would make tail -1 the summary, not the path."; \
+		e2e_out="$$backup/$$n.clade-e2e.out"; e2e_err="$$backup/$$n.clade-e2e.err"; \
+		(cd "$(ROOT)" && cargo run --quiet --bin clade-e2e) >"$$e2e_out" 2>"$$e2e_err" || true; \
+		report=$$(tail -1 "$$e2e_out"); \
+		if [ -f "$$report" ] && grep -qF "[FAIL] Swift logic tests ($$suite) FAILED" "$$report"; then \
 			echo "  ok   - caught by $$suite: $$name"; \
-		elif [ ! -f "$$report" ]; then \
-			echo "  ERROR - clade-e2e wrote no report, so nothing was measured"; fail=1; \
-		else \
+		elif [ -f "$$report" ] && grep -qF "[OK] Swift logic tests ($$suite): passed" "$$report"; then \
 			echo "  SURVIVED - $$name"; fail=1; \
+		else \
+			echo "  ERROR - the $$suite suite never ran: $$name"; fail=1; \
+			cat "$$e2e_err" "$$e2e_out" | head -5 | sed 's/^/         | /'; \
 		fi; \
 		cp "$$backup/$$n.bak" "$(ROOT)/$$src"; \
 	done; \
