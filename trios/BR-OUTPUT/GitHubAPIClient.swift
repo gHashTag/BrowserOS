@@ -110,6 +110,10 @@ actor GitHubAPIClient {
         case merged
         case refused(statusCode: Int, mergeable: Bool?, mergeState: String?)
         case conflict(mergeable: Bool?, mergeState: String?)
+        /// 409: the branch head moved since the reviewed commit. The code the
+        /// Queen approved is no longer the code that would land, so the task
+        /// must go back for review rather than be retried blindly (#1254).
+        case headMoved
     }
 
     /// A conflict is permanent: the branches diverge and no retry will
@@ -243,15 +247,63 @@ actor GitHubAPIClient {
     /// "never without a rebase" — the branches diverge. This is not a
     /// not-yet: retrying will not help. The caller stops retrying and emits
     /// its own event naming the conflict (#1252).
-    func mergePullRequest(repo: String, number: Int, title: String) async throws -> MergeOutcome {
+    /// Returns `.headMoved` when the forge says the branch head moved since
+    /// the commit the Queen reviewed — a 409. This is not "not yet" like 405:
+    /// the code the Queen approved is no longer the code on the branch. The
+    /// task must go back for review, not be retried at the new head (#1254).
+    ///
+    /// When `sha` is provided it is sent as the `sha` parameter the merge
+    /// endpoint expects. The forge compares it to the current head and returns
+    /// 409 if they differ, which is what distinguishes "the reviewed code is
+    /// still the head" from "someone pushed after the review". Without `sha`
+    /// the forge merges whatever is at the head now — silently merging code
+    /// nobody reviewed.
+    /// Builds the PUT body for the merge endpoint. Includes `sha` only when
+    /// the caller has a reviewed commit to pin — a nil sha means "merge
+    /// whatever is at HEAD", which the Queen never wants, but the parameter
+    /// has a default (#1254).
+    static func mergePayload(title: String, sha: String?) -> [String: Any] {
+        var payload: [String: Any] = [
+            "merge_method": "squash",
+            "commit_title": title
+        ]
+        if let sha {
+            payload["sha"] = sha
+        }
+        return payload
+    }
+
+    /// Maps an HTTP status code from the merge endpoint to a MergeOutcome.
+    /// Extracted as a pure function so the classification is testable without
+    /// a network call — the same pattern as `isConflict` (#1254).
+    static func outcome(statusCode: Int, mergeable: Bool?, mergeState: String?) -> MergeOutcome {
+        if statusCode == 200 {
+            return .merged
+        }
+        if isConflict(mergeable: mergeable, mergeState: mergeState) {
+            return .conflict(mergeable: mergeable, mergeState: mergeState)
+        }
+        // 409 head moved is its own outcome. The branch was pushed to since
+        // the reviewed commit, so the merge cannot proceed at a head the
+        // Queen never saw. This is distinct from 405 (not mergeable at all)
+        // and from a generic refusal: the task goes back to review, not to
+        // retry (#1254).
+        if statusCode == 409 {
+            return .headMoved
+        }
+        // 405 not mergeable, and anything else the forge refused with — both
+        // are answers rather than errors. The status code travels with the
+        // refusal so the caller can distinguish them, along with the
+        // mergeable fields so the caller does not need a second request.
+        return .refused(statusCode: statusCode, mergeable: mergeable, mergeState: mergeState)
+    }
+
+    func mergePullRequest(repo: String, number: Int, title: String, sha: String? = nil) async throws -> MergeOutcome {
         let path = try GitHubEndpoint.repositoryPath(repo, "/pulls/\(number)/merge")
         var put = try request(path)
         put.httpMethod = "PUT"
         put.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        put.httpBody = try JSONSerialization.data(withJSONObject: [
-            "merge_method": "squash",
-            "commit_title": title
-        ])
+        put.httpBody = try JSONSerialization.data(withJSONObject: Self.mergePayload(title: title, sha: sha))
         let (_, response) = try await URLSession.shared.data(for: put)
         guard let http = response as? HTTPURLResponse else {
             return .refused(statusCode: -1, mergeable: nil, mergeState: nil)
@@ -266,14 +318,7 @@ actor GitHubAPIClient {
         // and no retry will succeed — the distinction that #1252 exists to
         // make.
         let (mergeable, mergeState) = await fetchMergeStatus(repo: repo, number: number)
-        if Self.isConflict(mergeable: mergeable, mergeState: mergeState) {
-            return .conflict(mergeable: mergeable, mergeState: mergeState)
-        }
-        // 405 not mergeable, 409 head moved — both mean "not now", and both
-        // are answers rather than errors. The status code travels with the
-        // refusal so the caller can distinguish them, along with the
-        // mergeable fields so the caller does not need a second request.
-        return .refused(statusCode: http.statusCode, mergeable: mergeable, mergeState: mergeState)
+        return Self.outcome(statusCode: http.statusCode, mergeable: mergeable, mergeState: mergeState)
     }
 
     /// Fetches one pull request, which is the only endpoint that reports
