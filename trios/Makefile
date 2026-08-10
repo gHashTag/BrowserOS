@@ -17,6 +17,7 @@ ROOT  := $(shell cd "$(dir $(lastword $(MAKEFILE_LIST)))" && pwd)
 
 DEV_APP     := $(ROOT)/trios-dev.app
 RELEASE_APP := $(ROOT)/trios.app
+HARNESS_LOCK := /tmp/trios_harness.lock
 
 .DEFAULT_GOAL := dev
 .PHONY: help dev release build keychain-doors make-dollars empty-sources watch-empties check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard finish-mark-order parse-tests
@@ -188,7 +189,7 @@ keychain-doors:
 MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP WARNING_CEILING CASSETTE_DIR \
 	CASSETTE_BRANCHES SWEEP_CANARY LOG KEYCHAIN_ALLOW_PATTERNS MAKE VARIANT \
 	MSG ISSUE WORKER TASK PATHS CRITERIA SECOND REVIEW AUTONOMY CASSETTE \
-	SECOND_TURN QUEEN_COMMAND MUTANTS MUTANTS_LOGIC MAKE_DOLLAR_VARS
+	SECOND_TURN QUEEN_COMMAND MUTANTS MUTANTS_LOGIC MAKE_DOLLAR_VARS HARNESS_LOCK
 
 .PHONY: make-dollars
 make-dollars:
@@ -632,9 +633,22 @@ MUTANTS := \
 .PHONY: mutants mutants-logic
 mutants:
 	@backup=$$(mktemp -d); \
+	if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
+		echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK))"; \
+		rm -rf $$backup; exit 1; \
+	fi; \
 	trap 'for f in $$backup/*.bak; do [ -e "$$f" ] || continue; \
-	      target=$$(cat "$$f.path"); cp "$$f" "$(ROOT)/$$target"; done; \
-	      rm -rf $$backup' EXIT INT TERM; \
+	      target=$$(cat "$$f.path"); \
+	      cp "$$f" "$(ROOT)/$$target"; \
+	      expected=$$(cat "$${f}.sha" 2>/dev/null); \
+	      if [ -n "$$expected" ]; then \
+		      actual=$$(shasum "$(ROOT)/$$target" | cut -d" " -f1); \
+		      if [ "$$actual" != "$$expected" ]; then \
+			      echo "[FAIL] restore checksum mismatch for $$target" >&2; \
+		      fi; \
+	      fi; done; \
+	      rm -rf $$backup; \
+	      rmdir "$(HARNESS_LOCK)" 2>/dev/null' EXIT INT TERM; \
 	fail=0; n=0; \
 	: "Records are separated by ~ and fields by @@. A vertical bar cannot be \
 	   the record separator: the first needle contains || and split itself in \
@@ -647,6 +661,7 @@ mutants:
 		name=$$(echo "$$entry" | awk -F'@@' '{print $$4}'); \
 		n=$$((n + 1)); \
 		cp "$(ROOT)/$$src" "$$backup/$$n.bak"; echo "$$src" > "$$backup/$$n.bak.path"; \
+		shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.bak.sha"; \
 		if ! MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
 			'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; sys.exit(1) if o not in s else open(p,"w").write(s.replace(o,os.environ["MUT_NEW"],1))'; then \
 			echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
@@ -683,9 +698,22 @@ MUTANTS_LOGIC := \
 .PHONY: mutants-logic
 mutants-logic:
 	@backup=$$(mktemp -d); \
+	if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
+		echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK))"; \
+		rm -rf $$backup; exit 1; \
+	fi; \
 	trap 'for f in $$backup/*.bak; do [ -e "$$f" ] || continue; \
-	      target=$$(cat "$$f.path"); cp "$$f" "$(ROOT)/$$target"; done; \
-	      rm -rf $$backup' EXIT INT TERM; \
+	      target=$$(cat "$$f.path"); \
+	      cp "$$f" "$(ROOT)/$$target"; \
+	      expected=$$(cat "$${f}.sha" 2>/dev/null); \
+	      if [ -n "$$expected" ]; then \
+		      actual=$$(shasum "$(ROOT)/$$target" | cut -d" " -f1); \
+		      if [ "$$actual" != "$$expected" ]; then \
+			      echo "[FAIL] restore checksum mismatch for $$target" >&2; \
+		      fi; \
+	      fi; done; \
+	      rm -rf $$backup; \
+	      rmdir "$(HARNESS_LOCK)" 2>/dev/null' EXIT INT TERM; \
 	fail=0; n=0; \
 	IFS='~'; for entry in $$(echo '$(MUTANTS_LOGIC)' | sed 's/ rings\//~rings\//g'); do \
 		unset IFS; \
@@ -696,6 +724,7 @@ mutants-logic:
 		name=$$(echo "$$entry" | awk -F'@@' '{print $$5}'); \
 		n=$$((n + 1)); \
 		cp "$(ROOT)/$$src" "$$backup/$$n.bak"; echo "$$src" > "$$backup/$$n.bak.path"; \
+		shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.bak.sha"; \
 		if ! MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
 			'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; sys.exit(1) if o not in s else open(p,"w").write(s.replace(o,os.environ["MUT_NEW"],1))'; then \
 			echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
@@ -887,10 +916,16 @@ check-selftest:
 	sf="$(ROOT)/.selftest_boundary.swift"; \
 	ba=$$(mktemp /tmp/trios_selftest_ba.XXXXXX); \
 	cp "$$victim" "$$backup"; \
+	victim_sha=$$(shasum "$$victim" | cut -d" " -f1); \
 	md_file="$(ROOT)/Makefile"; \
 	md_backup=$$(mktemp); \
 	cp "$$md_file" "$$md_backup"; \
-	trap 'cp "$$backup" "$$victim" 2>/dev/null; cp "$$md_backup" "$$md_file" 2>/dev/null; rm -f "$$backup" "$$sf" "$$ba" "$$md_backup" 2>/dev/null' EXIT INT TERM; \
+	md_sha=$$(shasum "$$md_file" | cut -d" " -f1); \
+	if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
+		echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK))"; \
+		rm -f "$$backup" "$$sf" "$$ba" "$$md_backup"; exit 1; \
+	fi; \
+	trap 'cp "$$backup" "$$victim" 2>/dev/null; vs=$$(shasum "$$victim" | cut -d" " -f1 2>/dev/null); if [ -n "$$victim_sha" ] && [ "$$vs" != "$$victim_sha" ]; then echo "[FAIL] restore checksum mismatch for $$victim" >&2; fi; cp "$$md_backup" "$$md_file" 2>/dev/null; ms=$$(shasum "$$md_file" | cut -d" " -f1 2>/dev/null); if [ -n "$$md_sha" ] && [ "$$ms" != "$$md_sha" ]; then echo "[FAIL] restore checksum mismatch for $$md_file" >&2; fi; rm -f "$$backup" "$$sf" "$$ba" "$$md_backup" 2>/dev/null; rmdir "$(HARNESS_LOCK)" 2>/dev/null' EXIT INT TERM; \
 	printf '\n// check-selftest SecItemAdd\n' >> "$$victim"; \
 	if $(MAKE) --no-print-directory keychain-doors >/dev/null 2>&1; then \
 		kd_caught=0; \
