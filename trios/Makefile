@@ -17,6 +17,9 @@ ROOT  := $(shell cd "$(dir $(lastword $(MAKEFILE_LIST)))" && pwd)
 
 DEV_APP     := $(ROOT)/trios-dev.app
 RELEASE_APP := $(ROOT)/trios.app
+# The harness lock records its owner's PID.  An interrupted run leaves a
+# lock behind; the next run reads the PID, checks whether the owner is
+# still alive, and reclaims a dead owner's lock with a word about it.
 HARNESS_LOCK := /tmp/trios_harness.lock
 
 .DEFAULT_GOAL := dev
@@ -613,6 +616,11 @@ xctest:
 # mutation is reported as stale rather than silently skipped - a mutation that
 # matches nothing is the same lie as a check that matches nothing.
 #
+# If the needle is gone but its replacement is in place, the run was
+# interrupted mid-mutation: a leftover mutation.  It is repaired (the
+# replacement is swapped back to the needle) and the mutation re-runs.
+# A needle gone with no replacement present is genuinely stale.
+#
 # Sources are backed up before the first edit and restored on any exit, kill or
 # interrupt. This target writes to tracked files, so that trap is the whole
 # safety argument for it.
@@ -641,10 +649,22 @@ MUTANTS := \
 .PHONY: mutants mutants-logic mutants-changed
 mutants:
 	@backup=$$(mktemp -d); \
+	owner_pid=$$(cat "$(HARNESS_LOCK)/pid" 2>/dev/null || true); \
 	if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
-		echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK))"; \
-		rm -rf $$backup; exit 1; \
+		if [ -n "$$owner_pid" ] && ! kill -0 $$owner_pid 2>/dev/null; then \
+			echo "[INFO] reclaiming harness lock from dead PID $$owner_pid"; \
+			rm -rf "$(HARNESS_LOCK)"; \
+		fi; \
+		if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
+			if [ -n "$$owner_pid" ]; then \
+				echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK), owner PID $$owner_pid)"; \
+			else \
+				echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK))"; \
+			fi; \
+			rm -rf $$backup; exit 1; \
+		fi; \
 	fi; \
+	echo $$$$ > "$(HARNESS_LOCK)/pid"; \
 	trap 'for f in $$backup/*.bak; do [ -e "$$f" ] || continue; \
 	      target=$$(cat "$$f.path"); \
 	      cp "$$f" "$(ROOT)/$$target"; \
@@ -656,7 +676,7 @@ mutants:
 		      fi; \
 	      fi; done; \
 	      rm -rf $$backup; \
-	      rmdir "$(HARNESS_LOCK)" 2>/dev/null' EXIT INT TERM; \
+	      rm -rf "$(HARNESS_LOCK)" 2>/dev/null' EXIT INT TERM; \
 	fail=0; n=0; \
 	: "Records are separated by ~ and fields by @@. A vertical bar cannot be \
 	   the record separator: the first needle contains || and split itself in \
@@ -670,11 +690,16 @@ mutants:
 		n=$$((n + 1)); \
 		cp "$(ROOT)/$$src" "$$backup/$$n.bak"; echo "$$src" > "$$backup/$$n.bak.path"; \
 		shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.bak.sha"; \
-		if ! MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
-			'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; sys.exit(1) if o not in s else open(p,"w").write(s.replace(o,os.environ["MUT_NEW"],1))'; then \
-			echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
-			cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue; \
-		fi; \
+		MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
+			'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; n=os.environ["MUT_NEW"]; open(p,"w").write(s.replace(o,n,1)) if o in s else (open(p,"w").write(s.replace(n,o,1)),sys.exit(2))[1] if n in s else sys.exit(1)'; rc=$$?; \
+		case $$rc in \
+			2) echo "  LEFTOVER MUTATION - $$name (repaired: replacement was in $$src without its needle)"; \
+			   cp "$(ROOT)/$$src" "$$backup/$$n.bak"; shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.bak.sha"; \
+			   MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
+			   'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; open(p,"w").write(s.replace(o,os.environ["MUT_NEW"],1))' ;; \
+			1) echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
+			   cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue ;; \
+		esac; \
 		if bash "$(ROOT)/tests/swift/run_chat_sse_e2e.sh" >/dev/null 2>&1; then \
 			echo "  SURVIVED - $$name"; fail=1; \
 		else \
@@ -706,10 +731,22 @@ MUTANTS_LOGIC := \
 .PHONY: mutants-logic
 mutants-logic:
 	@backup=$$(mktemp -d); \
+	owner_pid=$$(cat "$(HARNESS_LOCK)/pid" 2>/dev/null || true); \
 	if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
-		echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK))"; \
-		rm -rf $$backup; exit 1; \
+		if [ -n "$$owner_pid" ] && ! kill -0 $$owner_pid 2>/dev/null; then \
+			echo "[INFO] reclaiming harness lock from dead PID $$owner_pid"; \
+			rm -rf "$(HARNESS_LOCK)"; \
+		fi; \
+		if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
+			if [ -n "$$owner_pid" ]; then \
+				echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK), owner PID $$owner_pid)"; \
+			else \
+				echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK))"; \
+			fi; \
+			rm -rf $$backup; exit 1; \
+		fi; \
 	fi; \
+	echo $$$$ > "$(HARNESS_LOCK)/pid"; \
 	trap 'for f in $$backup/*.bak; do [ -e "$$f" ] || continue; \
 	      target=$$(cat "$$f.path"); \
 	      cp "$$f" "$(ROOT)/$$target"; \
@@ -721,7 +758,7 @@ mutants-logic:
 		      fi; \
 	      fi; done; \
 	      rm -rf $$backup; \
-	      rmdir "$(HARNESS_LOCK)" 2>/dev/null' EXIT INT TERM; \
+	      rm -rf "$(HARNESS_LOCK)" 2>/dev/null' EXIT INT TERM; \
 	fail=0; n=0; \
 	IFS='~'; for entry in $$(echo '$(MUTANTS_LOGIC)' | sed 's/ rings\//~rings\//g; s/ BR-OUTPUT\//~BR-OUTPUT\//g'); do \
 		unset IFS; \
@@ -733,11 +770,16 @@ mutants-logic:
 		n=$$((n + 1)); \
 		cp "$(ROOT)/$$src" "$$backup/$$n.bak"; echo "$$src" > "$$backup/$$n.bak.path"; \
 		shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.bak.sha"; \
-		if ! MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
-			'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; sys.exit(1) if o not in s else open(p,"w").write(s.replace(o,os.environ["MUT_NEW"],1))'; then \
-			echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
-			cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue; \
-		fi; \
+		MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
+			'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; n=os.environ["MUT_NEW"]; open(p,"w").write(s.replace(o,n,1)) if o in s else (open(p,"w").write(s.replace(n,o,1)),sys.exit(2))[1] if n in s else sys.exit(1)'; rc=$$?; \
+		case $$rc in \
+			2) echo "  LEFTOVER MUTATION - $$name (repaired: replacement was in $$src without its needle)"; \
+			   cp "$(ROOT)/$$src" "$$backup/$$n.bak"; shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.bak.sha"; \
+			   MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
+			   'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; open(p,"w").write(s.replace(o,os.environ["MUT_NEW"],1))' ;; \
+			1) echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
+			   cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue ;; \
+		esac; \
 		report=$$(cd "$(ROOT)" && cargo run --quiet --bin clade-e2e 2>/dev/null | tail -1); \
 		if [ -f "$$report" ] && grep -q "\[FAIL\] Swift logic tests ($$suite)" "$$report"; then \
 			echo "  ok   - caught by $$suite: $$name"; \
@@ -773,10 +815,22 @@ mutants-logic:
 
 mutants-changed:
 	@backup=$$(mktemp -d); \
+	owner_pid=$$(cat "$(HARNESS_LOCK)/pid" 2>/dev/null || true); \
 	if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
-		echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK))"; \
-		rm -rf $$backup; exit 1; \
+		if [ -n "$$owner_pid" ] && ! kill -0 $$owner_pid 2>/dev/null; then \
+			echo "[INFO] reclaiming harness lock from dead PID $$owner_pid"; \
+			rm -rf "$(HARNESS_LOCK)"; \
+		fi; \
+		if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
+			if [ -n "$$owner_pid" ]; then \
+				echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK), owner PID $$owner_pid)"; \
+			else \
+				echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK))"; \
+			fi; \
+			rm -rf $$backup; exit 1; \
+		fi; \
 	fi; \
+	echo $$$$ > "$(HARNESS_LOCK)/pid"; \
 	trap 'for f in $$backup/*.bak; do [ -e "$$f" ] || continue; \
 	      target=$$(cat "$$f.path"); \
 	      cp "$$f" "$(ROOT)/$$target"; \
@@ -788,7 +842,7 @@ mutants-changed:
 		      fi; \
 	      fi; done; \
 	      rm -rf $$backup; \
-	      rmdir "$(HARNESS_LOCK)" 2>/dev/null' EXIT INT TERM; \
+	      rm -rf "$(HARNESS_LOCK)" 2>/dev/null' EXIT INT TERM; \
 	changed=$$(git -C "$(ROOT)" diff --name-only --relative HEAD); \
 	total=0; selected=0; \
 	: "Count total and selected mutations before running anything"; \
@@ -821,11 +875,16 @@ mutants-changed:
 		n=$$((n + 1)); \
 		cp "$(ROOT)/$$src" "$$backup/$$n.bak"; echo "$$src" > "$$backup/$$n.bak.path"; \
 		shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.bak.sha"; \
-		if ! MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
-			'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; sys.exit(1) if o not in s else open(p,"w").write(s.replace(o,os.environ["MUT_NEW"],1))'; then \
-			echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
-			cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue; \
-		fi; \
+		MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
+			'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; n=os.environ["MUT_NEW"]; open(p,"w").write(s.replace(o,n,1)) if o in s else (open(p,"w").write(s.replace(n,o,1)),sys.exit(2))[1] if n in s else sys.exit(1)'; rc=$$?; \
+		case $$rc in \
+			2) echo "  LEFTOVER MUTATION - $$name (repaired: replacement was in $$src without its needle)"; \
+			   cp "$(ROOT)/$$src" "$$backup/$$n.bak"; shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.bak.sha"; \
+			   MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
+			   'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; open(p,"w").write(s.replace(o,os.environ["MUT_NEW"],1))' ;; \
+			1) echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
+			   cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue ;; \
+		esac; \
 		if bash "$(ROOT)/tests/swift/run_chat_sse_e2e.sh" >/dev/null 2>&1; then \
 			echo "  SURVIVED - $$name"; fail=1; \
 		else \
@@ -845,11 +904,16 @@ mutants-changed:
 		n=$$((n + 1)); \
 		cp "$(ROOT)/$$src" "$$backup/$$n.bak"; echo "$$src" > "$$backup/$$n.bak.path"; \
 		shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.bak.sha"; \
-		if ! MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
-			'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; sys.exit(1) if o not in s else open(p,"w").write(s.replace(o,os.environ["MUT_NEW"],1))'; then \
-			echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
-			cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue; \
-		fi; \
+		MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
+			'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; n=os.environ["MUT_NEW"]; open(p,"w").write(s.replace(o,n,1)) if o in s else (open(p,"w").write(s.replace(n,o,1)),sys.exit(2))[1] if n in s else sys.exit(1)'; rc=$$?; \
+		case $$rc in \
+			2) echo "  LEFTOVER MUTATION - $$name (repaired: replacement was in $$src without its needle)"; \
+			   cp "$(ROOT)/$$src" "$$backup/$$n.bak"; shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.bak.sha"; \
+			   MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
+			   'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; open(p,"w").write(s.replace(o,os.environ["MUT_NEW"],1))' ;; \
+			1) echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
+			   cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue ;; \
+		esac; \
 		report=$$(cd "$(ROOT)" && cargo run --quiet --bin clade-e2e 2>/dev/null | tail -1); \
 		if [ -f "$$report" ] && grep -q "\[FAIL\] Swift logic tests ($$suite)" "$$report"; then \
 			echo "  ok   - caught by $$suite: $$name"; \
@@ -1041,11 +1105,23 @@ check-selftest:
 	md_backup=$$(mktemp); \
 	cp "$$md_file" "$$md_backup"; \
 	md_sha=$$(shasum "$$md_file" | cut -d" " -f1); \
+	owner_pid=$$(cat "$(HARNESS_LOCK)/pid" 2>/dev/null || true); \
 	if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
-		echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK))"; \
-		rm -f "$$backup" "$$sf" "$$ba" "$$md_backup"; exit 1; \
+		if [ -n "$$owner_pid" ] && ! kill -0 $$owner_pid 2>/dev/null; then \
+			echo "[INFO] reclaiming harness lock from dead PID $$owner_pid"; \
+			rm -rf "$(HARNESS_LOCK)"; \
+		fi; \
+		if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
+			if [ -n "$$owner_pid" ]; then \
+				echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK), owner PID $$owner_pid)"; \
+			else \
+				echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK))"; \
+			fi; \
+			rm -f "$$backup" "$$sf" "$$ba" "$$md_backup"; exit 1; \
+		fi; \
 	fi; \
-	trap 'cp "$$backup" "$$victim" 2>/dev/null; vs=$$(shasum "$$victim" | cut -d" " -f1 2>/dev/null); if [ -n "$$victim_sha" ] && [ "$$vs" != "$$victim_sha" ]; then echo "[FAIL] restore checksum mismatch for $$victim" >&2; fi; cp "$$md_backup" "$$md_file" 2>/dev/null; ms=$$(shasum "$$md_file" | cut -d" " -f1 2>/dev/null); if [ -n "$$md_sha" ] && [ "$$ms" != "$$md_sha" ]; then echo "[FAIL] restore checksum mismatch for $$md_file" >&2; fi; rm -f "$$backup" "$$sf" "$$ba" "$$md_backup" 2>/dev/null; rmdir "$(HARNESS_LOCK)" 2>/dev/null' EXIT INT TERM; \
+	echo $$$$ > "$(HARNESS_LOCK)/pid"; \
+	trap 'cp "$$backup" "$$victim" 2>/dev/null; vs=$$(shasum "$$victim" | cut -d" " -f1 2>/dev/null); if [ -n "$$victim_sha" ] && [ "$$vs" != "$$victim_sha" ]; then echo "[FAIL] restore checksum mismatch for $$victim" >&2; fi; cp "$$md_backup" "$$md_file" 2>/dev/null; ms=$$(shasum "$$md_file" | cut -d" " -f1 2>/dev/null); if [ -n "$$md_sha" ] && [ "$$ms" != "$$md_sha" ]; then echo "[FAIL] restore checksum mismatch for $$md_file" >&2; fi; rm -f "$$backup" "$$sf" "$$ba" "$$md_backup" 2>/dev/null; rm -rf "$(HARNESS_LOCK)" 2>/dev/null' EXIT INT TERM; \
 	printf '\n// check-selftest SecItemAdd\n' >> "$$victim"; \
 	if $(MAKE) --no-print-directory keychain-doors >/dev/null 2>&1; then \
 		kd_caught=0; \
