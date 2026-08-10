@@ -7141,12 +7141,13 @@ final class ChatViewModel: ObservableObject {
                     ["issue": task.issue.slug, "pr": "\(number)"]
                 )
                 do {
-                    let merged = try await client.mergePullRequest(
+                    let mergeOutcome = try await client.mergePullRequest(
                         repo: prRepo,
                         number: number,
                         title: "\(task.title) (\(task.issue.slug))"
                     )
-                    if merged {
+                    switch mergeOutcome {
+                    case .merged:
                         TriosLogBus.shared.info(
                             .queen, "queen.pr.merged", "Merged a reviewed pull request",
                             ["issue": task.issue.slug, "pr": "\(number)"]
@@ -7159,10 +7160,11 @@ final class ChatViewModel: ObservableObject {
                                 + "I liked the result."
                         )
                         continue
-                    } else {
+                    case .refused(let statusCode):
                         TriosLogBus.shared.warn(
-                            .queen, "queen.pr.merge_refused", "The forge refused the merge",
-                            ["issue": task.issue.slug, "pr": "\(number)"]
+                            .queen, "queen.pr.merge_refused",
+                            "The forge refused the merge (HTTP \(statusCode))",
+                            ["issue": task.issue.slug, "pr": "\(number)", "status": "\(statusCode)"]
                         )
                     }
                 } catch {

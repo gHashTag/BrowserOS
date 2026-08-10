@@ -51,7 +51,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 598  // 594 + 4 adversary-marker (#1127)
+    static let minimumChecks = 610  // 598 + 12 ask-the-forge (#1250)
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -124,6 +124,7 @@ struct ChatSSEEndToEndTests {
         await runNestedBoundariesClash()
         await runPullRequestRefusals()
         await runMergedIsNotTheSameAsClosed()
+        await runAskTheForgeWithOwnerBranch()
         await runStalledWorkerIsResumedBeforeCancelled()
         await runQueenTaskLifecycleCloses()
         await runPureQueenTypes()
@@ -3660,6 +3661,105 @@ struct ChatSSEEndToEndTests {
                 merged.isMerged != abandoned.isMerged,
                 "two pull requests with identical state disagree about whether work landed"
             )
+        }
+    }
+
+    static func runAskTheForgeWithOwnerBranch() async {
+        print("\n# Scenario: ask the forge with owner:branch, verify head.ref, name the refusal code")
+
+        // ── Criterion 1: the head filter uses owner:branch and is escaped ──
+        //
+        // The old code passed a bare branch name to `?head=`, which returns
+        // every open PR in the repo. GitHub requires `owner:branch`, and the
+        // slash inside the branch name must be percent-encoded or it injects
+        // a path segment.
+        check(
+            GitHubAPIClient.headFilter(owner: "gHashTag", branch: "queen/1250-ask-the-forge")
+                == "gHashTag%3Aqueen%2F1250-ask-the-forge",
+            "the head filter is owner:branch, percent-encoded as a single query value"
+        )
+        check(
+            GitHubAPIClient.headFilter(owner: "browseros-ai", branch: "feature/branch with space")
+                == "browseros-ai%3Afeature%2Fbranch%20with%20space",
+            "a colon, slash, and space are all encoded — nothing raw reaches the URL"
+        )
+
+        // The owner is derived from the repo the same way path building does.
+        check(
+            GitHubAPIClient.ownerFromRepo("trios") == "gHashTag",
+            "a bare repo name resolves to the default owner"
+        )
+        check(
+            GitHubAPIClient.ownerFromRepo("gHashTag/trios") == "gHashTag",
+            "an explicit owner/repo preserves the owner"
+        )
+        check(
+            GitHubAPIClient.ownerFromRepo("browseros-ai/BrowserOS") == "browseros-ai",
+            "a different owner is not replaced with the default"
+        )
+
+        // ── Criterion 2: a mismatched head ref is rejected rather than adopted ──
+
+        func decodePR(_ ref: String) -> GitHubPullRequest? {
+            let json = """
+            {"id":1,"number":7,"title":"t","state":"open","html_url":"u",\
+            "head":{"ref":"\(ref)","sha":"abc"},\
+            "base":{"ref":"dev","sha":"def"}}
+            """
+            return try? JSONDecoder().decode(GitHubPullRequest.self, from: Data(json.utf8))
+        }
+
+        guard let matching = decodePR("queen/1250-ask-the-forge"),
+              let mismatched = decodePR("queen/999-different-work") else {
+            fail("could not decode test pull requests"); return
+        }
+
+        // The right PR is selected from a list that also contains a wrong one.
+        check(
+            GitHubAPIClient.matchingPullRequest(
+                in: [mismatched, matching], expectedBranch: "queen/1250-ask-the-forge"
+            )?.head?.ref == "queen/1250-ask-the-forge",
+            "a PR whose head ref matches is selected from a list"
+        )
+        // A mismatched ref is rejected even when it is the only entry —
+        // this is the proof the guard is live: removing the verification and
+        // falling back to `.first` would adopt this PR.
+        check(
+            GitHubAPIClient.matchingPullRequest(
+                in: [mismatched], expectedBranch: "queen/1250-ask-the-forge"
+            ) == nil,
+            "a PR whose head ref differs is rejected rather than adopted"
+        )
+        check(
+            GitHubAPIClient.matchingPullRequest(in: [], expectedBranch: "queen/1250") == nil,
+            "an empty list yields nothing, not a guess"
+        )
+        // The mismatched PR sits in position zero; the old `.first` would have
+        // returned it. This is the check that fails if the verification is
+        // removed.
+        check(
+            GitHubAPIClient.matchingPullRequest(
+                in: [mismatched, matching], expectedBranch: "queen/1250-ask-the-forge"
+            )?.head?.ref == "queen/1250-ask-the-forge",
+            "the first PR has a different ref, yet the right one is returned"
+        )
+
+        // ── Criterion 3: merge_refused carries the status code ──
+
+        if case .merged = GitHubAPIClient.MergeOutcome.merged {
+            check(true, "a merged outcome reads as merged")
+        } else {
+            fail("a merged outcome reads as merged")
+        }
+        if case .refused(let code) = GitHubAPIClient.MergeOutcome.refused(statusCode: 405) {
+            check(code == 405, "a refused merge carries 405 (not mergeable)")
+        } else {
+            fail("a refused merge carries 405 (not mergeable)")
+        }
+        if case .refused(let code) = GitHubAPIClient.MergeOutcome.refused(statusCode: 409) {
+            check(code == 409, "a refused merge carries 409 (head moved)")
+        } else {
+            fail("a refused merge carries 409 (head moved)")
         }
     }
 

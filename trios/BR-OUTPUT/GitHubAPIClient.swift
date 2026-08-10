@@ -91,6 +91,52 @@ actor GitHubAPIClient {
         return try JSONDecoder().decode(GitHubIssue.self, from: data)
     }
 
+    // MARK: - Pull-request helpers (pure, testable)
+
+    /// The outcome of a merge attempt.
+    ///
+    /// The forge refuses for many reasons — branch protection, a failing
+    /// check, a moved head — and the status code is what tells them apart.
+    /// Carrying it lets the caller log and decide without a second request,
+    /// instead of learning only that something went wrong.
+    enum MergeOutcome {
+        case merged
+        case refused(statusCode: Int)
+    }
+
+    /// Builds the `owner:branch` value the GitHub pulls endpoint requires for
+    /// the `head` query parameter, percent-encoded as a query value.
+    ///
+    /// A bare branch name returns every open PR in the repo; an unencoded
+    /// slash from the branch name injects a path segment. Both are the kind
+    /// of mistake that looks correct until the wrong pull request is adopted.
+    static func headFilter(owner: String, branch: String) -> String {
+        let qualified = "\(owner):\(branch)"
+        var allowed = CharacterSet.urlQueryAllowed
+        allowed.remove(charactersIn: ":/")
+        return qualified.addingPercentEncoding(withAllowedCharacters: allowed) ?? qualified
+    }
+
+    /// Extracts the owner from a repository string the same way
+    /// `GitHubEndpoint.repositoryPath` does: `"name"` uses the default owner,
+    /// `"owner/name"` uses the one provided.
+    static func ownerFromRepo(_ repo: String) -> String {
+        let parts = repo.split(separator: "/", omittingEmptySubsequences: false).map(String.init)
+        return parts.count >= 2 ? parts[0] : GitHubEndpoint.defaultOwner
+    }
+
+    /// Returns the first pull request whose head ref matches the expected
+    /// branch, rejecting any whose ref differs.
+    ///
+    /// The list is filtered by `owner:branch`, but a PR from a fork whose
+    /// owner happens to match would still appear. This is the guard that
+    /// stops it from being adopted as someone else's work.
+    static func matchingPullRequest(
+        in list: [GitHubPullRequest], expectedBranch: String
+    ) -> GitHubPullRequest? {
+        list.first { $0.head?.ref == expectedBranch }
+    }
+
     func createPR(repo: String, title: String, body: String, head: String, base: String = "dev") async throws -> GitHubPullRequest {
         var req = try request(GitHubEndpoint.repositoryPath(repo, "/pulls"))
         req.httpMethod = "POST"
@@ -112,11 +158,24 @@ actor GitHubAPIClient {
         if statusCode == 422,
            let bodyString = String(data: data, encoding: .utf8),
            bodyString.localizedCaseInsensitiveContains("pull request already exists") {
-            let listPath = try GitHubEndpoint.repositoryPath(repo, "/pulls?head=\(head)&state=open")
+            // The forge says a PR for this head already exists. The list
+            // endpoint requires `owner:branch` to narrow by source — a bare
+            // branch name returns every open PR — and the value must be
+            // percent-encoded as a query parameter because an unencoded slash
+            // injects a path segment.
+            let qualifiedHead = Self.headFilter(
+                owner: Self.ownerFromRepo(repo), branch: head
+            )
+            let listPath = try GitHubEndpoint.repositoryPath(
+                repo, "/pulls?head=\(qualifiedHead)&state=open"
+            )
             let (listData, listResponse) = try await URLSession.shared.data(for: try request(listPath))
             try validate(listResponse, endpoint: listPath)
             let existing = try JSONDecoder().decode([GitHubPullRequest].self, from: listData)
-            if let pr = existing.first {
+            // A PR with a different head ref is not the one we asked for. The
+            // list is filtered, but a forked PR whose owner matches would still
+            // appear. Verify rather than adopt.
+            if let pr = Self.matchingPullRequest(in: existing, expectedBranch: head) {
                 return pr
             }
         }
@@ -139,10 +198,12 @@ actor GitHubAPIClient {
     /// intermediate commits, and the history that matters afterwards is one
     /// change with the issue attached, not eleven attempts at it.
     ///
-    /// Returns false when the forge refuses - branch protection, a failing
-    /// check, an out-of-date base - rather than throwing, because "not allowed
-    /// to merge yet" is a normal answer here and the task simply stays open.
-    func mergePullRequest(repo: String, number: Int, title: String) async throws -> Bool {
+    /// Returns `.refused(statusCode:)` when the forge refuses — branch
+    /// protection, a failing check, an out-of-date base — rather than
+    /// throwing, because "not allowed to merge yet" is a normal answer here
+    /// and the task simply stays open. The status code travels with the
+    /// refusal so the caller can tell 405 from 409 without a second request.
+    func mergePullRequest(repo: String, number: Int, title: String) async throws -> MergeOutcome {
         let path = try GitHubEndpoint.repositoryPath(repo, "/pulls/\(number)/merge")
         var put = try request(path)
         put.httpMethod = "PUT"
@@ -152,10 +213,16 @@ actor GitHubAPIClient {
             "commit_title": title
         ])
         let (_, response) = try await URLSession.shared.data(for: put)
-        guard let http = response as? HTTPURLResponse else { return false }
-        // 200 merged. 405 not mergeable, 409 head moved - both mean "not now",
-        // and both are answers rather than errors.
-        return http.statusCode == 200
+        guard let http = response as? HTTPURLResponse else {
+            return .refused(statusCode: -1)
+        }
+        // 200 merged. 405 not mergeable, 409 head moved — both mean "not now",
+        // and both are answers rather than errors. The status code travels
+        // with the refusal so the caller can distinguish them.
+        if http.statusCode == 200 {
+            return .merged
+        }
+        return .refused(statusCode: http.statusCode)
     }
 
     /// Fetches one pull request, which is the only endpoint that reports
