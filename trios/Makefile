@@ -27,7 +27,7 @@ help:
 	@echo "  make            - build the DEV app (safe default; never touches the release)"
 	@echo "  make dev        - same as above"
 	@echo "  make release    - build the RELEASE app (deliberate; replaces trios.app)"
-	@echo "  make check      - build dev and run every logic suite"
+	@echo "  make check      - build dev and run every logic suite, including mutants-changed"
 	@echo "  make test       - run the Swift logic suites only"
 	@echo "  make e2e        - run the chat end-to-end flow"
 	@echo "  make run        - launch the dev app"
@@ -340,7 +340,7 @@ parse-tests:
 		exit 1; \
 	fi
 
-check: check-selftest keychain-doors make-dollars empty-sources finish-mark-order parse-tests dev test cassettes
+check: check-selftest keychain-doors make-dollars empty-sources finish-mark-order parse-tests dev test cassettes mutants-changed
 
 # Replay every cassette and assert the expected signal appears in the log.
 #
