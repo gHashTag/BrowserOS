@@ -305,3 +305,46 @@ undone, restore the last working version so the tool is not left broken, and
 keep the attempt somewhere retrievable. The half that works — here the app-side
 inbox and concurrent dispatch — should be committed and reported separately from
 the half that does not.
+
+## Where the loop's time actually goes, measured
+
+One night of continuous work on this repo, timed rather than guessed:
+
+| step | cost | note |
+|---|---|---|
+| e2e suite, full | 103–115 s | run alone is 35 s, so ~70 s is compilation |
+| `make mutants`, 16 mutations | ~20 min | 14 of those minutes recompile unchanged code |
+| one delegation turn | 8–15 min | model time dominates; build is a small part |
+| `make dev` | 60–90 s | |
+| `make release` | 90–120 s | |
+
+Four conclusions, in order of how much they returned:
+
+**1. Run workers concurrently.** Three bees dispatched in the same second
+finished, committed, opened and merged three pull requests within seven seconds
+of each other. Before that the dispatch was serialised and cost 57 s between the
+first and second; before *that* the second worker killed the first. This was the
+single largest win of the night and it changed nothing about how fast any one
+step runs.
+
+**2. Attack compilation, not test count.** Two thirds of every verification is
+`swiftc` rebuilding 152 unchanged files. Adding tests is nearly free; adding a
+*run* is not. Prefer a narrow target (`make mutants-changed`, `make
+finish-mark-order`, `make parse-tests` — all seconds) over the full suite when
+the narrow one can answer the question.
+
+**3. Scope a task to one turn or the worker dies.** Two workers tonight ended
+with `queen.worker.died.clean` — stream over, no text, no files — and both had
+broad specs touching four or five files. The same work split into single-file
+tasks succeeded. A dead worker costs the full 15 minutes and returns nothing, so
+scope is a speed decision, not a tidiness one.
+
+**4. Hand over literal text for mechanical transforms.** `$` → `$$` in a
+Makefile recipe failed three delegations in a row, ~30 minutes, before the
+corrected recipe was written to a file and the task became "apply this
+verbatim, then run it". Some transformations are cheap to state and expensive to
+generate; recognise them and stop paying the generation cost.
+
+Two habits that cost hours when skipped: commit a worker's output before
+delegating anything else that touches the same path, and never wrap a
+source-mutating harness in `timeout`.
