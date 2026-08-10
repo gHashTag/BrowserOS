@@ -125,3 +125,37 @@ compile step is the check that matters. And when the compiler points at line
 3942, the break is usually *above* it — walk the brace depth back from the
 first complaint to the last line where it was still correct rather than reading
 the reported line.
+
+## Three self-demonstrating checks in one night, none of which demonstrated
+
+A "self-demonstrating" check runs itself against a known-bad input first, so a
+check that has quietly stopped working announces itself instead of printing OK
+forever. The idea is sound. All three attempts at it tonight were broken, each
+in a different way, and each printed a cheerful OK while broken:
+
+1. `check-selftest` exercised a **copy** of the target instead of the target,
+   so it praised a recipe that was already broken.
+2. `finish-mark-order` ran `awk` on its fixture and treated *any* non-zero exit
+   as "the bad fixture was correctly rejected". Delete the fixture and awk
+   fails to open it — which read as success. The demonstration switched itself
+   off silently.
+3. `parse-tests` shipped a fixture that was **valid Swift**, parsed it in the
+   same loop as the real sources, and printed `[OK] every test source parses`.
+   Its comment described the manual procedure — "remove the func header and
+   this would fail" — instead of performing it. Nothing was demonstrated at all.
+
+The shape is always the same: **the negative arm degrades into the positive
+arm.** So when writing one, check these three things explicitly:
+
+- The bad input is genuinely bad. Run the check on it by hand once and watch it
+  fail before you believe the recipe.
+- The bad input's *absence* is a failure, named — not an error code that the
+  recipe reinterprets as success.
+- The negative arm asserts the opposite outcome from the positive arm. If both
+  arms are "this thing succeeded", there is no negative arm.
+
+And the break test for a self-demonstrating check is two-sided: replace the bad
+fixture with a good one (the target must fail), and break the real subject (the
+target must fail, naming the real location). Only then does a passing run mean
+anything. `parse-tests` earned it — it names line 3887, where the damage is,
+while the full e2e run pointed at 3942, 3985 and 4267, all of them consequences.
