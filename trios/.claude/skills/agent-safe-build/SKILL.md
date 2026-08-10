@@ -276,3 +276,32 @@ its first parent is the entire other side.
 or a silent everything — into an obvious one. Add a valve too: if a "targeted"
 run selects more than half the population, that is not targeting, and it should
 fail rather than quietly do the full job under a narrower name.
+
+## The `$` → `$$` transformation defeats workers; put the literal text in the spec
+
+Three separate delegations produced a `Makefile` recipe of correct *shape* and
+broken *substance*: every shell variable written with a single `$`, which make
+eats before bash ever sees it. `$issue` arrived as `ssue`, `$((before + 1))` as
+`)`. The recipes were never run before being handed back.
+
+This is now the most repeated defect in this repository's history — twice in one
+night, in two different targets, plus an older instance in `backlog-audit`.
+Stating the rule in prose ("every dollar meant for the shell is doubled") has
+failed every time.
+
+What to do instead:
+
+- Put the **literal target text** in the specification, doubled dollars and all,
+  rather than describing the transformation.
+- Make "run the target once and paste the output" an explicit acceptance
+  criterion. Every one of these arrived unrun; a single execution would have
+  shown `ssue` immediately.
+- After any Makefile edit, grep the changed region for `$$` before believing it:
+  `sed -n '<range>p' Makefile | grep -c '\$\$'` returning 0 on a recipe with
+  shell variables means it cannot work.
+
+And when a mechanical fix fails three times, stop re-delegating it: say it is
+undone, restore the last working version so the tool is not left broken, and
+keep the attempt somewhere retrievable. The half that works — here the app-side
+inbox and concurrent dispatch — should be committed and reported separately from
+the half that does not.
