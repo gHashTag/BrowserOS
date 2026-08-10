@@ -40,6 +40,7 @@ help:
 	@echo "  make clean      - remove build products for both variants"
 	@echo "  make mutants    - break known guards and require the SSE suite to notice"
 	@echo "  make mutants-logic - the same, for guards a clade-e2e logic suite owns"
+	@echo "  make mutants-changed - run mutations for guarded files dirty in the working tree"
 	@echo "  make drift-guard - run the interface-drift compiling proof (slow; not in the fast suite)"
 	@echo "  make finish-mark-order - check the completed-turn mark stays in the finish callback"
 
@@ -637,7 +638,7 @@ MUTANTS := \
 	BR-OUTPUT/GitHubAPIClient.swift@@list.first { $$0.head?.ref == expectedBranch }@@list.first@@the first pull request is adopted without verifying its branch ref \
 	BR-OUTPUT/GitHubAPIClient.swift@@"commit_title": title@@"commit_title": ""@@the merge payload loses its commit title
 
-.PHONY: mutants mutants-logic
+.PHONY: mutants mutants-logic mutants-changed
 mutants:
 	@backup=$$(mktemp -d); \
 	if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
@@ -749,6 +750,118 @@ mutants-logic:
 	done; \
 	if [ $$fail -eq 0 ]; then echo "[OK] every logic-suite mutation was caught ($$n)"; \
 	else echo "[FAIL] a logic-suite mutation survived, went stale, or was not measured"; exit 1; fi
+
+# --- Mutation (working tree only) ---------------------------------------
+#
+# `mutants` runs every mutation every time, which is slow.  This target
+# selects mutations only for guarded files that are dirty in the working
+# tree — uncommitted edits, staged or unstaged.  It no longer compares
+# against a base branch, because a wide diff (rebase, merge, branch switch)
+# selected every mutation and ran for twenty minutes on a change to one file.
+#
+# A sanity valve refuses to run when more than half the known mutations are
+# selected.  That is the signature of a wide working tree, not a focused
+# edit, and the valve keeps the target honest about what it is for.
+#
+# Removed from `check`: the selection is still broader than the guard it
+# exists to test.  Add it back when the set is narrow enough to run on every
+# build without surprise.
+#
+# Shares the harness lock and the backup-and-restore trap with `mutants` and
+# `mutants-logic` so the safety contract is identical: every file is restored
+# with a checksum verification on any exit path.
+
+mutants-changed:
+	@backup=$$(mktemp -d); \
+	if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
+		echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK))"; \
+		rm -rf $$backup; exit 1; \
+	fi; \
+	trap 'for f in $$backup/*.bak; do [ -e "$$f" ] || continue; \
+	      target=$$(cat "$$f.path"); \
+	      cp "$$f" "$(ROOT)/$$target"; \
+	      expected=$$(cat "$${f}.sha" 2>/dev/null); \
+	      if [ -n "$$expected" ]; then \
+		      actual=$$(shasum "$(ROOT)/$$target" | cut -d" " -f1); \
+		      if [ "$$actual" != "$$expected" ]; then \
+			      echo "[FAIL] restore checksum mismatch for $$target" >&2; \
+		      fi; \
+	      fi; done; \
+	      rm -rf $$backup; \
+	      rmdir "$(HARNESS_LOCK)" 2>/dev/null' EXIT INT TERM; \
+	changed=$$(git -C "$(ROOT)" diff --name-only --relative HEAD); \
+	total=0; selected=0; \
+	: "Count total and selected mutations before running anything"; \
+	IFS='~'; for entry in $$(echo '$(MUTANTS) $(MUTANTS_LOGIC)' | sed 's/ rings\//~rings\//g; s/ BR-OUTPUT\//~BR-OUTPUT\//g'); do \
+		unset IFS; \
+		[ -z "$$entry" ] && continue; \
+		src=$$(echo "$$entry" | awk -F'@@' '{print $$1}'); \
+		total=$$((total + 1)); \
+		echo "$$changed" | grep -qxF "$$src" && selected=$$((selected + 1)) || true; \
+	done; \
+	echo "[INFO] working tree: $$selected of $$total mutations selected"; \
+	half=$$((total / 2)); \
+	if [ $$selected -gt $$half ]; then \
+		echo "[FAIL] sanity valve: $$selected mutations selected, more than half of $$total (ceiling $$half)."; \
+		echo "       Narrow your working-tree changes or run 'make mutants' directly."; \
+		exit 1; \
+	fi; \
+	if [ $$selected -eq 0 ]; then \
+		echo "[OK] no guarded file changed in the working tree (0 of $$total mutations selected)"; exit 0; \
+	fi; \
+	fail=0; n=0; \
+	: "SSE-harness mutations whose source is dirty in the working tree"; \
+	IFS='~'; for entry in $$(echo '$(MUTANTS)' | sed 's/ rings\//~rings\//g; s/ BR-OUTPUT\//~BR-OUTPUT\//g'); do \
+		unset IFS; \
+		src=$$(echo "$$entry" | awk -F'@@' '{print $$1}'); \
+		needle=$$(echo "$$entry" | awk -F'@@' '{print $$2}'); \
+		repl=$$(echo "$$entry" | awk -F'@@' '{print $$3}'); \
+		name=$$(echo "$$entry" | awk -F'@@' '{print $$4}'); \
+		echo "$$changed" | grep -qxF "$$src" || continue; \
+		n=$$((n + 1)); \
+		cp "$(ROOT)/$$src" "$$backup/$$n.bak"; echo "$$src" > "$$backup/$$n.bak.path"; \
+		shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.bak.sha"; \
+		if ! MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
+			'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; sys.exit(1) if o not in s else open(p,"w").write(s.replace(o,os.environ["MUT_NEW"],1))'; then \
+			echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
+			cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue; \
+		fi; \
+		if bash "$(ROOT)/tests/swift/run_chat_sse_e2e.sh" >/dev/null 2>&1; then \
+			echo "  SURVIVED - $$name"; fail=1; \
+		else \
+			echo "  ok   - caught: $$name"; \
+		fi; \
+		cp "$$backup/$$n.bak" "$(ROOT)/$$src"; \
+	done; \
+	: "logic-suite mutations whose source is dirty in the working tree"; \
+	IFS='~'; for entry in $$(echo '$(MUTANTS_LOGIC)' | sed 's/ rings\//~rings\//g; s/ BR-OUTPUT\//~BR-OUTPUT\//g'); do \
+		unset IFS; \
+		src=$$(echo "$$entry" | awk -F'@@' '{print $$1}'); \
+		needle=$$(echo "$$entry" | awk -F'@@' '{print $$2}'); \
+		repl=$$(echo "$$entry" | awk -F'@@' '{print $$3}'); \
+		suite=$$(echo "$$entry" | awk -F'@@' '{print $$4}'); \
+		name=$$(echo "$$entry" | awk -F'@@' '{print $$5}'); \
+		echo "$$changed" | grep -qxF "$$src" || continue; \
+		n=$$((n + 1)); \
+		cp "$(ROOT)/$$src" "$$backup/$$n.bak"; echo "$$src" > "$$backup/$$n.bak.path"; \
+		shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.bak.sha"; \
+		if ! MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
+			'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; sys.exit(1) if o not in s else open(p,"w").write(s.replace(o,os.environ["MUT_NEW"],1))'; then \
+			echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
+			cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue; \
+		fi; \
+		report=$$(cd "$(ROOT)" && cargo run --quiet --bin clade-e2e 2>/dev/null | tail -1); \
+		if [ -f "$$report" ] && grep -q "\[FAIL\] Swift logic tests ($$suite)" "$$report"; then \
+			echo "  ok   - caught by $$suite: $$name"; \
+		elif [ ! -f "$$report" ]; then \
+			echo "  ERROR - clade-e2e wrote no report, so nothing was measured"; fail=1; \
+		else \
+			echo "  SURVIVED - $$name"; fail=1; \
+		fi; \
+		cp "$$backup/$$n.bak" "$(ROOT)/$$src"; \
+	done; \
+	if [ $$fail -eq 0 ]; then echo "[OK] every working-tree mutation was caught ($$n of $$total mutations selected)"; \
+	else echo "[FAIL] a working-tree mutation survived, went stale, or was not measured ($$n of $$total mutations selected)"; exit 1; fi
 
 # --- Interface-drift compiling proof ------------------------------------
 #
