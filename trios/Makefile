@@ -660,7 +660,7 @@ mutants:
 	: "Records are separated by ~ and fields by @@. A vertical bar cannot be \
 	   the record separator: the first needle contains || and split itself in \
 	   half, which the stale check caught rather than letting it pass."; \
-	IFS='~'; for entry in $$(echo '$(MUTANTS)' | sed 's/ rings\//~rings\//g'); do \
+	IFS='~'; for entry in $$(echo '$(MUTANTS)' | sed 's/ rings\//~rings\//g; s/ BR-OUTPUT\//~BR-OUTPUT\//g'); do \
 		unset IFS; \
 		src=$$(echo "$$entry" | awk -F'@@' '{print $$1}'); \
 		needle=$$(echo "$$entry" | awk -F'@@' '{print $$2}'); \
@@ -722,7 +722,7 @@ mutants-logic:
 	      rm -rf $$backup; \
 	      rmdir "$(HARNESS_LOCK)" 2>/dev/null' EXIT INT TERM; \
 	fail=0; n=0; \
-	IFS='~'; for entry in $$(echo '$(MUTANTS_LOGIC)' | sed 's/ rings\//~rings\//g'); do \
+	IFS='~'; for entry in $$(echo '$(MUTANTS_LOGIC)' | sed 's/ rings\//~rings\//g; s/ BR-OUTPUT\//~BR-OUTPUT\//g'); do \
 		unset IFS; \
 		src=$$(echo "$$entry" | awk -F'@@' '{print $$1}'); \
 		needle=$$(echo "$$entry" | awk -F'@@' '{print $$2}'); \
