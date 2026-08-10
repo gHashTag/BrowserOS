@@ -197,6 +197,20 @@ final class ChatViewModel: ObservableObject {
     private var memoryWriteRevisions: [UUID: UInt64] = [:]
     private var historyWriteRevisions: [UUID: UInt64] = [:]
     private var historyDeletionCounts: [UUID: Int] = [:]
+    // MARK: - Dev-only inbox poller (#1150)
+    /// Background task that polls the dev-only Queen inbox JSONL file and
+    /// delegates each new line. Only started in the dev variant.
+    private var queenInboxPollTask: Task<Void, Never>?
+    /// Byte offset into `queen_inbox.jsonl` — remembered so a restart does
+    /// not re-process lines already delegated. Persisted in UserDefaults so
+    /// it survives app relaunches.
+    private var queenInboxOffset: UInt64 = 0
+    /// UserDefaults key, prefixed with the variant so dev and prod never
+    /// share an offset.
+    private static var queenInboxOffsetKey: String {
+        "queen.inbox.offset.\(ProjectPaths.variant.rawValue)"
+    }
+
     private var isConversationTransitioning = false
     /// #1224: Guards the provider-key warm-up so it starts once per session,
     /// not on every precheck refusal. The first start fills the
@@ -415,12 +429,143 @@ final class ChatViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
             }
         }
+
+        // #1150: Dev-only inbox poller. Reads `.trinity-dev/state/queen_inbox.jsonl`,
+        // remembers its byte offset, and approves + delegates each new line.
+        // Runs only in the dev variant so a release app never picks up a
+        // dev inbox.
+        if ProjectPaths.isDevVariant {
+            queenInboxOffset = UInt64(
+                UserDefaults.standard.double(forKey: Self.queenInboxOffsetKey)
+            )
+            queenInboxPollTask = Task { [weak self] in
+                guard let self else { return }
+                while !Task.isCancelled {
+                    await self.pollQueenInbox()
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                }
+            }
+        }
+
         NSLog("ChatViewModel.init finished")
     }
 
     deinit {
         initializationTask?.cancel()
         healthCheckTask?.cancel()
+        queenInboxPollTask?.cancel()
+    }
+
+    // MARK: - Dev-only inbox poller (#1150)
+
+    /// One line of `queen_inbox.jsonl`. Every field except `issue` is optional;
+    /// missing values fall back to the same defaults the `/delegate` command uses.
+    ///
+    /// Line format — one JSON object per line, UTF-8:
+    /// ```
+    /// {"issue":"gHashTag/trios#123","worker":"queen-swift","title":"Fix X","paths":["src/Foo.swift"],"skill":null,"criteria":["it compiles"]}
+    /// ```
+    ///
+    /// - `issue` (required): GitHub reference parseable by `IssueReference.parse`,
+    ///   e.g. `"gHashTag/trios#1150"`.
+    /// - `worker` (optional): worker identifier; defaults to `"queen-swift"`.
+    /// - `title` (optional): task title shown in the sidebar;
+    ///   defaults to `"Work on <slug>"`.
+    /// - `paths` (optional): boundary paths the worker may edit; defaults to `[]`.
+    /// - `skill` (optional): skill name passed to the worker; defaults to `nil`.
+    /// - `criteria` (optional): acceptance criteria; defaults to `[]`
+    ///   (the issue body is read instead).
+    private struct QueenInboxEntry: Codable {
+        let issue: String
+        let worker: String?
+        let title: String?
+        let paths: [String]?
+        let skill: String?
+        let criteria: [String]?
+    }
+
+    /// The absolute path to the dev-only inbox file. Uses `ProjectPaths.trinity`
+    /// which resolves to `.trinity-dev` under the dev variant.
+    private static var queenInboxPath: String {
+        "\(ProjectPaths.trinity)/state/queen_inbox.jsonl"
+    }
+
+    /// Reads any new lines appended since the last poll and delegates each one.
+    /// The byte offset is persisted to UserDefaults after each read, so a
+    /// restart resumes from where it stopped without re-delegating.
+    private func pollQueenInbox() async {
+        let path = Self.queenInboxPath
+        guard FileManager.default.fileExists(atPath: path),
+              let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path))
+        else { return }
+        defer { try? handle.close() }
+
+        try? handle.seek(toOffset: queenInboxOffset)
+        guard let data = try? handle.readToEnd(), !data.isEmpty else { return }
+
+        // Advance the offset before processing so a crash mid-delegation
+        // does not re-process the same lines.
+        queenInboxOffset += UInt64(data.count)
+        UserDefaults.standard.set(
+            Double(queenInboxOffset), forKey: Self.queenInboxOffsetKey
+        )
+
+        guard let text = String(data: data, encoding: .utf8) else { return }
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
+
+        for line in lines {
+            guard let lineData = line.data(using: .utf8),
+                  let entry = try? JSONDecoder().decode(
+                      QueenInboxEntry.self, from: lineData
+                  )
+            else {
+                TriosLogBus.shared.warn(
+                    .queen, "queen.inbox",
+                    "Could not parse inbox line: \(line.prefix(200))",
+                    ["line": String(line.prefix(200))]
+                )
+                continue
+            }
+
+            guard let issue = IssueReference.parse(entry.issue) else {
+                TriosLogBus.shared.warn(
+                    .queen, "queen.inbox",
+                    "Could not parse issue reference: \(entry.issue)",
+                    ["raw": entry.issue]
+                )
+                continue
+            }
+
+            TriosLogBus.shared.info(
+                .queen, "queen.inbox",
+                "Inbox entry read: \(issue.slug)",
+                ["issue": issue.slug, "worker": entry.worker ?? "queen-swift"]
+            )
+
+            // Each new line is auto-approved then delegated.  Approval
+            // must precede delegation because `delegateIssueToWorker`
+            // refuses to start work on an un-approved issue.  Each step
+            // is logged so the trail never goes cold after "entry read".
+            await approveDelegation(issue: issue)
+            TriosLogBus.shared.info(
+                .queen, "queen.inbox",
+                "Approved: \(issue.slug)",
+                ["issue": issue.slug]
+            )
+            await delegateIssueToWorker(
+                issue: issue,
+                worker: entry.worker ?? "queen-swift",
+                title: entry.title ?? "Work on \(issue.slug)",
+                paths: entry.paths ?? [],
+                skill: entry.skill,
+                criteria: entry.criteria ?? []
+            )
+            TriosLogBus.shared.info(
+                .queen, "queen.inbox",
+                "Delegated: \(issue.slug)",
+                ["issue": issue.slug, "worker": entry.worker ?? "queen-swift"]
+            )
+        }
     }
 
     func setupConversationId() async {
