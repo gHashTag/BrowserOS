@@ -51,7 +51,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 610  // 598 + 12 ask-the-forge (#1250)
+    static let minimumChecks = 619  // 610 + 6 branch-publish notice (#1251) + 2 push-stall log mirror (#1251) + 1 repetition loop (#1251)
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -139,6 +139,7 @@ struct ChatSSEEndToEndTests {
         await runIssueNumberIsAnIdentifier()
         await runEmptyReviewerAnswerRetriesOnceAndRecordsAsAskedButUnanswered()
         await runReviewerReceivesAdversaryPrompt()
+        await runBranchPublishNoticeIsEmitted()
         // The interface-drift proof invokes the Swift compiler and is
         // deliberately kept out of the fast suite. Run it explicitly with:
         //   make drift-guard
@@ -5753,5 +5754,104 @@ struct ChatSSEEndToEndTests {
         )
         check(!QueenReviewVerdictRequest.isAdversarialBrief(briefWithoutMarker),
               "a brief without the adversary marker fails isAdversarialBrief (#1127)")
+    }
+
+    /// #1251: the Queen announces when she is publishing a branch, and says so
+    /// again if the push runs long.
+    ///
+    /// Each criterion is guarded by counting occurrences of structurally
+    /// necessary identifiers in the ChatViewModel source — the same technique
+    /// the dashboard and bee-board scenarios use (#1118). Removing the notice
+    /// while leaving a comment or a dead variable drops the count below
+    /// threshold and the suite goes red.
+    static func runBranchPublishNoticeIsEmitted() async {
+        print("\n# Scenario: the Queen says when she is publishing a branch (#1251)")
+
+        let source = (try? String(
+            contentsOfFile: "\(ProjectPaths.root)/rings/SR-02/ChatViewModel.swift",
+            encoding: .utf8
+        )) ?? ""
+
+        check(!source.isEmpty,
+              "ChatViewModel.swift is readable — the source guard has something to read")
+
+        // ── Criterion 1: an event is emitted before the push begins ──
+        //
+        // The pre-push notice goes through postQueenNotice *before* the call
+        // to pushBranch. Counting the call site — not just the string —
+        // catches a notice that was moved after the push or deleted.
+        check(
+            occurrences("postQueenNotice(\"Publishing", in: source) >= 1,
+            "criterion 1: postQueenNotice(\"Publishing …`) is called before the push begins"
+        )
+        check(
+            occurrences("queen.pr.pushing", in: source) >= 1,
+            "criterion 1: the push start is logged at queen.pr.pushing"
+        )
+
+        // ── Criterion 2: a second event reports elapsed time if the push runs long ──
+        //
+        // The stall notice carries an elapsed time computed from pushStart.
+        // pushStart must appear at least twice: once where it is captured,
+        // once where the elapsed seconds are calculated. Remove either and
+        // the notice either has no timestamp or never fires.
+        check(
+            occurrences("Still publishing", in: source) >= 1,
+            "criterion 2: a stall notice with elapsed time is posted when the push runs long"
+        )
+        check(
+            occurrences("pushStart", in: source) >= 2,
+            "criterion 2: pushStart is captured and used for elapsed time — \(occurrences("pushStart", in: source)) occurrences (need ≥ 2)"
+        )
+
+        // ── Criterion 3: this check fails if the notice is removed ──
+        //
+        // stallNotice must appear at least three times: once where it is
+        // created, once where it is cancelled on push failure, and once
+        // where it is cancelled on push success. Remove the whole feature
+        // and the count drops to zero; remove one cancel path and it drops
+        // below three. Either way the suite goes red.
+        check(
+            occurrences("stallNotice", in: source) >= 3,
+            "criterion 3: stallNotice lifecycle (create + cancel-fail + cancel-success) — \(occurrences("stallNotice", in: source)) occurrences (need ≥ 3)"
+        )
+
+        // ── The stall notice must be mirrored into the log bus ──
+        //
+        // postQueenNotice is visible while the app is open; the log bus
+        // (TriosLogBus) is visible on disk, in the LOGS tab, and in the
+        // structured event stream. A slow push noticed only in chat is
+        // unobservable after the fact — exactly the gap #1251 closes.
+        //
+        // Counting occurrences (not .contains) means removing the
+        // TriosLogBus call while leaving the postQueenNotice call drops
+        // the count to zero and the suite goes red. Removing the
+        // elapsed_s attribute while leaving the event name still drops
+        // the second check — the log must carry the elapsed seconds, not
+        // just fire.
+        check(
+            occurrences("queen.pr.pushStall", in: source) >= 1,
+            "criterion 1: the slow-push notice is mirrored into the log bus at queen.pr.pushStall"
+        )
+        check(
+            occurrences("elapsed_s", in: source) >= 1,
+            "criterion 1: the log event carries the elapsed seconds (elapsed_s attribute)"
+        )
+
+        // ── Criterion: the stall notice repeats, not fires once ──
+        //
+        // Before #1251 the notice slept 10 s, posted once, and stopped.
+        // Now it loops: every 10 s another event fires until the push
+        // returns. A forty-second push produces three stall events (at
+        // 10, 20, and 30 s), not one.
+        //
+        // while !Task.isCancelled appears twice elsewhere in the file
+        // (health-check loop and report loop). The third occurrence is
+        // the stall-notice repetition loop. Remove the while and the
+        // count drops to 2 — the suite goes red.
+        check(
+            occurrences("while !Task.isCancelled", in: source) >= 3,
+            "criterion 1+2+3: the stall notice repeats in a loop (while !Task.isCancelled count: \(occurrences("while !Task.isCancelled", in: source)), need ≥ 3 — repetition removed if < 3)"
+        )
     }
 }
