@@ -7170,6 +7170,16 @@ final class ChatViewModel: ObservableObject {
                 continue
             }
 
+            // Capture the reviewed head SHA: record it once from the PR's head
+            // ref, then reuse it on every poll so the merge request pins the
+            // exact commit the Queen saw. The forge returns 409 if the branch
+            // has moved since, which is how the task knows to go back for
+            // review rather than silently merge code nobody checked (#1254).
+            let reviewedSHA = task.reviewedHeadSHA ?? pullRequest.head?.sha
+            if task.reviewedHeadSHA == nil, let reviewedSHA {
+                registry.recordReviewedHeadSHA(taskID: task.id, sha: reviewedSHA)
+            }
+
             // An open pull request for accepted work is the Queen's to finish.
             // She reviewed it against the criteria; waiting for a human to press
             // the same button she already decided on is ceremony, not oversight.
@@ -7186,7 +7196,8 @@ final class ChatViewModel: ObservableObject {
                     let mergeOutcome = try await client.mergePullRequest(
                         repo: prRepo,
                         number: number,
-                        title: "\(task.title) (\(task.issue.slug))"
+                        title: "\(task.title) (\(task.issue.slug))",
+                        sha: reviewedSHA
                     )
                     switch mergeOutcome {
                     case .merged:
@@ -7223,6 +7234,29 @@ final class ChatViewModel: ObservableObject {
                                     + "(merge_state: \(mergeState ?? "dirty")). "
                                     + "The task is back in the review queue - it will not be "
                                     + "retried until the branch is rebased."
+                            )
+                        }
+                        continue
+                    case .headMoved:
+                        // The branch head moved since the reviewed commit (409).
+                        // The code the Queen approved is no longer the code on
+                        // the branch. Transition the task back to review so the
+                        // new head is examined, and clear the SHA so it is
+                        // re-captured on the next review (#1254).
+                        TriosLogBus.shared.warn(
+                            .queen, "queen.pr.head_moved",
+                            "The branch head moved since the reviewed commit (409)",
+                            ["issue": task.issue.slug, "pr": "\(number)",
+                             "reviewed_sha": reviewedSHA ?? "-"]
+                        )
+                        registry.clearReviewedHeadSHA(taskID: task.id)
+                        if registry.transition(taskID: task.id, to: .awaitingReview) {
+                            await appendSystemMessageToQueenChat(
+                                SystemNoticeClassifier.warningMarker
+                                    + "#\(number) for \(task.issue.slug) was pushed to after "
+                                    + "my review, so the commit I approved is no longer the head. "
+                                    + "The task is back in the review queue - the new head must be "
+                                    + "checked before it can be merged."
                             )
                         }
                         continue

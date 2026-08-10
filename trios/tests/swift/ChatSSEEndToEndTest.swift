@@ -51,7 +51,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 640  // 610 + 6 branch-publish notice (#1251) + 2 push-stall log mirror (#1251) + 1 repetition loop (#1251) + 2 log-before-notice ordering and stall interval (#1251) + 19 conflict-is-not-a-not-yet (#1252)
+    static let minimumChecks = 663  // 610 + 6 branch-publish notice (#1251) + 2 push-stall log mirror (#1251) + 1 repetition loop (#1251) + 2 log-before-notice ordering and stall interval (#1251) + 19 conflict-is-not-a-not-yet (#1252) + 15 merge-the-reviewed-commit (#1254) + 8 mergePayload/outcome pure-function extraction (#1254)
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -126,6 +126,7 @@ struct ChatSSEEndToEndTests {
         await runMergedIsNotTheSameAsClosed()
         await runAskTheForgeWithOwnerBranch()
         await runConflictIsNotANotYet()
+        await runMergeTheReviewedCommit()
         await runStalledWorkerIsResumedBeforeCancelled()
         await runQueenTaskLifecycleCloses()
         await runPureQueenTypes()
@@ -3882,6 +3883,172 @@ struct ChatSSEEndToEndTests {
         // guarded by a failing check, not by trust.
         check(GitHubAPIClient.isConflict(mergeable: false, mergeState: "dirty"),
               "removing isConflict breaks this check — the distinction is guarded")
+    }
+
+    // MARK: - Scenario: merge the reviewed commit, read 409 as branch moved (#1254)
+
+    static func runMergeTheReviewedCommit() async {
+        print("\n# Scenario: merge the reviewed commit and read 409 as the branch having moved (#1254)")
+
+        // ── Criterion 1: the task records the reviewed head commit ──
+        //
+        // DelegatedTask carries reviewedHeadSHA, and the registry records
+        // and clears it. If the field is removed, these checks fail to
+        // compile — which is the guard criterion 4 asks for.
+
+        let store = NSTemporaryDirectory() + "queen-1254-\(UUID().uuidString).json"
+        defer { try? FileManager.default.removeItem(atPath: store) }
+        let registry = QueenDelegationRegistry(storePath: store)
+
+        guard let issue = IssueReference.parse("gHashTag/trios#1254") else {
+            fail("could not build a test issue"); return
+        }
+        guard let task = registry.delegate(
+            issue: issue, title: "sha probe", worker: "queen-swift",
+            conversationId: UUID(), ownedPaths: ["BR-OUTPUT/GitHubAPIClient.swift"]
+        ) else {
+            fail("registry refused a clean delegation"); return
+        }
+
+        // A freshly delegated task has no reviewed head SHA.
+        check(registry.tasks.first(where: { $0.id == task.id })?.reviewedHeadSHA == nil,
+              "a new task has no reviewed head SHA")
+
+        // Recording the SHA persists it.
+        registry.recordReviewedHeadSHA(taskID: task.id, sha: "abc123")
+        check(registry.tasks.first(where: { $0.id == task.id })?.reviewedHeadSHA == "abc123",
+              "recordReviewedHeadSHA persists the SHA")
+
+        // Clearing it removes it.
+        registry.clearReviewedHeadSHA(taskID: task.id)
+        check(registry.tasks.first(where: { $0.id == task.id })?.reviewedHeadSHA == nil,
+              "clearReviewedHeadSHA removes the SHA")
+
+        // ── Criterion 2: the merge request sends it as sha ──
+        //
+        // mergePullRequest accepts a sha parameter. If the parameter is
+        // removed, the call site in pollPullRequests (sha: reviewedSHA)
+        // fails to compile, and the switch's .headMoved case becomes
+        // unreachable — both are compile-time guards. The pure enum
+        // checks below also fail to compile if .headMoved is removed.
+
+        // ── Criterion 3: 409 is distinguished from 405 ──
+        //
+        // .headMoved is its own case, distinct from .refused and .conflict.
+        // If it is removed, the switch in pollPullRequests fails to compile
+        // (non-exhaustive), and these checks fail to compile.
+
+        // .headMoved does not match .refused — the distinction that makes
+        // the caller handle them differently.
+        let headMoved = GitHubAPIClient.MergeOutcome.headMoved
+        if case .refused = headMoved {
+            fail("headMoved must not match .refused — 409 is not a generic refusal")
+        } else {
+            check(true, "headMoved does not match the refused pattern")
+        }
+        if case .conflict = headMoved {
+            fail("headMoved must not match .conflict — 409 is not a merge conflict")
+        } else {
+            check(true, "headMoved does not match the conflict pattern")
+        }
+        if case .merged = headMoved {
+            fail("headMoved must not match .merged — 409 means the merge did not happen")
+        } else {
+            check(true, "headMoved does not match the merged pattern")
+        }
+
+        // A 405 refusal stays in .refused with the status code intact.
+        if case .refused(let code, _, _) = GitHubAPIClient.MergeOutcome.refused(statusCode: 405, mergeable: nil, mergeState: nil) {
+            check(code == 405, "a 405 refusal carries 405 (not mergeable)")
+        } else {
+            fail("a 405 refusal should match .refused")
+        }
+
+        // ── Criterion 1 (acceptance): mergePayload includes sha when given ──
+        //
+        // mergePayload is a pure static function. Removing the function
+        // definition makes every check below fail to compile.
+
+        let withSHA = GitHubAPIClient.mergePayload(title: "t", sha: "abc123")
+        check(withSHA["sha"] as? String == "abc123",
+              "mergePayload includes sha when given")
+        let withoutSHA = GitHubAPIClient.mergePayload(title: "t", sha: nil)
+        check(withoutSHA["sha"] == nil,
+              "mergePayload omits sha when nil")
+        check(withSHA["merge_method"] as? String == "squash",
+              "mergePayload always sets merge_method to squash")
+        check(withSHA["commit_title"] as? String == "t",
+              "mergePayload always sets commit_title")
+
+        // ── Criterion 2 (acceptance): outcome maps status codes correctly ──
+        //
+        // outcome is a pure static function. Removing the function
+        // definition makes every check below fail to compile.
+
+        if case .headMoved = GitHubAPIClient.outcome(statusCode: 409, mergeable: nil, mergeState: nil) {
+            check(true, "outcome maps 409 to headMoved")
+        } else {
+            fail("outcome should map 409 to headMoved")
+        }
+
+        if case .conflict = GitHubAPIClient.outcome(statusCode: 405, mergeable: false, mergeState: nil) {
+            check(true, "outcome maps 405 with mergeable false to conflict")
+        } else {
+            fail("outcome should map 405 with mergeable false to conflict")
+        }
+
+        // 405 without a conflict signal is a generic refusal, not a conflict.
+        if case .refused(let code, _, _) = GitHubAPIClient.outcome(statusCode: 405, mergeable: nil, mergeState: nil) {
+            check(code == 405, "outcome maps 405 with mergeable nil to refused(405)")
+        } else {
+            fail("outcome should map 405 with mergeable nil to refused")
+        }
+
+        // 200 is merged regardless of mergeable fields.
+        if case .merged = GitHubAPIClient.outcome(statusCode: 200, mergeable: nil, mergeState: nil) {
+            check(true, "outcome maps 200 to merged")
+        } else {
+            fail("outcome should map 200 to merged")
+        }
+
+        // ── Criterion 4: checks fail if the sha is dropped or 409 is folded into 405 ──
+        //
+        // After a headMoved, the task is back in the review queue and the
+        // SHA is cleared — the same structural test as the conflict
+        // scenario, applied to the 409 path.
+
+        // Walk the task to .accepted with a PR, as the Queen's review would.
+        check(registry.transition(taskID: task.id, to: .running),
+              "the probe task starts running")
+        check(registry.transition(taskID: task.id, to: .awaitingReview),
+              "moves to review")
+        check(registry.transition(taskID: task.id, to: .accepted),
+              "and is accepted")
+        registry.recordPullRequest(taskID: task.id, number: 99)
+        registry.recordReviewedHeadSHA(taskID: task.id, sha: "deadbeef")
+
+        // Before the headMoved: the task IS in the poll filter and has a SHA.
+        let beforeFilter = registry.tasks.filter {
+            $0.pullRequestNumber != nil && $0.state == .accepted
+        }
+        check(beforeFilter.contains(where: { $0.id == task.id }),
+              "before the headMoved, the task is in pollPullRequests' filter")
+        check(registry.tasks.first(where: { $0.id == task.id })?.reviewedHeadSHA == "deadbeef",
+              "before the headMoved, the task has the reviewed SHA")
+
+        // Simulate the headMoved: clear SHA and transition to .awaitingReview.
+        registry.clearReviewedHeadSHA(taskID: task.id)
+        check(registry.transition(taskID: task.id, to: .awaitingReview),
+              "a headMoved transitions the task from accepted to awaitingReview")
+
+        // After the headMoved: the task is NOT in the poll filter and SHA is nil.
+        let afterFilter = registry.tasks.filter {
+            $0.pullRequestNumber != nil && $0.state == .accepted
+        }
+        check(!afterFilter.contains(where: { $0.id == task.id }),
+              "after the headMoved, the task is dropped from the filter — retry stops")
+        check(registry.tasks.first(where: { $0.id == task.id })?.reviewedHeadSHA == nil,
+              "after the headMoved, the reviewed SHA is cleared for re-capture")
     }
 
     static func runStalledWorkerIsResumedBeforeCancelled() async {

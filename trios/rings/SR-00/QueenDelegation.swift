@@ -175,6 +175,15 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// process restarts. Optional so older stores without this key still decode.
     var baselineTree: String?
 
+    /// The head commit SHA the Queen reviewed, captured when the pull request
+    /// is first fetched for an accepted task. Sent as the `sha` parameter with
+    /// the merge request so the forge refuses (409) if the branch has moved
+    /// since the review — meaning the code the Queen approved is no longer the
+    /// code that would land (#1254). Nil means the SHA has not been captured
+    /// yet, either because the PR has not been polled or because a 409 cleared
+    /// it to force a fresh capture on the next review.
+    var reviewedHeadSHA: String?
+
     /// The pull request opened for this task's branch, once one exists.
     ///
     /// Nil means no pull request has been opened - not that one failed. The
@@ -250,7 +259,8 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         pullRequestNumber: Int? = nil,
         provider: String? = nil,
         model: String? = nil,
-        baselineTree: String? = nil
+        baselineTree: String? = nil,
+        reviewedHeadSHA: String? = nil
     ) {
         self.id = id
         self.conversationId = conversationId
@@ -276,6 +286,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         self.provider = provider
         self.model = model
         self.baselineTree = baselineTree
+        self.reviewedHeadSHA = reviewedHeadSHA
     }
 }
 
