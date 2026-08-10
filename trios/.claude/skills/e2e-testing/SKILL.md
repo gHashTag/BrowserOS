@@ -195,3 +195,31 @@ Also: make the break faithful. The first attempt at this one replaced the digits
 nothing. Verify the edit landed on the executable line before you trust the
 result — a break test aimed at a comment is indistinguishable from a passing
 guard.
+
+## An offset that outlives its file reads past the end and says nothing
+
+The dev-only Queen inbox remembers a byte offset in `UserDefaults` and seeks to
+it before reading. Delete or shorten the file and the offset stays: the seek
+lands past EOF, `readToEnd` returns nothing, and the poller is silently dead.
+Appending line after line produced not one log entry — no error, no warning,
+nothing to grep for.
+
+It cost most of an hour, and the diagnosis only came from looking outside the
+program:
+
+    $ defaults read com.browseros.trios.dev | grep inbox
+        "queen.inbox.offset.dev" = 339;     # the file was 190 bytes
+
+The same defect was already solved once in this repo for the LOGS live tail,
+which detects truncation and restarts from zero. A durable cursor is a cache of
+a fact about a file, and like every cache it needs an invalidation rule.
+
+**Any persisted read offset needs two things**: a size check before the seek
+(offset > size means the file was replaced — start over) and a log line when
+that happens. A reader that has stopped reading must say so; silence is
+indistinguishable from an empty inbox.
+
+Note for driving tests: state that outlives the process is invisible in
+`git status` and in the log. When a component "does nothing" and its code looks
+right, ask what it remembers from last time — `defaults read <bundle-id>` for a
+Mac app, and the state files under `.trinity-dev/state/`.
