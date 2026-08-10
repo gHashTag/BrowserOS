@@ -228,3 +228,51 @@ Two guards, both cheap:
 Prove both from the failing side: hold the lock and watch the run refuse; corrupt
 the recorded hash and watch the mismatch fire. A harness that guards everything
 else is the last place to accept an unproven guard.
+
+## Never wrap the mutation harness in `timeout`
+
+Two `timeout`-killed runs of `make mutants-changed` left **six** mutations in
+the tree across three files, and a stale `/tmp/trios_harness.lock` that would
+have blocked the next honest run. Among the six: `isConflict` returning only
+`mergeState == "dirty"`, the pull-request lookup back to bare `list.first`, an
+empty merge `commit_title`, `409` rewritten to `499`, and a skill guard reduced
+to `true`. All of them compile. All of them pass every gate. That is the point
+of a mutation — it is chosen to look like ordinary code.
+
+`trap ... EXIT INT TERM` does not save you: `timeout` signals `make`, `make`
+dies, and the recipe's shell goes with it before the trap runs.
+
+So:
+
+- Run the harness in the background and **wait for it**, never under `timeout`.
+- After any interrupted run, check three things before doing anything else:
+  `git status --short rings/ BR-OUTPUT/`, `ls -d /tmp/trios_harness.lock`, and
+  the diff of every file the harness touches.
+- Restore by reversing the known replacement, not by `git checkout --` — the
+  same file may hold real work you have not committed.
+
+The deeper lesson is about the report, not the tool: when the harness said
+`STALE - its needle is no longer in <file>`, the true cause was "our own
+mutation is sitting there", not "the list is out of date". A message that names
+only one of two possible causes sends you looking in the wrong place — twice, in
+one night. See gHashTag/trios#1258.
+
+## Ask a filter to say how much it selected
+
+`make mutants-changed` was meant to run only the mutations whose source the
+working tree touched. It ran all sixteen, and looked entirely healthy doing it:
+every mutation was caught, the tree came back clean, the target exited zero.
+
+The one line that exposed it was the count I had asked for:
+
+    [OK] every changed-file mutation was caught (2173 files considered, 16 selected)
+
+2173 is the whole repository. The selection came from `git diff HEAD~1 HEAD`,
+and `HEAD` on this branch is almost always a merge commit, whose diff against
+its first parent is the entire other side.
+
+**Any filter, narrowing step, or subset selection must report its own numbers.**
+"Selected N of M, from K considered" costs one line and turns a silent no-op —
+or a silent everything — into an obvious one. Add a valve too: if a "targeted"
+run selects more than half the population, that is not targeting, and it should
+fail rather than quietly do the full job under a narrower name.
