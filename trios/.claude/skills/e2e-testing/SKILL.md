@@ -57,3 +57,32 @@ Corollary for measuring: define the failure numerically before you fix anything.
 Here it was "restarts within ten seconds of a clean finish", counted straight
 off the JSONL — 20 of 37. Without that number, "it seems better now" would have
 been the whole report, and the second, subtler race would never have surfaced.
+
+## When the forge lies quietly: filters that are ignored, not refused
+
+`GET /repos/{o}/{r}/pulls?head=<branch>` looks like it works. It returns 200 and
+a JSON array. It is also *completely unfiltered* unless the value is in
+`owner:branch` form — GitHub silently ignores a bare ref rather than rejecting
+it. Take `.first` of that array and you have adopted a stranger's pull request
+with no error anywhere in the log.
+
+This cost the Queen sixteen merge refusals out of twenty-one attempts before
+anyone noticed, because under a single worker the array's first element usually
+*is* the right PR. It only became visible with two bees running at once.
+
+Two rules fall out of it, and they generalise past GitHub:
+
+1. **An API filter you cannot see failing is not a filter.** After narrowing a
+   query, verify the result actually matches what you asked for — here,
+   `pr.head.ref == branch`. If it does not match, that is an error to throw, not
+   a result to use. The check costs one comparison and turns a silent
+   misattribution into a loud one.
+2. **Percent-encode query values whose content you do not control.** Branch
+   names contain slashes; an unencoded slash in a query value injects a path
+   segment. Remove `:` and `/` from `urlQueryAllowed` before encoding, or the
+   colon that makes the filter work gets mangled too.
+
+Diagnostic habit that found it: count the log's own verbs against each other.
+`21 pr.attempt, 14 pr.opened, 2 pr.refused` does not add up, and the missing
+five are where the truth is. Ratios between event names cost nothing to compute
+and point straight at the gap; reading any single line would not have.
