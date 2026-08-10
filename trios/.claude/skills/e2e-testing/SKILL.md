@@ -223,3 +223,32 @@ Note for driving tests: state that outlives the process is invisible in
 `git status` and in the log. When a component "does nothing" and its code looks
 right, ask what it remembers from last time — `defaults read <bundle-id>` for a
 Mac app, and the state files under `.trinity-dev/state/`.
+
+## A quiet component proves nothing: check it was alive during the window
+
+The claim was "the release variant never reads the dev inbox". First proof: put
+a line in `.trinity/state/queen_inbox.jsonl`, wait ninety seconds, observe that
+no file appeared and no inbox event was logged. Clean-looking, and worthless —
+the release app wrote **zero** log lines in that window. A guard that works and
+an app that is idle produce identical evidence.
+
+    процесс: 1
+    строк добавлено за проверку: 0      # <- the whole proof, undone
+
+The proof that counted: restart the release app with the line *already sitting*
+in the inbox, then count.
+
+    строк записано после старта: 38
+    из них про ящик: 0
+
+Thirty-eight entries establish liveness inside the window; zero of them about
+the inbox establishes the guard. Same conclusion, but now the absence means
+something.
+
+**Whenever the expected result is "nothing happened", the observation needs a
+second measurement showing the subject was capable of acting.** Otherwise the
+test passes when the feature is broken, when the app is dead, when the log path
+is wrong, and when the test itself never ran — four failure modes wearing one
+face. Pick a moment when the subject is guaranteed to be busy (startup is
+usually the cheapest) and count its unrelated activity alongside the silence you
+care about.
