@@ -1,0 +1,28 @@
+{"issue": "gHashTag/trios#1150", "worker": "queen-swift", "title": "Double every shell dollar in the new probe recipe and run it in both branches", "paths": ["Makefile"], "criteria": ["the recipe uses double dollars throughout", "the running-app branch appends and waits for its own issue", "the stopped-app branch still launches"]}
+{"issue": "gHashTag/trios#1219", "worker": "queen-swift", "title": "Create docs/conn-drill.md with two lines", "paths": ["docs/conn-drill.md"], "criteria": null}
+{"issue": "gHashTag/trios#1188", "worker": "queen-swift", "title": "Write docs/client-probe.md with two lines", "paths": ["docs/client-probe.md"], "criteria": ["the file exists"]}
+{"issue": "gHashTag/trios#1150", "worker": "queen-swift", "title": "Guard the dev-only rule for the inbox so it cannot be dropped silently", "paths": ["tests/swift/ChatSSEEndToEndTest.swift"], "criteria": ["a named check asserts the inbox poller is dev-variant only", "the check fails if the variant guard is removed"]}
+{"not-an-inbox-entry":"poller cadence probe"}
+{"issue": "gHashTag/trios#1090", "worker": "queen-swift", "title": "Inbox entrance latency measurement", "paths": ["docs"], "criteria": null}
+{"issue": "cadence-probe-not-a-ref"}
+{"issue": "cadence-32614-1"}
+{"issue": "cadence-6780-2"}
+{"issue": "cadence-20955-3"}
+{"issue":"gHashTag\/trios#1086","paths":["docs"],"title":"Cassette baseline before one entrance","worker":"queen-swift"}
+{"issue": "gHashTag/trios#1086", "worker": "queen-swift", "title": "Cassette baseline before one entrance", "paths": ["docs"], "criteria": null}
+{"issue":"gHashTag\/trios#1086","paths":["docs"],"title":"Cassette baseline before one entrance","worker":"queen-swift"}
+{"issue":"gHashTag\/trios#1086","paths":["docs"],"title":"Cassette after one entrance","worker":"queen-swift"}
+{"issue":"gHashTag\/trios\\#1086","paths":["docs"],"title":"Cassette worker-happy-path.sse","worker":"queen-swift"}
+{"issue":"gHashTag\/trios\\#1086","paths":["docs"],"title":"Cassette worker-looping.sse","worker":"queen-swift"}
+{"issue":"gHashTag\/trios\\#1086","paths":["docs"],"title":"Cassette worker-out-of-bounds.sse","worker":"queen-swift"}
+{"issue":"gHashTag\/trios\\#1086","paths":["docs"],"title":"Cassette worker-orphan-tool-call.sse","worker":"queen-swift"}
+{"issue":"gHashTag\/trios#1086","paths":["docs"],"title":"Cassette first bee","worker":"queen-swift"}
+{"issue":"gHashTag\/trios\\#1090","paths":["README.md"],"title":"Second bee drill","worker":"queen-swift"}
+{"issue":"gHashTag\/trios#1086","paths":["docs"],"title":"Cassette final one entrance","worker":"queen-swift"}
+{"issue":"gHashTag\/trios#1086","paths":["docs"],"title":"Adversary reproduction of one entrance","worker":"queen-swift"}
+{"issue":"gHashTag\/trios\\#1086","paths":["docs"],"title":"Cassette worker-happy-path.sse","worker":"queen-swift"}
+{"issue":"gHashTag\/trios\\#1086","paths":["docs"],"title":"Cassette worker-looping.sse","worker":"queen-swift"}
+{"issue":"gHashTag\/trios\\#1086","paths":["docs"],"title":"Cassette worker-out-of-bounds.sse","worker":"queen-swift"}
+{"issue":"gHashTag\/trios\\#1086","paths":["docs"],"title":"Cassette worker-orphan-tool-call.sse","worker":"queen-swift"}
+{"issue": "gHashTag/trios#1262", "worker": "queen-swift", "title": "Score a mutation only on positive evidence that the suite actually ran", "paths": ["Makefile"], "criteria": ["a suite that dies before any test is ERROR not caught", "a real caught mutation is still caught", "a survivor is still SURVIVED", "all three shown by a run"]}
+{"issue":"gHashTag\/trios#1262","title":"second bee log probe","worker":"queen-swift"}

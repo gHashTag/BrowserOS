@@ -1,0 +1,69 @@
+[
+  {
+    "acceptanceCriteria" : [
+      "a suite that dies before any test is ERROR not caught",
+      "a real caught mutation is still caught",
+      "a survivor is still SURVIVED",
+      "all three shown by a run"
+    ],
+    "baselineTree" : "df9f031c787461d456c3efd097700e9196a7e44d",
+    "completedTurns" : 1,
+    "conversationId" : "86B0500E-0563-420E-B974-0CA9FAEF8127",
+    "createdAt" : "2026-08-10T21:04:53Z",
+    "criterionVerdicts" : {
+
+    },
+    "id" : "1FA221C6-B4D3-4213-9864-FC7D318DAC9B",
+    "inputTokens" : 0,
+    "interventions" : [
+
+    ],
+    "issue" : {
+      "number" : 1262,
+      "owner" : "gHashTag",
+      "repo" : "trios"
+    },
+    "model" : "glm-5.2",
+    "outputTokens" : 0,
+    "ownedPaths" : [
+      "Makefile"
+    ],
+    "provider" : "zai",
+    "state" : "failed",
+    "title" : "Score a mutation only on positive evidence that the suite actually ran",
+    "toolCalls" : 4,
+    "updatedAt" : "2026-08-10T21:10:08Z",
+    "virtualBranch" : "queen\/1262-score-a-mutation-only-on-positive",
+    "worker" : "queen-swift"
+  },
+  {
+    "acceptanceCriteria" : [
+
+    ],
+    "baselineTree" : "b3aa1a9a1df975a39392f46025bda372e201f996",
+    "conversationId" : "89FBF006-D479-45F7-B893-1B62AAE97266",
+    "createdAt" : "2026-08-10T22:34:07Z",
+    "criterionVerdicts" : {
+
+    },
+    "id" : "93F1377C-0A9A-4493-9AF4-4A70850E32FC",
+    "interventions" : [
+
+    ],
+    "issue" : {
+      "number" : 1262,
+      "owner" : "gHashTag",
+      "repo" : "trios"
+    },
+    "model" : "glm-5.2",
+    "ownedPaths" : [
+
+    ],
+    "provider" : "zai",
+    "state" : "failed",
+    "title" : "second bee log probe",
+    "updatedAt" : "2026-08-10T22:34:48Z",
+    "virtualBranch" : "queen\/1262-second-bee-log-probe",
+    "worker" : "queen-swift"
+  }
+]
