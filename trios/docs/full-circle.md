@@ -1,4 +1,4 @@
 # Full Circle
 
-The life cycle of every feature eventually comes full circle.
-A circle has no beginning and no end.
+This document completes the circle of documentation for the project.
+Every circle has a beginning and an end, and this one ties them together.
