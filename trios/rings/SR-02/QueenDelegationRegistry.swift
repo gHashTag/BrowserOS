@@ -364,6 +364,27 @@ final class QueenDelegationRegistry: ObservableObject {
         persist()
     }
 
+    /// Records the head commit SHA the Queen reviewed, so the merge request
+    /// can send it and the forge can refuse (409) if the branch has moved
+    /// (#1254). Called when the pull request is first fetched for an accepted
+    /// task.
+    func recordReviewedHeadSHA(taskID: UUID, sha: String) {
+        guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        tasks[index].reviewedHeadSHA = sha
+        tasks[index].updatedAt = dateProvider()
+        persist()
+    }
+
+    /// Clears the reviewed head SHA after a 409 (head moved), so the next
+    /// review captures a fresh SHA rather than reusing one that the branch
+    /// has already moved past (#1254).
+    func clearReviewedHeadSHA(taskID: UUID) {
+        guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        tasks[index].reviewedHeadSHA = nil
+        tasks[index].updatedAt = dateProvider()
+        persist()
+    }
+
     /// Records a restart and marks the task as freshly active.
     ///
     /// Bumping `updatedAt` is the point, not bookkeeping: `stalled()` measures
