@@ -7003,7 +7003,48 @@ final class ChatViewModel: ObservableObject {
         // has never seen, and until now nothing in the delegation path pushed:
         // the bee committed locally, the Queen asked for a pull request, and
         // the cycle stopped one step short of the only thing it is for.
+        //
+        // #1251: say that the branch is being published *before* the push
+        // begins. A push that stalls on a network hiccup leaves the user
+        // staring at a silent screen; the notice is the difference between
+        // "the app froze" and "the Queen is working".
+        await postQueenNotice("Publishing `\(branch)`…")
+        TriosLogBus.shared.info(
+            .queen, "queen.pr.pushing", "Publishing the branch",
+            ["issue": issue.slug, "branch": branch]
+        )
+
+        // #1251: if the push runs long, say so again with the elapsed time.
+        // The push itself races a 90 s deadline; this notice fires well
+        // before that — long enough not to cry wolf on an ordinary push,
+        // short enough to arrive before the user assumes it died.
+        let pushStart = Date()
+        let stallNotice = Task { [weak self] in
+            // #1251: repeat the notice every 10 s while the push is still
+            // running. A single notice at 10 s falls silent again by 20 s;
+            // a long push must keep talking, not cry wolf once and stop.
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                guard !Task.isCancelled, let self else { return }
+                let elapsed = Int(Date().timeIntervalSince(pushStart))
+                // #1251: log before posting — observability must not queue
+                // behind the chat write. The structured event hits the log
+                // bus first so it is on disk and in the LOGS tab even if the
+                // chat write that follows is slow or dropped.
+                TriosLogBus.shared.warn(
+                    .queen, "queen.pr.pushStall",
+                    "Push is taking long: \(elapsed) s so far",
+                    ["issue": issue.slug, "branch": branch, "elapsed_s": String(elapsed)]
+                )
+                await self.postQueenNotice(
+                    SystemNoticeClassifier.warningMarker
+                        + "Still publishing `\(branch)` — \(elapsed) s so far."
+                )
+            }
+        }
+
         if let pushFailure = await QueenBranchCommitter.pushBranch(branch) {
+            stallNotice.cancel()
             TriosLogBus.shared.error(
                 .queen, "queen.pr.pushFailed", "Could not publish the branch",
                 ["issue": issue.slug, "branch": branch, "detail": pushFailure]
@@ -7015,6 +7056,7 @@ final class ChatViewModel: ObservableObject {
             )
             return
         }
+        stallNotice.cancel()
 
         // Where the branch is, not where the issue is. Those differ here and the
         // mismatch is what stopped the cycle: the branch lives in the checkout's
