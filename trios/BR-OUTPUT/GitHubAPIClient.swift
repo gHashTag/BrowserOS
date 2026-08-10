@@ -99,9 +99,26 @@ actor GitHubAPIClient {
     /// check, a moved head — and the status code is what tells them apart.
     /// Carrying it lets the caller log and decide without a second request,
     /// instead of learning only that something went wrong.
+    ///
+    /// A **conflict** is a permanent refusal: the branches diverge and no
+    /// retry will resolve it. The forge signals this through
+    /// `mergeable == false` or `mergeable_state == "dirty"`. This is not
+    /// "not yet" — it is "never without a rebase" — and retrying is
+    /// pointless. The `.conflict` case exists so the caller can stop,
+    /// name the conflict, and move on (#1252).
     enum MergeOutcome {
         case merged
-        case refused(statusCode: Int)
+        case refused(statusCode: Int, mergeable: Bool?, mergeState: String?)
+        case conflict(mergeable: Bool?, mergeState: String?)
+    }
+
+    /// A conflict is permanent: the branches diverge and no retry will
+    /// resolve it. The forge signals this through `mergeable == false`
+    /// or `mergeable_state == "dirty"`. Extracted as a pure function so
+    /// the classification is testable without a network call — the same
+    /// pattern as `headFilter` and `matchingPullRequest` (#1252).
+    static func isConflict(mergeable: Bool?, mergeState: String?) -> Bool {
+        mergeable == false || mergeState == "dirty"
     }
 
     /// Builds the `owner:branch` value the GitHub pulls endpoint requires for
@@ -192,17 +209,40 @@ actor GitHubAPIClient {
         throw GitHubAPIError.createPRFailed(statusCode: statusCode, message: message)
     }
 
+    /// Decodable subset of the single-PR response — just the fields that
+    /// distinguish a conflict from a not-yet. The full `GitHubPullRequest`
+    /// model lives in a file this client cannot extend, so only the
+    /// merge-relevant fields are decoded here.
+    private struct MergeStatusPayload: Codable {
+        let mergeable: Bool?
+        let mergeable_state: String?
+    }
+
+    /// Fetches `mergeable` and `mergeable_state` for one pull request.
+    /// Returns `(nil, nil)` on any failure — absence is not a conflict.
+    private func fetchMergeStatus(repo: String, number: Int) async -> (Bool?, String?) {
+        guard let path = try? GitHubEndpoint.repositoryPath(repo, "/pulls/\(number)"),
+              let (data, _) = try? await URLSession.shared.data(for: try request(path)),
+              let payload = try? JSONDecoder().decode(MergeStatusPayload.self, from: data)
+        else { return (nil, nil) }
+        return (payload.mergeable, payload.mergeable_state)
+    }
+
     /// Merges a pull request.
     ///
     /// Squash by default: a worker's branch is a session's worth of
     /// intermediate commits, and the history that matters afterwards is one
     /// change with the issue attached, not eleven attempts at it.
     ///
-    /// Returns `.refused(statusCode:)` when the forge refuses — branch
-    /// protection, a failing check, an out-of-date base — rather than
-    /// throwing, because "not allowed to merge yet" is a normal answer here
-    /// and the task simply stays open. The status code travels with the
-    /// refusal so the caller can tell 405 from 409 without a second request.
+    /// Returns `.refused(statusCode:mergeable:mergeState:)` when the forge
+    /// says "not yet" — branch protection, a failing check, an out-of-date
+    /// base — rather than throwing, because "not allowed to merge yet" is a
+    /// normal answer here and the task simply stays open.
+    ///
+    /// Returns `.conflict(mergeable:mergeState:)` when the forge says
+    /// "never without a rebase" — the branches diverge. This is not a
+    /// not-yet: retrying will not help. The caller stops retrying and emits
+    /// its own event naming the conflict (#1252).
     func mergePullRequest(repo: String, number: Int, title: String) async throws -> MergeOutcome {
         let path = try GitHubEndpoint.repositoryPath(repo, "/pulls/\(number)/merge")
         var put = try request(path)
@@ -214,15 +254,26 @@ actor GitHubAPIClient {
         ])
         let (_, response) = try await URLSession.shared.data(for: put)
         guard let http = response as? HTTPURLResponse else {
-            return .refused(statusCode: -1)
+            return .refused(statusCode: -1, mergeable: nil, mergeState: nil)
         }
-        // 200 merged. 405 not mergeable, 409 head moved — both mean "not now",
-        // and both are answers rather than errors. The status code travels
-        // with the refusal so the caller can distinguish them.
         if http.statusCode == 200 {
             return .merged
         }
-        return .refused(statusCode: http.statusCode)
+
+        // The forge refused. Before reporting a generic refusal, fetch the
+        // PR's mergeable state so the caller can tell a conflict (permanent)
+        // from a not-yet (temporary). A conflict means the branches diverge
+        // and no retry will succeed — the distinction that #1252 exists to
+        // make.
+        let (mergeable, mergeState) = await fetchMergeStatus(repo: repo, number: number)
+        if Self.isConflict(mergeable: mergeable, mergeState: mergeState) {
+            return .conflict(mergeable: mergeable, mergeState: mergeState)
+        }
+        // 405 not mergeable, 409 head moved — both mean "not now", and both
+        // are answers rather than errors. The status code travels with the
+        // refusal so the caller can distinguish them, along with the
+        // mergeable fields so the caller does not need a second request.
+        return .refused(statusCode: http.statusCode, mergeable: mergeable, mergeState: mergeState)
     }
 
     /// Fetches one pull request, which is the only endpoint that reports
