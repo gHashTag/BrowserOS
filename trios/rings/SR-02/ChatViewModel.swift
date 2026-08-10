@@ -490,6 +490,25 @@ final class ChatViewModel: ObservableObject {
         "\(ProjectPaths.trinity)/state/queen_inbox.jsonl"
     }
 
+    /// #1260: A cursor is a cache. The saved byte offset can point past the
+    /// end of a file that was truncated or rotated — the offset is stale, the
+    /// same way a cached value is stale when its source changes. This pure
+    /// function decides whether the offset is still valid and what to use
+    /// instead, so the decision is testable without the full poll loop.
+    ///
+    /// Returns the offset to seek to and whether a restart was needed. An
+    /// offset past EOF returns zero and `didRestart: true`; anything within
+    /// or at the boundary returns the offset unchanged and `didRestart: false`.
+    internal static func resolveInboxOffset(
+        currentOffset: UInt64,
+        fileSize: UInt64
+    ) -> (offset: UInt64, didRestart: Bool) {
+        if currentOffset > fileSize {
+            return (0, true)
+        }
+        return (currentOffset, false)
+    }
+
     /// Reads any new lines appended since the last poll and delegates each one.
     /// The byte offset is persisted to UserDefaults after each read, so a
     /// restart resumes from where it stopped without re-delegating.
@@ -500,7 +519,28 @@ final class ChatViewModel: ObservableObject {
         else { return }
         defer { try? handle.close() }
 
-        try? handle.seek(toOffset: queenInboxOffset)
+        // #1260: A cursor is a cache — check the size before the seek. If the
+        // file was truncated or rotated, the saved offset points past EOF and
+        // readToEnd() silently returns nothing, losing every line appended
+        // since the shrink. Resolve the offset first; restart from zero and
+        // announce it if the cursor is stale.
+        guard let fileSize = try? handle.seekToEnd() else { return }
+        let (resolvedOffset, didRestart) = Self.resolveInboxOffset(
+            currentOffset: queenInboxOffset, fileSize: fileSize
+        )
+        if didRestart {
+            TriosLogBus.shared.info(
+                .queen, "queen.inbox.restarted",
+                "Inbox cursor (\(queenInboxOffset) B) was past EOF (\(fileSize) B) — restarting from zero",
+                ["oldOffset": "\(queenInboxOffset)", "fileSize": "\(fileSize)"]
+            )
+            queenInboxOffset = 0
+            UserDefaults.standard.set(
+                Double(queenInboxOffset), forKey: Self.queenInboxOffsetKey
+            )
+        }
+
+        try? handle.seek(toOffset: resolvedOffset)
         guard let data = try? handle.readToEnd(), !data.isEmpty else { return }
 
         // Advance the offset before processing so a crash mid-delegation

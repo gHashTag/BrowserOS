@@ -51,7 +51,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 663  // 610 + 6 branch-publish notice (#1251) + 2 push-stall log mirror (#1251) + 1 repetition loop (#1251) + 2 log-before-notice ordering and stall interval (#1251) + 19 conflict-is-not-a-not-yet (#1252) + 15 merge-the-reviewed-commit (#1254) + 8 mergePayload/outcome pure-function extraction (#1254)
+    static let minimumChecks = 673  // 610 + 6 branch-publish notice (#1251) + 2 push-stall log mirror (#1251) + 1 repetition loop (#1251) + 2 log-before-notice ordering and stall interval (#1251) + 19 conflict-is-not-a-not-yet (#1252) + 15 merge-the-reviewed-commit (#1254) + 8 mergePayload/outcome pure-function extraction (#1254) + 10 cursor-is-a-cache (#1260)
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -141,7 +141,8 @@ struct ChatSSEEndToEndTests {
         await runIssueNumberIsAnIdentifier()
         await runEmptyReviewerAnswerRetriesOnceAndRecordsAsAskedButUnanswered()
         await runReviewerReceivesAdversaryPrompt()
-        await runBranchPublishNoticeIsEmitted()
+            await runBranchPublishNoticeIsEmitted()
+            await runCursorIsACache()
         // The interface-drift proof invokes the Swift compiler and is
         // deliberately kept out of the fast suite. Run it explicitly with:
         //   make drift-guard
@@ -6182,5 +6183,93 @@ struct ChatSSEEndToEndTests {
         } else {
             check(false, "criterion 1+3: could not locate both markers for the ordering check")
         }
+    }
+
+    // MARK: - Scenario: cursor-is-a-cache (#1260)
+
+    /// A cursor is a cache: the saved byte offset into the inbox file can go
+    /// stale when the file is truncated or rotated. The offset then points
+    /// past EOF and `readToEnd()` silently returns nothing — every line
+    /// appended since the shrink is lost.
+    ///
+    /// #1260 adds a size check before the seek: if the offset is past the
+    /// end, it restarts from zero and logs the restart. Ordinary appends
+    /// (offset within the file) are unaffected.
+    static func runCursorIsACache() async {
+        print("\n# Scenario: a cursor is a cache — check the size before the seek (#1260)")
+
+        let source = (try? String(
+            contentsOfFile: "\(ProjectPaths.root)/rings/SR-02/ChatViewModel.swift",
+            encoding: .utf8
+        )) ?? ""
+
+        check(!source.isEmpty,
+              "ChatViewModel.swift is readable — the source guard has something to read")
+
+        // ── Criterion 1: an offset past the end of file restarts from zero ──
+        //
+        // resolveInboxOffset is the pure decision function. If the cursor
+        // (500) is past the file size (100), it returns zero so the seek
+        // starts from the beginning of the fresh file.
+        let truncated = ChatViewModel.resolveInboxOffset(currentOffset: 500, fileSize: 100)
+        check(truncated.offset == 0,
+              "criterion 1: an offset past EOF (500 > 100) restarts from zero")
+        check(truncated.didRestart,
+              "criterion 1: the restart is flagged so the caller can announce it")
+
+        // ── Criterion 2: the restart is announced in the log ──
+        //
+        // The restart must be visible after the fact — in the LOGS tab, on
+        // disk, in the structured event stream — not just silently happen.
+        // Counting occurrences (not .contains) means removing the
+        // TriosLogBus call while leaving the offset reset drops the count
+        // to zero and the suite goes red.
+        check(
+            occurrences("queen.inbox.restarted", in: source) >= 1,
+            "criterion 2: the restart is logged at queen.inbox.restarted"
+        )
+        check(
+            occurrences("restarting from zero", in: source) >= 1,
+            "criterion 2: the log message announces the restart (\"restarting from zero\")"
+        )
+
+        // ── Criterion 3: ordinary appends are still read incrementally ──
+        //
+        // The truncation guard must not trigger on a healthy file. An
+        // offset within or at the boundary of the file is returned as-is;
+        // the poll reads from there to EOF, which is exactly the new
+        // content appended since the last read.
+        let ordinary = ChatViewModel.resolveInboxOffset(currentOffset: 100, fileSize: 500)
+        check(ordinary.offset == 100 && !ordinary.didRestart,
+              "criterion 3: an offset within the file is used as-is (100 of 500)")
+
+        let atEnd = ChatViewModel.resolveInboxOffset(currentOffset: 500, fileSize: 500)
+        check(atEnd.offset == 500 && !atEnd.didRestart,
+              "criterion 3: an offset at EOF is used as-is (500 of 500) — no false restart")
+
+        let fresh = ChatViewModel.resolveInboxOffset(currentOffset: 0, fileSize: 0)
+        check(fresh.offset == 0 && !fresh.didRestart,
+              "criterion 3: a zero offset on an empty file does not restart")
+
+        // ── Criterion 4: a check fails if the truncation detection is removed ──
+        //
+        // resolveInboxOffset must be defined AND called inside
+        // pollQueenInbox. Removing the call (the truncation detection)
+        // while leaving the definition drops the count below 2 — the suite
+        // goes red. Removing the definition entirely drops it to 0.
+        check(
+            occurrences("resolveInboxOffset", in: source) >= 2,
+            "criterion 4: resolveInboxOffset is defined and called in pollQueenInbox — \(occurrences("resolveInboxOffset", in: source)) occurrences (need ≥ 2)"
+        )
+
+        // The seekToEnd call must exist so the file size is measured
+        // before the seek. Without it, there is no comparison and the
+        // truncation check cannot fire. This string does not appear
+        // elsewhere in ChatViewModel.swift, so a single occurrence proves
+        // the guard is wired in.
+        check(
+            occurrences("seekToEnd", in: source) >= 1,
+            "criterion 4: seekToEnd measures the file before the seek — \(occurrences("seekToEnd", in: source)) occurrences (need ≥ 1)"
+        )
     }
 }
