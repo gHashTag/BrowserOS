@@ -27,6 +27,9 @@ Cargo.lock
 # Trinity runtime state (auto-generated)
 .trinity/state/
 
+# Test-harness state and the incremental e2e build directory
+.trinity-test/
+
 # Tooling
 lefthook.yml
 
