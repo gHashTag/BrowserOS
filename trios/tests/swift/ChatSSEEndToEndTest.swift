@@ -51,7 +51,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 678  // 610 + 6 branch-publish notice (#1251) + 2 push-stall log mirror (#1251) + 1 repetition loop (#1251) + 2 log-before-notice ordering and stall interval (#1251) + 19 conflict-is-not-a-not-yet (#1252) + 15 merge-the-reviewed-commit (#1254) + 8 mergePayload/outcome pure-function extraction (#1254) + 10 cursor-is-a-cache (#1260) + 5 dispatch-inbox-entries-concurrently (#1150)
+    static let minimumChecks = 681  // 610 + 6 branch-publish notice (#1251) + 2 push-stall log mirror (#1251) + 1 repetition loop (#1251) + 2 log-before-notice ordering and stall interval (#1251) + 19 conflict-is-not-a-not-yet (#1252) + 15 merge-the-reviewed-commit (#1254) + 8 mergePayload/outcome pure-function extraction (#1254) + 10 cursor-is-a-cache (#1260) + 5 dispatch-inbox-entries-concurrently (#1150) + 3 inbox-poller-is-dev-variant-only (#1150)
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -144,6 +144,7 @@ struct ChatSSEEndToEndTests {
             await runBranchPublishNoticeIsEmitted()
             await runCursorIsACache()
             await runDispatchInboxEntriesConcurrently()
+            await runInboxPollerIsDevVariantOnly()
         // The interface-drift proof invokes the Swift compiler and is
         // deliberately kept out of the fast suite. Run it explicitly with:
         //   make drift-guard
@@ -6434,7 +6435,61 @@ struct ChatSSEEndToEndTests {
         // delegationBlockReason in the registry.
         check(
             occurrences("canStartAnother", in: source) >= 1,
-            "criterion 2: a slot re-check (canStartAnother) guards the transition to .running in ChatViewModel — \(occurrences("canStartAnother", in: source)) occurrences (need ≥ 1)"
+              "criterion 2: a slot re-check (canStartAnother) guards the transition to .running in ChatViewModel — \(occurrences("canStartAnother", in: source)) occurrences (need ≥ 1)"
         )
+    }
+
+    // MARK: - Scenario: inbox poller is dev-variant only (#1150)
+
+    /// The Queen inbox poller must only start in the dev variant. The
+    /// `if ProjectPaths.isDevVariant` guard at the poller's startup site
+    /// is the single thing that prevents a release build from reading the
+    /// dev-only `queen_inbox.jsonl` file. If that guard is deleted — or
+    /// the task is moved outside it — the poller silently runs everywhere.
+    ///
+    /// Two criteria:
+    /// 1. A named check asserts the inbox poller is dev-variant only.
+    /// 2. The check fails if the variant guard is removed.
+    static func runInboxPollerIsDevVariantOnly() async {
+        print("\n# Scenario: inbox poller is dev-variant only (#1150)")
+
+        let source = (try? String(
+            contentsOfFile: "\(ProjectPaths.root)/rings/SR-02/ChatViewModel.swift",
+            encoding: .utf8
+        )) ?? ""
+
+        check(!source.isEmpty,
+              "ChatViewModel.swift is readable — the source guard has something to read")
+
+        let lines = source.components(separatedBy: "\n")
+
+        // Locate the line that starts the poller: `queenInboxPollTask = Task`.
+        // This is the single assignment that launches the background loop.
+        // It must live inside an `if ProjectPaths.isDevVariant {` block.
+        let pollerLineIndex = lines.firstIndex {
+            $0.contains("queenInboxPollTask = Task")
+        }
+
+        check(pollerLineIndex != nil,
+              "criterion 1: inbox poller task assignment (queenInboxPollTask = Task) exists in ChatViewModel.swift")
+
+        guard let pollerLineIndex else {
+            fail("criterion 2: cannot verify dev-variant guard — poller line not found")
+            return
+        }
+
+        // Search backwards from the poller assignment for the variant guard.
+        // In the current source the guard is 1 line above. We allow up to 5
+        // lines (whitespace, offset-init lines) between guard and task start.
+        // If someone removes the `if ProjectPaths.isDevVariant {` line, no
+        // line in the window contains `isDevVariant` and this check fails.
+        let windowStart = max(0, pollerLineIndex - 5)
+        let precedingLines = lines[windowStart...pollerLineIndex]
+        let hasVariantGuard = precedingLines.contains {
+            $0.contains("isDevVariant")
+        }
+
+        check(hasVariantGuard,
+              "criterion 2: poller task is guarded by ProjectPaths.isDevVariant — the guard appears within 5 lines above the task assignment")
     }
 }
