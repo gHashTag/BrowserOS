@@ -19,7 +19,7 @@ DEV_APP     := $(ROOT)/trios-dev.app
 RELEASE_APP := $(ROOT)/trios.app
 
 .DEFAULT_GOAL := dev
-.PHONY: help dev release build keychain-doors make-dollars empty-sources watch-empties check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard
+.PHONY: help dev release build keychain-doors make-dollars empty-sources watch-empties check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard finish-mark-order
 
 help:
 	@echo "TriOS targets:"
@@ -40,6 +40,7 @@ help:
 	@echo "  make mutants    - break known guards and require the SSE suite to notice"
 	@echo "  make mutants-logic - the same, for guards a clade-e2e logic suite owns"
 	@echo "  make drift-guard - run the interface-drift compiling proof (slow; not in the fast suite)"
+	@echo "  make finish-mark-order - check the completed-turn mark stays in the finish callback"
 
 # --- Building -----------------------------------------------------------
 
@@ -261,7 +262,35 @@ watch-empties:
 		sleep 1; \
 	done
 
-check: check-selftest keychain-doors make-dollars empty-sources dev test cassettes
+# --- Finish-mark order guard ---------------------------------------------
+#
+# #1248 moved recordCompletedTurn into the onFinish callback synchronously,
+# before the deferred Task.  If the call drifts back inside the Task block,
+# the completed-turn count is invisible to reapStalledWorkers until the
+# async work finishes — the race #1248 fixed.  This check asserts the
+# ordering holds and proves it can fail by running the same logic against
+# a fixture where the call is in the wrong place.
+.PHONY: finish-mark-order
+finish-mark-order:
+	@fail=0; \
+	if awk '/runner\.onFinish[[:space:]]*=/{f=1} f&&/recordCompletedTurn/{rc=NR} f&&/Task[[:space:]]*\{/{tk=NR;f=0} END{exit !(rc>0&&tk>0&&rc<tk)}' "$(ROOT)/rings/SR-02/ChatViewModel.swift"; then \
+		echo "  ok   - real source: recordCompletedTurn precedes Task in onFinish"; \
+	else \
+		echo "  FAIL - real source: recordCompletedTurn does not precede Task in onFinish"; \
+		fail=1; \
+	fi; \
+	if [ ! -f "$(ROOT)/tests/fixtures/finish-mark-wrong.swift" ]; then \
+		echo "  FAIL - missing fixture: $(ROOT)/tests/fixtures/finish-mark-wrong.swift"; \
+		fail=1; \
+	elif awk '/runner\.onFinish[[:space:]]*=/{f=1} f&&/recordCompletedTurn/{rc=NR} f&&/Task[[:space:]]*\{/{tk=NR;f=0} END{exit !(rc>0&&tk>0&&rc<tk)}' "$(ROOT)/tests/fixtures/finish-mark-wrong.swift"; then \
+		echo "  FAIL - bad fixture passed (the check cannot detect the regression)"; \
+		fail=1; \
+	else \
+		echo "  ok   - bad fixture correctly rejected"; \
+	fi; \
+	if [ $$fail -ne 0 ]; then exit 1; fi
+
+check: check-selftest keychain-doors make-dollars empty-sources finish-mark-order dev test cassettes
 
 # Replay every cassette and assert the expected signal appears in the log.
 #
