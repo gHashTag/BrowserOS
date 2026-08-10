@@ -3980,35 +3980,45 @@ struct ChatSSEEndToEndTests {
         check(withSHA["commit_title"] as? String == "t",
               "mergePayload always sets commit_title")
 
-        // ── Criterion 2 (acceptance): outcome maps status codes correctly ──
+        // ── #1254 Criterion 2 + #1259: each branch of outcome is named ──
         //
-        // outcome is a pure static function. Removing the function
-        // definition makes every check below fail to compile.
+        // outcome is a pure static function. Removing the function definition
+        // makes every check below fail to compile. Each branch is named so
+        // that removing it produces a failure whose name identifies the branch
+        // that was deleted — a break reads as the defect (#1259).
 
+        // The 409 branch: statusCode == 409 → headMoved.
+        // Removing this branch makes 409 fall through to refused. The check
+        // name says "409 branch" so the failure identifies the code removed.
         if case .headMoved = GitHubAPIClient.outcome(statusCode: 409, mergeable: nil, mergeState: nil) {
-            check(true, "outcome maps 409 to headMoved")
+            check(true, "the 409 branch in outcome maps to headMoved")
         } else {
-            fail("outcome should map 409 to headMoved")
+            fail("the 409 branch in outcome maps to headMoved")
         }
 
+        // The isConflict branch: isConflict(mergeable:mergeState:) → conflict.
+        // Removing isConflict from outcome makes 405+mergeable=false fall
+        // through to refused. The check name says "isConflict" so the failure
+        // identifies the branch removed (#1259 criterion 3).
         if case .conflict = GitHubAPIClient.outcome(statusCode: 405, mergeable: false, mergeState: nil) {
-            check(true, "outcome maps 405 with mergeable false to conflict")
+            check(true, "the isConflict branch in outcome maps mergeable false to conflict")
         } else {
-            fail("outcome should map 405 with mergeable false to conflict")
+            fail("the isConflict branch in outcome maps mergeable false to conflict")
         }
 
-        // 405 without a conflict signal is a generic refusal, not a conflict.
+        // The default branch: anything the forge refuses without a conflict
+        // signal. 405 with mergeable nil is a generic refusal, not a conflict.
         if case .refused(let code, _, _) = GitHubAPIClient.outcome(statusCode: 405, mergeable: nil, mergeState: nil) {
-            check(code == 405, "outcome maps 405 with mergeable nil to refused(405)")
+            check(code == 405, "the default branch in outcome maps 405 nil to refused")
         } else {
-            fail("outcome should map 405 with mergeable nil to refused")
+            fail("the default branch in outcome maps 405 nil to refused")
         }
 
-        // 200 is merged regardless of mergeable fields.
+        // The 200 branch: statusCode == 200 → merged regardless of fields.
         if case .merged = GitHubAPIClient.outcome(statusCode: 200, mergeable: nil, mergeState: nil) {
-            check(true, "outcome maps 200 to merged")
+            check(true, "the 200 branch in outcome maps to merged")
         } else {
-            fail("outcome should map 200 to merged")
+            fail("the 200 branch in outcome maps to merged")
         }
 
         // ── Criterion 4: checks fail if the sha is dropped or 409 is folded into 405 ──
