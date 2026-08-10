@@ -159,3 +159,39 @@ fixture with a good one (the target must fail), and break the real subject (the
 target must fail, naming the real location). Only then does a passing run mean
 anything. `parse-tests` earned it — it names line 3887, where the damage is,
 while the full e2e run pointed at 3942, 3985 and 4267, all of them consequences.
+
+## A check that cannot reach the decision is not guarding it
+
+Two decisions went in behind a network call: whether the merge request carries
+the reviewed `sha`, and whether HTTP 409 maps to "the branch moved". The
+accompanying checks exercised the registry field and the enum's case matching —
+everything *around* the decisions. Both break tests passed with the code
+deliberately broken:
+
+    sha removed from the payload   → All tests passed (655 checks)
+    the 409 branch deleted         → All tests passed (655 checks)
+
+The fix is the same one this file already used for `isConflict`: pull the
+decision out as a pure function the suite can call directly.
+
+    static func mergePayload(title: String, sha: String?) -> [String: Any]
+    static func outcome(statusCode: Int, mergeable: Bool?, mergeState: String?) -> MergeOutcome
+
+and let the network method do nothing but call them. After that the same two
+breaks fail.
+
+**Rule: if a decision lives behind I/O, the suite cannot see it, and a check
+written next to it is decoration.** Extract the decision or admit it is
+unguarded — do not let its neighbours' green ticks stand in for it.
+
+Note on break-test quality: deleting the `409` branch made the suite fail
+through its coverage guard ("a scenario returned early without asserting"),
+not through a named assertion. That is a real signal but a blunt one — it says
+*something* went missing, not what. Prefer a check that names the mapping, so
+the failure reads as "409 is no longer headMoved" rather than "coverage moved".
+
+Also: make the break faithful. The first attempt at this one replaced the digits
+`409` in a *comment* three lines above the branch and, of course, changed
+nothing. Verify the edit landed on the executable line before you trust the
+result — a break test aimed at a comment is indistinguishable from a passing
+guard.
