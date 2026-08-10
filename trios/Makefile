@@ -19,7 +19,7 @@ DEV_APP     := $(ROOT)/trios-dev.app
 RELEASE_APP := $(ROOT)/trios.app
 
 .DEFAULT_GOAL := dev
-.PHONY: help dev release build keychain-doors make-dollars empty-sources watch-empties check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard finish-mark-order
+.PHONY: help dev release build keychain-doors make-dollars empty-sources watch-empties check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard finish-mark-order parse-tests
 
 help:
 	@echo "TriOS targets:"
@@ -290,7 +290,40 @@ finish-mark-order:
 	fi; \
 	if [ $$fail -ne 0 ]; then exit 1; fi
 
-check: check-selftest keychain-doors make-dollars empty-sources finish-mark-order dev test cassettes
+# --- Parse-every-test-source guard --------------------------------------
+#
+# A green build proves the app compiled, not that every test source is
+# syntactically valid.  A broken func header or an unbalanced brace in a
+# test file that clade-e2e happened not to compile this run sits unnoticed
+# until the next time that suite runs — which may be never, if the build
+# appeared green.  This check runs `swiftc -parse` (syntax only, no type
+# resolution) on every Swift file under tests/swift/ so a syntax error is
+# caught and named before it hides behind a suite that did not run.
+#
+# The fixture proves the check itself works: it is a valid Swift file that
+# parses, and if it goes missing the check fails rather than silently
+# passing with one fewer file to check.
+.PHONY: parse-tests
+parse-tests:
+	@fail=0; \
+	if [ ! -f "$(ROOT)/tests/fixtures/parse-fixture.swift" ]; then \
+		echo "[FAIL] missing fixture: $(ROOT)/tests/fixtures/parse-fixture.swift"; \
+		exit 1; \
+	fi; \
+	for f in "$(ROOT)"/tests/swift/*.swift "$(ROOT)/tests/fixtures/parse-fixture.swift"; do \
+		if ! err=$$(swiftc -parse "$$f" 2>&1); then \
+			echo "[FAIL] $$f does not parse:"; \
+			echo "$$err" | grep 'error:' | head -5 | sed 's/^/  /'; \
+			fail=1; \
+		fi; \
+	done; \
+	if [ $$fail -eq 0 ]; then \
+		echo "[OK] every test source parses"; \
+	else \
+		exit 1; \
+	fi
+
+check: check-selftest keychain-doors make-dollars empty-sources finish-mark-order parse-tests dev test cassettes
 
 # Replay every cassette and assert the expected signal appears in the log.
 #
