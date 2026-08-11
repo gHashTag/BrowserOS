@@ -40,6 +40,15 @@ lefthook.yml
 # Built app bundle
 trios.app/
 
+# The dev variant's build output, 178 MB rewritten by every `make dev`.
+# Never ignored when the dev/release split landed, so every Queen snapshot
+# re-hashed and zlib-compressed all of it into .git/objects: 5.40s against
+# 1.07s once the blobs exist. That delay is what pushed the #1117 wait past
+# its budget (#1263), and it leaked unreferenced blobs on every delegation.
+trios_dev_app
+trios-dev.app/
+Frameworks-dev/
+
 # Archived prototypes (kept locally, not part of build)
 .archive/
 
