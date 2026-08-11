@@ -348,3 +348,49 @@ generate; recognise them and stop paying the generation cost.
 Two habits that cost hours when skipped: commit a worker's output before
 delegating anything else that touches the same path, and never wrap a
 source-mutating harness in `timeout`.
+
+## Incremental compilation quietly rewrites what your gates measure
+
+Making the build incremental was the biggest speedup of the effort — the e2e
+harness went 82 s to 35 s, the app build got the same treatment. It also broke a
+gate, silently, and the break looked like good news.
+
+`make dev` counts compiler warnings out of the build log. Once the build became
+incremental, the log stopped describing the tree and started describing the
+delta. Same revision, two builds in a row:
+
+    make dev with nothing touched                     -> 0 warnings
+    touch BR-OUTPUT/RichTextRenderer.swift; make dev  -> 4 warnings
+
+Worse than the wrong number: on the false zero the recipe printed *"Lower
+WARNING_CEILING so the gain cannot be given back"* — advice that would have made
+the next cold build fail. A gate that congratulates you is the one to check.
+
+The general rule, because this will recur with every cache you add:
+
+**When you make a step incremental, list everything downstream that reads its
+output, and ask of each whether it needed the whole thing.** Warning counts,
+timing measurements, "files compiled" tallies, log-derived metrics — all of them
+were implicitly full-build measurements. Incrementality does not just make them
+faster; it changes their meaning from *tree* to *delta*, and nothing warns you.
+
+Two related traps met the same night:
+
+- **A stale object cache across build variants.** dev and prod now keep separate
+  object directories. The comment claimed mixing them "fails to link with
+  undefined symbols" — that was invented. Driven: planting all 185 dev objects
+  into a prod directory builds fine, exit 0, zero dev symbols, because swiftc
+  takes the module name from the output basename and mixing changes the compiler
+  arguments, which makes the driver print *"Incremental compilation has been
+  disabled, because different arguments were passed"* and recompile everything.
+  The real risk was never a mixed binary; it was silently losing incrementality
+  — a full 52 s recompile on every alternating build, under an `[OK]`. Guard the
+  silent case, and put the stamp *inside* the object directory so it travels
+  with what it describes.
+- **A git snapshot that hashes build output.** `.gitignore` covered the release
+  binaries but not the dev variant's 178 MB, so every Queen snapshot re-hashed
+  and zlib-compressed them: 4.91 s against 1.73 s once ignored, measured. First
+  attempt at that measurement showed no difference at all, because the blobs were
+  already in `.git/objects` from earlier runs — the cost only exists for content
+  git has never seen. Measure the state the defect lives in, not the one that is
+  convenient to reproduce.
