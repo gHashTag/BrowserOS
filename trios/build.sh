@@ -39,11 +39,25 @@ fi
 # instead of rebuilding all 185 files every time.
 #
 # The variant is the LAST path component and is appended even to an explicit
-# TRIOS_BUILD_DIR, so a release build can never link objects compiled for dev:
-# the two variants differ in signing, bundle identity and ports, and one silent
-# object reused across them would ship a dev binary as the release. Set
-# TRIOS_BUILD_CLEAN=1 to start from scratch; point TRIOS_BUILD_DIR somewhere
-# private for A/B measurements or parallel checkouts.
+# TRIOS_BUILD_DIR, so two variants cannot resolve to one object directory. That
+# separation is real but it is not what protects the release binary; the
+# toolchain does. Measured, not assumed:
+#   - swiftc takes the module name from the output binary's basename, so all
+#     185 dev objects export $s13trios_dev_app* and all 185 prod objects export
+#     $s9trios_app*. Not one object of either set carries the other's prefix.
+#   - the driver records the compiler arguments, and -o differs between the
+#     variants. Planting a complete dev build directory (objects, swiftdeps and
+#     the dependency graph) under a forged prod stamp does not link dev code and
+#     does not fail; the driver prints "Incremental compilation has been
+#     disabled, because different arguments were passed to the compiler" and
+#     recompiles every file over the top. The binary that came out had zero
+#     trios_dev_app symbols.
+# So a mixed binary is not something the directory layout is holding back.
+# Signing, bundle identity and ports are decided after the compile and never
+# reach an object either. Set TRIOS_BUILD_CLEAN=1 to start from scratch; point
+# TRIOS_BUILD_DIR somewhere private for A/B measurements or parallel checkouts.
+# The object directory records its variant (see below) to catch the failure that
+# IS silent: two variants sharing one directory and recompiling in full forever.
 BUILD_DIR="${TRIOS_BUILD_DIR:-$PROJECT_DIR/.trinity/build}/$VARIANT"
 OBJ_DIR="$BUILD_DIR/obj"
 SWIFT_OPTIMIZATION="${TRIOS_SWIFT_OPTIMIZATION:--Onone}"
@@ -283,6 +297,43 @@ if [ -n "${TRIOS_BUILD_CLEAN:-}" ]; then
     rm -rf "$BUILD_DIR"
 fi
 mkdir -p "$OBJ_DIR"
+
+# Stamp the object directory with the variant that owns it, and refuse to
+# compile into objects that belong to the other one.
+#
+# This is not a guard against shipping dev code as the release: the paragraph at
+# the top of this file records the experiment showing swiftc cannot reuse the
+# other variant's objects at all. It guards the failure that leaves no trace. A
+# restored CI cache under the wrong key, a hand copy of one variant's directory
+# onto the other, or a future edit that drops the "/$VARIANT" from BUILD_DIR all
+# end with two variants writing one directory - and the only symptom is that
+# every build recompiles all ${#SWIFT_FILES[@]} files, forever, while still
+# printing success. The incremental build quietly stops being incremental. Here
+# that is one line before any compile instead of a minute nobody attributes.
+#
+# The stamp lives inside OBJ_DIR, not beside it, so it travels with the objects
+# it describes: copying just obj/ into the other variant's directory would leave
+# an outer stamp telling the truth about a directory whose contents are foreign.
+VARIANT_STAMP="$OBJ_DIR/.variant"
+LEGACY_VARIANT_STAMP="$BUILD_DIR/variant"
+if [ -f "$LEGACY_VARIANT_STAMP" ] && [ ! -f "$VARIANT_STAMP" ]; then
+    mv "$LEGACY_VARIANT_STAMP" "$VARIANT_STAMP"
+fi
+if [ -f "$VARIANT_STAMP" ]; then
+    STAMPED_VARIANT="$(cat "$VARIANT_STAMP")"
+    if [ "$STAMPED_VARIANT" != "$VARIANT" ]; then
+        echo "[FAIL] $OBJ_DIR holds objects built as variant '$STAMPED_VARIANT', not '$VARIANT'."
+        echo "       Swift objects carry the variant in every symbol, so none of them can be"
+        echo "       reused: this build would recompile all ${#SWIFT_FILES[@]} files and say nothing."
+        echo "       Delete that directory, or point TRIOS_BUILD_DIR somewhere private."
+        exit 1
+    fi
+else
+    if [ -n "$(ls -A "$OBJ_DIR" 2>/dev/null)" ]; then
+        echo "[NOTE] Adopting existing unstamped object directory as variant '$VARIANT'."
+    fi
+    printf '%s\n' "$VARIANT" > "$VARIANT_STAMP"
+fi
 
 # Object stems are the repo-relative path with "/" turned into "_", not the
 # basename: two files named the same in different rings would otherwise share

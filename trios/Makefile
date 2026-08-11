@@ -805,6 +805,19 @@ MUTANTS := \
 # The logic targets read the same way from the clade-e2e report: only the
 # "(<suite>) FAILED" verdict is a catch, only "(<suite>): passed" is a
 # survivor, and "compile failed" or a missing report is a suite that never ran.
+#
+# One failure is not a catch (#1263). Once "caught" keys on "test(s) failed", a
+# flaky suite is indistinguishable from a mutation the suite noticed: the gate
+# would score its own flake as coverage. So the failure must REPEAT. On the
+# first failing run the suite is run once more with the mutation still applied:
+#   fails again  -> caught.
+#   passes       -> FLAKY, and that fails the target. It is not a catch; it is
+#                   evidence the suite is unreliable, which is worse news than
+#                   a survivor and must not be scored as coverage.
+#   neither      -> the confirmation run never ran: ERROR, also a failure.
+# The cost is paid only by a catch, which then costs two suite runs instead of
+# one. That is the intended trade: the slow, explicit mutation targets buy a
+# verdict that a single flake cannot forge.
 .PHONY: mutants mutants-logic mutants-changed
 mutants:
 	@backup=$$(mktemp -d); \
@@ -861,7 +874,17 @@ mutants:
 		esac; \
 		out=$$(bash "$(ROOT)/tests/swift/run_chat_sse_e2e.sh" 2>&1 || true); \
 		if echo "$$out" | grep -qF "test(s) failed"; then \
-			echo "  ok   - caught: $$name"; \
+			: "One failure could be the suite's own flake. Confirm it with a \
+			   second run, mutation still applied."; \
+			out2=$$(bash "$(ROOT)/tests/swift/run_chat_sse_e2e.sh" 2>&1 || true); \
+			if echo "$$out2" | grep -qF "test(s) failed"; then \
+				echo "  ok   - caught: $$name (failed twice)"; \
+			elif echo "$$out2" | grep -qF "All ChatSSEEndToEnd tests passed"; then \
+				echo "  FLAKY - the suite failed once and passed once with the mutation applied: $$name"; fail=1; \
+			else \
+				echo "  ERROR - the confirmation run never ran: $$name"; fail=1; \
+				echo "$$out2" | head -5 | sed 's/^/         | /'; \
+			fi; \
 		elif echo "$$out" | grep -qF "All ChatSSEEndToEnd tests passed"; then \
 			echo "  SURVIVED - $$name"; fail=1; \
 		else \
@@ -871,7 +894,7 @@ mutants:
 		cp "$$backup/$$n.bak" "$(ROOT)/$$src"; \
 	done; \
 	if [ $$fail -eq 0 ]; then echo "[OK] every mutation was caught ($$n)"; \
-	else echo "[FAIL] a mutation survived or went stale"; exit 1; fi
+	else echo "[FAIL] a mutation survived, went stale, or failed only once"; exit 1; fi
 
 # Mutations a logic suite catches rather than the SSE harness.
 #
@@ -950,7 +973,19 @@ mutants-logic:
 		(cd "$(ROOT)" && cargo run --quiet --bin clade-e2e) >"$$e2e_out" 2>"$$e2e_err" || true; \
 		report=$$(tail -1 "$$e2e_out"); \
 		if [ -f "$$report" ] && grep -qF "[FAIL] Swift logic tests ($$suite) FAILED" "$$report"; then \
-			echo "  ok   - caught by $$suite: $$name"; \
+			: "One failure could be the suite's own flake. Confirm it with a \
+			   second run, mutation still applied."; \
+			e2e_out2="$$backup/$$n.clade-e2e.confirm.out"; e2e_err2="$$backup/$$n.clade-e2e.confirm.err"; \
+			(cd "$(ROOT)" && cargo run --quiet --bin clade-e2e) >"$$e2e_out2" 2>"$$e2e_err2" || true; \
+			report2=$$(tail -1 "$$e2e_out2"); \
+			if [ -f "$$report2" ] && grep -qF "[FAIL] Swift logic tests ($$suite) FAILED" "$$report2"; then \
+				echo "  ok   - caught by $$suite: $$name (failed twice)"; \
+			elif [ -f "$$report2" ] && grep -qF "[OK] Swift logic tests ($$suite): passed" "$$report2"; then \
+				echo "  FLAKY - the suite failed once and passed once with the mutation applied: $$name"; fail=1; \
+			else \
+				echo "  ERROR - the confirmation run of $$suite never ran: $$name"; fail=1; \
+				cat "$$e2e_err2" "$$e2e_out2" | head -5 | sed 's/^/         | /'; \
+			fi; \
 		elif [ -f "$$report" ] && grep -qF "[OK] Swift logic tests ($$suite): passed" "$$report"; then \
 			echo "  SURVIVED - $$name"; fail=1; \
 		else \
@@ -960,7 +995,7 @@ mutants-logic:
 		cp "$$backup/$$n.bak" "$(ROOT)/$$src"; \
 	done; \
 	if [ $$fail -eq 0 ]; then echo "[OK] every logic-suite mutation was caught ($$n)"; \
-	else echo "[FAIL] a logic-suite mutation survived, went stale, or was not measured"; exit 1; fi
+	else echo "[FAIL] a logic-suite mutation survived, went stale, failed only once, or was not measured"; exit 1; fi
 
 # --- Mutation (working tree only) ---------------------------------------
 #
@@ -1056,7 +1091,17 @@ mutants-changed:
 		esac; \
 		out=$$(bash "$(ROOT)/tests/swift/run_chat_sse_e2e.sh" 2>&1 || true); \
 		if echo "$$out" | grep -qF "test(s) failed"; then \
-			echo "  ok   - caught: $$name"; \
+			: "One failure could be the suite's own flake. Confirm it with a \
+			   second run, mutation still applied."; \
+			out2=$$(bash "$(ROOT)/tests/swift/run_chat_sse_e2e.sh" 2>&1 || true); \
+			if echo "$$out2" | grep -qF "test(s) failed"; then \
+				echo "  ok   - caught: $$name (failed twice)"; \
+			elif echo "$$out2" | grep -qF "All ChatSSEEndToEnd tests passed"; then \
+				echo "  FLAKY - the suite failed once and passed once with the mutation applied: $$name"; fail=1; \
+			else \
+				echo "  ERROR - the confirmation run never ran: $$name"; fail=1; \
+				echo "$$out2" | head -5 | sed 's/^/         | /'; \
+			fi; \
 		elif echo "$$out" | grep -qF "All ChatSSEEndToEnd tests passed"; then \
 			echo "  SURVIVED - $$name"; fail=1; \
 		else \
@@ -1094,7 +1139,19 @@ mutants-changed:
 		(cd "$(ROOT)" && cargo run --quiet --bin clade-e2e) >"$$e2e_out" 2>"$$e2e_err" || true; \
 		report=$$(tail -1 "$$e2e_out"); \
 		if [ -f "$$report" ] && grep -qF "[FAIL] Swift logic tests ($$suite) FAILED" "$$report"; then \
-			echo "  ok   - caught by $$suite: $$name"; \
+			: "One failure could be the suite's own flake. Confirm it with a \
+			   second run, mutation still applied."; \
+			e2e_out2="$$backup/$$n.clade-e2e.confirm.out"; e2e_err2="$$backup/$$n.clade-e2e.confirm.err"; \
+			(cd "$(ROOT)" && cargo run --quiet --bin clade-e2e) >"$$e2e_out2" 2>"$$e2e_err2" || true; \
+			report2=$$(tail -1 "$$e2e_out2"); \
+			if [ -f "$$report2" ] && grep -qF "[FAIL] Swift logic tests ($$suite) FAILED" "$$report2"; then \
+				echo "  ok   - caught by $$suite: $$name (failed twice)"; \
+			elif [ -f "$$report2" ] && grep -qF "[OK] Swift logic tests ($$suite): passed" "$$report2"; then \
+				echo "  FLAKY - the suite failed once and passed once with the mutation applied: $$name"; fail=1; \
+			else \
+				echo "  ERROR - the confirmation run of $$suite never ran: $$name"; fail=1; \
+				cat "$$e2e_err2" "$$e2e_out2" | head -5 | sed 's/^/         | /'; \
+			fi; \
 		elif [ -f "$$report" ] && grep -qF "[OK] Swift logic tests ($$suite): passed" "$$report"; then \
 			echo "  SURVIVED - $$name"; fail=1; \
 		else \
@@ -1104,7 +1161,7 @@ mutants-changed:
 		cp "$$backup/$$n.bak" "$(ROOT)/$$src"; \
 	done; \
 	if [ $$fail -eq 0 ]; then echo "[OK] every working-tree mutation was caught ($$n of $$total mutations selected)"; \
-	else echo "[FAIL] a working-tree mutation survived, went stale, or was not measured ($$n of $$total mutations selected)"; exit 1; fi
+	else echo "[FAIL] a working-tree mutation survived, went stale, failed only once, or was not measured ($$n of $$total mutations selected)"; exit 1; fi
 
 # --- Interface-drift compiling proof ------------------------------------
 #
