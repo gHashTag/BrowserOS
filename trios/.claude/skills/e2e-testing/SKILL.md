@@ -315,3 +315,42 @@ Corollary discovered immediately after: once `caught` keys on "test(s) failed",
 a **flaky** suite is indistinguishable from a caught mutation. Positive-evidence
 scoring is necessary but not sufficient; the suite itself has to be stable, or
 the score has to require the failure to repeat. See gHashTag/trios#1263.
+
+## A cache entry outlives the truth it recorded
+
+The warning gate was rebuilt around a per-file cache: remember each file's
+warnings, refresh only the files this build recompiled, report the union as a
+tree total. It reads as obviously correct and it drifts in both directions,
+neither of them visible from inside the cache.
+
+**Over-count.** Adversaries planted warnings, drove the gate, and removed the
+plants. The plants' files were never recompiled again, so their cache entries
+were never refreshed. Three consecutive builds reported `8 compiler warnings in
+the tree (185/185 files measured)` on a tree holding 4, enforced the ceiling
+against that, and never healed. Only deleting the cache by hand recovered it.
+
+**Under-count.** When a build fails *after* some files have compiled, their
+incremental state has already advanced. They are "Skipping input" ever after,
+their warnings were never folded in, and because they are still listed as seen,
+the gate still claims 185/185 and passes. The trigger is not exotic — the driver
+error "input file was modified during the build" is the worktree flicker this
+repo already documents, and it fired spontaneously twice during one review.
+
+The general shape, and it is not specific to warnings:
+
+**A cache of derived facts about files needs an invalidation rule that can fire
+without recompiling the file — and usually there isn't one.** The entry says
+"this file had N warnings when I last compiled it". Nothing about the file's
+current bytes tells you whether that is still true; only compiling it does. So
+the cache can only be refreshed by the very work it exists to avoid.
+
+What we did instead: `make dev` no longer keeps the cache between builds. It
+reports only what this build compiled, labels the count partial, and does not
+enforce the ceiling. Enforcement moved to `make warnings`, which compiles
+everything — 3 s warm, because it keeps its own build directory rather than its
+own *answer* directory. Caching the objects is sound; caching the conclusion is
+not.
+
+If you must keep a conclusion cache, give it a expiry it cannot outlive: tie the
+entry to the object file's identity, and treat a missing or older object as no
+entry at all.
