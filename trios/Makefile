@@ -23,7 +23,7 @@ RELEASE_APP := $(ROOT)/trios.app
 HARNESS_LOCK := /tmp/trios_harness.lock
 
 .DEFAULT_GOAL := dev
-.PHONY: help dev release build keychain-doors make-dollars empty-sources watch-empties check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard finish-mark-order guard-shapes parse-tests
+.PHONY: help dev release build keychain-doors make-dollars empty-sources watch-empties check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard finish-mark-order guard-shapes parse-tests warnings warning-gate
 
 help:
 	@echo "TriOS targets:"
@@ -47,6 +47,7 @@ help:
 	@echo "  make drift-guard - run the interface-drift compiling proof (slow; not in the fast suite)"
 	@echo "  make finish-mark-order - check the completed-turn mark stays in the finish callback"
 	@echo "  make guard-shapes - check the load-bearing guards are still in their files"
+	@echo "  make warnings   - full compiler-warning count for the whole tree (one cold build)"
 
 # --- Building -----------------------------------------------------------
 
@@ -86,32 +87,185 @@ help:
 # to the user, and not something to change without looking at the screen.
 #
 # Uses /usr/bin/grep deliberately: this shell has grep shadowed by a function.
+#
+# --- The number has to describe the TREE, not the last delta (#1264) ---------
+#
+# Everything above was written when every build recompiled every file, so "what
+# this build printed" and "what the tree contains" were the same number. They
+# stopped being the same the day the dev build became incremental, and the gate
+# did not notice. Driven, on one unchanged revision:
+#
+#   make dev, nothing touched                        -> 0 warnings
+#   touch BR-OUTPUT/RichTextRenderer.swift; make dev -> 4 warnings
+#
+# The compiler only warns about what it compiled. The false zero was worse than
+# useless, because the recipe went on to advise lowering WARNING_CEILING - which
+# would have made the next cold build fail on debt nobody added.
+#
+# Three designs were on the table:
+#   (a) a 'make warnings' target that compiles clean into a scratch tree and
+#       counts there, with check using that instead of the side effect of dev;
+#   (b) a per-file cache of each file's last known warnings, refreshed only for
+#       the files a build actually compiled, reported as a tree total;
+#   (c) print no number at all when the build was incremental.
+#
+# (b), with (c) as its fallback and (a) as its repair. (a) alone puts a cold
+# build inside every check - measured at the bottom of this comment, and nobody
+# pays that per run. (c) alone is honest but surrenders: since almost every
+# build here is now incremental, the ceiling would essentially never be
+# enforced again, and a gate that never fires is the gate being removed with
+# extra steps. (b) costs milliseconds, and its one weak spot - a cache that has
+# not yet seen every file - is exactly where (c)'s refusal is correct and where
+# (a)'s full recompile is the cure.
+#
+# How the cache knows which files this build compiled: the Makefile sets
+# TRIOS_BUILD_SHOW_INCREMENTAL, so the driver prints one
+# "Incremental compilation: Skipping input: {compile: X.o <= X.swift}" per file
+# it reused. Compiled = every file in the build's own output-file-map minus
+# those. That is better than comparing object mtimes, which a concurrent build
+# would have disturbed and which would have silently *lowered* the count.
+#
+# It is NOT immune to a concurrent build, and the earlier comment here claimed
+# it was. Three adversaries refuted that claim by driving it: `dev` writes the
+# driver's output to the fixed global path /tmp/trios_build_dev.log via a shell
+# redirect that truncates before build.sh is even exec'd, and build.sh does not
+# take its per-variant lock until much later. Two `make dev` runs overlapping in
+# that window read each other's log, and nothing correlates the log with the
+# build that wrote it - no nonce, no build id. The count is trustworthy for one
+# build at a time, which is how the gates are run; it is not trustworthy under
+# concurrency, and `make warnings` is the repair when in doubt.
+#
+# The other refuted overstatement: a warning in a file that has NOT been
+# recompiled since the cache was created is invisible to this number. The
+# partial-count branch below says so out loud whenever measured < total, but on
+# a 185/185 count the figure is only as good as the compiles that filled it.
+#
+# The cache lives inside the object directory it describes, so deleting the
+# build directory throws it away with the objects, and the cold build that
+# follows refills it completely. If a build reports no incremental remarks at
+# all (a toolchain that drops the flag), attribution is impossible: the seen
+# list is emptied and the count reported as partial rather than guessed.
+#
+# A partial count is a lower bound, so it can still FAIL the ceiling - what it
+# must never do is claim the tree is clean, and it must never print the
+# lower-the-ceiling advice. That advice is now reachable only from a count that
+# has seen every file.
+#
+# Cost of the full count: 'make warnings' forces TRIOS_BUILD_CLEAN=1, i.e. one
+# cold build of all 185 files. Measured here twice, 108s and 96s, against 48-56s
+# for the incremental build it replaces - and that target prints its own
+# [warnings] timing line, so the figure stays honest. That is the cost of design
+# (a) on every check, and the reason the cheap cache carries the daily load.
 WARNING_CEILING := 4
 
+# Where the per-file warning cache lives. Inside the dev object directory on
+# purpose: its lifetime is the objects' lifetime.
+WARN_BUILD_DIR := $(ROOT)/.trinity/build/dev
+WARN_OFM := $(WARN_BUILD_DIR)/output-file-map.json
+WARN_LIST := $(WARN_BUILD_DIR)/warnings.list
+WARN_SEEN := $(WARN_BUILD_DIR)/warnings.seen
+WARN_LOG := /tmp/trios_build_dev.log
+
 dev:
-	@TRIOS_VARIANT=dev "$(ROOT)/build.sh" > /tmp/trios_build_dev.log 2>&1; \
-	if grep -q "Build successful: $(ROOT)/trios_dev_app" /tmp/trios_build_dev.log; then \
+	@TRIOS_VARIANT=dev TRIOS_BUILD_SHOW_INCREMENTAL=1 "$(ROOT)/build.sh" > $(WARN_LOG) 2>&1; \
+	if grep -q "Build successful: $(ROOT)/trios_dev_app" $(WARN_LOG); then \
 		echo "[OK] dev app built"; \
-		grep -q "swift test failed" /tmp/trios_build_dev.log && \
+		grep -q "swift test failed" $(WARN_LOG) && \
 			echo "[NOTE] XCTest suite still broken (pre-existing); run 'make xctest' for detail"; \
-		warnings=$$(awk '/Copied and signed/{exit} {print}' /tmp/trios_build_dev.log 2>/dev/null \
-			| /usr/bin/grep -oE "^$(ROOT)/[^:]+\.swift:[0-9]+:[0-9]+: warning: " | sort -u | wc -l | tr -d ' '); \
-		if [ "$$warnings" -gt $(WARNING_CEILING) ]; then \
-			echo "[FAIL] $$warnings compiler warnings; the ceiling is $(WARNING_CEILING)."; \
-			awk '/Copied and signed/{exit} {print}' /tmp/trios_build_dev.log \
-				| /usr/bin/grep -oE "^$(ROOT)/[^:]+\.swift:[0-9]+:[0-9]+: warning: .*" \
-				| sort -u | sed 's|$(ROOT)/||' | head -25; \
-			exit 1; \
-		elif [ "$$warnings" -lt $(WARNING_CEILING) ]; then \
-			echo "[NOTE] $$warnings warnings, under the ceiling of $(WARNING_CEILING)."; \
-			echo "       Lower WARNING_CEILING in the Makefile so the gain cannot be given back."; \
-		fi; \
+		$(MAKE) --no-print-directory warning-gate || exit 1; \
 		exit 0; \
 	else \
 		echo "[FAIL] dev app did not build:"; \
-		grep -E "error:" /tmp/trios_build_dev.log | head -10; \
+		grep -E "error:" $(WARN_LOG) | head -10; \
 		exit 1; \
 	fi
+
+# Fold this build's warnings into the per-file cache and judge the tree total.
+# Reads $(WARN_LOG), which 'dev' has just written; safe to run again by hand.
+.PHONY: warning-gate
+warning-gate:
+	@if [ ! -f "$(WARN_OFM)" ]; then \
+		echo "[NOTE] compiler warnings: no output file map at $(WARN_OFM), so the file"; \
+		echo "       list is unknown and no count is reported. Run 'make warnings'."; \
+		exit 0; \
+	fi; \
+	tmp=$$(mktemp -d /tmp/trios_warn.XXXXXX) || exit 1; \
+	trap 'rm -rf "$$tmp"' EXIT INT TERM; \
+	awk '/^  "\//{src=$$0;sub(/^  "/,"",src);sub(/": \{$$/,"",src);next} \
+	     /^    "object": /{o=$$0;sub(/^    "object": "/,"",o);sub(/",$$/,"",o); \
+	       if(src!=""){n=split(o,p,"/");print p[n] "\t" src;src=""}}' \
+		"$(WARN_OFM)" | sort > "$$tmp/all"; \
+	cut -f2 "$$tmp/all" | sort -u > "$$tmp/sources"; \
+	total=$$(wc -l < "$$tmp/sources" | tr -d ' '); \
+	remarks=$$(/usr/bin/grep -c "Incremental compilation:" $(WARN_LOG) 2>/dev/null || true); \
+	unknown=0; \
+	if [ -n "$${TRIOS_BUILD_CLEAN:-}" ]; then \
+		: > "$$tmp/skipped"; \
+	elif [ "$${remarks:-0}" -gt 0 ]; then \
+		sed -n 's/.*Incremental compilation: Skipping input:.*{compile: \([^ ]*\.o\) .*/\1/p' \
+			$(WARN_LOG) | sort -u > "$$tmp/skipped"; \
+	else \
+		unknown=1; cut -f1 "$$tmp/all" | sort -u > "$$tmp/skipped"; \
+	fi; \
+	awk -v first="$$tmp/skipped" \
+		'FILENAME==first{skip[$$1]=1;next} !($$1 in skip){print $$2}' \
+		"$$tmp/skipped" "$$tmp/all" | sort -u > "$$tmp/compiled"; \
+	compiled=$$(wc -l < "$$tmp/compiled" | tr -d ' '); \
+	awk '/Copied and signed/{exit} {print}' $(WARN_LOG) 2>/dev/null \
+		| /usr/bin/grep -E "^$(ROOT)/[^:]+\.swift:[0-9]+:[0-9]+: warning: " \
+		| sort -u > "$$tmp/fresh" || true; \
+	touch "$(WARN_LIST)" "$(WARN_SEEN)"; \
+	awk -v first="$$tmp/compiled" \
+		'FILENAME==first{c[$$0]=1;next}{p=$$1;sub(/:[0-9]+:[0-9]+:$$/,"",p);if(!(p in c))print}' \
+		"$$tmp/compiled" "$(WARN_LIST)" > "$$tmp/kept"; \
+	cat "$$tmp/kept" "$$tmp/fresh" | sort -u > "$$tmp/merged"; \
+	awk -v first="$$tmp/sources" \
+		'FILENAME==first{s[$$0]=1;next}{p=$$1;sub(/:[0-9]+:[0-9]+:$$/,"",p);if(p in s)print}' \
+		"$$tmp/sources" "$$tmp/merged" > "$$tmp/list"; \
+	if [ "$$unknown" -eq 1 ]; then \
+		: > "$$tmp/seen"; \
+	else \
+		cat "$(WARN_SEEN)" "$$tmp/compiled" | sort -u \
+			| comm -12 - "$$tmp/sources" > "$$tmp/seen"; \
+	fi; \
+	cp "$$tmp/list" "$(WARN_LIST)"; cp "$$tmp/seen" "$(WARN_SEEN)"; \
+	measured=$$(wc -l < "$$tmp/seen" | tr -d ' '); \
+	count=$$(awk '{print $$1}' "$$tmp/list" | sort -u | wc -l | tr -d ' '); \
+	if [ "$$measured" -ge "$$total" ]; then \
+		echo "[OK] $$count compiler warnings in the tree ($$measured/$$total files measured, $$compiled recompiled this build)"; \
+	elif [ "$$unknown" -eq 1 ]; then \
+		echo "[NOTE] this build did not report which files it compiled, so the tree total"; \
+		echo "       is unknown; $$count warning(s) seen in its own output. Partial count:"; \
+		echo "       the ceiling of $(WARNING_CEILING) is not being enforced against the tree."; \
+		echo "       Run 'make warnings' for a full count."; \
+	else \
+		echo "[NOTE] partial count: $$count warning(s) across the $$measured of $$total files"; \
+		echo "       measured so far ($$compiled recompiled this build). The other"; \
+		echo "       $$((total - measured)) file(s) have not been compiled since the cache was"; \
+		echo "       created, so a warning in them is not in this number, and the ceiling"; \
+		echo "       of $(WARNING_CEILING) is not being enforced against the tree."; \
+		echo "       Run 'make warnings' for a full count."; \
+	fi; \
+	if [ "$$count" -gt $(WARNING_CEILING) ]; then \
+		echo "[FAIL] $$count compiler warnings; the ceiling is $(WARNING_CEILING)."; \
+		sed 's|$(ROOT)/||' "$$tmp/list" | sort -u | head -25; \
+		exit 1; \
+	fi; \
+	if [ "$$measured" -ge "$$total" ] && [ "$$count" -lt $(WARNING_CEILING) ]; then \
+		echo "[NOTE] $$count warnings, under the ceiling of $(WARNING_CEILING)."; \
+		echo "       Lower WARNING_CEILING in the Makefile so the gain cannot be given back."; \
+	fi
+
+# The full count: recompile every file, so the cache describes the whole tree.
+# One cold build. Run it when the gate says the count is partial.
+.PHONY: warnings
+warnings:
+	@echo "[warnings] full count: forcing a cold build of the dev variant."
+	@start=$$(date +%s); \
+	TRIOS_BUILD_CLEAN=1 $(MAKE) --no-print-directory dev; status=$$?; \
+	end=$$(date +%s); \
+	echo "[warnings] full count took $$((end - start))s"; \
+	exit $$status
 
 release:
 	@echo "Building RELEASE. This replaces $(RELEASE_APP)."
@@ -192,6 +346,7 @@ keychain-doors:
 # #1237).  This check walks every recipe line and flags a lone $ that is
 # neither $ nor a Make variable in the allowlist below.
 MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP WARNING_CEILING CASSETTE_DIR \
+	WARN_BUILD_DIR WARN_OFM WARN_LIST WARN_SEEN WARN_LOG \
 	CASSETTE_BRANCHES SWEEP_CANARY LOG KEYCHAIN_ALLOW_PATTERNS MAKE VARIANT \
 	MSG ISSUE WORKER TASK PATHS CRITERIA SECOND REVIEW AUTONOMY CASSETTE \
 	SECOND_TURN QUEEN_COMMAND MUTANTS MUTANTS_LOGIC MAKE_DOLLAR_VARS HARNESS_LOCK GUARDS
