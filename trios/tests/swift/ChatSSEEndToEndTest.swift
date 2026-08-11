@@ -68,6 +68,37 @@ struct ChatSSEEndToEndTests {
         failures += 1
     }
 
+    /// Waits until `condition` holds, or until `seconds` of wall-clock time
+    /// have passed. Returns whether the condition was ever observed.
+    ///
+    /// `for _ in 0..<100 { sleep(100ms) }` is a fixed iteration count
+    /// wearing the costume of a ten-second budget, and the disguise only
+    /// holds on an idle machine. Sleeping is not the thing that gets slower
+    /// under load, so counting sleeps measures the one quantity in the
+    /// system that does not move: 100 iterations measured 10.91s while nine
+    /// suites and a build shared the machine, against 10.0s idle. The work
+    /// being waited on has no such ceiling — the Queen's snapshot shells out
+    /// to `git add -A` over the whole superproject, ~2s idle and 11-14s
+    /// under that same load (#1263). The budget stood still, the work grew
+    /// past it, and the loop gave up on a task that was about to arrive.
+    ///
+    /// A wall-clock deadline is the honest spelling of "wait up to N
+    /// seconds": it stretches with the machine exactly as the work does.
+    /// The condition is re-tested once after the deadline so a sleep that
+    /// straddles it cannot turn an arrived result into a timeout.
+    static func wait(
+        upTo seconds: Double,
+        pollingEvery interval: Double = 0.1,
+        until condition: @MainActor () -> Bool
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if condition() { return true }
+            try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+        }
+        return condition()
+    }
+
     /// Counts non-overlapping occurrences of `needle` in `haystack`.
     ///
     /// `.contains` answers "does the string appear anywhere?" — a dead
@@ -5937,17 +5968,34 @@ struct ChatSSEEndToEndTests {
         // worker finishes → handleWorkerFinished → requestReviewerVerdicts
         // → sendOneShotReviewerRequest (once + one retry) →
         // askedButUnanswered populated → transition to awaitingReview.
-        var settled = false
-        for _ in 0..<100 {
+        //
+        // A wall-clock deadline, not an iteration count. On the way to
+        // awaitingReview the Queen takes a whole-tree git snapshot, which
+        // costs seconds and costs more of them the busier the machine is;
+        // the old `0..<100` budget did not grow with it and expired first
+        // (#1263). Sixty seconds is far past the ~4s this takes idle and
+        // past the ~14s it took under the worst measured load, so an
+        // expiry now means something is genuinely wedged.
+        let settled = await wait(upTo: 60) {
             let state = registry.task(forIssue: task.issue)?.state
-            if state == .awaitingReview || state == .failed {
-                settled = true
-                break
-            }
-            try? await Task.sleep(nanoseconds: 100_000_000)
+            return state == .awaitingReview || state == .failed
         }
         check(settled,
               "the worker finished and the task reached a terminal review state")
+        guard settled else {
+            // Stop here. Every check below reads state that the review
+            // populates, so continuing past a timeout does not test the
+            // retry — it reports the retry as broken. That is how one slow
+            // git call turned into five confident failures about reviewer
+            // logic that had not yet been given the chance to run. One
+            // timeout is one failure; the suite's minimum-checks guard
+            // then says plainly that a scenario returned early.
+            let lastState = registry.task(forIssue: task.issue)?.state
+            print("       (timed out after 60s; #1117 was last seen in "
+                  + "\(String(describing: lastState)) "
+                  + "— nothing below was measured)")
+            return
+        }
 
         // Let any remaining async work flush.
         try? await Task.sleep(nanoseconds: 500_000_000)
