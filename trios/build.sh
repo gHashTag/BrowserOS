@@ -33,6 +33,19 @@ else
     OUTPUT="$PROJECT_DIR/trios_app"
     STANDALONE_FRAMEWORKS="$PROJECT_DIR/Frameworks"
 fi
+
+# Persistent build directory: the objects, the output file map and the
+# dependency graph survive between runs so swiftc can compile incrementally
+# instead of rebuilding all 185 files every time.
+#
+# The variant is the LAST path component and is appended even to an explicit
+# TRIOS_BUILD_DIR, so a release build can never link objects compiled for dev:
+# the two variants differ in signing, bundle identity and ports, and one silent
+# object reused across them would ship a dev binary as the release. Set
+# TRIOS_BUILD_CLEAN=1 to start from scratch; point TRIOS_BUILD_DIR somewhere
+# private for A/B measurements or parallel checkouts.
+BUILD_DIR="${TRIOS_BUILD_DIR:-$PROJECT_DIR/.trinity/build}/$VARIANT"
+OBJ_DIR="$BUILD_DIR/obj"
 SWIFT_OPTIMIZATION="${TRIOS_SWIFT_OPTIMIZATION:--Onone}"
 LOG_DIR="$PROJECT_DIR/.trinity/logs"
 LOG_FILE="$LOG_DIR/build_$(date +%s).log"
@@ -222,13 +235,115 @@ if [ -z "$SQLCIPHER_DYLIB" ] || [ ! -f "$SQLCIPHER_DYLIB" ]; then
     exit 1
 fi
 
+# The build directory is shared mutable state - 185 objects plus a dependency
+# graph, not a single binary. Two concurrent builds of the same variant would
+# have two frontends writing the same .o, and a truncated object links as a
+# build failure. Serialize on an atomic mkdir lock, reclaiming it when the
+# recorded owner is gone. The lock covers only the compile: everything after it
+# (bundle assembly, signing, tests) touches no shared object.
+BUILD_LOCK="$BUILD_DIR.lock"
+LOCK_HELD=0
+release_build_lock() {
+    if [ "$LOCK_HELD" = "1" ]; then
+        LOCK_HELD=0
+        rm -rf "$BUILD_LOCK"
+    fi
+}
+LOCK_WAIT="${TRIOS_BUILD_LOCK_WAIT:-900}"
+lock_waited=0
+mkdir -p "$(dirname "$BUILD_LOCK")"
+while [ "$LOCK_HELD" = "0" ]; do
+    if mkdir "$BUILD_LOCK" 2>/dev/null; then
+        LOCK_HELD=1
+        trap 'release_build_lock' EXIT
+        trap 'release_build_lock; exit 130' INT
+        trap 'release_build_lock; exit 143' TERM
+        echo $$ > "$BUILD_LOCK/pid"
+        break
+    fi
+    lock_owner="$(cat "$BUILD_LOCK/pid" 2>/dev/null || true)"
+    if [ -z "$lock_owner" ] || ! kill -0 "$lock_owner" 2>/dev/null; then
+        echo "Reclaiming stale build lock $BUILD_LOCK (owner ${lock_owner:-unknown} is gone)."
+        rm -rf "$BUILD_LOCK"
+        continue
+    fi
+    if [ "$lock_waited" -ge "$LOCK_WAIT" ]; then
+        echo "[FAIL] another $VARIANT build holds $BUILD_LOCK (pid $lock_owner) after ${lock_waited}s."
+        echo "       Set TRIOS_BUILD_DIR to build in a private directory."
+        exit 1
+    fi
+    if [ "$lock_waited" = "0" ]; then
+        echo "Waiting for the $VARIANT build lock held by pid $lock_owner..."
+    fi
+    sleep 2
+    lock_waited=$((lock_waited + 2))
+done
+
+if [ -n "${TRIOS_BUILD_CLEAN:-}" ]; then
+    rm -rf "$BUILD_DIR"
+fi
+mkdir -p "$OBJ_DIR"
+
+# Object stems are the repo-relative path with "/" turned into "_", not the
+# basename: two files named the same in different rings would otherwise share
+# one .o and one of them would silently vanish from the binary. Assert it.
+STEMS=()
+for swift_file in "${SWIFT_FILES[@]}"; do
+    case "$swift_file" in
+        *'"'*|*'\'*)
+            echo "[FAIL] source path contains a quote or backslash and cannot be written into the output file map: $swift_file"
+            exit 1
+            ;;
+    esac
+    stem="${swift_file#$PROJECT_DIR/}"
+    stem="${stem//\//_}"
+    STEMS+=("${stem%.swift}")
+done
+DUPLICATE_STEMS="$(printf '%s\n' "${STEMS[@]}" | sort | uniq -d)"
+if [ -n "$DUPLICATE_STEMS" ]; then
+    echo "[FAIL] duplicate object name for: $DUPLICATE_STEMS"
+    exit 1
+fi
+
+# The output file map is what makes -incremental possible: it names a persistent
+# .o and .swiftdeps per input, and the "" entry tells the driver where to keep
+# the whole-build dependency graph. This toolchain's driver writes that graph
+# beside the named path as master.priors rather than master.swiftdeps, so look
+# for either when inspecting the directory by hand.
+OFM="$BUILD_DIR/output-file-map.json"
+{
+    printf '{\n'
+    printf '  "": {\n    "swift-dependencies": "%s/master.swiftdeps"\n  }' "$BUILD_DIR"
+    i=0
+    while [ "$i" -lt "${#SWIFT_FILES[@]}" ]; do
+        printf ',\n  "%s": {\n    "object": "%s/%s.o",\n    "swift-dependencies": "%s/%s.swiftdeps"\n  }' \
+            "${SWIFT_FILES[$i]}" "$OBJ_DIR" "${STEMS[$i]}" "$OBJ_DIR" "${STEMS[$i]}"
+        i=$((i + 1))
+    done
+    printf '\n}\n'
+} > "$OFM"
+
+SWIFTC_INCREMENTAL_FLAGS=(-incremental -output-file-map "$OFM")
+if [ -n "${TRIOS_BUILD_SHOW_INCREMENTAL:-}" ]; then
+    SWIFTC_INCREMENTAL_FLAGS+=(-driver-show-incremental -driver-show-job-lifecycle)
+fi
+
 echo "Compiling ${#SWIFT_FILES[@]} Swift files with SQLCipher..."
 
 # Build with swiftc. CSQLCipher.modulemap re-exports the SQLCipher sqlite3 API
 # and links -lsqlcipher; we still pass the include/L paths for the C headers
 # and runtime library resolution.
-swiftc -j 1 \
-    -disable-batch-mode \
+# Batch mode is what pays for incrementality on a cold build. -incremental makes
+# every frontend job also emit a .swiftdeps, and with one job per file that cost
+# is paid 185 times: measured here, a cold build went 171s -> 262s. Batching the
+# primary files into one job per worker loads SwiftUI/AppKit once instead of
+# once per file and brings the same cold build to 136s - faster than the
+# non-incremental build it replaces. Rebuild granularity is unchanged: on a
+# later build only the files the dependency graph marks stale become primaries.
+# -j 1 stays: jobs still run one at a time, as before.
+swiftc "${SWIFTC_INCREMENTAL_FLAGS[@]}" \
+    -j 1 \
+    -enable-batch-mode \
     "$SWIFT_OPTIMIZATION" \
     -o "$OUTPUT" \
     -framework SwiftUI \
@@ -248,8 +363,13 @@ swiftc -j 1 \
     -Xlinker -rpath \
     -Xlinker @executable_path/../Frameworks \
     "${SWIFT_FILES[@]}" 2>&1 | tee "$LOG_FILE"
+COMPILE_STATUS=${PIPESTATUS[0]}
+# The objects and the dependency graph are written; bundle assembly, signing
+# and the test suites below touch no shared build state, so another agent's
+# build of this variant can start now.
+release_build_lock
 
-if [ ${PIPESTATUS[0]} -eq 0 ]; then
+if [ "$COMPILE_STATUS" -eq 0 ]; then
     echo "[OK] Build successful: $OUTPUT"
     chmod +x "$OUTPUT"
 

@@ -27,6 +27,10 @@ Cargo.lock
 # Trinity runtime state (auto-generated)
 .trinity/state/
 
+# Incremental app build directory: objects, output file map, dependency graph
+# and the per-variant build lock (.trinity/build/<variant>.lock).
+.trinity/build/
+
 # Test-harness state and the incremental e2e build directory
 .trinity-test/
 
