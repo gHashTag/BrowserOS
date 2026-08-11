@@ -93,15 +93,35 @@ mkdir -p "$LOG_DIR"
 
 # --- QueenUILib resolution: compile from source or use vendored dylib ---
 if [ -n "$TRIOS_VENDORED" ]; then
-    # Use pre-built dylib from Frameworks-dev/ or Frameworks/
+    # Use the pre-built QueenUILib from Frameworks-dev/ or Frameworks/.
+    #
+    # QueenUILib has two halves and the vendored build needs BOTH: the dylib
+    # satisfies the linker, and the swiftmodule satisfies `import QueenUILib`
+    # at compile time. Vendoring only the dylib is what made this path dead on
+    # arrival - the module search path pointed at the Frameworks directory,
+    # which holds dylibs and no interface, so every importing file failed with
+    # "no such module 'QueenUILib'" before the linker was ever reached. A
+    # normal build now vendors the interface next to the dylib (see
+    # "vendored escape hatch" below).
     QUEEN_DYLIB="$STANDALONE_FRAMEWORKS/libQueenUILib.dylib"
+    QUEEN_MODULE_DIR="$STANDALONE_FRAMEWORKS/Modules"
     if [ ! -f "$QUEEN_DYLIB" ]; then
         echo "[FAIL] Vendored QueenUILib not found: $QUEEN_DYLIB"
         echo "       Run a normal build first, or unset TRIOS_VENDORED."
         exit 1
     fi
+    if [ ! -f "$QUEEN_MODULE_DIR/QueenUILib.swiftmodule" ]; then
+        echo "[FAIL] Vendored QueenUILib interface not found:"
+        echo "       $QUEEN_MODULE_DIR/QueenUILib.swiftmodule"
+        echo "       The dylib alone only satisfies the linker; swiftc needs the"
+        echo "       swiftmodule or every 'import QueenUILib' fails to compile."
+        echo "       Run a normal build first (it vendors both halves),"
+        echo "       or unset TRIOS_VENDORED."
+        exit 1
+    fi
     QUEEN_BIN_DIR="$STANDALONE_FRAMEWORKS"
     echo "[VENDORED] Using pre-built QueenUILib: $QUEEN_DYLIB"
+    echo "[VENDORED] Using pre-built interface: $QUEEN_MODULE_DIR/QueenUILib.swiftmodule"
 else
     if [ ! -f "$QUEEN_PACKAGE_ROOT/Package.swift" ]; then
         echo "[FAIL] Canonical Queen package not found: $QUEEN_PACKAGE_ROOT"
@@ -119,8 +139,15 @@ else
         QUEEN_BIN_DIR="$(swift build --package-path "$QUEEN_PACKAGE_ROOT" --show-bin-path)"
     fi
     QUEEN_DYLIB="$QUEEN_BIN_DIR/libQueenUILib.dylib"
+    # SwiftPM writes the interfaces to a Modules/ subdirectory of the bin dir.
+    QUEEN_MODULE_DIR="$QUEEN_BIN_DIR/Modules"
     if [ ! -f "$QUEEN_DYLIB" ]; then
         echo "[FAIL] QueenUILib was not produced: $QUEEN_DYLIB"
+        exit 1
+    fi
+    if [ ! -f "$QUEEN_MODULE_DIR/QueenUILib.swiftmodule" ]; then
+        echo "[FAIL] QueenUILib interface was not produced:"
+        echo "       $QUEEN_MODULE_DIR/QueenUILib.swiftmodule"
         exit 1
     fi
 fi
@@ -406,7 +433,7 @@ swiftc "${SWIFTC_INCREMENTAL_FLAGS[@]}" \
     -I "$SQLCIPHER_INCLUDE" \
     -L "$SQLCIPHER_LIB" \
     -lsqlcipher \
-    -I "$QUEEN_BIN_DIR/Modules" \
+    -I "$QUEEN_MODULE_DIR" \
     -L "$QUEEN_BIN_DIR" \
     -lQueenUILib \
     -Xlinker -rpath \
@@ -426,7 +453,26 @@ if [ "$COMPILE_STATUS" -eq 0 ]; then
 
     # Keep the standalone development binary runnable as well as the app bundle.
     mkdir -p "$STANDALONE_FRAMEWORKS"
-    cp "$QUEEN_DYLIB" "$STANDALONE_FRAMEWORKS/libQueenUILib.dylib"
+    # In vendored mode the source IS the destination, and `cp x x` exits 1,
+    # which under `set -e` would abort a build that had already succeeded.
+    if [ "$QUEEN_DYLIB" != "$STANDALONE_FRAMEWORKS/libQueenUILib.dylib" ]; then
+        cp "$QUEEN_DYLIB" "$STANDALONE_FRAMEWORKS/libQueenUILib.dylib"
+    fi
+
+    # --- vendored escape hatch ---
+    # TRIOS_VENDORED=1 is the documented way to build on a machine without the
+    # neighbouring trinity checkout. It can only work if a normal build leaves
+    # the compile-time half of QueenUILib behind too, so vendor the interface
+    # next to the dylib every time we build from source.
+    if [ -z "$TRIOS_VENDORED" ]; then
+        mkdir -p "$STANDALONE_FRAMEWORKS/Modules"
+        for queen_module_artifact in QueenUILib.swiftmodule QueenUILib.swiftdoc; do
+            if [ -f "$QUEEN_MODULE_DIR/$queen_module_artifact" ]; then
+                cp "$QUEEN_MODULE_DIR/$queen_module_artifact" \
+                    "$STANDALONE_FRAMEWORKS/Modules/$queen_module_artifact"
+            fi
+        done
+    fi
     rm -f "$STANDALONE_FRAMEWORKS/$SQLCIPHER_DYLIB_NAME"
     cp -L "$SQLCIPHER_DYLIB" "$STANDALONE_FRAMEWORKS/$SQLCIPHER_DYLIB_NAME"
     chmod +w "$STANDALONE_FRAMEWORKS/$SQLCIPHER_DYLIB_NAME"
@@ -544,6 +590,32 @@ EOF
     codesign --force --deep --sign "$SIGN_IDENTITY" "$APP_BUNDLE"
     codesign --verify --deep --strict "$APP_BUNDLE"
     echo "[OK] Copied and signed $APP_BUNDLE (variant: $VARIANT, identity: $SIGN_IDENTITY)"
+
+    # Prove the vendored escape hatch still works, on the build that produces
+    # it. A documented fallback that fails is worse than none, and this one WAS
+    # broken and unnoticed: -I pointed at a directory of dylibs with no
+    # interface in it. Typechecking a one-line `import QueenUILib` against the
+    # vendored Modules directory alone exercises exactly the resolution a
+    # TRIOS_VENDORED=1 build depends on, and costs under a second.
+    if [ -n "$TRIOS_VENDORED" ]; then
+        echo "[SKIP] Vendored build in progress; the compile above already proved resolution"
+    elif [ -n "${TRIOS_SKIP_VENDOR_CHECK:-}" ]; then
+        echo "[SKIP] TRIOS_SKIP_VENDOR_CHECK is set; not verifying the vendored interface"
+    else
+        VENDOR_PROBE_DIR="$BUILD_DIR/vendor-probe"
+        mkdir -p "$VENDOR_PROBE_DIR"
+        printf 'import QueenUILib\n' > "$VENDOR_PROBE_DIR/probe.swift"
+        if swiftc -typecheck -I "$STANDALONE_FRAMEWORKS/Modules" \
+            "$VENDOR_PROBE_DIR/probe.swift" > "$VENDOR_PROBE_DIR/probe.log" 2>&1; then
+            echo "[OK] Vendored QueenUILib resolves from $STANDALONE_FRAMEWORKS/Modules (TRIOS_VENDORED=1 is buildable)"
+        else
+            echo "[FAIL] Vendored QueenUILib does NOT resolve from $STANDALONE_FRAMEWORKS/Modules"
+            echo "       A TRIOS_VENDORED=1 build on a machine without trinity would fail."
+            sed 's/^/       /' "$VENDOR_PROBE_DIR/probe.log"
+            echo "       Set TRIOS_SKIP_VENDOR_CHECK=1 to build without this check."
+            exit 1
+        fi
+    fi
 
     # The app-level memory, planner, streaming, cancellation, and persistence
     # contracts live in the existing standalone integration harness because the

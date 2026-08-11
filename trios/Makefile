@@ -47,7 +47,7 @@ help:
 	@echo "  make drift-guard - run the interface-drift compiling proof (slow; not in the fast suite)"
 	@echo "  make finish-mark-order - check the completed-turn mark stays in the finish callback"
 	@echo "  make guard-shapes - check the load-bearing guards are still in their files"
-	@echo "  make warnings   - full compiler-warning count for the whole tree (one cold build)"
+	@echo "  make warnings   - full compiler-warning count for the whole tree (own build dir; first run is cold)"
 
 # --- Building -----------------------------------------------------------
 
@@ -125,15 +125,22 @@ help:
 # those. That is better than comparing object mtimes, which a concurrent build
 # would have disturbed and which would have silently *lowered* the count.
 #
-# It is NOT immune to a concurrent build, and the earlier comment here claimed
-# it was. Three adversaries refuted that claim by driving it: `dev` writes the
-# driver's output to the fixed global path /tmp/trios_build_dev.log via a shell
-# redirect that truncates before build.sh is even exec'd, and build.sh does not
-# take its per-variant lock until much later. Two `make dev` runs overlapping in
-# that window read each other's log, and nothing correlates the log with the
-# build that wrote it - no nonce, no build id. The count is trustworthy for one
-# build at a time, which is how the gates are run; it is not trustworthy under
-# concurrency, and `make warnings` is the repair when in doubt.
+# It used to be wide open to a concurrent build. Three adversaries refuted the
+# claim of immunity by driving it: `dev` wrote the driver's output to the fixed
+# global path /tmp/trios_build_dev.log via a shell redirect that truncates
+# before build.sh is even exec'd, so build.sh's per-variant lock - taken later,
+# inside a different process - could not protect a file the next run's shell
+# had already opened. Two `make dev` runs overlapping that way read each
+# other's log, and nothing correlated a log with the build that wrote it -
+# no nonce, no build id. Every build now writes its own log and the gate is
+# handed that log plus a build id it verifies; see WARN_LOG_DIR below for the
+# measurement that closed it.
+#
+# What is still shared between two concurrent gates is the per-file cache
+# itself: both read warnings.list / warnings.seen and both rewrite them, so the
+# loser's contribution to the tree total can be lost. That is a stale total, no
+# longer a total computed from somebody else's build, and `make warnings` is
+# still the repair when in doubt.
 #
 # The other refuted overstatement: a warning in a file that has NOT been
 # recompiled since the cache was created is invisible to this number. The
@@ -151,11 +158,12 @@ help:
 # lower-the-ceiling advice. That advice is now reachable only from a count that
 # has seen every file.
 #
-# Cost of the full count: 'make warnings' forces TRIOS_BUILD_CLEAN=1, i.e. one
-# cold build of all 185 files. Measured here twice, 108s and 96s, against 48-56s
-# for the incremental build it replaces - and that target prints its own
-# [warnings] timing line, so the figure stays honest. That is the cost of design
-# (a) on every check, and the reason the cheap cache carries the daily load.
+# Cost of the full count: it used to force TRIOS_BUILD_CLEAN=1 on the dev
+# directory, i.e. one cold build of all 185 files, measured here twice at 108s
+# and 96s against 48-56s for the incremental build it replaced. A check that
+# slow is a check nobody runs, which is how this gate rotted the first time. See
+# WARN_FULL_ROOT below for what replaced it; the target still prints its own
+# [warnings] timing line, so the figure stays honest either way.
 WARNING_CEILING := 4
 
 # Where the per-file warning cache lives. Inside the dev object directory on
@@ -164,27 +172,118 @@ WARN_BUILD_DIR := $(ROOT)/.trinity/build/dev
 WARN_OFM := $(WARN_BUILD_DIR)/output-file-map.json
 WARN_LIST := $(WARN_BUILD_DIR)/warnings.list
 WARN_SEEN := $(WARN_BUILD_DIR)/warnings.seen
-WARN_LOG := /tmp/trios_build_dev.log
+
+# One log per build, not one log per machine.
+#
+# The old arrangement pointed every `make dev` at /tmp/trios_build_dev.log. The
+# shell truncates a `>` target when it opens it - in the *next* run's shell,
+# before that run's build.sh is exec'd - so build.sh's per-variant build lock
+# cannot protect the log no matter when it is taken: below, run B emptied run
+# A's log while run A held the lock and was compiling. Both gates then read
+# whatever the one file happened to hold. Driven here on 2026-08-12, two
+# `make dev` runs started 5s apart:
+#
+#   /tmp/trios_build_dev.log  13940846 -> 46 bytes at 01:03:18  (run A opens it)
+#                                46754 -> 46 bytes at 01:03:23  (run B opens it)
+#
+# Run A was 6s into a 85s build when its log was emptied under it. The
+# incremental remarks this gate counts sit in bytes 24172-46350 of a dev log,
+# so run A's entire remark block was inside the 46754 bytes run B destroyed:
+# the 185 remarks run A's gate went on to count were written by run B. Both
+# runs printed the same verdict, and neither log said whose build it was -
+# a corrupted log is byte-indistinguishable from a clean one here.
+#
+# Now: mktemp gives each invocation its own path (unique even for two builds
+# started in the same second by the same pid), the first line of that file is a
+# build id, and `dev` hands the gate both. The gate refuses a log that does not
+# carry the id it was told to expect, and refuses one carrying more than one id
+# - which is exactly what a clobbered log looks like.
+#
+# $(WARN_LOG_LAST) is kept as a convenience copy of the last finished build for
+# anyone who greps it by hand; it is written by an atomic rename so it is always
+# one whole build, and nothing on the `dev` path reads it. Per-build logs are
+# ~14 MB, so ones older than an hour are swept at the start of the next build -
+# an hour is ~40x the length of a build, so a live log is never in range. The
+# sweep says $(WARN_LOG_DIR)/ with the slash on purpose: /tmp is a symlink to
+# /private/tmp, and find does not follow a symlink named on the command line,
+# so the slashless form silently matched nothing and swept nothing.
+WARN_LOG_DIR  := /tmp
+WARN_LOG_LAST := $(WARN_LOG_DIR)/trios_build_dev.log
+# Both are set by `dev` on the command line when it calls the gate. Empty here
+# on purpose: a hand-run gate has no build of its own and must say so.
+WARN_LOG :=
+WARN_BUILD_ID :=
 
 dev:
-	@TRIOS_VARIANT=dev TRIOS_BUILD_SHOW_INCREMENTAL=1 "$(ROOT)/build.sh" > $(WARN_LOG) 2>&1; \
-	if grep -q "Build successful: $(ROOT)/trios_dev_app" $(WARN_LOG); then \
+	@# The per-file warning cache does not survive a build (#1264, second round).
+	@# An entry outlives the truth it recorded. Driven, both directions: warnings
+	@# planted and then removed left the cache reporting 8 on a tree holding 4,
+	@# three builds running and never healing, with the ceiling enforced against
+	@# a fiction; and when a build fails after some files compiled, their
+	@# incremental state advances, they are Skipped ever after, their warnings
+	@# were never folded in, and the gate still claims "185/185 measured" over an
+	@# under-count. Neither drift is detectable from inside the cache.
+	@# So `dev` reports only what this build actually compiled, labelled partial,
+	@# and never enforces the ceiling. `make warnings` compiles everything and is
+	@# where the ceiling is enforced; `check` runs it.
+	@rm -f "$(WARN_LIST)" "$(WARN_SEEN)"
+	@find $(WARN_LOG_DIR)/ -maxdepth 1 -type f -name 'trios_build_dev.*.log' \
+		-mmin +60 -delete 2>/dev/null || true; \
+	log=$$(mktemp $(WARN_LOG_DIR)/trios_build_dev.$$$$.XXXXXX) || exit 1; \
+	mv "$$log" "$$log.log" || exit 1; log="$$log.log"; \
+	id="dev.$$$$.$$(date +%s).$$RANDOM"; \
+	printf '[trios-build-id] %s\n' "$$id" > "$$log"; \
+	echo "[dev] build log $$log (id $$id)"; \
+	TRIOS_VARIANT=dev TRIOS_BUILD_SHOW_INCREMENTAL=1 "$(ROOT)/build.sh" >> "$$log" 2>&1; \
+	cp "$$log" "$(WARN_LOG_LAST).new.$$$$" 2>/dev/null && \
+		mv "$(WARN_LOG_LAST).new.$$$$" "$(WARN_LOG_LAST)" 2>/dev/null; \
+	rm -f "$(WARN_LOG_LAST).new.$$$$"; \
+	if grep -q "Build successful: $(ROOT)/trios_dev_app" "$$log"; then \
 		echo "[OK] dev app built"; \
-		grep -q "swift test failed" $(WARN_LOG) && \
+		grep -q "swift test failed" "$$log" && \
 			echo "[NOTE] XCTest suite still broken (pre-existing); run 'make xctest' for detail"; \
-		$(MAKE) --no-print-directory warning-gate || exit 1; \
+		$(MAKE) --no-print-directory warning-gate WARN_LOG="$$log" WARN_BUILD_ID="$$id" || exit 1; \
 		exit 0; \
 	else \
-		echo "[FAIL] dev app did not build:"; \
-		grep -E "error:" $(WARN_LOG) | head -10; \
+		echo "[FAIL] dev app did not build (log: $$log):"; \
+		grep -E "error:" "$$log" | head -10; \
 		exit 1; \
 	fi
 
 # Fold this build's warnings into the per-file cache and judge the tree total.
-# Reads $(WARN_LOG), which 'dev' has just written; safe to run again by hand.
+# Reads the log it is given - `dev` passes WARN_LOG and WARN_BUILD_ID for the
+# build it just ran, and the id is checked before a line of the log is believed.
+# Run by hand with no arguments it falls back to the last build's copy and says
+# so; pass WARN_LOG=<path> to judge a particular build.
 .PHONY: warning-gate
 warning-gate:
-	@if [ ! -f "$(WARN_OFM)" ]; then \
+	@log="$(WARN_LOG)"; id="$(WARN_BUILD_ID)"; \
+	if [ -z "$$log" ]; then \
+		log="$(WARN_LOG_LAST)"; \
+		echo "[NOTE] warning-gate: no WARN_LOG given, so this reads $(WARN_LOG_LAST),"; \
+		echo "       a copy of whichever build finished last - not necessarily yours."; \
+		echo "       'make dev' passes its own log and never comes through here."; \
+	fi; \
+	if [ ! -f "$$log" ]; then \
+		echo "[NOTE] compiler warnings: no build log at $$log, so nothing is counted."; \
+		echo "       Run 'make dev'."; \
+		exit 0; \
+	fi; \
+	ids=$$(/usr/bin/grep -ac '^\[trios-build-id\] ' "$$log" || true); \
+	if [ -n "$$id" ]; then \
+		if [ "$${ids:-0}" != "1" ]; then \
+			echo "[FAIL] warning-gate: $$log carries $${ids:-0} build ids."; \
+			echo "       A log holds exactly one build; this one was written by more"; \
+			echo "       than one, so nothing in it can be attributed. Rebuild."; \
+			exit 1; \
+		fi; \
+		if ! /usr/bin/grep -qaxF "[trios-build-id] $$id" "$$log"; then \
+			echo "[FAIL] warning-gate: $$log was not written by build $$id."; \
+			exit 1; \
+		fi; \
+		echo "[gate] judging build $$id from $$log"; \
+	fi; \
+	if [ ! -f "$(WARN_OFM)" ]; then \
 		echo "[NOTE] compiler warnings: no output file map at $(WARN_OFM), so the file"; \
 		echo "       list is unknown and no count is reported. Run 'make warnings'."; \
 		exit 0; \
@@ -197,13 +296,13 @@ warning-gate:
 		"$(WARN_OFM)" | sort > "$$tmp/all"; \
 	cut -f2 "$$tmp/all" | sort -u > "$$tmp/sources"; \
 	total=$$(wc -l < "$$tmp/sources" | tr -d ' '); \
-	remarks=$$(/usr/bin/grep -c "Incremental compilation:" $(WARN_LOG) 2>/dev/null || true); \
+	remarks=$$(/usr/bin/grep -c "Incremental compilation:" "$$log" 2>/dev/null || true); \
 	unknown=0; \
 	if [ -n "$${TRIOS_BUILD_CLEAN:-}" ]; then \
 		: > "$$tmp/skipped"; \
 	elif [ "$${remarks:-0}" -gt 0 ]; then \
 		sed -n 's/.*Incremental compilation: Skipping input:.*{compile: \([^ ]*\.o\) .*/\1/p' \
-			$(WARN_LOG) | sort -u > "$$tmp/skipped"; \
+			"$$log" | sort -u > "$$tmp/skipped"; \
 	else \
 		unknown=1; cut -f1 "$$tmp/all" | sort -u > "$$tmp/skipped"; \
 	fi; \
@@ -211,7 +310,7 @@ warning-gate:
 		'FILENAME==first{skip[$$1]=1;next} !($$1 in skip){print $$2}' \
 		"$$tmp/skipped" "$$tmp/all" | sort -u > "$$tmp/compiled"; \
 	compiled=$$(wc -l < "$$tmp/compiled" | tr -d ' '); \
-	awk '/Copied and signed/{exit} {print}' $(WARN_LOG) 2>/dev/null \
+	awk '/Copied and signed/{exit} {print}' "$$log" 2>/dev/null \
 		| /usr/bin/grep -E "^$(ROOT)/[^:]+\.swift:[0-9]+:[0-9]+: warning: " \
 		| sort -u > "$$tmp/fresh" || true; \
 	touch "$(WARN_LIST)" "$(WARN_SEEN)"; \
@@ -256,15 +355,185 @@ warning-gate:
 		echo "       Lower WARNING_CEILING in the Makefile so the gain cannot be given back."; \
 	fi
 
-# The full count: recompile every file, so the cache describes the whole tree.
-# One cold build. Run it when the gate says the count is partial.
+# --- The full count, without the cold build ------------------------------
+#
+# The full count is a build directory that has compiled every file, plus a cache
+# of what each compile said. The old target got that by throwing the dev
+# directory away and building it back - correct, and 96-108s, which is how a
+# check gets skipped and how this gate rotted in the first place.
+#
+# Nothing about the count needs the directory to be *new*; it needs it to be
+# *complete*. So the count gets its own directory, .trinity/build/warn/dev, and
+# keeps it. First run compiles all 185 files and fills the cache. Later runs
+# recompile only what changed and refresh those entries, and every other file's
+# entry is still the one its own compile produced. That is a full count from an
+# incremental build - measurements at the bottom.
+#
+# Why a second directory rather than reusing .trinity/build/dev:
+#   - the dev directory's cache is whatever the day's dev builds happened to
+#     touch, and the thing being asked for here is completeness;
+#   - a cold repair of the dev directory makes the NEXT `make dev` slow too;
+#   - `make dev` and this target can then be measured against each other
+#     without one deleting the other's objects.
+# The cost is a second copy of the objects, ~55 MB, inside .trinity/build/ so
+# .gitignore already covers it (a sibling .trinity/build-warn/ would not be
+# ignored, and 55 MB of untracked object files is its own kind of bug).
+#
+# The number still has to describe the TREE. Two things could make it not:
+#
+#   1. A file the warn directory has never compiled - a new source file, an
+#      interrupted first run, or a build whose compiles could not be attributed
+#      at all (see the `unknown` branch in the gate: it empties `seen`, which a
+#      toolchain change that disables incrementality can do). The gate already
+#      handles this: `seen` is the set of files this directory has measured, and
+#      when it is smaller than the file list the gate prints the partial-count
+#      paragraph, refuses to claim the tree is clean, and refuses the
+#      lower-the-ceiling advice. So the failure mode of a persistent directory
+#      is a count that says it is incomplete, not one that is quietly wrong.
+#      Driven: deleting one line from warnings.seen and re-running printed
+#      "partial count: 4 warning(s) across the 184 of 185 files".
+#      One thing does change, though. The gate's repair advice is "Run 'make
+#      warnings' for a full count", which is right when `make dev` prints it and
+#      circular when this target does - and an emptied `seen` is not something a
+#      reuse build can refill, since the files it describes do not need
+#      recompiling. So a partial result here is not advised away: the target
+#      deletes the directory and counts again from scratch, once. If even that
+#      is partial it says so and stops, rather than looping.
+#   2. A first run whose compiles cannot be attributed. On an empty directory
+#      there is no build record, the driver prints no "Incremental compilation:"
+#      remarks, and the gate's attribution branch would empty `seen` and report
+#      partial - a false partial on the one run that really did compile
+#      everything. So when the directory has no objects and no build record this
+#      target sets TRIOS_BUILD_CLEAN=1, which is true by construction and tells
+#      the gate to count every file in the map as compiled. Setting it on an
+#      already-empty directory costs nothing (build.sh rm -rf's a path that is
+#      not there).
+#
+# What this target does NOT do: repair the dev directory's cache. It used to, as
+# a side effect of rebuilding it. `make dev` reports from its own cache and gets
+# it complete by compiling; this target answers the question directly instead.
+#
+# It skips the chat e2e, swift test and the vendored-interface probe. None of
+# them can emit a compiler warning that this count reads - the gate cuts the log
+# at "Copied and signed" - and they are most of what a build costs once the
+# compile is incremental. `make dev` still runs all three; this is a measuring
+# instrument, not a substitute for a build.
+#
+# Measured, one revision, this machine, each run printing
+# "[OK] 4 compiler warnings in the tree (185/185 files measured, N recompiled)":
+#
+#   rm -rf .trinity/build/warn; make warnings   57s   (N=185)
+#   make warnings, nothing touched               3s   (N=0)
+#   touch one file; make warnings                4s   (N=1)
+#
+# against 96-108s for the old target on every one of those. Two honest notes on
+# that first number. It is 57s rather than ~100s partly because of the skips
+# above, not only because of the directory: the directory is what turns the
+# SECOND run into 3s. And "touch one file" recompiles exactly that file, because
+# touching does not change what the file exports; a real edit that changes a
+# type or a signature also recompiles its dependents, so 4s is the floor of that
+# row and 57s is its ceiling.
+#
+# The lock. The warn build compiles into its own directory, but build.sh derives
+# the OUTPUT binary from the variant, so a dev-variant build links
+# $(ROOT)/trios_dev_app and signs $(DEV_APP) wherever its objects live. Two
+# linkers on one output path is a corrupt binary, and until now build.sh's dev
+# lock serialized them because the full count WAS a dev build. A private
+# directory silently gives that up, so this target takes the dev build lock
+# itself, with build.sh's protocol: mkdir, owner pid inside, reclaim when the
+# owner is gone. What stays exposed is the same thing two concurrent `make dev`
+# runs expose - build.sh releases the lock after the compile and copies and
+# signs the bundle outside it.
+WARN_FULL_ROOT  := $(ROOT)/.trinity/build/warn
+WARN_FULL_CACHE := $(WARN_FULL_ROOT)/dev
+DEV_BUILD_LOCK  := $(ROOT)/.trinity/build/dev.lock
+
 .PHONY: warnings
 warnings:
-	@echo "[warnings] full count: forcing a cold build of the dev variant."
 	@start=$$(date +%s); \
-	TRIOS_BUILD_CLEAN=1 $(MAKE) --no-print-directory dev; status=$$?; \
-	end=$$(date +%s); \
-	echo "[warnings] full count took $$((end - start))s"; \
+	clean=""; \
+	if [ ! -d "$(WARN_FULL_CACHE)/obj" ] || [ ! -f "$(WARN_FULL_CACHE)/master.priors" ]; then \
+		clean=1; \
+		echo "[warnings] full count: $(WARN_FULL_CACHE) holds no usable build,"; \
+		echo "           so this run compiles every file. Later runs reuse it."; \
+	else \
+		echo "[warnings] full count: reusing $(WARN_FULL_CACHE); only changed files recompile."; \
+	fi; \
+	mkdir -p "$(ROOT)/.trinity/build"; \
+	waited=0; reclaims=0; \
+	while ! mkdir "$(DEV_BUILD_LOCK)" 2>/dev/null; do \
+		owner=$$(cat "$(DEV_BUILD_LOCK)/pid" 2>/dev/null || true); \
+		if [ -z "$$owner" ] || ! kill -0 "$$owner" 2>/dev/null; then \
+			reclaims=$$((reclaims + 1)); \
+			if [ "$$reclaims" -gt 3 ]; then \
+				echo "[FAIL] cannot create $(DEV_BUILD_LOCK) and it has no live owner."; \
+				echo "       Three reclaims in a row means mkdir is failing for some other"; \
+				echo "       reason; stopping rather than spinning on it."; \
+				exit 1; \
+			fi; \
+			echo "[warnings] reclaiming stale dev build lock (owner $${owner:-unknown} is gone)"; \
+			rm -rf "$(DEV_BUILD_LOCK)"; \
+			mkdir -p "$(ROOT)/.trinity/build"; \
+			continue; \
+		fi; \
+		if [ "$$waited" -ge 900 ]; then \
+			echo "[FAIL] a dev build (pid $$owner) still holds $(DEV_BUILD_LOCK) after $${waited}s;"; \
+			echo "       not starting a second build against $(ROOT)/trios_dev_app."; \
+			exit 1; \
+		fi; \
+		if [ "$$waited" = "0" ]; then \
+			echo "[warnings] waiting for the dev build lock held by pid $$owner..."; \
+		fi; \
+		sleep 2; waited=$$((waited + 2)); \
+	done; \
+	echo $$$$ > "$(DEV_BUILD_LOCK)/pid"; \
+	trap 'rm -rf "$(DEV_BUILD_LOCK)"' EXIT INT TERM; \
+	find $(WARN_LOG_DIR)/ -maxdepth 1 -type f -name 'trios_build_warn.*.log' \
+		-mmin +60 -delete 2>/dev/null || true; \
+	status=0; \
+	for attempt in 1 2; do \
+		log=$$(mktemp $(WARN_LOG_DIR)/trios_build_warn.$$$$.XXXXXX) || exit 1; \
+		mv "$$log" "$$log.log" || exit 1; log="$$log.log"; \
+		id="warn.$$$$.$$(date +%s).$$RANDOM"; \
+		printf '[trios-build-id] %s\n' "$$id" > "$$log"; \
+		echo "[warnings] build log $$log (id $$id)"; \
+		bstart=$$(date +%s); \
+		TRIOS_VARIANT=dev \
+		TRIOS_BUILD_DIR="$(WARN_FULL_ROOT)" \
+		TRIOS_BUILD_CLEAN="$$clean" \
+		TRIOS_BUILD_SHOW_INCREMENTAL=1 \
+		TRIOS_SKIP_CHAT_E2E=1 \
+		TRIOS_SKIP_SWIFT_TEST=1 \
+		TRIOS_SKIP_VENDOR_CHECK=1 \
+			"$(ROOT)/build.sh" >> "$$log" 2>&1; \
+		bend=$$(date +%s); \
+		if ! /usr/bin/grep -q "Build successful: $(ROOT)/trios_dev_app" "$$log"; then \
+			echo "[FAIL] the warning build did not compile, so there is no count (log: $$log):"; \
+			/usr/bin/grep -E "error:" "$$log" | head -10; \
+			echo "[warnings] gave up after $$((bend - start))s"; \
+			exit 1; \
+		fi; \
+		echo "[warnings] build took $$((bend - bstart))s"; \
+		status=0; \
+		out=$$(TRIOS_BUILD_CLEAN="$$clean" $(MAKE) --no-print-directory warning-gate \
+			WARN_LOG="$$log" WARN_BUILD_ID="$$id" \
+			WARN_BUILD_DIR="$(WARN_FULL_CACHE)" 2>&1) || status=1; \
+		printf '%s\n' "$$out"; \
+		case "$$out" in *"compiler warnings in the tree"*) break ;; esac; \
+		if [ "$$status" != "0" ]; then break; fi; \
+		if [ -n "$$clean" ]; then \
+			echo "[warnings] a from-scratch build still could not account for every file,"; \
+			echo "           so the count above is a lower bound. Treat it as one."; \
+			break; \
+		fi; \
+		echo "[warnings] the reused directory cannot account for every file, so the count"; \
+		echo "           above is partial and running this target again would repeat it."; \
+		echo "           Rebuilding $(WARN_FULL_ROOT) from scratch - the expensive path,"; \
+		echo "           taken here rather than advised, because a full count was asked for."; \
+		rm -rf "$(WARN_FULL_ROOT)"; \
+		clean=1; \
+	done; \
+	echo "[warnings] full count took $$(($$(date +%s) - start))s"; \
 	exit $$status
 
 release:
@@ -346,7 +615,8 @@ keychain-doors:
 # #1237).  This check walks every recipe line and flags a lone $ that is
 # neither $ nor a Make variable in the allowlist below.
 MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP WARNING_CEILING CASSETTE_DIR \
-	WARN_BUILD_DIR WARN_OFM WARN_LIST WARN_SEEN WARN_LOG \
+	WARN_BUILD_DIR WARN_OFM WARN_LIST WARN_SEEN WARN_LOG WARN_LOG_DIR \
+	WARN_LOG_LAST WARN_BUILD_ID WARN_FULL_ROOT WARN_FULL_CACHE DEV_BUILD_LOCK \
 	CASSETTE_BRANCHES SWEEP_CANARY LOG KEYCHAIN_ALLOW_PATTERNS MAKE VARIANT \
 	MSG ISSUE WORKER TASK PATHS CRITERIA SECOND REVIEW AUTONOMY CASSETTE \
 	SECOND_TURN QUEEN_COMMAND MUTANTS MUTANTS_LOGIC MAKE_DOLLAR_VARS HARNESS_LOCK GUARDS
@@ -626,7 +896,7 @@ parse-tests:
 		exit 1; \
 	fi
 
-check: check-selftest keychain-doors make-dollars empty-sources finish-mark-order guard-shapes parse-tests dev test cassettes mutants-changed
+check: check-selftest keychain-doors make-dollars empty-sources finish-mark-order guard-shapes parse-tests dev warnings test cassettes mutants-changed
 
 # Replay every cassette and assert the expected signal appears in the log.
 #
