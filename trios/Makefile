@@ -23,7 +23,7 @@ RELEASE_APP := $(ROOT)/trios.app
 HARNESS_LOCK := /tmp/trios_harness.lock
 
 .DEFAULT_GOAL := dev
-.PHONY: help dev release build keychain-doors make-dollars empty-sources watch-empties check test cassettes e2e run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard finish-mark-order guard-shapes parse-tests warnings warning-gate
+.PHONY: help dev release build keychain-doors make-dollars empty-sources watch-empties check test cassettes e2e shake run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard finish-mark-order guard-shapes parse-tests vendor-step warnings warning-gate
 
 help:
 	@echo "TriOS targets:"
@@ -33,6 +33,7 @@ help:
 	@echo "  make check      - build dev and run every logic suite, including mutants-changed"
 	@echo "  make test       - run the Swift logic suites only"
 	@echo "  make e2e        - run the chat end-to-end flow"
+	@echo "  make shake      - run the e2e flow N times under CPU/IO load; tells flaky from broken (~4 min)"
 	@echo "  make run        - launch the dev app"
 	@echo "  make run-release- launch the release app"
 	@echo "  make stop       - quit both apps"
@@ -47,6 +48,7 @@ help:
 	@echo "  make drift-guard - run the interface-drift compiling proof (slow; not in the fast suite)"
 	@echo "  make finish-mark-order - check the completed-turn mark stays in the finish callback"
 	@echo "  make guard-shapes - check the load-bearing guards are still in their files"
+	@echo "  make vendor-step - check build.sh still vendors both halves of QueenUILib (runs before every dev build)"
 	@echo "  make warnings   - full compiler-warning count for the whole tree (own build dir; first run is cold)"
 
 # --- Building -----------------------------------------------------------
@@ -214,7 +216,7 @@ WARN_LOG_LAST := $(WARN_LOG_DIR)/trios_build_dev.log
 WARN_LOG :=
 WARN_BUILD_ID :=
 
-dev:
+dev: vendor-step
 	@# The per-file warning cache does not survive a build (#1264, second round).
 	@# An entry outlives the truth it recorded. Driven, both directions: warnings
 	@# planted and then removed left the cache reporting 8 on a tree holding 4,
@@ -574,6 +576,32 @@ e2e:
 	fi; \
 	exit $$e2e_status
 
+# --- Shaking (resource-affected flakiness) ------------------------------
+#
+# `make e2e` answers "does the suite pass right now, on this machine, as busy
+# as it happens to be". That is a different question from "does the suite
+# pass", and the two came apart here: nine agents shared this Mac, the suite
+# went red, and hours went into deciding whether the failure was real.
+#
+# Silva et al. (Shaker, ICSME 2020) measured that 46.5% of flaky tests are
+# resource-affected - their failure rate moves with machine load - and that
+# the way to find them is to add the load on purpose rather than wait for it.
+# `make shake` does that: one unloaded baseline run, then SHAKE_RUNS runs with
+# one busy loop per core and an I/O writer alongside, and a verdict that
+# separates "failed every single time" (broken) from "failed some of the
+# time" (flaky) from "only fails when the machine is busy".
+#
+# Cost, measured on this 8-core machine: ~25s per unloaded run, ~30-45s per
+# loaded run, so the default (1 baseline + 5 loaded) is roughly 4 minutes.
+# Knobs: SHAKE_RUNS, SHAKE_LOAD, SHAKE_IO, SHAKE_BASELINE, SHAKE_SUITE.
+#   make shake SHAKE_RUNS=10          the budget Shaker itself used (~8 min)
+#   make shake SHAKE_LOAD=0           no CPU load - reruns only
+# Exit status: 0 stable, 1 broken (the unloaded baseline failed), 2 flaky or
+# load-induced, 3 the load generator never spun up so nothing was measured.
+.PHONY: shake
+shake:
+	@bash "$(ROOT)/tests/swift/shake_e2e.sh"
+
 # --- Keychain door guard ------------------------------------------------
 #
 # SecItemCopyMatching, SecItemAdd, SecItemUpdate and SecItemDelete are the
@@ -619,7 +647,8 @@ MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP WARNING_CEILING CASSETTE_DIR \
 	WARN_LOG_LAST WARN_BUILD_ID WARN_FULL_ROOT WARN_FULL_CACHE DEV_BUILD_LOCK \
 	CASSETTE_BRANCHES SWEEP_CANARY LOG KEYCHAIN_ALLOW_PATTERNS MAKE VARIANT \
 	MSG ISSUE WORKER TASK PATHS CRITERIA SECOND REVIEW AUTONOMY CASSETTE \
-	SECOND_TURN QUEEN_COMMAND MUTANTS MUTANTS_LOGIC MAKE_DOLLAR_VARS HARNESS_LOCK GUARDS
+	SECOND_TURN QUEEN_COMMAND MUTANTS MUTANTS_LOGIC MAKE_DOLLAR_VARS HARNESS_LOCK GUARDS \
+	VENDOR_SRC VENDOR_BEGIN VENDOR_END VENDOR_ANCHOR VENDOR_HALVES
 
 .PHONY: make-dollars
 make-dollars:
@@ -896,7 +925,153 @@ parse-tests:
 		exit 1; \
 	fi
 
-check: check-selftest keychain-doors make-dollars empty-sources finish-mark-order guard-shapes parse-tests dev warnings test cassettes mutants-changed
+# --- The vendoring step -------------------------------------------------
+#
+# TRIOS_VENDORED=1 is how trios builds on a machine with no neighbouring
+# trinity checkout, and it works only because a NORMAL build leaves both
+# halves of QueenUILib behind: the dylib the linker needs and the
+# swiftmodule `import QueenUILib` needs.  Both copies live in build.sh
+# between the `BEGIN vendor-halves` and `END vendor-halves` markers.
+#
+# Delete that region and nothing complains.  Driven, this machine: with the
+# region cut out of build.sh a dev build printed "[OK] Build successful"
+# and build.sh's own vendored-interface probe printed "[OK] Vendored
+# QueenUILib resolves from .../Frameworks-dev/Modules (TRIOS_VENDORED=1 is
+# buildable)", exit 0, while Frameworks-dev/Modules/QueenUILib.swiftmodule
+# kept the timestamp an EARLIER build had given it.  The probe typechecks
+# one `import QueenUILib` against that directory as it stands, so it was
+# reading a leftover artifact and calling this build honest.  It cannot see
+# the step that produces the artifact; only something that reads build.sh
+# can.  make-dollars, empty-sources, finish-mark-order, guard-shapes,
+# parse-tests and keychain-doors all passed over the same broken tree.
+#
+# Two arms, both run every time, in the shape finish-mark-order and
+# parse-tests use:
+#
+#   1. Positive -- the live build.sh must carry the region, and each copy
+#      in VENDOR_HALVES must appear INSIDE it.  A copy that drifted out of
+#      the region is reported the same as a deleted one, because a copy
+#      outside the markers is a copy the fixture cannot remove and this
+#      check can no longer prove anything about.
+#   2. Negative -- a fixture whose region body has been deleted, exactly
+#      the adversarial edit above, must come back GONE.  Not merely "fail":
+#      a fixture that had also lost the markers or the anchor would fail
+#      for the wrong reason and the negative arm would pass while proving
+#      nothing, so NOREGION and NOANCHOR are reported separately from GONE.
+#
+# The fixture is generated from the live build.sh instead of being checked
+# in, and that is the one deliberate departure from the two targets above.
+# A checked-in copy of a 900-line script goes stale on the first unrelated
+# edit; a copy taken now and cut at the markers is the real file minus the
+# real step.  Everything that could quietly stop it from being a fixture is
+# a named failure: no file produced, nothing removed (which is what a
+# build.sh with no markers left looks like), markers lost, anchor lost, or
+# an empty table.
+#
+# What this cannot do: it reads shape, not meaning.  A copy still present
+# but wrapped in `if false`, or pointed at the wrong directory, contains
+# the needle and passes.  It catches deletion, which is the failure that
+# happened.
+#
+# Wired into `dev`, not only `check`: a hard exit buried in build.sh is not
+# a guard, and build.sh's exit status does not even reach `make dev` (the
+# probe's `exit 1` fires after "Build successful", which is the line `dev`
+# greps for).  As a prerequisite this refuses the build out loud instead.
+VENDOR_SRC    := build.sh
+VENDOR_BEGIN  := --- BEGIN vendor-halves ---
+VENDOR_END    := --- END vendor-halves ---
+# Sits immediately after the region and survives the fixture's cut, so the
+# fixture can be told apart from a build.sh that lost the whole passage.
+VENDOR_ANCHOR := rm -f "$$STANDALONE_FRAMEWORKS/$$SQLCIPHER_DYLIB_NAME"
+# One row per vendored half: needle@@consequence, rows separated by `~`.
+# Do not put a `#` in the table: inside a Make variable it starts a comment
+# and would silently truncate the row.  Do not put a `'` in it either: the
+# rows are fed to the loop inside a single-quoted printf, and one apostrophe
+# splits a row in two -- which the malformed-row arm below does catch, but
+# only after it has already thrown the row away.
+VENDOR_HALVES := \
+	cp "$$QUEEN_DYLIB" "$$STANDALONE_FRAMEWORKS/libQueenUILib.dylib"@@the linker half: a vendored build finds no libQueenUILib.dylib~ \
+	"$$STANDALONE_FRAMEWORKS/Modules/$$queen_module_artifact"@@the compile-time half: every import QueenUILib fails with "no such module"
+
+.PHONY: vendor-step
+vendor-step:
+	@fail=0; n=0; \
+	src="$(ROOT)/$(VENDOR_SRC)"; \
+	af=$$(mktemp /tmp/trios_vs.XXXXXX); \
+	ff=$$(mktemp /tmp/trios_vs_cut.XXXXXX); \
+	fx=$$(mktemp /tmp/trios_vs_fixture.XXXXXX); \
+	trap 'rm -f $$af $$ff $$fx' EXIT INT TERM; \
+	printf '%s\n' \
+		'index($$0, b) { inr = 1; seen = 1; next }' \
+		'index($$0, e) { inr = 0; next }' \
+		'index($$0, a) { anchor = 1 }' \
+		'inr && index($$0, needle) { hit = 1 }' \
+		'END {' \
+		'  if (!seen)   { print "NOREGION"; exit 3 }' \
+		'  if (!anchor) { print "NOANCHOR"; exit 4 }' \
+		'  if (!hit)    { print "GONE"; exit 5 }' \
+		'  print "PRESENT"' \
+		'}' \
+	> $$af; \
+	printf '%s\n' \
+		'index($$0, b) { print; skip = 1; next }' \
+		'index($$0, e) { skip = 0 }' \
+		'!skip { print }' \
+	> $$ff; \
+	if [ ! -f "$$src" ]; then \
+		echo "  FAIL - missing source: $(VENDOR_SRC)"; \
+		exit 1; \
+	fi; \
+	awk -v b='$(VENDOR_BEGIN)' -v e='$(VENDOR_END)' -f $$ff "$$src" > $$fx; \
+	if [ ! -s $$fx ]; then \
+		echo "  FAIL - fixture generator produced nothing; there is no broken fixture to reject"; \
+		exit 1; \
+	fi; \
+	if cmp -s "$$src" $$fx; then \
+		echo "  FAIL - fixture generator removed nothing from $(VENDOR_SRC): the"; \
+		echo "         '$(VENDOR_BEGIN)' markers are gone, so there is no fixture"; \
+		echo "         and the positive arm below would be checking an unmarked file"; \
+		exit 1; \
+	fi; \
+	while IFS= read -r raw; do \
+		entry=$$(printf '%s' "$$raw" | sed 's/^[[:space:]]*//; s/[[:space:]]*$$//'); \
+		[ -n "$$entry" ] || continue; \
+		fields=$$(printf '%s' "$$entry" | awk -F'@@' '{print NF}'); \
+		if [ "$$fields" != "2" ]; then \
+			echo "  FAIL - malformed vendor row ($$fields fields, want 2): $$entry"; fail=1; continue; \
+		fi; \
+		needle=$${entry%%@@*}; label=$${entry#*@@}; \
+		n=$$((n + 1)); \
+		v=$$(awk -v b='$(VENDOR_BEGIN)' -v e='$(VENDOR_END)' -v a='$(VENDOR_ANCHOR)' \
+			-v needle="$$needle" -f $$af "$$src"); \
+		case "$$v" in \
+		PRESENT) echo "  ok   - $(VENDOR_SRC): $$label -- copy still inside the vendor-halves region" ;; \
+		NOREGION) echo "  FAIL - $(VENDOR_SRC): the vendor-halves markers are gone; nothing is being checked"; fail=1 ;; \
+		NOANCHOR) echo "  FAIL - $(VENDOR_SRC): the anchor is gone; this check is stale"; fail=1 ;; \
+		*) echo "  FAIL - $(VENDOR_SRC): vendoring step gone -> $$label"; fail=1 ;; \
+		esac; \
+		fv=$$(awk -v b='$(VENDOR_BEGIN)' -v e='$(VENDOR_END)' -v a='$(VENDOR_ANCHOR)' \
+			-v needle="$$needle" -f $$af $$fx); \
+		case "$$fv" in \
+		GONE) echo "  ok   - cut fixture correctly rejected: $$label" ;; \
+		NOREGION) echo "  FAIL - cut fixture lost the markers; it fails for the wrong reason"; fail=1 ;; \
+		NOANCHOR) echo "  FAIL - cut fixture lost the anchor; it fails for the wrong reason"; fail=1 ;; \
+		*) echo "  FAIL - cut fixture passed; this check cannot see the vendoring step disappear"; fail=1 ;; \
+		esac; \
+	done < <(printf '%s\n' '$(VENDOR_HALVES)' | tr '~' '\n'); \
+	if [ $$n -eq 0 ]; then \
+		echo "[FAIL] the vendor-halves table is empty; this target would pass by doing nothing"; \
+		exit 1; \
+	fi; \
+	if [ $$fail -eq 0 ]; then \
+		echo "[OK] $$n vendoring copies present in build.sh, $$n rejected in the cut fixture"; \
+	else \
+		echo "[FAIL] TRIOS_VENDORED=1 would build against whatever an earlier build left"; \
+		echo "       in Frameworks-dev/Modules, and build.sh's own probe would not notice."; \
+		exit 1; \
+	fi
+
+check: check-selftest keychain-doors make-dollars empty-sources finish-mark-order guard-shapes parse-tests vendor-step dev warnings test cassettes mutants-changed
 
 # Replay every cassette and assert the expected signal appears in the log.
 #

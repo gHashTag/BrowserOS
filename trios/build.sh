@@ -453,6 +453,14 @@ if [ "$COMPILE_STATUS" -eq 0 ]; then
 
     # Keep the standalone development binary runnable as well as the app bundle.
     mkdir -p "$STANDALONE_FRAMEWORKS"
+    # --- BEGIN vendor-halves ---
+    # Everything between this marker and END vendor-halves is what makes
+    # TRIOS_VENDORED=1 possible on a machine with no trinity checkout: the dylib
+    # for the linker and the swiftmodule for `import QueenUILib`. Deleting it
+    # breaks that build path silently - the probe further down only reads the
+    # Modules directory as it stands, so an artifact an EARLIER build left there
+    # keeps it printing [OK]. `make vendor-step` reads THIS region and is the
+    # check that can see the deletion. Keep the markers with the code.
     # In vendored mode the source IS the destination, and `cp x x` exits 1,
     # which under `set -e` would abort a build that had already succeeded.
     if [ "$QUEEN_DYLIB" != "$STANDALONE_FRAMEWORKS/libQueenUILib.dylib" ]; then
@@ -473,6 +481,7 @@ if [ "$COMPILE_STATUS" -eq 0 ]; then
             fi
         done
     fi
+    # --- END vendor-halves ---
     rm -f "$STANDALONE_FRAMEWORKS/$SQLCIPHER_DYLIB_NAME"
     cp -L "$SQLCIPHER_DYLIB" "$STANDALONE_FRAMEWORKS/$SQLCIPHER_DYLIB_NAME"
     chmod +w "$STANDALONE_FRAMEWORKS/$SQLCIPHER_DYLIB_NAME"
