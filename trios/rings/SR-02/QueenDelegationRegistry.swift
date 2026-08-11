@@ -116,10 +116,15 @@ final class QueenDelegationRegistry: ObservableObject {
     }
 
     /// Bees that have stopped without saying so.
+    ///
+    /// Measured on the evidence the runner recorded - no byte for the stall
+    /// threshold and no open stream - rather than on `updatedAt` alone.
+    /// `updatedAt` moves when the Queen writes bookkeeping, not when the worker
+    /// speaks, so a long turn that streamed for an hour was "stale" the whole
+    /// time and got reaped the instant its stream object went away (#1247).
     func stalled(now: Date = Date()) -> [DelegatedTask] {
         tasks.filter {
-            $0.state == .running
-                && now.timeIntervalSince($0.updatedAt) >= QueenDelegationPolicy.stallThreshold
+            $0.state == .running && QueenDelegationPolicy.hasGoneSilent($0, now: now)
         }
     }
 
@@ -411,6 +416,37 @@ final class QueenDelegationRegistry: ObservableObject {
         guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
         tasks[index].completedTurns = (tasks[index].completedTurns ?? 0) + 1
         persist()
+    }
+
+    /// Files what the runner reported about a worker's stream.
+    ///
+    /// The runner is the layer that knows whether a turn is in flight, when the
+    /// last byte landed, and whether the stream ended with a terminal event or
+    /// was cut. Recording those as they happen is what lets `stalled` read
+    /// evidence instead of sampling "is a stream running right now" - an answer
+    /// that is stale the moment it is given (#1247, #1248).
+    ///
+    /// No `persist()` here, and no `updatedAt` bump. This is liveness for the
+    /// current process: a byte fact would otherwise rewrite the whole store
+    /// once a second per worker, and bumping `updatedAt` would let bookkeeping
+    /// masquerade as the worker speaking - the confusion that made a live
+    /// worker look stale in the first place. A stale value that reaches the
+    /// store through some other mutation is harmless: everything the store
+    /// calls `running` at launch is reconciled as failed before it is read.
+    ///
+    /// `lastByteAt` never moves backwards, so a `.terminal` fact carrying the
+    /// turn's real last byte cannot undo a later one.
+    func recordStreamFact(
+        taskID: UUID,
+        outcome: WorkerStreamOutcome,
+        lastByteAt: Date?
+    ) {
+        guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        tasks[index].streamOutcome = outcome
+        if let lastByteAt,
+           lastByteAt > (tasks[index].lastStreamByteAt ?? .distantPast) {
+            tasks[index].lastStreamByteAt = lastByteAt
+        }
     }
 
     /// Drops the oldest settled tasks once the archive grows past `limit`.

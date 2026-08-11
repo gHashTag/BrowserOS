@@ -29,6 +29,22 @@ final class QueenWorkerRunner: ObservableObject {
     /// the observer stateless.
     var onProgress: ((DelegatedTask, QueenWorkerTranscript) -> Void)?
 
+    /// Reports what this runner knows about a worker's stream, as it happens:
+    /// that a turn was opened, that a byte arrived, and how the stream ended.
+    ///
+    /// The reaper used to ask `isRunning(conversationId:)` instead, and that
+    /// question cannot distinguish a worker that finished a millisecond ago
+    /// from one that died an hour ago - which is how a worker got reaped 0.7s
+    /// after finishing (#1247, #1248). The runner is the layer that knows, so
+    /// it states the facts rather than leaving them to be inferred.
+    var onStreamFact: ((DelegatedTask, WorkerStreamOutcome, _ lastByteAt: Date?) -> Void)?
+
+    /// How often a byte is reported. A fact per delta would be a registry
+    /// mutation - and a UI publish - per token, for a timestamp compared
+    /// against an hour. One second of resolution costs nothing and is three
+    /// orders of magnitude finer than the question being asked.
+    static let byteFactResolution: TimeInterval = 1
+
     /// What one worker turn consumed.
     struct WorkerUsage: Equatable {
         let inputTokens: Int
@@ -42,6 +58,11 @@ final class QueenWorkerRunner: ObservableObject {
     private let makeTransport: @Sendable () -> ChatTransportProtocol
     private var runs: [UUID: Task<Void, Never>] = [:]
     private var liveUsage: [UUID: WorkerUsage] = [:]
+    /// When the last byte of the current turn arrived, per conversation, and
+    /// when that was last reported. Kept unthrottled here so `finish` can state
+    /// the real last byte rather than the last rounded one.
+    private var lastByteAt: [UUID: Date] = [:]
+    private var lastByteReportedAt: [UUID: Date] = [:]
 
     init(
         persister: ChatPersisterProtocol,
@@ -62,6 +83,12 @@ final class QueenWorkerRunner: ObservableObject {
     func start(task: DelegatedTask, brief: String) {
         guard runs[task.conversationId] == nil else { return }
         runningConversationIds.insert(task.conversationId)
+        // Synchronously, before the run task is even created: a sweep that
+        // interleaves with dispatch must not find a task the registry calls
+        // running with no record of a turn ever being opened.
+        lastByteAt[task.conversationId] = nil
+        lastByteReportedAt[task.conversationId] = nil
+        onStreamFact?(task, .open, nil)
         let run = Task { [weak self] () -> Void in
             await self?.execute(task: task, brief: brief)
         }
@@ -164,6 +191,7 @@ final class QueenWorkerRunner: ObservableObject {
                 if let action = await parser.parse(event) {
                     transcript.apply(action)
                     charsBox.count = transcript.assistantText.count
+                    noteByte(for: task)
                     publish(transcript, for: task.conversationId)
                     liveUsage[task.conversationId] = WorkerUsage(
                         inputTokens: transcript.inputTokens,
@@ -215,6 +243,17 @@ final class QueenWorkerRunner: ObservableObject {
         }
         runs[task.conversationId] = nil
         runningConversationIds.remove(task.conversationId)
+        // Before `onFinish`, so the reaper cannot observe a task whose stream
+        // is over while the record still says a turn is in flight. A terminal
+        // event and a stream cut mid-flight are different facts and the Queen
+        // is entitled to both; "there is no stream object" is neither.
+        onStreamFact?(
+            task,
+            transcript.didComplete ? .terminal : .cut,
+            lastByteAt[task.conversationId]
+        )
+        lastByteAt[task.conversationId] = nil
+        lastByteReportedAt[task.conversationId] = nil
         // #1219: A connectivity failure is not a worker failure. Log it
         // as queen.worker.finish here — not queen.worker.failed — so that
         // anyone filtering the journal for worker.failed sees only
@@ -247,6 +286,22 @@ final class QueenWorkerRunner: ObservableObject {
 
     private func publish(_ transcript: QueenWorkerTranscript, for conversationId: UUID) {
         transcripts[conversationId] = transcript.messages
+    }
+
+    /// Records that this worker's stream just delivered something.
+    ///
+    /// The exact time is kept for `finish`; the reported time is rounded down
+    /// to `byteFactResolution` so a busy stream does not push a registry
+    /// mutation per token.
+    private func noteByte(for task: DelegatedTask) {
+        let now = Date()
+        lastByteAt[task.conversationId] = now
+        if let reported = lastByteReportedAt[task.conversationId],
+           now.timeIntervalSince(reported) < Self.byteFactResolution {
+            return
+        }
+        lastByteReportedAt[task.conversationId] = now
+        onStreamFact?(task, .open, now)
     }
 
     /// #1246: mutable char count safe to capture in a sendable closure.

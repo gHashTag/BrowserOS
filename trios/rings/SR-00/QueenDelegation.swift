@@ -98,6 +98,22 @@ enum DelegatedTaskState: String, Codable, Equatable, Sendable, CaseIterable {
     }
 }
 
+/// How a worker's stream ended, or that it has not ended.
+///
+/// Recorded by the runner as it happens rather than inferred afterwards. The
+/// failure-detector literature is blunt about this shape: reliable detection
+/// comes from asking the layer that knows, not from sampling a timeout
+/// (Leners et al., Falcon, SOSP 2011). The runner is that layer here.
+enum WorkerStreamOutcome: String, Codable, Equatable, Sendable {
+    /// A turn is in flight. The runner opened it and has not finished it.
+    case open
+    /// The stream ended with a terminal event - the worker said its piece.
+    case terminal
+    /// The stream ended without one: it threw, was cancelled, or simply
+    /// stopped. Not the same as silence, and not the same as success.
+    case cut
+}
+
 /// One unit of delegated work: an issue, a worker, and its own chat.
 struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     let id: UUID
@@ -204,6 +220,29 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// decode. Counted rather than flagged, because the interesting question is
     /// not "was it stuck" but "how many times, and did it ever get anywhere".
     var resumeAttempts: Int?
+
+    /// When the runner last saw a byte of this worker's stream.
+    ///
+    /// Written by the layer that knows. Liveness used to be inferred by asking
+    /// the runner "is a stream running right now", and that answer is stale the
+    /// moment it is given: a worker that finished a millisecond ago answers no,
+    /// exactly like one that died an hour ago (#1247, #1248).
+    ///
+    /// Nothing writes the store for it: recording a byte does not persist, so
+    /// a busy stream does not rewrite the delegation file once a second. A copy
+    /// can still ride along when some other mutation persists, and that copy
+    /// means nothing after a restart - everything the store calls `running` at
+    /// launch is reconciled as failed before anyone reads this.
+    var lastStreamByteAt: Date?
+
+    /// How this worker's stream stands, as reported by the runner.
+    ///
+    /// `nil` means no turn has ever been opened for the task - the orphan case.
+    /// The point of recording it is that "ended with a terminal event" and
+    /// "cut mid-flight" are different facts, and neither is the same as "no
+    /// stream object exists right now".
+    var streamOutcome: WorkerStreamOutcome?
+
     /// Which model did the work, so a cost estimate is possible after the fact.
     var provider: String?
     var model: String?
@@ -256,6 +295,8 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         committedFiles: Int? = nil,
         resumeAttempts: Int? = nil,
         completedTurns: Int? = nil,
+        lastStreamByteAt: Date? = nil,
+        streamOutcome: WorkerStreamOutcome? = nil,
         pullRequestNumber: Int? = nil,
         provider: String? = nil,
         model: String? = nil,
@@ -282,6 +323,8 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         self.committedFiles = committedFiles
         self.resumeAttempts = resumeAttempts
         self.completedTurns = completedTurns
+        self.lastStreamByteAt = lastStreamByteAt
+        self.streamOutcome = streamOutcome
         self.pullRequestNumber = pullRequestNumber
         self.provider = provider
         self.model = model
@@ -462,6 +505,58 @@ enum QueenDelegationPolicy {
         case .abandoned: return .awaitingReview
         case .pending: return nil
         }
+    }
+
+    // MARK: - Is this worker dead?
+    //
+    // Three defects came from answering that by asking "is a stream running for
+    // this conversation right now": a worker reaped 0.7s after it finished
+    // (#1247), the same under parallelism (#1248), and a third through a
+    // deferred bookkeeping hop. That question samples a boolean whose answer is
+    // stale the moment it is given - a worker that finished a millisecond ago
+    // and one that died an hour ago both answer "no stream".
+    //
+    // The functions below read facts the runner recorded as they happened
+    // instead. They are pure, so the decision can be exercised without a
+    // transport, a clock, or an app.
+
+    /// Whether a turn is in flight, according to the runner that owns it.
+    static func isStreamOpen(_ task: DelegatedTask) -> Bool {
+        task.streamOutcome == .open
+    }
+
+    /// The most recent moment this worker gave any sign of life.
+    ///
+    /// The last byte when there is one. `updatedAt` is the floor rather than
+    /// the fallback: a restart bumps it, so a worker resumed after a dead turn
+    /// measures its silence from the restart and not from bytes the previous
+    /// turn happened to deliver.
+    static func lastEvidenceOfLife(_ task: DelegatedTask) -> Date {
+        max(task.lastStreamByteAt ?? .distantPast, task.updatedAt)
+    }
+
+    /// No byte for `threshold`, and the stream is not open.
+    ///
+    /// Both halves are load-bearing. Without the second, a slow but live
+    /// stream is reaped mid-answer; without the first, "not open" alone reaps
+    /// every worker in the window between its last byte and its bookkeeping.
+    static func hasGoneSilent(
+        _ task: DelegatedTask,
+        now: Date,
+        threshold: TimeInterval = QueenDelegationPolicy.stallThreshold
+    ) -> Bool {
+        guard !isStreamOpen(task) else { return false }
+        return now.timeIntervalSince(lastEvidenceOfLife(task)) >= threshold
+    }
+
+    /// A task the registry calls running for which no turn was ever opened.
+    ///
+    /// Caught immediately rather than after the stall threshold: a task that
+    /// was never dispatched looks "working" to the sidebar, the slot counter
+    /// and the stall timer while doing nothing at all (#1139). A completed turn
+    /// disqualifies it - that worker did real work (#1247).
+    static func wasNeverStarted(_ task: DelegatedTask) -> Bool {
+        task.streamOutcome == nil && (task.completedTurns ?? 0) == 0
     }
 
     /// Why the Queen may not open this chat yet, or nil if the user has agreed.

@@ -4201,6 +4201,19 @@ final class ChatViewModel: ObservableObject {
             )
         }
 
+        // The runner states what it knows as it happens - a turn was opened, a
+        // byte arrived, the stream ended this way - and the reaper reads those
+        // facts. It used to ask "is a stream running for this conversation
+        // right now", and that answer cannot tell a worker that finished a
+        // millisecond ago from one that died an hour ago (#1247, #1248).
+        runner.onStreamFact = { [delegationRegistry] task, outcome, lastByteAt in
+            delegationRegistry.recordStreamFact(
+                taskID: task.id,
+                outcome: outcome,
+                lastByteAt: lastByteAt
+            )
+        }
+
         // The observer reads the stream while it is still moving. The review
         // loop is post-mortem by construction; this is the only place a bee can
         // be stopped before it wastes the whole turn.
@@ -6205,24 +6218,29 @@ final class ChatViewModel: ObservableObject {
     ///
     /// A task stuck in `running` forever occupies a worker slot and hides real
     /// capacity, so the swarm quietly shrinks to nothing. This also catches
-    /// **orphans** — tasks the registry shows as `.running` but whose worker
-    /// runner has no active run. A task transitioned to `.running` whose worker
-    /// was never dispatched looks "working" to the sidebar, the slot counter,
-    /// and the stall timer, while doing nothing at all (#1139).
+    /// **orphans** - tasks the registry shows as `.running` for which no turn
+    /// was ever opened. A task transitioned to `.running` whose worker was
+    /// never dispatched looks "working" to the sidebar, the slot counter, and
+    /// the stall timer, while doing nothing at all (#1139).
+    ///
+    /// Every judgement here is read from facts the runner recorded as they
+    /// happened - a turn opened, a byte at this time, the stream ended this
+    /// way - rather than from sampling "is a stream running for this
+    /// conversation right now". That sample is stale the moment it is taken.
     func reapStalledWorkers(now: Date = Date()) async {
         let registry = delegationRegistry
 
-        // Orphans: the registry says .running but the runner has no active
-        // task for the conversation. Caught immediately rather than waiting
-        // the stall threshold, because a task that was never started looks
-        // "working" to every other part of the system while doing nothing.
-        // #1247: A worker that already completed a turn is not an orphan — it
-        // did real work. The stalled sweep below still catches it if it goes
-        // quiet long enough.
-        let orphaned = registry.running.filter {
-            workerRunner?.isRunning(conversationId: $0.conversationId) != true
-                && ($0.completedTurns ?? 0) == 0
-        }
+        // Orphans: the registry says .running but no turn was ever opened for
+        // it. Caught immediately rather than waiting the stall threshold,
+        // because a task that was never dispatched looks "working" to every
+        // other part of the system while doing nothing.
+        //
+        // Read off the runner's record of the task, not off "is a stream
+        // running right now". That question answers no both for a task nobody
+        // ever started and for a worker that streamed for an hour and stopped
+        // a moment ago, and treating the second as the first is how a finished
+        // worker got reaped 0.7s after it finished (#1247, #1248).
+        let orphaned = registry.running.filter(QueenDelegationPolicy.wasNeverStarted)
         let stalled = registry.stalled(now: now)
         // Deduplicate: a task can be both orphaned and stalled, but it only
         // needs to be processed once.
@@ -6231,8 +6249,15 @@ final class ChatViewModel: ObservableObject {
         guard !toProcess.isEmpty else { return }
 
         for task in toProcess {
-            // Only reap what has genuinely stopped. A long stream is not a stall.
-            guard workerRunner?.isRunning(conversationId: task.conversationId) != true else { continue }
+            // Only reap what has genuinely stopped. A long stream is not a
+            // stall - and the runner says whether this one is still in flight,
+            // so nothing here has to guess from the absence of a stream object.
+            // Re-read it rather than trusting the copy taken before the loop:
+            // this function awaits on every iteration, so by the time a later
+            // task is reached its turn may have been restarted - by the resume
+            // branch below, or by a sweep that interleaved with this one.
+            let current = registry.task(forConversation: task.conversationId) ?? task
+            guard !QueenDelegationPolicy.isStreamOpen(current) else { continue }
 
             // #1219: A connectivity failure is not the worker's fault. Retry
             // without counting a resume attempt — the stall was outside its
