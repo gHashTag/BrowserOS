@@ -1549,6 +1549,17 @@ xctest:
 #   a leftover, because its own table entry is a second copy of the needle it
 #   searches for.  The reasoning is written out above MUTANTS_GUARD.
 #
+#   The sketched row shape has since grown a fifth field, so the live shape is
+#
+#       MUTANTS_GUARD := source@@needle@@replacement@@target@@parse@@name
+#
+#   where `parse` is `parses` or `must-not-parse` and is checked with
+#   `swiftc -parse` inside the mutation window, before the target is
+#   consulted.  The sketch above was missing it, and that omission is exactly
+#   the hole it left: with a tree-reader as the oracle, a mutant that does not
+#   compile scores "ok - caught" for the wrong reason and nothing notices.
+#   Written out above MUTANTS_GUARD, with what a parse does and does not see.
+#
 #   Two would still not fit even that.  empty-sources needs an operation other
 #   than substitution - smallest form, a sentinel replacement such as
 #   <TRUNCATE> meaning "write zero bytes" rather than "replace the needle".
@@ -1826,7 +1837,19 @@ mutants-logic:
 #
 # So do not score it against the suite.  Score it against the check.
 #
-#   MUTANTS_GUARD := source@@needle@@replacement@@target@@name
+#   MUTANTS_GUARD := source@@needle@@replacement@@target@@parse@@name
+#
+# Fields are separated by `@@`, rows by a literal `~`, the way GUARDS does it.
+# Rows used to be split by guessing a record boundary from the leading path -
+# a fixed list of ` rings/`, ` BR-OUTPUT/` and ` tests/` - which had two ways
+# to lie the moment a row named a file outside that list: `main.swift` would
+# have been swallowed into its predecessor's label, and any row whose LABEL
+# contained the words " main.swift" would have been split in half.  Row 7 is
+# a main.swift row whose label names main.swift, so both were live.
+#
+# `replacement` is normally the text the needle becomes.  When it begins with
+# `<DELETE-BLOCK>` it is not a substitution at all - see "The second
+# operation" below.
 #
 # Per row, in order:
 #   1. `make <target>` BEFORE the mutation.  It must exit 0 and print an [OK].
@@ -1894,12 +1917,118 @@ mutants-logic:
 #                      `guard !isStreamOpen(current) else { continue }` becomes
 #                      a bare `_ = isStreamOpen(current)` - predicate still
 #                      consulted, answer thrown away, live workers taken
-#                      mid-answer.  Chosen over the other six because it is the
-#                      one whose deletion still COMPILES: it is a standalone
-#                      statement, so no orphaned brace is left behind.  A
-#                      compiler cannot see a missing guard, which is the whole
-#                      reason guard-shapes exists; here that is measured, not
-#                      argued.
+#                      mid-answer.  It was for a while the ONLY guard with a
+#                      row, because substitution is a one-line edit and guard 6
+#                      is the only one of the seven that is a one-line
+#                      statement: replacing the first line of a multi-line
+#                      `guard ... else {` orphans its brace, and the mutant
+#                      does not compile.  A row whose mutant does not compile
+#                      proves nothing (see the fifth field below).  The block
+#                      operation lifted that limit; guards 2, 3 and 7 now have
+#                      rows too.  A compiler cannot see a missing guard, which
+#                      is the whole reason guard-shapes exists; here that is
+#                      measured, not argued.
+#
+# --- The second operation: <DELETE-BLOCK> --------------------------------
+#
+# A row whose replacement begins `<DELETE-BLOCK>` does not substitute.  It
+# removes the needle line and everything up to and including the brace that
+# closes it.  The text after the sentinel is an ANCHOR, and the needle chosen
+# is the occurrence NEAREST ABOVE it - the same lookup guard-shapes does.
+# That is not decoration.  Two of the seven needles are ambiguous by plain
+# first-match: `guard ProjectPaths.isDevVariant else {` is a prefix of guard
+# 2's own line, so a first-match delete for guard 3 would have removed guard
+# 2 instead; and `guard RecursionGuard.shared.ensureSingleInstance() else {`
+# appears twice in main.swift, at line 31 in applicationDidFinishLaunching and
+# at 1198 in the boot path, and only the second is the one row 7 scores.  A
+# first-match delete there removes a guard nobody is scoring, guard-shapes
+# stays green, and the row prints SURVIVED - a false alarm rather than a
+# forged catch, but still an answer about the wrong code.
+#
+# Brace matching is lexical, not a character count.  Line comments, nested
+# block comments, escapes, raw strings of any hash count, multiline strings
+# and `\(...)` interpolation are all tracked, so a brace inside a string is
+# not a brace - while a brace inside an interpolation IS one, because that is
+# code again.
+#
+# Measured, and worth saying plainly: none of the seven guards CURRENTLY hides
+# a brace in a string or a comment, so on this tree today a naive counter
+# would give the same answer.  The reason to be lexical anyway is that "today"
+# is not a property of the checker.  A guard line grows a string with a brace
+# in it and the naive version starts deleting the wrong span, silently, in a
+# harness whose entire job is to be trusted while it edits tracked sources.
+#
+# What proves the claim is tests/fixtures/delete-block-braces.swift, which
+# exercises each rule at least once: `{` inside the guard line's own string,
+# `}` in a line comment, `}` in a plain string, `{`/`}` in a block comment,
+# `}` in a raw string with a hashed escape, `{`/`}` in a multiline string, and
+# a `{ item in item }` closure inside an interpolation followed by a `}` still
+# in the string.  Driven: a character counter closes that guard nine lines
+# early, on the first `log(...)`; the matcher closes it on the guard's own
+# brace, deleting lines 16-27.  mutants-guard runs that fixture against
+# delete-block-braces.expected.swift BEFORE the table, and if the two differ
+# no row runs at all.
+#
+# It refuses instead of guessing when it meets a shape it does not handle:
+# code before the needle on its line, code after the closing brace on its
+# line (`} else {`), or a source that does not lex.  Driven: a row aimed at
+# `if let client = a2aClient {`, whose block closes into an `} else {`,
+# prints "BROKEN ROW ... code follows the closing brace on its line" and
+# writes nothing.
+#
+# Which guards this fits, and which it does not:
+#
+#   guards 2, 3, 7  Fit, and have rows.  Each is a `guard ... else { ... }`
+#                   whose else-body is the bail-out, so deleting the whole
+#                   statement is exactly the dangerous edit - the protection
+#                   goes, the function runs on - and the guard-shapes ANCHOR,
+#                   which sits after the guard, survives to be found.  Driven:
+#                   all three flip guard-shapes from GUARDED to UNGUARDED.
+#
+#   guards 1, 4, 5  Do NOT fit, and are deliberately absent.  All three are
+#                   `if <dev-only> { ... }`, and their guard-shapes anchor
+#                   sits INSIDE the block: `queenInboxPollTask = Task` at 441
+#                   within 437-448, `DevSecretStore.read(...)` at 76 within
+#                   75-80, `return try loadOrCreateTestKey()` at 204 within
+#                   203-205.  Deleting the block takes the anchor with it, and
+#                   guard-shapes then answers NOANCHOR - "the guard table is
+#                   stale" - not UNGUARDED.  That still exits non-zero, so the
+#                   row WOULD print "ok - caught"; it would be scoring a stale
+#                   table under the name of a missing guard.  Measured, not
+#                   argued: the three deletions were applied to copies and the
+#                   guard-shapes awk answered NOANCHOR for each.
+#
+#                   There is a real edit that fits them - unwrap the block,
+#                   deleting the `if` line and its closing brace and keeping
+#                   the body, which is precisely the accident that started
+#                   guard-shapes.  That is a third operation, not this one.
+#
+#   guard 6         Keeps its substitution row.  Deleting `guard ... else
+#                   { continue }` whole is legal, but the row already exists
+#                   and gutting it is the sharper edit: the predicate is still
+#                   called, so the mutant is indistinguishable from live code
+#                   to anything but a shape check.
+#
+# What a delete row gives up: the leftover-mutation branch.  A deletion has no
+# replacement text, so there is nothing to find in a file to tell a killed run
+# from a clean tree.  It is not needed.  A leftover deletion leaves the guard
+# MISSING, so guard-shapes is red, and the green-baseline check refuses the
+# row by name before it touches anything.  That is also why exit 1 from the
+# deleter means a stale table here and never a leftover.
+#
+# And the compile question, which parse alone cannot answer.  Deleting a block
+# can break code that a substitution never would - `guard let x = ... else
+# { return }` deleted whole leaves every later use of `x` undefined, which
+# parses clean and does not typecheck.  None of guards 2, 3 and 7 binds
+# anything, so none has that problem, but "none of them binds" is an argument
+# and the fifth field only buys syntax.  So it was driven once, by hand: all
+# three deletions applied to the real tree at once, `make dev` run over them,
+# EXIT=0 with 0 warnings across the 3 files it recompiled, then both sources
+# restored and verified by shasum and the dev app rebuilt from the restored
+# tree.  That is a measurement of these three rows on this tree, not a gate:
+# a build per row would cost minutes and buy, for rows that bind nothing,
+# what a 0.2s parse already answers.  A row that ever deletes a block with a
+# binding in it should pay for a build.
 #
 # Two standing checks with a red state are still NOT here, each for its own
 # reason:
@@ -1926,20 +2055,148 @@ mutants-logic:
 #                  Makefile - the same event, scored where the oracle is the
 #                  check itself and the table has no copy of the string.
 #
-# Needle and replacement are chosen so that neither contains the other,
-# otherwise the leftover-mutation branch cannot tell a half-finished run from
-# a clean tree.  `count: 32` becomes `count: 0x20` for that reason alone -
-# same constant, different text.
+# On a SUBSTITUTION row, needle and replacement are chosen so that neither
+# contains the other, otherwise the leftover-mutation branch cannot tell a
+# half-finished run from a clean tree.  `count: 32` becomes `count: 0x20` for
+# that reason alone - same constant, different text.  A `<DELETE-BLOCK>` row
+# has no replacement text and is exempt; what covers it instead is written out
+# under "The second operation" below.
 #
 # The planted call is also chosen to COMPILE.  keychain-doors is a grep and
 # does not care, but another agent may be building this tree inside the few
 # seconds the mutation is applied, and a harness that hands a neighbour a
 # broken source is buying its verdict with somebody else's build.
+#
+# --- Does the mutant compile?  The fifth field ---------------------------
+#
+# "Chosen to compile" was, for three of these four rows, an ARGUMENT: each
+# replacement uses only identifiers already in scope and throws the result
+# away with `_ =`.  No compiler ever checked, which is the same shape as
+# every other defect found in this harness - a claim about the world resting
+# on reasoning rather than on a run.
+#
+# It matters more here than in the SSE table.  A mutant that does not compile
+# sends the target red for a reason that is NOT the guard noticing, and the
+# row prints "ok - caught" having proved nothing.  The SSE table survives
+# that case by accident of its scoring contract: a suite that cannot build
+# prints neither verdict and scores ERROR.  These targets are text readers.
+# They never build anything.  Nothing here would have caught it.
+#
+# So every row now declares, in a fifth field, what its mutant must do to a
+# parser, and the loop checks that INSIDE the mutation window, BEFORE the
+# target is consulted:
+#
+#   parses          the mutant must still parse.  If it does not, the row is
+#                   BROKEN: the target is not run at all and the target fails.
+#                   A broken row is not a catch and must not be reported as
+#                   one.
+#   must-not-parse  the mutant must NOT parse.  Only parse-tests, whose whole
+#                   subject is a syntax error in a source the app build never
+#                   compiles.  Be honest about what the gate buys THERE: it
+#                   is the same instrument as the oracle, so it does not
+#                   independently confirm the catch - it asserts the row's
+#                   premise, and would fire if the replacement were ever
+#                   edited into something that parses, at which point the row
+#                   would be scoring some other event under the old name.
+#
+# The instrument is `swiftc -parse` on the one mutated file.  What that does
+# and does not see, driven on this machine rather than argued:
+#
+#   CAUGHT      syntax.  A dropped `func`, an unbalanced brace, a replacement
+#               pasted in with the needle's trailing context lost.
+#               `swiftc -parse` on a one-line file `func g( {` exits non-zero
+#               and names the column.
+#   NOT CAUGHT  types, scope and imports.  `_ = task.id` parses whether or
+#               not `task` exists, whether or not it has an `id`, and whether
+#               or not the file imports what the identifier needs.  A file
+#               whose whole body is `_ = nonexistentThing` parses clean
+#               (exit 0) and fails `-typecheck` with "cannot find in scope".
+#
+# So this gate proves the mutant is Swift.  It does not prove the mutant is
+# the code the row's prose describes.  It is a floor, and it is named as one.
+#
+# The stronger instruments were priced here, not assumed away:
+#
+#   swiftc -typecheck on the one file.  Unusable as a pass/fail gate, because
+#   the rest of the module is absent and a PRISTINE source already fails.
+#   Measured on this tree, unmutated: rings/SR-02/AgentMemoryService.swift
+#   28 errors in 0.7s; tests/swift/queen_delegation_test.swift 190 errors in
+#   2.5s.  There is no green baseline to compare a mutant against.
+#
+#   A whole-module typecheck.  Correct, and it would need build.sh's source
+#   list plus its -I/-L set (SQLCipher modulemap, SQLCipher headers,
+#   QueenUILib module dir) copied into this Makefile, where a second copy
+#   would rot out of step with the build it imitates.
+#
+#   `make dev` per row.  The real answer, and priced: measured here, one
+#   incremental `make dev` after touching rings/SR-02/ChatViewModel.swift
+#   took 80s, exit 0.  Three compiling rows, two of them in that same file,
+#   turns a target that ran in 16-26s into more than four minutes.  This
+#   target is deliberate and is NOT in `make check`, so that is affordable
+#   in a way it would not otherwise be - but four minutes buys a stronger
+#   answer for three rows that a 0.2s parse already answers weakly, and the
+#   weak answer is the one that was missing.  If the table ever grows a row
+#   whose replacement is subtle enough that syntax is not enough, THAT row
+#   can pay for a build; the others should not pay for it too.
+#
+# `swiftc -parse` costs 0.13-0.21s per file here and runs twice per row -
+# once on the pristine source, so a file that was ALREADY broken by somebody
+# else is REFUSED rather than blamed on the row, and once on the mutant.
+# Under two seconds across the whole table: driven, the target went from
+# 16-26s before the gate to 24s and 29s with it.
+#
+# Driven, this machine, all five arms (the first line's row count is from the
+# run, and the table has grown since - see the block-operation arms below it):
+#
+#   - the table as it stands: four rows, all "ok - caught", exit 0.
+#   - the guard-shapes replacement swapped for an unbalanced
+#     `isStreamOpen(current` : "BROKEN ROW ... the mutant does not parse",
+#     make guard-shapes NOT run, recipe exit 1 / make exit 2, and
+#     ChatViewModel.swift restored byte-identical (shasum before == after).
+#   - the SAME unbalanced replacement with its field flipped to
+#     `must-not-parse`, so the gate is satisfied and the target IS consulted:
+#     "ok - caught", exit 0.  That is what this table printed for an
+#     uncompilable mutant before the fifth field existed, and it is the whole
+#     reason the field exists.
+#   - keychain-doors flipped to `must-not-parse` while its mutant parses:
+#     "BROKEN ROW ... the mutant parses, and this row exists to plant a
+#     syntax error".  A garbage field value (`maybe`) is a broken row too.
+#   - a temporary row pointing at tests/fixtures/parse-fixture.swift, which
+#     does not parse on a clean tree: "REFUSED ... does not parse BEFORE the
+#     mutation", and the fixture's shasum unchanged, so nothing was written.
+#
+# Driven again when `<DELETE-BLOCK>` was added.  The negative arms were driven
+# by overriding the table on the command line - `make mutants-guard
+# MUTANTS_GUARD='...'` - so no temporary row was ever committed:
+#
+#   - the table as it stands: seven rows, all "ok - caught", exit 0, 32.6s.
+#     The three new ones print "caught by guard-shapes", and the run before
+#     them - the matcher's own fixture - prints "deleted lines 16-27".
+#   - `git status --short rings/ BR-OUTPUT/ main.swift` empty after every run
+#     below, including the ones that failed.
+#   - a delete row whose ANCHOR was renamed away: "STALE ... - the anchor is
+#     not in this source".  Its needle renamed away instead: "STALE ... - no
+#     needle line above the anchor".  Two different faults, two different
+#     sentences; the deleter's own words are appended to the verdict.
+#   - a delete row aimed at `if let client = a2aClient {`, whose block closes
+#     into `} else {`: "BROKEN ROW ... code follows the closing brace on its
+#     line", nothing written, make exit 2.
+#   - guard 2's deletion scored against `keychain-doors`, a target that cannot
+#     see it: "SURVIVED", make exit 2.  A delete row is not rubber-stamped by
+#     being a deletion.
+#   - delete-block-braces.expected.swift edited to disagree with the matcher:
+#     "[FAIL] the block deletion did not reproduce ...", the diff printed, and
+#     NO row run.  The input fixture moved out of the way instead: "[FAIL] the
+#     block-deletion fixtures are missing".  The harness lock was released on
+#     both of those early exits.
 MUTANTS_GUARD := \
-	rings/SR-02/AgentMemoryService.swift@@var bytes = [UInt8](repeating: 0, count: 32)@@_ = SecItemCopyMatching([kSecClass as String: kSecClassGenericPassword] as CFDictionary, nil); var bytes = [UInt8](repeating: 0, count: 0x20)@@keychain-doors@@a real keychain call is opened in a file that is not on the allowlist \
-	tests/swift/queen_delegation_test.swift@@static func issueParsing() {@@static issueParsing() {@@parse-tests@@a test source the app build never compiles loses its func keyword \
-	rings/SR-02/ChatViewModel.swift@@delegationRegistry.recordCompletedTurn(taskID: task.id)@@_ = task.id // gutted: the turn is never marked complete@@finish-mark-order@@the completed-turn mark is dropped from the finish callback \
-	rings/SR-02/ChatViewModel.swift@@guard !QueenDelegationPolicy.isStreamOpen(current) else { continue }@@_ = QueenDelegationPolicy.isStreamOpen(current) // gutted: the answer is thrown away@@guard-shapes@@a load-bearing guard disappears from its file while the tree still compiles
+	rings/SR-02/AgentMemoryService.swift@@var bytes = [UInt8](repeating: 0, count: 32)@@_ = SecItemCopyMatching([kSecClass as String: kSecClassGenericPassword] as CFDictionary, nil); var bytes = [UInt8](repeating: 0, count: 0x20)@@keychain-doors@@parses@@a real keychain call is opened in a file that is not on the allowlist~ \
+	tests/swift/queen_delegation_test.swift@@static func issueParsing() {@@static issueParsing() {@@parse-tests@@must-not-parse@@a test source the app build never compiles loses its func keyword~ \
+	rings/SR-02/ChatViewModel.swift@@delegationRegistry.recordCompletedTurn(taskID: task.id)@@_ = task.id // gutted: the turn is never marked complete@@finish-mark-order@@parses@@the completed-turn mark is dropped from the finish callback~ \
+	rings/SR-02/ChatViewModel.swift@@guard !QueenDelegationPolicy.isStreamOpen(current) else { continue }@@_ = QueenDelegationPolicy.isStreamOpen(current) // gutted: the answer is thrown away@@guard-shapes@@parses@@guard 6 is gutted in place: the reaper still asks the predicate and throws the answer away~ \
+	rings/SR-02/ChatViewModel.swift@@guard ProjectPaths.isDevVariant else { return }@@<DELETE-BLOCK>let path = Self.queenInboxPath@@guard-shapes@@parses@@guard 2 is deleted through its brace: the dev-inbox read loses its variant check~ \
+	rings/SR-02/ChatViewModel.swift@@guard ProjectPaths.isDevVariant else {@@<DELETE-BLOCK>let entry = QueenInboxEntry(@@guard-shapes@@parses@@guard 3 is deleted through its brace: the inbox enqueue loses its variant check~ \
+	main.swift@@guard RecursionGuard.shared.ensureSingleInstance() else {@@<DELETE-BLOCK>NSApplication.shared.run()@@guard-shapes@@parses@@guard 7 is deleted through its brace: the boot path stops enforcing a single instance
 
 .PHONY: mutants-guard
 mutants-guard:
@@ -1973,15 +2230,210 @@ mutants-guard:
 	      rm -rf $$backup; \
 	      rm -rf "$(HARNESS_LOCK)" 2>/dev/null' EXIT INT TERM; \
 	fail=0; n=0; \
-	: "tests/ joins rings/ and BR-OUTPUT/ as a record boundary: a guard row \
-	   may name a test source, which no suite-oracle row ever could."; \
-	IFS='~'; for entry in $$(echo '$(MUTANTS_GUARD)' | sed 's/ rings\//~rings\//g; s/ BR-OUTPUT\//~BR-OUTPUT\//g; s/ tests\//~tests\//g'); do \
-		unset IFS; \
+	df="$$backup/delete-block.py"; \
+	: "The block operation. A row whose replacement is <DELETE-BLOCK>ANCHOR"; \
+	: "removes the needle line and everything up to and including the brace"; \
+	: "that closes it, choosing the needle occurrence NEAREST ABOVE the anchor"; \
+	: "- the same lookup guard-shapes does, so the guard deleted is the guard"; \
+	: "scored. Braces are counted lexically: line comments, nested block"; \
+	: "comments, escapes, raw and multiline strings, and interpolation are all"; \
+	: "tracked, so a brace inside a string is not a brace. It refuses rather"; \
+	: "than guesses when code precedes the needle on its line, when code"; \
+	: "follows the closing brace on its line (an else chain), or when the"; \
+	: "source does not lex."; \
+	printf '%s\n' \
+		'import os, sys' \
+		'q1 = chr(34)' \
+		'q3 = q1 * 3' \
+		'hsh = chr(35)' \
+		'src = open(os.environ["DB_SRC"], encoding="utf-8").read()' \
+		'needle = os.environ["DB_NEEDLE"]' \
+		'anchor = os.environ["DB_ANCHOR"]' \
+		'n = len(src)' \
+		'code = bytearray(n)' \
+		'stack = []' \
+		'mode = "code"' \
+		'hashes = 0' \
+		'triple = False' \
+		'depth_c = 0' \
+		'paren = 0' \
+		'i = 0' \
+		'while i < n:' \
+		'    c = src[i]' \
+		'    if mode == "line":' \
+		'        if c == "\n":' \
+		'            mode = "code"' \
+		'        i += 1' \
+		'        continue' \
+		'    if mode == "block":' \
+		'        if src.startswith("/*", i):' \
+		'            depth_c += 1' \
+		'            i += 2' \
+		'            continue' \
+		'        if src.startswith("*/", i):' \
+		'            depth_c -= 1' \
+		'            i += 2' \
+		'            if depth_c == 0:' \
+		'                mode = "code"' \
+		'            continue' \
+		'        i += 1' \
+		'        continue' \
+		'    if mode == "str":' \
+		'        esc = "\\" + hsh * hashes' \
+		'        if src.startswith(esc + "(", i):' \
+		'            stack.append((hashes, triple, paren))' \
+		'            mode = "code"' \
+		'            paren = 1' \
+		'            i += len(esc) + 1' \
+		'            continue' \
+		'        if src.startswith(esc, i):' \
+		'            i += len(esc) + 1' \
+		'            continue' \
+		'        close = (q3 if triple else q1) + hsh * hashes' \
+		'        if src.startswith(close, i):' \
+		'            mode = "code"' \
+		'            i += len(close)' \
+		'            continue' \
+		'        i += 1' \
+		'        continue' \
+		'    if src.startswith("//", i):' \
+		'        mode = "line"' \
+		'        i += 2' \
+		'        continue' \
+		'    if src.startswith("/*", i):' \
+		'        mode = "block"' \
+		'        depth_c = 1' \
+		'        i += 2' \
+		'        continue' \
+		'    h = 0' \
+		'    while i + h < n and src[i + h] == hsh:' \
+		'        h += 1' \
+		'    if i + h < n and src[i + h] == q1:' \
+		'        hashes = h' \
+		'        triple = src.startswith(q3, i + h)' \
+		'        mode = "str"' \
+		'        i += h + (3 if triple else 1)' \
+		'        continue' \
+		'    if stack:' \
+		'        if c == "(":' \
+		'            paren += 1' \
+		'        elif c == ")":' \
+		'            paren -= 1' \
+		'            if paren == 0:' \
+		'                hashes, triple, paren = stack.pop()' \
+		'                mode = "str"' \
+		'                i += 1' \
+		'                continue' \
+		'    code[i] = 1' \
+		'    i += 1' \
+		'if mode != "code" or stack or depth_c:' \
+		'    sys.stderr.write("the source does not lex: unterminated string or comment\n")' \
+		'    sys.exit(3)' \
+		'starts = [0]' \
+		'for k in range(n):' \
+		'    if src[k] == "\n":' \
+		'        starts.append(k + 1)' \
+		'lines = src.split("\n")' \
+		'a = -1' \
+		'for k in range(len(lines)):' \
+		'    if anchor in lines[k]:' \
+		'        a = k' \
+		'        break' \
+		'if a < 0:' \
+		'    sys.stderr.write("the anchor is not in this source\n")' \
+		'    sys.exit(1)' \
+		'g = -1' \
+		'for k in range(a - 1, -1, -1):' \
+		'    if needle in lines[k]:' \
+		'        g = k' \
+		'        break' \
+		'if g < 0:' \
+		'    sys.stderr.write("no needle line above the anchor\n")' \
+		'    sys.exit(1)' \
+		'col = lines[g].index(needle)' \
+		'if lines[g][:col].strip():' \
+		'    sys.stderr.write("code precedes the needle on its own line\n")' \
+		'    sys.exit(3)' \
+		'open_at = -1' \
+		'for p in range(starts[g] + col, n):' \
+		'    if code[p] and src[p] == "{":' \
+		'        open_at = p' \
+		'        break' \
+		'if open_at < 0:' \
+		'    sys.stderr.write("no opening brace after the needle\n")' \
+		'    sys.exit(3)' \
+		'depth = 0' \
+		'close_at = -1' \
+		'for p in range(open_at, n):' \
+		'    if not code[p]:' \
+		'        continue' \
+		'    if src[p] == "{":' \
+		'        depth += 1' \
+		'    elif src[p] == "}":' \
+		'        depth -= 1' \
+		'        if depth == 0:' \
+		'            close_at = p' \
+		'            break' \
+		'if close_at < 0:' \
+		'    sys.stderr.write("the opening brace has no match\n")' \
+		'    sys.exit(3)' \
+		'c_line = 0' \
+		'for k in range(len(starts)):' \
+		'    if starts[k] <= close_at:' \
+		'        c_line = k' \
+		'    else:' \
+		'        break' \
+		'if src[close_at + 1:starts[c_line] + len(lines[c_line])].strip():' \
+		'    sys.stderr.write("code follows the closing brace on its line\n")' \
+		'    sys.exit(3)' \
+		'end = starts[c_line] + len(lines[c_line])' \
+		'if end < n and src[end] == "\n":' \
+		'    end += 1' \
+		'open(os.environ["DB_SRC"], "w", encoding="utf-8").write(src[:starts[g]] + src[end:])' \
+		'sys.stderr.write("deleted lines " + str(g + 1) + "-" + str(c_line + 1) + "\n")' \
+	> $$df; \
+	: "It proves itself on a fixture before it is pointed at a real source."; \
+	: "The fixture hides braces in a string, a line comment and a block"; \
+	: "comment; a counter that walks characters closes that guard four lines"; \
+	: "early and leaves a source that does not compile. Driven here, not"; \
+	: "argued: if the result is not the expected file, no row runs at all."; \
+	fx="$(ROOT)/tests/fixtures/delete-block-braces.swift"; \
+	fxe="$(ROOT)/tests/fixtures/delete-block-braces.expected.swift"; \
+	if [ ! -f "$$fx" ] || [ ! -f "$$fxe" ]; then \
+		echo "[FAIL] the block-deletion fixtures are missing:"; \
+		echo "       tests/fixtures/delete-block-braces.swift and .expected.swift"; \
+		echo "       no row was run; the operation has nothing to prove itself on"; \
+		exit 1; \
+	fi; \
+	sfx="$$backup/selftest.swift"; cp "$$fx" "$$sfx"; \
+	if ! sferr=$$(DB_SRC="$$sfx" DB_NEEDLE='guard ready(shape:' DB_ANCHOR='return true' python3 $$df 2>&1); then \
+		echo "[FAIL] the block-deletion self-test refused the fixture: $$sferr"; \
+		echo "       no row was run"; \
+		exit 1; \
+	fi; \
+	if ! diff -q "$$fxe" "$$sfx" >/dev/null; then \
+		echo "[FAIL] the block deletion did not reproduce delete-block-braces.expected.swift"; \
+		diff -u "$$fxe" "$$sfx" | head -20 | sed 's/^/       | /'; \
+		echo "       no row was run: an operation that cannot match braces past a"; \
+		echo "       string must not be pointed at a real source"; \
+		exit 1; \
+	fi; \
+	echo "  ok   - block deletion matches braces past strings and comments ($$sferr)"; \
+	: "Rows are separated by a literal ~, the way GUARDS does it, not by \
+	   guessing a record boundary from the leading path. That guess had a \
+	   fixed list - rings/, BR-OUTPUT/, tests/ - so a row naming main.swift \
+	   would have been swallowed by its predecessor, and a row whose LABEL \
+	   happened to read ' main.swift' would have been split in two. Both are \
+	   live hazards the moment a guard row points at the boot file."; \
+	while IFS= read -r raw; do \
+		entry=$$(printf '%s' "$$raw" | sed 's/^[[:space:]]*//; s/[[:space:]]*$$//'); \
+		[ -n "$$entry" ] || continue; \
 		src=$$(echo "$$entry" | awk -F'@@' '{print $$1}'); \
 		needle=$$(echo "$$entry" | awk -F'@@' '{print $$2}'); \
 		repl=$$(echo "$$entry" | awk -F'@@' '{print $$3}'); \
 		guard=$$(echo "$$entry" | awk -F'@@' '{print $$4}'); \
-		name=$$(echo "$$entry" | awk -F'@@' '{print $$5}'); \
+		parse=$$(echo "$$entry" | awk -F'@@' '{print $$5}'); \
+		name=$$(echo "$$entry" | awk -F'@@' '{print $$6}'); \
 		n=$$((n + 1)); \
 		: "The machine before the mutation. An already-red target would go \
 		   red again for its own reason and forge a catch, so a row that \
@@ -1993,27 +2445,81 @@ mutants-guard:
 			echo "$$pre" | head -5 | sed 's/^/         | /'; \
 			fail=1; continue; \
 		fi; \
+		: "And the source before it is touched. If it does not parse already, \
+		   the mutant's parse below would blame this row for somebody else's \
+		   broken edit."; \
+		if ! preparse=$$(swiftc -parse "$(ROOT)/$$src" 2>&1); then \
+			echo "  REFUSED - $$name: $$src does not parse BEFORE the mutation"; \
+			echo "            no mutation was applied; a mutant's parse proves nothing"; \
+			echo "            on a source that was already broken"; \
+			echo "$$preparse" | grep 'error:' | head -3 | sed 's/^/         | /'; \
+			fail=1; continue; \
+		fi; \
 		cp "$(ROOT)/$$src" "$$backup/$$n.bak"; echo "$$src" > "$$backup/$$n.bak.path"; \
 		shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.bak.sha"; \
-		MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
-			'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; n=os.environ["MUT_NEW"]; open(p,"w").write(s.replace(o,n,1)) if o in s else (open(p,"w").write(s.replace(n,o,1)),sys.exit(2))[1] if n in s else sys.exit(1)'; rc=$$?; \
+		case "$$repl" in \
+		"<DELETE-BLOCK>"*) \
+			: "A deletion has no replacement text, so the leftover-mutation \
+			   branch below cannot apply to it: there is nothing to look for \
+			   in the file. It is not needed either. A deletion left behind \
+			   by a killed run leaves the guard MISSING, so make guard-shapes \
+			   is red and the green-baseline check above has already REFUSED \
+			   this row by name. That is also why exit 1 here means a stale \
+			   table and not a leftover: a leftover never reaches this line."; \
+			dberr=$$(DB_SRC="$(ROOT)/$$src" DB_NEEDLE="$$needle" \
+				DB_ANCHOR="$${repl#<DELETE-BLOCK>}" python3 $$df 2>&1); rc=$$?; \
+			;; \
+		*) \
+			: "dberr belongs to the row being run, not to the last delete row \
+			   that set it; a stale value here would attach one row's reason \
+			   to another row's verdict."; \
+			dberr=; \
+			MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
+				'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; n=os.environ["MUT_NEW"]; open(p,"w").write(s.replace(o,n,1)) if o in s else (open(p,"w").write(s.replace(n,o,1)),sys.exit(2))[1] if n in s else sys.exit(1)'; rc=$$?; \
+			;; \
+		esac; \
 		case $$rc in \
+			3) echo "  BROKEN ROW - $$name: the block deletion refused: $$dberr"; \
+			   echo "               nothing was written; the row names a shape this"; \
+			   echo "               operation does not handle, and a guess would have"; \
+			   echo "               left a source nobody can compile"; \
+			   fail=1; cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue ;; \
 			2) echo "  LEFTOVER MUTATION - $$name (repaired: replacement was in $$src without its needle)"; \
 			   cp "$(ROOT)/$$src" "$$backup/$$n.bak"; shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.bak.sha"; \
 			   MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
 			   'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; open(p,"w").write(s.replace(o,os.environ["MUT_NEW"],1))' ;; \
-			1) echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
+			1) echo "  STALE - $$name (its needle is no longer in $$src)$${dberr:+ - $$dberr}"; fail=1; \
 			   cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue ;; \
 		esac; \
 		shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.mut.sha"; \
-		post=$$($(MAKE) --no-print-directory $$guard 2>&1); postrc=$$?; \
-		if [ $$postrc -ne 0 ] && echo "$$post" | grep -qF "[FAIL]"; then \
-			echo "  ok   - caught by $$guard: $$name"; \
-		elif [ $$postrc -eq 0 ] && echo "$$post" | grep -qF "[OK]"; then \
-			echo "  SURVIVED - $$name"; fail=1; \
+		: "The mutant itself, before the target is consulted. A replacement \
+		   that does not compile sends the target red for a reason that is \
+		   not the guard noticing, and these targets never build anything, \
+		   so nothing else in this loop would catch it. Syntax only - the \
+		   note above the table says what that does and does not see."; \
+		mutparse=$$(swiftc -parse "$(ROOT)/$$src" 2>&1); mutrc=$$?; broken=; \
+		case "$$parse" in \
+			parses) if [ $$mutrc -ne 0 ]; then broken="the mutant does not parse"; fi ;; \
+			must-not-parse) if [ $$mutrc -eq 0 ]; then broken="the mutant parses, and this row exists to plant a syntax error"; fi ;; \
+			*) broken="the row declares parse expectation '$$parse'; want parses or must-not-parse" ;; \
+		esac; \
+		if [ -n "$$broken" ]; then \
+			echo "  BROKEN ROW - $$name: $$broken"; \
+			echo "               make $$guard was NOT consulted: when the mutant is not"; \
+			echo "               the code the row claims it is, a red target says nothing"; \
+			echo "               about the guard - a broken row, not a catch"; \
+			echo "$$mutparse" | grep 'error:' | head -3 | sed 's/^/         | /'; \
+			fail=1; \
 		else \
-			echo "  ERROR - make $$guard neither passed nor failed: $$name (exit $$postrc)"; fail=1; \
-			echo "$$post" | head -5 | sed 's/^/         | /'; \
+			post=$$($(MAKE) --no-print-directory $$guard 2>&1); postrc=$$?; \
+			if [ $$postrc -ne 0 ] && echo "$$post" | grep -qF "[FAIL]"; then \
+				echo "  ok   - caught by $$guard: $$name"; \
+			elif [ $$postrc -eq 0 ] && echo "$$post" | grep -qF "[OK]"; then \
+				echo "  SURVIVED - $$name"; fail=1; \
+			else \
+				echo "  ERROR - make $$guard neither passed nor failed: $$name (exit $$postrc)"; fail=1; \
+				echo "$$post" | head -5 | sed 's/^/         | /'; \
+			fi; \
 		fi; \
 		if [ -f "$$backup/$$n.mut.sha" ]; then \
 			now_sha=$$(shasum "$(ROOT)/$$src" | cut -d" " -f1); \
@@ -2025,9 +2531,9 @@ mutants-guard:
 			fi; \
 		fi; \
 		cp "$$backup/$$n.bak" "$(ROOT)/$$src"; \
-	done; \
+	done < <(printf '%s\n' '$(MUTANTS_GUARD)' | tr '~' '\n'); \
 	if [ $$fail -eq 0 ]; then echo "[OK] every guard mutation was caught by its own check ($$n)"; \
-	else echo "[FAIL] a guard mutation survived, went stale, was not measured, or ran against a red machine"; exit 1; fi
+	else echo "[FAIL] a guard mutation survived, went stale, did not compile, was not measured, or ran against a red machine"; exit 1; fi
 
 # --- Mutation (working tree only) ---------------------------------------
 #
