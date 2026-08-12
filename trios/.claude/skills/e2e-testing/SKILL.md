@@ -354,3 +354,39 @@ not.
 If you must keep a conclusion cache, give it a expiry it cannot outlive: tie the
 entry to the object file's identity, and treat a missing or older object as no
 entry at all.
+
+## A test that transcribes the logic tests the transcript
+
+Twenty named checks went in to guard the stall reaper. They drive
+`QueenDelegationPolicy.isStreamOpen` and `wasNeverStarted` through a real
+registry, they fail by name when either predicate is gutted, and two mutation
+rows catch the same thing. All good — and an adversary then deleted
+`guard !QueenDelegationPolicy.isStreamOpen(current) else { continue }` from the
+*shipped reaper* in ChatViewModel.swift and the suite was byte-identical to the
+pristine baseline. Not one of the twenty noticed.
+
+Because the test helper carried its own copy of that line. It reimplemented the
+reaper's decision instead of calling it, so the checks proved the predicates
+correct and proved nothing about the code that consults them. This is the same
+defect as a self-check that exercises a copy of the target — it was
+`check-selftest` earlier the same night, praising a recipe that was already
+broken.
+
+**Ask, of every test: if I delete the line under test from the shipped code,
+does this fail?** If the answer is no because the test has its own copy of that
+line, the test is guarding the copy.
+
+When the real call site cannot be invoked from the harness — here
+`reapStalledWorkers` is `@MainActor` on a view model with a live runner — the
+honest options are two, and both are cheap:
+
+- guard the *shape*: a row in `make guard-shapes` asserting the guard line still
+  sits above its anchor in the real file, with a broken fixture proving the
+  check can fail (this is what closed the gap; removing the line now produces a
+  named FAIL);
+- or state plainly in the test's own comment that it covers the predicate and
+  not its use, so the next reader does not mistake the twenty green ticks for
+  coverage of the decision.
+
+Silently transcribing is the only wrong answer, and it is the one that looks
+most like thorough testing.
