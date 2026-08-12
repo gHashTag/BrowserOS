@@ -394,3 +394,38 @@ Two related traps met the same night:
   already in `.git/objects` from earlier runs — the cost only exists for content
   git has never seen. Measure the state the defect lives in, not the one that is
   convenient to reproduce.
+
+## A restore check that compares the backup to itself
+
+The mutation harness snapshots each source, records its checksum, mutates it,
+runs the suite, copies the backup back, and then verifies the restore by
+comparing the restored file's checksum against the recorded one. That comparison
+can never fail: it checks the copy against the thing it was copied from.
+
+What it does NOT notice is somebody writing to the file while the harness holds
+it mutated. The restore then silently reverts that write, and the harness
+reports success. This is how one agent's edit came apart: it changed a function
+body and its doc comment, a harness run overlapped, and the file ended up with
+the new comment describing the old body — a state that never existed as a
+coherent edit, and one a human reading the diff would skim straight past,
+because the comment says exactly what you expect the code to say.
+
+The fix is one checksum in the other direction. Record the hash of the *mutated*
+file right after mutating; before restoring, compare the file on disk to that.
+If it differs, someone else wrote to it:
+
+    [FAIL] rings/SR-01/SkillStore.swift changed while the harness held it mutated.
+           Restoring the backup would silently revert whoever wrote to it.
+           The mutation is left in place; resolve by hand. Backup: <path>
+
+Leaving the mutation in place is deliberate. Reverting either version silently
+picks a winner; failing loudly with the backup path lets a person choose.
+
+Driven: start a mutation run, append a line to the file 25 s in, and the guard
+fires. Ordinary runs still pass — `ok - caught: probe row (failed twice)`.
+
+**The general rule: a verification that compares an artifact to the source it was
+produced from verifies the copy, not the world.** To detect interference you must
+compare against what you last observed, not against what you last wrote. The same
+shape appeared twice more the same week — a warning cache compared to itself, and
+a test that compared the reaper to its own transcription of the reaper.
