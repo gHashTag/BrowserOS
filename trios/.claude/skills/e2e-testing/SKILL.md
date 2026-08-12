@@ -586,3 +586,41 @@ bundles ship a binary named `trios`. It is in `make help`, in no gate, and exits
 0 always, so it had been lying to everyone who looked at it. Match processes by
 their bundle path, stat the binary, and remember that a target with no red state
 is a report, not a check.
+
+## A rule that lives in the file it searches can never go stale out loud
+
+`make-dollars` was the obvious next row for the guard-oracle table: plant a
+single-dollar shell variable in a recipe, the check must go red. Two agents
+refused it, and the second one's reason is the interesting one — it replaced the
+first's.
+
+The first said: the harness would rewrite the Makefile it is executing. That is
+not the objection; the parent `make` has already parsed the file, and a mutation
+chosen to keep it parsing is survivable.
+
+The real objection is **self-reference**. A row stores its needle and its
+replacement *as text in the same file it searches*. So `needle in file` and
+`replacement in file` are permanently true, whatever the recipe below says. The
+two branches that depend on those tests stop working:
+
+- STALE can never fire — the needle is always "present", in the table entry.
+- The leftover-mutation repair can never fire either, and worse, a mutation
+  applied by first-match would hit the *table row* rather than the recipe once
+  the recipe line has moved.
+
+So the row would not merely be useless; it would quietly forge verdicts later.
+The event it wants to catch already has an honest red-driver in `check-selftest`,
+which appends a single-dollar line to a **copy** of the Makefile — the same
+event, scored where the table holds no copy of the string.
+
+**Generalise: a checker whose rules are stored in the artifact it inspects has a
+blind spot exactly the size of its own rule table.** Keep the rule and the
+subject in different files, or accept that the rule is invisible to itself.
+
+Related, from the same round: two rows needed a one-line change to their oracle
+before they could be scored at all. `finish-mark-order` and `guard-shapes`
+printed human-readable lines but no bracketed `[OK]`/`[FAIL]`, so the harness's
+positive-evidence rule could not read them and every row against them would have
+scored ERROR. **A target that a machine is meant to score must say so in a form
+a machine can read** — the same discipline as the suite printing its own
+"N of M test(s) failed".
