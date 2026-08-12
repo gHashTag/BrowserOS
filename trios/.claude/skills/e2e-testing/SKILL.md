@@ -427,3 +427,47 @@ Corollary about self-describing counters: a floor set exactly at the current
 value has no slack in either direction, so it fires on the first honest failure
 as well as on real coverage loss. If the comment says "just under", make the
 number just under.
+
+## What a mutation table cannot ask, and why
+
+Seven standing Makefile checks were audited for mechanical falsifiability — can
+the MUTANTS table ask "what event makes this red?" on their behalf? The answer
+for all seven is no, and the reason is structural rather than incidental:
+
+**The table's oracle is the e2e suite. Every one of those checks exists
+precisely because the compiler and the suite cannot see the failure it guards.
+Read backwards, that is: its failure cannot be scored here.**
+
+Measured, not reasoned:
+
+- `keychain-doors` — a real `SecItemCopyMatching` planted outside the allowlist.
+  The check names the file and exits 1; the harness printed **SURVIVED**. The
+  suite runs with `TRIOS_E2E_DISABLE_KEYCHAIN=1`; it is keychain-blind by design.
+- the warning gate — the mutation put a genuine warning into the suite's own
+  build log, and the harness still printed **SURVIVED**. The runner reads
+  `PIPESTATUS`, never the warning text.
+- `parse-tests` — fails both ways: a syntax break in a compiled source gives
+  **ERROR - the suite never ran**; in a source the suite does not compile (the
+  exact case the check exists for) it **SURVIVED**.
+- `backlog-audit` has no red at all: against its bad fixture it prints
+  `verdict=looks-open` and exits 0, by design. It is a report, not a gate.
+
+Two conclusions worth keeping:
+
+1. **A row that passes for the wrong reason is the same lie as scoring a flake.**
+   One tempting row would have opened a keychain door *by* deleting an
+   identifier the suite counts — "ok - caught" for the deleted call site, not
+   for the open door. Rejected on purpose.
+2. **The right home for a Makefile check's question is a harness whose oracle is
+   the check itself** — `check-selftest`, not the suite. The sketch: a sibling
+   table `source@@needle@@replacement@@target@@name`, run `make <target>` before
+   the mutation (must be green, or a red machine forges a catch), mutate, run
+   again, score only green→red as caught. No repeat run needed: those targets
+   are deterministic file readers with no build, network or clock.
+
+And the finding that came out of the audit rather than out of the table: a check
+that **hangs** is worse than one that cannot fail. `make drift-guard` never
+finishes; it is not in `check`, so nobody had run it. Four undrained `Pipe()`s
+turned out to be a real deadlock hazard and were fixed — and the hang survived
+them, so that was not the cause. Silence about a check nobody runs is how both
+of those lived.
