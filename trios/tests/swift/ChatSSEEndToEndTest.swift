@@ -51,7 +51,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 681  // 610 + 6 branch-publish notice (#1251) + 2 push-stall log mirror (#1251) + 1 repetition loop (#1251) + 2 log-before-notice ordering and stall interval (#1251) + 19 conflict-is-not-a-not-yet (#1252) + 15 merge-the-reviewed-commit (#1254) + 8 mergePayload/outcome pure-function extraction (#1254) + 10 cursor-is-a-cache (#1260) + 5 dispatch-inbox-entries-concurrently (#1150) + 3 inbox-poller-is-dev-variant-only (#1150)
+    static let minimumChecks = 701  // 610 + 6 branch-publish notice (#1251) + 2 push-stall log mirror (#1251) + 1 repetition loop (#1251) + 2 log-before-notice ordering and stall interval (#1251) + 19 conflict-is-not-a-not-yet (#1252) + 15 merge-the-reviewed-commit (#1254) + 8 mergePayload/outcome pure-function extraction (#1254) + 10 cursor-is-a-cache (#1260) + 5 dispatch-inbox-entries-concurrently (#1150) + 3 inbox-poller-is-dev-variant-only (#1150) + 20 the reaper decides from evidence (#1139, #1247, #1248)
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -159,6 +159,7 @@ struct ChatSSEEndToEndTests {
         await runConflictIsNotANotYet()
         await runMergeTheReviewedCommit()
         await runStalledWorkerIsResumedBeforeCancelled()
+        await runReaperDecidesFromEvidence()
         await runQueenTaskLifecycleCloses()
         await runPureQueenTypes()
         await runSelfAuditFindsPlantedDeadCode()
@@ -4150,6 +4151,317 @@ struct ChatSSEEndToEndTests {
             registry.task(forIssue: issue)?.state == .running,
             "restarting leaves the task running rather than closing it"
         )
+    }
+
+    // MARK: - Scenario: the reaper decides from evidence, not from a timeout
+    //
+    // Three defects came from answering "is this worker dead?" by sampling
+    // "is a stream running for this conversation right now": a worker reaped
+    // 0.7s after it finished (#1247), the same under parallelism (#1248), and
+    // a task the registry called running that no runner ever started, which
+    // that sample could not distinguish from a worker mid-answer (#1139).
+    //
+    // The fix replaced the sample with two pure predicates over facts the
+    // runner recorded as they happened - `isStreamOpen` and `wasNeverStarted`,
+    // read through `hasGoneSilent` and `lastEvidenceOfLife`. The only proof
+    // they worked lived in a throwaway driver outside the repository, so when
+    // both were gutted - `isStreamOpen` to `false`, `wasNeverStarted` to
+    // "no completed turn" - nothing in the tree noticed, and every running
+    // worker without a finished turn became reapable mid-stream.
+    //
+    // These checks are that proof, brought inside. They drive the shipped
+    // predicates through a real `QueenDelegationRegistry`, reading them exactly
+    // as `ChatViewModel.reapStalledWorkers` and `QueenDelegationRegistry`
+    // .stalled(now:) read them, rather than paraphrasing the decision.
+
+    /// The instant every reaper scenario measures from. Fixed, because the
+    /// question is "how long since the worker spoke", and a moving `now`
+    /// turns that into "how long since the machine got round to it".
+    private static let reaperEpoch = Date(timeIntervalSince1970: 1_700_000_000)
+
+    private static func reaperAt(_ minutes: Double) -> Date {
+        reaperEpoch.addingTimeInterval(minutes * 60)
+    }
+
+    /// A registry whose clock does not move, so `updatedAt` records the
+    /// dispatch and nothing else - which is the situation that made a live
+    /// worker look an hour and a half stale (#1247).
+    private static func reaperRegistry(_ label: String) -> QueenDelegationRegistry {
+        QueenDelegationRegistry(
+            storePath: NSTemporaryDirectory() + "queen-reaper-\(label)-\(UUID().uuidString).json",
+            dateProvider: { reaperEpoch }
+        )
+    }
+
+    private static func reaperDispatch(
+        _ registry: QueenDelegationRegistry,
+        issue number: Int,
+        worker: String,
+        owns: String
+    ) -> DelegatedTask? {
+        guard let issue = IssueReference.parse("gHashTag/trios#\(number)") else {
+            fail("could not build a test issue for #\(number)"); return nil
+        }
+        guard let task = registry.delegate(
+            issue: issue, title: "worker \(number)", worker: worker,
+            conversationId: UUID(), ownedPaths: [owns]
+        ) else {
+            fail("the registry refused to delegate #\(number): "
+                + (registry.lastError ?? "no reason given"))
+            return nil
+        }
+        guard registry.transition(taskID: task.id, to: .running) else {
+            fail("the registry refused to start #\(number)"); return nil
+        }
+        return task
+    }
+
+    // The runner speaks in exactly three places. These mirror all three, so
+    // the facts under test are the ones the shipped runner files.
+    //   start()  -> onStreamFact(.open, nil)
+    //   a delta  -> noteByte -> onStreamFact(.open, now)
+    //   finish() -> onStreamFact(didComplete ? .terminal : .cut, lastByteAt),
+    //               and onFinish -> recordCompletedTurn, synchronously (#1248)
+
+    private static func reaperStart(_ registry: QueenDelegationRegistry, _ task: DelegatedTask) {
+        registry.recordStreamFact(taskID: task.id, outcome: .open, lastByteAt: nil)
+    }
+
+    private static func reaperByte(
+        _ registry: QueenDelegationRegistry,
+        _ task: DelegatedTask,
+        at when: Date
+    ) {
+        registry.recordStreamFact(taskID: task.id, outcome: .open, lastByteAt: when)
+    }
+
+    private static func reaperFinish(
+        _ registry: QueenDelegationRegistry,
+        _ task: DelegatedTask,
+        terminal: Bool,
+        lastByteAt: Date?
+    ) {
+        registry.recordStreamFact(
+            taskID: task.id,
+            outcome: terminal ? .terminal : .cut,
+            lastByteAt: lastByteAt
+        )
+        registry.recordCompletedTurn(taskID: task.id)
+    }
+
+    /// The orphan list `reapStalledWorkers` builds before it does anything,
+    /// transcribed verbatim. Its members skip the stall threshold entirely, so
+    /// the only thing between a live worker in here and a worker executed
+    /// mid-stream is the `isStreamOpen` guard in the loop below it. Asserted
+    /// separately from `reaperWouldTake` on purpose: a bee that survives only
+    /// because a second predicate caught the first one's mistake is one
+    /// predicate away from death, and the adversary gutted both at once.
+    private static func reaperOrphans(_ registry: QueenDelegationRegistry) -> [String] {
+        registry.running
+            .filter(QueenDelegationPolicy.wasNeverStarted)
+            .map(\.issue.slug)
+    }
+
+    /// Everything the sweep would take, transcribed from `reapStalledWorkers`:
+    /// orphans plus the silent, deduplicated, then each one skipped while the
+    /// runner says its turn is still in flight.
+    private static func reaperWouldTake(
+        _ registry: QueenDelegationRegistry,
+        now: Date
+    ) -> [String] {
+        let orphaned = registry.running.filter(QueenDelegationPolicy.wasNeverStarted)
+        let stalled = registry.stalled(now: now)
+        var seen = Set<UUID>()
+        return (orphaned + stalled)
+            .filter { seen.insert($0.id).inserted }
+            .filter { !QueenDelegationPolicy.isStreamOpen($0) }
+            .map(\.issue.slug)
+    }
+
+    static func runReaperDecidesFromEvidence() async {
+        print("\n# Scenario: the stall reaper decides from evidence, not from a timeout")
+
+        typealias P = QueenDelegationPolicy
+
+        // ── 1247: a bee that streamed for 90 minutes and finished 0.7s ago ──
+        //
+        // Nothing wrote the registry while it streamed, so `updatedAt` is still
+        // the dispatch time and an `updatedAt`-only clock calls it 90 minutes
+        // stale. The last byte says otherwise.
+        do {
+            let registry = reaperRegistry("finished")
+            guard let bee = reaperDispatch(registry, issue: 1247, worker: "queen-swift", owns: "docs") else {
+                return
+            }
+            reaperStart(registry, bee)
+            for minute in stride(from: 1.0, through: 90.0, by: 1.0) {
+                reaperByte(registry, bee, at: reaperAt(minute))
+            }
+            reaperFinish(registry, bee, terminal: true, lastByteAt: reaperAt(90))
+
+            let justAfter = reaperAt(90).addingTimeInterval(0.7)
+            guard let settled = registry.task(forConversation: bee.conversationId) else {
+                fail("the registry lost the finished bee"); return
+            }
+
+            check(
+                reaperWouldTake(registry, now: justAfter).isEmpty,
+                "1247: a bee that spoke 0.7s ago is NOT reaped - taking it kills a worker that just finished"
+            )
+            check(
+                settled.streamOutcome == .terminal,
+                "1247: the runner filed a terminal end, so the reaper has a fact to read instead of a hunch"
+            )
+            check(
+                P.lastEvidenceOfLife(settled) == reaperAt(90),
+                "1247: the worker's last sign of life is its last byte, not the dispatch time on updatedAt"
+            )
+            check(
+                !P.hasGoneSilent(settled, now: justAfter),
+                "1247: 0.7 seconds of quiet is not an hour of silence"
+            )
+            check(
+                !P.wasNeverStarted(settled),
+                "1247: a bee that streamed for 90 minutes was started, whatever its bookkeeping says"
+            )
+        }
+
+        // ── The other direction: the same history, cut mid-stream and silent ──
+        do {
+            let registry = reaperRegistry("cut")
+            guard let bee = reaperDispatch(registry, issue: 1247, worker: "queen-swift", owns: "docs") else {
+                return
+            }
+            reaperStart(registry, bee)
+            for minute in stride(from: 1.0, through: 90.0, by: 1.0) {
+                reaperByte(registry, bee, at: reaperAt(minute))
+            }
+            reaperFinish(registry, bee, terminal: false, lastByteAt: reaperAt(90))
+
+            guard let cut = registry.task(forConversation: bee.conversationId) else {
+                fail("the registry lost the cut bee"); return
+            }
+            check(
+                cut.streamOutcome == .cut,
+                "a stream that stopped without a terminal event is on the record as cut, not as ended"
+            )
+            check(
+                reaperWouldTake(registry, now: reaperAt(90 + 59)).isEmpty,
+                "59 minutes of silence is under the threshold - the reaper waits the hour it promised"
+            )
+            check(
+                reaperWouldTake(registry, now: reaperAt(90 + 61)) == ["gHashTag/trios#1247"],
+                "a bee cut off mid-stream and silent past the threshold IS reaped - the detector still detects"
+            )
+            check(
+                P.hasGoneSilent(cut, now: reaperAt(90 + 61)),
+                "and it is silence plus a closed stream that condemns it, both halves together"
+            )
+        }
+
+        // ── The mirror that makes `isStreamOpen` load-bearing ──
+        //
+        // Identical silence, but the runner never closed the stream. A long
+        // think mid-answer is not a death, and cutting it off is the worse form
+        // of the same defect: the worker is killed while it is still talking.
+        do {
+            let registry = reaperRegistry("open-and-quiet")
+            guard let bee = reaperDispatch(registry, issue: 1247, worker: "queen-swift", owns: "docs") else {
+                return
+            }
+            reaperStart(registry, bee)
+            for minute in stride(from: 1.0, through: 90.0, by: 1.0) {
+                reaperByte(registry, bee, at: reaperAt(minute))
+            }
+            // No finish: the turn is still in flight when the sweep runs.
+
+            guard let live = registry.task(forConversation: bee.conversationId) else {
+                fail("the registry lost the still-streaming bee"); return
+            }
+            let longAfter = reaperAt(90 + 61)
+            check(
+                P.isStreamOpen(live),
+                "a turn the runner opened and never closed reads as open - the fact the reaper asks for"
+            )
+            check(
+                !P.hasGoneSilent(live, now: longAfter),
+                "an open stream quiet for 61 minutes is thinking, not dead - silence alone must not condemn it"
+            )
+            check(
+                reaperWouldTake(registry, now: longAfter).isEmpty,
+                "and the sweep leaves it alone - reaping an open stream cuts off a live answer mid-sentence"
+            )
+        }
+
+        // ── 1248: one bee finishes while another is still streaming ──
+        do {
+            let registry = reaperRegistry("parallel")
+            guard let quick = reaperDispatch(registry, issue: 1248, worker: "queen-swift", owns: "docs"),
+                  let slow = reaperDispatch(registry, issue: 1249, worker: "queen-docs", owns: "rings")
+            else { return }
+
+            reaperStart(registry, quick)
+            reaperStart(registry, slow)
+            for minute in stride(from: 1.0, through: 90.0, by: 1.0) {
+                reaperByte(registry, quick, at: reaperAt(minute))
+                reaperByte(registry, slow, at: reaperAt(minute))
+            }
+            reaperFinish(registry, quick, terminal: true, lastByteAt: reaperAt(90))
+            // `slow` keeps streaming straight through the moment of the sweep.
+            reaperByte(registry, slow, at: reaperAt(90).addingTimeInterval(0.5))
+
+            let now = reaperAt(90).addingTimeInterval(0.7)
+            guard let slowNow = registry.task(forConversation: slow.conversationId),
+                  let quickNow = registry.task(forConversation: quick.conversationId)
+            else { fail("the registry lost one of the two bees"); return }
+
+            check(
+                reaperWouldTake(registry, now: now).isEmpty,
+                "1248: with one bee finishing while another streams, the sweep takes NEITHER"
+            )
+            check(
+                reaperOrphans(registry).isEmpty,
+                "1248: and neither is even classed an orphan - the orphan list skips the stall threshold, so a live bee in it is one predicate away from being executed mid-stream"
+            )
+            check(
+                !P.wasNeverStarted(slowNow),
+                "1139 must not eat live workers: a bee with an open stream and no completed turn WAS started"
+            )
+            check(
+                P.isStreamOpen(slowNow),
+                "1248: the bee still mid-stream is on the record as open while its neighbour settles"
+            )
+            check(
+                (quickNow.completedTurns ?? 0) == 1 && quickNow.streamOutcome == .terminal,
+                "1248: the bee that finished has both a completed turn and a terminal stream on its record"
+            )
+        }
+
+        // ── 1139: running in the registry, never dispatched to a runner ──
+        do {
+            let registry = reaperRegistry("orphan")
+            guard let ghost = reaperDispatch(registry, issue: 1139, worker: "queen-swift", owns: "docs") else {
+                return
+            }
+            // Three seconds later: no threshold to wait for.
+            let now = reaperAt(0.05)
+            guard let never = registry.task(forConversation: ghost.conversationId) else {
+                fail("the registry lost the orphan"); return
+            }
+
+            check(
+                P.wasNeverStarted(never),
+                "1139: no stream fact was ever filed for this task, so no turn was ever dispatched"
+            )
+            check(
+                reaperWouldTake(registry, now: now) == ["gHashTag/trios#1139"],
+                "1139: a task marked running that no runner ever started IS caught immediately"
+            )
+            check(
+                registry.stalled(now: now).isEmpty,
+                "1139: the stall clock alone would have left it looking busy for another hour"
+            )
+        }
     }
 
     static func runQueenTaskLifecycleCloses() async {

@@ -803,6 +803,7 @@ GUARDS := \
 	rings/SR-02/ChatViewModel.swift@@let entry = QueenInboxEntry(@@guard ProjectPaths.isDevVariant else {@@10@@guards/inbox-enqueue-unguarded.swift@@a release build queues delegations into the dev Queen inbox (1090)~ \
 	rings/SR-00/KeychainSecrets.swift@@DevSecretStore.read(service: service, account: account)@@if ProjectPaths.isDevVariant {@@4@@guards/dev-secret-store-unguarded.swift@@a release build reads secrets from the plaintext dev store~ \
 	rings/SR-00/TriOSEncryption.swift@@return try loadOrCreateTestKey()@@if ProcessInfo.processInfo.environment["TRIOS_E2E_DISABLE_KEYCHAIN"] == "1" {@@4@@guards/test-key-unguarded.swift@@every build derives its data key from a volatile test file~ \
+	rings/SR-02/ChatViewModel.swift@@if connectivityFailedTasks.contains(task.id), let runner = workerRunner {@@guard !QueenDelegationPolicy.isStreamOpen(current) else { continue }@@8@@guards/reaper-unguarded.swift@@the reaper stops consulting the stream-open predicate and takes live workers mid-answer~ \
 	main.swift@@NSApplication.shared.run()@@guard RecursionGuard.shared.ensureSingleInstance() else {@@12@@guards/single-instance-unguarded.swift@@a second trios instance starts alongside the first~
 
 .PHONY: guard-shapes
@@ -1372,6 +1373,8 @@ xctest:
 MUTANTS := \
 	rings/SR-00/QueenObserver.swift@@lowered.contains("write") || lowered.contains("edit")@@lowered.contains("write")@@the boundary detector forgets edit-shaped tools \
 	rings/SR-02/QueenDelegationRegistry.swift@@if criteria.contains(criterion) {@@if true {@@a verdict is accepted for a criterion the task never had \
+	rings/SR-00/QueenDelegation.swift@@task.streamOutcome == .open@@false // gutted: no stream is ever open@@the reaper stops believing any stream is open and takes live workers mid-answer \
+	rings/SR-00/QueenDelegation.swift@@task.streamOutcome == nil && (task.completedTurns ?? 0) == 0@@(task.completedTurns ?? 0) == 0 // gutted: turn count alone@@never-started is decided on turn count alone, so every running worker without a finished turn is an orphan \
 	rings/SR-00/QueenTaskSpec.swift@@lines.append(QueenBranchPolicy.ownershipRule(branch: branch))@@lines.append("")@@the specification stops telling the worker to leave the branch alone \
 	rings/SR-00/QueenObserver.swift@@observedWrites.forEach(consider)@@_ = observedWrites@@the observer ignores what git measured and trusts tool names again \
 	rings/SR-02/QueenBranchCommitter.swift@@guard !prefix.isEmpty, normalized.hasPrefix("\(prefix)/") else { return normalized }@@guard !prefix.isEmpty else { return normalized }@@a measured path is stripped whether or not it carries the prefix \
