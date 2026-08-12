@@ -17,6 +17,23 @@ ROOT  := $(shell cd "$(dir $(lastword $(MAKEFILE_LIST)))" && pwd)
 
 DEV_APP     := $(ROOT)/trios-dev.app
 RELEASE_APP := $(ROOT)/trios.app
+
+# Both bundles ship an executable literally named `trios`
+# (trios-dev.app/Contents/MacOS/trios), so a *name* is not an identity here:
+# 'pgrep -x trios-dev' can never match anything, and 'pgrep -x trios' matches
+# either variant. Only the path tells them apart, which is how `restart` and
+# `delegate-probe` already do it. The dot is escaped because these are regular
+# expressions, and the release pattern keeps its leading slash so it cannot
+# match .../trios-dev.app/... .
+DEV_PROC     := trios-dev\.app/Contents/MacOS/trios
+RELEASE_PROC := /trios\.app/Contents/MacOS/trios
+
+# The bundle DIRECTORY's mtime is set when the bundle is created, not when the
+# binary inside it is replaced, so it reads as weeks stale after a rebuild.
+# Report the mtime of the thing that actually gets rebuilt.
+DEV_BIN     := $(DEV_APP)/Contents/MacOS/trios
+RELEASE_BIN := $(RELEASE_APP)/Contents/MacOS/trios
+
 # The harness lock records its owner's PID.  An interrupted run leaves a
 # lock behind; the next run reads the PID, checks whether the owner is
 # still alive, and reclaims a dead owner's lock with a word about it.
@@ -47,6 +64,7 @@ help:
 	@echo "  make clean      - remove build products for both variants"
 	@echo "  make mutants    - break known guards and require the SSE suite to notice"
 	@echo "  make mutants-logic - the same, for guards a clade-e2e logic suite owns"
+	@echo "  make mutants-guard - the same, for guards whose oracle is the check itself"
 	@echo "  make mutants-changed - run mutations for guarded files dirty in the working tree"
 	@echo "  make drift-guard - run the interface-drift compiling proof (slow; not in the fast suite)"
 	@echo "  make finish-mark-order - check the completed-turn mark stays in the finish callback"
@@ -672,12 +690,13 @@ keychain-doors:
 # the recipe silently does the wrong thing ($E2E_DIR became 2E_DIR in
 # #1237).  This check walks every recipe line and flags a lone $ that is
 # neither $ nor a Make variable in the allowlist below.
-MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP WARNING_CEILING CASSETTE_DIR \
+MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP DEV_BIN RELEASE_BIN DEV_PROC \
+	RELEASE_PROC WARNING_CEILING CASSETTE_DIR \
 	WARN_BUILD_DIR WARN_OFM WARN_LIST WARN_SEEN WARN_LOG WARN_LOG_DIR \
 	WARN_LOG_LAST WARN_BUILD_ID WARN_FULL_ROOT WARN_FULL_CACHE DEV_BUILD_LOCK \
 	CASSETTE_BRANCHES SWEEP_CANARY LOG KEYCHAIN_ALLOW_PATTERNS MAKE VARIANT \
 	MSG ISSUE WORKER TASK PATHS CRITERIA SECOND REVIEW AUTONOMY CASSETTE \
-	SECOND_TURN QUEEN_COMMAND MUTANTS MUTANTS_LOGIC MAKE_DOLLAR_VARS HARNESS_LOCK GUARDS \
+	SECOND_TURN QUEEN_COMMAND MUTANTS MUTANTS_LOGIC MUTANTS_GUARD MAKE_DOLLAR_VARS HARNESS_LOCK GUARDS \
 	VENDOR_SRC VENDOR_BEGIN VENDOR_END VENDOR_ANCHOR VENDOR_HALVES
 
 .PHONY: make-dollars
@@ -1224,8 +1243,8 @@ run-release:
 	@open "$(RELEASE_APP)"
 
 stop:
-	@pkill -x trios 2>/dev/null || true
-	@pkill -x trios-dev 2>/dev/null || true
+	@pkill -f '$(RELEASE_PROC)' 2>/dev/null || true
+	@pkill -f '$(DEV_PROC)' 2>/dev/null || true
 	@echo "stopped"
 
 # --- Release gate -------------------------------------------------------
@@ -1239,9 +1258,12 @@ promote: check
 # --- Diagnostics --------------------------------------------------------
 
 doctor:
-	@echo "release app : $$([ -d '$(RELEASE_APP)' ] && stat -f '%Sm' '$(RELEASE_APP)' || echo 'absent')"
-	@echo "dev app     : $$([ -d '$(DEV_APP)' ] && stat -f '%Sm' '$(DEV_APP)' || echo 'absent')"
-	@echo "running     : $$(pgrep -x trios >/dev/null && echo 'release' || echo '-') $$(pgrep -x trios-dev >/dev/null && echo 'dev' || echo '')"
+	@echo "release app : $$([ -f '$(RELEASE_BIN)' ] && stat -f '%Sm' '$(RELEASE_BIN)' || echo 'absent')"
+	@echo "dev app     : $$([ -f '$(DEV_BIN)' ] && stat -f '%Sm' '$(DEV_BIN)' || echo 'absent')"
+	@up=''; \
+	 pgrep -f '$(RELEASE_PROC)' >/dev/null 2>&1 && up='release'; \
+	 pgrep -f '$(DEV_PROC)'     >/dev/null 2>&1 && up="$${up:+$$up+}dev"; \
+	 echo "running     : $${up:--}"
 	@echo "server 9105 : $$(curl -s -m 3 http://127.0.0.1:9105/health || echo 'down')"
 	@echo "server 9205 : $$(curl -s -m 3 http://127.0.0.1:9205/health || echo 'down')"
 
@@ -1487,7 +1509,19 @@ xctest:
 # check's "what makes this red?" belongs, because there the oracle is the
 # check itself.
 #
-# The smallest extension that WOULD fit the rest (described, not built):
+# The smallest extension that fits the rest - BUILT, below `MUTANTS_LOGIC`, as
+# `MUTANTS_GUARD` / `make mutants-guard`.  Driven on this machine: the two rows
+# the audit measured as impossible here (the planted SecItemCopyMatching, and
+# the dropped func keyword in a test source the app build never compiles) both
+# print "ok - caught" against their own check, and `make mutants-guard` exits 0
+# in 16-26s (three runs here: 26s, 15.7s, 18.2s - `swiftc -parse` over
+# tests/swift is the whole cost).  With keychain-doors made red BEFORE the row
+# ran - a SecItemDelete planted in a THIRD file - the row printed "REFUSED";
+# `shasum -c` against a checksum taken before the run showed the file the row
+# WOULD have mutated byte-identical, so the refusal happened before any edit;
+# the sibling parse-tests row still scored "ok - caught" on that same run; and
+# the target failed (recipe exit 1, make exit 2).  The sketch below is why that
+# gate is not ceremony:
 #
 #   A sibling table carrying one extra field that names the oracle, exactly as
 #   MUTANTS_LOGIC already carries a suite label:
@@ -1768,6 +1802,167 @@ mutants-logic:
 	done; \
 	if [ $$fail -eq 0 ]; then echo "[OK] every logic-suite mutation was caught ($$n)"; \
 	else echo "[FAIL] a logic-suite mutation survived, went stale, failed only once, or was not measured"; exit 1; fi
+
+# --- Mutations whose oracle is a standing check, not a suite -------------
+#
+# This is the sibling table sketched in "What this table CANNOT ask, and why"
+# above `MUTANTS`.  The audit there ended with seven checks whose "what event
+# makes this red?" the SSE table cannot ask, and one sentence explaining all
+# seven: a standing check exists precisely BECAUSE the compiler and the suite
+# cannot see the failure it guards, which read backwards is "its failure
+# cannot be scored against the suite".
+#
+# So do not score it against the suite.  Score it against the check.
+#
+#   MUTANTS_GUARD := source@@needle@@replacement@@target@@name
+#
+# Per row, in order:
+#   1. `make <target>` BEFORE the mutation.  It must exit 0 and print an [OK].
+#      This is not ceremony.  A target that is ALREADY red returns non-zero
+#      after the mutation too, and the row would print "caught" for a machine
+#      that never noticed anything - a forged catch, which is the same lie as
+#      scoring a flake as coverage.  A row that cannot establish a green
+#      baseline REFUSES to score, and refusing fails the target.
+#   2. Apply the mutation (same stale / leftover-mutation handling as above).
+#   3. `make <target>` again.
+#         non-zero and it printed [FAIL]  -> caught.
+#         zero and it printed [OK]        -> SURVIVED.
+#         anything else                   -> ERROR, first lines shown.
+#      The exit status alone is not read, for the reason the SSE contract
+#      gives: a target that dies before it checks anything also exits
+#      non-zero.  Positive evidence, or no verdict.
+#
+# No confirmation run.  `make mutants` repeats a failure because the SSE suite
+# can flake and a flake would be scored as coverage; these targets are
+# deterministic readers of the tree - no build, no network, no clock - so the
+# second run can only restate the first, and would double the cost to buy
+# nothing.  That difference is exactly why they can be scored this way and the
+# suite cannot.
+#
+# Kept out of `check`, like the other two: it writes to tracked sources.  It
+# shares the harness lock, the backup-and-restore trap with checksum
+# verification, and the concurrent-write guard from b4d1946fe - if the source
+# changed while the harness held it mutated, the mutation is LEFT in place and
+# named, because restoring would silently revert whoever wrote to it.
+#
+# The two rows below are the two the audit measured as impossible for the SSE
+# table and trivial here:
+#
+#   keychain-doors  A real SecItemCopyMatching call in a file that imports
+#                   Security and is not on KEYCHAIN_ALLOWLIST.  Against the
+#                   suite this printed SURVIVED: the suite runs with
+#                   TRIOS_E2E_DISABLE_KEYCHAIN=1 and is keychain-blind by
+#                   construction.  Against `make keychain-doors` it is caught.
+#
+#   parse-tests     The func keyword dropped from a test source that the app
+#                   build never compiles - the exact case parse-tests was
+#                   written for, and the exact case the SSE table scored
+#                   SURVIVED.  A syntax error in a file nobody compiles is
+#                   invisible to a suite and plain to a parser.
+#
+# empty-sources is deliberately NOT here: a row is one text substitution and
+# cannot take a file to zero bytes.  It keeps its red-driver in check-selftest.
+#
+# Needle and replacement are chosen so that neither contains the other,
+# otherwise the leftover-mutation branch cannot tell a half-finished run from
+# a clean tree.  `count: 32` becomes `count: 0x20` for that reason alone -
+# same constant, different text.
+#
+# The planted call is also chosen to COMPILE.  keychain-doors is a grep and
+# does not care, but another agent may be building this tree inside the few
+# seconds the mutation is applied, and a harness that hands a neighbour a
+# broken source is buying its verdict with somebody else's build.
+MUTANTS_GUARD := \
+	rings/SR-02/AgentMemoryService.swift@@var bytes = [UInt8](repeating: 0, count: 32)@@_ = SecItemCopyMatching([kSecClass as String: kSecClassGenericPassword] as CFDictionary, nil); var bytes = [UInt8](repeating: 0, count: 0x20)@@keychain-doors@@a real keychain call is opened in a file that is not on the allowlist \
+	tests/swift/queen_delegation_test.swift@@static func issueParsing() {@@static issueParsing() {@@parse-tests@@a test source the app build never compiles loses its func keyword
+
+.PHONY: mutants-guard
+mutants-guard:
+	@backup=$$(mktemp -d); \
+	owner_pid=$$(cat "$(HARNESS_LOCK)/pid" 2>/dev/null || true); \
+	if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
+		if [ -n "$$owner_pid" ] && ! kill -0 $$owner_pid 2>/dev/null; then \
+			echo "[INFO] reclaiming harness lock from dead PID $$owner_pid"; \
+			rm -rf "$(HARNESS_LOCK)"; \
+		fi; \
+		if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
+			if [ -n "$$owner_pid" ]; then \
+				echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK), owner PID $$owner_pid)"; \
+			else \
+				echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK))"; \
+			fi; \
+			rm -rf $$backup; exit 1; \
+		fi; \
+	fi; \
+	echo $$$$ > "$(HARNESS_LOCK)/pid"; \
+	trap 'for f in $$backup/*.bak; do [ -e "$$f" ] || continue; \
+	      target=$$(cat "$$f.path"); \
+	      cp "$$f" "$(ROOT)/$$target"; \
+	      expected=$$(cat "$${f}.sha" 2>/dev/null); \
+	      if [ -n "$$expected" ]; then \
+		      actual=$$(shasum "$(ROOT)/$$target" | cut -d" " -f1); \
+		      if [ "$$actual" != "$$expected" ]; then \
+			      echo "[FAIL] restore checksum mismatch for $$target" >&2; \
+		      fi; \
+	      fi; done; \
+	      rm -rf $$backup; \
+	      rm -rf "$(HARNESS_LOCK)" 2>/dev/null' EXIT INT TERM; \
+	fail=0; n=0; \
+	: "tests/ joins rings/ and BR-OUTPUT/ as a record boundary: a guard row \
+	   may name a test source, which no suite-oracle row ever could."; \
+	IFS='~'; for entry in $$(echo '$(MUTANTS_GUARD)' | sed 's/ rings\//~rings\//g; s/ BR-OUTPUT\//~BR-OUTPUT\//g; s/ tests\//~tests\//g'); do \
+		unset IFS; \
+		src=$$(echo "$$entry" | awk -F'@@' '{print $$1}'); \
+		needle=$$(echo "$$entry" | awk -F'@@' '{print $$2}'); \
+		repl=$$(echo "$$entry" | awk -F'@@' '{print $$3}'); \
+		guard=$$(echo "$$entry" | awk -F'@@' '{print $$4}'); \
+		name=$$(echo "$$entry" | awk -F'@@' '{print $$5}'); \
+		n=$$((n + 1)); \
+		: "The machine before the mutation. An already-red target would go \
+		   red again for its own reason and forge a catch, so a row that \
+		   cannot show a green baseline is not allowed to score at all."; \
+		pre=$$($(MAKE) --no-print-directory $$guard 2>&1); prerc=$$?; \
+		if [ $$prerc -ne 0 ] || ! echo "$$pre" | grep -qF "[OK]"; then \
+			echo "  REFUSED - $$name: make $$guard is not green BEFORE the mutation (exit $$prerc)"; \
+			echo "            no mutation was applied; a red machine cannot prove a catch"; \
+			echo "$$pre" | head -5 | sed 's/^/         | /'; \
+			fail=1; continue; \
+		fi; \
+		cp "$(ROOT)/$$src" "$$backup/$$n.bak"; echo "$$src" > "$$backup/$$n.bak.path"; \
+		shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.bak.sha"; \
+		MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
+			'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; n=os.environ["MUT_NEW"]; open(p,"w").write(s.replace(o,n,1)) if o in s else (open(p,"w").write(s.replace(n,o,1)),sys.exit(2))[1] if n in s else sys.exit(1)'; rc=$$?; \
+		case $$rc in \
+			2) echo "  LEFTOVER MUTATION - $$name (repaired: replacement was in $$src without its needle)"; \
+			   cp "$(ROOT)/$$src" "$$backup/$$n.bak"; shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.bak.sha"; \
+			   MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
+			   'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; open(p,"w").write(s.replace(o,os.environ["MUT_NEW"],1))' ;; \
+			1) echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
+			   cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue ;; \
+		esac; \
+		shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.mut.sha"; \
+		post=$$($(MAKE) --no-print-directory $$guard 2>&1); postrc=$$?; \
+		if [ $$postrc -ne 0 ] && echo "$$post" | grep -qF "[FAIL]"; then \
+			echo "  ok   - caught by $$guard: $$name"; \
+		elif [ $$postrc -eq 0 ] && echo "$$post" | grep -qF "[OK]"; then \
+			echo "  SURVIVED - $$name"; fail=1; \
+		else \
+			echo "  ERROR - make $$guard neither passed nor failed: $$name (exit $$postrc)"; fail=1; \
+			echo "$$post" | head -5 | sed 's/^/         | /'; \
+		fi; \
+		if [ -f "$$backup/$$n.mut.sha" ]; then \
+			now_sha=$$(shasum "$(ROOT)/$$src" | cut -d" " -f1); \
+			if [ "$$now_sha" != "$$(cat "$$backup/$$n.mut.sha")" ]; then \
+				echo "  [FAIL] $$src changed while the harness held it mutated."; \
+				echo "         Restoring the backup would silently revert whoever wrote to it."; \
+				echo "         The mutation is left in place; resolve by hand. Backup: $$backup/$$n.bak"; \
+				fail=1; continue; \
+			fi; \
+		fi; \
+		cp "$$backup/$$n.bak" "$(ROOT)/$$src"; \
+	done; \
+	if [ $$fail -eq 0 ]; then echo "[OK] every guard mutation was caught by its own check ($$n)"; \
+	else echo "[FAIL] a guard mutation survived, went stale, was not measured, or ran against a red machine"; exit 1; fi
 
 # --- Mutation (working tree only) ---------------------------------------
 #
