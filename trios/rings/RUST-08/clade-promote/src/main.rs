@@ -8,8 +8,12 @@ use std::process::{Command, Stdio};
 use std::time::Instant;
 
 fn project_dir() -> String { trios_config::project_dir() }
-const SOVEREIGN_HEALTH: &str = "http://127.0.0.1:9105/health";
-const CANARY_HEALTH: &str = "http://127.0.0.1:9205/health";
+
+/// Health endpoints come from trios-config so SOVEREIGN_PORT / CANARY_PORT
+/// move the whole pipeline at once. Baking the ports in here made the promote
+/// gate probe a socket the rest of the fleet had already left.
+fn sovereign_health() -> String { trios_config::sovereign_health_url() }
+fn canary_health() -> String { trios_config::canary_health_url() }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct SafetyBudget {
@@ -292,7 +296,7 @@ fn run_seal(_clade_id: &str, _dry_run: bool) -> (Vec<SealResult>, SealMetrics) {
         };
 
     std::thread::sleep(std::time::Duration::from_secs(5));
-    let health_ok = check_health(CANARY_HEALTH);
+    let health_ok = check_health(&canary_health());
     metrics.health_launch_ms = launch_start.elapsed().as_millis();
     metrics.health_passed = health_ok;
     if let Some(mut c) = child {
@@ -481,7 +485,7 @@ fn boot_probe() -> bool {
     println!("   Waiting for health probe (max 30s)...");
     let start = Instant::now();
     loop {
-        if check_health(SOVEREIGN_HEALTH) {
+        if check_health(&sovereign_health()) {
             println!("   [OK] Health OK after {:?}", start.elapsed());
             return true;
         }
@@ -814,5 +818,65 @@ mod tests {
         assert_eq!(s.version, "0.0.0");
         assert_eq!(s.status, "unknown");
         assert!((s.e_value.unwrap_or(0.0) - 1.0).abs() < f64::EPSILON);
+    }
+
+    /// Serve exactly one HTTP request that looks like a healthy trios node.
+    /// Returns the bound port and a receiver that fires when a probe arrives.
+    fn one_shot_health_server() -> (u16, std::sync::mpsc::Receiver<()>, std::net::SocketAddr) {
+        let listener = match std::net::TcpListener::bind("127.0.0.1:0") {
+            Ok(l) => l,
+            Err(e) => panic!("cannot bind probe listener: {}", e),
+        };
+        let addr = match listener.local_addr() {
+            Ok(a) => a,
+            Err(e) => panic!("cannot read probe listener address: {}", e),
+        };
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let _ = tx.send(());
+                let body = "{\"status\":\"ok\"}";
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                );
+                let _ = stream.flush();
+            }
+        });
+        (addr.port(), rx, addr)
+    }
+
+    /// The promote gate must probe the port the operator configured, not a
+    /// baked-in one: a stale port silently reads as an unhealthy canary.
+    #[test]
+    fn sovereign_probe_follows_port_override() {
+        let (port, rx, addr) = one_shot_health_server();
+        std::env::set_var("SOVEREIGN_PORT", port.to_string());
+        let healthy = check_health(&sovereign_health());
+        std::env::remove_var("SOVEREIGN_PORT");
+
+        let probed = rx.recv_timeout(std::time::Duration::from_secs(5)).is_ok();
+        if !probed {
+            let _ = std::net::TcpStream::connect(addr); // release the accept thread
+        }
+        assert!(probed, "promote never probed SOVEREIGN_PORT={}", port);
+        assert!(healthy, "probe reached port {} but did not read status=ok", port);
+    }
+
+    #[test]
+    fn canary_probe_follows_port_override() {
+        let (port, rx, addr) = one_shot_health_server();
+        std::env::set_var("CANARY_PORT", port.to_string());
+        let healthy = check_health(&canary_health());
+        std::env::remove_var("CANARY_PORT");
+
+        let probed = rx.recv_timeout(std::time::Duration::from_secs(5)).is_ok();
+        if !probed {
+            let _ = std::net::TcpStream::connect(addr); // release the accept thread
+        }
+        assert!(probed, "promote never probed CANARY_PORT={}", port);
+        assert!(healthy, "probe reached port {} but did not read status=ok", port);
     }
 }

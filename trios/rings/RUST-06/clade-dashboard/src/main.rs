@@ -3,6 +3,13 @@ use serde::{Deserialize, Serialize};
 use warp::Filter;
 
 fn project_dir() -> String { trios_config::project_dir() }
+
+/// Health endpoints come from trios-config so SOVEREIGN_PORT / CANARY_PORT
+/// move the dashboard together with the rest of the pipeline. Inline literals
+/// made it report on whatever process happened to hold the old port.
+fn sovereign_health() -> String { trios_config::sovereign_health_url() }
+fn canary_health() -> String { trios_config::canary_health_url() }
+
 const DEFAULT_PORT: u16 = 9405;
 
 fn port() -> u16 {
@@ -132,6 +139,12 @@ async fn main() {
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], p));
     match std::net::TcpListener::bind(addr) {
         Ok(listener) => {
+            // tokio refuses to register a blocking socket with its reactor
+            // (it panics), and std::net::TcpListener::bind returns one.
+            if let Err(e) = listener.set_nonblocking(true) {
+                eprintln!("[CladeDashboard] Cannot set listener non-blocking: {} - exiting", e);
+                std::process::exit(1);
+            }
             match tokio::net::TcpListener::from_std(listener) {
                 Ok(tokio_listener) => {
                     println!("[CladeDashboard] Port {} bound, starting server...", p);
@@ -158,9 +171,12 @@ async fn gather_status() -> DashboardData {
         .build()
         .unwrap_or_default();
 
+    let sovereign_url = sovereign_health();
+    let canary_url = canary_health();
+
     let (sovereign, canary, budget, clade_id, snapshots, recent_events, loop_metrics) = tokio::join!(
-        check_health(&client, "http://127.0.0.1:9105/health"),
-        check_health(&client, "http://127.0.0.1:9205/health"),
+        check_health(&client, &sovereign_url),
+        check_health(&client, &canary_url),
         load_safety_budget(),
         load_clade_id(),
         list_snapshots(),
@@ -396,5 +412,23 @@ mod tests {
         let s = compute_health_score(true, true, &budget, 1);
         let total_weight: f64 = s.components.iter().map(|c| c.weight).sum();
         assert!((total_weight - 1.0).abs() < f64::EPSILON);
+    }
+
+    /// The dashboard must report on the node the operator configured; a stale
+    /// port makes it describe whatever process now holds the old one.
+    #[test]
+    fn sovereign_health_follows_port_override() {
+        std::env::set_var("SOVEREIGN_PORT", "19105");
+        let url = sovereign_health();
+        std::env::remove_var("SOVEREIGN_PORT");
+        assert_eq!(url, "http://127.0.0.1:19105/health");
+    }
+
+    #[test]
+    fn canary_health_follows_port_override() {
+        std::env::set_var("CANARY_PORT", "19205");
+        let url = canary_health();
+        std::env::remove_var("CANARY_PORT");
+        assert_eq!(url, "http://127.0.0.1:19205/health");
     }
 }

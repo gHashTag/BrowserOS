@@ -60,6 +60,8 @@ help:
 	@echo "  make promote    - check the gates, then build release"
 	@echo "  make doctor     - REPORT: the state of both variants (never fails)"
 	@echo "  make xctest     - count the XCTest compile errors against XCTEST_ERROR_CEILING"
+	@echo "  make sources-drift - fail if build.sh and the root Package.swift disagree"
+	@echo "                    on which Swift files make up the app (part of make check)"
 	@echo "  make backlog-audit - REPORT: open sub-issues of #1090 that look already done"
 	@echo "  make chat-probe - send a real message and report whether the agent answered"
 	@echo "  make verify     - build, relaunch, and prove the chat answers (use after every change)"
@@ -707,8 +709,9 @@ MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP DEV_BIN RELEASE_BIN DEV_PROC \
 	CASSETTE_BRANCHES SWEEP_CANARY LOG KEYCHAIN_ALLOW_PATTERNS MAKE VARIANT \
 	MSG ISSUE WORKER TASK PATHS CRITERIA SECOND REVIEW AUTONOMY CASSETTE \
 	SECOND_TURN QUEEN_COMMAND MUTANTS MUTANTS_LOGIC MUTANTS_GUARD MAKE_DOLLAR_VARS HARNESS_LOCK GUARDS \
-	TYPE_STATE \
-	VENDOR_SRC VENDOR_BEGIN VENDOR_END VENDOR_ANCHOR VENDOR_HALVES
+	TYPE_STATE VARIANT_FENCE_SRC VARIANT_FENCE_DIR \
+	VENDOR_SRC VENDOR_BEGIN VENDOR_END VENDOR_ANCHOR VENDOR_HALVES \
+	SOURCES_MANIFEST SOURCES_APP_ONLY SOURCES_TEST_ONLY
 
 .PHONY: make-dollars
 make-dollars:
@@ -947,6 +950,136 @@ guard-shapes:
 		exit 1; \
 	fi
 
+# --- Variant type fence --------------------------------------------------
+#
+# Subject: the build variant is a TYPE, not a string.  Every check above this
+# one reads text; this one asks the compiler a question no text reader can
+# answer, and it is the first target in this Makefile whose subject lives in
+# the type system.
+#
+# What forks on the variant.  `.trinity` vs `.trinity-dev` (the running app's
+# encrypted memory, its delegation store, and safety_budget.json - the value
+# cron-life.md treats as the halt switch), Keychain vs DevSecretStore, 9105 vs
+# 9205, the bundle id, the binary name, the Frameworks directory.  All six live
+# in ONE place, `BuildVariant` in rings/SR-00/BuildVariantPolicy.swift, and are
+# reached by asking a value of that type.  ProjectPaths.swift says so out loud:
+# "Those constants used to be written a third time in this file, beside the
+# copies in build.sh and in BuildVariant; only the copy nobody called was under
+# test."
+#
+# What makes that a single symbol rather than a house style is a type-level
+# fact: there is no path from a raw String to a BuildVariant except the
+# failable `init?(rawValue:)`, so a literal cannot be written where the variant
+# belongs.  That is the fence, and only a compiler can decide whether it is
+# still standing.
+#
+# It is not hypothetical that people write the literal instead.
+# tools/ChatProbe.swift:30 is `let isDev = variant == "dev"` against its own
+# String copy, while BR-OUTPUT/ProjectPaths.swift:128 is `variant == .dev`.
+# The probe is outside the app module so nothing stops it; this target is what
+# stops the same line landing INSIDE the module.  A string comparison has no
+# wrong answers, only false ones - `== "Dev"` is merely false - and a dev build
+# that quietly reports itself as release writes into the state of the app the
+# user is running, which is the one outcome the two-variant split exists to
+# prevent.
+#
+# Two arms, and the second is why the first can be believed:
+#
+#   positive.swift    compiled WITH the two real sources; must typecheck.  It
+#                     names each symbol at the type the fence depends on, so
+#                     the cheapest way to satisfy every negative at once -
+#                     delete the enum, rename ProjectPaths.variant, change
+#                     areFullyIsolated's arity - is a failing check and not a
+#                     passing one.
+#   neg-*.swift       each compiled WITH the two real sources and ALONE; each
+#                     must NOT typecheck, AND swiftc must say the sentence the
+#                     witness declares in its `// EXPECT:` line.  Without that
+#                     second half a witness broken into "cannot find
+#                     ProjectPathz in scope" would score as the fence holding,
+#                     which is this repo's recurring forgery: the right verdict
+#                     for the wrong reason.
+#
+# One negative per file, deliberately.  A compile fails as a whole, so two
+# negatives sharing a file would still fail with one of them silently
+# compiling - the fence half gone and the target green.
+#
+# Driven rather than argued.  Adding `ExpressibleByStringLiteral` to
+# BuildVariant - one legal, compiling conformance - flips all three negatives
+# to TYPECHECKS while the positive stays green, so every raw-string fork in the
+# tree re-opens at once.  No grep in this file can see that, and the mutation
+# row below scores it.
+#
+# What it does NOT see, named rather than left to be discovered: the fence
+# stops a raw string being READ as a variant.  It does nothing about `.trinity`
+# being spelled out DOWNSTREAM of one - `"\(projectRoot)/.trinity/..."` is a
+# String either way, and rings/SR-02/QueenSelfImprovementService.swift and
+# BR-OUTPUT/QueenStatusViewModel.swift do exactly that today.  That is a real
+# defect and it is a different instrument's job; claiming it here would be the
+# same over-reach this target exists to avoid.
+#
+# Cost, driven on this machine: four `swiftc -typecheck` runs - the two real
+# sources plus one witness each - 1.67s on the first run and 1.44 / 1.46 /
+# 1.48s on the three after it.  It needs no dev build, no output-file map and
+# no incremental state (the two sources typecheck standalone in 0.68s cold), so
+# unlike the type floor in `mutants-guard` it can sit in `check`, and it does.
+VARIANT_FENCE_SRC := $(ROOT)/BR-OUTPUT/ProjectPaths.swift $(ROOT)/rings/SR-00/BuildVariantPolicy.swift
+VARIANT_FENCE_DIR := $(ROOT)/tests/fixtures/guards/variant-fence
+
+.PHONY: variant-fence
+variant-fence:
+	@fail=0; n=0; \
+	pos="$(VARIANT_FENCE_DIR)/positive.swift"; \
+	if [ ! -f "$$pos" ]; then \
+		echo "[FAIL] the positive witness is missing: $$pos"; \
+		echo "       without it every negative arm below can be satisfied by the"; \
+		echo "       symbols not existing, which is not the fence holding"; \
+		exit 1; \
+	fi; \
+	if out=$$(swiftc -typecheck $(VARIANT_FENCE_SRC) "$$pos" 2>&1); then \
+		echo "  ok   - the variant vocabulary and its positive witness typecheck"; \
+	else \
+		echo "  FAIL - the variant vocabulary does not typecheck with its witness"; \
+		echo "$$out" | grep 'error:' | head -5 | sed 's/^/         | /'; \
+		fail=1; \
+	fi; \
+	for neg in "$(VARIANT_FENCE_DIR)"/neg-*.swift; do \
+		[ -e "$$neg" ] || continue; \
+		n=$$((n + 1)); \
+		base=$$(basename "$$neg"); \
+		want=$$(sed -n 's|^// EXPECT: ||p' "$$neg" | head -1); \
+		if [ -z "$$want" ]; then \
+			echo "  FAIL - $$base carries no '// EXPECT:' line; a compile that fails"; \
+			echo "         for an unnamed reason is not evidence of this fence"; \
+			fail=1; continue; \
+		fi; \
+		if out=$$(swiftc -typecheck $(VARIANT_FENCE_SRC) "$$neg" 2>&1); then \
+			echo "  FAIL - $$base TYPECHECKS: a raw string is accepted where a"; \
+			echo "         BuildVariant belongs, so the fence is gone"; \
+			fail=1; \
+		elif echo "$$out" | grep -F "$$neg:" | grep -qF "$$want"; then \
+			echo "  ok   - $$base refused: $$want"; \
+		else \
+			echo "  FAIL - $$base was refused for the WRONG reason; swiftc never said"; \
+			echo "         this ABOUT $$base:"; \
+			echo "         $$want"; \
+			echo "$$out" | grep 'error:' | head -3 | sed 's/^/         | /'; \
+			fail=1; \
+		fi; \
+	done; \
+	if [ $$n -eq 0 ]; then \
+		echo "[FAIL] no neg-*.swift in $(VARIANT_FENCE_DIR); this target would pass"; \
+		echo "       by asserting nothing about the fence"; \
+		exit 1; \
+	fi; \
+	if [ $$fail -eq 0 ]; then \
+		echo "[OK] the build variant is a type: $$n raw-string substitutions refused by the compiler"; \
+	else \
+		echo "[FAIL] a raw string can stand in for a BuildVariant, or the variant"; \
+		echo "       vocabulary no longer typechecks. .trinity vs .trinity-dev,"; \
+		echo "       Keychain vs DevSecretStore and 9105 vs 9205 fork on this value."; \
+		exit 1; \
+	fi
+
 # --- Parse-every-test-source guard --------------------------------------
 #
 # A green build proves the app compiled, not that every test source is
@@ -1141,7 +1274,7 @@ vendor-step:
 		exit 1; \
 	fi
 
-check: check-selftest keychain-doors make-dollars empty-sources finish-mark-order guard-shapes parse-tests vendor-step dev warnings test cassettes mutants-changed
+check: check-selftest keychain-doors make-dollars empty-sources sources-drift sources-drift-selftest finish-mark-order guard-shapes variant-fence parse-tests vendor-step dev warnings test cassettes mutants-changed
 
 # Replay every cassette and assert the expected signal appears in the log.
 #
@@ -1416,6 +1549,221 @@ delegate-probe:
 		| grep -F "$$issue" \
 		|| echo "no lines were written for $$issue"
 
+# --- The source list, written twice ---------------------------------------
+#
+# The set of Swift files that make up this app was written down in two places
+# and neither read the other:
+#
+#   - build.sh: the LEAN_BR_OUTPUT array plus `find rings -name '*.swift'`
+#   - Package.swift AT THE GIT ROOT (not in trios/, which is part of why nobody
+#     looked at it): the TriOSKit target's `sources:` list
+#
+# By the time anyone diffed them they were 46 paths apart: 45 that build.sh
+# compiled and the manifest did not, and 1 the other way. One of the 45 is
+# main.swift and can never be in a library target, so 45 of the 46 were
+# unintended. That did not surface
+# as a missing file. It surfaced as SwiftPM stopping at "Emitting module
+# TriOSKit" on `cannot find type SessionGuard in scope`, which meant the ENTIRE
+# XCTest suite had never once compiled - and XCTEST_ERROR_CEILING was 2, exactly
+# what that wreckage produced. The gate was green because it had been fitted to
+# the breakage.
+#
+# The 1 the other way was worse, because SwiftPM does not fail on it:
+# "BR-OUTPUT/HotkeyAnalytics.swift" was deleted in 939028c91 and the manifest
+# entry stayed, which SwiftPM reports as `Invalid Source ...: File not found.`
+# - a WARNING, on a build that then succeeds. So this target checks that every
+# entry EXISTS as well as that the two sets agree.
+#
+# build.sh is the list of record and prints it (`TRIOS_PRINT_SOURCES=1`, 0.5s,
+# no side effects), so this compares the manifest against the list that actually
+# builds the app rather than against a third copy of it. Same move, and the same
+# reason, as TRIOS_PRINT_FLAGS.
+SOURCES_MANIFEST := $(ROOT)/../Package.swift
+
+# The two lists cannot be made identical, and these are the six paths that
+# differ, each with the compiler error that forces it. Package.swift carries the
+# same list next to the entries; this one is what the gate enforces. A seventh
+# cannot be added by accident - only by editing this line.
+#
+#   main.swift                            SwiftPM refuses a `main` file in a
+#                                         library product outright
+#   BR-OUTPUT/MenuBuilder.swift           cannot find type 'AppDelegate'
+#   BR-OUTPUT/ChatPanelView.swift         Notification.Name has no member
+#                                         'exportSessionRecoveryPackage'
+#   BR-OUTPUT/FullscreenChatWorkspace.swift  cannot find 'ChatPanelView'
+#   BR-OUTPUT/QueenTabView.swift          cannot find 'AdaptiveChatWorkspace'
+#   BR-OUTPUT/TriosTabView.swift          cannot find 'QueenTabView'
+#
+# Only the first is a rule of the tool. The rest are one entanglement:
+# MenuBuilder.swift holds the AppDelegate menu wiring AND the Notification.Name
+# constants the chat views need. Split that file and four of these five come
+# back under test.
+SOURCES_APP_ONLY := main.swift \
+	BR-OUTPUT/MenuBuilder.swift \
+	BR-OUTPUT/ChatPanelView.swift \
+	BR-OUTPUT/FullscreenChatWorkspace.swift \
+	BR-OUTPUT/QueenTabView.swift \
+	BR-OUTPUT/TriosTabView.swift
+
+# Paths the manifest may carry that build.sh does not. Empty, and it should stay
+# that way: this is where "just for the test" lives, and the last occupant was a
+# dangling reference to a file deleted eight commits earlier. A name here must
+# also be a real file, and must really be absent from build.sh's list, or the
+# gate calls the exception stale.
+SOURCES_TEST_ONLY :=
+
+.PHONY: sources-drift
+sources-drift:
+	@tmp=$$(mktemp -d /tmp/trios_sources_drift.XXXXXX) || exit 1; \
+	trap 'rm -rf "$$tmp"' EXIT INT TERM; \
+	if [ ! -f "$(SOURCES_MANIFEST)" ]; then \
+		echo "[FAIL] no manifest to check: $(SOURCES_MANIFEST)"; \
+		exit 1; \
+	fi; \
+	if ! TRIOS_PRINT_SOURCES=1 "$(ROOT)/build.sh" > "$$tmp/build" 2>"$$tmp/build_err"; then \
+		echo "[FAIL] build.sh could not print its source list, so this target"; \
+		echo "       measured nothing. Output:"; \
+		sed -n "1,10p" "$$tmp/build_err" | sed "s/^/  /"; \
+		exit 1; \
+	fi; \
+	if [ ! -s "$$tmp/build" ]; then \
+		echo "[FAIL] build.sh printed an empty source list. An empty list agrees"; \
+		echo "       with nothing and would compare clean against an empty"; \
+		echo "       manifest, so it is a failure, not a pass."; \
+		exit 1; \
+	fi; \
+	sort -u "$$tmp/build" -o "$$tmp/build"; \
+	awk '/sources:[ \t]*\[/{f=1;next} f&&/^[ \t]*\],[ \t]*$$/{f=0} f' \
+		"$(SOURCES_MANIFEST)" \
+		| grep -v '^[ \t]*//' \
+		| sed -n 's|^[ \t]*"\([^"]*\)".*|\1|p' \
+		| sort -u > "$$tmp/literal"; \
+	if [ ! -s "$$tmp/literal" ]; then \
+		echo "[FAIL] found no source entries in $(SOURCES_MANIFEST). Either the"; \
+		echo "       target lost its sources: list or this recipe stopped being"; \
+		echo "       able to read it; both are failures."; \
+		exit 1; \
+	fi; \
+	missing=""; \
+	while IFS= read -r entry; do \
+		[ -e "$(ROOT)/$$entry" ] || missing="$$missing$$entry"$$'\n'; \
+	done < "$$tmp/literal"; \
+	if [ -n "$$missing" ]; then \
+		echo "[FAIL] $(SOURCES_MANIFEST) names sources that do not exist."; \
+		echo "       SwiftPM only warns about these and builds on, so a test"; \
+		echo "       that needs the file fails with 'cannot find ... in scope'"; \
+		echo "       and nothing points at the manifest:"; \
+		printf '%s' "$$missing" | sed "s/^/  /"; \
+		exit 1; \
+	fi; \
+	while IFS= read -r entry; do \
+		if [ -d "$(ROOT)/$$entry" ]; then \
+			find "$(ROOT)/$$entry" -name '*.swift' | sed "s|^$(ROOT)/||"; \
+		else \
+			echo "$$entry"; \
+		fi; \
+	done < "$$tmp/literal" | sort -u > "$$tmp/manifest"; \
+	printf '%s\n' $(SOURCES_APP_ONLY) | grep -v '^$$' | sort -u > "$$tmp/app_only"; \
+	printf '%s\n' $(SOURCES_TEST_ONLY) | grep -v '^$$' | sort -u > "$$tmp/test_only"; \
+	stale=""; \
+	while IFS= read -r entry; do \
+		grep -qxF "$$entry" "$$tmp/build" \
+			|| stale="$$stale$$entry (SOURCES_APP_ONLY, but build.sh does not compile it)"$$'\n'; \
+	done < "$$tmp/app_only"; \
+	while IFS= read -r entry; do \
+		[ -z "$$entry" ] && continue; \
+		grep -qxF "$$entry" "$$tmp/build" \
+			&& stale="$$stale$$entry (SOURCES_TEST_ONLY, but build.sh compiles it too)"$$'\n'; \
+	done < "$$tmp/test_only"; \
+	if [ -n "$$stale" ]; then \
+		echo "[FAIL] declared exception no longer describes anything real:"; \
+		printf '%s' "$$stale" | sed "s/^/  /"; \
+		echo "       An exception that is not an exception is a place for the"; \
+		echo "       next divergence to hide. Remove it."; \
+		exit 1; \
+	fi; \
+	comm -23 "$$tmp/build" "$$tmp/app_only" | sort -u > "$$tmp/expected"; \
+	cat "$$tmp/test_only" >> "$$tmp/expected"; \
+	sort -u "$$tmp/expected" -o "$$tmp/expected"; \
+	only_build=$$(comm -23 "$$tmp/expected" "$$tmp/manifest"); \
+	only_manifest=$$(comm -13 "$$tmp/expected" "$$tmp/manifest"); \
+	if [ -n "$$only_build" ] || [ -n "$$only_manifest" ]; then \
+		echo "[FAIL] the source list and $(SOURCES_MANIFEST) disagree."; \
+		if [ -n "$$only_build" ]; then \
+			echo "  build.sh compiles these, the manifest does not (so the"; \
+			echo "  library, and every test that links it, cannot see them):"; \
+			echo "$$only_build" | sed "s/^/    /"; \
+		fi; \
+		if [ -n "$$only_manifest" ]; then \
+			echo "  the manifest lists these and build.sh does not (so they are"; \
+			echo "  under test but not in the shipped app):"; \
+			echo "$$only_manifest" | sed "s/^/    /"; \
+		fi; \
+		echo "  Add the file to whichever list is missing it, or - if the"; \
+		echo "  difference is deliberate and forced - name it in SOURCES_APP_ONLY"; \
+		echo "  or SOURCES_TEST_ONLY in the Makefile, with the compiler error"; \
+		echo "  that forces it."; \
+		exit 1; \
+	fi; \
+	echo "[OK] build.sh and $$(basename "$(SOURCES_MANIFEST)") agree on $$(wc -l < "$$tmp/manifest" | tr -d ' ') sources" \
+		"($$(wc -l < "$$tmp/app_only" | tr -d ' ') declared app-only," \
+		"$$(wc -l < "$$tmp/test_only" | tr -d ' ') declared test-only)"
+
+# Proof that the target above can go red. Each fixture is a real Package.swift
+# on disk rather than a mocked list, run through the same recipe by pointing
+# SOURCES_MANIFEST at the copy - so what is exercised is the parser and the
+# comparison, not a stub of them. The summary counts the cases it ran; a number
+# written into the message is a number that goes stale on the next case added.
+#
+# Written because the gate it proves exists to replace one that was green for
+# the wrong reason. A drift check that cannot fail would be the same mistake
+# with a longer name.
+.PHONY: sources-drift-selftest
+sources-drift-selftest:
+	@tmp=$$(mktemp -d /tmp/trios_drift_selftest.XXXXXX) || exit 1; \
+	trap 'rm -rf "$$tmp"' EXIT INT TERM; \
+	fail=0; ran=0; \
+	run() { \
+		label="$$1"; want="$$2"; shift 2; \
+		"$(MAKE)" --no-print-directory sources-drift "$$@" > "$$tmp/out" 2>&1; \
+		rc=$$?; \
+		if [ "$$want" = "pass" ] && [ "$$rc" -ne 0 ]; then \
+			echo "  [FAIL] $$label: expected pass, got exit $$rc"; \
+			sed -n "1,6p" "$$tmp/out" | sed "s/^/         /"; fail=1; return; \
+		fi; \
+		if [ "$$want" = "fail" ] && [ "$$rc" -eq 0 ]; then \
+			echo "  [FAIL] $$label: expected a failure, the gate passed"; \
+			sed -n "1,6p" "$$tmp/out" | sed "s/^/         /"; fail=1; return; \
+		fi; \
+		ran=$$((ran + 1)); \
+		echo "  [ok] $$label -> $$(head -n 1 "$$tmp/out")"; \
+	}; \
+	cp "$(SOURCES_MANIFEST)" "$$tmp/clean.swift"; \
+	sed '\|"BR-OUTPUT/SessionGuard.swift",|d' "$$tmp/clean.swift" > "$$tmp/dropped.swift"; \
+	cmp -s "$$tmp/clean.swift" "$$tmp/dropped.swift" && { \
+		echo "[FAIL] fixture did not change anything: BR-OUTPUT/SessionGuard.swift"; \
+		echo "       is no longer an entry, so this fixture proves nothing."; \
+		exit 1; \
+	}; \
+	sed 's|"BR-OUTPUT/SessionGuard.swift",|"BR-OUTPUT/SessionGuard.swift",\n                "main.swift",|' \
+		"$$tmp/clean.swift" > "$$tmp/added.swift"; \
+	sed 's|"BR-OUTPUT/SessionGuard.swift",|"BR-OUTPUT/SessionGuard.swift",\n                "BR-OUTPUT/HotkeyAnalytics.swift",|' \
+		"$$tmp/clean.swift" > "$$tmp/ghost.swift"; \
+	run "unmodified manifest" pass SOURCES_MANIFEST="$$tmp/clean.swift"; \
+	run "entry removed (the SessionGuard hole)" fail SOURCES_MANIFEST="$$tmp/dropped.swift"; \
+	run "app-only file added to the library" fail SOURCES_MANIFEST="$$tmp/added.swift"; \
+	run "entry naming a deleted file (HotkeyAnalytics)" fail SOURCES_MANIFEST="$$tmp/ghost.swift"; \
+	run "stale declared exception" fail SOURCES_APP_ONLY="main.swift BR-OUTPUT/NotCompiledByBuildSh.swift"; \
+	if [ "$$fail" -ne 0 ]; then \
+		echo "[FAIL] sources-drift did not behave as claimed"; \
+		exit 1; \
+	fi; \
+	if [ "$$ran" -lt 2 ]; then \
+		echo "[FAIL] only $$ran fixture(s) ran; this proves nothing"; \
+		exit 1; \
+	fi; \
+	echo "[OK] sources-drift behaved as claimed on all $$ran fixtures"
+
 # The XCTest target, reported honestly rather than folded into the app build.
 # Counts distinct errors, not lines mentioning one.
 #
@@ -1434,6 +1782,10 @@ delegate-probe:
 # 1. A ceiling, the same shape as WARNING_CEILING. Not a round number somebody
 #    liked - it is exactly what this tree measures today, which is the only
 #    value that is simultaneously green now and impossible to argue upward.
+#    That property is necessary and it is NOT sufficient: this ceiling sat at 2
+#    and green for months because 2 was what a packaging bug produced, and
+#    "measured today" says nothing about whether the measurement reaches the
+#    thing being gated. Ask what the count did not get to before trusting it.
 #
 # 2. The old line called the count "pre-existing debt", and it is not. Driven
 #    on this revision the two errors are one missing symbol:
@@ -1453,6 +1805,30 @@ delegate-probe:
 #    first honest measurement of the suite, not a regression, and it is the one
 #    time raising this ceiling is a finding rather than tuning.
 #
+# 2b. THE WALL CAME DOWN, and the number is 23. Package.swift's sources list now
+#    matches what build.sh compiles (see `make sources-drift` above), the two
+#    QueenUILib -I/-L flags are read from build.sh rather than absent, and
+#    `Emitting module TriOSKitTests` is reached for the first time. 2 -> 23 is
+#    not a regression and not 21 new bugs; 2 was never the suite's error count,
+#    it was the distance to a wall that hid the other 23. All 23 are in test
+#    files, none in the library:
+#
+#      ChatFailureTests.swift             9   MainActor isolation, three Mock
+#                                             types no longer matching the
+#                                             protocols they stub, and
+#                                             ModelHealthResult.unavailable
+#      LocalAuthProviderTests.swift       7   isolation, a dropped `try`, and
+#                                             an argument the API no longer has
+#      LogsTabViewTests.swift             6   isolation, a syntax error, and
+#                                             LogRotationPolicy needing Hashable
+#      HotkeyAnalyticsEncryptionTests.swift 1 cannot find HotkeyAnalyticsViewModel
+#
+#    The last one is not fixable in the test: BR-OUTPUT/HotkeyAnalytics.swift
+#    was deleted in 939028c91 and the test that asserts those analytics are
+#    encrypted at rest has been testing nothing since. The other 38 test files
+#    compile. That is the finding this ceiling is now holding, and the next
+#    honest move on it is DOWN.
+#
 # 3. `swift build` failing with no source-level error line at all - a manifest
 #    error, no sqlcipher, no toolchain - used to print "0 distinct compile
 #    errors" and exit 0. That is the same false zero the warning gate was
@@ -1469,13 +1845,34 @@ delegate-probe:
 # `check` to go red for a reason unrelated to the change under test. `make dev`
 # already prints "run 'make xctest' for detail" when the suite is broken, so the
 # pointer exists; the wiring needs its own driving before it is claimed.
-XCTEST_ERROR_CEILING := 2
+XCTEST_ERROR_CEILING := 23
 
 .PHONY: xctest
 xctest:
 	@tmp=$$(mktemp -d /tmp/trios_xctest.XXXXXX) || exit 1; \
 	trap 'rm -rf "$$tmp"' EXIT INT TERM; \
-	swift build --build-tests > "$$tmp/log" 2>&1; rc=$$?; \
+	: "Two of the library sources import QueenUILib, which lives in the"; \
+	: "trinity checkout and is not a SwiftPM dependency of this package. Without"; \
+	: "its -I/-L the test build stops on 'no such module' - one error, in the"; \
+	: "library, tests never reached - and the number this target prints is the"; \
+	: "distance to that wall rather than the state of the suite. The exact same"; \
+	: "way the SessionGuard gap made this gate read 2 for months. build.sh"; \
+	: "resolves those directories and prints them, so read them from there."; \
+	if ! TRIOS_PRINT_FLAGS=1 "$(ROOT)/build.sh" > "$$tmp/flags" 2>"$$tmp/flags_err"; then \
+		echo "[FAIL] build.sh could not resolve the module flags, so the test build"; \
+		echo "       would have measured a missing QueenUILib instead of the suite."; \
+		echo "       Nothing was measured and the ceiling is not being enforced:"; \
+		sed -n "1,10p" "$$tmp/flags_err" | sed "s/^/  /"; \
+		exit 1; \
+	fi; \
+	xflags=(); \
+	while IFS= read -r flag; do xflags+=(-Xswiftc "$$flag"); done < "$$tmp/flags"; \
+	if [ "$${#xflags[@]}" -eq 0 ]; then \
+		echo "[FAIL] build.sh printed no module flags; refusing to report a count"; \
+		echo "       taken without them."; \
+		exit 1; \
+	fi; \
+	swift build --build-tests "$${xflags[@]}" > "$$tmp/log" 2>&1; rc=$$?; \
 	/usr/bin/grep -E "^/.*error:" "$$tmp/log" \
 		| sed "s/:[0-9]*:[0-9]*: error: /: /" \
 		| sort -u > "$$tmp/errors"; \
@@ -1666,6 +2063,13 @@ xctest:
 #   a row that mutates the file it is stored in cannot report STALE or repair
 #   a leftover, because its own table entry is a second copy of the needle it
 #   searches for.  The reasoning is written out above MUTANTS_GUARD.
+#
+#   And one oracle that is NOT a tree reader has since been added:
+#   `variant-fence` runs `swiftc -typecheck` four times.  The sentence above
+#   still holds for it, for the reason it gave rather than by luck - no
+#   network, no clock, no build products, same inputs and same compiler give
+#   the same answer - so it needs no confirmation run either.  What it does not
+#   inherit is the cost: 1.5s per consultation, twice per row.
 #
 #   The sketched row shape has since grown a fifth field, so the live shape is
 #
@@ -2284,9 +2688,9 @@ mutants-logic:
 #                   does not PARSE is planting a syntax error rather than a
 #                   type error, and a mutant that TYPECHECKS has not planted
 #                   anything, so the target is not consulted about a mutation
-#                   that did not happen.  No row uses it today; "A value with
-#                   no row" below says why that is the honest state, and what
-#                   a row would look like.
+#                   that did not happen.  One row uses it - `variant-fence`,
+#                   whose subject is that a raw string cannot stand in for a
+#                   BuildVariant; see "The value that got its row" below.
 #   parses          the mutant must still parse, and nothing more can be asked
 #                   of it because the file is in no module this Makefile can
 #                   assemble.  If it does not parse, the row is BROKEN: the
@@ -2382,14 +2786,19 @@ mutants-logic:
 #   when one file changed.  There IS a green baseline; it is the module, not
 #   the file.  What the rot argument gets right is that a hand-copied source
 #   list would rot - so nothing is copied: the list is READ from the dev
-#   build's own output-file-map, the artifact `make dev` writes, and the -I
+#   build's own output-file-map, the artifact `make dev` writes, and the flag
 #   set is READ from build.sh's own flag print (`TRIOS_PRINT_FLAGS=1`, 0.4s,
-#   compiles nothing), every directory of which is checked to exist before a
-#   row runs.  The -I set was the last thing here that WAS a copy, and it had
-#   already drifted - it named Frameworks-dev/Modules while a dev build
-#   compiles against SwiftPM's .build/.../debug/Modules.  A set that is wrong
-#   cannot be silent now: either the print refuses by naming the directory, or
-#   the pristine module typecheck below goes red and every row REFUSES by name.
+#   compiles nothing) and passed to the typecheck whole, every -I directory of
+#   which is checked to exist before a row runs.  Passing it whole rather than
+#   keeping the -I pairs is measured, not argued: full set and -I-only set,
+#   same 185 sources, both exit 0 with byte-identical diagnostics and the same
+#   0.53s warm - swiftc ignores -L/-l under -typecheck without so much as an
+#   unused-argument warning.  The flag set was the last thing here that WAS a
+#   copy, and it had already drifted - it named Frameworks-dev/Modules while a
+#   dev build compiles against SwiftPM's .build/.../debug/Modules.  A set that
+#   is wrong cannot be silent now: either the print refuses by naming the
+#   directory, or the pristine module typecheck below goes red and every row
+#   REFUSES by name.
 #
 #   `make dev` per row.  Still not worth it: measured here, one incremental
 #   `make dev` after touching rings/SR-02/ChatViewModel.swift took 80s, exit 0
@@ -2459,18 +2868,53 @@ mutants-logic:
 #     reads one file - but both fail toward "no verdict", never toward a
 #     verdict this harness did not earn.
 #
-# --- A value with no row -------------------------------------------------
+# --- The value that got its row ------------------------------------------
 #
-# `must-not-typecheck` is live vocabulary and the table does not use it.  That
-# is deliberate, and the alternative was to invent a row for it, which would
-# have been the same defect this whole harness keeps finding: a claim about
-# the world with nothing behind it.
+# `must-not-typecheck` went in before anything declared it, and the section
+# that stood here said so: the value was live vocabulary with no referent, and
+# inventing a row to fill the gap would have been the same defect this harness
+# keeps finding - a claim about the world with nothing behind it.  The honest
+# way out was never to invent a row.  It was to find a duplicated value whose
+# single symbol the COMPILER can defend, and build the missing check.
 #
-# The question a row would have to answer is "which standing check's SUBJECT
-# is a property of the type system?", because only there is planting a type
-# error the honest expression of the regression rather than a broken mutant.
-# Every check this table can use as an oracle was read, and the answer today
-# is none of them:
+# That check is `variant-fence`, and its two rows are the last two in the table
+# above.  Its subject: the build variant is a type, not a string.  `.trinity`
+# vs `.trinity-dev`, Keychain vs DevSecretStore, 9105 vs 9205, the bundle id,
+# the binary name and the Frameworks directory all fork on one `BuildVariant`
+# value, and the only route from a String into that type is the failable
+# `init?(rawValue:)`.  Nothing in this file can read that fact.  A compiler
+# decides it in 1.5s.
+#
+# The row the value existed for:
+#
+#   BR-OUTPUT/ProjectPaths.swift@@static var isDevVariant: Bool
+#       { variant == .dev }@@ ... { variant == "dev" }@@variant-fence@@
+#       must-not-typecheck@@ ...    (one row; wrapped here to fit the margin)
+#
+# It reintroduces the literal where the enum case belongs - the line
+# tools/ChatProbe.swift:30 already carries outside the module - and the mutant
+# CANNOT compile, because `==` has no overload between a BuildVariant and a
+# String.  That is not a broken mutant; it is the regression, stated in the
+# only language that can state it.  Driven both ways below: declared
+# `must-not-typecheck` it is "ok - caught by variant-fence"; declared
+# `typechecks` it is "BROKEN ROW ... the mutant parses but does not typecheck"
+# with the target never consulted.  Before the fourth value this row could not
+# be written at all, which is precisely what the old section predicted.
+#
+# The second row is `typechecks` and it is not decoration.  A check whose
+# negative arms assert "this does not compile" can rot in a direction the
+# first row cannot reach: adding `ExpressibleByStringLiteral` to BuildVariant
+# is one legal, COMPILING conformance that flips all three negative witnesses
+# green at once and re-opens every raw-string fork in the tree.  Driven: the
+# positive witness stays green, all three negatives print "TYPECHECKS ... the
+# fence is gone".  One check, two rows, one per arm - and each row was scored
+# against a target that cannot see it (row A against keychain-doors, row B
+# against guard-shapes) and printed SURVIVED, so neither is being rubber-
+# stamped by some incidental redness.
+#
+# The survey that produced "none of them" is kept below, because it is still
+# true of every check that predates variant-fence, and it is the reason a new
+# check had to be built rather than a row found:
 #
 #   keychain-doors      the presence of a SecItem* call outside an allowlist.
 #                       Text.  Its mutant is a real, compiling call.
@@ -2488,23 +2932,28 @@ mutants-logic:
 #   make-dollars,       already excluded above for reasons that have nothing
 #   backlog-audit       to do with types.
 #
-# `drift-guard` is the one whose subject IS type-level - it proves
-# QueenBranchCommitter.verifyCombinedBuild catches a signature mismatch - and
-# it is still not a row: the mismatch it judges is between two scratch
+# `drift-guard` was the only OTHER check whose subject is type-level - it
+# proves QueenBranchCommitter.verifyCombinedBuild catches a signature mismatch
+# - and it is still not a row: the mismatch it judges is between two scratch
 # packages it builds itself, not between two states of this tree, so a
 # mutation here has no lever on it.  Excluded above for its shape as well.
+# That is the difference variant-fence had to be built with: it judges THIS
+# tree's sources, so a mutation in them moves it.
 #
-# What a future row would look like, in the two ways one could arrive:
+# The two ways one could arrive at such a row.  The first is no longer a
+# forecast - it is what variant-fence did - and it is left in the shape it was
+# written in, because the prediction and the outcome agreeing is the evidence:
 #
 #   1. A check whose subject is genuinely type-level - say a guard asserting
 #      that some call site keeps a particular signature, or that a type keeps
 #      a conformance.  Its honest mutant CHANGES that signature or drops that
-#      conformance, which breaks every caller in the module.  Today such a row
-#      has to declare `typechecks`, and the type floor would then call it
-#      BROKEN for doing exactly what it exists to do - so the row could not be
-#      written at all, and the check would have no mutation proving it works.
-#      That is the hole this value fills, and it is why the value is worth
-#      having before the row that needs it exists.
+#      conformance, which breaks every caller in the module.  Under
+#      `typechecks` the type floor calls such a row BROKEN for doing exactly
+#      what it exists to do, so the row cannot be written at all and the check
+#      has no mutation proving it works.  That is the hole this value fills.
+#      Arrived at exactly this way: the fence asserts that a String cannot
+#      become a BuildVariant, its mutant plants that conversion, and the flip
+#      to `typechecks` was driven and prints the predicted BROKEN ROW.
 #
 #   2. empty-sources, which is not type-level but arrives at the same place.
 #      Its subject is a source that went to zero bytes; per #1238 above, what
@@ -2697,6 +3146,58 @@ mutants-logic:
 #     the message now names all four: "want typechecks, must-not-typecheck,
 #     parses or must-not-parse".
 #
+# Driven a sixth time when `variant-fence` gave the fourth value its row.  The
+# rows are now IN the table, so the positive arms come from a plain `make
+# mutants-guard`; every negative arm is still `make mutants-guard
+# MUTANTS_GUARD='...'`, so nothing temporary was committed, and `git status
+# --short rings/ BR-OUTPUT/ main.swift` was empty after every run below, the
+# failures included:
+#
+#   - the table with both new rows: twelve rows, all "ok - caught", exit 0,
+#     77.4s / 74.1s / 89.1s on three runs, against ~55s for the same table at
+#     ten rows.  The two rows are dearer than the eight before them because
+#     they are the first to touch BR-OUTPUT/ProjectPaths.swift and rings/SR-00/
+#     BuildVariantPolicy.swift, and the second of those sits near the bottom of
+#     the dependency graph, so its incremental typecheck re-checks most of the
+#     module.  The 74-89s spread is machine load; the honest summary is
+#     "roughly +20s, and under a minute and a half".
+#   - the `must-not-typecheck` row, positive arm, in the table: "ok - caught by
+#     variant-fence: the dev/release fork is decided by a raw string again, the
+#     way tools/ChatProbe.swift already does it".
+#   - the same row flipped to `typechecks`: "BROKEN ROW ... the mutant parses
+#     but does not typecheck", with swiftc's own "cannot convert value of type
+#     'BuildVariant' to expected argument type 'String'" quoted underneath and
+#     make variant-fence NOT consulted.  This is the counterfactual the value
+#     was added for, now with a real row behind it instead of a forecast.
+#   - the same row with a COMPILING mutant (`variant == .prod`) still declaring
+#     `must-not-typecheck`: "BROKEN ROW ... the mutant typechecks, and this row
+#     exists to plant a type error", target not consulted, make exit 2.
+#   - the same row with an unbalanced mutant (`{ variant == "dev" ` , brace
+#     dropped): "BROKEN ROW ... the mutant does not parse, so it plants a
+#     syntax error and not the type error this row claims", swiftc's "static
+#     properties may only be declared on a type" quoted underneath.
+#   - both rows scored against a target that cannot see them - row A against
+#     keychain-doors, row B against guard-shapes: "SURVIVED", make exit 2.  A
+#     type error is not rubber-stamped by being a type error; the catch has to
+#     come from the check whose subject it is.
+#   - the check's own arms, driven on scratch copies via `make variant-fence
+#     VARIANT_FENCE_SRC=...` and `VARIANT_FENCE_DIR=...`, so no tracked file
+#     was touched: the fence removed by `ExpressibleByStringLiteral` (positive
+#     green, all three negatives "TYPECHECKS ... the fence is gone"); the raw
+#     string written into the real source (positive red, naming
+#     ProjectPaths.swift:128); a missing positive witness; a directory with no
+#     neg-*.swift; a negative with its `// EXPECT:` line stripped; a negative
+#     with a bogus `// EXPECT:` line.  All six exit 2 and say which.
+#   - and one defect the driving found in the check itself, recorded because it
+#     is the failure this repo keeps re-discovering.  The EXPECT match was
+#     first written as a grep over the WHOLE swiftc output.  With the raw
+#     string planted in the real source, ProjectPaths.swift:128 emitted the
+#     exact sentence neg-compare-literal.swift declares, so that witness
+#     printed "ok - refused" on the strength of an error in a different file.
+#     The match is now anchored to lines swiftc attributes to the witness
+#     itself, and the same run prints "FAIL ... swiftc never said this ABOUT
+#     neg-compare-literal.swift".
+#
 # Where the type state lives.  A sibling of the app build's object directory,
 # never inside it - see "The type floor" above for why, and for the numbers.
 TYPE_STATE := $(ROOT)/.trinity/build/typecheck-guard
@@ -2711,7 +3212,9 @@ MUTANTS_GUARD := \
 	main.swift@@guard RecursionGuard.shared.ensureSingleInstance() else {@@<DELETE-BLOCK>NSApplication.shared.run()@@guard-shapes@@typechecks@@guard 7 is deleted through its brace: the boot path stops enforcing a single instance~ \
 	rings/SR-02/ChatViewModel.swift@@if ProjectPaths.isDevVariant {@@<UNWRAP-BLOCK>queenInboxPollTask = Task@@guard-shapes@@typechecks@@guard 1 is unwrapped, body kept: a release build starts the dev Queen inbox poller~ \
 	rings/SR-00/KeychainSecrets.swift@@if ProjectPaths.isDevVariant {@@<UNWRAP-BLOCK>DevSecretStore.read(service: service, account: account)@@guard-shapes@@typechecks@@guard 4 is unwrapped, body kept: a release build reads secrets from the plaintext dev store~ \
-	rings/SR-00/TriOSEncryption.swift@@if ProcessInfo.processInfo.environment["TRIOS_E2E_DISABLE_KEYCHAIN"] == "1" {@@<UNWRAP-BLOCK>return try loadOrCreateTestKey()@@guard-shapes@@typechecks@@guard 5 is unwrapped, body kept: every build derives its data key from a volatile test file
+	rings/SR-00/TriOSEncryption.swift@@if ProcessInfo.processInfo.environment["TRIOS_E2E_DISABLE_KEYCHAIN"] == "1" {@@<UNWRAP-BLOCK>return try loadOrCreateTestKey()@@guard-shapes@@typechecks@@guard 5 is unwrapped, body kept: every build derives its data key from a volatile test file~ \
+	BR-OUTPUT/ProjectPaths.swift@@static var isDevVariant: Bool { variant == .dev }@@static var isDevVariant: Bool { variant == "dev" }@@variant-fence@@must-not-typecheck@@the dev/release fork is decided by a raw string again, the way tools/ChatProbe.swift already does it~ \
+	rings/SR-00/BuildVariantPolicy.swift@@enum BuildVariant: String, Equatable, Sendable {@@enum BuildVariant: String, Equatable, Sendable, ExpressibleByStringLiteral { init(stringLiteral value: String) { self = BuildVariant(rawValue: value) ?? .prod }@@variant-fence@@typechecks@@BuildVariant becomes string-convertible and every raw-string fork in the tree re-opens at once
 
 .PHONY: mutants-guard
 mutants-guard:
@@ -3035,11 +3538,24 @@ mutants-guard:
 	   the copy HAD already drifted: it pointed at Frameworks-dev/Modules, the \
 	   vendored copy of the QueenUILib interface, while a dev build compiles \
 	   against SwiftPM's .build/.../debug/Modules.  Same bytes that day, two \
-	   directories, and nothing would have said so.  What is still duplicated, \
-	   named exactly rather than implied: (a) the reader keeps the -I pairs and \
-	   drops -L/-l, because a typecheck wants search paths and not link flags - \
-	   that is swiftc's calling convention, not build.sh's logic, and a fourth \
-	   -I added to build.sh arrives here on its own; (b) the variant, which is \
+	   directories, and nothing would have said so.  \
+	   The printed set is passed to swiftc WHOLE - -L, -lsqlcipher and \
+	   -lQueenUILib included.  The reader used to keep the -I pairs and drop the \
+	   link flags, on the ARGUMENT that a typecheck wants search paths and not \
+	   libraries.  Measured instead, on this tree, both sets over the same 185 \
+	   sources: exit 0 either way and BYTE-IDENTICAL diagnostics - 33 lines, the \
+	   4 known warnings, diff clean - cold 17.9s with the full set against 19.1s \
+	   with the -I-only set, warm 0.53s against 0.52s.  swiftc accepts -L and -l \
+	   under -typecheck, links nothing, and does not even warn about an unused \
+	   argument.  The filter bought nothing measurable, and it was the last place \
+	   where this reader decided something about the set instead of consuming it: \
+	   a flag added to build.sh that is not a -I used to be dropped here in \
+	   silence, and now reaches the compiler, where a set swiftc rejects turns \
+	   the pristine typecheck red and every row REFUSES by name.  \
+	   The -I pairs are still read out below, but only to be CHECKED - that the \
+	   list pairs up and that every directory exists - which is a question asked \
+	   about the printed set, not a decision about what is passed.  The one thing \
+	   still duplicated, named exactly rather than implied: the variant, which is \
 	   WARN_VARIANT, the same symbol that picked the output-file-map above.  \
 	   Where any of these directories ARE is no longer written in this file."; \
 	incfile="$$backup/include-flags.txt"; \
@@ -3077,6 +3593,7 @@ mutants-guard:
 		echo "       was run."; \
 		exit 1; \
 	fi; \
+	nflag=$$(wc -l < "$$incfile" | tr -d ' '); \
 	: "The flag file is byte-stable on purpose: swiftc throws the incremental \
 	   state away when the flags change, and a run that rebuilds its flags \
 	   differently each time is a gate that is never warm - measured at 17s \
@@ -3103,15 +3620,15 @@ mutants-guard:
 		'open(st + "/output-file-map.json", "w").write(json.dumps(m, indent=1))' \
 		'flags = ["-typecheck", "-incremental", "-output-file-map",' \
 		'         st + "/output-file-map.json", "-j", "1", "-enable-batch-mode"]' \
-		'for d in open(os.environ["MG_INC"]).read().splitlines():' \
-		'    if d:' \
-		'        flags += ["-I", d]' \
+		'for a in open(os.environ["MG_FLAGS"]).read().splitlines():' \
+		'    if a:' \
+		'        flags.append(a)' \
 		'open(st + "/typecheck.args", "w").write("\n".join(flags + files) + "\n")' \
 		'open(st + "/module-files.txt", "w").write("\n".join(files) + "\n")' \
 		'sys.stdout.write(str(len(files)))' \
 	> $$tf; \
 	if ! tcn=$$(MG_OFM="$$ofm" MG_STATE="$$tcstate" \
-		MG_INC="$$backup/include-dirs.txt" python3 $$tf 2>&1); then \
+		MG_FLAGS="$$incfile" python3 $$tf 2>&1); then \
 		echo "[FAIL] the dev output-file-map is not usable as a source list: $$tcn"; \
 		echo "       It is stale with respect to the tree. Run 'make dev' and try again;"; \
 		echo "       no row was run."; \
@@ -3121,7 +3638,7 @@ mutants-guard:
 	if [ "$$tccold" = yes ]; then \
 		echo "  note - typecheck state is empty; the first module pass fills it (~17s)"; \
 	fi; \
-	echo "  ok   - app module borrowed from the $(WARN_VARIANT) build: $$tcn sources, $$ninc include dirs printed by build.sh"; \
+	echo "  ok   - app module borrowed from the $(WARN_VARIANT) build: $$tcn sources, $$nflag flags printed by build.sh, passed whole ($$ninc are -I dirs, all present)"; \
 	: "Rows are separated by a literal ~, the way GUARDS does it, not by \
 	   guessing a record boundary from the leading path. That guess had a \
 	   fixed list - rings/, BR-OUTPUT/, tests/ - so a row naming main.swift \

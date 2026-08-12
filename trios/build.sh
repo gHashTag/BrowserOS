@@ -48,8 +48,16 @@ fi
 # stdout is reserved for the flags: the line below hands the real stdout to
 # fd 3 and points stdout at stderr, so no [VENDORED], [REUSE] or [FAIL] line
 # this script prints can reach the reader as if it were a flag.
+#
+# TRIOS_PRINT_SOURCES (see below, just after the source list is assembled) is
+# the second reader of this script and gets the same treatment: reserved stdout,
+# no side effects. TRIOS_PRINT_ONLY is what the write-guards test, so adding a
+# third print mode means naming it here once and not hunting for guards.
 TRIOS_PRINT_FLAGS="${TRIOS_PRINT_FLAGS:-}"
-if [ -n "$TRIOS_PRINT_FLAGS" ]; then
+TRIOS_PRINT_SOURCES="${TRIOS_PRINT_SOURCES:-}"
+TRIOS_PRINT_ONLY=""
+if [ -n "$TRIOS_PRINT_FLAGS" ] || [ -n "$TRIOS_PRINT_SOURCES" ]; then
+    TRIOS_PRINT_ONLY=1
     exec 3>&1 1>&2
 fi
 
@@ -97,13 +105,13 @@ USER_ROOT_DIR="$(cd "$PROJECT_DIR/../.." && pwd)"
 # Keep artifact log families small and fresh. Inline rotation caps the main repo
 # at 5 files per family, and a shared backstop cleaner also removes logs older
 # than 7 days and scans git worktrees under .worktrees/.
-# Both rotations are skipped under TRIOS_PRINT_FLAGS: they delete files, and a
+# Both rotations are skipped under either print mode: they delete files, and a
 # flag print is a read.
 CLEANUP_SCRIPT="$SCRIPT_DIR/scripts/cleanup_artifact_logs.sh"
-if [ -z "$TRIOS_PRINT_FLAGS" ] && [ -x "$CLEANUP_SCRIPT" ]; then
+if [ -z "$TRIOS_PRINT_ONLY" ] && [ -x "$CLEANUP_SCRIPT" ]; then
     "$CLEANUP_SCRIPT" --apply --days 7 --cap 5 >/dev/null 2>&1 || true
 fi
-if [ -z "$TRIOS_PRINT_FLAGS" ] && command -v find >/dev/null 2>&1; then
+if [ -z "$TRIOS_PRINT_ONLY" ] && command -v find >/dev/null 2>&1; then
     rotate_family() {
         local pattern="$1"
         find "$LOG_DIR" -maxdepth 1 -type f -name "$pattern" -print0 \
@@ -120,79 +128,7 @@ fi
 TRINITY_SOURCE_ROOT="${TRINITY_ROOT:-$USER_ROOT_DIR/trinity}"
 QUEEN_PACKAGE_ROOT="$TRINITY_SOURCE_ROOT/apps/queen"
 
-[ -n "$TRIOS_PRINT_FLAGS" ] || mkdir -p "$LOG_DIR"
-
-# --- QueenUILib resolution: compile from source or use vendored dylib ---
-if [ -n "$TRIOS_VENDORED" ]; then
-    # Use the pre-built QueenUILib from Frameworks-dev/ or Frameworks/.
-    #
-    # QueenUILib has two halves and the vendored build needs BOTH: the dylib
-    # satisfies the linker, and the swiftmodule satisfies `import QueenUILib`
-    # at compile time. Vendoring only the dylib is what made this path dead on
-    # arrival - the module search path pointed at the Frameworks directory,
-    # which holds dylibs and no interface, so every importing file failed with
-    # "no such module 'QueenUILib'" before the linker was ever reached. A
-    # normal build now vendors the interface next to the dylib (see
-    # "vendored escape hatch" below).
-    QUEEN_DYLIB="$STANDALONE_FRAMEWORKS/libQueenUILib.dylib"
-    QUEEN_MODULE_DIR="$STANDALONE_FRAMEWORKS/Modules"
-    if [ ! -f "$QUEEN_DYLIB" ]; then
-        echo "[FAIL] Vendored QueenUILib not found: $QUEEN_DYLIB"
-        echo "       Run a normal build first, or unset TRIOS_VENDORED."
-        exit 1
-    fi
-    if [ ! -f "$QUEEN_MODULE_DIR/QueenUILib.swiftmodule" ]; then
-        echo "[FAIL] Vendored QueenUILib interface not found:"
-        echo "       $QUEEN_MODULE_DIR/QueenUILib.swiftmodule"
-        echo "       The dylib alone only satisfies the linker; swiftc needs the"
-        echo "       swiftmodule or every 'import QueenUILib' fails to compile."
-        echo "       Run a normal build first (it vendors both halves),"
-        echo "       or unset TRIOS_VENDORED."
-        exit 1
-    fi
-    QUEEN_BIN_DIR="$STANDALONE_FRAMEWORKS"
-    echo "[VENDORED] Using pre-built QueenUILib: $QUEEN_DYLIB"
-    echo "[VENDORED] Using pre-built interface: $QUEEN_MODULE_DIR/QueenUILib.swiftmodule"
-else
-    if [ ! -f "$QUEEN_PACKAGE_ROOT/Package.swift" ]; then
-        echo "[FAIL] Canonical Queen package not found: $QUEEN_PACKAGE_ROOT"
-        echo "       Set TRINITY_ROOT to the gHashTag/trinity checkout,"
-        echo "       or use TRIOS_VENDORED=1 to build with pre-built dylibs."
-        exit 1
-    fi
-
-    echo "Building canonical Trinity Queen interface..."
-    if [ -n "${TRIOS_REUSE_QUEEN_BUILD:-}" ]; then
-        QUEEN_BIN_DIR="$QUEEN_PACKAGE_ROOT/.build/arm64-apple-macosx/debug"
-        echo "[REUSE] Using existing QueenUILib build: $QUEEN_BIN_DIR"
-    else
-        # This compile is the whole reason TRIOS_PRINT_FLAGS has to be a mode
-        # rather than a wrapper: it is the one step that can build before the
-        # flags are known. Print mode skips it and asks only for the path.
-        # --show-bin-path does not compile - it prints where the products would
-        # go - so the directory it names may be empty or stale, and the
-        # swiftmodule check below is what turns that into a named failure.
-        # Both branches end at the same QUEEN_BIN_DIR expression, so the path
-        # printed is the path the real build compiles against; only the
-        # side effect differs.
-        if [ -z "$TRIOS_PRINT_FLAGS" ]; then
-            swift build --package-path "$QUEEN_PACKAGE_ROOT" --target QueenUILib
-        fi
-        QUEEN_BIN_DIR="$(swift build --package-path "$QUEEN_PACKAGE_ROOT" --show-bin-path)"
-    fi
-    QUEEN_DYLIB="$QUEEN_BIN_DIR/libQueenUILib.dylib"
-    # SwiftPM writes the interfaces to a Modules/ subdirectory of the bin dir.
-    QUEEN_MODULE_DIR="$QUEEN_BIN_DIR/Modules"
-    if [ ! -f "$QUEEN_DYLIB" ]; then
-        echo "[FAIL] QueenUILib was not produced: $QUEEN_DYLIB"
-        exit 1
-    fi
-    if [ ! -f "$QUEEN_MODULE_DIR/QueenUILib.swiftmodule" ]; then
-        echo "[FAIL] QueenUILib interface was not produced:"
-        echo "       $QUEEN_MODULE_DIR/QueenUILib.swiftmodule"
-        exit 1
-    fi
-fi
+[ -n "$TRIOS_PRINT_ONLY" ] || mkdir -p "$LOG_DIR"
 
 # Build tracked production sources. BR-OUTPUT is also used for local prototypes,
 # so compiling every untracked Swift file makes unrelated drafts break the app.
@@ -276,6 +212,108 @@ else
             SWIFT_FILES+=("$swift_file")
         fi
     done < <(find "$PROJECT_DIR/BR-OUTPUT" -name "*.swift" | sort)
+fi
+
+# `TRIOS_PRINT_SOURCES=1 ./build.sh` prints the resolved source list - the exact
+# set of .swift paths the compile below is handed, one per line, repo-relative -
+# and exits without compiling anything. Same move as TRIOS_PRINT_FLAGS above,
+# and for the same reason: the set was written down a second time in the root
+# Package.swift, the two drifted by 45 paths, and the drift did not show up as a
+# missing file. It showed up as SwiftPM failing at "Emitting module TriOSKit"
+# with `cannot find type SessionGuard in scope`, which meant the XCTest suite
+# had never once compiled. `make sources-drift` reads THIS, so the manifest is
+# checked against the list that actually builds instead of against a copy.
+#
+# Placed here, above the QueenUILib resolution, deliberately: the source list
+# does not depend on QueenUILib, and a reader that fails because trinity is not
+# checked out is a gate that goes red for a reason unrelated to what it
+# measures. Printing must not build, and from this point nothing has.
+if [ -n "$TRIOS_PRINT_SOURCES" ]; then
+    PRINT_SOURCES_LF=$'\n'
+    for print_source in "${SWIFT_FILES[@]}"; do
+        case "$print_source" in
+            *"$PRINT_SOURCES_LF"*)
+                echo "[FAIL] a source path contains a newline and cannot be printed"
+                echo "       as a line-per-path list: $print_source"
+                exit 1
+                ;;
+        esac
+        printf '%s\n' "${print_source#$PROJECT_DIR/}" >&3
+    done
+    exit 0
+fi
+
+
+# --- QueenUILib resolution: compile from source or use vendored dylib ---
+if [ -n "$TRIOS_VENDORED" ]; then
+    # Use the pre-built QueenUILib from Frameworks-dev/ or Frameworks/.
+    #
+    # QueenUILib has two halves and the vendored build needs BOTH: the dylib
+    # satisfies the linker, and the swiftmodule satisfies `import QueenUILib`
+    # at compile time. Vendoring only the dylib is what made this path dead on
+    # arrival - the module search path pointed at the Frameworks directory,
+    # which holds dylibs and no interface, so every importing file failed with
+    # "no such module 'QueenUILib'" before the linker was ever reached. A
+    # normal build now vendors the interface next to the dylib (see
+    # "vendored escape hatch" below).
+    QUEEN_DYLIB="$STANDALONE_FRAMEWORKS/libQueenUILib.dylib"
+    QUEEN_MODULE_DIR="$STANDALONE_FRAMEWORKS/Modules"
+    if [ ! -f "$QUEEN_DYLIB" ]; then
+        echo "[FAIL] Vendored QueenUILib not found: $QUEEN_DYLIB"
+        echo "       Run a normal build first, or unset TRIOS_VENDORED."
+        exit 1
+    fi
+    if [ ! -f "$QUEEN_MODULE_DIR/QueenUILib.swiftmodule" ]; then
+        echo "[FAIL] Vendored QueenUILib interface not found:"
+        echo "       $QUEEN_MODULE_DIR/QueenUILib.swiftmodule"
+        echo "       The dylib alone only satisfies the linker; swiftc needs the"
+        echo "       swiftmodule or every 'import QueenUILib' fails to compile."
+        echo "       Run a normal build first (it vendors both halves),"
+        echo "       or unset TRIOS_VENDORED."
+        exit 1
+    fi
+    QUEEN_BIN_DIR="$STANDALONE_FRAMEWORKS"
+    echo "[VENDORED] Using pre-built QueenUILib: $QUEEN_DYLIB"
+    echo "[VENDORED] Using pre-built interface: $QUEEN_MODULE_DIR/QueenUILib.swiftmodule"
+else
+    if [ ! -f "$QUEEN_PACKAGE_ROOT/Package.swift" ]; then
+        echo "[FAIL] Canonical Queen package not found: $QUEEN_PACKAGE_ROOT"
+        echo "       Set TRINITY_ROOT to the gHashTag/trinity checkout,"
+        echo "       or use TRIOS_VENDORED=1 to build with pre-built dylibs."
+        exit 1
+    fi
+
+    echo "Building canonical Trinity Queen interface..."
+    if [ -n "${TRIOS_REUSE_QUEEN_BUILD:-}" ]; then
+        QUEEN_BIN_DIR="$QUEEN_PACKAGE_ROOT/.build/arm64-apple-macosx/debug"
+        echo "[REUSE] Using existing QueenUILib build: $QUEEN_BIN_DIR"
+    else
+        # This compile is the whole reason TRIOS_PRINT_FLAGS has to be a mode
+        # rather than a wrapper: it is the one step that can build before the
+        # flags are known. Print mode skips it and asks only for the path.
+        # --show-bin-path does not compile - it prints where the products would
+        # go - so the directory it names may be empty or stale, and the
+        # swiftmodule check below is what turns that into a named failure.
+        # Both branches end at the same QUEEN_BIN_DIR expression, so the path
+        # printed is the path the real build compiles against; only the
+        # side effect differs.
+        if [ -z "$TRIOS_PRINT_FLAGS" ]; then
+            swift build --package-path "$QUEEN_PACKAGE_ROOT" --target QueenUILib
+        fi
+        QUEEN_BIN_DIR="$(swift build --package-path "$QUEEN_PACKAGE_ROOT" --show-bin-path)"
+    fi
+    QUEEN_DYLIB="$QUEEN_BIN_DIR/libQueenUILib.dylib"
+    # SwiftPM writes the interfaces to a Modules/ subdirectory of the bin dir.
+    QUEEN_MODULE_DIR="$QUEEN_BIN_DIR/Modules"
+    if [ ! -f "$QUEEN_DYLIB" ]; then
+        echo "[FAIL] QueenUILib was not produced: $QUEEN_DYLIB"
+        exit 1
+    fi
+    if [ ! -f "$QUEEN_MODULE_DIR/QueenUILib.swiftmodule" ]; then
+        echo "[FAIL] QueenUILib interface was not produced:"
+        echo "       $QUEEN_MODULE_DIR/QueenUILib.swiftmodule"
+        exit 1
+    fi
 fi
 
 # SQLCipher is required for encrypted agent-memory I/O. Use pkg-config when
@@ -718,7 +756,19 @@ EOF
         echo "[SKIP] XCTest not available in this toolchain (install Xcode to run swift test)"
     else
         echo "Running swift test..."
-        swift test --package-path "$PROJECT_DIR/.." 2>&1 | tee -a "$LOG_FILE"
+        # Hand SwiftPM the same module flags this build just resolved. Two of
+        # the library sources import QueenUILib, which is not a SwiftPM
+        # dependency of that package, so without these the run stops on "no
+        # such module" in the library and never reaches a test - and reports
+        # that as the suite being broken. The flags are already in scope here;
+        # not passing them was the same omission, one file over, as the
+        # sources list that was written down twice.
+        SWIFT_TEST_XFLAGS=()
+        for module_flag in "${SWIFTC_MODULE_FLAGS[@]}"; do
+            SWIFT_TEST_XFLAGS+=(-Xswiftc "$module_flag")
+        done
+        swift test --package-path "$PROJECT_DIR/.." \
+            "${SWIFT_TEST_XFLAGS[@]}" 2>&1 | tee -a "$LOG_FILE"
         if [ ${PIPESTATUS[0]} -ne 0 ]; then
             echo "[FAIL] swift test failed (log: $LOG_FILE)"
             exit 1

@@ -63,8 +63,8 @@ final class QueenSelfImprovementService: ObservableObject {
         self.persister = persister
         self.a2aClient = a2aClient
         self.projectRoot = projectRoot
-        self.budgetURL = URL(fileURLWithPath: "\(projectRoot)/.trinity/state/safety_budget.json")
-        self.proposalsURL = URL(fileURLWithPath: "\(projectRoot)/.trinity/state/queen-proposals.json")
+        self.budgetURL = URL(fileURLWithPath: "\(projectRoot)/\(ProjectPaths.variant.dataDirectoryName)/state/safety_budget.json")
+        self.proposalsURL = URL(fileURLWithPath: "\(projectRoot)/\(ProjectPaths.variant.dataDirectoryName)/state/queen-proposals.json")
         self.proposals = loadProposalsSync()
     }
 
@@ -187,7 +187,7 @@ final class QueenSelfImprovementService: ObservableObject {
 
     /// Loads the budget for any project root without needing an instance.
     static func loadBudget(projectRoot: String = ProjectPaths.root) -> QueenSafetyBudget? {
-        let url = URL(fileURLWithPath: "\(projectRoot)/.trinity/state/safety_budget.json")
+        let url = URL(fileURLWithPath: "\(projectRoot)/\(ProjectPaths.variant.dataDirectoryName)/state/safety_budget.json")
         guard FileManager.default.fileExists(atPath: url.path),
               let data = try? Data(contentsOf: url),
               let budget = try? JSONDecoder().decode(QueenSafetyBudget.self, from: data) else {
@@ -229,7 +229,7 @@ final class QueenSelfImprovementService: ObservableObject {
     ) -> QueenSafetyBudget? {
         guard var budget = loadBudget(projectRoot: projectRoot), budget.isActive else { return nil }
         budget.budget = max(0, budget.budget - amount)
-        let url = URL(fileURLWithPath: "\(projectRoot)/.trinity/state/safety_budget.json")
+        let url = URL(fileURLWithPath: "\(projectRoot)/\(ProjectPaths.variant.dataDirectoryName)/state/safety_budget.json")
         try? FileManager.default.createDirectory(
             at: url.deletingLastPathComponent(), withIntermediateDirectories: true
         )
