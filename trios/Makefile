@@ -65,6 +65,8 @@ help:
 	@echo "  make mutants    - break known guards and require the SSE suite to notice"
 	@echo "  make mutants-logic - the same, for guards a clade-e2e logic suite owns"
 	@echo "  make mutants-guard - the same, for guards whose oracle is the check itself"
+	@echo "                    (needs one 'make dev' first: it typechecks each mutant"
+	@echo "                     inside the app module the build leaves behind)"
 	@echo "  make mutants-changed - run mutations for guarded files dirty in the working tree"
 	@echo "  make drift-guard - run the interface-drift compiling proof (slow; not in the fast suite)"
 	@echo "  make finish-mark-order - check the completed-turn mark stays in the finish callback"
@@ -697,6 +699,7 @@ MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP DEV_BIN RELEASE_BIN DEV_PROC \
 	CASSETTE_BRANCHES SWEEP_CANARY LOG KEYCHAIN_ALLOW_PATTERNS MAKE VARIANT \
 	MSG ISSUE WORKER TASK PATHS CRITERIA SECOND REVIEW AUTONOMY CASSETTE \
 	SECOND_TURN QUEEN_COMMAND MUTANTS MUTANTS_LOGIC MUTANTS_GUARD MAKE_DOLLAR_VARS HARNESS_LOCK GUARDS \
+	TYPE_STATE \
 	VENDOR_SRC VENDOR_BEGIN VENDOR_END VENDOR_ANCHOR VENDOR_HALVES
 
 .PHONY: make-dollars
@@ -1924,10 +1927,12 @@ mutants-logic:
 #                      `guard ... else {` orphans its brace, and the mutant
 #                      does not compile.  A row whose mutant does not compile
 #                      proves nothing (see the fifth field below).  The block
-#                      operation lifted that limit; guards 2, 3 and 7 now have
-#                      rows too.  A compiler cannot see a missing guard, which
-#                      is the whole reason guard-shapes exists; here that is
-#                      measured, not argued.
+#                      operations lifted that limit: <DELETE-BLOCK> gave guards
+#                      2, 3 and 7 rows, and <UNWRAP-BLOCK> gave the last three -
+#                      1, 4 and 5 - so all seven guards are now driven.  A
+#                      compiler cannot see a missing guard, which is the whole
+#                      reason guard-shapes exists; here that is measured, not
+#                      argued.
 #
 # --- The second operation: <DELETE-BLOCK> --------------------------------
 #
@@ -1985,23 +1990,22 @@ mutants-logic:
 #                   which sits after the guard, survives to be found.  Driven:
 #                   all three flip guard-shapes from GUARDED to UNGUARDED.
 #
-#   guards 1, 4, 5  Do NOT fit, and are deliberately absent.  All three are
-#                   `if <dev-only> { ... }`, and their guard-shapes anchor
-#                   sits INSIDE the block: `queenInboxPollTask = Task` at 441
-#                   within 437-448, `DevSecretStore.read(...)` at 76 within
-#                   75-80, `return try loadOrCreateTestKey()` at 204 within
-#                   203-205.  Deleting the block takes the anchor with it, and
-#                   guard-shapes then answers NOANCHOR - "the guard table is
-#                   stale" - not UNGUARDED.  That still exits non-zero, so the
-#                   row WOULD print "ok - caught"; it would be scoring a stale
-#                   table under the name of a missing guard.  Measured, not
-#                   argued: the three deletions were applied to copies and the
-#                   guard-shapes awk answered NOANCHOR for each.
-#
-#                   There is a real edit that fits them - unwrap the block,
-#                   deleting the `if` line and its closing brace and keeping
-#                   the body, which is precisely the accident that started
-#                   guard-shapes.  That is a third operation, not this one.
+#   guards 1, 4, 5  Do NOT fit THIS operation, and take <UNWRAP-BLOCK> below
+#                   instead.  All three are `if <dev-only> { ... }`, and their
+#                   guard-shapes anchor sits INSIDE the block:
+#                   `queenInboxPollTask = Task` at 441 within 437-448,
+#                   `DevSecretStore.read(...)` at 76 within 75-80, `return try
+#                   loadOrCreateTestKey()` at 204 within 203-205.  Deleting the
+#                   block takes the anchor with it, and guard-shapes then
+#                   answers NOANCHOR - "the guard table is stale" - not
+#                   UNGUARDED.  That still exits non-zero, so the row WOULD
+#                   print "ok - caught"; it would be scoring a stale table
+#                   under the name of a missing guard.  Measured, not argued,
+#                   and re-driven when the unwrap went in: the three deletions
+#                   were applied to /tmp copies and guard-shapes, pointed at
+#                   them, said "anchor ... is gone; the guard table is stale"
+#                   for each, against "no 'if ProjectPaths.isDevVariant {'
+#                   within 8 lines above ..." for the same three unwrapped.
 #
 #   guard 6         Keeps its substitution row.  Deleting `guard ... else
 #                   { continue }` whole is legal, but the row already exists
@@ -2029,6 +2033,64 @@ mutants-logic:
 # a build per row would cost minutes and buy, for rows that bind nothing,
 # what a 0.2s parse already answers.  A row that ever deletes a block with a
 # binding in it should pay for a build.
+#
+# --- The third operation: <UNWRAP-BLOCK> ---------------------------------
+#
+# A row whose replacement begins `<UNWRAP-BLOCK>` removes the needle line and
+# its matching closing brace and KEEPS the body.  The block's contents start
+# running unconditionally - which is not a variation on deleting the block, it
+# is the opposite failure, and it is the accident guard-shapes was built for:
+# a dev-only branch quietly becoming everybody's code path.
+#
+# It exists because the three guards <DELETE-BLOCK> could not reach need the
+# anchor to SURVIVE.  Unwrapping leaves it exactly where it was, one line
+# shallower, so guard-shapes answers UNGUARDED - the missing guard the row
+# names - instead of NOANCHOR.  Driven, on /tmp copies of the three real
+# sources, with guard-shapes itself as the instrument:
+#
+#   unwrapped   "no 'if ProjectPaths.isDevVariant {' within 8 lines above
+#               'queenInboxPollTask = Task'"   ... and the same for 4 and 5
+#   deleted     "anchor 'queenInboxPollTask = Task' is gone; the guard table
+#               is stale"                      ... and the same for 4 and 5
+#
+# Everything up to the brace match is the DELETE-BLOCK code path: same lookup
+# (the needle occurrence nearest above the anchor), same lexical matcher, same
+# three refusals.  The operation is a flag on the same script, not a second
+# copy of a brace matcher, because two matchers drift and only one of them
+# would be the one the fixture proves.
+#
+# Where unwrapping is more dangerous than deleting, and what is done about it.
+# A deletion that closes the block on the wrong line leaves a hole - the
+# mutant does not compile and the type floor says so.  An unwrap that gets the
+# span wrong SILENTLY EATS A LINE and can still compile: close one line early
+# and a body line goes instead of the brace.  So three shapes are refused
+# outright rather than guessed at, each driven in the self-test:
+#
+#   a one-line block            `if devOnly(...) { return false }` - the open
+#                               and close are the same line, and removing it
+#                               takes the body with it.
+#   code before the closing     `return false }` - removing that line removes
+#   brace on its line           the return.  DELETE-BLOCK accepts this shape
+#                               (it removes the body anyway); unwrap must not.
+#   an anchor outside the       the row would be unwrapping a block that does
+#   block                       not contain the line it scores - which is the
+#                               DELETE-BLOCK shape, written under the wrong
+#                               operation.
+#
+# The self-test is therefore four arms, not one, and it runs before any row:
+# tests/fixtures/unwrap-block-braces.swift carries the same string, comment,
+# raw-string, multiline and interpolation hazards as the delete fixture, and
+# the positive arm is diffed against unwrap-block-braces.expected.swift.  The
+# three refusals must each exit 3, name their reason, and leave the copy they
+# were handed byte-identical.  Driven: the positive arm reports "unwrapped
+# lines 22 and 33, body kept".
+#
+# The compile question is sharper here than for a deletion and is answered the
+# same way - by the type floor, on every run.  Unwrapping guards 4 and 5 makes
+# a `return` unconditional, so the rest of each function becomes unreachable;
+# that is a warning, not an error, and `swiftc -typecheck` stays green.  A
+# mutant that broke the module would be a BROKEN ROW and guard-shapes would
+# not be consulted at all.
 #
 # Two standing checks with a red state are still NOT here, each for its own
 # reason:
@@ -2065,7 +2127,10 @@ mutants-logic:
 # The planted call is also chosen to COMPILE.  keychain-doors is a grep and
 # does not care, but another agent may be building this tree inside the few
 # seconds the mutation is applied, and a harness that hands a neighbour a
-# broken source is buying its verdict with somebody else's build.
+# broken source is buying its verdict with somebody else's build.  That used
+# to be a choice and is now a measurement - see "The type floor" below - which
+# matters more since the floor also lengthens the window a neighbour can build
+# in, by the ~2s each mutant spends being typechecked.
 #
 # --- Does the mutant compile?  The fifth field ---------------------------
 #
@@ -2082,14 +2147,18 @@ mutants-logic:
 # prints neither verdict and scores ERROR.  These targets are text readers.
 # They never build anything.  Nothing here would have caught it.
 #
-# So every row now declares, in a fifth field, what its mutant must do to a
-# parser, and the loop checks that INSIDE the mutation window, BEFORE the
-# target is consulted:
+# So every row now declares, in a fifth field, what its mutant must survive,
+# and the loop checks that INSIDE the mutation window, BEFORE the target is
+# consulted:
 #
-#   parses          the mutant must still parse.  If it does not, the row is
-#                   BROKEN: the target is not run at all and the target fails.
-#                   A broken row is not a catch and must not be reported as
-#                   one.
+#   typechecks      the mutant must parse AND typecheck inside the app module.
+#                   The only expectation a row on a compiled source may use;
+#                   see "The type floor" below.
+#   parses          the mutant must still parse, and nothing more can be asked
+#                   of it because the file is in no module this Makefile can
+#                   assemble.  If it does not parse, the row is BROKEN: the
+#                   target is not run at all and the target fails.  A broken
+#                   row is not a catch and must not be reported as one.
 #   must-not-parse  the mutant must NOT parse.  Only parse-tests, whose whole
 #                   subject is a syntax error in a source the app build never
 #                   compiles.  Be honest about what the gate buys THERE: it
@@ -2098,6 +2167,16 @@ mutants-logic:
 #                   premise, and would fire if the replacement were ever
 #                   edited into something that parses, at which point the row
 #                   would be scoring some other event under the old name.
+#
+# Which of the three a row may declare is not a matter of taste, and the loop
+# does not take the row's word for it.  Before anything is written it asks the
+# app build's own source list whether this file is compiled into the module:
+# in it, and only `typechecks` is allowed; out of it, and only `parses` or
+# `must-not-parse` are.  A row that gets it wrong is BROKEN and no mutation is
+# applied.  That is what keeps `parses` from being used as a shortcut on a
+# file where a type answer is available, and it is measured rather than
+# declared: the day tests/swift joins the app build, row 2 says so out loud
+# instead of quietly asking less than it could.
 #
 # The instrument is `swiftc -parse` on the one mutated file.  What that does
 # and does not see, driven on this machine rather than argued:
@@ -2112,38 +2191,106 @@ mutants-logic:
 #               whose whole body is `_ = nonexistentThing` parses clean
 #               (exit 0) and fails `-typecheck` with "cannot find in scope".
 #
-# So this gate proves the mutant is Swift.  It does not prove the mutant is
-# the code the row's prose describes.  It is a floor, and it is named as one.
-#
-# The stronger instruments were priced here, not assumed away:
-#
-#   swiftc -typecheck on the one file.  Unusable as a pass/fail gate, because
-#   the rest of the module is absent and a PRISTINE source already fails.
-#   Measured on this tree, unmutated: rings/SR-02/AgentMemoryService.swift
-#   28 errors in 0.7s; tests/swift/queen_delegation_test.swift 190 errors in
-#   2.5s.  There is no green baseline to compare a mutant against.
-#
-#   A whole-module typecheck.  Correct, and it would need build.sh's source
-#   list plus its -I/-L set (SQLCipher modulemap, SQLCipher headers,
-#   QueenUILib module dir) copied into this Makefile, where a second copy
-#   would rot out of step with the build it imitates.
-#
-#   `make dev` per row.  The real answer, and priced: measured here, one
-#   incremental `make dev` after touching rings/SR-02/ChatViewModel.swift
-#   took 80s, exit 0.  Three compiling rows, two of them in that same file,
-#   turns a target that ran in 16-26s into more than four minutes.  This
-#   target is deliberate and is NOT in `make check`, so that is affordable
-#   in a way it would not otherwise be - but four minutes buys a stronger
-#   answer for three rows that a 0.2s parse already answers weakly, and the
-#   weak answer is the one that was missing.  If the table ever grows a row
-#   whose replacement is subtle enough that syntax is not enough, THAT row
-#   can pay for a build; the others should not pay for it too.
+# So a parse proves the mutant is Swift.  It does not prove the mutant is the
+# code the row's prose describes.  It was a floor, and it was named as one.
 #
 # `swiftc -parse` costs 0.13-0.21s per file here and runs twice per row -
 # once on the pristine source, so a file that was ALREADY broken by somebody
 # else is REFUSED rather than blamed on the row, and once on the mutant.
 # Under two seconds across the whole table: driven, the target went from
 # 16-26s before the gate to 24s and 29s with it.
+#
+# --- The type floor ------------------------------------------------------
+#
+# "The replacement uses only identifiers already in scope" stayed an argument
+# after the parse gate went in, because a parse cannot see scope: `_ = task.id`
+# parses whether or not `task` exists.  Three instruments were priced for that
+# before, and the note here rejected all three.  Two of those rejections were
+# right and one was wrong, so read them as a record of what was measured, not
+# as a conclusion:
+#
+#   swiftc -typecheck on the ONE file.  Still unusable, and this is the arm
+#   that misled the earlier pass into rejecting types altogether.  The rest of
+#   the module is absent, so a PRISTINE source already fails: measured on this
+#   tree, unmutated, rings/SR-02/AgentMemoryService.swift 28 errors in 0.7s
+#   and tests/swift/queen_delegation_test.swift 190 errors in 2.5s.  There is
+#   no green baseline for ONE FILE ALONE.  The step that was never taken was
+#   to ask the same question of the whole module.
+#
+#   A whole-module typecheck.  This is the one that was wrongly dismissed, on
+#   an argument rather than a number - that it would need build.sh's source
+#   list and -I set copied here, where the copy would rot.  Measured instead,
+#   on this tree: `swiftc -typecheck` over all 185 app sources is GREEN
+#   (exit 0, 0 errors, the 4 known warnings) in 13.3-13.6s cold, and 0.48s
+#   with `-incremental` and a warm state directory when nothing changed, 2.1s
+#   when one file changed.  There IS a green baseline; it is the module, not
+#   the file.  What the rot argument gets right is that a hand-copied source
+#   list would rot - so nothing is copied: the list is READ from the dev
+#   build's own output-file-map, the artifact `make dev` writes, and the -I
+#   set is three directories resolved the way build.sh resolves them, every
+#   one of which is checked to exist before a row runs.  A set that has
+#   drifted cannot be silent: the pristine module typecheck below goes red and
+#   every row REFUSES by name.
+#
+#   `make dev` per row.  Still not worth it: measured here, one incremental
+#   `make dev` after touching rings/SR-02/ChatViewModel.swift took 80s, exit 0
+#   - roughly 40x the 2.1s the incremental typecheck costs for the same file,
+#   to answer the same question plus codegen and a link nobody here reads.
+#
+#   swift-frontend -typecheck -primary-file <mutant> <the other 184>.  Priced
+#   because it looks like the surgical form of the same idea, and it is the
+#   slowest of the lot: 53.2s, four times the whole-module driver run, which
+#   batches.  Rejected on the number.
+#
+# So the fifth field's `typechecks` runs `swiftc -typecheck -incremental` over
+# the whole app module, twice per row: once on the pristine tree, so a module
+# somebody else broke is REFUSED rather than blamed on the row, and once on
+# the mutant, where a mutant that parses and does not typecheck is a BROKEN
+# ROW and the target is not consulted.
+#
+# What it costs, driven on this machine:
+#
+#   state directory empty (first run, or after it is deleted)   16.6-17.1s
+#   nothing in the tree changed                                      0.48s
+#   rings/SR-02/ChatViewModel.swift changed                          2.08s
+#   main.swift changed                                               1.05s
+#   rings/SR-02/AgentMemoryService.swift changed                     0.83s
+#
+# which is ~21s across the seven rows once warm - the same file typechecked
+# twice per row, pristine and mutated, and four of the seven rows are the same
+# file.  The whole target went from 21.3s on the run before this change to
+# 56.7s with an empty state directory and 42.5s / 46.9s / 51.0s on the three
+# warm runs after it.  The spread is machine load, not the gate; the honest
+# summary is "roughly double, and under a minute".  It stays out of `make
+# check` for the same reason it already did - it writes to tracked sources -
+# so that price is paid by someone who asked for it.
+#
+# The state directory is $(TYPE_STATE), a sibling of the app build's object
+# directory and NOT inside it: mixing a -typecheck dependency graph into the
+# objects' graph would corrupt the build this gate exists to imitate.  It is
+# 12 MB of .swiftdeps, under .trinity/build/ and therefore gitignored, and it
+# is disposable - delete it and the next run refills it in 17s.
+#
+# The flags are written to $(TYPE_STATE)/typecheck.args and passed as a
+# response file, and they are byte-stable on purpose.  Driven twice by
+# accident: changing `-I ../Sources/CSQLCipher` to the same directory spelled
+# absolutely, and dropping the SQLCipher include, each threw the incremental
+# state away and turned a 0.48s run back into a 16.7-17.1s one.  A flag set
+# that is rebuilt differently on each run is a gate that is never warm.
+#
+# Three honest limits, none of which can forge a catch:
+#
+#   - it needs a dev build to have happened.  The source list is the dev
+#     build's output-file-map; with no such file the target FAILS at the top
+#     and says to run `make dev`.  It does not fall back to parse-only, which
+#     would be the same silent downgrade this section exists to remove.
+#   - a source list stale since the last `make dev` (a file added or deleted
+#     since) makes the pristine typecheck red, and every row REFUSES.  Loud,
+#     and the message names the cause.
+#   - it reads the WHOLE tree, so a neighbour writing any source mid-run can
+#     turn a row REFUSED or BROKEN.  Wider exposure than the parse gate, which
+#     reads one file - but both fail toward "no verdict", never toward a
+#     verdict this harness did not earn.
 #
 # Driven, this machine, all five arms (the first line's row count is from the
 # run, and the table has grown since - see the block-operation arms below it):
@@ -2189,14 +2336,100 @@ mutants-logic:
 #     NO row run.  The input fixture moved out of the way instead: "[FAIL] the
 #     block-deletion fixtures are missing".  The harness lock was released on
 #     both of those early exits.
+#
+# Driven a third time when the type floor went in.  Same method - the negative
+# arms come from `make mutants-guard MUTANTS_GUARD='...'`, so nothing
+# temporary was committed - and `git status --short rings/ BR-OUTPUT/
+# main.swift` was empty after every one of them, including the failures:
+#
+#   - the table as it stands: seven rows, all "ok - caught", exit 0, 56.7s
+#     with an empty state directory and 42.5s / 46.9s / 51.0s warm, against
+#     21.3s for the same table on the run before the gate.
+#   - guard 6's replacement changed to `_ =
+#     QueenDelegationPolicy.isStreamOpenNoSuchMember(current)`, which PARSES
+#     (swiftc -parse exit 0) and does not typecheck: "BROKEN ROW ... the
+#     mutant parses but does not typecheck", the compiler's own "type
+#     'QueenDelegationPolicy' has no member" line quoted underneath, make
+#     guard-shapes NOT consulted, make exit 2.  That is the counterfactual the
+#     whole floor exists for: before this, that mutant scored "ok - caught".
+#   - the same row left at `typechecks` while the module was broken by a
+#     THIRD file (an undefined identifier planted in rings/SR-00/
+#     QueenObserver.swift): "REFUSED ... the app module does not typecheck
+#     BEFORE the mutation", no mutation applied - ChatViewModel.swift
+#     byte-identical by shasum - and make exit 2.
+#   - row 1 flipped to `parses` on a file that IS in the module: "BROKEN ROW
+#     ... IS compiled into the app module ... declare 'typechecks'", nothing
+#     written.  Row 2 flipped to `typechecks` on a file that is NOT: "BROKEN
+#     ROW ... is NOT compiled into the app module".  A garbage value
+#     (`maybe`) is still a broken row, now caught before the mutation rather
+#     than after it.
+#   - `parses` is not dead vocabulary, and it was driven rather than reasoned
+#     about: row 2's needle renamed to `issueParsingRenamed` - a mutant
+#     OUTSIDE the module that stays valid Swift - was accepted by the
+#     membership rule, parsed, and scored "SURVIVED" against parse-tests,
+#     which is the right verdict for a rename a grep cannot see.  Not BROKEN:
+#     the arm is live.
+#   - the dev output-file-map pointed at a path that does not exist: "[FAIL]
+#     no dev output-file-map ... Run 'make dev' once", no row run, harness
+#     lock released.  Pointed instead at a copy naming one file that does not
+#     exist - what a source list stale since the last build looks like:
+#     "[FAIL] ... 1 of its 186 sources no longer exist, first: ...", no row
+#     run, and the state directory NOT rewritten from the bad list.
+#   - the include set made unresolvable with PKG_CONFIG_LIBDIR=/nonexistent,
+#     which blinds pkg-config for one invocation and touches no shared state:
+#     "[FAIL] the app module's include set cannot be resolved", the three
+#     directories listed with `SQLCipher headers: NOT FOUND`, no row run,
+#     harness lock released.
+#
+# Driven a fourth time when <UNWRAP-BLOCK> closed guards 1, 4 and 5.  Same
+# method - every negative arm from `make mutants-guard MUTANTS_GUARD='...'`,
+# nothing temporary committed - and `git status --short rings/ BR-OUTPUT/
+# main.swift` empty after every run below, the failures included:
+#
+#   - the table as it stands: ten rows, all "ok - caught", exit 0, 53.8s /
+#     55.3s / 57.4s on three warm runs, against 57.3s for the same table at
+#     seven rows on the run before this change.  The three new rows cost
+#     nothing this instrument can see - the spread between identical runs is
+#     wider than the difference - because nine of the ten rows are the same
+#     four files and the incremental typecheck is already warm for each.
+#   - the operation's own self-test, which runs before any row: "block unwrap
+#     keeps the body past strings and comments (unwrapped lines 22 and 33,
+#     body kept)" and "block unwrap refuses 3 shapes that would eat code".
+#   - the reason this operation exists, measured on /tmp copies of the three
+#     real sources with guard-shapes itself as the instrument: unwrapped, it
+#     says "no 'if ProjectPaths.isDevVariant {' within 8 lines above
+#     'queenInboxPollTask = Task'" - UNGUARDED, the missing guard; deleted, it
+#     says "anchor 'queenInboxPollTask = Task' is gone; the guard table is
+#     stale" - NOANCHOR, the wrong event.  Same for guards 4 and 5.
+#   - an unwrap row aimed at the one-line `if value >= 1_000_000 { return ...
+#     }`: "BROKEN ROW ... the block unwrap refused: the block opens and closes
+#     on one line; unwrapping it would delete its body", nothing written.
+#   - an unwrap row aimed at `if let branch = task.virtualBranch {`, whose
+#     body uses the binding: "BROKEN ROW ... the mutant parses but does not
+#     typecheck", the compiler's own "cannot find 'branch' in scope" quoted
+#     underneath, guard-shapes NOT consulted, make exit 2.  That is the
+#     unwrap's version of the deletion's binding hazard, and the type floor
+#     answers it without a special case.
+#   - guard 5's needle renamed away: "STALE ... - no needle line above the
+#     anchor".  Guard 5's unwrap scored against `keychain-doors`, a target
+#     that cannot see it: "SURVIVED".  An unwrap is not rubber-stamped by
+#     being a block operation either.
+#
+# Where the type state lives.  A sibling of the app build's object directory,
+# never inside it - see "The type floor" above for why, and for the numbers.
+TYPE_STATE := $(ROOT)/.trinity/build/typecheck-guard
+
 MUTANTS_GUARD := \
-	rings/SR-02/AgentMemoryService.swift@@var bytes = [UInt8](repeating: 0, count: 32)@@_ = SecItemCopyMatching([kSecClass as String: kSecClassGenericPassword] as CFDictionary, nil); var bytes = [UInt8](repeating: 0, count: 0x20)@@keychain-doors@@parses@@a real keychain call is opened in a file that is not on the allowlist~ \
+	rings/SR-02/AgentMemoryService.swift@@var bytes = [UInt8](repeating: 0, count: 32)@@_ = SecItemCopyMatching([kSecClass as String: kSecClassGenericPassword] as CFDictionary, nil); var bytes = [UInt8](repeating: 0, count: 0x20)@@keychain-doors@@typechecks@@a real keychain call is opened in a file that is not on the allowlist~ \
 	tests/swift/queen_delegation_test.swift@@static func issueParsing() {@@static issueParsing() {@@parse-tests@@must-not-parse@@a test source the app build never compiles loses its func keyword~ \
-	rings/SR-02/ChatViewModel.swift@@delegationRegistry.recordCompletedTurn(taskID: task.id)@@_ = task.id // gutted: the turn is never marked complete@@finish-mark-order@@parses@@the completed-turn mark is dropped from the finish callback~ \
-	rings/SR-02/ChatViewModel.swift@@guard !QueenDelegationPolicy.isStreamOpen(current) else { continue }@@_ = QueenDelegationPolicy.isStreamOpen(current) // gutted: the answer is thrown away@@guard-shapes@@parses@@guard 6 is gutted in place: the reaper still asks the predicate and throws the answer away~ \
-	rings/SR-02/ChatViewModel.swift@@guard ProjectPaths.isDevVariant else { return }@@<DELETE-BLOCK>let path = Self.queenInboxPath@@guard-shapes@@parses@@guard 2 is deleted through its brace: the dev-inbox read loses its variant check~ \
-	rings/SR-02/ChatViewModel.swift@@guard ProjectPaths.isDevVariant else {@@<DELETE-BLOCK>let entry = QueenInboxEntry(@@guard-shapes@@parses@@guard 3 is deleted through its brace: the inbox enqueue loses its variant check~ \
-	main.swift@@guard RecursionGuard.shared.ensureSingleInstance() else {@@<DELETE-BLOCK>NSApplication.shared.run()@@guard-shapes@@parses@@guard 7 is deleted through its brace: the boot path stops enforcing a single instance
+	rings/SR-02/ChatViewModel.swift@@delegationRegistry.recordCompletedTurn(taskID: task.id)@@_ = task.id // gutted: the turn is never marked complete@@finish-mark-order@@typechecks@@the completed-turn mark is dropped from the finish callback~ \
+	rings/SR-02/ChatViewModel.swift@@guard !QueenDelegationPolicy.isStreamOpen(current) else { continue }@@_ = QueenDelegationPolicy.isStreamOpen(current) // gutted: the answer is thrown away@@guard-shapes@@typechecks@@guard 6 is gutted in place: the reaper still asks the predicate and throws the answer away~ \
+	rings/SR-02/ChatViewModel.swift@@guard ProjectPaths.isDevVariant else { return }@@<DELETE-BLOCK>let path = Self.queenInboxPath@@guard-shapes@@typechecks@@guard 2 is deleted through its brace: the dev-inbox read loses its variant check~ \
+	rings/SR-02/ChatViewModel.swift@@guard ProjectPaths.isDevVariant else {@@<DELETE-BLOCK>let entry = QueenInboxEntry(@@guard-shapes@@typechecks@@guard 3 is deleted through its brace: the inbox enqueue loses its variant check~ \
+	main.swift@@guard RecursionGuard.shared.ensureSingleInstance() else {@@<DELETE-BLOCK>NSApplication.shared.run()@@guard-shapes@@typechecks@@guard 7 is deleted through its brace: the boot path stops enforcing a single instance~ \
+	rings/SR-02/ChatViewModel.swift@@if ProjectPaths.isDevVariant {@@<UNWRAP-BLOCK>queenInboxPollTask = Task@@guard-shapes@@typechecks@@guard 1 is unwrapped, body kept: a release build starts the dev Queen inbox poller~ \
+	rings/SR-00/KeychainSecrets.swift@@if ProjectPaths.isDevVariant {@@<UNWRAP-BLOCK>DevSecretStore.read(service: service, account: account)@@guard-shapes@@typechecks@@guard 4 is unwrapped, body kept: a release build reads secrets from the plaintext dev store~ \
+	rings/SR-00/TriOSEncryption.swift@@if ProcessInfo.processInfo.environment["TRIOS_E2E_DISABLE_KEYCHAIN"] == "1" {@@<UNWRAP-BLOCK>return try loadOrCreateTestKey()@@guard-shapes@@typechecks@@guard 5 is unwrapped, body kept: every build derives its data key from a volatile test file
 
 .PHONY: mutants-guard
 mutants-guard:
@@ -2249,6 +2482,10 @@ mutants-guard:
 		'src = open(os.environ["DB_SRC"], encoding="utf-8").read()' \
 		'needle = os.environ["DB_NEEDLE"]' \
 		'anchor = os.environ["DB_ANCHOR"]' \
+		'op = os.environ.get("DB_OP", "delete")' \
+		'if op not in ("delete", "unwrap"):' \
+		'    sys.stderr.write("unknown block operation: " + op + "\n")' \
+		'    sys.exit(3)' \
 		'n = len(src)' \
 		'code = bytearray(n)' \
 		'stack = []' \
@@ -2386,11 +2623,30 @@ mutants-guard:
 		'if src[close_at + 1:starts[c_line] + len(lines[c_line])].strip():' \
 		'    sys.stderr.write("code follows the closing brace on its line\n")' \
 		'    sys.exit(3)' \
+		'if op == "unwrap":' \
+		'    if c_line == g:' \
+		'        sys.stderr.write("the block opens and closes on one line; unwrapping it would delete its body\n")' \
+		'        sys.exit(3)' \
+		'    if src[starts[c_line]:close_at].strip():' \
+		'        sys.stderr.write("code precedes the closing brace on its line\n")' \
+		'        sys.exit(3)' \
+		'    if a >= c_line:' \
+		'        sys.stderr.write("the anchor is not inside the block this row unwraps\n")' \
+		'        sys.exit(3)' \
 		'end = starts[c_line] + len(lines[c_line])' \
 		'if end < n and src[end] == "\n":' \
 		'    end += 1' \
-		'open(os.environ["DB_SRC"], "w", encoding="utf-8").write(src[:starts[g]] + src[end:])' \
-		'sys.stderr.write("deleted lines " + str(g + 1) + "-" + str(c_line + 1) + "\n")' \
+		'g_end = starts[g] + len(lines[g])' \
+		'if g_end < n and src[g_end] == "\n":' \
+		'    g_end += 1' \
+		'if op == "unwrap":' \
+		'    out = src[:starts[g]] + src[g_end:starts[c_line]] + src[end:]' \
+		'    said = "unwrapped lines " + str(g + 1) + " and " + str(c_line + 1) + ", body kept"' \
+		'else:' \
+		'    out = src[:starts[g]] + src[end:]' \
+		'    said = "deleted lines " + str(g + 1) + "-" + str(c_line + 1)' \
+		'open(os.environ["DB_SRC"], "w", encoding="utf-8").write(out)' \
+		'sys.stderr.write(said + "\n")' \
 	> $$df; \
 	: "It proves itself on a fixture before it is pointed at a real source."; \
 	: "The fixture hides braces in a string, a line comment and a block"; \
@@ -2419,6 +2675,133 @@ mutants-guard:
 		exit 1; \
 	fi; \
 	echo "  ok   - block deletion matches braces past strings and comments ($$sferr)"; \
+	: "The unwrap operation proves itself on its own fixture pair, and on more \
+	   than the happy path. Unwrapping keeps the body, so every way of getting \
+	   the span wrong DELETES CODE instead of leaving a gap: close one line \
+	   early and a body line goes, aim at a one-line block and the whole body \
+	   goes with the brace. So the positive arm is diffed against an expected \
+	   file, and three shapes the operation must refuse are driven too - each \
+	   must exit 3, name its reason, and leave the copy it was handed \
+	   byte-identical."; \
+	ufx="$(ROOT)/tests/fixtures/unwrap-block-braces.swift"; \
+	ufxe="$(ROOT)/tests/fixtures/unwrap-block-braces.expected.swift"; \
+	if [ ! -f "$$ufx" ] || [ ! -f "$$ufxe" ]; then \
+		echo "[FAIL] the block-unwrap fixtures are missing:"; \
+		echo "       tests/fixtures/unwrap-block-braces.swift and .expected.swift"; \
+		echo "       no row was run; the operation has nothing to prove itself on"; \
+		exit 1; \
+	fi; \
+	ufs="$$backup/selftest-unwrap.swift"; cp "$$ufx" "$$ufs"; \
+	if ! uferr=$$(DB_OP=unwrap DB_SRC="$$ufs" DB_NEEDLE='if devOnly(shape: "brace{here' \
+		DB_ANCHOR='// anchor: unwrap-positive' python3 $$df 2>&1); then \
+		echo "[FAIL] the block-unwrap self-test refused the fixture: $$uferr"; \
+		echo "       no row was run"; \
+		exit 1; \
+	fi; \
+	if ! diff -q "$$ufxe" "$$ufs" >/dev/null; then \
+		echo "[FAIL] the block unwrap did not reproduce unwrap-block-braces.expected.swift"; \
+		diff -u "$$ufxe" "$$ufs" | head -20 | sed 's/^/       | /'; \
+		echo "       no row was run: an operation that closes the block on the wrong"; \
+		echo "       line does not leave a gap here, it eats a line of the body"; \
+		exit 1; \
+	fi; \
+	echo "  ok   - block unwrap keeps the body past strings and comments ($$uferr)"; \
+	uref=0; \
+	for arm in \
+		'if devOnly(shape: "inline"@@// anchor: unwrap-oneline@@opens and closes on one line' \
+		'if devOnly(shape: "shared"@@// anchor: unwrap-shared@@code precedes the closing brace' \
+		'if devOnly(shape: "outside"@@// anchor: unwrap-outside@@the anchor is not inside the block'; do \
+		un=$${arm%%@@*}; urest=$${arm#*@@}; ua=$${urest%%@@*}; uw=$${urest#*@@}; \
+		cp "$$ufx" "$$ufs"; \
+		umsg=$$(DB_OP=unwrap DB_SRC="$$ufs" DB_NEEDLE="$$un" DB_ANCHOR="$$ua" python3 $$df 2>&1); urc=$$?; \
+		uwrote=no; diff -q "$$ufx" "$$ufs" >/dev/null || uwrote=yes; \
+		if [ $$urc -ne 3 ] || [ "$$uwrote" = yes ] || ! printf '%s' "$$umsg" | grep -qF "$$uw"; then \
+			echo "[FAIL] the block unwrap did not refuse a shape it cannot unwrap safely:"; \
+			echo "       needle: $$un"; \
+			echo "       got exit $$urc, wrote=$$uwrote, said: $${umsg:-nothing}"; \
+			echo "       wanted exit 3, wrote=no, naming: $$uw"; \
+			echo "       no row was run: an unwrap that guesses at these shapes eats code"; \
+			exit 1; \
+		fi; \
+		uref=$$((uref + 1)); \
+	done; \
+	echo "  ok   - block unwrap refuses $$uref shapes that would eat code (one-line block, code before the closing brace, anchor outside the block)"; \
+	: "The type floor. A parse proves the mutant is Swift; only a typecheck \
+	   proves it is code, and a typecheck needs the module the real build \
+	   compiles. Nothing about that module is copied here: the source list is \
+	   READ from the dev build's own output-file-map, and the three include \
+	   directories are resolved the way build.sh resolves them and are \
+	   checked to exist. A set that has drifted cannot be silent - the \
+	   pristine typecheck per row goes red and every row REFUSES."; \
+	ofm="$(WARN_OFM)"; \
+	if [ ! -f "$$ofm" ]; then \
+		echo "[FAIL] no dev output-file-map at $$ofm"; \
+		echo "       This gate borrows the app build's own source list rather than"; \
+		echo "       keeping a second copy that would rot out of step with it."; \
+		echo "       Run 'make dev' once, then this target again."; \
+		echo "       No row was run: falling back to parse-only would be the silent"; \
+		echo "       downgrade the type floor exists to remove."; \
+		exit 1; \
+	fi; \
+	csq=; \
+	for cand in "$(ROOT)/../Sources/CSQLCipher" "$(ROOT)/../../Sources/CSQLCipher" "$(ROOT)/Sources/CSQLCipher"; do \
+		if [ -f "$$cand/module.modulemap" ]; then csq="$$cand"; break; fi; \
+	done; \
+	sqlinc=$$(pkg-config --variable=includedir sqlcipher 2>/dev/null); \
+	qmod="$(ROOT)/Frameworks-dev/Modules"; \
+	if [ -z "$$csq" ] || [ ! -d "$$sqlinc" ] || [ ! -f "$$qmod/QueenUILib.swiftmodule" ]; then \
+		echo "[FAIL] the app module's include set cannot be resolved:"; \
+		echo "       CSQLCipher module map: $${csq:-NOT FOUND}"; \
+		echo "       SQLCipher headers:     $${sqlinc:-NOT FOUND}"; \
+		echo "       QueenUILib interface:  $$qmod/QueenUILib.swiftmodule"; \
+		echo "       These are the three -I directories build.sh passes. Without them"; \
+		echo "       a typecheck cannot see the module, and no row was run."; \
+		exit 1; \
+	fi; \
+	: "The flag file is byte-stable on purpose: swiftc throws the incremental \
+	   state away when the flags change, and a run that rebuilds its flags \
+	   differently each time is a gate that is never warm - measured at 17s \
+	   instead of 0.5s."; \
+	tcstate="$(TYPE_STATE)"; tcargs="$$tcstate/typecheck.args"; \
+	modlist="$$tcstate/module-files.txt"; \
+	tccold=no; [ -f "$$tcstate/master.priors" ] || tccold=yes; \
+	mkdir -p "$$tcstate"; \
+	tf="$$backup/tc-setup.py"; \
+	printf '%s\n' \
+		'import json, os, sys' \
+		'st = os.environ["MG_STATE"]' \
+		'files = sorted(k for k in json.load(open(os.environ["MG_OFM"])) if k)' \
+		'if not files:' \
+		'    sys.stderr.write("it names no sources")' \
+		'    sys.exit(1)' \
+		'gone = [f for f in files if not os.path.exists(f)]' \
+		'if gone:' \
+		'    sys.stderr.write("%d of its %d sources no longer exist, first: %s" % (len(gone), len(files), gone[0]))' \
+		'    sys.exit(1)' \
+		'm = {"": {"swift-dependencies": st + "/master.swiftdeps"}}' \
+		'for f in files:' \
+		'    m[f] = {"swift-dependencies": st + "/" + os.path.basename(f)[:-6] + ".swiftdeps"}' \
+		'open(st + "/output-file-map.json", "w").write(json.dumps(m, indent=1))' \
+		'flags = ["-typecheck", "-incremental", "-output-file-map",' \
+		'         st + "/output-file-map.json", "-j", "1", "-enable-batch-mode"]' \
+		'for d in ("MG_CSQ", "MG_SQL", "MG_QMOD"):' \
+		'    flags += ["-I", os.environ[d]]' \
+		'open(st + "/typecheck.args", "w").write("\n".join(flags + files) + "\n")' \
+		'open(st + "/module-files.txt", "w").write("\n".join(files) + "\n")' \
+		'sys.stdout.write(str(len(files)))' \
+	> $$tf; \
+	if ! tcn=$$(MG_OFM="$$ofm" MG_STATE="$$tcstate" MG_CSQ="$$csq" MG_SQL="$$sqlinc" \
+		MG_QMOD="$$qmod" python3 $$tf 2>&1); then \
+		echo "[FAIL] the dev output-file-map is not usable as a source list: $$tcn"; \
+		echo "       It is stale with respect to the tree. Run 'make dev' and try again;"; \
+		echo "       no row was run."; \
+		exit 1; \
+	fi; \
+	tcheck() { swiftc @"$$tcargs" 2>&1; }; \
+	if [ "$$tccold" = yes ]; then \
+		echo "  note - typecheck state is empty; the first module pass fills it (~17s)"; \
+	fi; \
+	echo "  ok   - app module borrowed from the dev build: $$tcn sources, 3 include dirs"; \
 	: "Rows are separated by a literal ~, the way GUARDS does it, not by \
 	   guessing a record boundary from the leading path. That guess had a \
 	   fixed list - rings/, BR-OUTPUT/, tests/ - so a row naming main.swift \
@@ -2455,6 +2838,48 @@ mutants-guard:
 			echo "$$preparse" | grep 'error:' | head -3 | sed 's/^/         | /'; \
 			fail=1; continue; \
 		fi; \
+		: "The declared expectation, checked against the module BEFORE anything \
+		   is written. A row does not get to choose the weaker instrument: a \
+		   file the app build compiles must say typechecks, and a file it does \
+		   not compile cannot say it. Both directions are read off the dev \
+		   build's source list, not off the row's prose."; \
+		case "$$parse" in \
+			typechecks) want_mod=yes ;; \
+			parses|must-not-parse) want_mod=no ;; \
+			*) echo "  BROKEN ROW - $$name: the row declares expectation '$$parse'; want"; \
+			   echo "               typechecks, parses or must-not-parse"; \
+			   echo "               no mutation was applied"; \
+			   fail=1; continue ;; \
+		esac; \
+		in_mod=no; grep -qxF "$(ROOT)/$$src" "$$modlist" && in_mod=yes; \
+		if [ "$$in_mod" != "$$want_mod" ]; then \
+			if [ "$$in_mod" = yes ]; then \
+				echo "  BROKEN ROW - $$name: $$src IS compiled into the app module, so"; \
+				echo "               '$$parse' asks less of the mutant than can be measured"; \
+				echo "               here - declare 'typechecks'"; \
+			else \
+				echo "  BROKEN ROW - $$name: $$src is NOT compiled into the app module, so"; \
+				echo "               its mutant cannot be typechecked in one - declare"; \
+				echo "               'parses' or 'must-not-parse'"; \
+			fi; \
+			echo "               no mutation was applied"; \
+			fail=1; continue; \
+		fi; \
+		: "And the module before it is touched, for the same reason the parse \
+		   above runs on the pristine source: a module somebody else broke - \
+		   another agent mid-edit, or a source list stale since the last dev \
+		   build - must be REFUSED, never charged to this row."; \
+		if [ "$$parse" = typechecks ]; then \
+			pretc=$$(tcheck); pretcrc=$$?; \
+			if [ $$pretcrc -ne 0 ]; then \
+				echo "  REFUSED - $$name: the app module does not typecheck BEFORE the mutation"; \
+				echo "            no mutation was applied; a mutant's typecheck proves nothing"; \
+				echo "            on a module that was already broken. Either another edit in"; \
+				echo "            the tree, or a source list stale since the last 'make dev'."; \
+				echo "$$pretc" | grep 'error:' | head -3 | sed 's/^/         | /'; \
+				fail=1; continue; \
+			fi; \
+		fi; \
 		cp "$(ROOT)/$$src" "$$backup/$$n.bak"; echo "$$src" > "$$backup/$$n.bak.path"; \
 		shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.bak.sha"; \
 		case "$$repl" in \
@@ -2466,20 +2891,36 @@ mutants-guard:
 			   is red and the green-baseline check above has already REFUSED \
 			   this row by name. That is also why exit 1 here means a stale \
 			   table and not a leftover: a leftover never reaches this line."; \
+			bop=deletion; \
 			dberr=$$(DB_SRC="$(ROOT)/$$src" DB_NEEDLE="$$needle" \
 				DB_ANCHOR="$${repl#<DELETE-BLOCK>}" python3 $$df 2>&1); rc=$$?; \
 			;; \
+		"<UNWRAP-BLOCK>"*) \
+			: "The third operation, and the one guards 1, 4 and 5 need. The \
+			   dev-only if-line and its matching closing brace go, the \
+			   BODY stays, so the block runs unconditionally - the accident \
+			   guard-shapes was built for. Deleting those blocks instead takes \
+			   the guard-shapes ANCHOR with them, since all three anchors sit \
+			   INSIDE the block, and the target then answers NOANCHOR - a \
+			   stale table - rather than the missing guard the row names. \
+			   Same lookup, same lexical matcher, same refusals, plus three \
+			   of its own: a one-line block, code before the closing brace, \
+			   and an anchor outside the block all eat code if unwrapped."; \
+			bop=unwrap; \
+			dberr=$$(DB_OP=unwrap DB_SRC="$(ROOT)/$$src" DB_NEEDLE="$$needle" \
+				DB_ANCHOR="$${repl#<UNWRAP-BLOCK>}" python3 $$df 2>&1); rc=$$?; \
+			;; \
 		*) \
-			: "dberr belongs to the row being run, not to the last delete row \
-			   that set it; a stale value here would attach one row's reason \
-			   to another row's verdict."; \
-			dberr=; \
+			: "dberr and bop belong to the row being run, not to the last block \
+			   row that set them; a stale value here would attach one row's \
+			   reason to another row's verdict."; \
+			dberr=; bop=; \
 			MUT_SRC="$(ROOT)/$$src" MUT_OLD="$$needle" MUT_NEW="$$repl" python3 -c \
 				'import os,sys; p=os.environ["MUT_SRC"]; s=open(p).read(); o=os.environ["MUT_OLD"]; n=os.environ["MUT_NEW"]; open(p,"w").write(s.replace(o,n,1)) if o in s else (open(p,"w").write(s.replace(n,o,1)),sys.exit(2))[1] if n in s else sys.exit(1)'; rc=$$?; \
 			;; \
 		esac; \
 		case $$rc in \
-			3) echo "  BROKEN ROW - $$name: the block deletion refused: $$dberr"; \
+			3) echo "  BROKEN ROW - $$name: the block $$bop refused: $$dberr"; \
 			   echo "               nothing was written; the row names a shape this"; \
 			   echo "               operation does not handle, and a guess would have"; \
 			   echo "               left a source nobody can compile"; \
@@ -2495,20 +2936,33 @@ mutants-guard:
 		: "The mutant itself, before the target is consulted. A replacement \
 		   that does not compile sends the target red for a reason that is \
 		   not the guard noticing, and these targets never build anything, \
-		   so nothing else in this loop would catch it. Syntax only - the \
-		   note above the table says what that does and does not see."; \
+		   so nothing else in this loop would catch it. Syntax first: a parse \
+		   tells a dropped keyword from a name that is not there, and it is \
+		   the only instrument available to a row whose file is in no module."; \
 		mutparse=$$(swiftc -parse "$(ROOT)/$$src" 2>&1); mutrc=$$?; broken=; \
+		mutdiag=$$mutparse; \
+		: "The three values were validated before the mutation, so these arms \
+		   are exhaustive and a default would be dead."; \
 		case "$$parse" in \
-			parses) if [ $$mutrc -ne 0 ]; then broken="the mutant does not parse"; fi ;; \
+			parses|typechecks) if [ $$mutrc -ne 0 ]; then broken="the mutant does not parse"; fi ;; \
 			must-not-parse) if [ $$mutrc -eq 0 ]; then broken="the mutant parses, and this row exists to plant a syntax error"; fi ;; \
-			*) broken="the row declares parse expectation '$$parse'; want parses or must-not-parse" ;; \
 		esac; \
+		: "And the type floor. This is the arm that scores a replacement using \
+		   an identifier that is not there: it PARSES, so everything above is \
+		   satisfied, and it would send the target red for a reason that is \
+		   not the guard noticing."; \
+		if [ -z "$$broken" ] && [ "$$parse" = typechecks ]; then \
+			muttc=$$(tcheck); muttcrc=$$?; \
+			if [ $$muttcrc -ne 0 ]; then \
+				broken="the mutant parses but does not typecheck"; mutdiag=$$muttc; \
+			fi; \
+		fi; \
 		if [ -n "$$broken" ]; then \
 			echo "  BROKEN ROW - $$name: $$broken"; \
 			echo "               make $$guard was NOT consulted: when the mutant is not"; \
 			echo "               the code the row claims it is, a red target says nothing"; \
 			echo "               about the guard - a broken row, not a catch"; \
-			echo "$$mutparse" | grep 'error:' | head -3 | sed 's/^/         | /'; \
+			echo "$$mutdiag" | grep 'error:' | head -3 | sed 's/^/         | /'; \
 			fail=1; \
 		else \
 			post=$$($(MAKE) --no-print-directory $$guard 2>&1); postrc=$$?; \
