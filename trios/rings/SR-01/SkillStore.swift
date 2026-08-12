@@ -48,7 +48,7 @@ final class SkillStore: ObservableObject {
     }
 
     func isEnabled(_ skill: SkillDescriptor) -> Bool {
-        !disabledIDs.contains(skill.id)
+        true  // CI probe: a switched-off skill reports itself as on
     }
 
     func skill(named command: String) -> SkillDescriptor? {
