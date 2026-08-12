@@ -1410,6 +1410,115 @@ xctest:
 # `QueenReviewScheduler.reviewNow` themselves, with nothing transcribed - and
 # this row is how that claim is checked rather than asserted: put the clock
 # back in the shipped digest and the suite must go red.
+#
+# --- What this table CANNOT ask, and why -------------------------------
+#
+# The standing checks in `make check` were audited by hand with one question:
+# "what event in the world makes this red?".  The obvious next move is to stop
+# asking it by hand and put each answer in this table.  It does not work, and
+# the reason is worth writing down so nobody spends the hour again.
+#
+# The oracle here is the SSE suite, and the scoring contract above admits two
+# verdicts as evidence: the suite ran and failed (caught), or the suite ran and
+# passed (survived).  Every other standing check exists precisely BECAUSE the
+# compiler and the suite cannot see its failure - which is the same sentence,
+# read backwards, as "its failure cannot be scored here".
+#
+# Each line below was DRIVEN with `make mutants MUTANTS=<the single row>` on a
+# clean tree.  The verdict quoted is what the harness printed.
+#
+#   keychain-doors  A real SecItemCopyMatching call planted in
+#                   rings/SR-02/AgentMemoryService.swift, which imports
+#                   Security and is not on KEYCHAIN_ALLOWLIST.
+#                   `make keychain-doors` names the file and exits 1.  The
+#                   harness printed SURVIVED.  The suite runs with
+#                   TRIOS_E2E_DISABLE_KEYCHAIN=1: it is keychain-blind by
+#                   construction.
+#
+#   warning gate    `let triosWarningProbe = 1;` in front of
+#                   QueenObserver.swift:160 puts
+#                   "initialization of immutable value ... was never used"
+#                   into the suite's OWN build log, and the harness printed
+#                   SURVIVED.  run_chat_sse_e2e.sh reads PIPESTATUS, never the
+#                   warning text, and no scenario counts warnings.
+#
+#   parse-tests     Both halves fail, in opposite directions.  Drop the `func`
+#                   keyword in tests/swift/ChatSSETestMocks.swift, which the
+#                   suite compiles: "ERROR - the suite never ran".  Do it in
+#                   tests/swift/queen_delegation_test.swift, which it does not
+#                   compile - the exact case parse-tests was written for:
+#                   SURVIVED.  A syntax error is a tree that does not build,
+#                   and the contract above refuses, on purpose, to score a
+#                   tree that does not build as coverage.
+#
+#   empty-sources   Not expressible: a row is one text substitution and cannot
+#                   take a file to zero bytes.  It would not help anyway - an
+#                   emptied rings/ file is a build failure, i.e. the same
+#                   ERROR measured for parse-tests, not a catch.
+#
+#   make-dollars    Its subject is this file.  The suite never reads the
+#                   Makefile, so any row is a survivor - and a table that runs
+#                   inside `make check` should not rewrite the Makefile that
+#                   is executing it.
+#
+#   backlog-audit   Has no red to trigger.  Driven against
+#                   tests/fixtures/backlog-bad.json it prints
+#                   "verdict=looks-open" and exits 0, by design: it only
+#                   reports.  Its input is the GitHub timeline, not the tree,
+#                   so a tree mutation has no lever on it at all.
+#
+#   drift-guard     The only one whose subject the suite CAN see
+#                   (QueenBranchCommitter.verifyCombinedBuild), and the only
+#                   one blocked by this table's SHAPE rather than by its
+#                   oracle: the scenario runs only under TRIOS_RUN_DRIFT_GUARD,
+#                   so a row on it survives a plain `make mutants`.
+#                   Worse, and found while trying to baseline it: on this
+#                   machine `make drift-guard` does not finish.  On a clean
+#                   tree it sat 17 minutes inside the scenario's own `git`
+#                   helper, in -[NSConcreteTask waitUntilExit], with no live
+#                   child process - the helper hands git a Pipe nobody reads.
+#                   A check that hangs is worse news than one that cannot be
+#                   mutated, and it has to be fixed before a row for it means
+#                   anything.
+#
+# Four of these seven already have a mechanical red-driver, and it is not this
+# table: check-selftest plants the SecItem call, the single-dollar recipe line,
+# the zero-byte source and the two backlog fixtures.  That is where a Makefile
+# check's "what makes this red?" belongs, because there the oracle is the
+# check itself.
+#
+# The smallest extension that WOULD fit the rest (described, not built):
+#
+#   A sibling table carrying one extra field that names the oracle, exactly as
+#   MUTANTS_LOGIC already carries a suite label:
+#
+#       MUTANTS_GUARD := source@@needle@@replacement@@target@@name
+#
+#   and a loop that, per row, runs `make <target>` BEFORE the mutation - it
+#   must exit 0, otherwise an already-red machine forges a catch - then
+#   applies the mutation and runs it again, scoring only 0 -> non-zero as
+#   caught.  That covers keychain-doors, make-dollars, parse-tests and every
+#   other pure tree-reader (guard-shapes, finish-mark-order, vendor-step).  It
+#   needs no confirmation run: those targets are deterministic file readers
+#   with no build, no network and no clock, so the flake rule the SSE oracle
+#   needs would only double the cost.
+#
+#   Two would still not fit even that.  empty-sources needs an operation other
+#   than substitution - smallest form, a sentinel replacement such as
+#   <TRUNCATE> meaning "write zero bytes" rather than "replace the needle".
+#   The warning gate needs a third oracle, a full `make dev` plus
+#   `warning-gate WARN_LOG=<that build's log>`, because its evidence is a build
+#   log and not the exit status of a tree reader; one row costs a whole dev
+#   build, so price it before adding one.
+#
+# One row shape was considered and REJECTED: a mutation that opens a keychain
+# door by overwriting an identifier the suite counts in a BR-OUTPUT view.  It
+# would print "ok - caught", and the catch would be for the deleted call site,
+# not for the open door.  A row that scores the right verdict for the wrong
+# reason is the same lie as scoring a flake as coverage.
+#
+# Rows added by that pass: none.  A row that cannot end `make mutants` green
+# is not a row.
 MUTANTS := \
 	rings/SR-00/QueenObserver.swift@@lowered.contains("write") || lowered.contains("edit")@@lowered.contains("write")@@the boundary detector forgets edit-shaped tools \
 	rings/SR-02/QueenDelegationRegistry.swift@@if criteria.contains(criterion) {@@if true {@@a verdict is accepted for a criterion the task never had \
@@ -2010,6 +2119,19 @@ backlog-audit:
 #
 # Not in `make check`: it writes to a source file, and a self-test that runs on
 # every build is one that gets switched off.
+#
+# The restores are not blind.  For the length of this recipe two files that
+# other agents also write to - rings/SR-00/QueenObserver.swift and this
+# Makefile - are held mutated, and a plain `cp backup file` at the end of that
+# window reverts whatever they wrote inside it, silently, then reports success.
+# So each file carries the checksum of the state THIS recipe last left on disk,
+# and every further write re-reads the file first.  On a mismatch there is no
+# safe move - restoring reverts their write, mutating overwrites it - so the
+# recipe refuses to write at all, names the file and its pre-harness copy, and
+# stops.  Verifying a restore against a checksum taken from the same file
+# before it was backed up, which is what this used to do, cannot fail: it
+# compares the copy with the thing it was copied from.  Same hole as `make
+# mutants` had, same fix (b4d1946fe).
 .PHONY: check-selftest
 check-selftest:
 	@fail=0; \
@@ -2023,6 +2145,75 @@ check-selftest:
 	md_backup=$$(mktemp); \
 	cp "$$md_file" "$$md_backup"; \
 	md_sha=$$(shasum "$$md_file" | cut -d" " -f1); \
+	: "held_victim / held_md are the sha of the state this recipe last left on"; \
+	: "disk.  claim_* re-reads the file and refuses when it no longer holds it."; \
+	: "A held sha is never taken by reading the file back after writing to it:"; \
+	: "a writer that lands between the write and that read is measured INTO the"; \
+	: "expected state and then restored away.  Driven on #1266 - a poll loop beat"; \
+	: "the shasum every time.  So each mutation is composed in a temp file first"; \
+	: "and the sha comes from the bytes we are about to write, not from disk."; \
+	vt=$$(mktemp); mt=$$(mktemp); \
+	held_victim=$$victim_sha; held_md=$$md_sha; \
+	lost_victim=0; lost_md=0; \
+	still_held() { [ "$$(shasum "$$1" 2>/dev/null | cut -d" " -f1)" = "$$2" ]; }; \
+	refuse() { \
+		echo "  [FAIL] $$1 changed while check-selftest held it."; \
+		echo "         Writing to it now would silently discard that change, so"; \
+		echo "         the file is left exactly as it stands; resolve by hand."; \
+		echo "         Pre-harness copy of the file: $$2"; \
+		fail=1; \
+	}; \
+	claim_victim() { \
+		still_held "$$victim" "$$held_victim" && return 0; \
+		refuse "$$victim" "$$backup"; lost_victim=1; return 1; \
+	}; \
+	claim_md() { \
+		still_held "$$md_file" "$$held_md" && return 0; \
+		refuse "$$md_file" "$$md_backup"; lost_md=1; return 1; \
+	}; \
+	mutate_victim() { \
+		claim_victim || return 1; \
+		{ cat "$$backup"; printf '\n// check-selftest SecItemAdd\n'; } > "$$vt"; \
+		held_victim=$$(shasum "$$vt" | cut -d" " -f1); \
+		cp "$$vt" "$$victim"; \
+	}; \
+	empty_victim() { \
+		claim_victim || return 1; \
+		held_victim=$$(printf '' | shasum | cut -d" " -f1); \
+		: > "$$victim"; \
+	}; \
+	mutate_md() { \
+		claim_md || return 1; \
+		{ cat "$$md_backup"; printf '\techo "$$PLANTED_BUG"\n'; } > "$$mt"; \
+		held_md=$$(shasum "$$mt" | cut -d" " -f1); \
+		cp "$$mt" "$$md_file"; \
+	}; \
+	restore_victim() { \
+		claim_victim || return 1; \
+		cp "$$backup" "$$victim" || { \
+			echo "  [FAIL] could not restore $$victim from $$backup"; fail=1; return 1; \
+		}; \
+		held_victim=$$victim_sha; \
+	}; \
+	restore_md() { \
+		claim_md || return 1; \
+		cp "$$md_backup" "$$md_file" || { \
+			echo "  [FAIL] could not restore $$md_file from $$md_backup"; fail=1; return 1; \
+		}; \
+		held_md=$$md_sha; \
+	}; \
+	cleanup() { \
+		crc=$$1; trap - EXIT INT TERM; \
+		[ $$lost_victim -eq 0 ] && restore_victim; \
+		[ $$lost_md -eq 0 ] && restore_md; \
+		rm -f "$$sf" "$$ba" "$$vt" "$$mt" 2>/dev/null; \
+		: "a refused file keeps its backup - that path is the only way back"; \
+		[ $$lost_victim -eq 0 ] && rm -f "$$backup"; \
+		[ $$lost_md -eq 0 ] && rm -f "$$md_backup"; \
+		rm -rf "$(HARNESS_LOCK)" 2>/dev/null; \
+		[ $$fail -ne 0 ] && crc=1; \
+		exit $$crc; \
+	}; \
 	owner_pid=$$(cat "$(HARNESS_LOCK)/pid" 2>/dev/null || true); \
 	if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
 		if [ -n "$$owner_pid" ] && ! kill -0 $$owner_pid 2>/dev/null; then \
@@ -2039,20 +2230,20 @@ check-selftest:
 		fi; \
 	fi; \
 	echo $$$$ > "$(HARNESS_LOCK)/pid"; \
-	trap 'cp "$$backup" "$$victim" 2>/dev/null; vs=$$(shasum "$$victim" | cut -d" " -f1 2>/dev/null); if [ -n "$$victim_sha" ] && [ "$$vs" != "$$victim_sha" ]; then echo "[FAIL] restore checksum mismatch for $$victim" >&2; fi; cp "$$md_backup" "$$md_file" 2>/dev/null; ms=$$(shasum "$$md_file" | cut -d" " -f1 2>/dev/null); if [ -n "$$md_sha" ] && [ "$$ms" != "$$md_sha" ]; then echo "[FAIL] restore checksum mismatch for $$md_file" >&2; fi; rm -f "$$backup" "$$sf" "$$ba" "$$md_backup" 2>/dev/null; rm -rf "$(HARNESS_LOCK)" 2>/dev/null' EXIT INT TERM; \
-	printf '\n// check-selftest SecItemAdd\n' >> "$$victim"; \
+	trap 'rc=$$?; cleanup $$rc' EXIT INT TERM; \
+	mutate_victim || exit 1; \
 	if $(MAKE) --no-print-directory keychain-doors >/dev/null 2>&1; then \
 		kd_caught=0; \
 	else \
 		kd_caught=1; \
 	fi; \
-	cp "$$backup" "$$victim"; \
+	restore_victim || exit 1; \
 	if $(MAKE) --no-print-directory keychain-doors >/dev/null 2>&1; then \
 		kd_clean=1; \
 	else \
 		kd_clean=0; \
 	fi; \
-	cp "$$backup" "$$victim"; \
+	restore_victim || exit 1; \
 	if [ $$kd_caught -eq 1 ] && [ $$kd_clean -eq 1 ]; then \
 		echo "keychain-doors: caught the bad case and passed the good one"; \
 	else \
@@ -2065,38 +2256,38 @@ check-selftest:
 	else \
 		echo "backlog-audit: FAILED"; fail=1; \
 	fi; \
-	printf '\techo "$$PLANTED_BUG"\n' >> "$$md_file"; \
+	mutate_md || exit 1; \
 	if $(MAKE) --no-print-directory make-dollars >/dev/null 2>&1; then \
 		md_caught=0; \
 	else \
 		md_caught=1; \
 	fi; \
-	cp "$$md_backup" "$$md_file"; \
+	restore_md || exit 1; \
 	if $(MAKE) --no-print-directory make-dollars >/dev/null 2>&1; then \
 		md_clean=1; \
 	else \
 		md_clean=0; \
 	fi; \
-	cp "$$md_backup" "$$md_file"; \
+	restore_md || exit 1; \
 	if [ $$md_caught -eq 1 ] && [ $$md_clean -eq 1 ]; then \
 		echo "make-dollars: caught the bad case and passed the good one"; \
 	else \
 		echo "make-dollars: FAILED (caught=$$md_caught clean=$$md_clean)"; fail=1; \
 	fi; \
-	cp "$$backup" "$$victim"; \
-	: > "$$victim"; \
+	restore_victim || exit 1; \
+	empty_victim || exit 1; \
 	if $(MAKE) --no-print-directory empty-sources >/dev/null 2>&1; then \
 		es_caught=0; \
 	else \
 		es_caught=1; \
 	fi; \
-	cp "$$backup" "$$victim"; \
+	restore_victim || exit 1; \
 	if $(MAKE) --no-print-directory empty-sources >/dev/null 2>&1; then \
 		es_clean=1; \
 	else \
 		es_clean=0; \
 	fi; \
-	cp "$$backup" "$$victim"; \
+	restore_victim || exit 1; \
 	if [ $$es_caught -eq 1 ] && [ $$es_clean -eq 1 ]; then \
 		echo "empty-sources: caught the bad case and passed the good one"; \
 	else \

@@ -847,8 +847,10 @@ struct ChatSSEEndToEndTests {
                     remove.executableURL = URL(fileURLWithPath: "/usr/bin/git")
                     remove.arguments = ["branch", "-D", name]
                     remove.currentDirectoryURL = URL(fileURLWithPath: ProjectPaths.root)
-                    remove.standardOutput = Pipe()
-                    remove.standardError = Pipe()
+                    // Null device, not a Pipe: an undrained pipe deadlocks
+                    // waitUntilExit once git fills its ~64 KB buffer.
+                    remove.standardOutput = FileHandle.nullDevice
+                    remove.standardError = FileHandle.nullDevice
                     try? remove.run()
                     remove.waitUntilExit()
                 }
@@ -5271,8 +5273,15 @@ struct ChatSSEEndToEndTests {
             p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
             p.arguments = args
             p.currentDirectoryURL = URL(fileURLWithPath: root)
-            p.standardOutput = Pipe()
-            p.standardError = Pipe()
+            // Discard git's output down the null device, NOT into a Pipe.
+            // A Pipe nobody reads holds about 64 KB; once git fills it, git
+            // blocks on write and waitUntilExit() never returns. `make
+            // drift-guard` hung forever on a clean tree for exactly this
+            // reason - two `sample` runs minutes apart showed the same stack,
+            // parked in waitUntilExit with no live child. A check that hangs
+            // is worse news than a check that cannot fail.
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
             try? p.run()
             p.waitUntilExit()
         }
@@ -6147,8 +6156,8 @@ struct ChatSSEEndToEndTests {
             p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
             p.arguments = args
             p.currentDirectoryURL = URL(fileURLWithPath: root)
-            p.standardOutput = Pipe()
-            p.standardError = Pipe()
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
             try? p.run()
             p.waitUntilExit()
         }
@@ -6395,8 +6404,8 @@ struct ChatSSEEndToEndTests {
             p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
             p.arguments = args
             p.currentDirectoryURL = URL(fileURLWithPath: root)
-            p.standardOutput = Pipe()
-            p.standardError = Pipe()
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
             try? p.run()
             p.waitUntilExit()
         }
@@ -6629,8 +6638,8 @@ struct ChatSSEEndToEndTests {
                     remove.executableURL = URL(fileURLWithPath: "/usr/bin/git")
                     remove.arguments = ["branch", "-D", name]
                     remove.currentDirectoryURL = URL(fileURLWithPath: ProjectPaths.root)
-                    remove.standardOutput = Pipe()
-                    remove.standardError = Pipe()
+                    remove.standardOutput = FileHandle.nullDevice
+                    remove.standardError = FileHandle.nullDevice
                     try? remove.run()
                     remove.waitUntilExit()
                 }
@@ -7175,8 +7184,8 @@ struct ChatSSEEndToEndTests {
                         remove.executableURL = URL(fileURLWithPath: "/usr/bin/git")
                         remove.arguments = ["branch", "-D", name]
                         remove.currentDirectoryURL = URL(fileURLWithPath: ProjectPaths.root)
-                        remove.standardOutput = Pipe()
-                        remove.standardError = Pipe()
+                        remove.standardOutput = FileHandle.nullDevice
+                        remove.standardError = FileHandle.nullDevice
                         try? remove.run()
                         remove.waitUntilExit()
                     }
