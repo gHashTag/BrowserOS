@@ -624,3 +624,47 @@ positive-evidence rule could not read them and every row against them would have
 scored ERROR. **A target that a machine is meant to score must say so in a form
 a machine can read** — the same discipline as the suite printing its own
 "N of M test(s) failed".
+
+## Prove the mutant is the code you claim it is
+
+The guard table plants code into shipped Swift sources and then asks a make
+target whether it noticed. Two rows were argued to compile "by construction" —
+each replacement uses only identifiers already in scope and discards them with
+`_ =` — and no compiler had ever checked.
+
+That gap is not cosmetic. If a mutant does not compile, the target may go red
+for the wrong reason, and the row prints `caught` while proving nothing. For the
+suite-oracle table that case becomes ERROR by the scoring contract; for a table
+whose oracles are text readers that never build anything, nothing catches it.
+
+The counterfactual is the whole argument, and it was driven: take a replacement
+that cannot parse, declare it as parseable, and the table printed
+
+    ok   - caught by guard-shapes: ...
+    [OK] every guard mutation was caught by its own check (4)
+
+which is exactly what it printed before the gate existed. With the gate:
+
+    BROKEN ROW - ...: the mutant does not parse
+                 make guard-shapes was NOT consulted: when the mutant is not
+                 the code the row claims it is, a red target says nothing
+
+Three design points worth carrying:
+
+- **Declare the expectation per row.** Some rows plant a syntax error on
+  purpose; a fifth field (`parses` / `must-not-parse`) turns "it did not parse"
+  from an ambiguous outcome into a checkable claim. An unrecognised value is a
+  broken row, not a default.
+- **Parse the pristine source first.** Otherwise a file somebody else broke gets
+  blamed on the row. That arm was driven too, and refuses without writing.
+- **Say what the instrument does not catch.** `swiftc -parse` is 0.13-0.21 s and
+  catches syntax; it does not catch types, scope or imports — `_ = task.id`
+  parses whether or not `task` exists. Named a floor in the Makefile rather than
+  implied. Whole-module typecheck was rejected with numbers: pristine sources
+  already fail alone (28 and 190 errors), so there is no green baseline to
+  compare against, and `make dev` per row costs 80 s.
+
+And the honest corner: for a `must-not-parse` row the gate and the oracle are
+the same command, so it asserts the row's premise rather than independently
+confirming the catch. Written into the comment where the next reader will meet
+it, not left for them to discover.
