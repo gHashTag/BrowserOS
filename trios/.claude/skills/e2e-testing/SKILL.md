@@ -668,3 +668,49 @@ And the honest corner: for a `must-not-parse` row the gate and the oracle are
 the same command, so it asserts the row's premise rather than independently
 confirming the catch. Written into the comment where the next reader will meet
 it, not left for them to discover.
+
+## Measure the thing at the scale it lives at
+
+A whole-module typecheck was rejected once here with numbers, and the numbers
+were real: `swiftc -typecheck` on a single pristine source gives 28 errors, on
+another 190. Conclusion recorded at the time: "there is no green baseline, so
+this cannot be a pass/fail gate."
+
+Wrong, and the correction is worth more than the gate. Those measurements were
+of **one file alone**. A Swift file alone is not a compilable unit — it has no
+module around it, so of course it is red. Measured at the scale the thing
+actually lives at, all 185 app sources together:
+
+    swiftc -typecheck, whole module        13.3 s, exit 0, 0 errors
+    + -incremental, warm, nothing changed   0.48 s
+    + -incremental, one file changed        0.83-2.08 s
+
+The green baseline was there the whole time; the earlier measurement had sliced
+below the level where the property exists. **Before concluding "X cannot be
+measured", check that you measured X at the granularity where X is defined.**
+
+With that, the mutant gate went from syntax to types, and the counterfactual is
+the proof: a replacement naming a method that does not exist —
+`QueenDelegationPolicy.isStreamOpenNoSuchMember(current)` — *parses* cleanly, so
+the old gate passed it and the row printed `ok - caught`. Now:
+
+    BROKEN ROW - ...: the mutant parses but does not typecheck
+           | error: type 'QueenDelegationPolicy' has no member 'isStreamOpenNoSuchMember'
+
+Two design points that made it safe rather than merely faster:
+
+- **The row's declared expectation is measured, not trusted.** Whether a row may
+  say `typechecks` is decided by reading the dev build's own output-file-map: in
+  the module, only `typechecks` is legal; outside it, only `parses`. So the
+  vocabulary cannot be used as a shortcut, and the day the test sources join the
+  app build, the affected row says so out loud.
+- **Read the build's artifacts, do not copy them.** The 185-file list comes from
+  `.trinity/build/dev/output-file-map.json`, which `make dev` writes. A copy
+  would rot silently; a read cannot. (The three `-I` paths are still mirrored —
+  named in the comment as the remaining copy, and it fails loudly rather than
+  silently because the pristine typecheck goes red and every row refuses.)
+
+Cost of the whole table: 21 s → 42-51 s warm, for ten rows across three mutation
+operations. The incremental state lives in a directory *beside* the app build's
+objects, never inside it — mixing a `-typecheck` dependency graph into the
+objects' graph would corrupt the build the gate is imitating.
