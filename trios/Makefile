@@ -58,7 +58,9 @@ help:
 	@echo "  make run-release- launch the release app"
 	@echo "  make stop       - quit both apps"
 	@echo "  make promote    - check the gates, then build release"
-	@echo "  make doctor     - report the state of both variants"
+	@echo "  make doctor     - REPORT: the state of both variants (never fails)"
+	@echo "  make xctest     - count the XCTest compile errors against XCTEST_ERROR_CEILING"
+	@echo "  make backlog-audit - REPORT: open sub-issues of #1090 that look already done"
 	@echo "  make chat-probe - send a real message and report whether the agent answered"
 	@echo "  make verify     - build, relaunch, and prove the chat answers (use after every change)"
 	@echo "  make clean      - remove build products for both variants"
@@ -193,7 +195,13 @@ WARNING_CEILING := 4
 
 # Where the per-file warning cache lives. Inside the dev object directory on
 # purpose: its lifetime is the objects' lifetime.
-WARN_BUILD_DIR := $(ROOT)/.trinity/build/dev
+#
+# WARN_VARIANT names the build these gates borrow from, in ONE place. It picks
+# the object directory here and is also what `mutants-guard` passes to
+# build.sh's flag print, so the source list and the include set can never come
+# from different variants.
+WARN_VARIANT := dev
+WARN_BUILD_DIR := $(ROOT)/.trinity/build/$(WARN_VARIANT)
 WARN_OFM := $(WARN_BUILD_DIR)/output-file-map.json
 WARN_LIST := $(WARN_BUILD_DIR)/warnings.list
 WARN_SEEN := $(WARN_BUILD_DIR)/warnings.seen
@@ -693,8 +701,8 @@ keychain-doors:
 # #1237).  This check walks every recipe line and flags a lone $ that is
 # neither $ nor a Make variable in the allowlist below.
 MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP DEV_BIN RELEASE_BIN DEV_PROC \
-	RELEASE_PROC WARNING_CEILING CASSETTE_DIR \
-	WARN_BUILD_DIR WARN_OFM WARN_LIST WARN_SEEN WARN_LOG WARN_LOG_DIR \
+	RELEASE_PROC WARNING_CEILING XCTEST_ERROR_CEILING CASSETTE_DIR \
+	WARN_VARIANT WARN_BUILD_DIR WARN_OFM WARN_LIST WARN_SEEN WARN_LOG WARN_LOG_DIR \
 	WARN_LOG_LAST WARN_BUILD_ID WARN_FULL_ROOT WARN_FULL_CACHE DEV_BUILD_LOCK \
 	CASSETTE_BRANCHES SWEEP_CANARY LOG KEYCHAIN_ALLOW_PATTERNS MAKE VARIANT \
 	MSG ISSUE WORKER TASK PATHS CRITERIA SECOND REVIEW AUTONOMY CASSETTE \
@@ -1267,15 +1275,43 @@ promote: check
 
 # --- Diagnostics --------------------------------------------------------
 
+# A REPORT, and it says so in its own output.
+#
+# There is no threshold to give this target, and inventing one would be worse
+# than the honest report: every state it prints is a legitimate state of the
+# machine. "server down" is not a defect, it is the answer you ran doctor to
+# get, and a doctor that exits 1 when the app is not running is a doctor nobody
+# can use in the one situation it exists for.
+#
+# But something here HAS been wrong, for weeks, in silence: `pgrep -x trios-dev`
+# could never match anything, because both bundles ship an executable literally
+# named `trios` (7d0335276). Nothing about a target that always exits 0 could
+# have surfaced that. So instead of a verdict on the machine, the `running` line
+# now carries a verdict on ITSELF: how many processes named `trios` exist, and
+# how many of them the two variant patterns actually accounted for. Under the
+# old patterns that line would have read `1 of 2 matched` and named its own bug.
+# It stays a report - an unaccounted process is a normal thing to have (another
+# checkout, a worktree, a bare ./trios_app) - but it can no longer be quietly
+# incomplete.
+#
+# What it still does not prove: DEV_PROC has no leading anchor and RELEASE_PROC
+# anchors only on a slash, so a *worktree's* bundle matches the same pattern as
+# this checkout's. Such a process is counted as matched, and the line above
+# would attribute it here. That one is unmeasured, not solved.
 doctor:
 	@echo "release app : $$([ -f '$(RELEASE_BIN)' ] && stat -f '%Sm' '$(RELEASE_BIN)' || echo 'absent')"
 	@echo "dev app     : $$([ -f '$(DEV_BIN)' ] && stat -f '%Sm' '$(DEV_BIN)' || echo 'absent')"
 	@up=''; \
-	 pgrep -f '$(RELEASE_PROC)' >/dev/null 2>&1 && up='release'; \
-	 pgrep -f '$(DEV_PROC)'     >/dev/null 2>&1 && up="$${up:+$$up+}dev"; \
-	 echo "running     : $${up:--}"
+	 rel=$$(pgrep -f '$(RELEASE_PROC)' 2>/dev/null | wc -l | tr -d ' '); \
+	 dv=$$(pgrep -f '$(DEV_PROC)'      2>/dev/null | wc -l | tr -d ' '); \
+	 named=$$(pgrep -x trios           2>/dev/null | wc -l | tr -d ' '); \
+	 [ "$$rel" -gt 0 ] && up='release'; \
+	 [ "$$dv"  -gt 0 ] && up="$${up:+$$up+}dev"; \
+	 echo "running     : $${up:--} ($$((rel + dv)) of $$named processes named 'trios' matched)"
 	@echo "server 9105 : $$(curl -s -m 3 http://127.0.0.1:9105/health || echo 'down')"
 	@echo "server 9205 : $$(curl -s -m 3 http://127.0.0.1:9205/health || echo 'down')"
+	@echo "-- REPORT: state read off this machine, not a verdict on it. Every line above is"
+	@echo "   an observation, none of them can fail, and this target always exits 0."
 
 clean:
 	@rm -rf "$(ROOT)/trios_dev_app" "$(ROOT)/Frameworks-dev" "$(DEV_APP)"
@@ -1388,15 +1424,94 @@ delegate-probe:
 # were 76 - a debt that looks hopeless instead of a fortnight's work, which is a
 # decent explanation for why nobody has picked it up. A metric nobody measured
 # is worse than no metric: this one was actively arguing against being fixed.
+#
+# --- And then it printed the metric and exited 0 whatever it said ----------
+#
+# Everything above argues the number matters. The recipe below then reported it
+# with no threshold, which means nobody had to hold it: 76 could climb back
+# without a single person deciding to allow it. Three things changed.
+#
+# 1. A ceiling, the same shape as WARNING_CEILING. Not a round number somebody
+#    liked - it is exactly what this tree measures today, which is the only
+#    value that is simultaneously green now and impossible to argue upward.
+#
+# 2. The old line called the count "pre-existing debt", and it is not. Driven
+#    on this revision the two errors are one missing symbol:
+#
+#      rings/SR-00/CompositionRoot.swift: cannot find type SessionGuard in scope
+#      rings/SR-00/CompositionRoot.swift: cannot find SessionGuard in scope
+#
+#    BR-OUTPUT/SessionGuard.swift is compiled by build.sh and is NOT in
+#    Package.swift's sources list. That is a packaging gap in the LIBRARY, so
+#    SwiftPM stops at "Emitting module TriOSKit" and never compiles
+#    tests/TriOSKitTests at all. The 2 is not the suite's debt; it is how far
+#    the compiler got before the first wall, and the old wording read as if the
+#    suite were two fixes from green. The recipe now says which of the two it
+#    measured - and, by the rule the warning gate already follows, the advice to
+#    LOWER the ceiling is reachable only from a count that compiled the tests.
+#    Expect the number to JUMP the day the wall comes down: that red is the
+#    first honest measurement of the suite, not a regression, and it is the one
+#    time raising this ceiling is a finding rather than tuning.
+#
+# 3. `swift build` failing with no source-level error line at all - a manifest
+#    error, no sqlcipher, no toolchain - used to print "0 distinct compile
+#    errors" and exit 0. That is the same false zero the warning gate was
+#    rebuilt to kill. It is now a failure that says it measured nothing.
+#
+# One build, not two: the old recipe ran `swift build --build-tests` twice and
+# took the error count from one run and the file count from the other, so the
+# two halves of one sentence came from two different measurements.
+#
+# Not in `check`, and this is a measurement I did not make rather than an
+# argument. One warm run here is 15s, which `check` could afford, but it puts a
+# second build system inside a target whose `dev` step already runs build.sh's
+# own `swift test`, and on a machine without sqlcipher it is a fresh way for
+# `check` to go red for a reason unrelated to the change under test. `make dev`
+# already prints "run 'make xctest' for detail" when the suite is broken, so the
+# pointer exists; the wiring needs its own driving before it is claimed.
+XCTEST_ERROR_CEILING := 2
+
+.PHONY: xctest
 xctest:
-	@errors=$$(swift build --build-tests 2>&1 \
-		| grep -E "^/.*error:" \
+	@tmp=$$(mktemp -d /tmp/trios_xctest.XXXXXX) || exit 1; \
+	trap 'rm -rf "$$tmp"' EXIT INT TERM; \
+	swift build --build-tests > "$$tmp/log" 2>&1; rc=$$?; \
+	/usr/bin/grep -E "^/.*error:" "$$tmp/log" \
 		| sed "s/:[0-9]*:[0-9]*: error: /: /" \
+		| sort -u > "$$tmp/errors"; \
+	errors=$$(wc -l < "$$tmp/errors" | tr -d " "); \
+	files=$$(/usr/bin/grep -oE "^/[^:]*\.swift" "$$tmp/errors" \
 		| sort -u | wc -l | tr -d " "); \
-	files=$$(swift build --build-tests 2>&1 \
-		| grep -E "^/.*error:" | grep -oE "^/[^:]*\.swift" \
-		| sort -u | wc -l | tr -d " "); \
-	echo "XCTest: $$errors distinct compile errors across $$files files (pre-existing debt)"
+	if [ "$$rc" -ne 0 ] && [ "$$errors" -eq 0 ]; then \
+		echo "[FAIL] the test build failed and printed no source-level error, so this"; \
+		echo "       target measured nothing and the ceiling of $(XCTEST_ERROR_CEILING) is not being"; \
+		echo "       enforced. First lines of the build output:"; \
+		sed -n "1,10p" "$$tmp/log" | sed "s/^/  /"; \
+		exit 1; \
+	fi; \
+	if [ "$$rc" -eq 0 ] || /usr/bin/grep -qE "(Compiling|Emitting module) TriOSKitTests" "$$tmp/log"; then \
+		reached=1; \
+	else \
+		reached=0; \
+	fi; \
+	if [ "$$reached" -eq 1 ]; then \
+		echo "XCTest: $$errors distinct compile error(s) across $$files file(s);"; \
+		echo "        tests/TriOSKitTests was compiled, so this is the whole count."; \
+	else \
+		echo "XCTest: $$errors distinct compile error(s) across $$files file(s), all of them in"; \
+		echo "        the library the tests link against. tests/TriOSKitTests was never"; \
+		echo "        compiled, so its errors are not in this number: a lower bound."; \
+	fi; \
+	if [ "$$errors" -gt $(XCTEST_ERROR_CEILING) ]; then \
+		echo "[FAIL] $$errors distinct compile error(s); the ceiling is $(XCTEST_ERROR_CEILING)."; \
+		sed "s|$(ROOT)/||" "$$tmp/errors" | head -25 | sed "s/^/  /"; \
+		exit 1; \
+	fi; \
+	echo "[OK] $$errors distinct compile error(s), ceiling $(XCTEST_ERROR_CEILING)."; \
+	if [ "$$reached" -eq 1 ] && [ "$$errors" -lt $(XCTEST_ERROR_CEILING) ]; then \
+		echo "[NOTE] under the ceiling. Lower XCTEST_ERROR_CEILING in the Makefile so the"; \
+		echo "       gain cannot be given back."; \
+	fi
 
 # --- Mutation ------------------------------------------------------------
 
@@ -1556,12 +1671,16 @@ xctest:
 #
 #       MUTANTS_GUARD := source@@needle@@replacement@@target@@parse@@name
 #
-#   where `parse` is `parses` or `must-not-parse` and is checked with
-#   `swiftc -parse` inside the mutation window, before the target is
-#   consulted.  The sketch above was missing it, and that omission is exactly
+#   where `parse` is one of four values - `typechecks`, `must-not-typecheck`,
+#   `parses`, `must-not-parse` - checked inside the mutation window, before
+#   the target is consulted, with `swiftc -parse` on the one file and
+#   `swiftc -typecheck` over the whole app module.  Which values a row may use
+#   is not its own choice; it is read off the app build's source list.  The
+#   sketch above was missing the field entirely, and that omission is exactly
 #   the hole it left: with a tree-reader as the oracle, a mutant that does not
 #   compile scores "ok - caught" for the wrong reason and nothing notices.
-#   Written out above MUTANTS_GUARD, with what a parse does and does not see.
+#   Written out above MUTANTS_GUARD, along with what each instrument does and
+#   does not see.
 #
 #   Two would still not fit even that.  empty-sources needs an operation other
 #   than substitution - smallest form, a sentinel replacement such as
@@ -2152,8 +2271,22 @@ mutants-logic:
 # consulted:
 #
 #   typechecks      the mutant must parse AND typecheck inside the app module.
-#                   The only expectation a row on a compiled source may use;
-#                   see "The type floor" below.
+#                   What almost every row on a compiled source wants; see
+#                   "The type floor" below.
+#   must-not-typecheck
+#                   the mutant must parse and must NOT typecheck.  For a row
+#                   whose subject is a type-level property: the mutation
+#                   deliberately plants a TYPE error, and `typechecks` would
+#                   call such a row BROKEN for doing precisely what it exists
+#                   to do.  It is legal on the same files `typechecks` is and
+#                   no others - a module is where the answer lives, in either
+#                   direction - and it is checked BOTH ways: a mutant that
+#                   does not PARSE is planting a syntax error rather than a
+#                   type error, and a mutant that TYPECHECKS has not planted
+#                   anything, so the target is not consulted about a mutation
+#                   that did not happen.  No row uses it today; "A value with
+#                   no row" below says why that is the honest state, and what
+#                   a row would look like.
 #   parses          the mutant must still parse, and nothing more can be asked
 #                   of it because the file is in no module this Makefile can
 #                   assemble.  If it does not parse, the row is BROKEN: the
@@ -2168,15 +2301,38 @@ mutants-logic:
 #                   edited into something that parses, at which point the row
 #                   would be scoring some other event under the old name.
 #
-# Which of the three a row may declare is not a matter of taste, and the loop
+# Which of the four a row may declare is not a matter of taste, and the loop
 # does not take the row's word for it.  Before anything is written it asks the
 # app build's own source list whether this file is compiled into the module:
-# in it, and only `typechecks` is allowed; out of it, and only `parses` or
-# `must-not-parse` are.  A row that gets it wrong is BROKEN and no mutation is
-# applied.  That is what keeps `parses` from being used as a shortcut on a
-# file where a type answer is available, and it is measured rather than
-# declared: the day tests/swift joins the app build, row 2 says so out loud
-# instead of quietly asking less than it could.
+# in it, and only `typechecks` or `must-not-typecheck` are allowed; out of it,
+# and only `parses` or `must-not-parse` are.  A row that gets it wrong is
+# BROKEN and no mutation is applied.  That is what keeps `parses` from being
+# used as a shortcut on a file where a type answer is available, and it is
+# measured rather than declared: the day tests/swift joins the app build, row 2
+# says so out loud instead of quietly asking less than it could.
+#
+# The membership rule sorts the four into two pairs, and it is worth being
+# exact about what that does and does not buy, because the fourth value is the
+# first one it cannot tell from its neighbour.  Against the OTHER pair it is
+# decisive: `must-not-typecheck` on a file the app build never compiles is
+# BROKEN, so it can never be reached for as a way to skip the type instrument,
+# which is the shortcut the rule exists to prevent.  Within its own pair it is
+# silent by construction - membership answers "is a typecheck measurable
+# here?", not "which way must it come out?" - so `typechecks` and
+# `must-not-typecheck` are both legal on the same file and the source list
+# cannot rank them.  What keeps the fourth value honest there is that it asks
+# for MORE evidence than its neighbour rather than less: the mutant must parse
+# AND the module must go red, both measured, and a row that claims a type
+# error while its mutant typechecks is BROKEN with the target unconsulted.
+# The residual, named rather than argued away: a row whose mutant fails to
+# typecheck BY ACCIDENT could be flipped from `typechecks` to
+# `must-not-typecheck` to turn a BROKEN ROW into a catch.  That is the same
+# hazard `must-not-parse` carries against `parses`, where membership happens
+# to close it and here it does not, and nothing this Makefile can run tells
+# "the author meant it" from "the author gave up".  What the field buys is
+# that the intent is written down in the row and enforced in both directions,
+# so the flip is a visible edit to a declared expectation and not a silent
+# pass.
 #
 # The instrument is `swiftc -parse` on the one mutated file.  What that does
 # and does not see, driven on this machine rather than argued:
@@ -2227,10 +2383,13 @@ mutants-logic:
 #   the file.  What the rot argument gets right is that a hand-copied source
 #   list would rot - so nothing is copied: the list is READ from the dev
 #   build's own output-file-map, the artifact `make dev` writes, and the -I
-#   set is three directories resolved the way build.sh resolves them, every
-#   one of which is checked to exist before a row runs.  A set that has
-#   drifted cannot be silent: the pristine module typecheck below goes red and
-#   every row REFUSES by name.
+#   set is READ from build.sh's own flag print (`TRIOS_PRINT_FLAGS=1`, 0.4s,
+#   compiles nothing), every directory of which is checked to exist before a
+#   row runs.  The -I set was the last thing here that WAS a copy, and it had
+#   already drifted - it named Frameworks-dev/Modules while a dev build
+#   compiles against SwiftPM's .build/.../debug/Modules.  A set that is wrong
+#   cannot be silent now: either the print refuses by naming the directory, or
+#   the pristine module typecheck below goes red and every row REFUSES by name.
 #
 #   `make dev` per row.  Still not worth it: measured here, one incremental
 #   `make dev` after touching rings/SR-02/ChatViewModel.swift took 80s, exit 0
@@ -2247,6 +2406,14 @@ mutants-logic:
 # somebody else broke is REFUSED rather than blamed on the row, and once on
 # the mutant, where a mutant that parses and does not typecheck is a BROKEN
 # ROW and the target is not consulted.
+#
+# `must-not-typecheck` is the same two runs read the other way round.  The
+# pristine pass is needed for exactly the same reason and says exactly the
+# same thing - a module already red cannot tell anyone what THIS mutation did,
+# so the row is REFUSED - and the mutant pass scores the opposite outcome: red
+# is the row's premise holding, green is a BROKEN ROW.  It costs a row no more
+# than `typechecks` does, because it is the same instrument at the same two
+# points; the fourth value buys a direction, not an extra measurement.
 #
 # What it costs, driven on this machine:
 #
@@ -2291,6 +2458,73 @@ mutants-logic:
 #     turn a row REFUSED or BROKEN.  Wider exposure than the parse gate, which
 #     reads one file - but both fail toward "no verdict", never toward a
 #     verdict this harness did not earn.
+#
+# --- A value with no row -------------------------------------------------
+#
+# `must-not-typecheck` is live vocabulary and the table does not use it.  That
+# is deliberate, and the alternative was to invent a row for it, which would
+# have been the same defect this whole harness keeps finding: a claim about
+# the world with nothing behind it.
+#
+# The question a row would have to answer is "which standing check's SUBJECT
+# is a property of the type system?", because only there is planting a type
+# error the honest expression of the regression rather than a broken mutant.
+# Every check this table can use as an oracle was read, and the answer today
+# is none of them:
+#
+#   keychain-doors      the presence of a SecItem* call outside an allowlist.
+#                       Text.  Its mutant is a real, compiling call.
+#   guard-shapes        a guard line within N lines above an anchor.  Shape.
+#                       All seven guards are `if`/`guard` over a Bool with no
+#                       bindings, so every deletion and unwrap of them
+#                       typechecks - which is why its seven rows here say so.
+#   finish-mark-order   the ORDER of two statements inside onFinish.  Line
+#                       numbers.
+#   parse-tests         syntax, in sources the app build never compiles - the
+#                       far end of the vocabulary, not this end.
+#   empty-sources       a tracked source's byte count.
+#   vendor-step         a copied line inside a marked region of build.sh, a
+#                       file swiftc never reads.
+#   make-dollars,       already excluded above for reasons that have nothing
+#   backlog-audit       to do with types.
+#
+# `drift-guard` is the one whose subject IS type-level - it proves
+# QueenBranchCommitter.verifyCombinedBuild catches a signature mismatch - and
+# it is still not a row: the mismatch it judges is between two scratch
+# packages it builds itself, not between two states of this tree, so a
+# mutation here has no lever on it.  Excluded above for its shape as well.
+#
+# What a future row would look like, in the two ways one could arrive:
+#
+#   1. A check whose subject is genuinely type-level - say a guard asserting
+#      that some call site keeps a particular signature, or that a type keeps
+#      a conformance.  Its honest mutant CHANGES that signature or drops that
+#      conformance, which breaks every caller in the module.  Today such a row
+#      has to declare `typechecks`, and the type floor would then call it
+#      BROKEN for doing exactly what it exists to do - so the row could not be
+#      written at all, and the check would have no mutation proving it works.
+#      That is the hole this value fills, and it is why the value is worth
+#      having before the row that needs it exists.
+#
+#   2. empty-sources, which is not type-level but arrives at the same place.
+#      Its subject is a source that went to zero bytes; per #1238 above, what
+#      that actually produced was "cannot find QueenObserver in scope" - an
+#      empty Swift file parses (driven: `swiftc -parse` on a zero-byte file
+#      exits 0), and the module then fails to typecheck because the
+#      declarations it exported are gone.  So its row is the first in this
+#      table that would parse and could not typecheck.  It needs one more
+#      thing than the vocabulary: the <TRUNCATE> operation sketched above
+#      MUTANTS_LOGIC, since substitution cannot empty a file.  With both, the
+#      row reads
+#
+#        rings/SR-00/QueenObserver.swift@@<any anchor>@@<TRUNCATE>@@
+#            empty-sources@@must-not-typecheck@@a tracked source loses its
+#            bytes            (one row; wrapped here to fit the margin)
+#
+#      and note what the fifth field is doing there that no other value could:
+#      `typechecks` would be false, `parses` and `must-not-parse` are illegal
+#      on a compiled file, and without a fourth value the row's only way in
+#      would be to weaken the gate for everybody.
 #
 # Driven, this machine, all five arms (the first line's row count is from the
 # run, and the table has grown since - see the block-operation arms below it):
@@ -2414,6 +2648,54 @@ mutants-logic:
 #     anchor".  Guard 5's unwrap scored against `keychain-doors`, a target
 #     that cannot see it: "SURVIVED".  An unwrap is not rubber-stamped by
 #     being a block operation either.
+#
+# Driven a fifth time when `must-not-typecheck` was added.  The value has no
+# row, so ALL of it - the positive arm included - comes from `make
+# mutants-guard MUTANTS_GUARD='...'`, and nothing temporary was committed.
+# `git status --short rings/ BR-OUTPUT/ main.swift tests/swift/` was empty
+# after every run below, the failures included:
+#
+#   - the table as it stands, unchanged by this: ten rows, all "ok - caught",
+#     exit 0, 56.1s on the run before the change and 55.0s on the run after
+#     it.  One sample each, so read it against the warm spread already
+#     recorded for this same ten-row table one block above - 53.8s / 55.3s /
+#     57.4s - which both numbers sit inside.  A value nobody declares costs
+#     nothing, which is the point of adding it before the row that needs it.
+#   - the positive arm.  Guard 6's replacement changed to
+#     `_ = QueenDelegationPolicy.isStreamOpenNoSuchMember(current)` - the exact
+#     mutant the type floor was built to reject - declared
+#     `must-not-typecheck`: it parsed, the module went red, guard-shapes was
+#     consulted and printed "ok - caught by guard-shapes", exit 0.  Under
+#     `typechecks` that same mutant is the "BROKEN ROW ... parses but does not
+#     typecheck" arm two blocks above, which is the whole shape of the gap.
+#   - the negative arm, and the one that decides whether the value is a
+#     shortcut.  The REAL guard 6 replacement - a mutant that compiles -
+#     declared `must-not-typecheck`: "BROKEN ROW ... the mutant typechecks,
+#     and this row exists to plant a type error", make guard-shapes NOT
+#     consulted, make exit 2.  A row cannot claim a type error it did not
+#     plant and be scored a catch for it.
+#   - membership, the property the other three values have and this one keeps:
+#     `must-not-typecheck` on tests/swift/queen_delegation_test.swift, which
+#     the app build never compiles: "BROKEN ROW ... is NOT compiled into the
+#     app module ... declare 'parses' or 'must-not-parse'", no mutation
+#     applied.  So the fourth value cannot be reached for as a way around the
+#     type instrument on a file where no typecheck is possible.
+#   - the parse floor underneath it: `must-not-typecheck` with an unbalanced
+#     `isStreamOpen(current` : "BROKEN ROW ... the mutant does not parse, so it
+#     plants a syntax error and not the type error this row claims", with
+#     swiftc's own "expected ')' in expression list" quoted underneath and
+#     guard-shapes not consulted.  A syntax error does not get to score as a
+#     type error.
+#   - the pristine-module REFUSE, which now covers this value too: the
+#     positive arm re-run with a THIRD file broken (an undefined identifier
+#     appended to rings/SR-00/QueenObserver.swift): "REFUSED ... the app
+#     module does not typecheck BEFORE the mutation", no mutation applied -
+#     ChatViewModel.swift byte-identical by shasum across the run - make exit
+#     2.  Without it, "the module is red" would read as this row's premise
+#     holding when it is really somebody else's edit.
+#   - a garbage value (`maybe`) is still a BROKEN ROW before the mutation, and
+#     the message now names all four: "want typechecks, must-not-typecheck,
+#     parses or must-not-parse".
 #
 # Where the type state lives.  A sibling of the app build's object directory,
 # never inside it - see "The type floor" above for why, and for the numbers.
@@ -2728,11 +3010,12 @@ mutants-guard:
 	echo "  ok   - block unwrap refuses $$uref shapes that would eat code (one-line block, code before the closing brace, anchor outside the block)"; \
 	: "The type floor. A parse proves the mutant is Swift; only a typecheck \
 	   proves it is code, and a typecheck needs the module the real build \
-	   compiles. Nothing about that module is copied here: the source list is \
-	   READ from the dev build's own output-file-map, and the three include \
-	   directories are resolved the way build.sh resolves them and are \
-	   checked to exist. A set that has drifted cannot be silent - the \
-	   pristine typecheck per row goes red and every row REFUSES."; \
+	   compiles. Nothing about that module is copied here, in either half: the \
+	   source list is READ from the dev build's own output-file-map, and the \
+	   include directories are READ from build.sh's own flag print. Both are \
+	   artifacts of the build rather than restatements of it, so neither can \
+	   rot. A set that is nonetheless wrong cannot be silent - the pristine \
+	   typecheck per row goes red and every row REFUSES."; \
 	ofm="$(WARN_OFM)"; \
 	if [ ! -f "$$ofm" ]; then \
 		echo "[FAIL] no dev output-file-map at $$ofm"; \
@@ -2743,19 +3026,55 @@ mutants-guard:
 		echo "       downgrade the type floor exists to remove."; \
 		exit 1; \
 	fi; \
-	csq=; \
-	for cand in "$(ROOT)/../Sources/CSQLCipher" "$(ROOT)/../../Sources/CSQLCipher" "$(ROOT)/Sources/CSQLCipher"; do \
-		if [ -f "$$cand/module.modulemap" ]; then csq="$$cand"; break; fi; \
-	done; \
-	sqlinc=$$(pkg-config --variable=includedir sqlcipher 2>/dev/null); \
-	qmod="$(ROOT)/Frameworks-dev/Modules"; \
-	if [ -z "$$csq" ] || [ ! -d "$$sqlinc" ] || [ ! -f "$$qmod/QueenUILib.swiftmodule" ]; then \
-		echo "[FAIL] the app module's include set cannot be resolved:"; \
-		echo "       CSQLCipher module map: $${csq:-NOT FOUND}"; \
-		echo "       SQLCipher headers:     $${sqlinc:-NOT FOUND}"; \
-		echo "       QueenUILib interface:  $$qmod/QueenUILib.swiftmodule"; \
-		echo "       These are the three -I directories build.sh passes. Without them"; \
-		echo "       a typecheck cannot see the module, and no row was run."; \
+	: "The include set is not resolved here. It is PRINTED by build.sh - the \
+	   script that passes it to the real compile - and read back: \
+	   'TRIOS_PRINT_FLAGS=1 build.sh' resolves the CSQLCipher module map, the \
+	   SQLCipher headers and QueenUILib's swiftmodule, prints the -I/-L/-l block \
+	   one argument per line, and exits without compiling.  This target used to \
+	   resolve those three directories in its own copy of build.sh's logic, and \
+	   the copy HAD already drifted: it pointed at Frameworks-dev/Modules, the \
+	   vendored copy of the QueenUILib interface, while a dev build compiles \
+	   against SwiftPM's .build/.../debug/Modules.  Same bytes that day, two \
+	   directories, and nothing would have said so.  What is still duplicated, \
+	   named exactly rather than implied: (a) the reader keeps the -I pairs and \
+	   drops -L/-l, because a typecheck wants search paths and not link flags - \
+	   that is swiftc's calling convention, not build.sh's logic, and a fourth \
+	   -I added to build.sh arrives here on its own; (b) the variant, which is \
+	   WARN_VARIANT, the same symbol that picked the output-file-map above.  \
+	   Where any of these directories ARE is no longer written in this file."; \
+	incfile="$$backup/include-flags.txt"; \
+	incerr="$$backup/include-flags.err"; \
+	if ! TRIOS_VARIANT=$(WARN_VARIANT) TRIOS_PRINT_FLAGS=1 "$(ROOT)/build.sh" \
+		> "$$incfile" 2> "$$incerr"; then \
+		echo "[FAIL] build.sh could not resolve the app module's flag set:"; \
+		head -10 "$$incerr" | sed 's/^/       | /'; \
+		echo "       That is the same resolution the real build performs, so this"; \
+		echo "       tree cannot compile either. No row was run: guessing an include"; \
+		echo "       set here is the silent divergence reading it removed."; \
+		exit 1; \
+	fi; \
+	if ! awk '$$0=="-I"{if((getline d)<=0){exit 2} print d}' "$$incfile" \
+		> "$$backup/include-dirs.txt"; then \
+		echo "[FAIL] build.sh printed a -I with no directory after it."; \
+		echo "       The flag list is malformed; no row was run."; \
+		exit 1; \
+	fi; \
+	: > "$$backup/include-bad.txt"; \
+	ninc=0; \
+	while IFS= read -r incdir; do \
+		[ -n "$$incdir" ] || continue; \
+		ninc=$$((ninc + 1)); \
+		[ -d "$$incdir" ] || printf '%s\n' "$$incdir" >> "$$backup/include-bad.txt"; \
+	done < "$$backup/include-dirs.txt"; \
+	nbadinc=$$(wc -l < "$$backup/include-bad.txt" | tr -d ' '); \
+	if [ "$$ninc" -eq 0 ] || [ "$$nbadinc" -ne 0 ]; then \
+		echo "[FAIL] the include set build.sh printed is not usable:"; \
+		[ "$$ninc" -ne 0 ] || echo "       it named no -I directory at all"; \
+		sed 's/^/       missing directory: /' "$$backup/include-bad.txt"; \
+		echo "       These are the -I directories build.sh passes to the real"; \
+		echo "       compile, read from it rather than resolved a second time here."; \
+		echo "       Without them a typecheck cannot see the module, and no row"; \
+		echo "       was run."; \
 		exit 1; \
 	fi; \
 	: "The flag file is byte-stable on purpose: swiftc throws the incremental \
@@ -2784,14 +3103,15 @@ mutants-guard:
 		'open(st + "/output-file-map.json", "w").write(json.dumps(m, indent=1))' \
 		'flags = ["-typecheck", "-incremental", "-output-file-map",' \
 		'         st + "/output-file-map.json", "-j", "1", "-enable-batch-mode"]' \
-		'for d in ("MG_CSQ", "MG_SQL", "MG_QMOD"):' \
-		'    flags += ["-I", os.environ[d]]' \
+		'for d in open(os.environ["MG_INC"]).read().splitlines():' \
+		'    if d:' \
+		'        flags += ["-I", d]' \
 		'open(st + "/typecheck.args", "w").write("\n".join(flags + files) + "\n")' \
 		'open(st + "/module-files.txt", "w").write("\n".join(files) + "\n")' \
 		'sys.stdout.write(str(len(files)))' \
 	> $$tf; \
-	if ! tcn=$$(MG_OFM="$$ofm" MG_STATE="$$tcstate" MG_CSQ="$$csq" MG_SQL="$$sqlinc" \
-		MG_QMOD="$$qmod" python3 $$tf 2>&1); then \
+	if ! tcn=$$(MG_OFM="$$ofm" MG_STATE="$$tcstate" \
+		MG_INC="$$backup/include-dirs.txt" python3 $$tf 2>&1); then \
 		echo "[FAIL] the dev output-file-map is not usable as a source list: $$tcn"; \
 		echo "       It is stale with respect to the tree. Run 'make dev' and try again;"; \
 		echo "       no row was run."; \
@@ -2801,7 +3121,7 @@ mutants-guard:
 	if [ "$$tccold" = yes ]; then \
 		echo "  note - typecheck state is empty; the first module pass fills it (~17s)"; \
 	fi; \
-	echo "  ok   - app module borrowed from the dev build: $$tcn sources, 3 include dirs"; \
+	echo "  ok   - app module borrowed from the $(WARN_VARIANT) build: $$tcn sources, $$ninc include dirs printed by build.sh"; \
 	: "Rows are separated by a literal ~, the way GUARDS does it, not by \
 	   guessing a record boundary from the leading path. That guess had a \
 	   fixed list - rings/, BR-OUTPUT/, tests/ - so a row naming main.swift \
@@ -2840,14 +3160,15 @@ mutants-guard:
 		fi; \
 		: "The declared expectation, checked against the module BEFORE anything \
 		   is written. A row does not get to choose the weaker instrument: a \
-		   file the app build compiles must say typechecks, and a file it does \
-		   not compile cannot say it. Both directions are read off the dev \
-		   build's source list, not off the row's prose."; \
+		   file the app build compiles must make a claim about types - either \
+		   way round - and a file it does not compile may not, because there \
+		   is no module in which to answer. Both directions are read off the \
+		   dev build's source list, not off the row's prose."; \
 		case "$$parse" in \
-			typechecks) want_mod=yes ;; \
+			typechecks|must-not-typecheck) want_mod=yes ;; \
 			parses|must-not-parse) want_mod=no ;; \
 			*) echo "  BROKEN ROW - $$name: the row declares expectation '$$parse'; want"; \
-			   echo "               typechecks, parses or must-not-parse"; \
+			   echo "               typechecks, must-not-typecheck, parses or must-not-parse"; \
 			   echo "               no mutation was applied"; \
 			   fail=1; continue ;; \
 		esac; \
@@ -2856,7 +3177,8 @@ mutants-guard:
 			if [ "$$in_mod" = yes ]; then \
 				echo "  BROKEN ROW - $$name: $$src IS compiled into the app module, so"; \
 				echo "               '$$parse' asks less of the mutant than can be measured"; \
-				echo "               here - declare 'typechecks'"; \
+				echo "               here - declare 'typechecks', or 'must-not-typecheck'"; \
+				echo "               if the mutation plants a type error on purpose"; \
 			else \
 				echo "  BROKEN ROW - $$name: $$src is NOT compiled into the app module, so"; \
 				echo "               its mutant cannot be typechecked in one - declare"; \
@@ -2869,7 +3191,7 @@ mutants-guard:
 		   above runs on the pristine source: a module somebody else broke - \
 		   another agent mid-edit, or a source list stale since the last dev \
 		   build - must be REFUSED, never charged to this row."; \
-		if [ "$$parse" = typechecks ]; then \
+		if [ "$$parse" = typechecks ] || [ "$$parse" = must-not-typecheck ]; then \
 			pretc=$$(tcheck); pretcrc=$$?; \
 			if [ $$pretcrc -ne 0 ]; then \
 				echo "  REFUSED - $$name: the app module does not typecheck BEFORE the mutation"; \
@@ -2941,22 +3263,38 @@ mutants-guard:
 		   the only instrument available to a row whose file is in no module."; \
 		mutparse=$$(swiftc -parse "$(ROOT)/$$src" 2>&1); mutrc=$$?; broken=; \
 		mutdiag=$$mutparse; \
-		: "The three values were validated before the mutation, so these arms \
-		   are exhaustive and a default would be dead."; \
+		: "The four values were validated before the mutation, so these arms \
+		   are exhaustive and a default would be dead. Three of them want a \
+		   mutant that parses; only must-not-parse wants one that does not. \
+		   A must-not-typecheck row is in the first group on purpose: a \
+		   replacement that fails to PARSE plants a syntax error, which is a \
+		   different event from the type error the row claims, and scoring it \
+		   under this name would be the same forgery the fifth field exists \
+		   to stop."; \
 		case "$$parse" in \
 			parses|typechecks) if [ $$mutrc -ne 0 ]; then broken="the mutant does not parse"; fi ;; \
+			must-not-typecheck) if [ $$mutrc -ne 0 ]; then broken="the mutant does not parse, so it plants a syntax error and not the type error this row claims"; fi ;; \
 			must-not-parse) if [ $$mutrc -eq 0 ]; then broken="the mutant parses, and this row exists to plant a syntax error"; fi ;; \
 		esac; \
-		: "And the type floor. This is the arm that scores a replacement using \
-		   an identifier that is not there: it PARSES, so everything above is \
-		   satisfied, and it would send the target red for a reason that is \
-		   not the guard noticing."; \
-		if [ -z "$$broken" ] && [ "$$parse" = typechecks ]; then \
-			muttc=$$(tcheck); muttcrc=$$?; \
-			if [ $$muttcrc -ne 0 ]; then \
-				broken="the mutant parses but does not typecheck"; mutdiag=$$muttc; \
-			fi; \
-		fi; \
+		: "And the type floor, read in whichever direction the row declared. \
+		   typechecks is the arm that scores a replacement using an identifier \
+		   that is not there: it PARSES, so everything above is satisfied, and \
+		   it would send the target red for a reason that is not the guard \
+		   noticing. must-not-typecheck is the same measurement with the \
+		   opposite premise - the row's whole subject is a type-level mistake, \
+		   so a mutant that TYPECHECKS has failed to plant it, and the target \
+		   must not be consulted about a mutation that did not happen."; \
+		case "$$parse" in \
+		typechecks|must-not-typecheck) \
+			if [ -z "$$broken" ]; then \
+				muttc=$$(tcheck); muttcrc=$$?; \
+				if [ "$$parse" = typechecks ] && [ $$muttcrc -ne 0 ]; then \
+					broken="the mutant parses but does not typecheck"; mutdiag=$$muttc; \
+				elif [ "$$parse" = must-not-typecheck ] && [ $$muttcrc -eq 0 ]; then \
+					broken="the mutant typechecks, and this row exists to plant a type error"; \
+				fi; \
+			fi ;; \
+		esac; \
 		if [ -n "$$broken" ]; then \
 			echo "  BROKEN ROW - $$name: $$broken"; \
 			echo "               make $$guard was NOT consulted: when the mutant is not"; \
@@ -3207,11 +3545,32 @@ drift-guard:
 # build.  Authentication uses GITHUB_TOKEN, GH_TOKEN, or gh auth token in that
 # order; without any of them the call is unauthenticated and may hit the rate
 # limit.
+#
+# A REPORT, and now it says so in its own first line, because that sentence
+# above lives in the Makefile where only its author reads it.  Two reasons no
+# threshold belongs here, and neither is squeamishness:
+#
+#   Its subject is not the tree.  The input is the GitHub timeline, so the
+#   verdicts move when an issue is edited, when the token is missing, and when
+#   the rate limit bites - and a gate that goes red because a network call was
+#   throttled is a gate that gets switched off in a week.  `make mutants`
+#   already records the same fact from the other side: no tree mutation has any
+#   lever on this target at all.
+#
+#   And its verdicts are not claims about correctness.  looks-done means "an
+#   identifier that appears in the issue also appears in the file", which is a
+#   grep, not a proof; the audit exists to make a human LOOK at that issue.
+#   Failing a build on a grep-shaped suspicion would teach everyone to phrase
+#   issues so the grep misses.
 .PHONY: backlog-audit
 backlog-audit:
 	@f=$$(mktemp /tmp/trios_backlog.XXXXXX); \
 	printf '%s\n' \
 		'import json, subprocess, re, os, sys' \
+		'' \
+		'print("-- REPORT: suspicions to look at, not a verdict. This target reads the GitHub")' \
+		'print("   timeline and the tree, never writes to either, and always exits 0.")' \
+		'print("")' \
 		'' \
 		'ROOT = os.environ.get("ROOT", ".")' \
 		'headers = ["-H", "Accept: application/vnd.github+json"]' \

@@ -24,6 +24,35 @@ if [ "$VARIANT" != "dev" ] && [ "$VARIANT" != "prod" ]; then
     exit 1
 fi
 
+# `TRIOS_PRINT_FLAGS=1 ./build.sh` resolves everything and prints the module
+# flag set - the -I/-L/-l block below - one argument per line, then exits
+# without compiling anything.
+#
+# It exists so that no other tool has to work out a second time where the
+# CSQLCipher module map, SQLCipher's headers and QueenUILib's swiftmodule live.
+# `make mutants-guard` typechecks 185 sources against this app's module and used
+# to resolve those directories in its own copy of the logic; a copy cannot be
+# kept honest, so it reads them from here instead.
+#
+# PRINTING MUST NOT BUILD, and does not. The only step in this script that can
+# compile before the flags are known is the QueenUILib `swift build` further
+# down, and print mode skips it, asking SwiftPM only where the bin directory
+# already IS (`--show-bin-path`: no compile, 0.5s here). Print mode also skips
+# the log rotation - deleting the user's logs is not a read - and returns before
+# the build lock, so a print never waits on, or blocks, a running build. Nothing
+# under .trinity/build is created or read. Measured on this machine: 0.6-0.8s
+# warm, against ~50-80s for `make dev`. If QueenUILib has never been built the
+# print FAILS by name (the swiftmodule check below) instead of quietly building
+# it to have something to print.
+#
+# stdout is reserved for the flags: the line below hands the real stdout to
+# fd 3 and points stdout at stderr, so no [VENDORED], [REUSE] or [FAIL] line
+# this script prints can reach the reader as if it were a flag.
+TRIOS_PRINT_FLAGS="${TRIOS_PRINT_FLAGS:-}"
+if [ -n "$TRIOS_PRINT_FLAGS" ]; then
+    exec 3>&1 1>&2
+fi
+
 # W2: per-variant binary and Frameworks, so a dev build cannot overwrite the
 # release binary or the dylibs it loads.
 if [ "$VARIANT" = "dev" ]; then
@@ -68,11 +97,13 @@ USER_ROOT_DIR="$(cd "$PROJECT_DIR/../.." && pwd)"
 # Keep artifact log families small and fresh. Inline rotation caps the main repo
 # at 5 files per family, and a shared backstop cleaner also removes logs older
 # than 7 days and scans git worktrees under .worktrees/.
+# Both rotations are skipped under TRIOS_PRINT_FLAGS: they delete files, and a
+# flag print is a read.
 CLEANUP_SCRIPT="$SCRIPT_DIR/scripts/cleanup_artifact_logs.sh"
-if [ -x "$CLEANUP_SCRIPT" ]; then
+if [ -z "$TRIOS_PRINT_FLAGS" ] && [ -x "$CLEANUP_SCRIPT" ]; then
     "$CLEANUP_SCRIPT" --apply --days 7 --cap 5 >/dev/null 2>&1 || true
 fi
-if command -v find >/dev/null 2>&1; then
+if [ -z "$TRIOS_PRINT_FLAGS" ] && command -v find >/dev/null 2>&1; then
     rotate_family() {
         local pattern="$1"
         find "$LOG_DIR" -maxdepth 1 -type f -name "$pattern" -print0 \
@@ -89,7 +120,7 @@ fi
 TRINITY_SOURCE_ROOT="${TRINITY_ROOT:-$USER_ROOT_DIR/trinity}"
 QUEEN_PACKAGE_ROOT="$TRINITY_SOURCE_ROOT/apps/queen"
 
-mkdir -p "$LOG_DIR"
+[ -n "$TRIOS_PRINT_FLAGS" ] || mkdir -p "$LOG_DIR"
 
 # --- QueenUILib resolution: compile from source or use vendored dylib ---
 if [ -n "$TRIOS_VENDORED" ]; then
@@ -135,7 +166,18 @@ else
         QUEEN_BIN_DIR="$QUEEN_PACKAGE_ROOT/.build/arm64-apple-macosx/debug"
         echo "[REUSE] Using existing QueenUILib build: $QUEEN_BIN_DIR"
     else
-        swift build --package-path "$QUEEN_PACKAGE_ROOT" --target QueenUILib
+        # This compile is the whole reason TRIOS_PRINT_FLAGS has to be a mode
+        # rather than a wrapper: it is the one step that can build before the
+        # flags are known. Print mode skips it and asks only for the path.
+        # --show-bin-path does not compile - it prints where the products would
+        # go - so the directory it names may be empty or stale, and the
+        # swiftmodule check below is what turns that into a named failure.
+        # Both branches end at the same QUEEN_BIN_DIR expression, so the path
+        # printed is the path the real build compiles against; only the
+        # side effect differs.
+        if [ -z "$TRIOS_PRINT_FLAGS" ]; then
+            swift build --package-path "$QUEEN_PACKAGE_ROOT" --target QueenUILib
+        fi
         QUEEN_BIN_DIR="$(swift build --package-path "$QUEEN_PACKAGE_ROOT" --show-bin-path)"
     fi
     QUEEN_DYLIB="$QUEEN_BIN_DIR/libQueenUILib.dylib"
@@ -274,6 +316,43 @@ SQLCIPHER_DYLIB=$(find "$SQLCIPHER_LIB" -maxdepth 1 -type f -name 'libsqlcipher.
 if [ -z "$SQLCIPHER_DYLIB" ] || [ ! -f "$SQLCIPHER_DYLIB" ]; then
     echo "[FAIL] SQLCipher dynamic library not found in $SQLCIPHER_LIB"
     exit 1
+fi
+
+# The module flag set: everything that makes this app's dependencies visible to
+# a compiler. It is defined ONCE, here, and consumed twice - by the swiftc
+# invocation below, and by TRIOS_PRINT_FLAGS readers. Anything added to this
+# array reaches both. There is no second list to remember, which is the point:
+# `make mutants-guard` used to carry its own resolution of the three -I
+# directories, and a copy that is merely kept in step is a copy that will
+# eventually not be.
+SWIFTC_MODULE_FLAGS=(
+    -I "$CSQLCIPHER_MODULEMAP_DIR"
+    -I "$SQLCIPHER_INCLUDE"
+    -L "$SQLCIPHER_LIB"
+    -lsqlcipher
+    -I "$QUEEN_MODULE_DIR"
+    -L "$QUEEN_BIN_DIR"
+    -lQueenUILib
+)
+
+if [ -n "$TRIOS_PRINT_FLAGS" ]; then
+    # One argument per line on the saved stdout. A path holding a newline would
+    # arrive at the reader as two arguments and could not be told from a real
+    # pair, so refuse to print it: a set that mis-splits silently is exactly the
+    # failure this mode was written to remove. Every directory here was checked
+    # to exist above, before this point was reached.
+    PRINT_FLAGS_LF=$'\n'
+    for print_flag in "${SWIFTC_MODULE_FLAGS[@]}"; do
+        case "$print_flag" in
+            *"$PRINT_FLAGS_LF"*)
+                echo "[FAIL] a resolved path contains a newline and cannot be printed"
+                echo "       as a flag list: $print_flag"
+                exit 1
+                ;;
+        esac
+        printf '%s\n' "$print_flag" >&3
+    done
+    exit 0
 fi
 
 # The build directory is shared mutable state - 185 objects plus a dependency
@@ -429,13 +508,7 @@ swiftc "${SWIFTC_INCREMENTAL_FLAGS[@]}" \
     -framework WebKit \
     -framework Combine \
     -framework Security \
-    -I "$CSQLCIPHER_MODULEMAP_DIR" \
-    -I "$SQLCIPHER_INCLUDE" \
-    -L "$SQLCIPHER_LIB" \
-    -lsqlcipher \
-    -I "$QUEEN_MODULE_DIR" \
-    -L "$QUEEN_BIN_DIR" \
-    -lQueenUILib \
+    "${SWIFTC_MODULE_FLAGS[@]}" \
     -Xlinker -rpath \
     -Xlinker @executable_path/Frameworks \
     -Xlinker -rpath \
