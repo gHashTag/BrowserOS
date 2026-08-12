@@ -41,17 +41,173 @@ struct ChatSSEEndToEndTests {
     static var checksRun = 0
     static let testFingerprintKey = Data(repeating: 0x5A, count: 32)
 
-    /// Fewest checks this suite may run and still be believed.
+    // MARK: - Coverage floor
+    //
+    // "No failures" is not evidence of coverage. Delete half the bodies below
+    // and this suite still prints that everything passed, because zero
+    // assertions cannot fail - the same shape as a scanner that matches
+    // nothing, one level up, guarding the loop rather than the code.
+    //
+    // The floor used to be one hand-written integer, and its comment claimed
+    // it was "set just under the current count" while it was set AT it: 718
+    // checks, floor 718, zero slack in either direction. Every added check
+    // needed the constant edited in the same commit, and every honest failure
+    // that lost a check tripped the floor instead of reporting the failure.
+    // A floor that must be re-typed on every change is a floor that is wrong
+    // most of the time.
+    //
+    // So the number is derived instead. Each scenario is run through the
+    // `scenarios` table below, its checks are counted separately, and the
+    // per-scenario counts plus the total are recorded in a JSON file on every
+    // passing run. The next run compares itself against that record with a
+    // small tolerance: adding checks is free, losing a handful is free, losing
+    // a scenario or twenty checks is not - and the message names the scenario
+    // rather than only the arithmetic.
+
+    /// Absolute floor for machines that have no recorded baseline yet (a fresh
+    /// clone, a sandbox with a read-only tree, the first run after a reset).
     ///
-    /// "No failures" is not evidence of coverage. Delete half the bodies below
-    /// and this suite still prints that everything passed, because zero
-    /// assertions cannot fail - the same shape as a scanner that matches
-    /// nothing, one level up, guarding the loop rather than the code.
+    /// This is the only hand-set number left, and it never has to be raised
+    /// for correctness: it is a lower bound, so coverage growing can only make
+    /// it looser. It exists so a checkout with no history still refuses a
+    /// suite that lost twenty checks.
+    static let seedFloor = 700
+
+    /// How many checks the tracked total may lose before the floor trips.
     ///
-    /// Set just under the current count so ordinary edits do not trip it and a
-    /// real loss does. Raise it when coverage grows; lowering it is a decision
-    /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 718  // 610 + 6 branch-publish notice (#1251) + 2 push-stall log mirror (#1251) + 1 repetition loop (#1251) + 2 log-before-notice ordering and stall interval (#1251) + 19 conflict-is-not-a-not-yet (#1252) + 15 merge-the-reviewed-commit (#1254) + 8 mergePayload/outcome pure-function extraction (#1254) + 10 cursor-is-a-cache (#1260) + 5 dispatch-inbox-entries-concurrently (#1150) + 3 inbox-poller-is-dev-variant-only (#1150) + 20 the reaper decides from evidence (#1139, #1247, #1248) + 17 the digest reads the same evidence as the reaper (#1247, #1248)
+    /// Small on purpose: "a sudden loss of twenty trips it, adding three does
+    /// not". Losses concentrated in one scenario are caught by name well below
+    /// this, by `scenarioSlack`.
+    static let totalSlack = 10
+
+    /// How many checks one scenario may lose before it is named.
+    static func scenarioSlack(forBaseline baseline: Int) -> Int {
+        max(3, baseline / 4)
+    }
+
+    /// The recorded high-water mark. High-water rather than last-seen so the
+    /// floor cannot be eroded a few checks at a time across many green runs.
+    struct CoverageBaseline: Codable {
+        var version: Int
+        var total: Int
+        var scenarios: [String: Int]
+    }
+
+    static let coverageBaselineVersion = 1
+
+    /// Where the recorded baseline lives.
+    ///
+    /// Derived from `#filePath`, not from the working directory: `make
+    /// mutants` and the shake loop invoke the runner from wherever they
+    /// happen to stand, and a cwd-derived path would quietly seed a fresh
+    /// (empty, therefore toothless) baseline in each of them. `.trinity-test/`
+    /// is gitignored, so this is per-checkout state, not a tracked artifact.
+    static var coverageBaselinePath: String {
+        URL(fileURLWithPath: #filePath)              // tests/swift/ChatSSEEndToEndTest.swift
+            .deletingLastPathComponent()             // tests/swift
+            .deletingLastPathComponent()             // tests
+            .deletingLastPathComponent()             // repository root
+            .appendingPathComponent(".trinity-test/chat_sse_coverage.json")
+            .path
+    }
+
+    /// Set `TRIOS_E2E_COVERAGE_RESET=1` for one run to accept the current
+    /// counts as the new baseline. Lowering the floor stays a decision someone
+    /// makes on purpose, which is the entire point - it is just no longer the
+    /// same decision as "I added a test".
+    static var coverageResetRequested: Bool {
+        ProcessInfo.processInfo.environment["TRIOS_E2E_COVERAGE_RESET"] != nil
+    }
+
+    static func loadCoverageBaseline() -> CoverageBaseline? {
+        guard !coverageResetRequested,
+              let data = FileManager.default.contents(atPath: coverageBaselinePath),
+              let decoded = try? JSONDecoder().decode(CoverageBaseline.self, from: data),
+              decoded.version == coverageBaselineVersion
+        else { return nil }
+        return decoded
+    }
+
+    /// Everything wrong with this run's coverage, in the order a reader wants
+    /// it: which scenario vanished, which one shrank, then the total.
+    static func coverageViolations(
+        observed: [(name: String, checks: Int)],
+        baseline: CoverageBaseline?
+    ) -> [String] {
+        let trackedTotal = observed.reduce(0) { $0 + $1.checks }
+        // A name listed twice in the table is one scenario run twice; sum it,
+        // so the comparison is against the same quantity that was recorded.
+        let counts = Dictionary(observed.map { ($0.name, $0.checks) }, uniquingKeysWith: +)
+        var violations: [String] = []
+
+        if let baseline {
+            for name in baseline.scenarios.keys.sorted() {
+                let was = baseline.scenarios[name] ?? 0
+                guard let now = counts[name] else {
+                    violations.append("scenario \(name) is in the baseline (\(was) checks) but did not run at all")
+                    continue
+                }
+                // A scenario that used to assert something and now asserts
+                // nothing is gone, whatever the slack arithmetic says. The
+                // smallest scenarios here record one or two checks, so the
+                // minimum slack of 3 gives them a negative floor: their bodies
+                // could be emptied one at a time, several of them, and still
+                // stay inside the total slack. Never let the floor fall below
+                // "ran at all".
+                let allowed = was > 0 ? max(1, was - scenarioSlack(forBaseline: was)) : 0
+                if now < allowed {
+                    violations.append("scenario \(name) ran \(now) checks, baseline \(was), floor \(allowed)")
+                }
+            }
+            let totalFloor = baseline.total - totalSlack
+            if trackedTotal < totalFloor {
+                violations.append("only \(trackedTotal) tracked checks ran, floor \(totalFloor) (baseline \(baseline.total) - slack \(totalSlack))")
+            }
+        }
+
+        // The seed applies with or without a baseline: a truncated or hand-
+        // edited record must not be able to talk the floor down to nothing.
+        if trackedTotal < seedFloor {
+            violations.append("only \(trackedTotal) tracked checks ran, seed floor \(seedFloor)")
+        }
+        return violations
+    }
+
+    /// Records the high-water counts after a green run. Best effort: a tree
+    /// that cannot be written to still runs the suite, it just falls back to
+    /// the seed floor next time - and says so, rather than degrading silently.
+    /// Returns whether the record was written.
+    @discardableResult
+    static func recordCoverageBaseline(
+        observed: [(name: String, checks: Int)],
+        previous: CoverageBaseline?
+    ) -> Bool {
+        var scenarios = previous?.scenarios ?? [:]
+        for entry in observed {
+            scenarios[entry.name] = max(scenarios[entry.name] ?? 0, entry.checks)
+        }
+        let trackedTotal = observed.reduce(0) { $0 + $1.checks }
+        let updated = CoverageBaseline(
+            version: coverageBaselineVersion,
+            total: max(previous?.total ?? 0, trackedTotal),
+            scenarios: scenarios
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(updated) else { return false }
+        let path = coverageBaselinePath
+        try? FileManager.default.createDirectory(
+            atPath: (path as NSString).deletingLastPathComponent,
+            withIntermediateDirectories: true
+        )
+        // Atomic: two runners sharing a checkout must never read half a file.
+        do {
+            try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+            return true
+        } catch {
+            return false
+        }
+    }
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -120,71 +276,92 @@ struct ChatSSEEndToEndTests {
         return haystack.components(separatedBy: needle).count - 1
     }
 
+    /// Every scenario in this suite, in run order.
+    ///
+    /// The table is what lets the floor say "runCursorIsACache did not run"
+    /// instead of "the number went down": `main` walks it and counts each
+    /// scenario's checks separately. Adding a scenario here is the whole of
+    /// registering it - the floor picks it up on the next green run.
+    ///
+    /// The drift guard is deliberately NOT in the table. It runs only under
+    /// TRIOS_RUN_DRIFT_GUARD, so recording its checks would raise the
+    /// high-water mark on `make drift-guard` and then make every ordinary run
+    /// look like a loss.
+    static let scenarios: [(name: String, body: @MainActor () async -> Void)] = [
+        ("runHappyPathStreaming", { await runHappyPathStreaming() }),
+        ("runCancellationIsNonError", { await runCancellationIsNonError() }),
+        ("runNewChatAppears", { await runNewChatAppears() }),
+        ("runQueenHearsEveryBee", { await runQueenHearsEveryBee() }),
+        ("runSlowReportDoesNotEraseAFasterOne", { await runSlowReportDoesNotEraseAFasterOne() }),
+        ("runQueenAnswersACommand", { await runQueenAnswersACommand() }),
+        ("runDeduplication", { await runDeduplication() }),
+        ("runConversationRenamePersistence", { await runConversationRenamePersistence() }),
+        ("runMemoryStoreAndPlannerPersistence", { await runMemoryStoreAndPlannerPersistence() }),
+        ("runChatMemoryPlannerIntegration", { await runChatMemoryPlannerIntegration() }),
+        ("runPlannerStreamTerminalStates", { await runPlannerStreamTerminalStates() }),
+        ("runUnterminatedStreamFailsClosed", { await runUnterminatedStreamFailsClosed() }),
+        ("runEmptyStreamDoesNotReusePriorAnswer", { await runEmptyStreamDoesNotReusePriorAnswer() }),
+        ("runExplicitCancellationWinsTransportErrorRace", { await runExplicitCancellationWinsTransportErrorRace() }),
+        ("runThrownTransportErrorStopsStreamingIndicator", { await runThrownTransportErrorStopsStreamingIndicator() }),
+        ("runNewConversationStopsRecallBeforeTransport", { await runNewConversationStopsRecallBeforeTransport() }),
+        ("runPlannerStorageFailureIsVisible", { await runPlannerStorageFailureIsVisible() }),
+        ("runAttachmentTurnIsNotRemembered", { await runAttachmentTurnIsNotRemembered() }),
+        ("runDeletionBlocksReentrantSend", { await runDeletionBlocksReentrantSend() }),
+        ("runFailedActiveDeletionPersistsRetainedHistory", { await runFailedActiveDeletionPersistsRetainedHistory() }),
+        ("runImmediateNewConversationSurvivesInitialization", { await runImmediateNewConversationSurvivesInitialization() }),
+        ("runMemoryClearBlocksInflightWrite", { await runMemoryClearBlocksInflightWrite() }),
+        ("runUnrelatedClearPreservesInflightWrite", { await runUnrelatedClearPreservesInflightWrite() }),
+        ("runClearWaitsForStartedMemoryWrite", { await runClearWaitsForStartedMemoryWrite() }),
+        ("runConversationSwitchPreservesStartedMemoryWrite", { await runConversationSwitchPreservesStartedMemoryWrite() }),
+        ("runScrollPositionPolicyAndRequestDelivery", { await runScrollPositionPolicyAndRequestDelivery() }),
+        ("runCassetteReplayAndObserver", { await runCassetteReplayAndObserver() }),
+        ("runSalienceLearnsFromOutcomes", { await runSalienceLearnsFromOutcomes() }),
+        ("runQueenCorrectsTheWorker", { await runQueenCorrectsTheWorker() }),
+        ("runAcceptanceIsCheckedAgainstCriteria", { await runAcceptanceIsCheckedAgainstCriteria() }),
+        ("runDelegationAcceptsCriteria", { await runDelegationAcceptsCriteria() }),
+        ("runGitHubEndpointPaths", { await runGitHubEndpointPaths() }),
+        ("runWorkerBriefIsASpecification", { await runWorkerBriefIsASpecification() }),
+        ("runQueenProposesEvolutionOptions", { await runQueenProposesEvolutionOptions() }),
+        ("runThreeOptionArrival", { await runThreeOptionArrival() }),
+        ("runWorkerLivenessIsObservable", { await runWorkerLivenessIsObservable() }),
+        ("runPullRequestOutcomeMapping", { await runPullRequestOutcomeMapping() }),
+        ("runAcceptedWaitsForTheMerge", { await runAcceptedWaitsForTheMerge() }),
+        ("runNestedBoundariesClash", { await runNestedBoundariesClash() }),
+        ("runPullRequestRefusals", { await runPullRequestRefusals() }),
+        ("runMergedIsNotTheSameAsClosed", { await runMergedIsNotTheSameAsClosed() }),
+        ("runAskTheForgeWithOwnerBranch", { await runAskTheForgeWithOwnerBranch() }),
+        ("runConflictIsNotANotYet", { await runConflictIsNotANotYet() }),
+        ("runMergeTheReviewedCommit", { await runMergeTheReviewedCommit() }),
+        ("runStalledWorkerIsResumedBeforeCancelled", { await runStalledWorkerIsResumedBeforeCancelled() }),
+        ("runReaperDecidesFromEvidence", { await runReaperDecidesFromEvidence() }),
+        ("runDigestReadsTheSameEvidenceAsTheReaper", { await runDigestReadsTheSameEvidenceAsTheReaper() }),
+        ("runQueenTaskLifecycleCloses", { await runQueenTaskLifecycleCloses() }),
+        ("runPureQueenTypes", { await runPureQueenTypes() }),
+        ("runSelfAuditFindsPlantedDeadCode", { await runSelfAuditFindsPlantedDeadCode() }),
+        ("runBranchCommitterAgainstScratchRepo", { await runBranchCommitterAgainstScratchRepo() }),
+        ("runBeeBoardReflectsStateChanges", { await runBeeBoardReflectsStateChanges() }),
+        ("runDashboardEntryExitCardButtonsAndEmptyState", { await runDashboardEntryExitCardButtonsAndEmptyState() }),
+        ("runVerdictParserHandlesMarkdownNumbers", { await runVerdictParserHandlesMarkdownNumbers() }),
+        ("runVerdictCarriesTreeState", { await runVerdictCarriesTreeState() }),
+        ("runMissingFingerprintIsNotStale", { await runMissingFingerprintIsNotStale() }),
+        ("runFingerprintOnlyCoversBoundary", { await runFingerprintOnlyCoversBoundary() }),
+        ("runIssueNumberIsAnIdentifier", { await runIssueNumberIsAnIdentifier() }),
+        ("runEmptyReviewerAnswerRetriesOnceAndRecordsAsAskedButUnanswered", { await runEmptyReviewerAnswerRetriesOnceAndRecordsAsAskedButUnanswered() }),
+        ("runReviewerReceivesAdversaryPrompt", { await runReviewerReceivesAdversaryPrompt() }),
+        ("runBranchPublishNoticeIsEmitted", { await runBranchPublishNoticeIsEmitted() }),
+        ("runCursorIsACache", { await runCursorIsACache() }),
+        ("runDispatchInboxEntriesConcurrently", { await runDispatchInboxEntriesConcurrently() }),
+        ("runInboxPollerIsDevVariantOnly", { await runInboxPollerIsDevVariantOnly() }),
+    ]
+
     static func main() async {
-        await runHappyPathStreaming()
-        await runCancellationIsNonError()
-        await runNewChatAppears()
-        await runQueenHearsEveryBee()
-        await runSlowReportDoesNotEraseAFasterOne()
-        await runQueenAnswersACommand()
-        await runDeduplication()
-        await runConversationRenamePersistence()
-        await runMemoryStoreAndPlannerPersistence()
-        await runChatMemoryPlannerIntegration()
-        await runPlannerStreamTerminalStates()
-        await runUnterminatedStreamFailsClosed()
-        await runEmptyStreamDoesNotReusePriorAnswer()
-        await runExplicitCancellationWinsTransportErrorRace()
-        await runThrownTransportErrorStopsStreamingIndicator()
-        await runNewConversationStopsRecallBeforeTransport()
-        await runPlannerStorageFailureIsVisible()
-        await runAttachmentTurnIsNotRemembered()
-        await runDeletionBlocksReentrantSend()
-        await runFailedActiveDeletionPersistsRetainedHistory()
-        await runImmediateNewConversationSurvivesInitialization()
-        await runMemoryClearBlocksInflightWrite()
-        await runUnrelatedClearPreservesInflightWrite()
-        await runClearWaitsForStartedMemoryWrite()
-        await runConversationSwitchPreservesStartedMemoryWrite()
-        await runScrollPositionPolicyAndRequestDelivery()
-        await runCassetteReplayAndObserver()
-        await runSalienceLearnsFromOutcomes()
-        await runQueenCorrectsTheWorker()
-        await runAcceptanceIsCheckedAgainstCriteria()
-        await runDelegationAcceptsCriteria()
-        await runGitHubEndpointPaths()
-        await runWorkerBriefIsASpecification()
-        await runQueenProposesEvolutionOptions()
-        await runThreeOptionArrival()
-        await runWorkerLivenessIsObservable()
-        await runPullRequestOutcomeMapping()
-        await runAcceptedWaitsForTheMerge()
-        await runNestedBoundariesClash()
-        await runPullRequestRefusals()
-        await runMergedIsNotTheSameAsClosed()
-        await runAskTheForgeWithOwnerBranch()
-        await runConflictIsNotANotYet()
-        await runMergeTheReviewedCommit()
-        await runStalledWorkerIsResumedBeforeCancelled()
-        await runReaperDecidesFromEvidence()
-        await runDigestReadsTheSameEvidenceAsTheReaper()
-        await runQueenTaskLifecycleCloses()
-        await runPureQueenTypes()
-        await runSelfAuditFindsPlantedDeadCode()
-        await runBranchCommitterAgainstScratchRepo()
-        await runBeeBoardReflectsStateChanges()
-        await runDashboardEntryExitCardButtonsAndEmptyState()
-        await runVerdictParserHandlesMarkdownNumbers()
-        await runVerdictCarriesTreeState()
-        await runMissingFingerprintIsNotStale()
-        await runFingerprintOnlyCoversBoundary()
-        await runIssueNumberIsAnIdentifier()
-        await runEmptyReviewerAnswerRetriesOnceAndRecordsAsAskedButUnanswered()
-        await runReviewerReceivesAdversaryPrompt()
-            await runBranchPublishNoticeIsEmitted()
-            await runCursorIsACache()
-            await runDispatchInboxEntriesConcurrently()
-            await runInboxPollerIsDevVariantOnly()
+        // Counted per scenario, not as one running total: see `scenarios`.
+        var observed: [(name: String, checks: Int)] = []
+        for scenario in scenarios {
+            let before = checksRun
+            await scenario.body()
+            observed.append((scenario.name, checksRun - before))
+        }
         // The interface-drift proof invokes the Swift compiler and is
         // deliberately kept out of the fast suite. Run it explicitly with:
         //   make drift-guard
@@ -197,10 +374,27 @@ struct ChatSSEEndToEndTests {
         // failure is the news and must be printed first: the mutation harness
         // scores on "N of M test(s) failed" and treats anything else as a suite
         // that never ran.
-        if failures == 0 && checksRun < minimumChecks {
-            print("\nFAIL - only \(checksRun) checks ran, expected at least \(minimumChecks).")
-            print("Coverage was removed, or a scenario returned early without asserting.")
-            exit(1)
+        if failures == 0 {
+            let baseline = loadCoverageBaseline()
+            let violations = coverageViolations(observed: observed, baseline: baseline)
+            if violations.isEmpty {
+                let recorded = recordCoverageBaseline(observed: observed, previous: baseline)
+                let tracked = observed.reduce(0) { $0 + $1.checks }
+                let floor = max((baseline?.total ?? 0) - totalSlack, seedFloor)
+                let note = recorded
+                    ? ""
+                    : " (baseline not writable - the next run falls back to the seed floor)"
+                print("\ncoverage floor: \(tracked) tracked checks in \(observed.count) scenarios, floor \(floor)\(note)")
+            } else {
+                print("\nFAIL - the coverage floor tripped.")
+                for violation in violations {
+                    print("  - \(violation)")
+                }
+                print("Coverage was removed, or a scenario returned early without asserting.")
+                print("If the loss is deliberate, re-run once with TRIOS_E2E_COVERAGE_RESET=1")
+                print("to re-seed \(coverageBaselinePath).")
+                exit(1)
+            }
         }
 
         if failures == 0 {

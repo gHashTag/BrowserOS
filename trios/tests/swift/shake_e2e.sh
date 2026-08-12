@@ -4,6 +4,13 @@
 # fails.
 #
 # Usage: bash tests/swift/shake_e2e.sh     (or: make shake)
+#        make shake SHAKE_BOUND=20         a looser bound, for less money
+#        make shake SHAKE_RUNS=3           spend exactly 3 runs, take the bound
+#                                          those 3 runs happen to earn
+#
+# The default rules out any per-run failure rate above 10%, which costs 29
+# loaded runs and about 20 minutes. See SHAKE_BOUND below for why 10 and not
+# 45 (free, and useless) or 1 (honest, and overnight).
 #
 # WHY
 # ---
@@ -18,13 +25,40 @@
 #
 # WHERE THE NUMBERS COME FROM
 # ---------------------------
-#   SHAKE_RUNS (default 5)
-#       Shaker reruns each test 10 times under noise. One run of this suite
-#       costs ~25s idle and ~30-45s loaded, so 10 reruns is 6-8 minutes - a
-#       target nobody runs. 5 keeps `make shake` near 4 minutes and still rules
-#       out any flake with a per-run failure rate >= 45% at 95% confidence
-#       (the script prints the exact bound it earned). Set SHAKE_RUNS=10 for
-#       the paper's budget when you have the time.
+#   SHAKE_BOUND (default 10, percent)
+#       Say what you want to RULE OUT, not how many runs to spend. n runs that
+#       all pass reject "the per-run failure rate is >= p0" at level alpha when
+#       (1-p0)^n <= alpha, so with alpha = 0.05 the runs needed for a bound are
+#       n = ceil(log(0.05) / log(1 - p0)), and the bound n runs earn is
+#       p0 = 1 - 0.05^(1/n). Equivalently the rule of three: no failure in n
+#       trials puts the 95% upper bound near 3/n.
+#
+#           bound   runs   wall clock (baseline + loaded, this 8-core Mac)
+#            45%      6      ~4m      what this target used to buy, for free
+#            20%     14     ~10m
+#            10%     29     ~20m      the default
+#             5%     59     ~40m
+#             1%    299    ~3h20m
+#
+#       The old default was 5 runs, and it announced that it had ruled out any
+#       flake above 45%. Nothing anyone worries about lives up there: a suite
+#       that fails 45% of the time is not flaky, it is broken, and you learn
+#       that on the first run. The rates that cost real hours here are single
+#       digit to low double digit - the incident that produced this script was
+#       one red run in a working day. So the default now buys a bound in that
+#       region: 10%, which is 29 loaded runs and about 20 minutes.
+#
+#       Not 5% (~40m) or 1% (~3h20m): those are overnight budgets, and a target
+#       nobody has time to run measures nothing. 10% is the knee - the tightest
+#       bound that still fits in a coffee break, and tight enough that "STABLE"
+#       is now a claim about the suite rather than a claim about arithmetic.
+#       Reach for SHAKE_BOUND=5 when a flake has already bitten twice and 10%
+#       came back clean.
+#
+#   SHAKE_RUNS (no default; overrides SHAKE_BOUND when set)
+#       Spend an exact number of runs instead. The report then states the bound
+#       those runs actually earned. SHAKE_RUNS=10 is the budget Shaker itself
+#       used per test (it earns 25.9%).
 #
 #   SHAKE_LOAD (default: number of logical cores)
 #       Not from the paper - from our own incident. Nine agent processes on
@@ -37,10 +71,14 @@
 #       suite touches SQLCipher databases and log files. SHAKE_IO=0 disables it.
 #       Setting both SHAKE_LOAD=0 and SHAKE_IO=1 is a legal rerun-only mode:
 #       no CPU floor is demanded, and the run says so in its own output.
-#       Cost worth knowing before you put this in a loop: one default run
-#       measured 17 GB written (the summary prints the figure every time). The
-#       blobs are deleted as they go, so it costs SSD writes, not disk space.
-#       SHAKE_IO=0 if that matters more to you than I/O noise does.
+#       Cost worth knowing before you put this in a loop: the writer runs for
+#       the whole session, so the bill scales with the bound. At the old 5-run
+#       default one run measured 17 GB written; at the 29-run default the run
+#       that set these numbers measured 109 GB (the summary prints the figure
+#       every time). The blobs are deleted as they go, so it costs SSD writes,
+#       not disk space - but a nightly at SHAKE_BOUND=5 would write ~220 GB a
+#       night, which is a real number for a laptop SSD. SHAKE_IO=0 if that
+#       matters more to you than I/O noise does.
 #
 #   SHAKE_BASELINE (default 1)
 #       One unloaded run first. This is what separates "resource-affected" from
@@ -75,10 +113,56 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 E2E="${SHAKE_SUITE:-$SCRIPT_DIR/run_chat_sse_e2e.sh}"
 
 CORES="$(sysctl -n hw.logicalcpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
-RUNS="${SHAKE_RUNS:-5}"
+BOUND="${SHAKE_BOUND:-10}"
 LOAD="${SHAKE_LOAD:-$CORES}"
 IO="${SHAKE_IO:-1}"
 BASELINE="${SHAKE_BASELINE:-1}"
+
+# Measured on this 8-core Mac and used only to predict the bill before it is
+# run; the summary reports the real wall clock at the end.
+#
+# 40s is the shake load on an otherwise quiet machine, and the first runs of a
+# session do hit it. It is a floor, not a promise: the 29-run run that set the
+# default here was estimated at 19m45s and took 24m30s, because the per-run
+# cost drifted 38s -> 64s as other agents piled onto the box. Read the printed
+# estimate as "at least this long", and trust only the wall clock in the
+# summary.
+SECONDS_PER_LOADED_RUN=40
+SECONDS_PER_BASELINE_RUN=25
+
+# n = ceil(log(alpha) / log(1 - p0)) with alpha = 0.05: the runs needed before
+# an all-pass result rejects "failure rate >= p0%" at 95% confidence. Rounded
+# up, so the bound earned is always at least as tight as the one requested.
+runs_for_bound() {
+    awk -v p="$1" 'BEGIN{n=log(0.05)/log(1-p/100); c=int(n); if(c<n-1e-9)c++; if(c<1)c=1; print c}'
+}
+
+# The inverse: p0 = 1 - alpha^(1/n), the bound n all-passing runs actually earn.
+bound_for_runs() {
+    awk -v n="$1" 'BEGIN{printf "%.1f", (1-exp(log(0.05)/n))*100}'
+}
+
+human_seconds() {
+    awk -v s="$1" 'BEGIN{h=int(s/3600); m=int((s%3600)/60); r=s%60;
+        if(h>0) printf "%dh%02dm", h, m; else printf "%dm%02ds", m, r}'
+}
+
+case "$BOUND" in ''|*[!0-9]*) echo "[FAIL] SHAKE_BOUND is a whole percent between 1 and 99, got '$BOUND'"; exit 1 ;; esac
+if [ "$BOUND" -lt 1 ] || [ "$BOUND" -gt 99 ]; then
+    echo "[FAIL] SHAKE_BOUND is a whole percent between 1 and 99, got '$BOUND'"
+    echo "       It names the per-run failure rate to rule out at 95% confidence."
+    exit 1
+fi
+
+if [ -n "${SHAKE_RUNS:-}" ]; then
+    RUNS="$SHAKE_RUNS"
+    RUNS_FROM="SHAKE_RUNS"
+    BOUND_REQUESTED=0
+else
+    RUNS="$(runs_for_bound "$BOUND")"
+    RUNS_FROM="SHAKE_BOUND"
+    BOUND_REQUESTED=1
+fi
 
 case "$RUNS" in ''|*[!0-9]*) echo "[FAIL] SHAKE_RUNS must be a non-negative integer, got '$RUNS'"; exit 1 ;; esac
 case "$LOAD" in ''|*[!0-9]*) echo "[FAIL] SHAKE_LOAD must be a non-negative integer, got '$LOAD'"; exit 1 ;; esac
@@ -197,12 +281,26 @@ failed_checks() {
     printf '%s\n' "$names"
 }
 
+EST_SECONDS=$((RUNS * SECONDS_PER_LOADED_RUN))
+[ "$BASELINE" != "0" ] && EST_SECONDS=$((EST_SECONDS + SECONDS_PER_BASELINE_RUN))
+
 echo "[shake] resource-affected flakiness probe for the chat SSE e2e suite"
 echo "[shake] configuration"
-printf '        runs under load : %-4s (SHAKE_RUNS)\n' "$RUNS"
-printf '        cpu stressors   : %-4s (SHAKE_LOAD; machine has %s logical cores)\n' "$LOAD" "$CORES"
-printf '        io writers      : %-4s (SHAKE_IO; 8 MB file, rewritten in a loop)\n' "$IO"
-printf '        baseline run    : %-4s (SHAKE_BASELINE; unloaded, tells broken from load-induced)\n' "$BASELINE"
+if [ "$BOUND_REQUESTED" -eq 1 ]; then
+    printf '        target bound    : %-6s (SHAKE_BOUND: rule out any per-run failure rate above\n' "${BOUND}%"
+    printf '                          this, at 95%% confidence, which takes %s all-passing runs)\n' "$RUNS"
+else
+    printf '        target bound    : %-6s (what %s all-passing runs earn at 95%% confidence;\n' \
+        "$(bound_for_runs "$RUNS")%" "$RUNS"
+    printf '                          SHAKE_RUNS was set, so it wins over SHAKE_BOUND)\n'
+fi
+printf '        runs under load : %-6s (from %s)\n' "$RUNS" "$RUNS_FROM"
+printf '        estimated cost  : ~%s at ~%ss per loaded run%s\n' \
+    "$(human_seconds "$EST_SECONDS")" "$SECONDS_PER_LOADED_RUN" \
+    "$([ "$BASELINE" != "0" ] && echo " plus a ~${SECONDS_PER_BASELINE_RUN}s baseline")"
+printf '        cpu stressors   : %-6s (SHAKE_LOAD; machine has %s logical cores)\n' "$LOAD" "$CORES"
+printf '        io writers      : %-6s (SHAKE_IO; 8 MB file, rewritten in a loop)\n' "$IO"
+printf '        baseline run    : %-6s (SHAKE_BASELINE; unloaded, tells broken from load-induced)\n' "$BASELINE"
 printf '        suite           : %s\n' "$E2E"
 printf '        logs            : %s\n' "$SHAKE_DIR"
 printf '        load average now: %s\n' "$(loadavg_1m)"
@@ -368,11 +466,27 @@ if [ "$MEASURED" -eq 0 ]; then
 fi
 
 if [ "$FAILED_RUNS" -eq 0 ]; then
-    bound="$(awk -v n="$MEASURED" 'BEGIN{printf "%.0f", (1 - exp(log(0.05)/n)) * 100}')"
+    # The bound is earned by the runs that produced a verdict, not by the runs
+    # that were asked for. Harness contention can eat some, and a target that
+    # printed the requested bound after measuring fewer runs than it needs
+    # would be overstating exactly the number it exists to state.
+    earned="$(bound_for_runs "$MEASURED")"
     echo "[OK] STABLE under load: $MEASURED/$MEASURED measured runs passed."
-    echo "     That rules out any flake with a per-run failure rate above ${bound}% at 95%"
-    echo "     confidence. A rarer flake would survive this many runs; raise SHAKE_RUNS"
-    echo "     to narrow the bound."
+    echo "     That rules out any flake with a per-run failure rate above ${earned}% at 95%"
+    echo "     confidence: (1 - p)^$MEASURED <= 0.05 for every p above it."
+    if [ "$BOUND_REQUESTED" -eq 1 ] && [ "$MEASURED" -lt "$RUNS" ]; then
+        echo "     SHORT: SHAKE_BOUND=${BOUND}% needed $RUNS measured runs and got $MEASURED, so the"
+        echo "     bound above is what was earned, not the one requested. Re-run to close it."
+    else
+        # Half of what this run earned, whether that came from SHAKE_BOUND or
+        # from a hand-picked SHAKE_RUNS.
+        tighter="$(awk -v b="$earned" 'BEGIN{t=int(b/2); if(t<b/2)t++; if(t<1)t=1; print t}')"
+        n_t="$(runs_for_bound "$tighter")"
+        est_t=$((n_t * SECONDS_PER_LOADED_RUN))
+        [ "$BASELINE" != "0" ] && est_t=$((est_t + SECONDS_PER_BASELINE_RUN))
+        echo "     A rarer flake would survive this many runs. Halving the bound roughly"
+        echo "     doubles the bill: SHAKE_BOUND=$tighter is $n_t runs, ~$(human_seconds "$est_t")."
+    fi
     exit 0
 fi
 
