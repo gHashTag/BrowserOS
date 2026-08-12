@@ -531,9 +531,11 @@ final class LogsTabViewTests: XCTestCase {
         let idToRemove = loaded.first?.id
         XCTAssertNotNil(idToRemove)
         await store.remove(id: idToRemove!)
-        XCTAssertEqual(await store.load().count, 1)
+        let afterRemove = await store.load()
+        XCTAssertEqual(afterRemove.count, 1)
         await store.clear()
-        XCTAssertTrue(await store.load().isEmpty)
+        let afterClear = await store.load()
+        XCTAssertTrue(afterClear.isEmpty)
         try? FileManager.default.removeItem(at: tempURL)
     }
 
@@ -1194,7 +1196,7 @@ final class LogsTabViewTests: XCTestCase {
 
     func testProposerIncludesSourceIDWhenProvided() {
         let line = ParsedLogLine(
-            rawLine: "{"event":"noisy_event"}",
+            rawLine: #"{"event":"noisy_event"}"#,
             timestamp: nil, level: .info, sourceID: "source-a",
             message: "hello world", event: "noisy_event", details: nil,
             metadata: [:], duplicateCount: 1
@@ -1207,7 +1209,7 @@ final class LogsTabViewTests: XCTestCase {
 
     func testProposerWithoutSourceIDRemainsGlobal() {
         let line = ParsedLogLine(
-            rawLine: "{"event":"noisy_event"}",
+            rawLine: #"{"event":"noisy_event"}"#,
             timestamp: nil, level: .info, sourceID: "source-a",
             message: "hello world", event: "noisy_event", details: nil,
             metadata: [:], duplicateCount: 1
@@ -1737,10 +1739,10 @@ final class LogsTabViewTests: XCTestCase {
         XCTAssertTrue(paths.contains { $0.path.contains("feature-a") && $0.path.hasSuffix("akashic-log.jsonl") })
         XCTAssertTrue(paths.contains { $0.path.contains("feature-b") && $0.path.hasSuffix("local-auth-audit.jsonl") })
 
-        let policies = Set(paths.map { $0.policy })
-        XCTAssertTrue(policies.contains(LogRotationPolicy.audit))
-        XCTAssertTrue(policies.contains(LogRotationPolicy.security))
-        XCTAssertTrue(policies.contains(LogRotationPolicy.experience))
+        let policies = paths.map { $0.policy }
+        XCTAssertTrue(policies.contains { $0.maxFileSizeBytes == LogRotationPolicy.audit.maxFileSizeBytes && $0.maxArchiveCount == LogRotationPolicy.audit.maxArchiveCount && $0.keepTailLines == LogRotationPolicy.audit.keepTailLines && $0.maxArchiveAgeSeconds == LogRotationPolicy.audit.maxArchiveAgeSeconds && $0.maxAgeBeforeRotationSeconds == LogRotationPolicy.audit.maxAgeBeforeRotationSeconds })
+        XCTAssertTrue(policies.contains { $0.maxFileSizeBytes == LogRotationPolicy.security.maxFileSizeBytes && $0.maxArchiveCount == LogRotationPolicy.security.maxArchiveCount && $0.keepTailLines == LogRotationPolicy.security.keepTailLines && $0.maxArchiveAgeSeconds == LogRotationPolicy.security.maxArchiveAgeSeconds && $0.maxAgeBeforeRotationSeconds == LogRotationPolicy.security.maxAgeBeforeRotationSeconds })
+        XCTAssertTrue(policies.contains { $0.maxFileSizeBytes == LogRotationPolicy.experience.maxFileSizeBytes && $0.maxArchiveCount == LogRotationPolicy.experience.maxArchiveCount && $0.keepTailLines == LogRotationPolicy.experience.keepTailLines && $0.maxArchiveAgeSeconds == LogRotationPolicy.experience.maxArchiveAgeSeconds && $0.maxAgeBeforeRotationSeconds == LogRotationPolicy.experience.maxAgeBeforeRotationSeconds })
     }
 
     func testWorktreeAuditLogPathsReturnsEmptyWhenNoWorktrees() {
