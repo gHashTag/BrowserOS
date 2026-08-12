@@ -548,3 +548,41 @@ Three method notes, each of which cost a wrong turn today:
 And the standing lesson underneath: `drift-guard` is not in `make check`, so
 nobody ran it, so a guard that could not see its own subject survived for
 months. A check nobody runs is indistinguishable from one that does not work.
+
+## Give each family of checks an oracle it can actually fail against
+
+The MUTANTS table could not ask "what event makes this red?" of the standing
+Makefile checks, and the reason was structural: its oracle is the e2e suite, and
+those checks exist precisely because the suite cannot see what they guard. A
+real `SecItemCopyMatching` planted outside the allowlist measured **SURVIVED**
+there, while `make keychain-doors` named the file and exited 1.
+
+The fix is not a cleverer row. It is a second table with a different oracle:
+
+    MUTANTS_GUARD := source@@needle@@replacement@@target@@name
+
+Per row: run `make <target>` first and require green, mutate, run it again,
+score green→red as caught. Both rows the old table could not express are caught
+here by their own check. No repeat run is needed — unlike the suite these
+targets are deterministic file readers with no build, no network and no clock,
+which is exactly why they can be scored on a single observation.
+
+The load-bearing detail is the **pre-check**. Without it a machine that is
+already red scores every mutation as caught — the gate would certify itself
+loudest exactly when it is most broken. Driven: with `keychain-doors` red before
+the mutation, the run refuses and says
+`a guard mutation ... ran against a red machine`, instead of printing a catch.
+
+Generalise it: **a verification harness needs a positive control, and the
+cheapest one is "prove the detector is currently working before you trust its
+verdict".** Same shape as requiring the suite to print its own "N tests failed"
+line rather than trusting an exit code, and as requiring 38 unrelated log lines
+before believing that zero inbox lines means the guard held.
+
+Corollary about reporting tools: `make doctor` printed the mtime of the bundle
+*directory*, which does not move when the binary inside is replaced — it was
+nineteen days stale — and `pgrep -x trios-dev` could never match, because both
+bundles ship a binary named `trios`. It is in `make help`, in no gate, and exits
+0 always, so it had been lying to everyone who looked at it. Match processes by
+their bundle path, stat the binary, and remember that a target with no red state
+is a report, not a check.
