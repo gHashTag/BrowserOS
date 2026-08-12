@@ -812,10 +812,20 @@ enum QueenBranchCommitter {
                     guard metaParts.count >= 3 else { continue }
                     let mode = String(metaParts[0])
                     let sha = String(metaParts[2])
-                    _ = runGit(
-                        ["update-index", "--cacheinfo", "\(mode),\(sha),\(path)"],
+                    // --add is load-bearing, and its absence was invisible.
+                    // Without it git refuses any path not already in the
+                    // index, so every file a branch ADDS was silently dropped
+                    // from the combined tree - and the result was discarded,
+                    // so nothing said so. The drift guard therefore could not
+                    // see the commonest two-bee conflict at all: one bee adds
+                    // a caller, another changes the signature it calls. The
+                    // scenario built exactly that and the combined tree came
+                    // out with the new signature and no new caller, so it
+                    // compiled and the guard reported success (#1268).
+                    guard runGit(
+                        ["update-index", "--add", "--cacheinfo", "\(mode),\(sha),\(path)"],
                         index: index, projectRoot: projectRoot
-                    )
+                    ) != nil else { return nil }
                 }
             }
 
