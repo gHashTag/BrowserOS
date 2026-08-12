@@ -472,3 +472,40 @@ Two corollaries learned the same day:
   of them. An earlier run put three independent fixes behind `await study` and a
   slow researcher idled the whole thing for an hour and a half. Fan out first,
   join only where a result is genuinely needed.
+
+## The mirrored copy had already drifted
+
+The mutant type-gate needed the app module's include set. It resolved the three
+`-I` directories the same way `build.sh` does — a second copy of the logic,
+knowingly written, with a comment promising it would fail loudly if it diverged.
+
+It had already diverged. The Makefile pointed at `Frameworks-dev/Modules`, the
+*vendored* copy of the QueenUILib interface; a dev build compiles against
+SwiftPM's own output under `trinity/apps/queen/.build/.../Modules`. Both were
+byte-identical that day — 6125716 bytes each — so nothing was visibly wrong and
+nothing would have said so. The gate had been typechecking mutants against an
+interface that only happened to match.
+
+The fix is the shape worth keeping: **one definition, consumed twice.**
+`build.sh` grew `TRIOS_PRINT_FLAGS=1`, which resolves everything, prints the
+flag set one argument per line, and builds nothing; the same
+`SWIFTC_MODULE_FLAGS` array feeds both the real compile and the print. A fourth
+include directory added to the build reaches the gate on its own, because there
+is no second list to update.
+
+Details that made it safe rather than merely shorter:
+
+- **stdout is reserved for the payload.** `exec 3>&1 1>&2` at the top, so none of
+  the script's own `[VENDORED]`/`[FAIL]` chatter can be read as a flag.
+- **Printing must not build, and must not wait.** The print skips the SwiftPM
+  compile step and returns before the build lock, so it cannot block or be
+  blocked by a running build. Measured: 0.37-0.46 s. It does still make one
+  `swift build --show-bin-path` call, which compiles nothing — stated rather
+  than hidden.
+- **Refuse a malformed set instead of mis-splitting it.** A `-I` with no
+  directory after it, or a directory that does not exist, fails the reader by
+  name with zero rows scored. All three arms driven.
+
+The general rule: a comment promising that a copy will fail loudly is not a
+mechanism. If two places must agree, make one of them read the other — and if
+they cannot, expect the drift to be there already rather than to arrive later.
