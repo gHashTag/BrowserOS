@@ -2555,3 +2555,6 @@ check-selftest:
 	fi; \
 	if [ $$fail -ne 0 ]; then exit 1; fi
 
+
+# CI probe: touches a path in the workflow filter so the fast gates run once on a
+# clean machine. This branch is thrown away immediately after.
