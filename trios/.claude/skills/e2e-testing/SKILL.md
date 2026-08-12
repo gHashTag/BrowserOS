@@ -390,3 +390,40 @@ honest options are two, and both are cheap:
 
 Silently transcribing is the only wrong answer, and it is the one that looks
 most like thorough testing.
+
+## A failed check still ran, and the order of the two verdicts matters
+
+`make mutants` scored three real catches as `ERROR - the suite never ran`. They
+were not coverage holes: the suite built, ran, detected each mutation and named
+it. The harness was told a lie by the suite itself, through a four-link chain
+worth knowing because every link looks harmless:
+
+1. `fail()` incremented `failures` but not `checksRun`. A check that ran and
+   failed stopped counting as a check that ran.
+2. The scenario was written `if case .X = outcome(...) { check(true, name) }
+   else { fail(name) }`. So a *caught* mutation lowered `checksRun` by one.
+3. `minimumChecks` was set at exactly the green count. Its own comment said "set
+   just under the current count so ordinary edits do not trip it" — it was set
+   AT it. Zero slack.
+4. The coverage floor was tested *before* the failure summary, and exited early.
+
+Result: `FAIL - only 717 checks ran, expected at least 718` instead of
+`1 of 718 test(s) failed`, and the mutation gate — which scores on the string
+"test(s) failed" — read that as a suite that never ran.
+
+Two one-line rules fix it, and both generalise:
+
+- **A check that ran and failed still ran.** Count execution and outcome
+  separately; never let a failure reduce the execution count.
+- **When something failed, the failure is the news.** A coverage floor answers
+  "did a scenario vanish?", which is only meaningful when nothing failed. Test
+  it *after* the failure summary, or guard it with `failures == 0`.
+
+Proof both ways after the fix: reverting the code under test now prints
+`5 of 718 test(s) failed` (was: `only 713 checks ran`), and the mutation row for
+it is caught, "failed twice".
+
+Corollary about self-describing counters: a floor set exactly at the current
+value has no slack in either direction, so it fires on the first honest failure
+as well as on real coverage loss. If the comment says "just under", make the
+number just under.
