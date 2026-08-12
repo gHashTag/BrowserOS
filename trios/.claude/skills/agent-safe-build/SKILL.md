@@ -429,3 +429,35 @@ produced from verifies the copy, not the world.** To detect interference you mus
 compare against what you last observed, not against what you last wrote. The same
 shape appeared twice more the same week — a warning cache compared to itself, and
 a test that compared the reaper to its own transcription of the reaper.
+
+## Delegate the thinking, run the heavy work yourself
+
+Eight subagents died in one day to `API Error: Stream idle timeout - no chunks
+received`. The correlation is not subtle: every death was on a task whose
+critical step is a single long, heavy, silent command —
+
+- `make shake` (29 loaded suite runs, ~25 min, load average 190+, 109 GB of I/O)
+  killed its agent twice, on two different attempts at the same task;
+- the mutation-harness investigation died three times, and only got done when I
+  ran it myself;
+- a cold `make warnings` and a full `make mutants` account for the rest.
+
+Adding "stay audible — split long work into steps and print between them" to the
+agent brief helped and did not cure it: the heaviest task died again afterwards.
+The cause is below the repository and cannot be diagnosed from inside it, so do
+not theorise about it — route around it.
+
+**The division that works: subagents design, implement and verify; the caller
+runs anything that takes tens of minutes or saturates the machine.** A dead
+agent costs its whole turn — ten to forty minutes — and returns nothing, so this
+is a throughput decision, not a tidiness one.
+
+Two corollaries learned the same day:
+
+- Never let a heavy run overlap with editing agents. `make shake` at load 190
+  starves everything else on the machine and is a plausible contributor to the
+  timeouts of *other* agents, not just its own.
+- If a workflow gates several fixes behind one slow step, one stall freezes all
+  of them. An earlier run put three independent fixes behind `await study` and a
+  slow researcher idled the whole thing for an hour and a half. Fan out first,
+  join only where a result is genuinely needed.
