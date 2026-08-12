@@ -1516,6 +1516,7 @@ mutants:
 			1) echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
 			   cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue ;; \
 		esac; \
+		shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.mut.sha"; \
 		out=$$(bash "$(ROOT)/tests/swift/run_chat_sse_e2e.sh" 2>&1 || true); \
 		if echo "$$out" | grep -qF "test(s) failed"; then \
 			: "One failure could be the suite's own flake. Confirm it with a \
@@ -1534,6 +1535,15 @@ mutants:
 		else \
 			echo "  ERROR - the suite never ran: $$name"; fail=1; \
 			echo "$$out" | head -5 | sed 's/^/         | /'; \
+		fi; \
+		if [ -f "$$backup/$$n.mut.sha" ]; then \
+			now_sha=$$(shasum "$(ROOT)/$$src" | cut -d" " -f1); \
+			if [ "$$now_sha" != "$$(cat "$$backup/$$n.mut.sha")" ]; then \
+				echo "  [FAIL] $$src changed while the harness held it mutated."; \
+				echo "         Restoring the backup would silently revert whoever wrote to it."; \
+				echo "         The mutation is left in place; resolve by hand. Backup: $$backup/$$n.bak"; \
+				fail=1; continue; \
+			fi; \
 		fi; \
 		cp "$$backup/$$n.bak" "$(ROOT)/$$src"; \
 	done; \
@@ -1636,6 +1646,15 @@ mutants-logic:
 			echo "  ERROR - the $$suite suite never ran: $$name"; fail=1; \
 			cat "$$e2e_err" "$$e2e_out" | head -5 | sed 's/^/         | /'; \
 		fi; \
+		if [ -f "$$backup/$$n.mut.sha" ]; then \
+			now_sha=$$(shasum "$(ROOT)/$$src" | cut -d" " -f1); \
+			if [ "$$now_sha" != "$$(cat "$$backup/$$n.mut.sha")" ]; then \
+				echo "  [FAIL] $$src changed while the harness held it mutated."; \
+				echo "         Restoring the backup would silently revert whoever wrote to it."; \
+				echo "         The mutation is left in place; resolve by hand. Backup: $$backup/$$n.bak"; \
+				fail=1; continue; \
+			fi; \
+		fi; \
 		cp "$$backup/$$n.bak" "$(ROOT)/$$src"; \
 	done; \
 	if [ $$fail -eq 0 ]; then echo "[OK] every logic-suite mutation was caught ($$n)"; \
@@ -1733,6 +1752,7 @@ mutants-changed:
 			1) echo "  STALE - $$name (its needle is no longer in $$src)"; fail=1; \
 			   cp "$$backup/$$n.bak" "$(ROOT)/$$src"; continue ;; \
 		esac; \
+		shasum "$(ROOT)/$$src" | cut -d" " -f1 > "$$backup/$$n.mut.sha"; \
 		out=$$(bash "$(ROOT)/tests/swift/run_chat_sse_e2e.sh" 2>&1 || true); \
 		if echo "$$out" | grep -qF "test(s) failed"; then \
 			: "One failure could be the suite's own flake. Confirm it with a \
@@ -1751,6 +1771,15 @@ mutants-changed:
 		else \
 			echo "  ERROR - the suite never ran: $$name"; fail=1; \
 			echo "$$out" | head -5 | sed 's/^/         | /'; \
+		fi; \
+		if [ -f "$$backup/$$n.mut.sha" ]; then \
+			now_sha=$$(shasum "$(ROOT)/$$src" | cut -d" " -f1); \
+			if [ "$$now_sha" != "$$(cat "$$backup/$$n.mut.sha")" ]; then \
+				echo "  [FAIL] $$src changed while the harness held it mutated."; \
+				echo "         Restoring the backup would silently revert whoever wrote to it."; \
+				echo "         The mutation is left in place; resolve by hand. Backup: $$backup/$$n.bak"; \
+				fail=1; continue; \
+			fi; \
 		fi; \
 		cp "$$backup/$$n.bak" "$(ROOT)/$$src"; \
 	done; \
@@ -1801,6 +1830,15 @@ mutants-changed:
 		else \
 			echo "  ERROR - the $$suite suite never ran: $$name"; fail=1; \
 			cat "$$e2e_err" "$$e2e_out" | head -5 | sed 's/^/         | /'; \
+		fi; \
+		if [ -f "$$backup/$$n.mut.sha" ]; then \
+			now_sha=$$(shasum "$(ROOT)/$$src" | cut -d" " -f1); \
+			if [ "$$now_sha" != "$$(cat "$$backup/$$n.mut.sha")" ]; then \
+				echo "  [FAIL] $$src changed while the harness held it mutated."; \
+				echo "         Restoring the backup would silently revert whoever wrote to it."; \
+				echo "         The mutation is left in place; resolve by hand. Backup: $$backup/$$n.bak"; \
+				fail=1; continue; \
+			fi; \
 		fi; \
 		cp "$$backup/$$n.bak" "$(ROOT)/$$src"; \
 	done; \
