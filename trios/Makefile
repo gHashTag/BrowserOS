@@ -33,7 +33,10 @@ help:
 	@echo "  make check      - build dev and run every logic suite, including mutants-changed"
 	@echo "  make test       - run the Swift logic suites only"
 	@echo "  make e2e        - run the chat end-to-end flow"
-	@echo "  make shake      - run the e2e flow N times under CPU/IO load; tells flaky from broken (~4 min)"
+	@echo "  make shake      - run the e2e flow under CPU/IO load until a 10% per-run flake rate is"
+	@echo "                    ruled out at 95% confidence: 29 loaded runs, ~20 min. Tells flaky from"
+	@echo "                    broken. Deliberate, not part of 'make check'."
+	@echo "                    make shake SHAKE_BOUND=20 for a looser bound in ~10 min; =5 for ~40 min"
 	@echo "  make run        - launch the dev app"
 	@echo "  make run-release- launch the release app"
 	@echo "  make stop       - quit both apps"
@@ -586,15 +589,42 @@ e2e:
 # Silva et al. (Shaker, ICSME 2020) measured that 46.5% of flaky tests are
 # resource-affected - their failure rate moves with machine load - and that
 # the way to find them is to add the load on purpose rather than wait for it.
-# `make shake` does that: one unloaded baseline run, then SHAKE_RUNS runs with
-# one busy loop per core and an I/O writer alongside, and a verdict that
+# `make shake` does that: one unloaded baseline run, then as many loaded runs
+# as the requested confidence bound needs - one busy loop per core and an I/O
+# writer alongside each of them - and a verdict that
 # separates "failed every single time" (broken) from "failed some of the
 # time" (flaky) from "only fails when the machine is busy".
 #
-# Cost, measured on this 8-core machine: ~25s per unloaded run, ~30-45s per
-# loaded run, so the default (1 baseline + 5 loaded) is roughly 4 minutes.
-# Knobs: SHAKE_RUNS, SHAKE_LOAD, SHAKE_IO, SHAKE_BASELINE, SHAKE_SUITE.
-#   make shake SHAKE_RUNS=10          the budget Shaker itself used (~8 min)
+# HOW MANY RUNS, AND WHY THAT MANY
+# n all-passing runs reject "the per-run failure rate is >= p0" at 95%
+# confidence exactly when (1-p0)^n <= 0.05, so n = ceil(log(0.05)/log(1-p0)).
+# The old default of 5 runs therefore announced a 45% bound - free, and
+# meaningless: a suite failing 45% of the time is broken, not flaky, and one
+# run tells you. The flakes that cost days here are the single-digit ones.
+#
+# So the caller now names the BOUND and the script buys the runs:
+#   SHAKE_BOUND=45 ->   6 runs,  ~4 min      (what this target used to be)
+#   SHAKE_BOUND=20 ->  14 runs, ~10 min
+#   SHAKE_BOUND=10 ->  29 runs, ~20 min      DEFAULT
+#   SHAKE_BOUND=5  ->  59 runs, ~40 min
+#   SHAKE_BOUND=1  -> 299 runs, ~3h20m
+# at ~40s per loaded run plus a ~25s unloaded baseline, measured on this 8-core
+# machine. 10% is the knee: the tightest bound that still fits in a coffee
+# break, and the loosest one that says something about a real flake rate.
+#
+# NOT IN `make check`, deliberately. Two reasons, either sufficient. First,
+# check does not run the e2e flow even once (that is `make e2e`), so adding 29
+# loaded repeats of it would not tighten check - it would replace it with a
+# different, twenty-minute target. Second, shake answers "is this machine
+# making my suite lie?", a question about the machine and the calendar, not
+# about the diff in front of you; the answer does not change per commit, so
+# paying for it per commit buys nothing. Run it when a red run smells like
+# noise, when the e2e suite grows a new wait, or on a nightly.
+#
+# Knobs: SHAKE_BOUND, SHAKE_RUNS, SHAKE_LOAD, SHAKE_IO, SHAKE_BASELINE, SHAKE_SUITE.
+#   make shake SHAKE_BOUND=20         looser bound, ~10 min
+#   make shake SHAKE_RUNS=10          exactly 10 runs, whatever bound that earns
+#                                     (25.9%); the budget Shaker itself used
 #   make shake SHAKE_LOAD=0           no CPU load - reruns only
 # Exit status: 0 stable, 1 broken (the unloaded baseline failed), 2 flaky or
 # load-induced, 3 the load generator never spun up so nothing was measured.
@@ -1370,11 +1400,22 @@ xctest:
 # also goes non-zero when the app or the server is down. Treating that as "the
 # mutation was caught" would be a false pass, and a mutation harness that lies
 # is worse than none.
+#
+# Why the digest row below exists.  Twenty named checks were written for the
+# reaper's predicates and none of them noticed when the stream-open guard was
+# deleted from the shipped reaper: the test helper `reaperWouldTake` carries
+# its own copy of that line, so it kept passing against the copy.  A test that
+# re-states the code under test can only fail when the re-statement is wrong.
+# The digest's checks therefore call `QueenReviewDigest.stalled` and
+# `QueenReviewScheduler.reviewNow` themselves, with nothing transcribed - and
+# this row is how that claim is checked rather than asserted: put the clock
+# back in the shipped digest and the suite must go red.
 MUTANTS := \
 	rings/SR-00/QueenObserver.swift@@lowered.contains("write") || lowered.contains("edit")@@lowered.contains("write")@@the boundary detector forgets edit-shaped tools \
 	rings/SR-02/QueenDelegationRegistry.swift@@if criteria.contains(criterion) {@@if true {@@a verdict is accepted for a criterion the task never had \
 	rings/SR-00/QueenDelegation.swift@@task.streamOutcome == .open@@false // gutted: no stream is ever open@@the reaper stops believing any stream is open and takes live workers mid-answer \
 	rings/SR-00/QueenDelegation.swift@@task.streamOutcome == nil && (task.completedTurns ?? 0) == 0@@(task.completedTurns ?? 0) == 0 // gutted: turn count alone@@never-started is decided on turn count alone, so every running worker without a finished turn is an orphan \
+	rings/SR-00/QueenReviewDigest.swift@@QueenDelegationPolicy.hasGoneSilent($$0, now: now, threshold: threshold)@@now.timeIntervalSince($$0.updatedAt) >= threshold // gutted: the clock again@@the hourly digest measures silence on updatedAt again and announces live workers as stalled while the reaper leaves them alone \
 	rings/SR-00/QueenTaskSpec.swift@@lines.append(QueenBranchPolicy.ownershipRule(branch: branch))@@lines.append("")@@the specification stops telling the worker to leave the branch alone \
 	rings/SR-00/QueenObserver.swift@@observedWrites.forEach(consider)@@_ = observedWrites@@the observer ignores what git measured and trusts tool names again \
 	rings/SR-02/QueenBranchCommitter.swift@@guard !prefix.isEmpty, normalized.hasPrefix("\(prefix)/") else { return normalized }@@guard !prefix.isEmpty else { return normalized }@@a measured path is stripped whether or not it carries the prefix \

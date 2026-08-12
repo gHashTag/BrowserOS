@@ -183,13 +183,32 @@ enum QueenReviewDigest {
         return "\(Int(seconds / 86_400)) days ago"
     }
 
-    /// Tasks that have been running long enough to be suspicious.
+    /// Running bees that have stopped without saying so.
+    ///
+    /// The same question the reaper asks, through the same predicate. This used
+    /// to measure silence from `updatedAt` alone, which is a clock and not
+    /// evidence: `updatedAt` records the last time the Queen wrote bookkeeping,
+    /// not the last time the worker spoke. A bee that streamed for ninety
+    /// minutes never touched it, so the hourly digest announced it as stalled
+    /// in the same minute the reaper - reading the runner's facts - correctly
+    /// left it alone (#1247, #1248). One supervisor with two answers is worse
+    /// than either answer on its own: whichever the user reads, the other half
+    /// of the system is acting on the opposite belief.
+    ///
+    /// There is exactly one notion of silence in this project and it lives in
+    /// `QueenDelegationPolicy.hasGoneSilent`: no byte for `threshold`, and no
+    /// open stream. `QueenReviewScheduler`, `QueenBackgroundService` and
+    /// `QueenDelegationRegistry.stalled` all reach it through one of these two
+    /// call sites. Neither keeps a copy, so neither can drift.
     static func stalled(
         _ tasks: [DelegatedTask],
         now: Date,
         threshold: TimeInterval = QueenDelegationPolicy.stallThreshold
     ) -> [DelegatedTask] {
-        tasks.filter { $0.state == .running && now.timeIntervalSince($0.updatedAt) >= threshold }
+        tasks.filter {
+            $0.state == .running
+                && QueenDelegationPolicy.hasGoneSilent($0, now: now, threshold: threshold)
+        }
     }
 
     private static func timestamp(_ date: Date) -> String {

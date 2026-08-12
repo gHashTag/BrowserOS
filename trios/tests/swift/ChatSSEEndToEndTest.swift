@@ -51,7 +51,7 @@ struct ChatSSEEndToEndTests {
     /// Set just under the current count so ordinary edits do not trip it and a
     /// real loss does. Raise it when coverage grows; lowering it is a decision
     /// someone has to make on purpose, which is the entire point.
-    static let minimumChecks = 701  // 610 + 6 branch-publish notice (#1251) + 2 push-stall log mirror (#1251) + 1 repetition loop (#1251) + 2 log-before-notice ordering and stall interval (#1251) + 19 conflict-is-not-a-not-yet (#1252) + 15 merge-the-reviewed-commit (#1254) + 8 mergePayload/outcome pure-function extraction (#1254) + 10 cursor-is-a-cache (#1260) + 5 dispatch-inbox-entries-concurrently (#1150) + 3 inbox-poller-is-dev-variant-only (#1150) + 20 the reaper decides from evidence (#1139, #1247, #1248)
+    static let minimumChecks = 718  // 610 + 6 branch-publish notice (#1251) + 2 push-stall log mirror (#1251) + 1 repetition loop (#1251) + 2 log-before-notice ordering and stall interval (#1251) + 19 conflict-is-not-a-not-yet (#1252) + 15 merge-the-reviewed-commit (#1254) + 8 mergePayload/outcome pure-function extraction (#1254) + 10 cursor-is-a-cache (#1260) + 5 dispatch-inbox-entries-concurrently (#1150) + 3 inbox-poller-is-dev-variant-only (#1150) + 20 the reaper decides from evidence (#1139, #1247, #1248) + 17 the digest reads the same evidence as the reaper (#1247, #1248)
 
     static func check(_ condition: @autoclosure () -> Bool, _ name: String) {
         checksRun += 1
@@ -65,6 +65,13 @@ struct ChatSSEEndToEndTests {
 
     static func fail(_ name: String) {
         print("FAIL - \(name)")
+        // A check that ran and failed still RAN. Counting it only as a failure
+        // made a caught mutation *lower* checksRun, which tripped the coverage
+        // floor before the failure summary was ever printed - so the suite said
+        // "only 717 checks ran" instead of "1 of 718 test(s) failed", and the
+        // mutation harness read that as "the suite never ran" and scored three
+        // real catches as ERROR.
+        checksRun += 1
         failures += 1
     }
 
@@ -160,6 +167,7 @@ struct ChatSSEEndToEndTests {
         await runMergeTheReviewedCommit()
         await runStalledWorkerIsResumedBeforeCancelled()
         await runReaperDecidesFromEvidence()
+        await runDigestReadsTheSameEvidenceAsTheReaper()
         await runQueenTaskLifecycleCloses()
         await runPureQueenTypes()
         await runSelfAuditFindsPlantedDeadCode()
@@ -184,7 +192,12 @@ struct ChatSSEEndToEndTests {
             await runInterfaceDriftGuardCatchesSignatureMismatch()
         }
 
-        if checksRun < minimumChecks {
+        // The coverage floor answers "did a scenario vanish?", which is only a
+        // meaningful question when nothing failed. When something did fail, the
+        // failure is the news and must be printed first: the mutation harness
+        // scores on "N of M test(s) failed" and treats anything else as a suite
+        // that never ran.
+        if failures == 0 && checksRun < minimumChecks {
             print("\nFAIL - only \(checksRun) checks ran, expected at least \(minimumChecks).")
             print("Coverage was removed, or a scenario returned early without asserting.")
             exit(1)
@@ -4462,6 +4475,207 @@ struct ChatSSEEndToEndTests {
                 "1139: the stall clock alone would have left it looking busy for another hour"
             )
         }
+    }
+
+    // MARK: - Scenario: the digest reads the same evidence as the reaper
+    //
+    // `QueenReviewDigest.stalled` measured silence from `updatedAt` while
+    // `QueenDelegationRegistry.stalled` measured it from the facts the runner
+    // recorded. That is two answers to one question inside one supervisor: the
+    // hourly digest could announce a worker as stalled in the same minute the
+    // reaper - correctly - left it alone, because `updatedAt` is when the Queen
+    // last wrote bookkeeping and has nothing to do with when the worker last
+    // spoke. Whichever number the user believed, the other half of the system
+    // was acting on the opposite belief. Both now ask
+    // `QueenDelegationPolicy.hasGoneSilent`.
+    //
+    // Every check below calls the SHIPPED `QueenReviewDigest.stalled` and the
+    // SHIPPED `QueenReviewScheduler.reviewNow`. Nothing here re-states the
+    // rule, and that is the whole design of this scenario: the twenty checks
+    // above, named for the reaper's predicates, could not see the stream-open
+    // guard being deleted from `ChatViewModel.reapStalledWorkers`, because
+    // `reaperWouldTake` carries its own copy of that line and kept passing
+    // against the copy. A test that transcribes the code under test can only
+    // fail when the transcription is wrong. Gut the digest and these go red.
+
+    /// Catches what the scheduler posted.
+    ///
+    /// `report` is a non-isolated escaping closure, so the capture cannot be a
+    /// local `var` on the main actor. A lock-guarded box keeps the test free of
+    /// isolation ceremony that has nothing to do with what is being proven.
+    final class QueenDigestReportSink: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: String?
+
+        func record(_ message: String) {
+            lock.lock()
+            value = message
+            lock.unlock()
+        }
+
+        var message: String {
+            lock.lock()
+            defer { lock.unlock() }
+            return value ?? ""
+        }
+    }
+
+    /// Runs one real review pass over `registry` and returns what the Queen
+    /// posted.
+    ///
+    /// The scheduler is the caller that turns the digest's stalled list into a
+    /// sentence a human reads, so driving it proves the whole path instead of
+    /// the predicate alone. Wired exactly as `ChatViewModel` wires the shared
+    /// one, with a frozen clock in place of the timer.
+    private static func digestReport(
+        for registry: QueenDelegationRegistry,
+        now: Date
+    ) async -> String {
+        let sink = QueenDigestReportSink()
+        let scheduler = QueenReviewScheduler(interval: 3600, dateProvider: { now })
+        scheduler.tasks = { [registry] in registry.open }
+        scheduler.report = { message in sink.record(message) }
+        await scheduler.reviewNow()
+        return sink.message
+    }
+
+    static func runDigestReadsTheSameEvidenceAsTheReaper() async {
+        print("\n# Scenario: the hourly digest and the reaper answer one question")
+
+        typealias P = QueenDelegationPolicy
+
+        // ── A bee mid-answer: streaming for 90 minutes, nothing since ──
+        //
+        // The runner opened its stream and has never closed it. No registry
+        // write followed the dispatch, so `updatedAt` is still the dispatch
+        // time - the exact shape that made the old digest and the reaper
+        // disagree.
+        let quiet = reaperRegistry("digest-quiet")
+        guard let liveBee = reaperDispatch(
+            quiet, issue: 1247, worker: "queen-swift", owns: "docs"
+        ) else { return }
+        reaperStart(quiet, liveBee)
+        for minute in stride(from: 1.0, through: 90.0, by: 1.0) {
+            reaperByte(quiet, liveBee, at: reaperAt(minute))
+        }
+        let midAnswer = reaperAt(90 + 61)
+        guard let live = quiet.task(forConversation: liveBee.conversationId) else {
+            fail("the registry lost the streaming bee"); return
+        }
+
+        // Without this the fixture proves nothing: a case both rules answer the
+        // same way cannot show that the digest changed rules.
+        check(
+            midAnswer.timeIntervalSince(live.updatedAt) >= P.stallThreshold,
+            "the clock the digest used to read calls this bee stale, so this fixture can tell the two rules apart"
+        )
+        check(
+            P.isStreamOpen(live) && !P.hasGoneSilent(live, now: midAnswer),
+            "and the evidence says otherwise: the stream is open, so it is thinking rather than dead"
+        )
+        check(
+            QueenReviewDigest.stalled(quiet.open, now: midAnswer).isEmpty,
+            "a bee streaming quietly is NOT in the digest's stalled list"
+        )
+        check(
+            quiet.stalled(now: midAnswer).isEmpty,
+            "and the reaper leaves it alone, as it already did - the two now agree"
+        )
+        check(
+            QueenReviewDigest.stalled(quiet.open, now: midAnswer).map(\.issue.slug)
+                == quiet.stalled(now: midAnswer).map(\.issue.slug),
+            "digest and reaper name the same bees, because they ask the same predicate"
+        )
+
+        let quietReport = await digestReport(for: quiet, now: midAnswer)
+        check(
+            !quietReport.contains("shown no sign of life"),
+            "the Queen's hourly report does not announce a live worker as stalled"
+        )
+        check(
+            quietReport.hasPrefix(SystemNoticeClassifier.infoMarker),
+            "it goes out as information, not as a warning about a stall that is not happening"
+        )
+        check(
+            quietReport.contains("gHashTag/trios#1247"),
+            "and the bee is still in the report - described as working, not omitted"
+        )
+
+        // ── The other direction: the detector must still detect ──
+        let silent = reaperRegistry("digest-silent")
+        guard let deadBee = reaperDispatch(
+            silent, issue: 1248, worker: "queen-docs", owns: "rings"
+        ) else { return }
+        reaperStart(silent, deadBee)
+        for minute in stride(from: 1.0, through: 90.0, by: 1.0) {
+            reaperByte(silent, deadBee, at: reaperAt(minute))
+        }
+        reaperFinish(silent, deadBee, terminal: false, lastByteAt: reaperAt(90))
+
+        check(
+            QueenReviewDigest.stalled(silent.open, now: reaperAt(90 + 59)).isEmpty,
+            "59 minutes after the last byte the digest still waits the hour it promised"
+        )
+        check(
+            QueenReviewDigest.stalled(silent.open, now: reaperAt(90 + 61)).map(\.issue.slug)
+                == ["gHashTag/trios#1248"],
+            "a bee cut off and silent past the threshold IS in the digest's stalled list"
+        )
+        check(
+            silent.stalled(now: reaperAt(90 + 61)).map(\.issue.slug) == ["gHashTag/trios#1248"],
+            "and the reaper would take the same bee - one silence, not two"
+        )
+
+        let silentReport = await digestReport(for: silent, now: reaperAt(90 + 61))
+        check(
+            silentReport.contains("shown no sign of life"),
+            "the Queen says so in words: this one has stopped"
+        )
+        check(
+            silentReport.hasPrefix(SystemNoticeClassifier.warningMarker),
+            "and says it as a warning, which is what a stalled bee is"
+        )
+
+        // ── An orphan is not silence ──
+        //
+        // `hasGoneSilent` is about a worker that spoke and stopped. A task no
+        // runner ever started belongs to the orphan sweep, which skips the
+        // threshold entirely. Both lists must agree it is not theirs, or the
+        // digest announces a stall the reaper does not believe in.
+        let orphan = reaperRegistry("digest-orphan")
+        guard let ghost = reaperDispatch(
+            orphan, issue: 1139, worker: "queen-swift", owns: "docs"
+        ) else { return }
+        let soonAfter = reaperAt(0.05)
+        check(
+            orphan.task(forConversation: ghost.conversationId).map(P.wasNeverStarted) == true,
+            "1139: the ghost is on the record as never started"
+        )
+        check(
+            QueenReviewDigest.stalled(orphan.open, now: soonAfter).isEmpty
+                && orphan.stalled(now: soonAfter).isEmpty,
+            "1139: neither list calls a never-started task silent - that one is the orphan sweep's job"
+        )
+
+        // ── Only running bees ──
+        //
+        // A result waiting for review has been quiet for hours by design.
+        // Announcing it as stalled would teach the user to ignore the word.
+        let reviewing = reaperRegistry("digest-review")
+        guard let done = reaperDispatch(
+            reviewing, issue: 1250, worker: "queen-swift", owns: "docs"
+        ) else { return }
+        reaperStart(reviewing, done)
+        reaperByte(reviewing, done, at: reaperAt(1))
+        reaperFinish(reviewing, done, terminal: true, lastByteAt: reaperAt(1))
+        check(
+            reviewing.transition(taskID: done.id, to: .awaitingReview),
+            "the finished bee moves to review"
+        )
+        check(
+            QueenReviewDigest.stalled(reviewing.open, now: reaperAt(1 + 600)).isEmpty,
+            "work waiting on the user is not stalled however long it waits"
+        )
     }
 
     static func runQueenTaskLifecycleCloses() async {
