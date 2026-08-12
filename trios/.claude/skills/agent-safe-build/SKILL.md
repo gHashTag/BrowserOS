@@ -432,9 +432,20 @@ a test that compared the reaper to its own transcription of the reaper.
 
 ## Delegate the thinking, run the heavy work yourself
 
-Eight subagents died in one day to `API Error: Stream idle timeout - no chunks
-received`. The correlation is not subtle: every death was on a task whose
-critical step is a single long, heavy, silent command —
+Eleven subagents died in one day to `API Error: Stream idle timeout - no chunks
+received`.
+
+**Correction, written an hour after the paragraph below.** This section first
+claimed the correlation with heavy commands was "not subtle". Then three
+read-only auditors — no builds, no suite runs, no load — died *simultaneously*,
+about forty-three minutes in. Three parallel agents failing at the same moment
+on a task with no heavy step is not explained by what any one of them was doing.
+Whatever this is, it is at least partly global: session-level, rate-related, or
+in the API. The heavy-command correlation below is real for the first eight
+deaths and is NOT the whole story, and I published it as though it were.
+
+The first eight deaths were all on tasks whose critical step is a single long,
+heavy, silent command —
 
 - `make shake` (29 loaded suite runs, ~25 min, load average 190+, 109 GB of I/O)
   killed its agent twice, on two different attempts at the same task;
