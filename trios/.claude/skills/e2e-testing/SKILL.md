@@ -714,3 +714,43 @@ Cost of the whole table: 21 s → 42-51 s warm, for ten rows across three mutati
 operations. The incremental state lives in a directory *beside* the app build's
 objects, never inside it — mixing a `-typecheck` dependency graph into the
 objects' graph would corrupt the build the gate is imitating.
+
+## Ask a green threshold why it is green, not only whether it can go red
+
+`XCTEST_ERROR_CEILING` was 2. I checked it the way this file recommends: plant
+an error in a file the build actually reaches, watch the target go red, restore,
+watch it go green. Falsifiable, driven, recorded as sound.
+
+It was measuring wreckage. The app's source list was written twice — in
+`build.sh` and in `Package.swift` at the git root — and had diverged by 46
+paths. SwiftPM stopped at `cannot find type SessionGuard in scope`, produced
+exactly 2 errors, and the ceiling had been set to exactly 2. The entire XCTest
+suite had never once compiled, so nothing it asserts had ever been true or
+false. With the list unified the real number is **23**, in 4 of 42 test files,
+none in the library — a suite that drifted behind Swift 6 concurrency and API
+changes while silently not building.
+
+Worse, one manifest entry named `BR-OUTPUT/HotkeyAnalytics.swift`, deleted eight
+months of commits earlier. SwiftPM does not fail on a missing source: it prints
+`Invalid Source ...: File not found.` as a **warning** and builds on. So
+`HotkeyAnalyticsEncryptionTests.swift`, which asserts hotkey analytics are
+encrypted at rest, had been asserting nothing.
+
+**A threshold equal to the current measurement is a snapshot, not a threshold.**
+Falsifiability is necessary and not sufficient. Two questions, always:
+
+1. What event makes this red? (this file has said so for days)
+2. **Why is it green at exactly this number?** If the answer is "because that is
+   what the tree measures today", the number encodes whatever was broken when it
+   was written — and it will be tuned again the next time something breaks.
+
+I had written that warning into the brief for someone else the same day, then
+walked past the instance in front of me, because I checked property 1 and never
+asked property 2.
+
+The structural fix is the same as everywhere else this week: one list, read not
+copied. `build.sh` grew `TRIOS_PRINT_SOURCES=1` beside its existing flag printer,
+`Package.swift` matches what it prints, and `make sources-drift` (0.1 s, in
+`check`) fails on four conditions — the sets disagree, an entry names a file
+that does not exist, a declared exception is stale, or either list comes back
+empty. That last one matters: an empty list agrees with everything.
