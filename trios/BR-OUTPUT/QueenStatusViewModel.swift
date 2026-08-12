@@ -291,7 +291,7 @@ final class QueenStatusViewModel: ObservableObject {
 
     private func checkSelfImprovementAsync() async {
         let fm = FileManager.default
-        let auditDir = "\(projectRoot)/.trinity/audit"
+        let auditDir = "\(ProjectPaths.trinity)/audit"
         var findings = 0
         var lastAudit: Date? = nil
         var passed = true
@@ -310,7 +310,7 @@ final class QueenStatusViewModel: ObservableObject {
             }
         }
 
-        let budgetPath = "\(projectRoot)/.trinity/state/safety_budget.json"
+        let budgetPath = "\(ProjectPaths.trinity)/state/safety_budget.json"
         var budgetText = "-"
         if let data = try? Data(contentsOf: URL(fileURLWithPath: budgetPath)),
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
