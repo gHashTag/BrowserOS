@@ -471,3 +471,40 @@ finishes; it is not in `check`, so nobody had run it. Four undrained `Pipe()`s
 turned out to be a real deadlock hazard and were fixed — and the hang survived
 them, so that was not the cause. Silence about a check nobody runs is how both
 of those lived.
+
+## `try? p.run()` followed by `waitUntilExit()` is a deadlock, not a fallback
+
+`make drift-guard` never finished. Two runs, seven and eleven minutes, killed by
+hand; `sample` gave the same stack both times — parked in `waitUntilExit` inside
+a local `git` helper — and `ps` showed no live git process.
+
+The cause, once instrumented (print the command before and after each call):
+
+    GITPROBE start: init -q -b main      <- and no matching "done", ever
+
+The scratch repository's directory was never created. `NSTemporaryDirectory() +
+"trios-drift-<uuid>"` produces a *path*; the only `createDirectory` in the
+scenario lives inside `writeFile`, which runs later. So `git init` got a
+`currentDirectoryURL` that did not exist, `Process.run()` threw, `try?` swallowed
+the throw — and `waitUntilExit()` then blocked forever on a child that had never
+been born.
+
+**Never write `try? p.run()` above `p.waitUntilExit()`.** The `try?` turns a
+loud, instant failure into a silent permanent one: no child, no exit, no news.
+Either propagate the error or skip the wait. And `ps` showing no child while the
+parent waits is the signature of exactly this bug.
+
+Two things this cost, both worth remembering:
+
+- The check had never once run to completion, so nothing it asserts had ever
+  been true or false. On its first finishing run it went straight to
+  `2 of 722 test(s) failed` — the drift guard does not catch the drift it exists
+  for, or its fixture has rotted. Either way that was invisible behind the hang.
+- It is not in `make check`, which is why a target that hangs forever survived in
+  the repository. **A check nobody runs is indistinguishable from one that does
+  not work**, and the way to tell them apart is to run it once on purpose.
+
+Method note: instrumenting was worth more than three theories. Undrained pipes
+(a real hazard — four were found and fixed) and gpg signing were both plausible
+and both wrong. One `print` before and after each call named the culprit in a
+single run.
