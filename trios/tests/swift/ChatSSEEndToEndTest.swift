@@ -6397,6 +6397,18 @@ struct ChatSSEEndToEndTests {
         }
 
         let root = NSTemporaryDirectory() + "trios-drift-\(UUID().uuidString)"
+        // Create it before anything runs in it. This line was missing, so the
+        // very first `git init` got a currentDirectoryURL that did not exist,
+        // Process.run() threw, `try?` swallowed the throw, and waitUntilExit()
+        // then blocked forever on a child that had never been born -- which is
+        // why `make drift-guard` never finished and why `ps` showed no live
+        // git (#1267). The directory is created by writeFile() further down,
+        // but the first git call happens before any file is written.
+        guard (try? FileManager.default.createDirectory(
+            atPath: root, withIntermediateDirectories: true)) != nil else {
+            fail("drift guard could not create its scratch repo at \(root)")
+            return
+        }
         defer { try? FileManager.default.removeItem(atPath: root) }
 
         func git(_ args: [String]) {
@@ -6406,7 +6418,14 @@ struct ChatSSEEndToEndTests {
             p.currentDirectoryURL = URL(fileURLWithPath: root)
             p.standardOutput = FileHandle.nullDevice
             p.standardError = FileHandle.nullDevice
-            try? p.run()
+            // Do NOT write `try? p.run()` here. Swallowing the launch error and
+            // then waiting is the deadlock above: no child, no exit, no news.
+            do {
+                try p.run()
+            } catch {
+                fail("drift guard could not run git \(args.joined(separator: " ")): \(error)")
+                return
+            }
             p.waitUntilExit()
         }
 
