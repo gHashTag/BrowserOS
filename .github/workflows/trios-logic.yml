@@ -11,6 +11,8 @@ on:
       - 'trios/rings/**'
       - 'trios/tests/**'
       - 'trios/agent-server/apps/server/src/agent/**'
+      - 'trios/Makefile'
+      - 'trios/tests/fixtures/**'
       - '.github/workflows/trios-logic.yml'
 
 jobs:
@@ -29,6 +31,19 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install SQLCipher
         run: brew install sqlcipher
+      # The fast gates: seconds each, no build, no GUI, no provider. They were
+      # local-only until now, which meant "when was this last run?" had no
+      # answer off this one machine - and that question is what found a guard
+      # that had never once run to completion.
+      - name: Fast gates (shape, parse, guards, empty sources, keychain doors)
+        working-directory: trios
+        run: |
+          make make-dollars
+          make empty-sources
+          make keychain-doors
+          make finish-mark-order
+          make guard-shapes
+          make parse-tests
       - name: Chat SSE, cassette replay, observer, salience learner
         working-directory: trios
         run: bash tests/swift/run_chat_sse_e2e.sh
