@@ -508,3 +508,43 @@ Method note: instrumenting was worth more than three theories. Undrained pipes
 (a real hazard — four were found and fixed) and gpg signing were both plausible
 and both wrong. One `print` before and after each call named the culprit in a
 single run.
+
+## One missing flag, and the guard could not see the case it exists for
+
+`make drift-guard` builds a scratch repo where one branch changes a signature
+and another adds a caller using the old one, then asserts the combined tree does
+not compile. It reported success. The tree, extracted and listed, explained why:
+
+    Sources/App contains: App.swift          <- Caller.swift is missing
+    Sources/Lib/Lib.swift: greet(_ name: String, _ greeting: String)
+
+Only the signature branch made it in. The overlay staged each changed path with
+
+    git update-index --cacheinfo <mode>,<sha>,<path>
+
+and **without `--add`, git refuses any path not already in the index**. Files a
+branch *modifies* land; files a branch *adds* are silently dropped. The return
+value was discarded with `_ =`, so nothing said so.
+
+The consequence is the whole point of the guard: the commonest two-bee conflict
+is exactly "one adds a caller, another changes the signature it calls", and that
+is precisely the shape it could not see. One word — `--add` — and it catches it:
+`All ChatSSEEndToEnd tests passed (722 checks)`, first green run in its life.
+
+Three method notes, each of which cost a wrong turn today:
+
+- **Instrument, don't theorise.** Undrained pipes, gpg signing, and tree size
+  were all plausible causes of the earlier hang and all wrong; one `print`
+  before and after each git call named it in a single run. The same again here:
+  printing the extracted directory listing settled in one run what three
+  readings of the code had not.
+- **Check the exit status of the thing you are timing or judging**, not of the
+  pipeline. `swift build 2>&1 | tail -3; echo $?` reports `tail`'s status — it
+  told me the reproduction built when it had failed.
+- **Count occurrences before replacing text.** Twice today a replacement took
+  the first of several identical helpers and fixed the wrong one, both times
+  leaving a green suite and an unfixed bug.
+
+And the standing lesson underneath: `drift-guard` is not in `make check`, so
+nobody ran it, so a guard that could not see its own subject survived for
+months. A check nobody runs is indistinguishable from one that does not work.
