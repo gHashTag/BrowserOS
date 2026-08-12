@@ -797,7 +797,15 @@ finish-mark-order:
 	else \
 		echo "  ok   - bad fixture correctly rejected"; \
 	fi; \
-	if [ $$fail -ne 0 ]; then exit 1; fi
+	: "The bracketed summary is the verdict a machine reads: mutants-guard \
+	   scores a row on positive evidence, not on the exit status alone, \
+	   because a target that dies before it checks anything also exits \
+	   non-zero.  Both lines, or this target cannot be an oracle."; \
+	if [ $$fail -ne 0 ]; then \
+		echo "[FAIL] the finish-mark order is broken"; \
+		exit 1; \
+	fi; \
+	echo "[OK] the completed-turn mark precedes the deferred Task in onFinish"
 
 # --- Load-bearing guard shapes -----------------------------------------
 #
@@ -924,6 +932,7 @@ guard-shapes:
 	if [ $$fail -eq 0 ]; then \
 		echo "[OK] $$n load-bearing guards present, $$n broken fixtures rejected"; \
 	else \
+		echo "[FAIL] a load-bearing guard is gone, or a broken fixture stopped being rejected"; \
 		exit 1; \
 	fi
 
@@ -1156,7 +1165,6 @@ CASSETTE_BRANCHES := queen/1086-cassette-*
 SWEEP_CANARY := queen/0-sweep-canary
 
 cassettes:
-	@pkill -x trios-dev 2>/dev/null || true
 	@pkill -f "trios-dev.app/Contents/MacOS" 2>/dev/null || true
 	@sleep 2
 	@: "A branch that looks like a delegation's real work, planted so the sweep \
@@ -1204,7 +1212,6 @@ cassettes:
 		else \
 			echo "  FAIL - $$label (trios-dev ran but $$marker never appeared in the log)"; fail=1; \
 		fi; \
-		pkill -x trios-dev 2>/dev/null || true; \
 		pkill -f "trios-dev.app/Contents/MacOS" 2>/dev/null || true; \
 		sleep 2; \
 	done; \
@@ -1293,7 +1300,6 @@ chat-probe:
 # probed is not verified. This target is the whole loop, so neither step gets
 # skipped.
 restart:
-	@pkill -x trios-dev 2>/dev/null || true
 	@pkill -f "trios-dev.app/Contents/MacOS" 2>/dev/null || true
 	@sleep 2
 	@open "$(DEV_APP)"
@@ -1536,6 +1542,12 @@ xctest:
 #   needs no confirmation run: those targets are deterministic file readers
 #   with no build, no network and no clock, so the flake rule the SSE oracle
 #   needs would only double the cost.
+#
+#   Since built and filled out: guard-shapes and finish-mark-order are rows
+#   and are driven; make-dollars is NOT, and the sketch was wrong to list it -
+#   a row that mutates the file it is stored in cannot report STALE or repair
+#   a leftover, because its own table entry is a second copy of the needle it
+#   searches for.  The reasoning is written out above MUTANTS_GUARD.
 #
 #   Two would still not fit even that.  empty-sources needs an operation other
 #   than substitution - smallest form, a sentinel replacement such as
@@ -1845,8 +1857,8 @@ mutants-logic:
 # changed while the harness held it mutated, the mutation is LEFT in place and
 # named, because restoring would silently revert whoever wrote to it.
 #
-# The two rows below are the two the audit measured as impossible for the SSE
-# table and trivial here:
+# The first two rows below are the two the audit measured as impossible for the
+# SSE table and trivial here:
 #
 #   keychain-doors  A real SecItemCopyMatching call in a file that imports
 #                   Security and is not on KEYCHAIN_ALLOWLIST.  Against the
@@ -1860,8 +1872,59 @@ mutants-logic:
 #                   SURVIVED.  A syntax error in a file nobody compiles is
 #                   invisible to a suite and plain to a parser.
 #
-# empty-sources is deliberately NOT here: a row is one text substitution and
-# cannot take a file to zero bytes.  It keeps its red-driver in check-selftest.
+# The next two are the standing checks whose red state a substitution CAN
+# express.  Both needed the same one-line change to their oracle first: they
+# printed `  ok` and `  FAIL`, never a bracketed verdict, so the positive-
+# evidence rule above could not read them and every row against them would
+# have scored ERROR.  A target that wants to be an oracle has to say [OK] or
+# [FAIL] out loud.
+#
+#   finish-mark-order  The completed-turn mark deleted from runner.onFinish.
+#                      Note WHICH arm this drives.  The literal #1248
+#                      regression - the call moving INSIDE the deferred Task -
+#                      is already driven on every run by the target's own
+#                      fixture, and cannot be a row anyway: moving a line is
+#                      two edits and a row is one substitution, with no way to
+#                      write the newline between them.  What no fixture can
+#                      show is that the arm reading the REAL source is still
+#                      wired to the real source; that is what this row scores,
+#                      and deleting the call is the smallest edit that asks it.
+#
+#   guard-shapes       Guard 6 removed from ChatViewModel.swift: the reaper's
+#                      `guard !isStreamOpen(current) else { continue }` becomes
+#                      a bare `_ = isStreamOpen(current)` - predicate still
+#                      consulted, answer thrown away, live workers taken
+#                      mid-answer.  Chosen over the other six because it is the
+#                      one whose deletion still COMPILES: it is a standalone
+#                      statement, so no orphaned brace is left behind.  A
+#                      compiler cannot see a missing guard, which is the whole
+#                      reason guard-shapes exists; here that is measured, not
+#                      argued.
+#
+# Two standing checks with a red state are still NOT here, each for its own
+# reason:
+#
+#   empty-sources  A row is one text substitution and cannot take a file to
+#                  zero bytes.  It keeps its red-driver in check-selftest,
+#                  which truncates a real source with `: > file`.
+#
+#   make-dollars   Its only input is this Makefile, so its row would have to
+#                  mutate the file the harness is executing - and that is not
+#                  the objection, since the parent make has already parsed it
+#                  and a mutation chosen to keep parsing is survivable.  The
+#                  objection is self-reference: the row's needle and
+#                  replacement would be STORED in the same file they search,
+#                  so `needle in file` and `replacement in file` are both
+#                  permanently true, and the two branches that read them stop
+#                  working - a stale row could never report STALE (it would
+#                  silently mutate its own table entry instead, the first
+#                  occurrence being the one below), and the leftover-mutation
+#                  repair could never fire.  A row that cannot go stale out
+#                  loud is a row that forges verdicts later.  make-dollars
+#                  also already has a driven red-driver in check-selftest,
+#                  which appends a single-dollar recipe line to a COPY of the
+#                  Makefile - the same event, scored where the oracle is the
+#                  check itself and the table has no copy of the string.
 #
 # Needle and replacement are chosen so that neither contains the other,
 # otherwise the leftover-mutation branch cannot tell a half-finished run from
@@ -1874,7 +1937,9 @@ mutants-logic:
 # broken source is buying its verdict with somebody else's build.
 MUTANTS_GUARD := \
 	rings/SR-02/AgentMemoryService.swift@@var bytes = [UInt8](repeating: 0, count: 32)@@_ = SecItemCopyMatching([kSecClass as String: kSecClassGenericPassword] as CFDictionary, nil); var bytes = [UInt8](repeating: 0, count: 0x20)@@keychain-doors@@a real keychain call is opened in a file that is not on the allowlist \
-	tests/swift/queen_delegation_test.swift@@static func issueParsing() {@@static issueParsing() {@@parse-tests@@a test source the app build never compiles loses its func keyword
+	tests/swift/queen_delegation_test.swift@@static func issueParsing() {@@static issueParsing() {@@parse-tests@@a test source the app build never compiles loses its func keyword \
+	rings/SR-02/ChatViewModel.swift@@delegationRegistry.recordCompletedTurn(taskID: task.id)@@_ = task.id // gutted: the turn is never marked complete@@finish-mark-order@@the completed-turn mark is dropped from the finish callback \
+	rings/SR-02/ChatViewModel.swift@@guard !QueenDelegationPolicy.isStreamOpen(current) else { continue }@@_ = QueenDelegationPolicy.isStreamOpen(current) // gutted: the answer is thrown away@@guard-shapes@@a load-bearing guard disappears from its file while the tree still compiles
 
 .PHONY: mutants-guard
 mutants-guard:
