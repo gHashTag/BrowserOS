@@ -46,11 +46,14 @@ struct InlineMarkdownText: View {
     let isUser: Bool
 
     var body: some View {
-        if let attributed = renderAttributed() {
-            Text(attributed)
-        } else {
-            manualMarkdown()
-        }
+        Text(renderedText)
+    }
+
+    /// Primary path: Foundation's markdown parser. Fallback: `manualMarkdown()`,
+    /// which builds the string by hand with `styledText(_:)` instead of the
+    /// `Text` concatenations removed in #1272.
+    private var renderedText: AttributedString {
+        renderAttributed() ?? manualMarkdown()
     }
 
     private func renderAttributed() -> AttributedString? {
@@ -61,25 +64,35 @@ struct InlineMarkdownText: View {
         return try? AttributedString(markdown: text, options: options)
     }
 
-    @ViewBuilder
-    private func manualMarkdown() -> some View {
-        let segments = parseInline(text)
-        if segments.count == 1, case .plain(let s) = segments.first {
-            Text(s)
-        } else {
-            segments.reduce(Text("")) { acc, seg in
-                switch seg {
-                case .plain(let s):
-                    return acc + Text(s)
-                case .bold(let s):
-                    return acc + Text(s).fontWeight(.bold)
-                case .italic(let s):
-                    return acc + Text(s).italic()
-                case .code(let s):
-                    return acc + Text(s).font(.system(.body, design: .monospaced))
-                }
-            }
+    /// Fallback for when `AttributedString(markdown:)` fails. Built entirely on
+    /// `AttributedString` (#1272): the deprecated `Text` `+` concatenations are
+    /// gone, and every segment becomes a run carrying its styling as
+    /// `inlinePresentationIntent` -- the same representation the primary path
+    /// above produces, so both paths render through one `Text(attributed)`.
+    private func manualMarkdown() -> AttributedString {
+        var result = AttributedString()
+        for segment in parseInline(text) {
+            result += styledText(for: segment)
         }
+        return result
+    }
+
+    /// One parsed segment as attributed text. `plain` carries no attributes;
+    /// `bold`, `italic` and `code` carry the intents `Text` renders as bold,
+    /// italic and monospaced respectively.
+    private func styledText(for segment: InlineSegment) -> AttributedString {
+        var styled = AttributedString(segment.text)
+        switch segment {
+        case .plain:
+            break
+        case .bold:
+            styled.inlinePresentationIntent = .stronglyEmphasized
+        case .italic:
+            styled.inlinePresentationIntent = .emphasized
+        case .code:
+            styled.inlinePresentationIntent = .code
+        }
+        return styled
     }
 }
 
@@ -88,6 +101,13 @@ private enum InlineSegment {
     case bold(String)
     case italic(String)
     case code(String)
+
+    var text: String {
+        switch self {
+        case .plain(let s), .bold(let s), .italic(let s), .code(let s):
+            return s
+        }
+    }
 }
 
 private func parseInline(_ text: String) -> [InlineSegment] {
