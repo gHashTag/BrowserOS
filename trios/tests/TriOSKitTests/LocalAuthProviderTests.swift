@@ -10,10 +10,19 @@ actor MockLocalAuthTokenStore: LocalAuthTokenStore {
     private(set) var writeCount = 0
     private(set) var refreshReadCount = 0
     private(set) var refreshWriteCount = 0
-    nonisolated var shouldFailRead = false
-    nonisolated var shouldFailWrite = false
-    nonisolated var shouldFailRefreshRead = false
-    nonisolated var shouldFailRefreshWrite = false
+    // These were declared `nonisolated var`, which the compiler refuses on a
+    // mutable stored property of an actor - the reason this file never built.
+    // They stay actor-isolated and are flipped through setters so a test can
+    // still arm a store failure; the failure behaviour below is unchanged.
+    private var shouldFailRead = false
+    private var shouldFailWrite = false
+    private var shouldFailRefreshRead = false
+    private var shouldFailRefreshWrite = false
+
+    func setShouldFailRead(_ value: Bool) { shouldFailRead = value }
+    func setShouldFailWrite(_ value: Bool) { shouldFailWrite = value }
+    func setShouldFailRefreshRead(_ value: Bool) { shouldFailRefreshRead = value }
+    func setShouldFailRefreshWrite(_ value: Bool) { shouldFailRefreshWrite = value }
 
     func read() async throws -> String? {
         readCount += 1
@@ -56,11 +65,15 @@ final class LocalAuthProviderTests: XCTestCase {
         return URLSession(configuration: .mockProtocolConfiguration())
     }
 
+    // The default used to be written `refreshToken: String = "refresh-\(token)"`,
+    // which cannot compile: a default argument cannot see another parameter.
+    // The derived-from-the-token default is preserved by deriving it in the body.
     private func makeTokenResponse(
         _ token: String,
-        refreshToken: String = "refresh-\(token)",
+        refreshToken: String? = nil,
         expiresInSeconds: TimeInterval = 900
     ) -> Data {
+        let refreshToken = refreshToken ?? "refresh-\(token)"
         let issuedAt = ISO8601DateFormatter().string(from: Date())
         let expiresAt = ISO8601DateFormatter().string(from: Date().addingTimeInterval(expiresInSeconds))
         let json = """
@@ -78,9 +91,10 @@ final class LocalAuthProviderTests: XCTestCase {
 
     private func makeRefreshResponse(
         accessToken: String,
-        refreshToken: String = "refresh-\(accessToken)",
+        refreshToken: String? = nil,
         expiresInSeconds: TimeInterval = 900
     ) -> Data {
+        let refreshToken = refreshToken ?? "refresh-\(accessToken)"
         let issuedAt = ISO8601DateFormatter().string(from: Date())
         let expiresAt = ISO8601DateFormatter().string(from: Date().addingTimeInterval(expiresInSeconds))
         let json = """
@@ -99,17 +113,22 @@ final class LocalAuthProviderTests: XCTestCase {
         return json.data(using: .utf8)!
     }
 
+    // LocalAuthProvider's parameter is `fallbackMaxAge` and always has been
+    // (rings/SR-01/LocalAuthProvider.swift:144, same commit that added this
+    // file). The helper called it `proactiveRefreshMaxAge`, so every call here
+    // was an "extra argument" the API never accepted. The name now matches the
+    // thing being driven; the value still reaches the same knob.
     private func makeProvider(
         store: MockLocalAuthTokenStore = MockLocalAuthTokenStore(),
         monitor: LocalAuthMonitor = LocalAuthMonitor(),
-        proactiveRefreshMaxAge: TimeInterval = LocalAuthMonitor.proactiveRefreshInterval
+        fallbackMaxAge: TimeInterval = LocalAuthMonitor.proactiveRefreshInterval
     ) -> LocalAuthProvider {
         LocalAuthProvider(
             baseURL: baseURL,
             session: makeMockSession(),
             tokenStore: store,
             monitor: monitor,
-            proactiveRefreshMaxAge: proactiveRefreshMaxAge
+            fallbackMaxAge: fallbackMaxAge
         )
     }
 
@@ -121,7 +140,7 @@ final class LocalAuthProviderTests: XCTestCase {
 
     func testValidTokenReturnsMemoryCacheWithoutStoreOrNetwork() async throws {
         let store = MockLocalAuthTokenStore()
-        await store.write("cached-token")
+        try await store.write("cached-token")
 
         let provider = makeProvider(store: store)
 
@@ -141,7 +160,7 @@ final class LocalAuthProviderTests: XCTestCase {
 
     func testValidTokenFallsBackToStoreWhenMemoryCacheEmpty() async throws {
         let store = MockLocalAuthTokenStore()
-        await store.write("keychain-token")
+        try await store.write("keychain-token")
 
         let provider = makeProvider(store: store)
 
@@ -178,7 +197,7 @@ final class LocalAuthProviderTests: XCTestCase {
 
     func testForcedRefreshFetchesNewTokenAndUpdatesStore() async throws {
         let store = MockLocalAuthTokenStore()
-        await store.write("old-token")
+        try await store.write("old-token")
 
         MockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
@@ -236,8 +255,8 @@ final class LocalAuthProviderTests: XCTestCase {
 
     func testStoreReadFailureFallsThroughToNetworkFetch() async throws {
         let store = MockLocalAuthTokenStore()
-        await store.write("ignored-token")
-        store.shouldFailRead = true
+        try await store.write("ignored-token")
+        await store.setShouldFailRead(true)
 
         MockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
@@ -257,7 +276,7 @@ final class LocalAuthProviderTests: XCTestCase {
 
     func testStoreWriteFailureStillReturnsFetchedToken() async throws {
         let store = MockLocalAuthTokenStore()
-        store.shouldFailWrite = true
+        await store.setShouldFailWrite(true)
 
         MockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
@@ -306,7 +325,7 @@ final class LocalAuthProviderTests: XCTestCase {
 
     func testProactiveRefreshTriggersWhenTokenIsStale() async throws {
         let store = MockLocalAuthTokenStore()
-        await store.write("stale-token")
+        try await store.write("stale-token")
 
         var fetchCount = 0
         MockURLProtocol.requestHandler = { request in
@@ -322,7 +341,7 @@ final class LocalAuthProviderTests: XCTestCase {
 
         let monitor = LocalAuthMonitor()
         // Prime the cache; then a threshold of 0 forces proactive refresh.
-        let provider = makeProvider(store: store, monitor: monitor, proactiveRefreshMaxAge: 0)
+        let provider = makeProvider(store: store, monitor: monitor, fallbackMaxAge: 0)
         let first = try await provider.validToken(forcingRefresh: false)
         XCTAssertEqual(first, "stale-token")
 
@@ -336,7 +355,7 @@ final class LocalAuthProviderTests: XCTestCase {
 
     func testProactiveRefreshDoesNotTriggerForFreshToken() async throws {
         let store = MockLocalAuthTokenStore()
-        await store.write("fresh-token")
+        try await store.write("fresh-token")
 
         var fetchCount = 0
         MockURLProtocol.requestHandler = { request in
@@ -350,7 +369,7 @@ final class LocalAuthProviderTests: XCTestCase {
             return (response, self.makeTokenResponse("other-token"))
         }
 
-        let provider = makeProvider(store: store, proactiveRefreshMaxAge: 600)
+        let provider = makeProvider(store: store, fallbackMaxAge: 600)
         let first = try await provider.validToken(forcingRefresh: false)
         XCTAssertEqual(first, "fresh-token")
 
@@ -361,8 +380,8 @@ final class LocalAuthProviderTests: XCTestCase {
 
     func testResetClearsCacheStoreAndMonitor() async throws {
         let store = MockLocalAuthTokenStore()
-        await store.write("cached-token")
-        await store.writeRefreshToken("cached-refresh")
+        try await store.write("cached-token")
+        try await store.writeRefreshToken("cached-refresh")
 
         MockURLProtocol.requestHandler = { request in
             let response = HTTPURLResponse(
@@ -412,13 +431,16 @@ final class LocalAuthProviderTests: XCTestCase {
 
         let storedRefresh = await store.storedRefreshToken
         XCTAssertEqual(storedRefresh, "refresh")
-        XCTAssertEqual(await store.refreshWriteCount, 1)
+        // XCTAssertEqual's arguments are non-async autoclosures, so the actor
+        // read has to happen before the assertion, not inside it.
+        let refreshWrites = await store.refreshWriteCount
+        XCTAssertEqual(refreshWrites, 1)
     }
 
     func testProactiveRefreshUsesRefreshEndpointWhenRefreshTokenStored() async throws {
         let store = MockLocalAuthTokenStore()
-        await store.write("stale-access")
-        await store.writeRefreshToken("stored-refresh")
+        try await store.write("stale-access")
+        try await store.writeRefreshToken("stored-refresh")
 
         var requestPaths: [String] = []
         MockURLProtocol.requestHandler = { request in
@@ -436,7 +458,7 @@ final class LocalAuthProviderTests: XCTestCase {
         }
 
         let monitor = LocalAuthMonitor()
-        let provider = makeProvider(store: store, monitor: monitor, proactiveRefreshMaxAge: 0)
+        let provider = makeProvider(store: store, monitor: monitor, fallbackMaxAge: 0)
 
         let first = try await provider.validToken(forcingRefresh: false)
         XCTAssertEqual(first, "stale-access")
@@ -455,8 +477,8 @@ final class LocalAuthProviderTests: XCTestCase {
 
     func testRefreshFamilyRevokedFallsBackToBootstrap() async throws {
         let store = MockLocalAuthTokenStore()
-        await store.write("stale-access")
-        await store.writeRefreshToken("stored-refresh")
+        try await store.write("stale-access")
+        try await store.writeRefreshToken("stored-refresh")
 
         var requestPaths: [String] = []
         MockURLProtocol.requestHandler = { request in
@@ -474,7 +496,7 @@ final class LocalAuthProviderTests: XCTestCase {
         }
 
         let monitor = LocalAuthMonitor()
-        let provider = makeProvider(store: store, monitor: monitor, proactiveRefreshMaxAge: 0)
+        let provider = makeProvider(store: store, monitor: monitor, fallbackMaxAge: 0)
 
         let first = try await provider.validToken(forcingRefresh: false)
         XCTAssertEqual(first, "stale-access")

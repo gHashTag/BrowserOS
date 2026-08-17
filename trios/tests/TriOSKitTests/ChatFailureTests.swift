@@ -130,6 +130,10 @@ final class ChatFailureTests: XCTestCase {
 
     // MARK: - Model fallback helpers
 
+    // ModelConfigurationStore is @MainActor; every other test that touches it
+    // is annotated and these two were not, which is the whole of their five
+    // isolation errors. The assertions are untouched.
+    @MainActor
     func testFallbackModelsExcludeCurrent() async {
         let defaults = UserDefaults(suiteName: "test-fallback")!
         defer { defaults.removePersistentDomain(forName: "test-fallback") }
@@ -143,6 +147,7 @@ final class ChatFailureTests: XCTestCase {
         XCTAssertFalse(store.fallbackSuggestion.isEmpty)
     }
 
+    @MainActor
     func testSelectNextModelAdvancesList() async {
         let defaults = UserDefaults(suiteName: "test-next-model")!
         defer { defaults.removePersistentDomain(forName: "test-next-model") }
@@ -198,8 +203,11 @@ final class ChatFailureTests: XCTestCase {
         store.selectProvider(.anthropic)
         store.selectModel("claude-sonnet-4-5")
 
+        // ModelHealthResult stopped being the enum and became a struct that
+        // carries one (plus latency and quota), so the case lives on `.health`.
+        // Same case, same reason, same failure message.
         let healthStatus = await store.healthStatus(for: "claude-opus-4-5")
-        if case .unavailable(let reason) = healthStatus {
+        if case .unavailable(let reason) = healthStatus.health {
             XCTAssertTrue(reason.contains("disabled"))
         } else {
             XCTFail("Expected unavailable due to disabled catalog status, got \(healthStatus)")
@@ -218,7 +226,30 @@ final class ChatFailureTests: XCTestCase {
             ]
         ] as [String: Any]
         let data = try JSONSerialization.data(withJSONObject: json)
-        let status = ProviderStatusService(ttl: 0)
+
+        // The fixture above was built and then dropped on the floor: the
+        // service was constructed with the default URLSession.shared, so this
+        // "catalog parsing" test issued two live GETs to openrouter.ai and
+        // asserted .present/.disabled against whatever the internet answered.
+        // The unused-`data` warning was the only trace of it. Serving the
+        // fixture through MockURLProtocol is what makes the two assertions
+        // below statements about parseCatalog instead of about the network.
+        MockURLProtocol.requestHandler = { request in
+            XCTAssertEqual(request.url?.absoluteString, "https://openrouter.ai/api/v1/models")
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            )!
+            return (response, data)
+        }
+        defer { MockURLProtocol.requestHandler = nil }
+
+        let status = ProviderStatusService(
+            ttl: 0,
+            session: URLSession(configuration: .mockProtocolConfiguration())
+        )
         let resultPresent = await status.status(
             for: "openai/gpt-5.2",
             provider: .openrouter,
@@ -548,9 +579,16 @@ private actor MockModelHealthService: ModelHealthServiceProtocol {
         provider: ModelProvider,
         baseURL: String,
         apiKey: String?
-    ) async -> ModelHealth {
+    ) async -> ModelHealthResult {
         probeCount += 1
-        return results[model] ?? .unknown(error: "not configured")
+        // `probe` now returns ModelHealthResult (health + latency + quota).
+        // The stubbed health is unchanged; latency is nil because this double
+        // performs no request, and inventing a number would feed the
+        // latency-aware ranking a measurement nobody took.
+        return ModelHealthResult(
+            health: results[model] ?? .unknown(error: "not configured"),
+            latencyMs: nil
+        )
     }
 
     func invalidate() async {}
@@ -583,10 +621,24 @@ private actor MockProviderStatusService: ProviderStatusServiceProtocol {
 
 private actor MockPersister: ChatPersisterProtocol {
     private var storage: [UUID: [ChatMessage]] = [:]
+    private var settings: [UUID: ConversationSettings] = [:]
     private var currentId: UUID = UUID()
 
     func save(messages: [ChatMessage], conversationId: UUID) async {
         storage[conversationId] = messages
+    }
+
+    // ChatPersisterProtocol grew per-conversation settings (the Cycle 34 output
+    // budget / pinned model overrides) and this double was never extended, so
+    // it stopped conforming. It round-trips them the way it already round-trips
+    // messages: a double that swallowed a pin the code under test just wrote
+    // would hide exactly the failover bug these tests exist to catch.
+    func saveSettings(_ settings: ConversationSettings, conversationId: UUID) async {
+        self.settings[conversationId] = settings
+    }
+
+    func loadSettings(conversationId: UUID) async -> ConversationSettings {
+        settings[conversationId] ?? .default
     }
 
     func load(conversationId: UUID) async -> [ChatMessage] {
@@ -616,6 +668,19 @@ private actor MockAgentMemoryStore: AgentMemoryStoreProtocol {
     func loadPlan(conversationId: UUID) async throws -> TODOPlan? { nil }
     func deletePlan(conversationId: UUID) async throws {}
     func deleteConversationData(conversationId: UUID) async throws {}
+    // Outcome recording (the Cycle 15 reliability scorecard) was added to
+    // AgentMemoryStoreProtocol after this double was written. Inert, matching
+    // the rest of it and MockWatchdogMemoryStore: these tests assert failover
+    // behaviour, not persistence, and returning canned outcomes would feed the
+    // ranker fixtures no test asked for.
+    func saveOutcome(_ outcome: ModelOutcome) async throws {}
+    func outcomes(
+        for model: String,
+        provider: ModelProvider,
+        baseURL: String,
+        limit: Int
+    ) async throws -> [ModelOutcome] { [] }
+    func deleteOutcomes(for model: String, provider: ModelProvider, baseURL: String) async throws {}
 }
 
 @MainActor

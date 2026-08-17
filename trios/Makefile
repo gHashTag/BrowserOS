@@ -1845,7 +1845,12 @@ sources-drift-selftest:
 # `check` to go red for a reason unrelated to the change under test. `make dev`
 # already prints "run 'make xctest' for detail" when the suite is broken, so the
 # pointer exists; the wiring needs its own driving before it is claimed.
-XCTEST_ERROR_CEILING := 23
+# Zero, and this number is derived from a REQUIREMENT rather than from a
+# reading. It was 2 for months because a mirrored source list stopped the build
+# after exactly 2 errors; it was 23 for an afternoon because that is what the
+# suite reported the first time it compiled. Both were snapshots. A suite that
+# compiles is the requirement, so the ceiling is 0 and any rise is a regression.
+XCTEST_ERROR_CEILING := 0
 
 .PHONY: xctest
 xctest:
