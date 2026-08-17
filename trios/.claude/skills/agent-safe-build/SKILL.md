@@ -509,3 +509,72 @@ Details that made it safe rather than merely shorter:
 The general rule: a comment promising that a copy will fail loudly is not a
 mechanism. If two places must agree, make one of them read the other — and if
 they cannot, expect the drift to be there already rather than to arrive later.
+
+## A harness and a live agent must not share a data root
+
+`make cassettes` — reached through `make check` — began with `pkill trios-dev`
+and ran `rm -f .trinity-dev/state/queen_delegation.json` before each of four
+replays. Towards a scratch app that is correct and was written deliberately,
+with a comment explaining why. Towards a working one it is data loss, and on
+2026-08-17 it destroyed a live registry of four delegated tasks in the middle
+of a cycle. Nothing reported it. There is no backup and the file is not under
+version control.
+
+The line had been correct for months. It stopped being correct the day the
+Queen started keeping real work in `.trinity-dev`, and nothing in the tree
+noticed the day that changed — because nothing was watching the *assumption*,
+only the behaviour.
+
+`ProjectPaths.trinity` states the principle in its own doc comment: if the dev
+build wrote to the release root, an agent iterating could corrupt the state of
+the app the user is actually using. The split stopped one level short. Dev was
+two roles wearing one directory: scratch space an agent wipes at will, and the
+workspace where the supervisor keeps live tasks.
+
+**Rule.** Before a target kills a process or deletes state, ask what else lives
+there *today*, not what lived there when the line was written. If a harness
+needs to wipe, give it a root nothing else uses. TriOS now builds a third
+variant for exactly this: `com.browseros.trios.test`, root `.trinity-test`,
+port 9305, driven by `make test-app`.
+
+**Prove it by planting a sentinel.** Write a recognisable file into the state
+you claim is protected, run the target, compare the hash. Do it with the other
+app *running* and compare its PID too — killing the process and deleting its
+state are two separate harms and a fix can address one and miss the other.
+Driven here: PID 84479 before and after, sentinel byte-identical.
+
+**Then gate it**, because the isolation is one `sed` from being undone and the
+failure is silent — the suite still passes. `make cassette-isolation` fails if
+the recipe names `trios-dev`, `.trinity-dev`, `DEV_APP`, `DEV_PROC` or the dev
+log, AND fails if it stops naming the test variant at all, so a rename cannot
+satisfy it by accident. Both arms driven.
+
+## A boolean that answers two questions is right only until it isn't
+
+`ProjectPaths.isDevVariant` was read at thirteen sites answering three different
+questions: *is this the dev supervisor build*, *may this reach the real
+Keychain*, *is there a supervisor inbox*. With two variants all three answers
+coincided, so the conflation was invisible and every comment at every site
+described the requirement correctly while the code asked something else.
+
+Adding a third variant separated them at once. The harness was refused its own
+delegation with the message "No inbox in a release build" while running as
+`test`; and ten secret-store sites would have sent it at the real Keychain,
+which does not fail — it **blocks on a dialog nobody is there to answer**, so
+the suite hangs rather than going red.
+
+**Tell.** Read the comment above the predicate. If it names a *requirement*
+("so a release app never…") while the code names an *instance* ("is this dev"),
+they agree only by coincidence of the current case count.
+
+Split into `usesFileSecretStore` and `hasSupervisorInbox`, both defined as
+`!isRelease` against one source rather than two copies of the same comparison.
+
+## Both arms of a variant switch must be written out
+
+`build.sh` had two `if [ "$VARIANT" = "dev" ]; then … else …` blocks. The
+`else` hands every unrecognised variant the **release** binary path and the
+release bundle id — the single outcome the variant split exists to prevent
+would have been its default. Now explicit three-way `case` statements with an
+unreachable arm that fails loudly. The validation above them makes that arm
+dead; it is written anyway, because the two guards drift independently.

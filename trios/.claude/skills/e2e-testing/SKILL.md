@@ -867,3 +867,117 @@ Two counting traps met while measuring this:
 - `cmd 2>&1 > file` sends stdout to the file and leaves stderr on the terminal —
   the opposite of what is wanted. It buried the answer under a 13 MB warning
   about 105,032 unhandled files in `node_modules`. Write `cmd > file 2>&1`.
+
+## A recorded test that needs a live credential is not recorded
+
+The cassette suite replays a recorded SSE stream so a swarm run is
+deterministic — same bytes, same order, every time. It substituted a
+`ReplayTransport` for the **workers**. The chat panel kept a live
+`SSETransport`, and `ChatViewModel`'s API-key precondition keys off exactly
+that:
+
+```swift
+if type(of: transport) is SSETransport.Type {
+    let resolvedKey = modelStore.resolvedAPIKey(for: modelStore.selectedProvider)
+    guard !resolvedKey.isEmpty else { /* refuse to dispatch */ }
+}
+```
+
+So every replay was gated on a credential it would never use. The suite passed
+on a machine that happened to have a key and failed on one that did not, with
+the message *API key is unavailable — the Keychain did not respond*, which
+names the wrong layer entirely. This is the resource-affected flake class (Silva
+et al.): the result depends on the machine, not the code.
+
+**Rule.** Substituting the transport is not enough. Find every precondition that
+*inspects* the transport — its type, its configuration, its credentials — and
+check what each one sees under replay. The question is not "did I replace the
+thing that fetches bytes" but "does anything still ask whether the real fetcher
+could have worked".
+
+Fixed by building both transports from one factory. Note the trap avoided: the
+two callers genuinely differ (a worker gets an hour, the chat keeps the
+default), so the factory takes the timeout as a parameter. Folding them into one
+constant would have changed the chat's patience as a side effect of a transport
+fix — a behaviour change smuggled in under a bug fix.
+
+Result: 4 of 4 cassettes, up from 3 of 4. The orphan-tool-call replay had been
+red for the API-key reason all along, and was being read as a real regression.
+
+## Harness memory outlives the harness run
+
+After the transport fix the replays still failed, now with
+`queen.inbox.skipped — Line already executed`. The cassette feeds the same
+delegation line every run, and the inbox idempotency store remembered it.
+
+That store is **not a file**. The offset and the executed-fingerprint set live
+in `UserDefaults` under the bundle id, so wiping the state directory does not
+touch them. A harness variant's defaults domain is disposable by construction:
+
+```
+defaults delete com.browseros.trios.test >/dev/null 2>&1 || true
+```
+
+**Rule.** When resetting a harness between runs, enumerate where state can hide:
+files under the data root, `UserDefaults` keyed by bundle id, the Keychain,
+`/tmp`, and git branches. A reset that clears only the obvious one produces a
+second run that behaves differently from the first, and the difference is
+reported as a missing marker rather than as leftover memory.
+
+## A run must certify its own completeness
+
+An aborted run does not report "n failures" — it reports a **prefix**, and a
+prefix is indistinguishable from a short suite. This repository read 121 tests,
+then 133, while the real figure was 483: a `fatalError` in a URLProtocol stub
+and fourteen force-unwraps after a failed `XCTAssertNotNil` were each killing
+the process mid-run, and everything scheduled after the crash disappeared
+silently.
+
+XCTest prints a final `Test Suite 'All tests'` summary if and only if it
+reached the end. `make xctest-run` refuses any log without it, whatever count
+the log claims.
+
+Two details that cost a round trip each:
+
+- The judgement lives in a separate target, `xctest-log-complete LOG=<path>`,
+  so the **red** side can be driven in milliseconds against a synthetic
+  truncated log instead of the 5.5 minutes a real abort costs. A gate proven
+  only from the green side is not proven.
+- Counting `^Test Case '-\[` double-counts: XCTest prints a line at start and
+  another at finish. The first run of the new target printed 966 for a 483-test
+  suite. Match ` started$`.
+
+## A gate validated against prose cannot tell prose from code
+
+`make keychain-doors` fails a file containing `SecItemCopyMatching` outside an
+allowlist. It fired on a test whose **comment** explained why the suite must not
+touch the Keychain — the opposite of a violation.
+
+The self-test that was supposed to prove the gate planted this fixture:
+
+```
+// check-selftest SecItemAdd
+```
+
+A comment. So for its whole life the self-test proved only that the gate greps
+for a word. The fixture is now a real call on a code line, and the rule skips
+lines whose first non-blank characters are `//` or `*`. That filter cannot hide
+a real call: a call on a line beginning `//` is not a call.
+
+**Rule.** A gate's negative fixture must be a real instance of the thing being
+forbidden. If the fixture is cheaper to write than the real violation, the gate
+is being validated against the cheap thing.
+
+Three arms driven every time: clean tree passes, real violation caught, benign
+lookalike passes.
+
+## Timing something whose exit status you did not check
+
+Measured time-to-first-byte five times: 0.31s, 0.07s, 0.07s, 0.07s, 0.12s.
+Those were five measurements of a **404** — wrong route. `curl | head -c 1`
+happily reports the first byte of an error page.
+
+This is the second time the same mistake produced a publishable-looking number
+in this repository. Print the status alongside the timing, always, in the same
+line — not as a separate check that can be skipped when the numbers look
+plausible.
