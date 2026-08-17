@@ -65,5 +65,363 @@
     "updatedAt" : "2026-08-10T22:34:48Z",
     "virtualBranch" : "queen\/1262-second-bee-log-probe",
     "worker" : "queen-swift"
+  },
+  {
+    "acceptanceCriteria" : [
+      "no site builds a .trinity path by string interpolation from projectRoot",
+      "the dev variant no longer touches the release .trinity tree",
+      "the build stays clean"
+    ],
+    "baselineTree" : "d1d0546fb75637d7b1721c88cf2f7ae6566d0611",
+    "committedFiles" : 2,
+    "completedTurns" : 1,
+    "conversationId" : "BEB78289-0717-4E4C-B9EF-9A64D7B1D26E",
+    "createdAt" : "2026-08-12T14:13:52Z",
+    "criterionVerdicts" : {
+      "no site builds a .trinity path by string interpolation from projectRoot" : "unmet",
+      "the build stays clean" : "unmet",
+      "the dev variant no longer touches the release .trinity tree" : "met"
+    },
+    "id" : "4E7BD4EC-CA9B-4D65-810A-345B78E7AA10",
+    "inputTokens" : 0,
+    "interventions" : [
+
+    ],
+    "issue" : {
+      "number" : 1270,
+      "owner" : "gHashTag",
+      "repo" : "trios"
+    },
+    "lastStreamByteAt" : "2026-08-12T14:18:06Z",
+    "model" : "glm-5.2",
+    "outputTokens" : 0,
+    "ownedPaths" : [
+      "rings\/SR-02\/QueenSelfImprovementService.swift",
+      "BR-OUTPUT\/QueenStatusViewModel.swift"
+    ],
+    "provider" : "zai",
+    "state" : "awaitingReview",
+    "streamOutcome" : "terminal",
+    "title" : "Route every runtime path through ProjectPaths, never string-built from root",
+    "toolCalls" : 53,
+    "updatedAt" : "2026-08-17T14:45:45Z",
+    "virtualBranch" : "queen\/1270-route-every-runtime-path-through",
+    "worker" : "queen-swift"
+  },
+  {
+    "acceptanceCriteria" : [
+      "make xctest reports fewer distinct errors than before and none of them in LogsTabViewTests",
+      "the file compiles under Swift 6 concurrency",
+      "no test assertion is weakened to make it compile"
+    ],
+    "baselineTree" : "13331b475bbb7cc0dd9bc72fb1663ad54849b7f6",
+    "committedFiles" : 1,
+    "completedTurns" : 1,
+    "conversationId" : "016BC308-F7A0-4CD4-A550-D2FE6DD92423",
+    "createdAt" : "2026-08-12T15:19:16Z",
+    "criterionVerdicts" : {
+
+    },
+    "id" : "F321B92A-6364-4E1A-B1EC-0BEA9EEDA37E",
+    "inputTokens" : 0,
+    "interventions" : [
+
+    ],
+    "issue" : {
+      "number" : 1271,
+      "owner" : "gHashTag",
+      "repo" : "trios"
+    },
+    "lastStreamByteAt" : "2026-08-12T15:30:28Z",
+    "model" : "glm-5.2",
+    "outputTokens" : 0,
+    "ownedPaths" : [
+      "tests\/TriOSKitTests\/LogsTabViewTests.swift"
+    ],
+    "provider" : "zai",
+    "state" : "awaitingReview",
+    "streamOutcome" : "terminal",
+    "title" : "LogsTabViewTests: six compile errors from drift behind Swift 6 and the API",
+    "toolCalls" : 39,
+    "updatedAt" : "2026-08-12T15:31:43Z",
+    "virtualBranch" : "queen\/1271-logstabviewtests-six-compile-errors-from",
+    "worker" : "queen-swift"
+  },
+  {
+    "acceptanceCriteria" : [
+      "make warnings reports zero",
+      "plain bold italic and monospaced are all still distinct in the built AttributedString",
+      "no styling case is dropped",
+      "say plainly that rendering was not verified visually"
+    ],
+    "baselineTree" : "3d00a5ae33ead0f167522a867f75319f1e0f8ce7",
+    "committedFiles" : 1,
+    "completedTurns" : 1,
+    "conversationId" : "76ED2988-2514-4EE9-9CEC-08CA590F768B",
+    "createdAt" : "2026-08-17T14:01:37Z",
+    "criterionVerdicts" : {
+      "make warnings reports zero" : "met",
+      "no styling case is dropped" : "met",
+      "plain bold italic and monospaced are all still distinct in the built AttributedString" : "met",
+      "say plainly that rendering was not verified visually" : "met"
+    },
+    "id" : "A50E730D-40E8-47E9-A694-7576AB4C092F",
+    "inputTokens" : 0,
+    "interventions" : [
+      "It touched tmp\/verify_1272.swift, which is outside the paths it was given. Its branch only collects files inside the boundary, so anything it writes out there lands in your working tree unattributed."
+    ],
+    "issue" : {
+      "number" : 1272,
+      "owner" : "gHashTag",
+      "repo" : "trios"
+    },
+    "lastStreamByteAt" : "2026-08-17T14:07:50Z",
+    "model" : "glm-5.2",
+    "outputTokens" : 0,
+    "ownedPaths" : [
+      "BR-OUTPUT\/RichTextRenderer.swift"
+    ],
+    "provider" : "zai",
+    "pullRequestNumber" : 70,
+    "reviewedHeadSHA" : "f3a0d4c6719ecbd7a95e66f0f1531749d7c17626",
+    "state" : "merged",
+    "streamOutcome" : "terminal",
+    "title" : "Rewrite styledText on AttributedString so the four deprecated Text concatenations go away",
+    "toolCalls" : 20,
+    "updatedAt" : "2026-08-17T14:31:25Z",
+    "virtualBranch" : "queen\/1272-rewrite-styledtext-on-attributedstring",
+    "worker" : "queen-swift"
+  },
+  {
+    "acceptanceCriteria" : [
+      "a line already executed is skipped with a named event",
+      "resetting the offset does not re-execute anything",
+      "a new line still runs at once"
+    ],
+    "baselineTree" : "af8997419e3db43ad1c3894ae41f9e7edb1e5fe7",
+    "conversationId" : "3C782C7D-A189-4E99-A0B5-4C500BC244F9",
+    "createdAt" : "2026-08-17T14:29:16Z",
+    "criterionVerdicts" : {
+
+    },
+    "id" : "17392AB5-F4C3-4D75-A5DB-A25E31723963",
+    "interventions" : [
+      "It touched tmp\/1274harness\/main.swift, which is outside the paths it was given. Its branch only collects files inside the boundary, so anything it writes out there lands in your working tree unattributed."
+    ],
+    "issue" : {
+      "number" : 1274,
+      "owner" : "gHashTag",
+      "repo" : "trios"
+    },
+    "lastStreamByteAt" : "2026-08-17T15:04:24Z",
+    "model" : "glm-5.2",
+    "ownedPaths" : [
+      "rings\/SR-02\/ChatViewModel.swift"
+    ],
+    "provider" : "zai",
+    "state" : "failed",
+    "streamOutcome" : "open",
+    "title" : "The inbox needs its own idempotency, not the registrys",
+    "updatedAt" : "2026-08-17T15:05:37Z",
+    "virtualBranch" : "queen\/1274-the-inbox-needs-its-own-idempotency-not",
+    "worker" : "queen-swift"
+  },
+  {
+    "acceptanceCriteria" : [
+      "the recipe uses double dollars throughout",
+      "the running-app branch appends and waits for its own issue",
+      "the stopped-app branch still launches"
+    ],
+    "baselineTree" : "67f39027f0db7b591ecc4e509a07cc9155673da0",
+    "conversationId" : "900211E9-0956-4A12-AE9A-29123A98EA1E",
+    "createdAt" : "2026-08-17T15:05:40Z",
+    "criterionVerdicts" : {
+
+    },
+    "id" : "2FCD9AFF-C7AF-49B1-B572-FDA435137FDB",
+    "interventions" : [
+
+    ],
+    "issue" : {
+      "number" : 1150,
+      "owner" : "gHashTag",
+      "repo" : "trios"
+    },
+    "lastStreamByteAt" : "2026-08-17T15:07:19Z",
+    "model" : "glm-5.2",
+    "ownedPaths" : [
+      "Makefile"
+    ],
+    "provider" : "zai",
+    "state" : "failed",
+    "streamOutcome" : "open",
+    "title" : "Double every shell dollar in the new probe recipe and run it in both branches",
+    "updatedAt" : "2026-08-17T15:07:36Z",
+    "virtualBranch" : "queen\/1150-double-every-shell-dollar-in-the-new",
+    "worker" : "queen-swift"
+  },
+  {
+    "acceptanceCriteria" : [
+      "the file exists"
+    ],
+    "baselineTree" : "9a3139431f4b302089d3e98be3220cedb6badf33",
+    "committedFiles" : 1,
+    "completedTurns" : 1,
+    "conversationId" : "F5AE4875-5559-46F5-B235-07C4A0D81585",
+    "createdAt" : "2026-08-17T15:05:41Z",
+    "criterionVerdicts" : {
+      "the file exists" : "met"
+    },
+    "id" : "2BE89B39-38C3-4ABC-8347-53A4AB3430EE",
+    "inputTokens" : 0,
+    "interventions" : [
+
+    ],
+    "issue" : {
+      "number" : 1188,
+      "owner" : "gHashTag",
+      "repo" : "trios"
+    },
+    "lastStreamByteAt" : "2026-08-17T15:06:50Z",
+    "model" : "glm-5.2",
+    "outputTokens" : 0,
+    "ownedPaths" : [
+      "docs\/client-probe.md"
+    ],
+    "provider" : "zai",
+    "state" : "accepted",
+    "streamOutcome" : "terminal",
+    "title" : "Write docs\/client-probe.md with two lines",
+    "toolCalls" : 6,
+    "updatedAt" : "2026-08-17T15:07:20Z",
+    "virtualBranch" : "queen\/1188-write-docs-client-probe-md-with-two",
+    "worker" : "queen-swift"
+  },
+  {
+    "acceptanceCriteria" : [
+      "Отказ, в котором сказано о невозможности соединиться, не переводит задачу в failed и не тратит попытку.",
+      "Такая задача остаётся ждать и берётся снова, когда связь есть.",
+      "Настоящая неудача ведёт себя как прежде.",
+      "В журнале эти два случая различимы по событию, а не по тексту.",
+      "Если убрать различение, обрыв снова хоронит задачу."
+    ],
+    "baselineTree" : "bb9cfc039a252dd17ad46450c8060733d517e2f4",
+    "conversationId" : "6509E60B-AA6F-45C8-9D06-9B58461F80C3",
+    "createdAt" : "2026-08-17T15:05:51Z",
+    "criterionVerdicts" : {
+
+    },
+    "id" : "B540C241-F0E5-4C1A-9EFC-47889870A612",
+    "interventions" : [
+
+    ],
+    "issue" : {
+      "number" : 1219,
+      "owner" : "gHashTag",
+      "repo" : "trios"
+    },
+    "lastStreamByteAt" : "2026-08-17T15:07:17Z",
+    "model" : "glm-5.2",
+    "ownedPaths" : [
+      "docs\/conn-drill.md"
+    ],
+    "provider" : "zai",
+    "state" : "failed",
+    "streamOutcome" : "open",
+    "title" : "Create docs\/conn-drill.md with two lines",
+    "updatedAt" : "2026-08-17T15:07:36Z",
+    "virtualBranch" : "queen\/1219-create-docs-conn-drill-md-with-two-lines",
+    "worker" : "queen-swift"
+  },
+  {
+    "acceptanceCriteria" : [
+      "make warnings reports zero",
+      "plain bold italic and monospaced are all still distinct in the built AttributedString",
+      "no styling case is dropped",
+      "say plainly that rendering was not verified visually"
+    ],
+    "conversationId" : "4D46881A-E9CD-46EF-8673-3D63CE267582",
+    "createdAt" : "2026-08-17T15:05:51Z",
+    "criterionVerdicts" : {
+
+    },
+    "id" : "EA6059B8-40DB-4EC7-BB50-C4EAD187E2DF",
+    "interventions" : [
+
+    ],
+    "issue" : {
+      "number" : 1272,
+      "owner" : "gHashTag",
+      "repo" : "trios"
+    },
+    "ownedPaths" : [
+      "BR-OUTPUT\/RichTextRenderer.swift"
+    ],
+    "state" : "cancelled",
+    "title" : "Rewrite styledText on AttributedString so the four deprecated Text concatenations go away",
+    "updatedAt" : "2026-08-17T15:05:58Z",
+    "virtualBranch" : "queen\/1272-rewrite-styledtext-on-attributedstring",
+    "worker" : "queen-swift"
+  },
+  {
+    "acceptanceCriteria" : [
+
+    ],
+    "baselineTree" : "bb9cfc039a252dd17ad46450c8060733d517e2f4",
+    "conversationId" : "9F123FCF-9242-4EE5-8DFE-50B1A836F648",
+    "createdAt" : "2026-08-17T15:05:51Z",
+    "criterionVerdicts" : {
+
+    },
+    "id" : "185E869C-CE0C-4D09-82CF-1A36587C8C89",
+    "interventions" : [
+
+    ],
+    "issue" : {
+      "number" : 1262,
+      "owner" : "gHashTag",
+      "repo" : "trios"
+    },
+    "lastStreamByteAt" : "2026-08-17T15:07:19Z",
+    "model" : "glm-5.2",
+    "ownedPaths" : [
+
+    ],
+    "provider" : "zai",
+    "state" : "failed",
+    "streamOutcome" : "open",
+    "title" : "second bee log probe",
+    "updatedAt" : "2026-08-17T15:07:36Z",
+    "virtualBranch" : "queen\/1262-second-bee-log-probe",
+    "worker" : "queen-swift"
+  },
+  {
+    "acceptanceCriteria" : [
+      "a line already executed is skipped with a named event",
+      "resetting the offset does not re-execute anything",
+      "a new line still runs at once"
+    ],
+    "conversationId" : "75C9E623-D10D-474A-90AB-82DB9B72A803",
+    "createdAt" : "2026-08-17T15:05:52Z",
+    "criterionVerdicts" : {
+
+    },
+    "id" : "0730A5CD-087B-4694-AB92-2AF98D6933BA",
+    "interventions" : [
+
+    ],
+    "issue" : {
+      "number" : 1274,
+      "owner" : "gHashTag",
+      "repo" : "trios"
+    },
+    "ownedPaths" : [
+      "rings\/SR-02\/ChatViewModel.swift"
+    ],
+    "state" : "cancelled",
+    "title" : "The inbox needs its own idempotency, not the registrys",
+    "updatedAt" : "2026-08-17T15:05:58Z",
+    "virtualBranch" : "queen\/1274-the-inbox-needs-its-own-idempotency-not",
+    "worker" : "queen-swift"
   }
 ]
