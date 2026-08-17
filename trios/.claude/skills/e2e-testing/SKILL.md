@@ -830,3 +830,40 @@ rather than in somebody's memory.
 **Three distinct states, and a gate that stops at the first is not measuring the
 third:** does it build, does it run, does it pass. This repository had a gate on
 the first, believed it was measuring the third, and the gap held for months.
+
+## A failing assertion must not be able to kill the run
+
+The suite reported 121 tests, then 133, and I believed each number in turn. The
+real figure was 483. Three quarters of it had never executed — not failed,
+never executed — because two patterns turn one bad assertion into a dead
+process, and everything scheduled afterwards silently disappears.
+
+    133  before        died in a URLProtocol's fatalError
+    187  after fix 1   died on a force-unwrap after a failed XCTAssertNotNil
+    483  after fix 2   no crash; 122 failures now visible
+
+**Pattern 1: `fatalError` inside a callback the framework owns.**
+`MockURLProtocol` had `fatalError("requestHandler is not set")`. The handler is
+a shared static that suites set and clear, so a request still in flight arrives
+after somebody's tearDown has nilled it — and takes the whole run with it. Fail
+the *request* instead: `client?.urlProtocol(self, didFailWithError:)`. One test
+fails, in the suite that leaked the request, and the run continues.
+
+**Pattern 2: `XCTAssertNotNil(x)` followed by `x!`.** Fourteen of these across
+four files. The assertion reports the failure and then the next line crashes the
+process, so the assertion's own message is the last thing anyone sees. Use
+`guard let ... else { XCTFail(...); return }`, or `try XCTUnwrap`.
+
+The rule underneath both: **in a test suite, a failure must be a value, never a
+control-flow event that leaves the process.** A crashed run does not report
+"n failures" — it reports a prefix, and a prefix is indistinguishable from a
+short suite.
+
+Two counting traps met while measuring this:
+
+- Summing `Executed N tests` lines triple-counts, because XCTest prints a total
+  per class, per suite and per run. That gave "1449". Count unique
+  `Test Case ... started` lines, or read the final `All tests` summary.
+- `cmd 2>&1 > file` sends stdout to the file and leaves stderr on the terminal —
+  the opposite of what is wanted. It buried the answer under a 13 MB warning
+  about 105,032 unhandled files in `node_modules`. Write `cmd > file 2>&1`.
