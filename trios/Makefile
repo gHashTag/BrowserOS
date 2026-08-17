@@ -193,6 +193,18 @@ help:
 # slow is a check nobody runs, which is how this gate rotted the first time. See
 # WARN_FULL_ROOT below for what replaced it; the target still prints its own
 # [warnings] timing line, so the figure stays honest either way.
+# WHY FOUR, ASKED HONESTLY. This number is a READING, not a requirement. It is
+# exactly the count of `'+' was deprecated in macOS 26.0` warnings in
+# BR-OUTPUT/RichTextRenderer.swift lines 73/75/77/79, and it was set to that
+# count. The requirement is zero. The same shape sat in XCTEST_ERROR_CEILING for
+# months at 2, where 2 was the number of errors a broken source list happened to
+# produce; asking "why is it green at this number" is what found it.
+#
+# It is not lowered to zero today because the fix is not a one-liner: the four
+# calls concatenate Text values that carry DIFFERENT styling (bold, italic,
+# monospaced), so the modern replacement is an AttributedString rewrite of
+# styledText, not a substitution. That changes rendering, and rendering is not
+# verifiable from a build log. Tracked rather than pretended away.
 WARNING_CEILING := 4
 
 # Where the per-file warning cache lives. Inside the dev object directory on

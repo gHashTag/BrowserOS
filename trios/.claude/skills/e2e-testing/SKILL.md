@@ -754,3 +754,49 @@ copied. `build.sh` grew `TRIOS_PRINT_SOURCES=1` beside its existing flag printer
 `check`) fails on four conditions — the sets disagree, an entry names a file
 that does not exist, a declared exception is stale, or either list comes back
 empty. That last one matters: an empty list agrees with everything.
+
+## The suite that had never compiled: 23 to 0, and what it cost to keep honest
+
+With the source manifest unified, `tests/TriOSKitTests` compiled for the first
+time and reported 23 errors in 4 of 42 files — pure drift, accumulated while
+nothing could build it: MainActor isolation, mocks that no longer conformed to
+the protocols they stub, an argument the API had dropped. All 23 are gone.
+
+The rule that made the number mean something was set before the work started:
+**do not weaken an assertion to make it compile.** A test that compiles because
+its check was deleted is worse than one that does not compile, because it then
+reports success. Measured afterwards rather than trusted:
+
+    ChatFailureTests        67 -> 68 assertions
+    LocalAuthProviderTests  50 -> 51
+    LogsTabViewTests       280 -> 280
+    HotkeyAnalytics...       5 ->   5
+
+Nothing was gutted; two files gained an assertion.
+
+The interesting case is the one whose subject no longer exists.
+`HotkeyAnalyticsEncryptionTests` asserts that hotkey analytics are encrypted at
+rest, and `HotkeyAnalyticsViewModel` was deleted months ago. There were three
+options and only one is honest:
+
+- restore the assertion — impossible, the subject is gone;
+- rewrite it into something that passes — this is the failure mode, dressed as
+  progress;
+- **skip loudly.** `throw XCTSkip(Self.subjectDeleted)`, the original assertions
+  preserved as comments in place, and a header recording what happened. Two
+  skips in the whole suite, both here, both named.
+
+Then the ceiling. It had been 2 (the number a broken build happened to produce),
+then 23 (the number the first real compile produced). Both were readings. It is
+now **0**, and that number comes from a requirement — a suite that compiles —
+so any rise is a regression rather than a new normal. Driven: one planted type
+error takes it red.
+
+The same question asked of `WARNING_CEILING` gave a different answer, and the
+difference is worth keeping. It is 4, which is exactly the four deprecated
+`Text` concatenations in one file — a reading. But the fix is an
+`AttributedString` rewrite that changes rendering, and rendering cannot be
+verified from a build log. So the number stays and **the comment now says it is
+a reading with a named debt**, with the issue linked. Correcting the claim is a
+real repair; retuning a number you cannot justify is the same defect facing the
+other way.
