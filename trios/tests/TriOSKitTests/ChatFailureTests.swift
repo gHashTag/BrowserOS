@@ -114,8 +114,14 @@ final class ChatFailureTests: XCTestCase {
         let future = Date(timeIntervalSinceNow: 120)
         let header = formatter.string(from: future)
         let parsed = SSETransport.parseRetryAfter(header)
-        XCTAssertNotNil(parsed)
-        XCTAssertEqual(parsed!, 120, accuracy: 1.0)
+        // A failed XCTAssertNotNil followed by `parsed!` kills the whole
+        // process, so every test scheduled after it never runs. Guard
+        // instead: one failing test, and the run continues.
+        guard let parsedValue = parsed else {
+            XCTFail("parsed was nil")
+            return
+        }
+        XCTAssertEqual(parsedValue, 120, accuracy: 1.0)
     }
 
     func testAuth403NotTreatedAsBalance() {

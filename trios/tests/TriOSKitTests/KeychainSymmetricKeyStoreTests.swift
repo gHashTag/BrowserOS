@@ -22,8 +22,14 @@ final class KeychainSymmetricKeyStoreTests: XCTestCase {
         let key = SymmetricKey(size: .bits256)
         try KeychainSymmetricKeyStore.write(keyName: testKeyName, key: key)
         let read = try KeychainSymmetricKeyStore.read(keyName: testKeyName)
-        XCTAssertNotNil(read)
-        let readBytes = read!.withUnsafeBytes { Data($0) }
+        // A failed XCTAssertNotNil followed by `read!` kills the whole
+        // process, so every test scheduled after it never runs. Guard
+        // instead: one failing test, and the run continues.
+        guard let readValue = read else {
+            XCTFail("read was nil")
+            return
+        }
+        let readBytes = readValue.withUnsafeBytes { Data($0) }
         let originalBytes = key.withUnsafeBytes { Data($0) }
         XCTAssertEqual(readBytes, originalBytes)
     }

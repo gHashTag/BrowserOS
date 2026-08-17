@@ -29,7 +29,20 @@ final class MockURLProtocol: URLProtocol {
             return
         }
         guard let handler = MockURLProtocol.requestHandler else {
-            fatalError("MockURLProtocol.requestHandler is not set")
+            // Fail the REQUEST, never the process. requestHandler is a shared
+            // static that other suites set and clear, so a request already in
+            // flight can arrive here after somebody's tearDown has nilled it.
+            // As a fatalError that killed the whole run: 121 tests became a
+            // truncated log ending in signal 5, and everything scheduled after
+            // SSETransportTests never executed. As an error it is one failing
+            // test, in the suite that actually leaked the request.
+            client?.urlProtocol(self, didFailWithError: NSError(
+                domain: "MockURLProtocol", code: 1,
+                userInfo: [NSLocalizedDescriptionKey:
+                    "requestHandler is not set: a request reached the mock "
+                    + "after its handler was cleared - \(request.url?.absoluteString ?? "no url")"]
+            ))
+            return
         }
         do {
             let (response, data) = try handler(request)

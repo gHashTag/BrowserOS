@@ -529,8 +529,14 @@ final class LogsTabViewTests: XCTestCase {
         await store.record(query: "b")
         let loaded = await store.load()
         let idToRemove = loaded.first?.id
-        XCTAssertNotNil(idToRemove)
-        await store.remove(id: idToRemove!)
+        // A failed XCTAssertNotNil followed by `idToRemove!` kills the whole
+        // process, so every test scheduled after it never runs. Guard
+        // instead: one failing test, and the run continues.
+        guard let idToRemoveValue = idToRemove else {
+            XCTFail("idToRemove was nil")
+            return
+        }
+        await store.remove(id: idToRemoveValue)
         let afterRemove = await store.load()
         XCTAssertEqual(afterRemove.count, 1)
         await store.clear()
@@ -560,8 +566,14 @@ final class LogsTabViewTests: XCTestCase {
 
     func testParseLineTimestampHandlesISO8601() {
         let date = LogParser.parseLineTimestamp("2026-07-24T12:00:00Z")
-        XCTAssertNotNil(date)
-        let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date!)
+        // A failed XCTAssertNotNil followed by `date!` kills the whole
+        // process, so every test scheduled after it never runs. Guard
+        // instead: one failing test, and the run continues.
+        guard let dateValue = date else {
+            XCTFail("date was nil")
+            return
+        }
+        let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: dateValue)
         XCTAssertEqual(components.year, 2026)
         XCTAssertEqual(components.month, 7)
         XCTAssertEqual(components.day, 24)
@@ -570,8 +582,14 @@ final class LogsTabViewTests: XCTestCase {
 
     func testParseLineTimestampHandlesBracketedFormat() {
         let date = LogParser.parseLineTimestamp("2026-07-24_12:30:45")
-        XCTAssertNotNil(date)
-        let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date!)
+        // A failed XCTAssertNotNil followed by `date!` kills the whole
+        // process, so every test scheduled after it never runs. Guard
+        // instead: one failing test, and the run continues.
+        guard let dateValue = date else {
+            XCTFail("date was nil")
+            return
+        }
+        let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: dateValue)
         XCTAssertEqual(components.year, 2026)
         XCTAssertEqual(components.month, 7)
         XCTAssertEqual(components.day, 24)
@@ -582,8 +600,14 @@ final class LogsTabViewTests: XCTestCase {
 
     func testParseLineTimestampHandlesTimeOnly() {
         let date = LogParser.parseLineTimestamp("08:15:30")
-        XCTAssertNotNil(date)
-        let components = Calendar.current.dateComponents([.hour, .minute, .second], from: date!)
+        // A failed XCTAssertNotNil followed by `date!` kills the whole
+        // process, so every test scheduled after it never runs. Guard
+        // instead: one failing test, and the run continues.
+        guard let dateValue = date else {
+            XCTFail("date was nil")
+            return
+        }
+        let components = Calendar.current.dateComponents([.hour, .minute, .second], from: dateValue)
         XCTAssertEqual(components.hour, 8)
         XCTAssertEqual(components.minute, 15)
         XCTAssertEqual(components.second, 30)
