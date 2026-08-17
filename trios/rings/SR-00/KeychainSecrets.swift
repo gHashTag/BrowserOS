@@ -72,7 +72,7 @@ enum KeychainSecrets {
         allowsInteraction: Bool = true
     ) throws -> Data {
         // Dev builds never touch the Keychain; see DevSecretStore.
-        if ProjectPaths.isDevVariant {
+        if ProjectPaths.usesFileSecretStore {
             guard let data = DevSecretStore.read(service: service, account: account) else {
                 throw KeychainSecretsError.itemNotFound(service: service, account: account)
             }
@@ -234,7 +234,7 @@ enum KeychainSecrets {
     /// time we report failure rather than hanging the main thread, and arm a
     /// 60-second cooldown.
     static func writeData(service: String, account: String, data: Data) throws {
-        if ProjectPaths.isDevVariant {
+        if ProjectPaths.usesFileSecretStore {
             guard DevSecretStore.write(service: service, account: account, data: data) else {
                 throw KeychainSecretsError.invalidItemType
             }
@@ -327,7 +327,7 @@ enum KeychainSecrets {
 
     /// Delete a stored secret.
     static func delete(service: String, account: String) throws {
-        if ProjectPaths.isDevVariant {
+        if ProjectPaths.usesFileSecretStore {
             DevSecretStore.delete(service: service, account: account)
             return
         }

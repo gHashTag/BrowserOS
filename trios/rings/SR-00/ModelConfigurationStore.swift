@@ -78,7 +78,7 @@ enum ModelCredentialStore {
     /// All keys stored for a provider, oldest first. Legacy entries sort first so
     /// the previously active key stays at the top of the list after upgrading.
     static func list(for provider: ModelProvider) -> [ModelKeyEntry] {
-        if ProjectPaths.isDevVariant {
+        if ProjectPaths.usesFileSecretStore {
             return DevSecretStore.accounts(service: service).compactMap { item in
                 guard let id = entryID(fromAccount: item.account, provider: provider) else { return nil }
                 let secret = DevSecretStore.read(service: service, account: item.account)
@@ -192,7 +192,7 @@ enum ModelCredentialStore {
 
     static func read(entryID: String, for provider: ModelProvider) -> String? {
         let cacheKey = account(for: provider, entryID: entryID)
-        if ProjectPaths.isDevVariant {
+        if ProjectPaths.usesFileSecretStore {
             return DevSecretStore.read(service: service, account: cacheKey)
                 .flatMap { String(data: $0, encoding: .utf8) }
         }
@@ -1890,7 +1890,7 @@ extension KeychainSecrets {
         description: String,
         data: Data
     ) throws {
-        if ProjectPaths.isDevVariant {
+        if ProjectPaths.usesFileSecretStore {
             guard DevSecretStore.write(service: service, account: account, data: data) else {
                 throw KeychainSecretsError.invalidItemType
             }

@@ -46,6 +46,43 @@ enum BuildVariant: String, Equatable, Sendable {
         }
     }
 
+    /// The shipped app the user runs. The one variant that must be protected
+    /// from every harness convenience below.
+    ///
+    /// Both predicates that follow are `!isRelease`, deliberately written
+    /// against one source rather than repeating the comparison: they answer
+    /// different questions and may diverge later, but until they do, a drift
+    /// between two copies of the same rule is a defect waiting for a fourth
+    /// variant.
+    var isRelease: Bool { self == .prod }
+
+    /// Whether this variant keeps its secrets in files instead of the Keychain.
+    ///
+    /// Split out of `isDevVariant`, which was answering two different questions
+    /// with one word. Ten call sites meant "do not touch the Keychain" and
+    /// three meant "this is the dev supervisor build"; they agreed only for as
+    /// long as there were exactly two variants. The moment `test` became
+    /// buildable, the first ten would have sent the harness at the real
+    /// Keychain - which does not fail, it BLOCKS on a dialog nobody is there to
+    /// answer, so the suite would hang rather than go red.
+    ///
+    /// Phrased as "not prod" rather than "dev or test" on purpose: a fourth
+    /// variant added later is a non-release build until someone deliberately
+    /// says otherwise, and the safe default for a secret store is the one that
+    /// cannot reach the user's real credentials.
+    var usesFileSecretStore: Bool { !isRelease }
+
+    /// Whether this variant runs the Queen's delegation inbox.
+    ///
+    /// Every comment at the three call sites said the same thing - "so a
+    /// release app never picks up an inbox" - while the code asked "is this
+    /// dev". With two variants those agreed; with three they stopped, and the
+    /// harness was refused its own delegation with the message "No inbox in a
+    /// release build" while running as `test`. Nothing can leak across: the
+    /// path is `ProjectPaths.trinity/state/queen_inbox.jsonl`, so each variant
+    /// reads a different file by construction.
+    var hasSupervisorInbox: Bool { !isRelease }
+
     var mcpPort: String {
         switch self {
         case .dev: return "9205"

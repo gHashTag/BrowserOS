@@ -7294,12 +7294,16 @@ struct ChatSSEEndToEndTests {
         )
     }
 
-    // MARK: - Scenario: inbox poller is dev-variant only (#1150)
+    // MARK: - Scenario: the inbox poller never starts in a release build (#1150)
 
-    /// The Queen inbox poller must only start in the dev variant. The
-    /// `if ProjectPaths.isDevVariant` guard at the poller's startup site
-    /// is the single thing that prevents a release build from reading the
-    /// dev-only `queen_inbox.jsonl` file. If that guard is deleted — or
+    /// The requirement is about the RELEASE app, and it always was: the guard
+    /// exists so a shipped build cannot read a supervisor `queen_inbox.jsonl`.
+    /// It was written as `isDevVariant` while only two variants existed, and
+    /// the moment a third did, that spelling refused the harness its own inbox
+    /// (#1275 follow-up). `hasSupervisorInbox` states the requirement instead
+    /// of one instance of it; nothing can leak across, because the path is
+    /// `ProjectPaths.trinity/state/...` and each variant resolves a different
+    /// file. If that guard is deleted — or
     /// the task is moved outside it — the poller silently runs everywhere.
     ///
     /// Two criteria:
@@ -7320,7 +7324,7 @@ struct ChatSSEEndToEndTests {
 
         // Locate the line that starts the poller: `queenInboxPollTask = Task`.
         // This is the single assignment that launches the background loop.
-        // It must live inside an `if ProjectPaths.isDevVariant {` block.
+        // It must live inside an `if ProjectPaths.hasSupervisorInbox {` block.
         let pollerLineIndex = lines.firstIndex {
             $0.contains("queenInboxPollTask = Task")
         }
@@ -7336,15 +7340,15 @@ struct ChatSSEEndToEndTests {
         // Search backwards from the poller assignment for the variant guard.
         // In the current source the guard is 1 line above. We allow up to 5
         // lines (whitespace, offset-init lines) between guard and task start.
-        // If someone removes the `if ProjectPaths.isDevVariant {` line, no
-        // line in the window contains `isDevVariant` and this check fails.
+        // If someone removes the `if ProjectPaths.hasSupervisorInbox {` line,
+        // no line in the window contains it and this check fails.
         let windowStart = max(0, pollerLineIndex - 5)
         let precedingLines = lines[windowStart...pollerLineIndex]
         let hasVariantGuard = precedingLines.contains {
-            $0.contains("isDevVariant")
+            $0.contains("hasSupervisorInbox")
         }
 
         check(hasVariantGuard,
-              "criterion 2: poller task is guarded by ProjectPaths.isDevVariant — the guard appears within 5 lines above the task assignment")
+              "criterion 2: poller task is guarded by ProjectPaths.hasSupervisorInbox — the guard appears within 5 lines above the task assignment")
     }
 }

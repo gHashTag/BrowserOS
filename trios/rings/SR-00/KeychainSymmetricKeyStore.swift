@@ -47,7 +47,7 @@ enum KeychainSymmetricKeyStore {
     /// and never shows a password prompt. That distinction matters: "missing" is
     /// safe to replace with a fresh key, "present but locked" is not.
     static func exists(keyName: String) -> Bool {
-        if ProjectPaths.isDevVariant {
+        if ProjectPaths.usesFileSecretStore {
             return DevSecretStore.read(service: service, account: keyName) != nil
         }
         let query: [String: Any] = [
@@ -70,7 +70,7 @@ enum KeychainSymmetricKeyStore {
     /// `applicationDidFinishLaunching` until the user answers - which is exactly
     /// how the app came to show "Application Not Responding" with no window.
     static func read(keyName: String, allowsInteraction: Bool = true) throws -> SymmetricKey? {
-        if ProjectPaths.isDevVariant {
+        if ProjectPaths.usesFileSecretStore {
             guard let data = DevSecretStore.read(service: service, account: keyName) else {
                 return nil
             }
@@ -122,7 +122,7 @@ enum KeychainSymmetricKeyStore {
             throw KeychainSymmetricKeyStoreError.invalidKeyLength(bytes.count)
         }
 
-        if ProjectPaths.isDevVariant {
+        if ProjectPaths.usesFileSecretStore {
             guard DevSecretStore.write(service: service, account: keyName, data: bytes) else {
                 throw KeychainSymmetricKeyStoreError.keychainWriteFailed(errSecIO)
             }
@@ -161,7 +161,7 @@ enum KeychainSymmetricKeyStore {
 
     /// Deletes a stored key.
     static func delete(keyName: String) throws {
-        if ProjectPaths.isDevVariant {
+        if ProjectPaths.usesFileSecretStore {
             DevSecretStore.delete(service: service, account: keyName)
             return
         }

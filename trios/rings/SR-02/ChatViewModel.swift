@@ -454,7 +454,7 @@ final class ChatViewModel: ObservableObject {
         // remembers its byte offset, and approves + delegates each new line.
         // Runs only in the dev variant so a release app never picks up a
         // dev inbox.
-        if ProjectPaths.isDevVariant {
+        if ProjectPaths.hasSupervisorInbox {
             queenInboxOffset = UInt64(
                 UserDefaults.standard.double(forKey: Self.queenInboxOffsetKey)
             )
@@ -613,7 +613,7 @@ final class ChatViewModel: ObservableObject {
         // being created in a release build. This one guards the read itself,
         // so no other caller - `enqueueQueenInboxEntry` included - can reach a
         // dev inbox out of a release app (#1090).
-        guard ProjectPaths.isDevVariant else { return }
+        guard ProjectPaths.hasSupervisorInbox else { return }
         let path = Self.queenInboxPath
         guard FileManager.default.fileExists(atPath: path),
               let handle = try? FileHandle(forReadingFrom: URL(fileURLWithPath: path))
@@ -795,7 +795,7 @@ final class ChatViewModel: ObservableObject {
         skill: String?,
         criteria: [String]?
     ) async -> Bool {
-        guard ProjectPaths.isDevVariant else {
+        guard ProjectPaths.hasSupervisorInbox else {
             TriosLogBus.shared.warn(
                 .queen, "queen.inbox",
                 "No inbox in a release build - the delegation was not queued",

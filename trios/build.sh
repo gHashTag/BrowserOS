@@ -13,14 +13,23 @@ PROJECT_DIR="${TRIOS_ROOT:-$SCRIPT_DIR}"
 case "${1:-}" in
     --release) TRIOS_VARIANT="prod" ;;
     --dev) TRIOS_VARIANT="dev" ;;
+    --test) TRIOS_VARIANT="test" ;;
     --vendored) TRIOS_VENDORED=1 ;;
 esac
 VARIANT="${TRIOS_VARIANT:-dev}"
 # --vendored: use pre-built dylibs from Frameworks-dev/ instead of compiling
 # QueenUILib from the trinity repo. Makes the build work without trinity.
 TRIOS_VENDORED="${TRIOS_VENDORED:-}"
-if [ "$VARIANT" != "dev" ] && [ "$VARIANT" != "prod" ]; then
-    echo "[FAIL] TRIOS_VARIANT must be 'dev' or 'prod', got '$VARIANT'"
+# 'test' is the harness variant. It exists because dev was doing two jobs at
+# once: the scratch space an agent rebuilds at will, AND the workspace where the
+# Queen keeps live delegated tasks. The cassette suite killed trios-dev and
+# deleted its delegation store before every replay, which is correct behaviour
+# towards a scratch app and data loss towards a working one - it destroyed a
+# real registry of 4 tasks on 2026-08-17 (#1275 follow-up). BuildVariant already
+# described .test in full (bundle id, data dir .trinity-test, port 9305); only
+# this script refused to produce it.
+if [ "$VARIANT" != "dev" ] && [ "$VARIANT" != "prod" ] && [ "$VARIANT" != "test" ]; then
+    echo "[FAIL] TRIOS_VARIANT must be 'dev', 'prod' or 'test', got '$VARIANT'"
     exit 1
 fi
 
@@ -63,13 +72,29 @@ fi
 
 # W2: per-variant binary and Frameworks, so a dev build cannot overwrite the
 # release binary or the dylibs it loads.
-if [ "$VARIANT" = "dev" ]; then
-    OUTPUT="$PROJECT_DIR/trios_dev_app"
-    STANDALONE_FRAMEWORKS="$PROJECT_DIR/Frameworks-dev"
-else
-    OUTPUT="$PROJECT_DIR/trios_app"
-    STANDALONE_FRAMEWORKS="$PROJECT_DIR/Frameworks"
-fi
+# Spelled out per variant rather than "dev, or else release". An `else` here
+# hands every unrecognised variant the RELEASE binary path, so the one mistake
+# this fence exists to prevent would be its default. The validation above makes
+# the third arm unreachable; it is written anyway, because the two guards drift
+# independently.
+case "$VARIANT" in
+    dev)
+        OUTPUT="$PROJECT_DIR/trios_dev_app"
+        STANDALONE_FRAMEWORKS="$PROJECT_DIR/Frameworks-dev"
+        ;;
+    test)
+        OUTPUT="$PROJECT_DIR/trios_test_app"
+        STANDALONE_FRAMEWORKS="$PROJECT_DIR/Frameworks-test"
+        ;;
+    prod)
+        OUTPUT="$PROJECT_DIR/trios_app"
+        STANDALONE_FRAMEWORKS="$PROJECT_DIR/Frameworks"
+        ;;
+    *)
+        echo "[FAIL] unreachable: variant '$VARIANT' passed validation but has no output path"
+        exit 1
+        ;;
+esac
 
 # Persistent build directory: the objects, the output file map and the
 # dependency graph survive between runs so swiftc can compile incrementally
@@ -606,21 +631,38 @@ if [ "$COMPILE_STATUS" -eq 0 ]; then
     # Two variants can coexist. The dev build carries its own bundle id, ports
     # and data directory, so an agent rebuilding it cannot disturb a release
     # instance the user is actually using. TRIOS_VARIANT=dev selects it.
-    if [ "$VARIANT" = "dev" ]; then
-        APP_BUNDLE="$PROJECT_DIR/trios-dev.app"
-        BUNDLE_ID="com.browseros.trios.dev"
-        BUNDLE_NAME="TriOS Dev"
-        VARIANT_MCP_PORT="9205"
-        VARIANT_A2A_PORT="9210"
-        VARIANT_MESH_PORT="9515"
-    else
-        APP_BUNDLE="$PROJECT_DIR/trios.app"
-        BUNDLE_ID="com.browseros.trios"
-        BUNDLE_NAME="Trios"
-        VARIANT_MCP_PORT="9105"
-        VARIANT_A2A_PORT="9200"
-        VARIANT_MESH_PORT="9505"
-    fi
+    # Three variants coexist, each with its own bundle id, ports and data
+    # directory. Explicit arms, no `else`: see the OUTPUT case above.
+    case "$VARIANT" in
+        dev)
+            APP_BUNDLE="$PROJECT_DIR/trios-dev.app"
+            BUNDLE_ID="com.browseros.trios.dev"
+            BUNDLE_NAME="TriOS Dev"
+            VARIANT_MCP_PORT="9205"
+            VARIANT_A2A_PORT="9210"
+            VARIANT_MESH_PORT="9515"
+            ;;
+        test)
+            APP_BUNDLE="$PROJECT_DIR/trios-test.app"
+            BUNDLE_ID="com.browseros.trios.test"
+            BUNDLE_NAME="TriOS Test"
+            VARIANT_MCP_PORT="9305"
+            VARIANT_A2A_PORT="9310"
+            VARIANT_MESH_PORT="9525"
+            ;;
+        prod)
+            APP_BUNDLE="$PROJECT_DIR/trios.app"
+            BUNDLE_ID="com.browseros.trios"
+            BUNDLE_NAME="Trios"
+            VARIANT_MCP_PORT="9105"
+            VARIANT_A2A_PORT="9200"
+            VARIANT_MESH_PORT="9505"
+            ;;
+        *)
+            echo "[FAIL] unreachable: variant '$VARIANT' has no bundle definition"
+            exit 1
+            ;;
+    esac
     MACOS_DIR="$APP_BUNDLE/Contents/MacOS"
     RESOURCES_DIR="$APP_BUNDLE/Contents/Resources"
     FRAMEWORKS_DIR="$APP_BUNDLE/Contents/Frameworks"

@@ -40,8 +40,42 @@ struct CompositionRoot {
         let serverURL = URL(string: ProjectPaths.mcpBaseURL) ?? URL(fileURLWithPath: "/dev/null")
         let localAuthProvider = LocalAuthProvider(baseURL: serverURL)
         LocalAuthUIManager.shared.configure(provider: localAuthProvider)
-        let transport = SSETransport(localAuthProvider: localAuthProvider)
-        NSLog("CompositionRoot: SSETransport created")
+        // One decision about who serves bytes, asked twice: once for the chat
+        // panel, once per worker. It used to be asked only for the workers, so
+        // a cassette run still built a live SSETransport for the chat - and
+        // ChatViewModel's "is the API key present" precondition keys off
+        // `type(of: transport) is SSETransport.Type`. Under a replay that
+        // precondition therefore fired on a credential the run would never use,
+        // and refused to dispatch. The suite passed anyway on any machine that
+        // happened to have a key, and failed on one that did not, blaming the
+        // Keychain. A recorded run must not depend on a secret; that is the
+        // entire reason to record it.
+        //
+        // A fresh instance each call: workers must not share a transport with
+        // the chat, because switching conversation cancels it.
+        // The timeout is a parameter rather than a constant because the two
+        // callers genuinely differ: the chat keeps SSETransport's own default,
+        // a worker gets an hour. Folding them together here would have changed
+        // the chat's patience as a side effect of a transport fix.
+        // `@Sendable` closure rather than a local func: the worker runner calls
+        // it from a nonisolated context, and a local function here inherits the
+        // enclosing main-actor isolation.
+        let makeTransport: @Sendable (TimeInterval?) -> ChatTransportProtocol = { resourceTimeout in
+            if let cassette = ProcessInfo.processInfo.environment["TRIOS_REPLAY_CASSETTE"],
+               !cassette.isEmpty {
+                return ReplayTransport(path: cassette)
+            }
+            if let resourceTimeout {
+                return SSETransport(
+                    localAuthProvider: localAuthProvider,
+                    resourceTimeout: resourceTimeout
+                )
+            }
+            return SSETransport(localAuthProvider: localAuthProvider)
+        }
+
+        let transport = makeTransport(nil)
+        NSLog("CompositionRoot: chat transport created (\(type(of: transport)))")
 
         let agentCard = AgentCard(
             id: AgentId("trios-agent"),
@@ -69,23 +103,15 @@ struct CompositionRoot {
         let workerRunner = QueenWorkerRunner(
             persister: persister,
             modelStore: modelStore,
-            makeTransport: {
-                // A cassette replaces the provider entirely when one is named,
-                // so a swarm run is deterministic: same bytes, same order, every
-                // time. Without it a one-in-three failure costs a session to
-                // characterise, because each attempt is a different conversation
-                // with a different model on a different day.
-                if let cassette = ProcessInfo.processInfo.environment["TRIOS_REPLAY_CASSETTE"],
-                   !cassette.isEmpty {
-                    return ReplayTransport(path: cassette)
-                }
-                return SSETransport(
-                    localAuthProvider: localAuthProvider,
-                    // An hour. Nobody is watching a bee tick, and being cut off
-                    // mid-task wastes every tool call it already made.
-                    resourceTimeout: 3600
-                )
-            }
+            // A cassette replaces the provider entirely when one is named, so a
+            // swarm run is deterministic: same bytes, same order, every time.
+            // Without it a one-in-three failure costs a session to characterise,
+            // because each attempt is a different conversation with a different
+            // model on a different day.
+            //
+            // An hour for a real worker: nobody is watching a bee tick, and
+            // being cut off mid-task wastes every tool call it already made.
+            makeTransport: { makeTransport(3600) }
         )
         NSLog("CompositionRoot: QueenWorkerRunner created")
 

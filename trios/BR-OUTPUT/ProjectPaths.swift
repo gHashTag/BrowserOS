@@ -123,9 +123,21 @@ enum ProjectPaths {
     ///
     /// The dev variant runs beside the release app with its own bundle id,
     /// ports and data directory, so an agent rebuilding it cannot disturb a
-    /// working release instance. It also stores secrets in files rather than
-    /// the Keychain - see DevSecretStore for why.
+    /// working release instance.
+    ///
+    /// Narrowly "is this the dev supervisor build". For the separate question
+    /// "may this build reach the real Keychain" use `usesFileSecretStore`: the
+    /// two used to be the same word, and they stopped agreeing the moment a
+    /// third variant existed.
     static var isDevVariant: Bool { variant == .dev }
+
+    /// Whether secrets live in files rather than the Keychain - see
+    /// DevSecretStore, and `BuildVariant.usesFileSecretStore` for the reasoning.
+    static var usesFileSecretStore: Bool { variant.usesFileSecretStore }
+
+    /// Whether this build runs the Queen's delegation inbox. False only for the
+    /// release app; see `BuildVariant.hasSupervisorInbox`.
+    static var hasSupervisorInbox: Bool { variant.hasSupervisorInbox }
 
     /// Build variant as a string, for callers that record or display it.
     ///

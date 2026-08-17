@@ -18,6 +18,19 @@ ROOT  := $(shell cd "$(dir $(lastword $(MAKEFILE_LIST)))" && pwd)
 DEV_APP     := $(ROOT)/trios-dev.app
 RELEASE_APP := $(ROOT)/trios.app
 
+# The harness bundle. Dev was doing two incompatible jobs: scratch space an
+# agent restarts and wipes at will, and the workspace where the Queen keeps
+# live delegated tasks. `make cassettes` treated it as the first - pkill, then
+# `rm -f .trinity-dev/state/queen_delegation.json` before each of four replays -
+# and on 2026-08-17 that deleted a real registry of four tasks mid-cycle. The
+# harness now runs as its own variant: bundle com.browseros.trios.test, data
+# root .trinity-test, port 9305. It can be killed and wiped freely because
+# nothing else lives there.
+TEST_APP    := $(ROOT)/trios-test.app
+TEST_PROC   := trios-test\.app/Contents/MacOS/trios
+TEST_BIN    := $(TEST_APP)/Contents/MacOS/trios
+TEST_LOG    := $(ROOT)/.trinity-test/logs/trios-app.jsonl
+
 # Both bundles ship an executable literally named `trios`
 # (trios-dev.app/Contents/MacOS/trios), so a *name* is not an identity here:
 # 'pgrep -x trios-dev' can never match anything, and 'pgrep -x trios' matches
@@ -727,6 +740,7 @@ keychain-doors:
 # #1237).  This check walks every recipe line and flags a lone $ that is
 # neither $ nor a Make variable in the allowlist below.
 MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP DEV_BIN RELEASE_BIN DEV_PROC \
+	TEST_APP TEST_PROC TEST_BIN TEST_LOG \
 	RELEASE_PROC WARNING_CEILING XCTEST_ERROR_CEILING CASSETTE_DIR \
 	WARN_VARIANT WARN_BUILD_DIR WARN_OFM WARN_LIST WARN_SEEN WARN_LOG WARN_LOG_DIR \
 	WARN_LOG_LAST WARN_BUILD_ID WARN_FULL_ROOT WARN_FULL_CACHE DEV_BUILD_LOCK \
@@ -893,10 +907,10 @@ finish-mark-order:
 # Do not put a `#` in the table: inside a Make variable it starts a
 # comment and would silently truncate the row.
 GUARDS := \
-	rings/SR-02/ChatViewModel.swift@@queenInboxPollTask = Task@@if ProjectPaths.isDevVariant {@@8@@guards/inbox-poller-unguarded.swift@@a release build polls the dev Queen inbox (1150)~ \
-	rings/SR-02/ChatViewModel.swift@@let path = Self.queenInboxPath@@guard ProjectPaths.isDevVariant else { return }@@3@@guards/inbox-read-unguarded.swift@@a release build reads the dev Queen inbox from any caller (1090)~ \
-	rings/SR-02/ChatViewModel.swift@@let entry = QueenInboxEntry(@@guard ProjectPaths.isDevVariant else {@@10@@guards/inbox-enqueue-unguarded.swift@@a release build queues delegations into the dev Queen inbox (1090)~ \
-	rings/SR-00/KeychainSecrets.swift@@DevSecretStore.read(service: service, account: account)@@if ProjectPaths.isDevVariant {@@4@@guards/dev-secret-store-unguarded.swift@@a release build reads secrets from the plaintext dev store~ \
+	rings/SR-02/ChatViewModel.swift@@queenInboxPollTask = Task@@if ProjectPaths.hasSupervisorInbox {@@8@@guards/inbox-poller-unguarded.swift@@a release build polls the dev Queen inbox (1150)~ \
+	rings/SR-02/ChatViewModel.swift@@let path = Self.queenInboxPath@@guard ProjectPaths.hasSupervisorInbox else { return }@@3@@guards/inbox-read-unguarded.swift@@a release build reads the dev Queen inbox from any caller (1090)~ \
+	rings/SR-02/ChatViewModel.swift@@let entry = QueenInboxEntry(@@guard ProjectPaths.hasSupervisorInbox else {@@10@@guards/inbox-enqueue-unguarded.swift@@a release build queues delegations into the dev Queen inbox (1090)~ \
+	rings/SR-00/KeychainSecrets.swift@@DevSecretStore.read(service: service, account: account)@@if ProjectPaths.usesFileSecretStore {@@4@@guards/dev-secret-store-unguarded.swift@@a release build reads secrets from the plaintext dev store~ \
 	rings/SR-00/TriOSEncryption.swift@@return try loadOrCreateTestKey()@@if ProcessInfo.processInfo.environment["TRIOS_E2E_DISABLE_KEYCHAIN"] == "1" {@@4@@guards/test-key-unguarded.swift@@every build derives its data key from a volatile test file~ \
 	rings/SR-02/ChatViewModel.swift@@if connectivityFailedTasks.contains(task.id), let runner = workerRunner {@@guard !QueenDelegationPolicy.isStreamAlive(current, now: now) else { continue }@@8@@guards/reaper-unguarded.swift@@the reaper stops consulting the liveness predicate and either takes live workers mid-answer or never takes a mute one~ \
 	main.swift@@NSApplication.shared.run()@@guard RecursionGuard.shared.ensureSingleInstance() else {@@12@@guards/single-instance-unguarded.swift@@a second trios instance starts alongside the first~
@@ -1298,7 +1312,7 @@ vendor-step:
 		exit 1; \
 	fi
 
-check: check-selftest keychain-doors make-dollars empty-sources sources-drift sources-drift-selftest finish-mark-order guard-shapes variant-fence parse-tests run-completeness-selftest vendor-step dev warnings test cassettes mutants-changed
+check: check-selftest keychain-doors make-dollars empty-sources sources-drift sources-drift-selftest finish-mark-order guard-shapes variant-fence parse-tests run-completeness-selftest cassette-isolation vendor-step dev warnings test cassettes mutants-changed
 
 # Replay every cassette and assert the expected signal appears in the log.
 #
@@ -1332,8 +1346,63 @@ CASSETTE_BRANCHES := queen/1086-cassette-*
 # it looks exactly like a real delegation's branch and nothing like a cassette's.
 SWEEP_CANARY := queen/0-sweep-canary
 
-cassettes:
-	@pkill -f "trios-dev.app/Contents/MacOS" 2>/dev/null || true
+# The cassette recipe must never name the Queen's variant.
+#
+# The isolation above is one `sed` away from being undone, and the failure is
+# silent: the suite still passes, and a live delegation registry disappears.
+# That is exactly how it happened - `rm -f .trinity-dev/state/queen_delegation
+# .json` sat in the recipe as a deliberate, commented, correct-looking line for
+# months, because when it was written nothing lived there.
+#
+# Scoped to the recipe, not the file: DEV_APP and .trinity-dev are legitimate
+# everywhere else in this Makefile.
+.PHONY: cassette-isolation
+cassette-isolation:
+	@body=$$(awk '/^cassettes: /,/^# --- Running/' "$(ROOT)/Makefile"); \
+	if [ -z "$$body" ]; then \
+		echo "[FAIL] cassette-isolation could not find the cassettes recipe to read"; \
+		exit 1; \
+	fi; \
+	fail=0; \
+	for needle in 'trios-dev' '.trinity-dev' 'DEV_APP' 'DEV_PROC' '$$(LOG)'; do \
+		if printf '%s\n' "$$body" | /usr/bin/grep -qF -- "$$needle"; then \
+			echo "  [FAIL] the cassette recipe names '$$needle'"; \
+			echo "         The harness runs as the test variant precisely so it can"; \
+			echo "         kill and wipe freely. Reaching into dev destroys the"; \
+			echo "         Queen's live delegation registry (#1275 follow-up)."; \
+			fail=1; \
+		fi; \
+	done; \
+	if ! printf '%s\n' "$$body" | /usr/bin/grep -qF -- 'trios-test'; then \
+		echo "  [FAIL] the cassette recipe names no test variant at all -"; \
+		echo "         a rename would satisfy every check above by accident."; \
+		fail=1; \
+	fi; \
+	if [ $$fail -eq 0 ]; then \
+		echo "[OK] the cassette recipe stays inside the test variant"; \
+	fi; \
+	exit $$fail
+
+# The harness bundle the cassette suite drives.
+#
+# TRIOS_SKIP_SWIFT_TEST / TRIOS_SKIP_CHAT_E2E: build.sh runs both suites at the
+# end of a build, and this bundle exists only to be launched four times with a
+# recorded stream. Running the test suites here would make `make cassettes`
+# depend on them, so a failure in either would be reported as a cassette
+# failure - the wrong name for the wrong layer.
+.PHONY: test-app
+test-app:
+	@TRIOS_VARIANT=test TRIOS_SKIP_SWIFT_TEST=1 TRIOS_SKIP_CHAT_E2E=1 \
+		"$(ROOT)/build.sh" > /tmp/trios_test_app_build.log 2>&1 || { \
+			echo "[FAIL] the harness bundle did not build"; \
+			tail -15 /tmp/trios_test_app_build.log | sed 's/^/  | /'; \
+			exit 1; \
+		}
+	@test -x "$(TEST_BIN)" || { echo "[FAIL] $(TEST_BIN) is missing after a build that claimed success"; exit 1; }
+	@echo "[OK] harness bundle built: $(TEST_APP)"
+
+cassettes: test-app
+	@pkill -f "trios-test.app/Contents/MacOS" 2>/dev/null || true
 	@sleep 2
 	@: "A branch that looks like a delegation's real work, planted so the sweep \
 	    below has something it must NOT delete. Widening CASSETTE_BRANCHES back \
@@ -1350,8 +1419,18 @@ cassettes:
 		covered="$$covered $$cassette"; \
 		marker=$${rest%%:*}; label=$${rest#*:}; \
 		case "$$marker" in second_turn*|*second_turn*) second=1 ;; *) second= ;; esac; \
-		before=$$(wc -l < "$(LOG)" 2>/dev/null || echo 0); \
-		rm -f "$(ROOT)/.trinity-dev/state/queen_delegation.json"; \
+		before=$$(wc -l < "$(TEST_LOG)" 2>/dev/null || echo 0); \
+		: "Everything the harness variant remembers between runs, cleared."; \
+		: "The delegation store, the inbox file, and - the one that is not a"; \
+		: "file - the inbox offset and executed-fingerprint sets, which live"; \
+		: "in UserDefaults under the test bundle id. Without that last one"; \
+		: "the second run of any cassette is answered with"; \
+		: "queen.inbox.skipped - Line already executed, and the suite reads"; \
+		: "as a marker that never appeared. Safe to wipe wholesale: nothing"; \
+		: "but this harness writes to com.browseros.trios.test."; \
+		rm -f "$(ROOT)/.trinity-test/state/queen_delegation.json"; \
+		rm -f "$(ROOT)/.trinity-test/state/queen_inbox.jsonl"; \
+		defaults delete com.browseros.trios.test >/dev/null 2>&1 || true; \
 		: "A cassette effect writes a file; if it survives from the last run the \
 		   baseline diff is empty and the commit assertion fails for the wrong \
 		   reason. Clean before, not only after."; \
@@ -1360,27 +1439,28 @@ cassettes:
 			| xargs -r -n1 git -C "$(ROOT)" branch -D >/dev/null 2>&1 || true; \
 		open --env TRIOS_E2E_DELEGATE="gHashTag/trios\#1086|queen-swift|Cassette $$cassette|docs" \
 		     --env TRIOS_REPLAY_CASSETTE="$(CASSETTE_DIR)/$$cassette" \
-		     --env TRIOS_E2E_SECOND_TURN="$$second" "$(DEV_APP)"; \
+		     --env TRIOS_E2E_SECOND_TURN="$$second" \
+		     --env TRIOS_E2E_DISABLE_KEYCHAIN="1" "$(TEST_APP)"; \
 		: "The wait is not a fixed 40-second cliff. The budget is 120 s \
 		   (3x the original) so a busy machine is not penalised, but the \
-		   loop breaks the moment trios-dev exits — a crashed app should \
+		   loop breaks the moment trios-test exits — a crashed app should \
 		   not burn the full budget. Two failure modes that used to look \
-		   identical are now told apart: 'never started' (no trios-dev \
+		   identical are now told apart: 'never started' (no trios-test \
 		   process was ever seen) vs 'ran but produced no marker'."; \
 		found=0; started=0; \
 		for i in $$(seq 1 60); do \
-			tail -n "+$$((before + 1))" "$(LOG)" 2>/dev/null | grep -q "$$marker" && { found=1; break; }; \
-			if pgrep -f "trios-dev.app/Contents/MacOS" >/dev/null 2>&1; then started=1; \
+			tail -n "+$$((before + 1))" "$(TEST_LOG)" 2>/dev/null | grep -q "$$marker" && { found=1; break; }; \
+			if pgrep -f "trios-test.app/Contents/MacOS" >/dev/null 2>&1; then started=1; \
 			elif [ $$started -eq 1 ]; then break; fi; \
 			sleep 2; \
 		done; \
 		if [ $$found -eq 1 ]; then echo "  ok   - $$label"; \
 		elif [ $$started -eq 0 ]; then \
-			echo "  FAIL - $$label (trios-dev never started; no process was seen)"; fail=1; \
+			echo "  FAIL - $$label (trios-test never started; no process was seen)"; fail=1; \
 		else \
-			echo "  FAIL - $$label (trios-dev ran but $$marker never appeared in the log)"; fail=1; \
+			echo "  FAIL - $$label (trios-test ran but $$marker never appeared in the log)"; fail=1; \
 		fi; \
-		pkill -f "trios-dev.app/Contents/MacOS" 2>/dev/null || true; \
+		pkill -f "trios-test.app/Contents/MacOS" 2>/dev/null || true; \
 		sleep 2; \
 	done; \
 	git -C "$(ROOT)" branch --list '$(CASSETTE_BRANCHES)' --format='%(refname:short)' | xargs -r -n1 git -C "$(ROOT)" branch -D >/dev/null 2>&1; \
@@ -3334,11 +3414,11 @@ MUTANTS_GUARD := \
 	tests/swift/queen_delegation_test.swift@@static func issueParsing() {@@static issueParsing() {@@parse-tests@@must-not-parse@@a test source the app build never compiles loses its func keyword~ \
 	rings/SR-02/ChatViewModel.swift@@delegationRegistry.recordCompletedTurn(taskID: task.id)@@_ = task.id // gutted: the turn is never marked complete@@finish-mark-order@@typechecks@@the completed-turn mark is dropped from the finish callback~ \
 	rings/SR-02/ChatViewModel.swift@@guard !QueenDelegationPolicy.isStreamAlive(current, now: now) else { continue }@@_ = QueenDelegationPolicy.isStreamAlive(current, now: now) // gutted: the answer is thrown away@@guard-shapes@@typechecks@@guard 6 is gutted in place: the reaper still asks the predicate and throws the answer away~ \
-	rings/SR-02/ChatViewModel.swift@@guard ProjectPaths.isDevVariant else { return }@@<DELETE-BLOCK>let path = Self.queenInboxPath@@guard-shapes@@typechecks@@guard 2 is deleted through its brace: the dev-inbox read loses its variant check~ \
-	rings/SR-02/ChatViewModel.swift@@guard ProjectPaths.isDevVariant else {@@<DELETE-BLOCK>let entry = QueenInboxEntry(@@guard-shapes@@typechecks@@guard 3 is deleted through its brace: the inbox enqueue loses its variant check~ \
+	rings/SR-02/ChatViewModel.swift@@guard ProjectPaths.hasSupervisorInbox else { return }@@<DELETE-BLOCK>let path = Self.queenInboxPath@@guard-shapes@@typechecks@@guard 2 is deleted through its brace: the dev-inbox read loses its variant check~ \
+	rings/SR-02/ChatViewModel.swift@@guard ProjectPaths.hasSupervisorInbox else {@@<DELETE-BLOCK>let entry = QueenInboxEntry(@@guard-shapes@@typechecks@@guard 3 is deleted through its brace: the inbox enqueue loses its variant check~ \
 	main.swift@@guard RecursionGuard.shared.ensureSingleInstance() else {@@<DELETE-BLOCK>NSApplication.shared.run()@@guard-shapes@@typechecks@@guard 7 is deleted through its brace: the boot path stops enforcing a single instance~ \
-	rings/SR-02/ChatViewModel.swift@@if ProjectPaths.isDevVariant {@@<UNWRAP-BLOCK>queenInboxPollTask = Task@@guard-shapes@@typechecks@@guard 1 is unwrapped, body kept: a release build starts the dev Queen inbox poller~ \
-	rings/SR-00/KeychainSecrets.swift@@if ProjectPaths.isDevVariant {@@<UNWRAP-BLOCK>DevSecretStore.read(service: service, account: account)@@guard-shapes@@typechecks@@guard 4 is unwrapped, body kept: a release build reads secrets from the plaintext dev store~ \
+	rings/SR-02/ChatViewModel.swift@@if ProjectPaths.hasSupervisorInbox {@@<UNWRAP-BLOCK>queenInboxPollTask = Task@@guard-shapes@@typechecks@@guard 1 is unwrapped, body kept: a release build starts the dev Queen inbox poller~ \
+	rings/SR-00/KeychainSecrets.swift@@if ProjectPaths.usesFileSecretStore {@@<UNWRAP-BLOCK>DevSecretStore.read(service: service, account: account)@@guard-shapes@@typechecks@@guard 4 is unwrapped, body kept: a release build reads secrets from the plaintext dev store~ \
 	rings/SR-00/TriOSEncryption.swift@@if ProcessInfo.processInfo.environment["TRIOS_E2E_DISABLE_KEYCHAIN"] == "1" {@@<UNWRAP-BLOCK>return try loadOrCreateTestKey()@@guard-shapes@@typechecks@@guard 5 is unwrapped, body kept: every build derives its data key from a volatile test file~ \
 	BR-OUTPUT/ProjectPaths.swift@@static var isDevVariant: Bool { variant == .dev }@@static var isDevVariant: Bool { variant == "dev" }@@variant-fence@@must-not-typecheck@@the dev/release fork is decided by a raw string again, the way tools/ChatProbe.swift already does it~ \
 	rings/SR-00/BuildVariantPolicy.swift@@enum BuildVariant: String, Equatable, Sendable {@@enum BuildVariant: String, Equatable, Sendable, ExpressibleByStringLiteral { init(stringLiteral value: String) { self = BuildVariant(rawValue: value) ?? .prod }@@variant-fence@@typechecks@@BuildVariant becomes string-convertible and every raw-string fork in the tree re-opens at once
