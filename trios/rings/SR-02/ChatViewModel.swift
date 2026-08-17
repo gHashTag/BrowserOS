@@ -4,6 +4,7 @@
 // Follow-up: seal against .trinity/specs/queen-proposal-applier.md.
 // Previous waiver: https://github.com/gHashTag/trios/issues/T27-EPIC-001 (fullscreen chat history).
 import Combine
+import CryptoKit
 import Foundation
 import SwiftUI
 
@@ -209,6 +210,25 @@ final class ChatViewModel: ObservableObject {
     /// share an offset.
     private static var queenInboxOffsetKey: String {
         "queen.inbox.offset.\(ProjectPaths.variant.rawValue)"
+    }
+    /// #1274: Fingerprints of inbox lines already executed — the inbox's own
+    /// idempotency, independent of the delegation registry. The byte offset
+    /// above is the fast path; these fingerprints are the safety net for when
+    /// the offset resets (a cleared default, a truncated file, a restart from
+    /// zero) and lines already handed over would otherwise be read again.
+    ///
+    /// The registry refuses a repeat only while the task sits in a
+    /// non-terminal state; a task that reached `accepted` or `archived` is
+    /// hidden from `task(forIssue:)` by design, and its line would execute a
+    /// second time. The fingerprint store does not consult the registry at
+    /// all: a well-formed line runs once per lifetime of this store. To
+    /// deliberately re-run a delegation, change the line (a new title is
+    /// enough) — the skip is named, never silent, so the operator sees why.
+    private var queenInboxExecuted: Set<String> = []
+    /// UserDefaults key for the persisted fingerprint set, variant-scoped for
+    /// the same reason as the offset key: dev and prod never share a net.
+    private static var queenInboxExecutedKey: String {
+        "queen.inbox.executed.\(ProjectPaths.variant.rawValue)"
     }
 
     private var isConversationTransitioning = false
@@ -438,6 +458,7 @@ final class ChatViewModel: ObservableObject {
             queenInboxOffset = UInt64(
                 UserDefaults.standard.double(forKey: Self.queenInboxOffsetKey)
             )
+            queenInboxExecuted = Self.loadInboxExecuted()
             queenInboxPollTask = Task { [weak self] in
                 guard let self else { return }
                 while !Task.isCancelled {
@@ -509,6 +530,81 @@ final class ChatViewModel: ObservableObject {
         return (currentOffset, false)
     }
 
+    /// #1274: Stable fingerprint of one raw inbox line — SHA-256 hex of its
+    /// UTF-8 bytes. Identical delegations collide; any edit (a new title, one
+    /// more path) does not. Deliberately not `Hasher`, whose per-process seed
+    /// would make fingerprints incomparable across launches. Nonisolated
+    /// because it is pure — passed as a function value in the seed pass and
+    /// callable from tests.
+    nonisolated internal static func inboxLineFingerprint(_ line: String) -> String {
+        SHA256.hash(data: Data(line.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    /// #1274: Can this line become a delegation? One decode plus one issue
+    /// parse — the same two steps the poll loop below warns about
+    /// individually. Used by the seeding pass, which must not adopt garbage
+    /// as "executed" (a malformed line was never handed over, so a later
+    /// re-read should still say so rather than claim a skip). Nonisolated:
+    /// pure, and passed as a function value.
+    nonisolated internal static func isExecutableInboxLine(_ line: String) -> Bool {
+        guard let data = line.data(using: .utf8),
+              let entry = try? JSONDecoder().decode(QueenInboxEntry.self, from: data)
+        else { return false }
+        return IssueReference.parse(entry.issue) != nil
+    }
+
+    /// #1274: The poll loop's skip decision as a pure function, so the
+    /// exactly-once contract is testable without a live poller. Walks a batch
+    /// of raw lines and returns the ones still to execute, the ones to skip
+    /// as already executed (with fingerprints, so the caller can *name* the
+    /// skip rather than fall silent), and the grown set — a line seen twice
+    /// inside one batch is skipped the second time.
+    ///
+    /// `isExecutable` decides which fresh lines are recorded: the poll loop
+    /// records only lines it actually hands over, so a malformed line is
+    /// warned about every time it is read, never "skipped as executed".
+    /// Nonisolated: pure, and driven directly from tests.
+    nonisolated internal static func filterInboxLines(
+        _ lines: [String],
+        executed: Set<String>,
+        isExecutable: (String) -> Bool = { _ in true }
+    ) -> (execute: [String],
+          skipped: [(line: String, fingerprint: String)],
+          executedAfter: Set<String>) {
+        var grown = executed
+        var toExecute: [String] = []
+        var skipped: [(line: String, fingerprint: String)] = []
+        for line in lines {
+            let fingerprint = inboxLineFingerprint(line)
+            if grown.contains(fingerprint) {
+                skipped.append((line, fingerprint))
+                continue
+            }
+            if isExecutable(line) {
+                grown.insert(fingerprint)
+                toExecute.append(line)
+            }
+        }
+        return (toExecute, skipped, grown)
+    }
+
+    /// #1274: Reads the persisted fingerprint set. Stored beside the offset,
+    /// in UserDefaults, so both survive a relaunch and reset together if a
+    /// human clears the domain.
+    private static func loadInboxExecuted() -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: queenInboxExecutedKey) ?? [])
+    }
+
+    /// #1274: Persists the whole set, sorted for stable diffs. Called only
+    /// when the set grew; cheap at dev-inbox scale.
+    private func persistInboxExecuted() {
+        UserDefaults.standard.set(
+            queenInboxExecuted.sorted(), forKey: Self.queenInboxExecutedKey
+        )
+    }
+
     /// Reads any new lines appended since the last poll and delegates each one.
     /// The byte offset is persisted to UserDefaults after each read, so a
     /// restart resumes from where it stopped without re-delegating.
@@ -545,6 +641,39 @@ final class ChatViewModel: ObservableObject {
             )
         }
 
+        // #1274: Converge with fingerprints persisted since the last tick —
+        // a second poller (a second window, the delegate probe) may have
+        // executed lines this one never saw. The union never shrinks.
+        queenInboxExecuted.formUnion(Self.loadInboxExecuted())
+
+        // #1274: Cold start of the fingerprint store. The offset says these
+        // bytes were consumed before the store existed, so the well-formed
+        // lines among them are adopted as already executed — the safety net
+        // then covers the file's whole past, not just its future. Never done
+        // after a restart-from-zero: an offset past EOF proves nothing about
+        // the bytes now sitting in the file, and adopting them could skip
+        // lines nobody ever executed.
+        if queenInboxExecuted.isEmpty, resolvedOffset > 0, !didRestart {
+            try? handle.seek(toOffset: 0)
+            if let head = try? handle.read(upToCount: Int(resolvedOffset)),
+               let headText = String(data: head, encoding: .utf8) {
+                let seeds = headText
+                    .split(separator: "\n", omittingEmptySubsequences: true)
+                    .map(String.init)
+                    .filter(Self.isExecutableInboxLine)
+                    .map(Self.inboxLineFingerprint)
+                if !seeds.isEmpty {
+                    queenInboxExecuted.formUnion(seeds)
+                    persistInboxExecuted()
+                    TriosLogBus.shared.info(
+                        .queen, "queen.inbox.seeded",
+                        "Adopted \(seeds.count) already-read lines as executed — the fingerprint store starts empty",
+                        ["seeded": String(seeds.count), "offset": String(resolvedOffset)]
+                    )
+                }
+            }
+        }
+
         try? handle.seek(toOffset: resolvedOffset)
         guard let data = try? handle.readToEnd(), !data.isEmpty else { return }
 
@@ -557,12 +686,33 @@ final class ChatViewModel: ObservableObject {
 
         guard let text = String(data: data, encoding: .utf8) else { return }
         let lines = text.split(separator: "\n", omittingEmptySubsequences: true)
+            .map(String.init)
 
         // Parse every line before dispatching, so malformed lines are logged
         // and skipped without blocking the valid ones. The entries are then
         // dispatched concurrently rather than one waiting for the next (#1150).
         var parsed: [(issue: IssueReference, entry: QueenInboxEntry)] = []
+        let executedBefore = queenInboxExecuted.count
         for line in lines {
+            // #1274: the inbox's own idempotency, not the registry's. A line
+            // whose fingerprint was already executed is skipped with a named
+            // event. Until now the repeat was caught by the delegation
+            // registry — and only while the task sat in a non-terminal
+            // state; one that had reached `accepted` or `archived` is
+            // invisible to `task(forIssue:)`, so its line ran twice. The
+            // check fires before the decode, so a skipped line costs one
+            // hash and one log line, and covers duplicates within this same
+            // batch as well as repeats after an offset reset.
+            let fingerprint = Self.inboxLineFingerprint(line)
+            if queenInboxExecuted.contains(fingerprint) {
+                TriosLogBus.shared.info(
+                    .queen, "queen.inbox.skipped",
+                    "Skipped — line already executed",
+                    ["fingerprint": fingerprint, "line": String(line.prefix(200))]
+                )
+                continue
+            }
+
             guard let lineData = line.data(using: .utf8),
                   let entry = try? JSONDecoder().decode(
                       QueenInboxEntry.self, from: lineData
@@ -585,6 +735,13 @@ final class ChatViewModel: ObservableObject {
                 continue
             }
 
+            // #1274: Record the fingerprint with the hand-over, on the same
+            // crash-safety principle as the offset advance above — a crash
+            // mid-delegation must not hand the same line over twice. Only a
+            // line that parses gets here, so a malformed line is never
+            // claimed as "already executed" by a later re-read.
+            queenInboxExecuted.insert(fingerprint)
+
             TriosLogBus.shared.info(
                 .queen, "queen.inbox",
                 "Inbox entry read: \(issue.slug)",
@@ -592,6 +749,9 @@ final class ChatViewModel: ObservableObject {
             )
 
             parsed.append((issue, entry))
+        }
+        if queenInboxExecuted.count != executedBefore {
+            persistInboxExecuted()
         }
 
         // Dispatch all valid entries concurrently, so one entry's network
