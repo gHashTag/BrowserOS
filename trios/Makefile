@@ -205,7 +205,11 @@ help:
 # monospaced), so the modern replacement is an AttributedString rewrite of
 # styledText, not a substitution. That changes rendering, and rendering is not
 # verifiable from a build log. Tracked rather than pretended away.
-WARNING_CEILING := 4
+# Zero, and derived from the requirement rather than from a reading. It was 4
+# for as long as BR-OUTPUT/RichTextRenderer.swift concatenated Text values with
+# the deprecated +; that rewrite landed on AttributedString and the count is
+# genuinely 0 (verified by touching the file and recompiling, not from cache).
+WARNING_CEILING := 0
 
 # Where the per-file warning cache lives. Inside the dev object directory on
 # purpose: its lifetime is the objects' lifetime.
