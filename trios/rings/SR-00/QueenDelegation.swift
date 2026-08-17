@@ -243,6 +243,21 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// stream object exists right now".
     var streamOutcome: WorkerStreamOutcome?
 
+    /// When the runner opened this worker's stream.
+    ///
+    /// Time-to-first-byte is unmeasurable without it, and until it existed the
+    /// two quantities the reaper needs - how long a worker has been silent, and
+    /// how long it has been failing to start - were both read off the same
+    /// `updatedAt`. They have different scales: a pause between tokens is
+    /// minutes, a wait for the first token is seconds. Conflating them let a
+    /// worker that opened a stream and never spoke sit in .running for 24
+    /// minutes while every detector called it healthy (#1275).
+    ///
+    /// Like `lastStreamByteAt`, nothing persists for it alone; and like it,
+    /// a copy that survives a restart is meaningless, because everything the
+    /// store calls running at launch is reconciled as failed first.
+    var streamOpenedAt: Date?
+
     /// Which model did the work, so a cost estimate is possible after the fact.
     var provider: String?
     var model: String?
@@ -297,6 +312,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         completedTurns: Int? = nil,
         lastStreamByteAt: Date? = nil,
         streamOutcome: WorkerStreamOutcome? = nil,
+        streamOpenedAt: Date? = nil,
         pullRequestNumber: Int? = nil,
         provider: String? = nil,
         model: String? = nil,
@@ -325,6 +341,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         self.completedTurns = completedTurns
         self.lastStreamByteAt = lastStreamByteAt
         self.streamOutcome = streamOutcome
+        self.streamOpenedAt = streamOpenedAt
         self.pullRequestNumber = pullRequestNumber
         self.provider = provider
         self.model = model
@@ -545,8 +562,29 @@ enum QueenDelegationPolicy {
         now: Date,
         threshold: TimeInterval = QueenDelegationPolicy.stallThreshold
     ) -> Bool {
-        guard !isStreamOpen(task) else { return false }
+        if isStreamOpen(task) {
+            // Spoken for, and paused: thinking. This is the case the comment
+            // above defends and it is deliberately untouched.
+            guard task.lastStreamByteAt == nil else { return false }
+            // Never spoke. An open socket is not a heartbeat - it is the
+            // absence of a close, which is precisely the evidence Chandra and
+            // Toueg's detectors are forbidden to rest on. Judged against the
+            // first byte, on its own much shorter scale.
+            let opened = task.streamOpenedAt ?? task.updatedAt
+            return now.timeIntervalSince(opened) >= QueenDelegationPolicy.firstByteDeadline
+        }
         return now.timeIntervalSince(lastEvidenceOfLife(task)) >= threshold
+    }
+
+    /// Whether the reaper must keep its hands off this one.
+    ///
+    /// The single shield, so the three places that used to ask `isStreamOpen`
+    /// directly - this policy, `reapStalledWorkers`, and the test that mirrors
+    /// it - cannot drift apart. Each of them independently believed an open
+    /// stream was alive; a mute worker therefore had to survive three
+    /// coincidences, and it survived all three (#1275).
+    static func isStreamAlive(_ task: DelegatedTask, now: Date) -> Bool {
+        isStreamOpen(task) && !hasGoneSilent(task, now: now)
     }
 
     /// A task the registry calls running for which no turn was ever opened.
@@ -576,6 +614,34 @@ enum QueenDelegationPolicy {
     static let maxResumeAttempts = 2
 
     static let stallThreshold: TimeInterval = 60 * 60
+
+    /// How long an open stream may deliver nothing at all before it is dead.
+    ///
+    /// Derived from the transport, not chosen. A stream that never produces a
+    /// byte is not abandoned by the reaper first - `SSETransport` gives up on
+    /// it on its own, and the reaper must not cut in ahead of the layer that
+    /// actually knows (the Falcon argument already cited on
+    /// `WorkerStreamOutcome`). That layer's worst case for a fully mute
+    /// connection is:
+    ///
+    ///     3 attempts x 120 s request inactivity  = 360 s
+    ///     + exponential backoff 1 s and 2 s      =   3 s
+    ///     ------------------------------------------------
+    ///                                              363 s
+    ///
+    /// (`NetworkRetryPolicy(maxAttempts: 3, baseDelay: 1, maxDelay: 30)` and
+    /// `timeoutIntervalForRequest = 120` in `SSETransport`.)
+    ///
+    /// 600 s sits above that with room for the runner to record the outcome
+    /// afterwards, and coincides with `timeoutIntervalForResource`, the
+    /// transport's other hard stop. Change either of those numbers and this one
+    /// is wrong - it is arithmetic over them, not a preference.
+    ///
+    /// Deliberately NOT measured against provider latency. Time-to-first-token
+    /// for these models is seconds, so any deadline derived from it would be
+    /// far tighter; the binding constraint is the transport's patience, and a
+    /// deadline below it would reap tasks the transport was about to rescue.
+    static let firstByteDeadline: TimeInterval = 600
 
     static func isExpensive(_ task: DelegatedTask) -> Bool {
         task.totalTokens >= workerTokenWarningThreshold

@@ -697,10 +697,18 @@ KEYCHAIN_ALLOW_PATTERNS := $(addprefix -e ,$(KEYCHAIN_ALLOWLIST))
 
 .PHONY: keychain-doors
 keychain-doors:
-	@offending=$$(/usr/bin/grep -rlE 'SecItem(CopyMatching|Add|Update|Delete)' \
+	@: "Matched on CODE lines only. A line whose first non-blank characters are"; \
+	: "// or * is prose, and prose cannot open a keychain door - the rule fired"; \
+	: "on a comment that merely NAMED SecItemCopyMatching while explaining why"; \
+	: "the suite must not touch the keychain, which is the opposite of a"; \
+	: "violation. This filter cannot hide a real call: a call on a line that"; \
+	: "starts with // is not a call."; \
+	offending=$$(/usr/bin/grep -rnE 'SecItem(CopyMatching|Add|Update|Delete)' \
 		--include='*.swift' --exclude-dir='.build' --exclude-dir='.git' \
 		--exclude-dir='.worktrees' --exclude-dir='trios_dev_app' --exclude-dir='trios_app' \
 		"$(ROOT)" \
+		| /usr/bin/grep -vE '^[^:]*:[0-9]+:[[:space:]]*(//|\*)' \
+		| cut -d: -f1 \
 		| sed "s|$(ROOT)/||" | sort -u \
 		| grep -vxF $(KEYCHAIN_ALLOW_PATTERNS) || true); \
 	if [ -n "$$offending" ]; then \
@@ -890,7 +898,7 @@ GUARDS := \
 	rings/SR-02/ChatViewModel.swift@@let entry = QueenInboxEntry(@@guard ProjectPaths.isDevVariant else {@@10@@guards/inbox-enqueue-unguarded.swift@@a release build queues delegations into the dev Queen inbox (1090)~ \
 	rings/SR-00/KeychainSecrets.swift@@DevSecretStore.read(service: service, account: account)@@if ProjectPaths.isDevVariant {@@4@@guards/dev-secret-store-unguarded.swift@@a release build reads secrets from the plaintext dev store~ \
 	rings/SR-00/TriOSEncryption.swift@@return try loadOrCreateTestKey()@@if ProcessInfo.processInfo.environment["TRIOS_E2E_DISABLE_KEYCHAIN"] == "1" {@@4@@guards/test-key-unguarded.swift@@every build derives its data key from a volatile test file~ \
-	rings/SR-02/ChatViewModel.swift@@if connectivityFailedTasks.contains(task.id), let runner = workerRunner {@@guard !QueenDelegationPolicy.isStreamOpen(current) else { continue }@@8@@guards/reaper-unguarded.swift@@the reaper stops consulting the stream-open predicate and takes live workers mid-answer~ \
+	rings/SR-02/ChatViewModel.swift@@if connectivityFailedTasks.contains(task.id), let runner = workerRunner {@@guard !QueenDelegationPolicy.isStreamAlive(current, now: now) else { continue }@@8@@guards/reaper-unguarded.swift@@the reaper stops consulting the liveness predicate and either takes live workers mid-answer or never takes a mute one~ \
 	main.swift@@NSApplication.shared.run()@@guard RecursionGuard.shared.ensureSingleInstance() else {@@12@@guards/single-instance-unguarded.swift@@a second trios instance starts alongside the first~
 
 .PHONY: guard-shapes
@@ -1290,7 +1298,7 @@ vendor-step:
 		exit 1; \
 	fi
 
-check: check-selftest keychain-doors make-dollars empty-sources sources-drift sources-drift-selftest finish-mark-order guard-shapes variant-fence parse-tests vendor-step dev warnings test cassettes mutants-changed
+check: check-selftest keychain-doors make-dollars empty-sources sources-drift sources-drift-selftest finish-mark-order guard-shapes variant-fence parse-tests run-completeness-selftest vendor-step dev warnings test cassettes mutants-changed
 
 # Replay every cassette and assert the expected signal appears in the log.
 #
@@ -1869,6 +1877,104 @@ sources-drift-selftest:
 XCTEST_ERROR_CEILING := 0
 
 .PHONY: xctest
+# --- Does the suite RUN, and does it FINISH? -----------------------------
+#
+# 'xctest' counts COMPILE errors. That is one of three distinct states, and for
+# months this repository had a gate on the first while believing it measured the
+# third: does it build, does it run, does it pass.
+#
+# This target answers the second and third, and the completeness check is the
+# load-bearing part. An aborted run does not report "n failures" -- it reports a
+# PREFIX, and a prefix is indistinguishable from a short suite. That is not
+# hypothetical: the suite reported 121 tests, then 133, and the real figure was
+# 483, because a fatalError in a URLProtocol and fourteen force-unwraps after a
+# failed XCTAssertNotNil were each killing the process mid-run. Everything
+# scheduled after the crash silently disappeared.
+#
+# So the run must certify its own completeness: XCTest prints a final
+# "Test Suite 'All tests'" summary if and only if it reached the end. No summary
+# means the number is a prefix, whatever it says.
+#
+# TRIOS_E2E_DISABLE_KEYCHAIN=1 is part of the contract, not a superstition:
+# without it KeychainSymmetricKeyStoreTests hits a real keychain, dies on a
+# Fatal error, and the run stops there. A precondition that changes the SHAPE of
+# the result rather than its value belongs in the recipe.
+#
+# The judgement lives in 'xctest-log-complete', which reads a log given to it,
+# so the red side can be driven in milliseconds instead of the 5.5 minutes a
+# real abort costs. A gate proven only from the green side is not proven.
+.PHONY: xctest-run
+xctest-run:
+	@log=$$(mktemp /tmp/trios_xctest_run.XXXXXX) || exit 1; \
+	trap 'rm -f "$$log"' EXIT INT TERM; \
+	TRIOS_E2E_DISABLE_KEYCHAIN=1 TRIOS_VARIANT=dev \
+		swift test --package-path "$(ROOT)/.." > "$$log" 2>&1 || true; \
+	$(MAKE) --no-print-directory xctest-log-complete LOG="$$log"
+
+.PHONY: xctest-log-complete
+xctest-log-complete:
+	@log="$(LOG)"; \
+	if [ -z "$$log" ] || [ ! -f "$$log" ]; then \
+		echo "[FAIL] xctest-log-complete needs LOG=<path to a swift test log>"; \
+		exit 1; \
+	fi; \
+	if ! /usr/bin/grep -q "Test Suite 'All tests'" "$$log"; then \
+		echo "[FAIL] the run did not finish: no 'All tests' summary."; \
+		echo "       Whatever count it printed is a PREFIX, not a result."; \
+		/usr/bin/grep -E "Fatal error|signal code" "$$log" | head -3 | sed 's/^/       | /'; \
+		exit 1; \
+	fi; \
+	line=$$(/usr/bin/grep -E "^\s+Executed .* tests?, with" "$$log" | tail -1); \
+	: "'started' is load-bearing: XCTest prints two lines per case, so the"; \
+	: "bare prefix counts every test twice. This target printed 966 for a"; \
+	: "483-test suite on its very first run."; \
+	ran=$$(/usr/bin/grep -cE "^Test Case .* started$$" "$$log"); \
+	echo "[OK] the run finished. $$line"; \
+	echo "     $$ran test case starts observed"
+
+# Both sides of the completeness check, on synthetic logs. The truncated one is
+# the exact shape the real suite had for months: a plausible "Executed N tests"
+# line, a crash, and nothing after it. A reader who trusts the number reads 2
+# where the truth is 483.
+.PHONY: run-completeness-selftest
+run-completeness-selftest:
+	@d=$$(mktemp -d /tmp/trios_runsel.XXXXXX) || exit 1; \
+	trap 'rm -rf "$$d"' EXIT INT TERM; \
+	fail=0; \
+	printf "%s\n" \
+		"Test Case '-[T a]' started" \
+		"Test Case '-[T a]' passed (0.1 seconds)" \
+		"Test Suite 'All tests' passed at 2026-08-17 03:00:00.000." \
+		"	 Executed 1 test, with 0 failures (0 unexpected) in 0.1 (0.1) seconds" \
+		> "$$d/whole.log"; \
+	printf "%s\n" \
+		"Test Case '-[T a]' started" \
+		"Test Case '-[T a]' passed (0.1 seconds)" \
+		"Test Case '-[T b]' started" \
+		"	 Executed 2 tests, with 0 failures (0 unexpected) in 0.2 (0.2) seconds" \
+		"Fatal error: MockURLProtocol.requestHandler is not set" \
+		> "$$d/cut.log"; \
+	if ! $(MAKE) --no-print-directory xctest-log-complete LOG="$$d/whole.log" \
+			> "$$d/whole.out" 2>&1; then \
+		echo "  [FAIL] a complete log was rejected:"; sed 's/^/         | /' "$$d/whole.out"; \
+		fail=1; \
+	fi; \
+	if $(MAKE) --no-print-directory xctest-log-complete LOG="$$d/cut.log" \
+			> "$$d/cut.out" 2>&1; then \
+		echo "  [FAIL] a TRUNCATED log passed. The gate does not gate:"; \
+		sed 's/^/         | /' "$$d/cut.out"; \
+		fail=1; \
+	fi; \
+	if $(MAKE) --no-print-directory xctest-log-complete LOG="$$d/absent.log" \
+			> /dev/null 2>&1; then \
+		echo "  [FAIL] a MISSING log passed. An unrun suite would read as green."; \
+		fail=1; \
+	fi; \
+	if [ $$fail -eq 0 ]; then \
+		echo "[OK] run-completeness: whole log accepted, truncated and missing refused"; \
+	fi; \
+	exit $$fail
+
 xctest:
 	@tmp=$$(mktemp -d /tmp/trios_xctest.XXXXXX) || exit 1; \
 	trap 'rm -rf "$$tmp"' EXIT INT TERM; \
@@ -3227,7 +3333,7 @@ MUTANTS_GUARD := \
 	rings/SR-02/AgentMemoryService.swift@@var bytes = [UInt8](repeating: 0, count: 32)@@_ = SecItemCopyMatching([kSecClass as String: kSecClassGenericPassword] as CFDictionary, nil); var bytes = [UInt8](repeating: 0, count: 0x20)@@keychain-doors@@typechecks@@a real keychain call is opened in a file that is not on the allowlist~ \
 	tests/swift/queen_delegation_test.swift@@static func issueParsing() {@@static issueParsing() {@@parse-tests@@must-not-parse@@a test source the app build never compiles loses its func keyword~ \
 	rings/SR-02/ChatViewModel.swift@@delegationRegistry.recordCompletedTurn(taskID: task.id)@@_ = task.id // gutted: the turn is never marked complete@@finish-mark-order@@typechecks@@the completed-turn mark is dropped from the finish callback~ \
-	rings/SR-02/ChatViewModel.swift@@guard !QueenDelegationPolicy.isStreamOpen(current) else { continue }@@_ = QueenDelegationPolicy.isStreamOpen(current) // gutted: the answer is thrown away@@guard-shapes@@typechecks@@guard 6 is gutted in place: the reaper still asks the predicate and throws the answer away~ \
+	rings/SR-02/ChatViewModel.swift@@guard !QueenDelegationPolicy.isStreamAlive(current, now: now) else { continue }@@_ = QueenDelegationPolicy.isStreamAlive(current, now: now) // gutted: the answer is thrown away@@guard-shapes@@typechecks@@guard 6 is gutted in place: the reaper still asks the predicate and throws the answer away~ \
 	rings/SR-02/ChatViewModel.swift@@guard ProjectPaths.isDevVariant else { return }@@<DELETE-BLOCK>let path = Self.queenInboxPath@@guard-shapes@@typechecks@@guard 2 is deleted through its brace: the dev-inbox read loses its variant check~ \
 	rings/SR-02/ChatViewModel.swift@@guard ProjectPaths.isDevVariant else {@@<DELETE-BLOCK>let entry = QueenInboxEntry(@@guard-shapes@@typechecks@@guard 3 is deleted through its brace: the inbox enqueue loses its variant check~ \
 	main.swift@@guard RecursionGuard.shared.ensureSingleInstance() else {@@<DELETE-BLOCK>NSApplication.shared.run()@@guard-shapes@@typechecks@@guard 7 is deleted through its brace: the boot path stops enforcing a single instance~ \
@@ -4290,7 +4396,17 @@ check-selftest:
 	}; \
 	mutate_victim() { \
 		claim_victim || return 1; \
-		{ cat "$$backup"; printf '\n// check-selftest SecItemAdd\n'; } > "$$vt"; \
+		: "A real call, on a code line. This fixture used to be the comment"; \
+		: "'// check-selftest SecItemAdd', so for its whole life it proved only"; \
+		: "that the gate greps for a WORD - and a gate validated against prose"; \
+		: "cannot tell prose from a door. That gap surfaced the moment a comment"; \
+		: "in a test explained why the keychain must not be touched and the gate"; \
+		: "called it a violation."; \
+		{ cat "$$backup"; \
+		  printf '\nimport Security\n'; \
+		  printf 'private func checkSelftestKeychainDoor() {\n'; \
+		  printf '    _ = SecItemAdd([:] as CFDictionary, nil)\n'; \
+		  printf '}\n'; } > "$$vt"; \
 		held_victim=$$(shasum "$$vt" | cut -d" " -f1); \
 		cp "$$vt" "$$victim"; \
 	}; \

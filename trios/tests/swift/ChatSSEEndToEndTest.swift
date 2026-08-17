@@ -4433,7 +4433,13 @@ struct ChatSSEEndToEndTests {
     //               and onFinish -> recordCompletedTurn, synchronously (#1248)
 
     private static func reaperStart(_ registry: QueenDelegationRegistry, _ task: DelegatedTask) {
-        registry.recordStreamFact(taskID: task.id, outcome: .open, lastByteAt: nil)
+        // Stamped at the fixture epoch, not at the wall clock. The first-byte
+        // deadline is measured from this moment, so a real `Date()` here would
+        // put the whole scenario's arithmetic three years in the future and
+        // every "past the deadline" check would silently read as "not yet".
+        registry.recordStreamFact(
+            taskID: task.id, outcome: .open, lastByteAt: nil, at: reaperEpoch
+        )
     }
 
     private static func reaperByte(
@@ -4483,7 +4489,7 @@ struct ChatSSEEndToEndTests {
         var seen = Set<UUID>()
         return (orphaned + stalled)
             .filter { seen.insert($0.id).inserted }
-            .filter { !QueenDelegationPolicy.isStreamOpen($0) }
+            .filter { !QueenDelegationPolicy.isStreamAlive($0, now: now) }
             .map(\.issue.slug)
     }
 
@@ -4599,6 +4605,59 @@ struct ChatSSEEndToEndTests {
             check(
                 reaperWouldTake(registry, now: longAfter).isEmpty,
                 "and the sweep leaves it alone - reaping an open stream cuts off a live answer mid-sentence"
+            )
+        }
+
+        // ── 1275: opened a stream, never said a word ──
+        //
+        // A real specimen, not a hypothesis. Task 3165EF5A on issue #1273 sat
+        // in .running with streamOutcome == .open and no lastStreamByteAt for
+        // 24 minutes, and was invisible to both detectors at once:
+        // `wasNeverStarted` wants streamOutcome == nil and this one is .open,
+        // `hasGoneSilent` returns false on sight of an open stream. Neither
+        // would ever have taken it - not at 24 minutes, not at 24 hours.
+        //
+        // The scenario above is the one that must NOT change: a bee that
+        // delivered ninety bytes and paused is thinking, and silence alone must
+        // not condemn it. The distinction this adds is speech, not silence. An
+        // open stream that has spoken keeps its whole hour. An open stream that
+        // has never spoken is judged against the time to the FIRST byte, which
+        // is a different quantity with a much smaller scale - a provider either
+        // answers within a minute or is not going to.
+        do {
+            let registry = reaperRegistry("open-and-mute")
+            guard let mute = reaperDispatch(registry, issue: 1275, worker: "queen-swift", owns: "docs") else {
+                return
+            }
+            reaperStart(registry, mute)
+            // No reaperByte, ever. That is the whole specimen.
+
+            guard let dead = registry.task(forConversation: mute.conversationId) else {
+                fail("the registry lost the mute bee"); return
+            }
+            check(
+                P.isStreamOpen(dead) && dead.lastStreamByteAt == nil,
+                "the specimen: stream open, not one byte - the state neither detector covered"
+            )
+            check(
+                !P.wasNeverStarted(dead),
+                "and it is not an orphan either - a stream WAS opened, so the orphan rule passes it by"
+            )
+            // Inside the first-byte deadline it is still starting up, and a
+            // provider that is merely slow to begin must not be cut off.
+            check(
+                !P.hasGoneSilent(dead, now: reaperAt(0.5)),
+                "thirty seconds without a first byte is a slow start, not a death"
+            )
+            // Past it, nothing is coming.
+            let past = reaperEpoch.addingTimeInterval(P.firstByteDeadline + 60)
+            check(
+                P.hasGoneSilent(dead, now: past),
+                "past the first-byte deadline a mute stream is dead, and the hour-long stall clock never applies"
+            )
+            check(
+                reaperWouldTake(registry, now: past) == ["gHashTag/trios#1275"],
+                "and the sweep takes it - otherwise it holds a worker slot until the app restarts"
             )
         }
 

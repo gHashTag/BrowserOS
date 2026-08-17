@@ -439,10 +439,22 @@ final class QueenDelegationRegistry: ObservableObject {
     func recordStreamFact(
         taskID: UUID,
         outcome: WorkerStreamOutcome,
-        lastByteAt: Date?
+        lastByteAt: Date?,
+        at now: Date = Date()
     ) {
         guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
         tasks[index].streamOutcome = outcome
+        // Stamped once, on the transition into .open, and never moved: the
+        // question it answers is "how long has this worker been failing to
+        // start", so a later byte-recording call must not push the start line
+        // forward under it. A resumed turn opens a fresh stream and is stamped
+        // again because the outcome left .open in between.
+        if outcome == .open, tasks[index].streamOpenedAt == nil {
+            tasks[index].streamOpenedAt = now
+        }
+        if outcome != .open {
+            tasks[index].streamOpenedAt = nil
+        }
         if let lastByteAt,
            lastByteAt > (tasks[index].lastStreamByteAt ?? .distantPast) {
             tasks[index].lastStreamByteAt = lastByteAt

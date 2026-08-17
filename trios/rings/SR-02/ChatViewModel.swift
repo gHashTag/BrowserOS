@@ -6417,7 +6417,11 @@ final class ChatViewModel: ObservableObject {
             // task is reached its turn may have been restarted - by the resume
             // branch below, or by a sweep that interleaved with this one.
             let current = registry.task(forConversation: task.conversationId) ?? task
-            guard !QueenDelegationPolicy.isStreamOpen(current) else { continue }
+            // `isStreamAlive`, not `isStreamOpen`: a stream that opened and
+            // never delivered a byte is open and dead at the same time, and
+            // asking only whether it is open let one hold a slot indefinitely
+            // (#1275). A stream that has spoken is still protected in full.
+            guard !QueenDelegationPolicy.isStreamAlive(current, now: now) else { continue }
 
             // #1219: A connectivity failure is not the worker's fault. Retry
             // without counting a resume attempt — the stall was outside its
