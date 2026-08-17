@@ -800,3 +800,33 @@ verified from a build log. So the number stays and **the comment now says it is
 a reading with a named debt**, with the issue linked. Correcting the claim is a
 real repair; retuning a number you cannot justify is the same defect facing the
 other way.
+
+## Compiling is not passing
+
+`make xctest` counts compile errors. When it reached zero I nearly reported the
+suite as healthy. Compiling is a precondition; the question is what the tests
+say. Run for the first time:
+
+    121 executed, 2 skipped, 10 failures across 4 suites
+    ...and the process still exits with signal 5
+
+The 2 skips are the deliberate ones. The 10 failures are not test drift — they
+are assertions about the product that nobody could evaluate for months:
+
+- a `BackgroundHealthPoller` that is not nil after being stopped;
+- `/doctor --model` with an empty value parsing as `doctor(model: nil)` instead
+  of being rejected — a flag with no value silently accepted;
+- a disabled provider catalog reporting `unknown("not configured")` where the
+  test expects `unavailable`.
+
+And a trap worth knowing before anyone repeats the run: **without
+`TRIOS_E2E_DISABLE_KEYCHAIN=1` the run does not merely fail, it aborts.**
+`KeychainSymmetricKeyStoreTests` hits `Fatal error: Unexpectedly found nil` and
+everything after it never executes — so the naive run shows a truncated picture,
+not ten failures. With the variable those six tests pass. A precondition that
+changes the *shape* of the result, not just its value, belongs in the contract
+rather than in somebody's memory.
+
+**Three distinct states, and a gate that stops at the first is not measuring the
+third:** does it build, does it run, does it pass. This repository had a gate on
+the first, believed it was measuring the third, and the gap held for months.
