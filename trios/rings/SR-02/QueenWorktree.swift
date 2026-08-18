@@ -1,0 +1,77 @@
+import Foundation
+
+/// A private checkout for one worker.
+///
+/// Until this existed every bee edited the same working tree as the user, the
+/// build, and each other. The variant split (#1276) stopped the harness from
+/// deleting the Queen's *state*; it did nothing about *sources*, and the moment
+/// the Queen started picking up work unprompted the collision became routine:
+/// `make check` failed with `cannot find 'result' in scope` on a snapshot of a
+/// file bee #1128 was halfway through writing. Seconds later the same file
+/// compiled. Nothing was wrong with the code and nothing was wrong with the
+/// gate - they were reading and writing the same bytes.
+///
+/// A worktree is the smallest thing that fixes it. Each bee gets its own
+/// directory backed by the same object store, so its branch and its edits live
+/// together and neither is visible to anyone else until it commits.
+enum QueenWorktree {
+    /// Where a task's checkout lives. Under `.worktrees/`, which is already
+    /// git-ignored, and named after the issue so an abandoned one says what it
+    /// belonged to.
+    static func path(forIssue number: Int, projectRoot: String) -> String {
+        "\(projectRoot)/.worktrees/queen-\(number)"
+    }
+
+    /// Why an existing branch must not be reused, or nil if it may be.
+    ///
+    /// `createVirtualBranch` treats "the branch already exists" as success, so
+    /// that reconnecting to a task in flight does not fail. That is right for a
+    /// task being resumed and wrong for a leftover: `queen/1127` was still on
+    /// disk from a run 140 commits earlier, was silently adopted, and the diff
+    /// between it and the current tip read as 641 insertions against 12,508
+    /// deletions - the whole Makefile, the night log, every fixture. The bee's
+    /// own change was 34 lines inside its boundary. Nothing was destroyed
+    /// because a diff is not a merge, but `QueenBranchCommitter` assembles the
+    /// combined tree by OVERLAY, and an overlay onto a base that old drops
+    /// everything newer.
+    ///
+    /// Pure so the decision can be driven without a repository. `mergeBase` is
+    /// the merge-base of the branch and HEAD; `head` is HEAD. They are equal
+    /// exactly when the branch already contains everything HEAD does.
+    static func staleBranchReason(
+        branchExists: Bool,
+        mergeBase: String?,
+        head: String?
+    ) -> String? {
+        guard branchExists else { return nil }
+        guard let head, !head.isEmpty else {
+            return "HEAD could not be resolved, so the branch's age is unknown"
+        }
+        guard let mergeBase, !mergeBase.isEmpty else {
+            return "the branch shares no history with HEAD"
+        }
+        guard mergeBase != head else { return nil }
+        return "the branch was cut before the current HEAD (\(String(head.prefix(8))))"
+    }
+
+    /// The name to use when the wanted one is taken by a stale branch.
+    ///
+    /// A suffix rather than a deletion. A leftover branch may hold the only
+    /// copy of somebody's work, and this code has no way to know; the one
+    /// thing it must not do is decide that for them.
+    static func freshBranchName(base: String, attempt: Int) -> String {
+        attempt <= 0 ? base : "\(base)-r\(attempt)"
+    }
+
+    /// Whether a path looks like a worktree this code created.
+    ///
+    /// Checked before removal, because `git worktree remove` takes a path and
+    /// this code should never be one typo away from handing it the checkout the
+    /// user is sitting in.
+    static func isOwnedWorktree(path: String, projectRoot: String) -> Bool {
+        let prefix = "\(projectRoot)/.worktrees/queen-"
+        guard path.hasPrefix(prefix) else { return false }
+        let suffix = String(path.dropFirst(prefix.count))
+        return !suffix.isEmpty && suffix.allSatisfy(\.isNumber)
+    }
+}

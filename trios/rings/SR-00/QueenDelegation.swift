@@ -258,6 +258,14 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// store calls running at launch is reconciled as failed first.
     var streamOpenedAt: Date?
 
+    /// The private checkout this worker edits in, if it has one.
+    ///
+    /// Nil means the shared tree - the old behaviour, kept so a task written
+    /// before worktrees existed still decodes and still runs. See
+    /// `QueenWorktree` for why sharing stopped being acceptable the day the
+    /// Queen started picking up work on her own.
+    var worktreePath: String?
+
     /// Which model did the work, so a cost estimate is possible after the fact.
     var provider: String?
     var model: String?
@@ -313,6 +321,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         lastStreamByteAt: Date? = nil,
         streamOutcome: WorkerStreamOutcome? = nil,
         streamOpenedAt: Date? = nil,
+        worktreePath: String? = nil,
         pullRequestNumber: Int? = nil,
         provider: String? = nil,
         model: String? = nil,
@@ -342,6 +351,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         self.lastStreamByteAt = lastStreamByteAt
         self.streamOutcome = streamOutcome
         self.streamOpenedAt = streamOpenedAt
+        self.worktreePath = worktreePath
         self.pullRequestNumber = pullRequestNumber
         self.provider = provider
         self.model = model

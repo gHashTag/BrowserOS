@@ -354,6 +354,7 @@ struct ChatSSEEndToEndTests {
         ("runInboxPollerIsDevVariantOnly", { await runInboxPollerIsDevVariantOnly() }),
         ("runProposalStoreCollapsesDuplicates", { await runProposalStoreCollapsesDuplicates() }),
         ("runQueenPicksUpWorkHerself", { await runQueenPicksUpWorkHerself() }),
+        ("runEachBeeGetsItsOwnCheckout", { await runEachBeeGetsItsOwnCheckout() }),
     ]
 
     static func main() async {
@@ -7559,5 +7560,93 @@ struct ChatSSEEndToEndTests {
             source.contains("if autonomous {\n                delegationRegistry.approve(issue: issue)"),
             "and the self-approval sits behind `if autonomous` - no other caller grants its own consent"
         )
+    }
+
+    // MARK: - Scenario: each bee gets its own checkout
+
+    /// The branch recorded WHOSE a change was; it never stopped two bees, or a
+    /// bee and the build, from writing the same bytes. `make check` failed with
+    /// `cannot find 'result' in scope` on a snapshot of a file bee #1128 was
+    /// halfway through writing, and the same file compiled seconds later
+    /// (#1277). Nothing was wrong with either side.
+    ///
+    /// Two decisions are worth testing here and neither needs a repository:
+    /// when a leftover branch may be adopted, and which paths this code is
+    /// allowed to hand to `git worktree remove`.
+    static func runEachBeeGetsItsOwnCheckout() async {
+        print("\n# Scenario: each bee gets its own checkout (#1277)")
+
+        let root = "/Users/x/BrowserOS/trios"
+
+        check(
+            QueenWorktree.path(forIssue: 1127, projectRoot: root)
+                == "\(root)/.worktrees/queen-1127",
+            "a checkout is named after its issue, under the already-ignored .worktrees"
+        )
+
+        // ── Adopting a leftover branch ───────────────────────────────
+        check(
+            QueenWorktree.staleBranchReason(
+                branchExists: false, mergeBase: nil, head: "abc123"
+            ) == nil,
+            "no branch, nothing to refuse"
+        )
+        check(
+            QueenWorktree.staleBranchReason(
+                branchExists: true, mergeBase: "abc123", head: "abc123"
+            ) == nil,
+            "a branch that already contains HEAD is the task being resumed - adopt it"
+        )
+        // The live case: queen/1127 was still on disk from a run 140 commits
+        // earlier and was adopted in silence. Its diff against the tip read as
+        // 641 insertions and 12,508 deletions; the bee's own change was 34
+        // lines. A diff is not a merge - but QueenBranchCommitter assembles by
+        // OVERLAY, and an overlay onto a base that old drops everything newer.
+        check(
+            QueenWorktree.staleBranchReason(
+                branchExists: true, mergeBase: "old999", head: "abc123"
+            )?.contains("cut before the current HEAD") == true,
+            "a branch cut before HEAD is a leftover, not a resumption - refuse it by name"
+        )
+        check(
+            QueenWorktree.staleBranchReason(
+                branchExists: true, mergeBase: nil, head: "abc123"
+            )?.contains("shares no history") == true,
+            "an unrelated branch that happens to share the name is refused too"
+        )
+        check(
+            QueenWorktree.staleBranchReason(
+                branchExists: true, mergeBase: "abc123", head: ""
+            )?.contains("HEAD could not be resolved") == true,
+            "and when HEAD cannot be read the answer is refuse, not assume - the age is unknown"
+        )
+
+        // Refusing must not mean deleting: a leftover branch may hold the only
+        // copy of somebody's work, and this code cannot know.
+        check(
+            QueenWorktree.freshBranchName(base: "queen/1127", attempt: 0) == "queen/1127",
+            "the first attempt uses the wanted name"
+        )
+        check(
+            QueenWorktree.freshBranchName(base: "queen/1127", attempt: 2) == "queen/1127-r2",
+            "and a taken one is sidestepped with a suffix, never freed by deleting it"
+        )
+
+        // ── What may be removed ──────────────────────────────────────
+        // This hands a path to `git worktree remove`, so the shape of the
+        // mistake is deleting the checkout somebody is sitting in.
+        check(
+            QueenWorktree.isOwnedWorktree(path: "\(root)/.worktrees/queen-1127", projectRoot: root),
+            "a checkout this code made is removable"
+        )
+        for hostile in [root, "\(root)/..", "\(root)/rings", "/",
+                        "\(root)/.worktrees", "\(root)/.worktrees/queen-",
+                        "\(root)/.worktrees/other", "\(root)/.worktrees/queen-1127/rings",
+                        "/other/BrowserOS/trios/.worktrees/queen-1127"] {
+            check(
+                !QueenWorktree.isOwnedWorktree(path: hostile, projectRoot: root),
+                "refuses to remove \(hostile)"
+            )
+        }
     }
 }

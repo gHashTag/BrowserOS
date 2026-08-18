@@ -3955,9 +3955,20 @@ final class ChatViewModel: ObservableObject {
             return
         }
 
-        // The virtual branch is what keeps two bees off each other's files.
+        // A private checkout is what keeps two bees off each other's files -
+        // and off the build's. The branch alone never did: it recorded WHOSE a
+        // change was, while every bee still wrote into the one working tree the
+        // user, the gate and each other were reading (#1277).
+        //
+        // `git worktree add -B` cuts the branch as it makes the checkout, so
+        // `createVirtualBranch` is only reached when a worktree could not be
+        // made. That fallback is the pre-worktree behaviour, kept deliberately:
+        // a bee that cannot get its own directory should still work, just
+        // without the isolation.
         if let branch = task.virtualBranch {
-            if let reason = await createVirtualBranch(named: branch) {
+            if let worktree = await prepareWorktree(for: task, branch: branch) {
+                registry.setWorktreePath(taskID: task.id, path: worktree)
+            } else if let reason = await createVirtualBranch(named: branch) {
                 registry.transition(taskID: task.id, to: .cancelled)
                 await postQueenNotice(
                     SystemNoticeClassifier.failureMarker
@@ -4167,6 +4178,121 @@ final class ChatViewModel: ObservableObject {
             let reason = attempt.trimmingCharacters(in: .whitespacesAndNewlines)
             return reason.isEmpty ? "git branch produced no output and no branch" : reason
         }.value
+    }
+
+    /// Gives a task its own checkout, and reports where.
+    ///
+    /// Returns the worktree path, or nil with the reason logged. Nil is not
+    /// fatal: the caller falls back to the shared tree, which is what every bee
+    /// did before this existed. Degrading to the old behaviour beats refusing
+    /// to work because a directory could not be made.
+    ///
+    /// The branch is cut here rather than by `createVirtualBranch`, because
+    /// `git worktree add -B` does both in one step and cannot leave a branch
+    /// pointing somewhere no checkout exists.
+    private func prepareWorktree(for task: DelegatedTask, branch: String) async -> String? {
+        let root = ProjectPaths.root
+        let path = QueenWorktree.path(forIssue: task.issue.number, projectRoot: root)
+        return await Task.detached(priority: .utility) { () -> String? in
+            func git(_ args: [String], timeout: TimeInterval = 25) -> String {
+                QueenStatusViewModel.runProcess(
+                    "/usr/bin/git", arguments: args, workDir: root, timeout: timeout
+                ).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+
+            // A worktree left behind by a killed run is reusable only if it is
+            // still registered; `git worktree list` is the register, not the
+            // presence of a directory.
+            if git(["worktree", "list", "--porcelain"]).contains("worktree \(path)") {
+                TriosLogBus.shared.info(
+                    .queen, "queen.worktree.reused",
+                    "Reusing the existing checkout for \(task.issue.slug)",
+                    ["path": path]
+                )
+                return path
+            }
+
+            // A branch left over from an older run is adopted silently by
+            // `createVirtualBranch`. Here that adoption is refused when the
+            // branch predates HEAD - see QueenWorktree.staleBranchReason. The
+            // old branch is never deleted; a fresh name is used instead.
+            let head = git(["rev-parse", "HEAD"])
+            var name = branch
+            var attempt = 0
+            while attempt < 8 {
+                let exists = !git(["branch", "--list", name]).isEmpty
+                let mergeBase = exists ? git(["merge-base", name, "HEAD"]) : nil
+                guard let reason = QueenWorktree.staleBranchReason(
+                    branchExists: exists, mergeBase: mergeBase, head: head
+                ) else { break }
+                attempt += 1
+                let next = QueenWorktree.freshBranchName(base: branch, attempt: attempt)
+                TriosLogBus.shared.warn(
+                    .queen, "queen.worktree.stale_branch",
+                    "Not reusing \(name): \(reason). Cutting \(next) from HEAD instead; "
+                        + "the old branch is left alone.",
+                    ["branch": name, "next": next, "reason": reason]
+                )
+                name = next
+            }
+
+            let output = git(
+                ["worktree", "add", "--quiet", "-B", name, path, "HEAD"], timeout: 90
+            )
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else {
+                TriosLogBus.shared.error(
+                    .queen, "queen.worktree.failed",
+                    "Could not create a checkout for \(task.issue.slug); working in the "
+                        + "shared tree instead. git said: "
+                        + (output.isEmpty ? "(nothing)" : output),
+                    ["issue": task.issue.slug, "path": path]
+                )
+                return nil
+            }
+            TriosLogBus.shared.info(
+                .queen, "queen.worktree.created",
+                "\(task.issue.slug) works in its own checkout on \(name)",
+                ["path": path, "branch": name]
+            )
+            return path
+        }.value
+    }
+
+    /// Removes a finished task's checkout. The branch stays.
+    ///
+    /// Guarded by `isOwnedWorktree`, because this hands a path to
+    /// `git worktree remove` and the shape of that mistake is deleting the
+    /// checkout somebody is working in. `--force` covers the ordinary case of a
+    /// bee that left uncommitted scratch behind; anything it wanted kept is on
+    /// its branch, which is the whole contract.
+    func releaseWorktree(for task: DelegatedTask) async {
+        guard let path = task.worktreePath else { return }
+        let root = ProjectPaths.root
+        guard QueenWorktree.isOwnedWorktree(path: path, projectRoot: root) else {
+            TriosLogBus.shared.error(
+                .queen, "queen.worktree.refused_removal",
+                "Refusing to remove \(path): it is not a checkout this code created",
+                ["path": path]
+            )
+            return
+        }
+        await Task.detached(priority: .utility) {
+            _ = QueenStatusViewModel.runProcess(
+                "/usr/bin/git",
+                arguments: ["worktree", "remove", "--force", path],
+                workDir: root,
+                timeout: 60
+            )
+            _ = QueenStatusViewModel.runProcess(
+                "/usr/bin/git", arguments: ["worktree", "prune"], workDir: root, timeout: 30
+            )
+        }.value
+        TriosLogBus.shared.info(
+            .queen, "queen.worktree.released",
+            "Released the checkout for \(task.issue.slug)", ["path": path]
+        )
     }
 
     // MARK: - Worker Runner
@@ -6214,7 +6340,31 @@ final class ChatViewModel: ObservableObject {
                     verdictTreeState: verdictTreeState,
                     currentTreeState: currentTreeState
                 ) == nil {
-                    guard registry.transition(taskID: task.id, to: .accepted) else {
+                    // The interface divergence watchdog (#1128) runs here
+                    // too: "the work was already done by an earlier pass"
+                    // is still an acceptance, and an acceptance of a lane
+                    // into a combined tree that does not build lands the
+                    // same break either way. Paid once, at this acceptance.
+                    let watchdogProof: CombinedBuildProof
+                    let divergenceGate = await runInterfaceDivergenceWatchdog(
+                        accepting: task, in: registry
+                    )
+                    switch divergenceGate {
+                    case .refused(let summary, let branches):
+                        await refuseAcceptanceForDivergence(
+                            issue: task.issue, summary: summary, branches: branches,
+                            logEvent: "queen.auto_accept.combined_build_failed"
+                        )
+                        return
+                    case .passed(let proof):
+                        watchdogProof = proof
+                    }
+                    // The proof is the entry ticket (#1128 criterion 4):
+                    // without the watchdog having passed above, this call
+                    // does not compile.
+                    guard transitionToAccepted(
+                        taskID: task.id, in: registry, watchdogProof: watchdogProof
+                    ) else {
                         TriosLogBus.shared.info(
                             .queen, "queen.auto_accept.transition_failed",
                             "Auto-accept skipped: state transition to .accepted failed",
@@ -6277,6 +6427,27 @@ final class ChatViewModel: ObservableObject {
         }
         let currentTreeState = currentBoundaryState ?? ""
 
+        // The interface divergence watchdog (#1128): the same gate the
+        // human-triggered /accept uses, paid once at this acceptance. The
+        // Queen must not close a task on criteria alone when the lanes the
+        // work will land beside do not compile together - autonomy signs
+        // the unambiguous ones, and a tree that does not build together is
+        // not unambiguous.
+        let watchdogProof: CombinedBuildProof
+        let divergenceGate = await runInterfaceDivergenceWatchdog(
+            accepting: task, in: registry
+        )
+        switch divergenceGate {
+        case .refused(let summary, let branches):
+            await refuseAcceptanceForDivergence(
+                issue: task.issue, summary: summary, branches: branches,
+                logEvent: "queen.auto_accept.combined_build_failed"
+            )
+            return
+        case .passed(let proof):
+            watchdogProof = proof
+        }
+
         if let reason = acceptanceBlockReasonDistinguishingEmptyAnswers(
             for: task,
             verdictTreeState: verdictTreeState,
@@ -6294,7 +6465,11 @@ final class ChatViewModel: ObservableObject {
             return
         }
 
-        guard registry.transition(taskID: task.id, to: .accepted) else {
+        // The proof is the entry ticket (#1128 criterion 4): without the
+        // watchdog having passed above, this call does not compile.
+        guard transitionToAccepted(
+            taskID: task.id, in: registry, watchdogProof: watchdogProof
+        ) else {
             TriosLogBus.shared.info(
                 .queen, "queen.auto_accept.transition_failed",
                 "Auto-accept skipped: state transition to .accepted failed",
@@ -6819,7 +6994,27 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Removes the checkouts of tasks that have finished.
+    ///
+    /// A sweep rather than a hook on each terminal transition: there are six
+    /// places a task can settle, and a cleanup wired to five of them leaves
+    /// directories on disk in exactly the case nobody tested. Idempotent, so
+    /// running it every tick costs nothing when there is nothing to do.
+    func releaseSettledWorktrees() async {
+        let settled = delegationRegistry.tasks.filter {
+            $0.state.isTerminal && $0.worktreePath != nil
+        }
+        for task in settled {
+            await releaseWorktree(for: task)
+            delegationRegistry.clearWorktreePath(taskID: task.id)
+        }
+    }
+
     func queenAutonomyTick() async {
+        // Before the capacity check, not after: a finished bee's checkout must
+        // be released even on the ticks where there is no room to start a new
+        // one, which is exactly when the swarm is busiest.
+        await releaseSettledWorktrees()
         let budget = QueenSelfImprovementService.loadBudget()
         if let reason = Self.autonomyBlockReason(
             enabled: queenAutonomyEnabled,
@@ -7465,6 +7660,159 @@ final class ChatViewModel: ObservableObject {
         )
     }
 
+    // MARK: - Interface divergence watchdog (#1128)
+
+    /// #1128: proof that the interface divergence watchdog ran, the combined
+    /// state of every open lane assembled, and the combined tree built.
+    ///
+    /// This type is load-bearing, not decorative. Its only constructor
+    /// refuses a `CombinedBuildResult` that did not build, and the only
+    /// producer of a `CombinedBuildResult` in the app is
+    /// `QueenBranchCommitter.verifyCombinedBuild`. So a `CombinedBuildProof`
+    /// in hand means the watchdog ran and passed - and
+    /// `transitionToAccepted` below takes this proof as a parameter, which
+    /// is criterion 4 made structural: delete the `verifyCombinedBuild`
+    /// call from an acceptance path and the proof has no source, the
+    /// transition has no argument, and the file stops compiling. The check
+    /// cannot be quietly dropped; it can only be loudly edited around, and
+    /// the type name says what was lost.
+    private struct CombinedBuildProof {
+        let summary: String
+        let combinedTreeSha: String?
+
+        /// The only way in. Nil for a failed result, so a combined build
+        /// that failed can never be mistaken for one that passed.
+        fileprivate init?(result: QueenBranchCommitter.CombinedBuildResult) {
+            guard result.builds else { return nil }
+            self.summary = result.summary
+            self.combinedTreeSha = result.combinedTreeSha
+        }
+    }
+
+    /// #1128: the outcome of one watchdog run, for one acceptance. `refused`
+    /// carries the named cause - what exactly did not converge - because a
+    /// refusal that does not name its subject sends the reader hunting for
+    /// the wrong problem.
+    private enum InterfaceDivergenceGate {
+        /// The combined state did not assemble or did not compile. `summary`
+        /// names the branches, the tree, and the errors that did not
+        /// converge.
+        case refused(summary: String, branches: [String])
+        /// The combined state built together. The proof is the entry ticket
+        /// to `.accepted`.
+        case passed(CombinedBuildProof)
+    }
+
+    /// Runs the interface divergence watchdog once, for one acceptance
+    /// (#1128).
+    ///
+    /// Slow, and deliberately so (criterion 3): assembling the combined
+    /// state means extracting every open lane's branch into a scratch tree
+    /// and running a full `swift build` in it - minutes, not milliseconds.
+    /// The check therefore runs exactly once per acceptance and nowhere
+    /// else: not per build, not when a worker commits, not when a branch is
+    /// proposed. The question it answers - "do these lanes still compile
+    /// *together*?" - is an acceptance question. Each lane already builds
+    /// alone; asking it per build would multiply minutes across every
+    /// commit for an answer that cannot change until someone accepts.
+    private func runInterfaceDivergenceWatchdog(
+        accepting task: DelegatedTask,
+        in registry: QueenDelegationRegistry
+    ) async -> InterfaceDivergenceGate {
+        // The combined state: every lane whose branch will land beside this
+        // one. Accepted-but-unmerged branches are in - an accepted lane's
+        // signature change is exactly what breaks the next lane's caller,
+        // and acceptance is the last moment that can catch it. Merged
+        // branches are out: their content is already in the base the tree
+        // is cut from. Cancelled and failed work will not land, so it
+        // cannot diverge from anything.
+        let combinableStates: Set<DelegatedTaskState> = [
+            .queued, .running, .awaitingReview, .rejected, .accepted
+        ]
+        var branches: [String] = []
+        for lane in registry.tasks where combinableStates.contains(lane.state) {
+            guard let branch = lane.virtualBranch else { continue }
+            if branch != task.virtualBranch && !branches.contains(branch) {
+                branches.append(branch)
+            }
+        }
+        // The branch being accepted goes last: on a same-path collision the
+        // last branch in the overlay wins, and the state this acceptance is
+        // about is the one that should win it.
+        if let own = task.virtualBranch, !branches.contains(own) {
+            branches.append(own)
+        }
+
+        guard let base = QueenBranchCommitter.baseBranch() else {
+            return .refused(
+                summary: "The combined state could not be assembled: the base "
+                    + "branch to combine the lanes against could not be resolved "
+                    + "(detached HEAD, or no current branch).",
+                branches: branches
+            )
+        }
+
+        let result = await QueenBranchCommitter.verifyCombinedBuild(
+            branches: branches, baseRef: base
+        )
+        if let proof = CombinedBuildProof(result: result) {
+            return .passed(proof)
+        }
+        return .refused(summary: result.summary, branches: branches)
+    }
+
+    /// Posts the #1128 structural refusal: the lanes do not build together.
+    ///
+    /// Kept apart from the criterion refusal on purpose - a different log
+    /// event, different wording - because "does not build together" and
+    /// "criterion not met" demand different fixes: the first is fixed in
+    /// the lanes, the second in the verdicts. A refusal that hides which
+    /// kind it is sends the reader looking for the wrong problem
+    /// (criterion 2).
+    private func refuseAcceptanceForDivergence(
+        issue: IssueReference,
+        summary: String,
+        branches: [String],
+        logEvent: String = "queen.accept.combined_build_failed"
+    ) async {
+        TriosLogBus.shared.warn(
+            .queen, logEvent,
+            "Acceptance refused: the combined state does not build together",
+            [
+                "issue": issue.slug,
+                "branches": branches.joined(separator: ", "),
+                "summary": summary
+            ]
+        )
+        await postQueenNotice(
+            SystemNoticeClassifier.warningMarker
+                + "Not accepting \(issue.slug): the lanes do not build together. "
+                + "This is not a criterion verdict - no criterion was judged. The "
+                + "combined state itself would not assemble or compile, so there "
+                + "is no tree in which the criteria could be checked. What did "
+                + "not converge:\n\(summary)"
+                + (branches.isEmpty
+                    ? ""
+                    : "\nLanes in the combined tree: \(branches.joined(separator: ", ")).")
+                + "\nFix the lanes; the criteria stand unchanged."
+        )
+    }
+
+    /// The only door from an acceptance path to `.accepted` (#1128).
+    ///
+    /// Takes the watchdog's proof as a parameter so the transition cannot
+    /// be separated from the check: no `verifyCombinedBuild`, no proof, no
+    /// compilation (criterion 4). Every acceptance in this file goes
+    /// through here.
+    @discardableResult
+    private func transitionToAccepted(
+        taskID: UUID,
+        in registry: QueenDelegationRegistry,
+        watchdogProof: CombinedBuildProof
+    ) -> Bool {
+        registry.transition(taskID: taskID, to: .accepted)
+    }
+
     /// Accepts or returns a worker's result.
     ///
     /// Rejection re-briefs the same worker in the same chat on the same branch,
@@ -7537,6 +7885,29 @@ final class ChatViewModel: ObservableObject {
             }
             let currentTreeState = currentBoundaryState ?? ""
 
+            // --- The interface divergence watchdog (#1128) ---
+            // The combined state is assembled and built once, here, before
+            // the contract is consulted. The order is deliberate: criteria
+            // are judged inside a tree, and if the tree that would land
+            // does not compile, there is no tree to judge them in. A
+            // refusal from this gate is a different kind of refusal from
+            // the one below - "does not build together" is not "criterion
+            // not met" - so it gets its own words, its own log event, and
+            // it never touches the verdicts.
+            let watchdogProof: CombinedBuildProof
+            let divergenceGate = await runInterfaceDivergenceWatchdog(
+                accepting: task, in: registry
+            )
+            switch divergenceGate {
+            case .refused(let summary, let branches):
+                await refuseAcceptanceForDivergence(
+                    issue: issue, summary: summary, branches: branches
+                )
+                return
+            case .passed(let proof):
+                watchdogProof = proof
+            }
+
             // Acceptance is checked against the contract before it is checked
             // against anything else. This is the whole point of writing criteria
             // down: without it the Queen signs off on an impression, and the
@@ -7573,7 +7944,11 @@ final class ChatViewModel: ObservableObject {
                 )
                 return
             }
-            guard registry.transition(taskID: task.id, to: .accepted) else {
+            // The proof is the entry ticket (#1128 criterion 4): without
+            // the watchdog having passed above, this call does not compile.
+            guard transitionToAccepted(
+                taskID: task.id, in: registry, watchdogProof: watchdogProof
+            ) else {
                 await postQueenNotice(SystemNoticeClassifier.failureMarker + (registry.lastError ?? "Could not accept \(issue.slug)."))
                 return
             }

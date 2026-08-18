@@ -436,6 +436,26 @@ final class QueenDelegationRegistry: ObservableObject {
     ///
     /// `lastByteAt` never moves backwards, so a `.terminal` fact carrying the
     /// turn's real last byte cannot undo a later one.
+    /// Records where this task's worker edits.
+    ///
+    /// Persisted, unlike the stream facts: after a restart the reaper has to
+    /// know which checkout to release, and a worktree nobody remembers is a
+    /// directory that stays on disk until someone notices.
+    /// Forgets a checkout that has been removed, so the sweep does not keep
+    /// trying to remove it.
+    func clearWorktreePath(taskID: UUID) {
+        guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        guard tasks[index].worktreePath != nil else { return }
+        tasks[index].worktreePath = nil
+        persist()
+    }
+
+    func setWorktreePath(taskID: UUID, path: String) {
+        guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        tasks[index].worktreePath = path
+        persist()
+    }
+
     func recordStreamFact(
         taskID: UUID,
         outcome: WorkerStreamOutcome,

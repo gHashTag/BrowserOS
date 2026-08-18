@@ -146,9 +146,10 @@ final class QueenWorkerRunner: ObservableObject {
             browserContext: nil,
             modelConfiguration: configuration,
             attachments: nil,
-            // The repository the task's branch lives in. Anything else and the
-            // bee's edits and its branch end up in different checkouts.
-            workingDirectory: ProjectPaths.root
+            // The task's own checkout when it has one, the shared tree when it
+            // does not. Anything else and the bee's edits and its branch end up
+            // in different checkouts.
+            workingDirectory: task.worktreePath ?? ProjectPaths.root
         ).build() else {
             await finish(task: task, transcript: &transcript, failure: "Could not build the worker request.")
             return
@@ -334,9 +335,13 @@ final class QueenWorkerRunner: ObservableObject {
         var lines = [
             "You are \(task.worker), a worker agent supervised by the Trinity Queen.",
             "You work on exactly one GitHub issue: \(task.issue.slug) (\(task.issue.url)).",
-            "The repository is \(ProjectPaths.root). Work only inside it: "
-                + "other checkouts of this project exist on this machine and "
-                + "editing one of those puts your work where nobody looks for it.",
+            "The repository is \(task.worktreePath ?? ProjectPaths.root). Work only "
+                + "inside it: other checkouts of this project exist on this machine "
+                + "and editing one of those puts your work where nobody looks for it."
+                + (task.worktreePath == nil
+                    ? ""
+                    : " This checkout is yours alone - no other worker, and no build, "
+                        + "reads or writes it while you have it."),
             "Do the work yourself. Do not delegate and do not open other chats."
         ]
         if let branch = task.virtualBranch {
