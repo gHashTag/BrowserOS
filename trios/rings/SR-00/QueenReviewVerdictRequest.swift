@@ -43,11 +43,12 @@ enum QueenReviewVerdictRequest {
 
     // MARK: - Adversarial prompt identity (#1127 criteria 1 & 4)
 
-    /// A token embedded in every adversarial reviewer brief. The caller checks
-    /// for its presence (`isAdversarialBrief`) before trusting the response,
-    /// and tests check for it to prove the reviewer received the adversary's
-    /// instructions. If the brief were replaced with a worker's prompt — which
-    /// carries no such marker — the check fails and the verdicts are discarded.
+    /// A token embedded in every adversarial reviewer brief. Tests check for
+    /// it to prove the reviewer received the adversary's instructions — if
+    /// the brief were replaced with a worker's prompt, which carries no such
+    /// marker, the check goes red (#1127 criterion 4). A caller that wants
+    /// to gate trust on prompt identity before accepting a response uses
+    /// `isAdversarialBrief` the same way.
     ///
     /// The marker is a literal, not a hash: a hash of the prompt would change
     /// every time the wording is revised, turning every improvement into a
@@ -58,43 +59,66 @@ enum QueenReviewVerdictRequest {
     /// Whether a prompt carries the adversary marker.
     ///
     /// Returns `false` for any text that lacks the token — including the old
-    /// neutral reviewer prompt and any worker prompt. The caller uses this as
-    /// a guard: if the brief sent to the reviewer does not carry the marker,
-    /// the response is not trusted, because the reviewer was not prompted as
-    /// an adversary. This is the check that "breaks" when the reviewer
-    /// receives the worker's instructions instead of the adversary's.
+    /// neutral reviewer prompt and any worker prompt. The standing check is
+    /// in the test suite: a worker prompt is asserted to fail this test, so
+    /// swapping the adversary's instructions for the worker's turns the
+    /// check red (#1127 criterion 4). A caller may use it the same way as a
+    /// gate: a brief without the marker is not an adversary's brief, and a
+    /// response to it is not an adversary's verdict. This is the check that
+    /// "breaks" when the reviewer receives the worker's instructions instead
+    /// of the adversary's.
     static func isAdversarialBrief(_ prompt: String) -> Bool {
         prompt.contains(adversaryPromptMarker)
     }
 
     // MARK: - Reviewer model selection (#1127 criterion 2)
 
-    /// Picks a provider for the reviewer that differs from the worker's.
+    /// Picks the provider the reviewer must run on, given what the settings
+    /// actually hold.
     ///
-    /// When two or more providers are configured, the reviewer is sent to the
-    /// first available provider that is not the worker's. This prevents the
-    /// same model from grading its own output: the worker built the code, and
-    /// a different model judges it.
+    /// `usableProviders` is every provider that can serve a request right
+    /// now. For a provider whose `requiresAPIKey` is true, that means at
+    /// least one key in `ModelCredentialStore`; for `.ollama`, which needs
+    /// no key, being present in the settings is enough — the criterion
+    /// (#1127) speaks of a second provider in the settings, and a local
+    /// second provider is a second provider even when it holds no key. The
+    /// caller builds that list; this function stays pure so the decision
+    /// can be asserted without touching the Keychain.
     ///
-    /// When only one provider is available, returns `nil`. This is not an
-    /// error — it means role separation (the adversarial prompt) is the
-    /// safeguard instead of a different model. The caller uses the same
-    /// provider but still sends the adversarial brief, so the same model is
-    /// asked to play a different role.
+    /// The decision is the criterion's own wording, as code:
+    ///
+    /// - Two or more usable providers → the first one that is not the
+    ///   worker's. The reviewer judges on a different provider, so the
+    ///   assumptions that wrote the code are not the ones grading it. Which
+    ///   model the reviewer uses on that provider is the caller's choice;
+    ///   the separation the criterion demands is at the provider.
+    /// - One usable provider, or none → `nil`. Not an error: role
+    ///   separation — the adversarial brief above — is the safeguard, and
+    ///   the caller sends the worker's configuration, still carrying the
+    ///   adversary's instructions. `journalModelLine(provider: nil)` records
+    ///   exactly that, so the journal never claims a separation that did
+    ///   not happen.
     ///
     /// `workerProvider` may be `nil` when the worker's provider is unknown;
-    /// in that case any available provider is acceptable, and the first is
-    /// returned (a model whose identity is unknown is already not trusted to
-    /// be the same as the worker's).
+    /// any usable provider is then acceptable (an identity that is unknown
+    /// is already not trusted to be the same as the worker's).
+    ///
+    /// Contract for the supervision path, which lives outside this file:
+    /// when this returns a provider, the reviewer's request goes out on
+    /// that provider's configuration rather than the worker's; when it
+    /// returns `nil`, the request goes out unchanged and the brief alone
+    /// carries the independence. The decision is here, the routing is
+    /// there — a call site that ignores the returned provider quietly
+    /// turns criterion 2 back into role separation for everyone.
     static func reviewerProvider(
-        from available: [String],
-        avoiding workerProvider: String?
-    ) -> String? {
-        guard available.count > 1 else { return nil }
+        workerProvider: ModelProvider?,
+        usableProviders: [ModelProvider]
+    ) -> ModelProvider? {
+        guard usableProviders.count > 1 else { return nil }
         if let workerProvider {
-            return available.first(where: { $0 != workerProvider })
+            return usableProviders.first(where: { $0 != workerProvider })
         }
-        return available.first
+        return usableProviders.first
     }
 
     // MARK: - Journal metadata (#1127 criterion 3)
