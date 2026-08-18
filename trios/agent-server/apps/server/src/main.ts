@@ -151,10 +151,25 @@ export class Application {
       this.a2aService = this.httpServer.a2aService
       this.taskQueueService = this.httpServer.taskQueueService
     } catch (error) {
-      logger.warn('HTTP server failed to start, continuing without it', {
-        error: error instanceof Error ? error.message : String(error),
-      })
-      this.httpServer = null
+      // Fatal, unlike CDP above, and the difference is the point: a browser is
+      // optional and HTTP is the product. Everything the app asks of this
+      // process goes over this port.
+      //
+      // "Continuing without it" produced the worst possible state: a live
+      // process serving nothing. It could not bind because an older instance
+      // still held the port, it warned, it kept running - and then the older
+      // one died and this one never retried. What was left was two processes
+      // answering nothing, while every health check said down and every
+      // launcher looked at those processes and saw a server. Six delegated
+      // tasks sat in awaitingReview for six hours behind it.
+      //
+      // Exiting frees the port and lets the next attempt be a real attempt.
+      const message = error instanceof Error ? error.message : String(error)
+      logger.error('HTTP server failed to start; exiting', { error: message })
+      console.error(
+        `[FATAL] HTTP server failed to start on port ${this.config.serverPort}: ${message}`,
+      )
+      process.exit(EXIT_CODES.GENERAL_ERROR)
     }
 
     try {

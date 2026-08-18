@@ -39,6 +39,39 @@ enum AgentServerLauncher {
         return http.statusCode == 200
     }
 
+    /// How often the supervisor re-asks. Sixty seconds: long enough that a
+    /// server restarting on its own is not raced, short enough that a dead one
+    /// is not left dead through a whole delegation.
+    static let watchInterval: UInt64 = 60_000_000_000
+
+    /// Keeps the server up, rather than starting it once and hoping.
+    ///
+    /// Starting at launch was not enough and the evidence was six delegated
+    /// tasks sitting in `awaitingReview` for six hours: the app had started a
+    /// server hours earlier, that server had since died, and nothing looked
+    /// again. A supervisor that only supervises at boot supervises nothing.
+    ///
+    /// `startIfNeeded` is idempotent, so this loop is just the same question
+    /// asked repeatedly.
+    static func superviseForever() -> Task<Void, Never> {
+        Task.detached(priority: .utility) {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: watchInterval)
+                guard !Task.isCancelled else { break }
+                if await isHealthy(port: ProjectPaths.mcpPort) { continue }
+                TriosLogBus.shared.warn(
+                    .app, "server.watch.down",
+                    "The agent server stopped answering on \(ProjectPaths.mcpPort); restarting it",
+                    ["port": ProjectPaths.mcpPort]
+                )
+                let state = await startIfNeeded()
+                TriosLogBus.shared.info(
+                    .app, "server.watch.restarted", "Agent server: \(state)", [:]
+                )
+            }
+        }
+    }
+
     /// Starts the server for this variant if nothing is listening.
     ///
     /// Returns what happened, so the caller can say it rather than guess.

@@ -83,6 +83,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Nothing used to start it, so it was whatever happened to be left
             // running - and after a reboot, nothing.
             let serverState = await AgentServerLauncher.startIfNeeded()
+            // And keep it up. Starting once was not enough: the server died
+            // hours later and six delegated tasks waited behind it.
+            _ = AgentServerLauncher.superviseForever()
             TriosLogBus.shared.info(
                 .app, "server.launch", "Agent server: \(serverState)", [:]
             )
