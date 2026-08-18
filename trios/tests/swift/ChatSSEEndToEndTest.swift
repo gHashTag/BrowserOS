@@ -7548,8 +7548,16 @@ struct ChatSSEEndToEndTests {
             "the loop refuses to start outside a supervisor build, on its first line"
         )
         check(
-            source.contains("await chooseNextOpenIssue(startAfterChoosing: true)"),
+            source.contains("await chooseNextOpenIssue(startAfterChoosing: true, autonomous: true)"),
             "and the tick starts the chosen issue rather than only naming it - the bootstrap's mistake"
+        )
+        // The self-approval must be reachable ONLY from the autonomous path.
+        // Without the condition, `/choose --start` and the launch bootstrap
+        // would start granting their own consent too, and the launch proposal
+        // that deliberately stops for a human would stop stopping.
+        check(
+            source.contains("if autonomous {\n                delegationRegistry.approve(issue: issue)"),
+            "and the self-approval sits behind `if autonomous` - no other caller grants its own consent"
         )
     }
 }
