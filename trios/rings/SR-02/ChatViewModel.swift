@@ -3955,9 +3955,20 @@ final class ChatViewModel: ObservableObject {
             return
         }
 
-        // The virtual branch is what keeps two bees off each other's files.
+        // A private checkout is what keeps two bees off each other's files -
+        // and off the build's. The branch alone never did: it recorded WHOSE a
+        // change was, while every bee still wrote into the one working tree the
+        // user, the gate and each other were reading (#1277).
+        //
+        // `git worktree add -B` cuts the branch as it makes the checkout, so
+        // `createVirtualBranch` is only reached when a worktree could not be
+        // made. That fallback is the pre-worktree behaviour, kept deliberately:
+        // a bee that cannot get its own directory should still work, just
+        // without the isolation.
         if let branch = task.virtualBranch {
-            if let reason = await createVirtualBranch(named: branch) {
+            if let worktree = await prepareWorktree(for: task, branch: branch) {
+                registry.setWorktreePath(taskID: task.id, path: worktree)
+            } else if let reason = await createVirtualBranch(named: branch) {
                 registry.transition(taskID: task.id, to: .cancelled)
                 await postQueenNotice(
                     SystemNoticeClassifier.failureMarker
@@ -4167,6 +4178,121 @@ final class ChatViewModel: ObservableObject {
             let reason = attempt.trimmingCharacters(in: .whitespacesAndNewlines)
             return reason.isEmpty ? "git branch produced no output and no branch" : reason
         }.value
+    }
+
+    /// Gives a task its own checkout, and reports where.
+    ///
+    /// Returns the worktree path, or nil with the reason logged. Nil is not
+    /// fatal: the caller falls back to the shared tree, which is what every bee
+    /// did before this existed. Degrading to the old behaviour beats refusing
+    /// to work because a directory could not be made.
+    ///
+    /// The branch is cut here rather than by `createVirtualBranch`, because
+    /// `git worktree add -B` does both in one step and cannot leave a branch
+    /// pointing somewhere no checkout exists.
+    private func prepareWorktree(for task: DelegatedTask, branch: String) async -> String? {
+        let root = ProjectPaths.root
+        let path = QueenWorktree.path(forIssue: task.issue.number, projectRoot: root)
+        return await Task.detached(priority: .utility) { () -> String? in
+            func git(_ args: [String], timeout: TimeInterval = 25) -> String {
+                QueenStatusViewModel.runProcess(
+                    "/usr/bin/git", arguments: args, workDir: root, timeout: timeout
+                ).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+
+            // A worktree left behind by a killed run is reusable only if it is
+            // still registered; `git worktree list` is the register, not the
+            // presence of a directory.
+            if git(["worktree", "list", "--porcelain"]).contains("worktree \(path)") {
+                TriosLogBus.shared.info(
+                    .queen, "queen.worktree.reused",
+                    "Reusing the existing checkout for \(task.issue.slug)",
+                    ["path": path]
+                )
+                return path
+            }
+
+            // A branch left over from an older run is adopted silently by
+            // `createVirtualBranch`. Here that adoption is refused when the
+            // branch predates HEAD - see QueenWorktree.staleBranchReason. The
+            // old branch is never deleted; a fresh name is used instead.
+            let head = git(["rev-parse", "HEAD"])
+            var name = branch
+            var attempt = 0
+            while attempt < 8 {
+                let exists = !git(["branch", "--list", name]).isEmpty
+                let mergeBase = exists ? git(["merge-base", name, "HEAD"]) : nil
+                guard let reason = QueenWorktree.staleBranchReason(
+                    branchExists: exists, mergeBase: mergeBase, head: head
+                ) else { break }
+                attempt += 1
+                let next = QueenWorktree.freshBranchName(base: branch, attempt: attempt)
+                TriosLogBus.shared.warn(
+                    .queen, "queen.worktree.stale_branch",
+                    "Not reusing \(name): \(reason). Cutting \(next) from HEAD instead; "
+                        + "the old branch is left alone.",
+                    ["branch": name, "next": next, "reason": reason]
+                )
+                name = next
+            }
+
+            let output = git(
+                ["worktree", "add", "--quiet", "-B", name, path, "HEAD"], timeout: 90
+            )
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else {
+                TriosLogBus.shared.error(
+                    .queen, "queen.worktree.failed",
+                    "Could not create a checkout for \(task.issue.slug); working in the "
+                        + "shared tree instead. git said: "
+                        + (output.isEmpty ? "(nothing)" : output),
+                    ["issue": task.issue.slug, "path": path]
+                )
+                return nil
+            }
+            TriosLogBus.shared.info(
+                .queen, "queen.worktree.created",
+                "\(task.issue.slug) works in its own checkout on \(name)",
+                ["path": path, "branch": name]
+            )
+            return path
+        }.value
+    }
+
+    /// Removes a finished task's checkout. The branch stays.
+    ///
+    /// Guarded by `isOwnedWorktree`, because this hands a path to
+    /// `git worktree remove` and the shape of that mistake is deleting the
+    /// checkout somebody is working in. `--force` covers the ordinary case of a
+    /// bee that left uncommitted scratch behind; anything it wanted kept is on
+    /// its branch, which is the whole contract.
+    func releaseWorktree(for task: DelegatedTask) async {
+        guard let path = task.worktreePath else { return }
+        let root = ProjectPaths.root
+        guard QueenWorktree.isOwnedWorktree(path: path, projectRoot: root) else {
+            TriosLogBus.shared.error(
+                .queen, "queen.worktree.refused_removal",
+                "Refusing to remove \(path): it is not a checkout this code created",
+                ["path": path]
+            )
+            return
+        }
+        await Task.detached(priority: .utility) {
+            _ = QueenStatusViewModel.runProcess(
+                "/usr/bin/git",
+                arguments: ["worktree", "remove", "--force", path],
+                workDir: root,
+                timeout: 60
+            )
+            _ = QueenStatusViewModel.runProcess(
+                "/usr/bin/git", arguments: ["worktree", "prune"], workDir: root, timeout: 30
+            )
+        }.value
+        TriosLogBus.shared.info(
+            .queen, "queen.worktree.released",
+            "Released the checkout for \(task.issue.slug)", ["path": path]
+        )
     }
 
     // MARK: - Worker Runner
@@ -6868,7 +6994,27 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Removes the checkouts of tasks that have finished.
+    ///
+    /// A sweep rather than a hook on each terminal transition: there are six
+    /// places a task can settle, and a cleanup wired to five of them leaves
+    /// directories on disk in exactly the case nobody tested. Idempotent, so
+    /// running it every tick costs nothing when there is nothing to do.
+    func releaseSettledWorktrees() async {
+        let settled = delegationRegistry.tasks.filter {
+            $0.state.isTerminal && $0.worktreePath != nil
+        }
+        for task in settled {
+            await releaseWorktree(for: task)
+            delegationRegistry.clearWorktreePath(taskID: task.id)
+        }
+    }
+
     func queenAutonomyTick() async {
+        // Before the capacity check, not after: a finished bee's checkout must
+        // be released even on the ticks where there is no room to start a new
+        // one, which is exactly when the swarm is busiest.
+        await releaseSettledWorktrees()
         let budget = QueenSelfImprovementService.loadBudget()
         if let reason = Self.autonomyBlockReason(
             enabled: queenAutonomyEnabled,
