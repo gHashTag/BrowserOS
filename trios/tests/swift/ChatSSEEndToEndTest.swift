@@ -355,6 +355,7 @@ struct ChatSSEEndToEndTests {
         ("runProposalStoreCollapsesDuplicates", { await runProposalStoreCollapsesDuplicates() }),
         ("runQueenPicksUpWorkHerself", { await runQueenPicksUpWorkHerself() }),
         ("runEachBeeGetsItsOwnCheckout", { await runEachBeeGetsItsOwnCheckout() }),
+        ("runAppStartsItsOwnServer", { await runAppStartsItsOwnServer() }),
     ]
 
     static func main() async {
@@ -7688,6 +7689,69 @@ struct ChatSSEEndToEndTests {
                 path: "\(root)/.worktrees/dev/queen-1127", projectRoot: root, variant: "test"
             ),
             "and the harness cannot remove a dev checkout even by full path"
+        )
+    }
+
+    // MARK: - Scenario: the app starts the server it cannot work without
+
+    /// `ProjectPaths.agentServerEntrypoint` pointed at the runtime for as long
+    /// as the runtime has lived in this tree, and nothing ever called it. The
+    /// app depended on a server it did not start, so the server was whatever
+    /// somebody had left running - and after a reboot, nothing. The Queen would
+    /// then choose an issue, delegate it, and the worker would find no
+    /// transport, which reads like a broken supervisor and is not.
+    static func runAppStartsItsOwnServer() async {
+        print("\n# Scenario: the app starts its own server (#1279)")
+
+        check(
+            !AgentServerLauncher.bunCandidates.isEmpty,
+            "the launcher knows where to look for bun"
+        )
+        // Absolute paths, not a bare name: an app launched from Finder does not
+        // inherit a login shell's PATH, which is the commonest way "works in the
+        // terminal, not in the app" happens.
+        check(
+            AgentServerLauncher.bunCandidates.allSatisfy { $0.hasPrefix("/") },
+            "and looks by absolute path, because a Finder-launched app has no login PATH"
+        )
+        check(
+            AgentServerLauncher.resolveBun(existsAt: { _ in false }) == nil,
+            "with nothing on disk it resolves nothing rather than guessing a name"
+        )
+        let second = AgentServerLauncher.bunCandidates[1]
+        check(
+            AgentServerLauncher.resolveBun(existsAt: { $0 == second }) == second,
+            "and finds the one that is actually there, wherever in the list it sits"
+        )
+        check(
+            AgentServerLauncher.resolveBun(existsAt: { _ in true })
+                == AgentServerLauncher.bunCandidates.first,
+            "preferring the first when several exist - one answer, not an arbitrary one"
+        )
+
+        // The entrypoint must be a real file in this checkout, or the launcher
+        // reports a missing entrypoint at every launch and the app never has a
+        // server.
+        check(
+            FileManager.default.fileExists(atPath: ProjectPaths.agentServerEntrypoint),
+            "the entrypoint the launcher spawns exists: \(ProjectPaths.agentServerEntrypoint)"
+        )
+
+        // Idempotence is what lets two variants both call this at launch.
+        let source = (try? String(
+            contentsOfFile: "\(ProjectPaths.root)/rings/SR-01/AgentServerLauncher.swift",
+            encoding: .utf8
+        )) ?? ""
+        check(
+            source.contains("if await isHealthy(port: port) {"),
+            "and it asks the port before spawning, so a second caller finds the first one's server"
+        )
+        // The output is kept. The first version sent it to /dev/null, the
+        // server died, and the one question this launcher exists to answer had
+        // been thrown away.
+        check(
+            !source.contains("FileHandle.nullDevice"),
+            "the spawned server's output is kept, not discarded - a server that dies must say why"
         )
     }
 }

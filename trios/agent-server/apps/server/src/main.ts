@@ -89,12 +89,44 @@ export class Application {
     }
 
     const cdp = new CdpBackend({ port: this.config.cdpPort })
+    // A browser that is not there yet is not a reason to refuse to start.
+    //
+    // This used to exit. The asymmetry was the problem: once running, the
+    // server tolerates losing CDP perfectly well - /health reports
+    // cdpConnected:false and stays ok - but it would not START without it. So
+    // after a reboot, with no browser up, the server died on launch, the
+    // supervisor had nothing to talk to, and "it worked yesterday" and "it
+    // refuses to start today" were both true.
+    //
+    // Now it starts, serves everything that needs no browser, and keeps trying
+    // in the background. Tools that need a browser fail per-request, which is
+    // the same thing that happens when the browser goes away mid-session.
+    let cdpConnected = false
     try {
       logger.debug(`Connecting to CDP on port ${this.config.cdpPort}`)
       await cdp.connect()
+      cdpConnected = true
       logger.info(`Connected to CDP on port ${this.config.cdpPort}`)
     } catch (error) {
-      return this.handleStartupError('CDP', this.config.cdpPort, error)
+      const message = error instanceof Error ? error.message : String(error)
+      logger.warn(
+        `CDP is not reachable on port ${this.config.cdpPort}; starting without a browser and retrying in the background`,
+        { error: message },
+      )
+      void (async () => {
+        while (!cdpConnected) {
+          await new Promise((resolve) => setTimeout(resolve, 10_000))
+          try {
+            await cdp.connect()
+            cdpConnected = true
+            logger.info(
+              `Connected to CDP on port ${this.config.cdpPort} after retrying`,
+            )
+          } catch {
+            // Still nothing. The next tick will try again.
+          }
+        }
+      })()
     }
 
     const browser = new Browser(cdp)

@@ -79,6 +79,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             cg.startMonitoring()
             // Queen background service owns A2A registration, heartbeat and the
             // self-improvement audit loop. It survives chat switches and panel close.
+            // The server this app talks to, started by the app that needs it.
+            // Nothing used to start it, so it was whatever happened to be left
+            // running - and after a reboot, nothing.
+            let serverState = await AgentServerLauncher.startIfNeeded()
+            TriosLogBus.shared.info(
+                .app, "server.launch", "Agent server: \(serverState)", [:]
+            )
             await QueenBackgroundService.shared.start()
             await runDelegationSelfTestIfRequested()
             // When TRIOS_E2E_DELEGATE is absent the self-test returns at its
