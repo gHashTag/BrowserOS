@@ -7511,11 +7511,30 @@ struct ChatSSEEndToEndTests {
             )?.contains("safety budget") == true,
             "a spent safety budget stops her - the budget is the whole point of having one"
         )
+        // The release app runs the full supervisor as of 2026-08-18, by the
+        // operator's decision: the swarm was invisible in the app they actually
+        // run, because the sidebar's Swarm section draws only when the registry
+        // has live work and the release registry never had any. `hasInbox` is
+        // now true everywhere and this arm covers a build that somehow has no
+        // inbox at all - still refused, and still refused first.
         check(
             VM.autonomyBlockReason(
                 enabled: true, hasInbox: false, runningWorkers: 0, budgetActive: true
             )?.contains("no supervisor inbox") == true,
-            "a release build never starts work by itself, whatever the stored preference says"
+            "a build with no inbox cannot start work, whatever the stored preference says"
+        )
+        check(
+            BuildVariant.prod.hasSupervisorInbox && BuildVariant.dev.hasSupervisorInbox,
+            "every variant has an inbox now - each reading its own file under its own data root"
+        )
+        // Exactly one variant starts work unprompted by default. Two autonomous
+        // Queens choose from the same epic and cannot see each other's registry
+        // - separate files by design - so they would take the same issue twice.
+        check(
+            BuildVariant.prod.autonomyDefault
+                && !BuildVariant.dev.autonomyDefault
+                && !BuildVariant.test.autonomyDefault,
+            "and exactly one of them picks up work by default - release, the app the user runs"
         )
 
         // Order matters: the inbox check comes first, so a release build is
@@ -7546,7 +7565,7 @@ struct ChatSSEEndToEndTests {
         let guardWindow = lines[loopIndex...min(loopIndex + 3, lines.count - 1)]
         check(
             guardWindow.contains { $0.contains("ProjectPaths.hasSupervisorInbox") },
-            "the loop refuses to start outside a supervisor build, on its first line"
+            "the loop still asks whether this build has an inbox before it starts"
         )
         check(
             source.contains("await chooseNextOpenIssue(startAfterChoosing: true, autonomous: true)"),

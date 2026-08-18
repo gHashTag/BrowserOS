@@ -74,14 +74,34 @@ enum BuildVariant: String, Equatable, Sendable {
 
     /// Whether this variant runs the Queen's delegation inbox.
     ///
-    /// Every comment at the three call sites said the same thing - "so a
-    /// release app never picks up an inbox" - while the code asked "is this
-    /// dev". With two variants those agreed; with three they stopped, and the
-    /// harness was refused its own delegation with the message "No inbox in a
-    /// release build" while running as `test`. Nothing can leak across: the
-    /// path is `ProjectPaths.trinity/state/queen_inbox.jsonl`, so each variant
-    /// reads a different file by construction.
-    var hasSupervisorInbox: Bool { !isRelease }
+    /// True everywhere as of 2026-08-18, by the operator's decision. It was
+    /// `!isRelease` on the reasoning that a shipped build must not open chats
+    /// by itself - sound in general, and wrong for this product, where the
+    /// supervisor IS the product. The consequence of the old answer was that
+    /// the swarm was invisible in the app the user actually runs: the sidebar's
+    /// Swarm section draws only when the registry has live work, the release
+    /// registry never had any, so the section was not hidden - it was empty and
+    /// therefore absent.
+    ///
+    /// Nothing leaks across variants: the path is
+    /// `ProjectPaths.trinity/state/queen_inbox.jsonl`, so each reads its own
+    /// file by construction. What the inbox does NOT decide is whether the
+    /// Queen starts work unprompted - that is `autonomyDefault` below, and it
+    /// answers true for exactly one variant.
+    var hasSupervisorInbox: Bool { true }
+
+    /// Whether the Queen picks up work unprompted when nothing says otherwise.
+    ///
+    /// Exactly one variant, and release is the one, because two autonomous
+    /// Queens choose from the same epic and neither can see the other's
+    /// registry - the stores are separate files by design. They would take the
+    /// same issue twice, open two chats for it, and cut two branches. The
+    /// worktree paths differ per variant so nothing would be corrupted; the
+    /// work would simply be done twice and reviewed twice.
+    ///
+    /// A stored preference overrides this in either direction. The default is
+    /// only what happens before anyone has said anything.
+    var autonomyDefault: Bool { isRelease }
 
     var mcpPort: String {
         switch self {

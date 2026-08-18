@@ -6943,7 +6943,8 @@ final class ChatViewModel: ObservableObject {
     /// shipped build cannot open chats by itself whatever this says.
     var queenAutonomyEnabled: Bool {
         get {
-            UserDefaults.standard.object(forKey: Self.queenAutonomyKey) as? Bool ?? true
+            UserDefaults.standard.object(forKey: Self.queenAutonomyKey) as? Bool
+                ?? ProjectPaths.autonomyDefault
         }
         set {
             UserDefaults.standard.set(newValue, forKey: Self.queenAutonomyKey)

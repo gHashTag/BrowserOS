@@ -135,9 +135,12 @@ enum ProjectPaths {
     /// DevSecretStore, and `BuildVariant.usesFileSecretStore` for the reasoning.
     static var usesFileSecretStore: Bool { variant.usesFileSecretStore }
 
-    /// Whether this build runs the Queen's delegation inbox. False only for the
-    /// release app; see `BuildVariant.hasSupervisorInbox`.
+    /// Whether this build runs the Queen's delegation inbox. True in every
+    /// variant since 2026-08-18; see `BuildVariant.hasSupervisorInbox`.
     static var hasSupervisorInbox: Bool { variant.hasSupervisorInbox }
+
+    /// Whether the Queen picks up work unprompted absent a stored preference.
+    static var autonomyDefault: Bool { variant.autonomyDefault }
 
     /// Build variant as a string, for callers that record or display it.
     ///
