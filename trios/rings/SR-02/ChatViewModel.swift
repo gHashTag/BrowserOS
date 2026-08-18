@@ -4274,6 +4274,14 @@ final class ChatViewModel: ObservableObject {
     func releaseWorktree(for task: DelegatedTask) async {
         guard let path = task.worktreePath else { return }
         let root = ProjectPaths.root
+        // Nothing there means nothing to remove, and the recorded path is
+        // simply out of date - a task written before the paths were scoped by
+        // variant carries the old shape. Without this the ownership guard below
+        // refuses it, forever, on every sweep, and says so each time.
+        guard FileManager.default.fileExists(atPath: path) else {
+            delegationRegistry.clearWorktreePath(taskID: task.id)
+            return
+        }
         guard QueenWorktree.isOwnedWorktree(
             path: path, projectRoot: root, variant: ProjectPaths.variant.rawValue
         ) else {
@@ -7891,33 +7899,22 @@ final class ChatViewModel: ObservableObject {
             }
             let currentTreeState = currentBoundaryState ?? ""
 
-            // --- The interface divergence watchdog (#1128) ---
-            // The combined state is assembled and built once, here, before
-            // the contract is consulted. The order is deliberate: criteria
-            // are judged inside a tree, and if the tree that would land
-            // does not compile, there is no tree to judge them in. A
-            // refusal from this gate is a different kind of refusal from
-            // the one below - "does not build together" is not "criterion
-            // not met" - so it gets its own words, its own log event, and
-            // it never touches the verdicts.
-            let watchdogProof: CombinedBuildProof
-            let divergenceGate = await runInterfaceDivergenceWatchdog(
-                accepting: task, in: registry
-            )
-            switch divergenceGate {
-            case .refused(let summary, let branches):
-                await refuseAcceptanceForDivergence(
-                    issue: issue, summary: summary, branches: branches
-                )
-                return
-            case .passed(let proof):
-                watchdogProof = proof
-            }
-
             // Acceptance is checked against the contract before it is checked
             // against anything else. This is the whole point of writing criteria
             // down: without it the Queen signs off on an impression, and the
             // specification becomes decoration that made the brief longer.
+            //
+            // Ahead of the divergence watchdog below, and the ordering matters.
+            // The watchdog was placed first with a stated reason - criteria are
+            // judged inside a tree, and a tree that does not compile is no
+            // place to judge them - which is true of criteria and NOT true of
+            // the contract refusals: "the reviewer was asked and gave no
+            // answer" is a fact about the reviewer, established without any
+            // tree at all. Running the watchdog first replaced that answer with
+            // "does not build together" and lost the distinction #1117 exists
+            // to keep. So: refusals that need no tree are reported first, and
+            // the watchdog guards the case where the contract is satisfied and
+            // something is actually about to land.
             if let reason = acceptanceBlockReasonDistinguishingEmptyAnswers(
                 for: task,
                 verdictTreeState: verdictTreeState,
@@ -7949,6 +7946,27 @@ final class ChatViewModel: ObservableObject {
                         + "`/verify \(issue.slug) <criterion text> met|unmet`."
                 )
                 return
+            }
+
+            // --- The interface divergence watchdog (#1128) ---
+            // The contract is satisfied, so something is about to land. The
+            // combined state of every open lane is assembled and built once,
+            // here. A refusal from this gate is a different kind of refusal
+            // from the contract's - "does not build together" is not
+            // "criterion not met" - so it gets its own words, its own log
+            // event, and it never touches the verdicts.
+            let watchdogProof: CombinedBuildProof
+            let divergenceGate = await runInterfaceDivergenceWatchdog(
+                accepting: task, in: registry
+            )
+            switch divergenceGate {
+            case .refused(let summary, let branches):
+                await refuseAcceptanceForDivergence(
+                    issue: issue, summary: summary, branches: branches
+                )
+                return
+            case .passed(let proof):
+                watchdogProof = proof
             }
             // The proof is the entry ticket (#1128 criterion 4): without
             // the watchdog having passed above, this call does not compile.

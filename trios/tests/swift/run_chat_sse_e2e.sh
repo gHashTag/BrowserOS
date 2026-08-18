@@ -188,7 +188,24 @@ if [ ${PIPESTATUS[0]} -eq 0 ]; then
     echo "[OK] Build successful: $OUTPUT"
     chmod +x "$OUTPUT"
     echo "Running $OUTPUT..."
+    # `set -e` is on, so the run must not be allowed to abort the script before
+    # the cleanup below - a failing suite is exactly when leftover checkouts are
+    # most likely and least welcome.
+    set +e
     TRIOS_DISABLE_STATUS_MONITORING=1 TRIOS_E2E_DISABLE_KEYCHAIN=1 TRIOS_E2E_DISABLE_WARMUP=1 "$OUTPUT"
+    STATUS=$?
+    set -e
+    # Scenarios that drive a real delegation now get a real worktree, and the
+    # suite exits without settling those tasks - so each run left a checkout
+    # behind under .worktrees/test. Cleared here rather than by the scenarios,
+    # because a scenario that crashes mid-way still has to leave the tree as it
+    # found it. Only the test variant: .worktrees/dev holds live work.
+    for wt in "$PROJECT_DIR/.worktrees/test"/queen-*; do
+        [ -d "$wt" ] || continue
+        git -C "$PROJECT_DIR" worktree remove --force "$wt" >/dev/null 2>&1 || true
+    done
+    git -C "$PROJECT_DIR" worktree prune >/dev/null 2>&1 || true
+    exit $STATUS
 else
     echo "[FAIL] Build failed (log: $LOG_FILE)"
     exit 1
