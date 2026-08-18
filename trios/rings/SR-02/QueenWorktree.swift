@@ -18,8 +18,21 @@ enum QueenWorktree {
     /// Where a task's checkout lives. Under `.worktrees/`, which is already
     /// git-ignored, and named after the issue so an abandoned one says what it
     /// belonged to.
-    static func path(forIssue number: Int, projectRoot: String) -> String {
-        "\(projectRoot)/.worktrees/queen-\(number)"
+    ///
+    /// Scoped by variant for the same reason the data root is (#1276): the
+    /// cassette harness dispatches real delegations, so it makes worktrees too.
+    /// Sharing one directory put the harness's checkouts and the working
+    /// Queen's in the same place, where the cassette suite's branch sweep -
+    /// which deletes what it created - would have met a branch checked out by a
+    /// live bee. It could not delete it, said so, and went red; had it been
+    /// able to, it would have taken a working checkout with it.
+    static func path(forIssue number: Int, projectRoot: String, variant: String) -> String {
+        "\(projectRoot)/.worktrees/\(variant)/queen-\(number)"
+    }
+
+    /// The directory holding one variant's checkouts, safe to clear wholesale.
+    static func directory(projectRoot: String, variant: String) -> String {
+        "\(projectRoot)/.worktrees/\(variant)"
     }
 
     /// Why an existing branch must not be reused, or nil if it may be.
@@ -68,8 +81,8 @@ enum QueenWorktree {
     /// Checked before removal, because `git worktree remove` takes a path and
     /// this code should never be one typo away from handing it the checkout the
     /// user is sitting in.
-    static func isOwnedWorktree(path: String, projectRoot: String) -> Bool {
-        let prefix = "\(projectRoot)/.worktrees/queen-"
+    static func isOwnedWorktree(path: String, projectRoot: String, variant: String) -> Bool {
+        let prefix = "\(directory(projectRoot: projectRoot, variant: variant))/queen-"
         guard path.hasPrefix(prefix) else { return false }
         let suffix = String(path.dropFirst(prefix.count))
         return !suffix.isEmpty && suffix.allSatisfy(\.isNumber)

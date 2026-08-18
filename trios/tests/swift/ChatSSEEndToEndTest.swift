@@ -7579,9 +7579,19 @@ struct ChatSSEEndToEndTests {
         let root = "/Users/x/BrowserOS/trios"
 
         check(
-            QueenWorktree.path(forIssue: 1127, projectRoot: root)
-                == "\(root)/.worktrees/queen-1127",
+            QueenWorktree.path(forIssue: 1127, projectRoot: root, variant: "dev")
+                == "\(root)/.worktrees/dev/queen-1127",
             "a checkout is named after its issue, under the already-ignored .worktrees"
+        )
+        // Scoped by variant, like the data root. The cassette harness
+        // dispatches real delegations and therefore makes real worktrees; when
+        // both lived in one directory the suite's branch sweep met a branch
+        // checked out by a live bee, could not delete it, and went red. Had it
+        // been able to, it would have taken a working checkout with it.
+        check(
+            QueenWorktree.path(forIssue: 1127, projectRoot: root, variant: "test")
+                != QueenWorktree.path(forIssue: 1127, projectRoot: root, variant: "dev"),
+            "the harness and the working Queen never share a checkout, even for the same issue"
         )
 
         // ── Adopting a leftover branch ───────────────────────────────
@@ -7636,17 +7646,29 @@ struct ChatSSEEndToEndTests {
         // This hands a path to `git worktree remove`, so the shape of the
         // mistake is deleting the checkout somebody is sitting in.
         check(
-            QueenWorktree.isOwnedWorktree(path: "\(root)/.worktrees/queen-1127", projectRoot: root),
+            QueenWorktree.isOwnedWorktree(
+                path: "\(root)/.worktrees/dev/queen-1127", projectRoot: root, variant: "dev"
+            ),
             "a checkout this code made is removable"
         )
+        // The last one is the point of the variant scoping: the harness must
+        // not be able to remove a working bee's checkout by naming it.
         for hostile in [root, "\(root)/..", "\(root)/rings", "/",
-                        "\(root)/.worktrees", "\(root)/.worktrees/queen-",
-                        "\(root)/.worktrees/other", "\(root)/.worktrees/queen-1127/rings",
-                        "/other/BrowserOS/trios/.worktrees/queen-1127"] {
+                        "\(root)/.worktrees", "\(root)/.worktrees/dev",
+                        "\(root)/.worktrees/dev/queen-",
+                        "\(root)/.worktrees/dev/other",
+                        "\(root)/.worktrees/dev/queen-1127/rings",
+                        "/other/BrowserOS/trios/.worktrees/dev/queen-1127"] {
             check(
-                !QueenWorktree.isOwnedWorktree(path: hostile, projectRoot: root),
+                !QueenWorktree.isOwnedWorktree(path: hostile, projectRoot: root, variant: "dev"),
                 "refuses to remove \(hostile)"
             )
         }
+        check(
+            !QueenWorktree.isOwnedWorktree(
+                path: "\(root)/.worktrees/dev/queen-1127", projectRoot: root, variant: "test"
+            ),
+            "and the harness cannot remove a dev checkout even by full path"
+        )
     }
 }

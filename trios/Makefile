@@ -1431,6 +1431,17 @@ cassettes: test-app
 		rm -f "$(ROOT)/.trinity-test/state/queen_delegation.json"; \
 		rm -f "$(ROOT)/.trinity-test/state/queen_inbox.jsonl"; \
 		defaults delete com.browseros.trios.test >/dev/null 2>&1 || true; \
+		: "The harness dispatches real delegations, so it makes real"; \
+		: "worktrees. Cleared under .worktrees/test only - the working"; \
+		: "Queen's checkouts live under .worktrees/dev and a branch checked"; \
+		: "out in one of those cannot be deleted by the sweep below, which"; \
+		: "is how this surfaced. Removing them is not an option: they hold"; \
+		: "live work."; \
+		for wt in "$(ROOT)/.worktrees/test"/queen-*; do \
+			[ -d "$$wt" ] || continue; \
+			git -C "$(ROOT)" worktree remove --force "$$wt" >/dev/null 2>&1 || true; \
+		done; \
+		git -C "$(ROOT)" worktree prune >/dev/null 2>&1 || true; \
 		: "A cassette effect writes a file; if it survives from the last run the \
 		   baseline diff is empty and the commit assertion fails for the wrong \
 		   reason. Clean before, not only after."; \
@@ -1463,6 +1474,15 @@ cassettes: test-app
 		pkill -f "trios-test.app/Contents/MacOS" 2>/dev/null || true; \
 		sleep 2; \
 	done; \
+	: "The LAST cassette's checkout is still standing here - the per-run"; \
+	: "cleanup above happens BEFORE each replay, so nothing clears the"; \
+	: "final one. A branch checked out in a worktree cannot be deleted,"; \
+	: "and the sweep then reports branches that survived."; \
+	for wt in "$(ROOT)/.worktrees/test"/queen-*; do \
+		[ -d "$$wt" ] || continue; \
+		git -C "$(ROOT)" worktree remove --force "$$wt" >/dev/null 2>&1 || true; \
+	done; \
+	git -C "$(ROOT)" worktree prune >/dev/null 2>&1 || true; \
 	git -C "$(ROOT)" branch --list '$(CASSETTE_BRANCHES)' --format='%(refname:short)' | xargs -r -n1 git -C "$(ROOT)" branch -D >/dev/null 2>&1; \
 	if git -C "$(ROOT)" rev-parse --verify --quiet $(SWEEP_CANARY) >/dev/null; then \
 		echo "  ok   - the branch sweep spares work it did not create"; \

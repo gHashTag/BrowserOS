@@ -4192,7 +4192,11 @@ final class ChatViewModel: ObservableObject {
     /// pointing somewhere no checkout exists.
     private func prepareWorktree(for task: DelegatedTask, branch: String) async -> String? {
         let root = ProjectPaths.root
-        let path = QueenWorktree.path(forIssue: task.issue.number, projectRoot: root)
+        let path = QueenWorktree.path(
+            forIssue: task.issue.number,
+            projectRoot: root,
+            variant: ProjectPaths.variant.rawValue
+        )
         return await Task.detached(priority: .utility) { () -> String? in
             func git(_ args: [String], timeout: TimeInterval = 25) -> String {
                 QueenStatusViewModel.runProcess(
@@ -4270,7 +4274,9 @@ final class ChatViewModel: ObservableObject {
     func releaseWorktree(for task: DelegatedTask) async {
         guard let path = task.worktreePath else { return }
         let root = ProjectPaths.root
-        guard QueenWorktree.isOwnedWorktree(path: path, projectRoot: root) else {
+        guard QueenWorktree.isOwnedWorktree(
+            path: path, projectRoot: root, variant: ProjectPaths.variant.rawValue
+        ) else {
             TriosLogBus.shared.error(
                 .queen, "queen.worktree.refused_removal",
                 "Refusing to remove \(path): it is not a checkout this code created",
