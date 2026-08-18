@@ -1344,7 +1344,14 @@ final class ModelConfigurationStore: ObservableObject {
         defaults.set(enabled, forKey: Self.predictiveWarmupEnabledKey)
         Task { [weak self] in
             if enabled {
-                await self?.restartPredictiveWarmup()
+                // `startPredictiveWarmup`, not `restart`. The scheduler is
+                // created in exactly one place - `startPredictiveWarmup` - and
+                // that runs only at launch and only when the persisted flag is
+                // ALREADY true. Turning the setting on afterwards therefore
+                // called `restart` on a nil optional and did nothing at all,
+                // while the toggle and the stored preference both read as on.
+                // No warmup until the next relaunch.
+                await self?.startPredictiveWarmup()
             } else {
                 await self?.stopPredictiveWarmup()
                 await MainActor.run {

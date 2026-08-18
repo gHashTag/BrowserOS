@@ -106,9 +106,22 @@ final class TriOSEncryption {
 
     /// Decrypts combined sealed-box bytes back to plaintext.
     func decrypt(_ combined: Data) throws -> Data {
+        // The key read stays OUTSIDE the catch: `keyUnavailableLocked` is a
+        // different fact from "this ciphertext is bad", and collapsing them
+        // would tell a user with a locked keychain that their data is
+        // corrupted.
         let key = try symmetricKey()
-        let sealed = try AES.GCM.SealedBox(combined: combined)
-        return try AES.GCM.open(sealed, using: key)
+        // CryptoKit's own error was propagated raw, so `.openFailure` was
+        // declared in the enum and never thrown - a case that could not
+        // happen. Callers switching on TriOSEncryptionError to tell a tampered
+        // file from a locked key got neither: they got an opaque CryptoKit
+        // error that matched no branch.
+        do {
+            let sealed = try AES.GCM.SealedBox(combined: combined)
+            return try AES.GCM.open(sealed, using: key)
+        } catch {
+            throw TriOSEncryptionError.openFailure
+        }
     }
 
     /// Returns the raw 256-bit key bytes for use with external crypto layers

@@ -776,13 +776,26 @@ actor MemoryStore: AgentMemoryStoreProtocol {
                         """
                 )
             }
-        } else if version == 1 || version == 2 || version == 3 {
+        } else if version >= 1 && version < schemaVersionNumber {
+            // A RUNNING version, not the one this branch was entered with.
+            //
+            // Every step below used to re-test the immutable `version`, so the
+            // ladder could only ever climb one rung: a v1 database ran the 1->2
+            // and 2->3 steps and then asked `if version == 3` of a value that
+            // was still 1, and stopped at 3. A v3 database stopped at 4. A v4
+            // database did not enter this branch at all, because the guard
+            // named 1, 2 and 3. Meanwhile the code assumes schema 5, so a
+            // long-lived install kept a model_outcomes table without the
+            // latency and token columns and every reliability write failed at
+            // runtime.
+            var current = version
             try withTransaction(database) {
-                if version == 1 {
+                if current == 1 {
                     // v1 -> v2: table layout unchanged, just bump pragma.
                     try execute(database, sql: "PRAGMA user_version = 2")
+                    current = 2
                 }
-                if version == 1 || version == 2 {
+                if current == 1 || current == 2 {
                     // v2 -> v3: add model_outcomes table.
                     try execute(
                         database,
@@ -803,8 +816,9 @@ actor MemoryStore: AgentMemoryStoreProtocol {
                             PRAGMA user_version = 3;
                             """
                     )
+                    current = 3
                 }
-                if version == 3 {
+                if current == 3 {
                     // v3 -> v4: add latency columns to model_outcomes.
                     try execute(
                         database,
@@ -815,8 +829,9 @@ actor MemoryStore: AgentMemoryStoreProtocol {
                             PRAGMA user_version = 4;
                             """
                     )
+                    current = 4
                 }
-                if version == 4 {
+                if current == 4 {
                     // v4 -> v5: add observed token / finish_reason columns.
                     try execute(
                         database,
@@ -1066,9 +1081,22 @@ actor MemoryStore: AgentMemoryStoreProtocol {
 
         var tokens: [String] = []
         var current = ""
+        // True while the rest of an over-long word is being discarded.
+        //
+        // Without it the flush below reset `current` and the loop kept
+        // accumulating the SAME word into further tokens, so a 100-character
+        // run became three OR-ed terms of 40, 40 and 18 - and the character
+        // that triggered each flush was dropped outright. Only the first chunk
+        // can ever match anything: FTS5 prefix terms anchor at the start of an
+        // indexed token, and the index holds the whole run as one token. The
+        // rest were mid-word substrings that added no recall while eating the
+        // twelve-term budget, so pasting a URL or a hash pushed the real search
+        // words out of the query.
+        var skippingRun = false
 
         for scalar in query.lowercased().unicodeScalars {
             if CharacterSet.alphanumerics.contains(scalar) {
+                if skippingRun { continue }
                 current.append(String(scalar))
                 if current.count > maxTokenLength {
                     // Truncate oversize token and flush it if long enough.
@@ -1077,9 +1105,11 @@ actor MemoryStore: AgentMemoryStoreProtocol {
                         tokens.append(trimmed)
                     }
                     current = ""
+                    skippingRun = true
                     if tokens.count >= maxTokens { break }
                 }
             } else {
+                skippingRun = false
                 if current.count >= minTokenLength, current.count <= maxTokenLength {
                     tokens.append(current)
                 }
