@@ -15,7 +15,17 @@ struct QueenSafetyBudget: Codable {
 struct QueenProposal: Identifiable, Codable {
     let id: UUID
     let createdAt: Date
-    let trigger: String
+    /// The evidence that produced this proposal, e.g. "22/50 messages mention
+    /// errors".
+    ///
+    /// `var` because the evidence moves while the proposal does not. The audit
+    /// re-derives the same weak spot every cycle with a slightly different
+    /// count, and appending each one produced 121 rows of which exactly ONE
+    /// was distinct - same file, same rationale, same patch, differing only in
+    /// 22/50 versus 23/50. The operator reading that store cannot tell a
+    /// standing problem from a hundred new ones, which is the same failure as
+    /// a log with no deduplication: volume presented as significance.
+    var trigger: String
     let targetFile: String
     let rationale: String
     let suggestedPatch: String
@@ -65,7 +75,17 @@ final class QueenSelfImprovementService: ObservableObject {
         self.projectRoot = projectRoot
         self.budgetURL = URL(fileURLWithPath: "\(projectRoot)/\(ProjectPaths.variant.dataDirectoryName)/state/safety_budget.json")
         self.proposalsURL = URL(fileURLWithPath: "\(projectRoot)/\(ProjectPaths.variant.dataDirectoryName)/state/queen-proposals.json")
-        self.proposals = loadProposalsSync()
+        let onDisk = loadProposalsRaw()
+        let collapsed = Self.collapseDuplicates(onDisk)
+        self.proposals = collapsed
+        // Write the collapse through now rather than waiting for whatever
+        // happens to save next. The audit timer is hourly, so without this the
+        // store reads as one proposal in memory and prints as a hundred on
+        // disk - and every tool that inspects the file, including the operator
+        // with `cat`, sees the number the code no longer believes.
+        if collapsed.count != onDisk.count {
+            saveProposals()
+        }
     }
 
     /// Starts the periodic self-improvement timer using the default interval.
@@ -259,9 +279,64 @@ final class QueenSelfImprovementService: ObservableObject {
         }
     }
 
+    /// Two proposals are the same proposal when they would make the same
+    /// change to the same file.
+    ///
+    /// Identity is what it would DO, not when it was noticed. `trigger` is
+    /// excluded on purpose: it is the evidence, and evidence that moves from
+    /// 22/50 to 23/50 does not make this a second, different suggestion.
+    /// `createdAt` and `id` are excluded for the same reason - keying on either
+    /// makes every proposal unique by construction, which is exactly how the
+    /// store reached 121 rows holding one idea.
+    nonisolated static func isSameProposal(_ a: QueenProposal, _ b: QueenProposal) -> Bool {
+        a.targetFile == b.targetFile
+            && a.suggestedPatch == b.suggestedPatch
+            && a.rationale == b.rationale
+    }
+
+    /// Adds only genuinely new proposals; refreshes the evidence on the rest.
+    ///
+    /// A proposal already in the store is left in whatever state the operator
+    /// put it in - a rejected suggestion must not quietly return as pending the
+    /// next time the audit runs, because an agent that re-asks a settled
+    /// question until it gets the answer it wants is not proposing, it is
+    /// wearing the operator down.
     private func appendProposals(_ new: [QueenProposal]) {
-        proposals.append(contentsOf: new)
+        for proposal in new {
+            if let existing = proposals.firstIndex(where: {
+                Self.isSameProposal($0, proposal)
+            }) {
+                proposals[existing].trigger = proposal.trigger
+            } else {
+                proposals.append(proposal)
+            }
+        }
         saveProposals()
+    }
+
+    /// Collapses duplicates already on disk, keeping the oldest of each.
+    ///
+    /// The oldest, not the newest: `createdAt` then answers "how long has this
+    /// been outstanding", which is the question worth asking of a standing
+    /// proposal. Its `trigger` is refreshed from the most recent duplicate so
+    /// the evidence is current even though the row is old. A decided status
+    /// wins over `pending` for the same reason the append path leaves it
+    /// alone - a decision must survive a collapse.
+    nonisolated static func collapseDuplicates(_ loaded: [QueenProposal]) -> [QueenProposal] {
+        var kept: [QueenProposal] = []
+        for proposal in loaded {
+            guard let index = kept.firstIndex(where: {
+                isSameProposal($0, proposal)
+            }) else {
+                kept.append(proposal)
+                continue
+            }
+            kept[index].trigger = proposal.trigger
+            if kept[index].status == .pending, proposal.status != .pending {
+                kept[index].status = proposal.status
+            }
+        }
+        return kept
     }
 
     private func saveProposals() {
@@ -270,13 +345,20 @@ final class QueenSelfImprovementService: ObservableObject {
         }
     }
 
-    private nonisolated func loadProposalsSync() -> [QueenProposal] {
+    /// What is on disk, exactly as written.
+    private nonisolated func loadProposalsRaw() -> [QueenProposal] {
         guard FileManager.default.fileExists(atPath: proposalsURL.path),
               let data = try? Data(contentsOf: proposalsURL),
               let loaded = try? JSONDecoder().decode([QueenProposal].self, from: data) else {
             return []
         }
         return loaded
+    }
+
+    /// Loads the store and collapses copies written before the append path
+    /// deduplicated. Nothing is lost that was not already a copy.
+    private nonisolated func loadProposalsSync() -> [QueenProposal] {
+        Self.collapseDuplicates(loadProposalsRaw())
     }
 
     private func log(event: QueenAuditLogEntry) async {

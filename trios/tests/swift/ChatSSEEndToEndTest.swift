@@ -352,6 +352,7 @@ struct ChatSSEEndToEndTests {
         ("runCursorIsACache", { await runCursorIsACache() }),
         ("runDispatchInboxEntriesConcurrently", { await runDispatchInboxEntriesConcurrently() }),
         ("runInboxPollerIsDevVariantOnly", { await runInboxPollerIsDevVariantOnly() }),
+        ("runProposalStoreCollapsesDuplicates", { await runProposalStoreCollapsesDuplicates() }),
     ]
 
     static func main() async {
@@ -7350,5 +7351,106 @@ struct ChatSSEEndToEndTests {
 
         check(hasVariantGuard,
               "criterion 2: poller task is guarded by ProjectPaths.hasSupervisorInbox — the guard appears within 5 lines above the task assignment")
+    }
+
+    // MARK: - Scenario: one idea is one proposal, however often it is noticed
+
+    /// The Queen's self-improvement audit re-derives the same weak spot every
+    /// cycle and `appendProposals` appended each one unconditionally. The live
+    /// store held 121 proposals of which exactly ONE was distinct: same file,
+    /// same rationale, same patch, differing only in "22/50 messages mention
+    /// errors" versus "23/50".
+    ///
+    /// That is not a cosmetic problem. An operator opening that store cannot
+    /// tell a standing suggestion from a hundred new ones, so the loudest
+    /// signal the supervisor produces is the one carrying the least
+    /// information - and the store grows without bound while saying nothing
+    /// new.
+    ///
+    /// Driven against the real defect, not a paraphrase: the checks below build
+    /// the exact shape the audit produced.
+    static func runProposalStoreCollapsesDuplicates() async {
+        print("\n# Scenario: one idea is one proposal (#1277)")
+
+        func proposal(
+            trigger: String,
+            file: String = "rings/SR-02/QueenSelfImprovementService.swift",
+            patch: String = "func classifyError(_ message: ChatMessage) -> QueenErrorClass",
+            rationale: String = "High error rate in Queen chat.",
+            status: QueenProposal.Status = .pending
+        ) -> QueenProposal {
+            QueenProposal(
+                id: UUID(),
+                createdAt: Date(timeIntervalSince1970: 1_700_000_000),
+                trigger: trigger,
+                targetFile: file,
+                rationale: rationale,
+                suggestedPatch: patch,
+                testPlan: "1. Run ./build.sh.",
+                status: status
+            )
+        }
+
+        // The store as it actually stood: one idea, a hundred times, evidence
+        // drifting by one.
+        let asFound = (0..<121).map { proposal(trigger: "\(22 + $0 % 2)/50 messages mention errors") }
+        let collapsed = QueenSelfImprovementService.collapseDuplicates(asFound)
+        check(
+            collapsed.count == 1,
+            "121 copies of one idea collapse to 1 - got \(collapsed.count)"
+        )
+        check(
+            collapsed.first?.trigger == asFound.last?.trigger,
+            "and the survivor carries the NEWEST evidence, so the row is old but the count is current"
+        )
+        check(
+            collapsed.first?.createdAt == asFound.first?.createdAt,
+            "while keeping the OLDEST createdAt - the answer to 'how long has this been outstanding'"
+        )
+
+        // Different ideas must survive. A collapse that is too eager is worse
+        // than no collapse: it silently drops work.
+        let mixed = [
+            proposal(trigger: "a"),
+            proposal(trigger: "b", file: "rings/SR-02/ChatViewModel.swift"),
+            proposal(trigger: "c", patch: "func somethingElse()"),
+            proposal(trigger: "d", rationale: "A different reason entirely."),
+        ]
+        check(
+            QueenSelfImprovementService.collapseDuplicates(mixed).count == 4,
+            "four genuinely different proposals all survive - identity is file AND patch AND rationale"
+        )
+
+        // A decision must survive a collapse. Otherwise a rejected suggestion
+        // returns as pending and the operator is asked again.
+        let decided = [
+            proposal(trigger: "a", status: .pending),
+            proposal(trigger: "b", status: .rejected),
+            proposal(trigger: "c", status: .pending),
+        ]
+        check(
+            QueenSelfImprovementService.collapseDuplicates(decided).first?.status == .rejected,
+            "a rejection outlives the copies around it - re-asking a settled question is not proposing"
+        )
+
+        // Identity ignores id and createdAt on purpose: keying on either makes
+        // every proposal unique by construction, which is how the store grew.
+        let sameIdeaLaterDay = [
+            proposal(trigger: "a"),
+            QueenProposal(
+                id: UUID(),
+                createdAt: Date(timeIntervalSince1970: 1_800_000_000),
+                trigger: "b",
+                targetFile: "rings/SR-02/QueenSelfImprovementService.swift",
+                rationale: "High error rate in Queen chat.",
+                suggestedPatch: "func classifyError(_ message: ChatMessage) -> QueenErrorClass",
+                testPlan: "1. Run ./build.sh.",
+                status: .pending
+            ),
+        ]
+        check(
+            QueenSelfImprovementService.collapseDuplicates(sameIdeaLaterDay).count == 1,
+            "a day later is still the same idea - createdAt is not part of identity"
+        )
     }
 }
