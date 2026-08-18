@@ -1497,6 +1497,50 @@ run: dev
 run-release:
 	@open "$(RELEASE_APP)"
 
+# Bring the backing services up after a reboot.
+#
+# A reboot leaves nothing running: no agent-server on 9105, no CDP browser on
+# 9222, and pm2's process list empty because no resurrect is configured. The
+# e2e suite's very first check then reports "BrowserOS Server: DOWN", which
+# reads as a regression and is not one.
+#
+# The order is not cosmetic. `main.ts` requires --cdp-port AND connects to it
+# before it will listen, so a server started before the browser exits at once.
+# Once running it tolerates losing CDP (`/health` reports cdpConnected: false
+# and stays ok) - that asymmetry is why "it worked yesterday" and "it refuses
+# to start today" are both true.
+.PHONY: serve
+serve:
+	@if curl -s -m 3 http://127.0.0.1:9222/json/version >/dev/null 2>&1; then \
+		echo "[OK] CDP already up on 9222"; \
+	else \
+		echo "[..] starting BrowserOS with remote debugging on 9222"; \
+		open -a /Applications/BrowserOS.app --args --remote-debugging-port=9222; \
+		for i in $$(seq 1 20); do \
+			curl -s -m 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1 && break; \
+			sleep 2; \
+		done; \
+	fi
+	@if curl -s -m 3 http://127.0.0.1:9105/health >/dev/null 2>&1; then \
+		echo "[OK] server already up on 9105"; \
+	else \
+		echo "[..] starting agent-server on 9105"; \
+		cd "$(ROOT)/agent-server" && \
+			nohup bun apps/server/src/index.ts --server-port 9105 --cdp-port 9222 \
+			> /tmp/trios_server_9105.log 2>&1 & \
+		for i in $$(seq 1 20); do \
+			curl -s -m 2 http://127.0.0.1:9105/health >/dev/null 2>&1 && break; \
+			sleep 2; \
+		done; \
+	fi
+	@health=$$(curl -s -m 5 http://127.0.0.1:9105/health || true); \
+	case "$$health" in \
+		*'"status":"ok"'*) echo "[OK] 9105 $$health" ;; \
+		*) echo "[FAIL] 9105 did not come up: $${health:-no answer}"; \
+		   tail -5 /tmp/trios_server_9105.log 2>/dev/null | sed 's/^/  | /'; \
+		   exit 1 ;; \
+	esac
+
 stop:
 	@pkill -f '$(RELEASE_PROC)' 2>/dev/null || true
 	@pkill -f '$(DEV_PROC)' 2>/dev/null || true
@@ -2007,8 +2051,22 @@ xctest-log-complete:
 	line=$$(/usr/bin/grep -E "^\s+Executed .* tests?, with" "$$log" | tail -1); \
 	: "'started' is load-bearing: XCTest prints two lines per case, so the"; \
 	: "bare prefix counts every test twice. This target printed 966 for a"; \
-	: "483-test suite on its very first run."; \
-	ran=$$(/usr/bin/grep -cE "^Test Case .* started$$" "$$log"); \
+	: "483-test suite on its very first run. The line ends 'started.' WITH a"; \
+	: "period, and anchoring on 'started$$' then printed 0 for the same 483 -"; \
+	: "the second wrong count in the same expression, which is why the"; \
+	: "self-check below exists."; \
+	ran=$$(/usr/bin/grep -cE "^Test Case .* started\.?$$" "$$log"); \
+	: "A counter that can silently read zero is worse than no counter: it"; \
+	: "reports absence with the same confidence as a measurement. If the"; \
+	: "summary says tests executed and this says none started, the pattern is"; \
+	: "wrong, not the suite."; \
+	if [ "$$ran" -eq 0 ] && ! printf '%s' "$$line" | /usr/bin/grep -q "Executed 0 tests"; then \
+		echo "[FAIL] the summary reports executed tests but no start lines matched."; \
+		echo "       $$line"; \
+		echo "       The counting pattern is stale, not the suite. Sample line:"; \
+		/usr/bin/grep -m1 "^Test Case" "$$log" | sed 's/^/       | /'; \
+		exit 1; \
+	fi; \
 	echo "[OK] the run finished. $$line"; \
 	echo "     $$ran test case starts observed"
 

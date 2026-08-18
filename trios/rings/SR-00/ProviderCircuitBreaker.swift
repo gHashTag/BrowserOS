@@ -14,6 +14,32 @@ struct ModelEndpointTuple: Hashable, Sendable, Equatable {
 struct ProviderEndpointKey: Hashable, Sendable, Equatable {
     let provider: ModelProvider
     let baseURL: String
+
+    /// A hash that is the same in every process, unlike `hashValue`.
+    ///
+    /// Swift seeds `Hashable` with a per-process random value, so `hashValue`
+    /// is stable only for the lifetime of one launch. The cooldown jitter was
+    /// derived from it under a comment promising a ratio "stable for the same
+    /// endpoint" - true within a run, false across restarts. Two consequences,
+    /// one operational and one that hid the other:
+    ///
+    ///   - a client that restarts draws a fresh jitter for the same endpoint,
+    ///     which is precisely the desynchronisation this was meant to give
+    ///     across CLIENTS, not across restarts of one client;
+    ///   - and no test of it could reproduce, so a real floor violation
+    ///     (below) read as a flaky test for as long as it existed.
+    ///
+    /// FNV-1a over the same bytes the key is made of. Not a security hash and
+    /// not required to be: it needs to be spread and it needs to be the same
+    /// tomorrow.
+    var stableHash: UInt64 {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in "\(provider.rawValue)|\(baseURL)".utf8 {
+            hash ^= UInt64(byte)
+            hash &*= 0x0000_0100_0000_01b3
+        }
+        return hash
+    }
 }
 
 /// Classified failure kinds used to drive circuit-breaker cooldown policy.
@@ -331,31 +357,38 @@ actor ProviderCircuitBreaker: Sendable {
         let multiplier = kind.isTransient ? transientBackoffMultiplier : persistentBackoffMultiplier
         let exponent = max(0, streak - failureThreshold)
         let base = baseCooldown * pow(multiplier, Double(exponent))
-        let cooldown: TimeInterval
+        // The kind-specific minimum. Named, because it is the thing jitter must
+        // not be allowed to undercut - a floor that jitter can push through is
+        // not a floor, and `balance` was landing at 111 s under a stated
+        // minimum of 120 s.
+        let floor: TimeInterval
         switch kind {
         case .auth:
             // Auth issues usually need human intervention; use the maximum
             // cooldown quickly but still allow occasional probes.
-            cooldown = min(maxCooldown, max(base, baseCooldown * 2))
+            floor = baseCooldown * 2
         case .balance:
             // Balance issues require a top-up and should not be retried aggressively.
-            cooldown = min(maxCooldown, max(base, baseCooldown * 4))
+            floor = baseCooldown * 4
         case .contextLength:
             // Context-length failures are prompt-specific; keep them out of the
             // warmup cache long enough to discourage repeated doomed sends.
-            cooldown = min(maxCooldown, max(base, baseCooldown * 2))
+            floor = baseCooldown * 2
         case .rateLimit, .gateway, .connection, .timeout, .modelUnavailable, .unknown:
-            cooldown = min(maxCooldown, base)
+            floor = 0
         }
+        let cooldown = min(maxCooldown, max(base, floor))
         guard jitterFactor > 0 else { return cooldown }
-        // Add ±jitterFactor to desynchronize recovery probes across clients and
-        // avoid thundering-herd retries. Use a deterministic ratio derived from
-        // the key hash so the result is stable for the same endpoint but varied
-        // across endpoints.
-        let hash = abs(key.hashValue)
-        let ratio = Double(hash % 1_000_000) / 1_000_000.0
+        // Add +/-jitterFactor to desynchronize recovery probes across clients
+        // and avoid thundering-herd retries. `stableHash`, not `hashValue`: see
+        // the note on ProviderEndpointKey for why the latter is not stable
+        // across processes despite the comment that used to be here.
+        let ratio = Double(key.stableHash % 1_000_000) / 1_000_000.0
         let jitter = cooldown * jitterFactor * (ratio * 2 - 1)
-        return max(0, cooldown + jitter)
+        // Clamped back to the floor, and never above maxCooldown either: the
+        // jitter is there to spread retries, not to overrule the policy it is
+        // spreading.
+        return min(maxCooldown, max(floor, max(0, cooldown + jitter)))
     }
 
     /// If a half-open probe has been in flight longer than the probe timeout,
