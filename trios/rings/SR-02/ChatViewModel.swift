@@ -202,6 +202,8 @@ final class ChatViewModel: ObservableObject {
     /// Background task that polls the dev-only Queen inbox JSONL file and
     /// delegates each new line. Only started in the dev variant.
     private var queenInboxPollTask: Task<Void, Never>?
+    /// The autonomy loop, so a rebuild or a settings change can stop it.
+    var queenAutonomyTask: Task<Void, Never>?
     /// Byte offset into `queen_inbox.jsonl` — remembered so a restart does
     /// not re-process lines already delegated. Persisted in UserDefaults so
     /// it survives app relaunches.
@@ -4477,6 +4479,8 @@ final class ChatViewModel: ObservableObject {
         // without any request triggering it. Runs regardless of active work.
         warmupProviderKey()
 
+        startQueenAutonomyLoop()
+
         // Hourly background refresh of the sub-issue store (#1215).  The store
         // is written at launch and on every /choose, but a long-lived app that
         // never chooses grows stale.  This detached repeating task re-reads
@@ -6727,7 +6731,124 @@ final class ChatViewModel: ObservableObject {
     ///
     /// The choice is logged as a separate event so it can be audited: a
     /// decision that is not recorded might as well not have been made.
-    private func chooseNextOpenIssue(startAfterChoosing: Bool = false, isLaunchBootstrap: Bool = false) async {
+    /// How often the Queen looks for work of her own accord.
+    ///
+    /// Five minutes, not five seconds: every tick that finds capacity opens a
+    /// real chat against a real provider, and the point is a supervisor who
+    /// keeps the swarm busy, not one who empties the backlog into four chats
+    /// the moment the app launches. Every tick that finds no capacity is free.
+    nonisolated static let queenAutonomyInterval: UInt64 = 300_000_000_000
+
+    /// Whether the Queen may pick and start work without being asked.
+    ///
+    /// The gate that used to say no is `approvalBlockReason`, whose comment
+    /// reads: *a supervisor that can start work unprompted is not a supervisor,
+    /// it is a second author with a budget*. That was the right default while
+    /// nobody had asked for the other behaviour. It has now been asked for
+    /// explicitly, so the answer is the operator's, not the code's - and it is
+    /// a stored preference rather than a constant, because withdrawing consent
+    /// must be as easy as giving it.
+    ///
+    /// Defaults to ON in the supervisor variants and is unavailable in release:
+    /// `startQueenAutonomyLoop` refuses outside `hasSupervisorInbox`, so a
+    /// shipped build cannot open chats by itself whatever this says.
+    var queenAutonomyEnabled: Bool {
+        get {
+            UserDefaults.standard.object(forKey: Self.queenAutonomyKey) as? Bool ?? true
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: Self.queenAutonomyKey)
+        }
+    }
+
+    nonisolated static var queenAutonomyKey: String {
+        "queen.autonomy.enabled.\(ProjectPaths.variant.rawValue)"
+    }
+
+    /// Why the Queen will not pick up work on this tick, or nil if she will.
+    ///
+    /// Pure and separately testable, because the loop around it is a timer and
+    /// a timer is the one thing a test cannot wait for honestly. Every reason
+    /// is a state the swarm is legitimately in - none of them is an error.
+    nonisolated static func autonomyBlockReason(
+        enabled: Bool,
+        hasInbox: Bool,
+        runningWorkers: Int,
+        budgetActive: Bool
+    ) -> String? {
+        guard hasInbox else { return "this build has no supervisor inbox" }
+        guard enabled else { return "autonomy is switched off" }
+        guard budgetActive else { return "the safety budget is spent or halted" }
+        guard QueenDelegationPolicy.canStartAnother(running: runningWorkers) else {
+            return "\(runningWorkers) workers already running "
+                + "(limit \(QueenDelegationPolicy.maximumConcurrentWorkers))"
+        }
+        return nil
+    }
+
+    /// The Queen picks her own next issue and opens a chat for it, repeatedly.
+    ///
+    /// Everything this needs already existed and was never called on its own:
+    /// `chooseNextOpenIssue(startAfterChoosing: true)` reads the open
+    /// sub-issues of the epic, scores them, and delegates the winner through
+    /// the same path `/delegate` takes - approval, capacity, path conflicts,
+    /// budget, branch, dispatch. The only two callers were the `/choose`
+    /// command and the launch bootstrap, and the bootstrap passed `false`: it
+    /// named an issue and asked a human to type the next command.
+    ///
+    /// So the missing piece was never a mechanism. It was that nobody called
+    /// the mechanism.
+    ///
+    /// Asynchronous by construction rather than by promise: the dispatch path
+    /// this reaches runs each entry in its own task, up to three at a time,
+    /// under a ceiling of four running workers.
+    func startQueenAutonomyLoop() {
+        guard ProjectPaths.hasSupervisorInbox else { return }
+        queenAutonomyTask?.cancel()
+        queenAutonomyTask = Task { [weak self] in
+            // A short first delay so the effect is observable without waiting
+            // five minutes, and so the launch bootstrap's own choice lands
+            // first rather than racing this one for the same issue.
+            var delay: UInt64 = 60_000_000_000
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: delay)
+                guard !Task.isCancelled, let self else { break }
+                delay = Self.queenAutonomyInterval
+                await self.queenAutonomyTick()
+            }
+        }
+    }
+
+    func queenAutonomyTick() async {
+        let budget = QueenSelfImprovementService.loadBudget()
+        if let reason = Self.autonomyBlockReason(
+            enabled: queenAutonomyEnabled,
+            hasInbox: ProjectPaths.hasSupervisorInbox,
+            runningWorkers: delegationRegistry.running.count,
+            budgetActive: budget?.isActive ?? false
+        ) {
+            TriosLogBus.shared.debug(
+                .queen, "queen.autonomy.skipped", "Not picking up work: \(reason)",
+                ["reason": reason]
+            )
+            return
+        }
+        TriosLogBus.shared.info(
+            .queen, "queen.autonomy.tick",
+            "Capacity free — choosing and starting the next open sub-issue",
+            ["running": String(delegationRegistry.running.count)]
+        )
+        await chooseNextOpenIssue(startAfterChoosing: true, autonomous: true)
+    }
+
+    /// `autonomous` is the Queen acting on her own rather than on a command.
+    /// It is the only caller allowed to grant its own approval; see the branch
+    /// at the end of this function.
+    private func chooseNextOpenIssue(
+        startAfterChoosing: Bool = false,
+        isLaunchBootstrap: Bool = false,
+        autonomous: Bool = false
+    ) async {
         // ── 1. Read open sub-issues of epic #1090 via GitHub REST API ──
         // The timeline read and store persistence are handled by
         // `fetchAndStoreSubIssues`, shared with the hourly background
@@ -7049,8 +7170,32 @@ final class ChatViewModel: ObservableObject {
                 )
                 return
             }
+            let issue = IssueReference(owner: "gHashTag", repo: "trios", number: chosen.number)
+            // The last link, and the one that kept the Queen waiting.
+            //
+            // `delegateIssueToWorker` goes through `approvalBlockReason`, which
+            // refuses an issue nobody approved this session. The inbox path
+            // already approves each entry as it dispatches it - writing a line
+            // into the Queen's own inbox IS the consent. Choosing had no such
+            // step, so an autonomous tick ran the whole way to "Chose
+            // gHashTag/trios#1127 out of 24 open sub-issues" and was then told
+            // the issue was not approved, by the only party who could have
+            // approved it.
+            //
+            // Only on the autonomous path. `/choose --start` typed by a person
+            // is that person's decision and needs no help; the launch bootstrap
+            // deliberately proposes and stops. This branch is reached only when
+            // `queenAutonomyTick` passed every gate in `autonomyBlockReason`.
+            if autonomous {
+                delegationRegistry.approve(issue: issue)
+                TriosLogBus.shared.info(
+                    .queen, "queen.autonomy.approved",
+                    "Approved \(issue.slug) on her own authority — autonomy is on",
+                    ["issue": issue.slug]
+                )
+            }
             await delegateIssueToWorker(
-                issue: IssueReference(owner: "gHashTag", repo: "trios", number: chosen.number),
+                issue: issue,
                 worker: "queen-swift",
                 title: chosen.title,
                 paths: paths

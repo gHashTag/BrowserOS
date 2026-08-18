@@ -353,6 +353,7 @@ struct ChatSSEEndToEndTests {
         ("runDispatchInboxEntriesConcurrently", { await runDispatchInboxEntriesConcurrently() }),
         ("runInboxPollerIsDevVariantOnly", { await runInboxPollerIsDevVariantOnly() }),
         ("runProposalStoreCollapsesDuplicates", { await runProposalStoreCollapsesDuplicates() }),
+        ("runQueenPicksUpWorkHerself", { await runQueenPicksUpWorkHerself() }),
     ]
 
     static func main() async {
@@ -7451,6 +7452,104 @@ struct ChatSSEEndToEndTests {
         check(
             QueenSelfImprovementService.collapseDuplicates(sameIdeaLaterDay).count == 1,
             "a day later is still the same idea - createdAt is not part of identity"
+        )
+    }
+
+    // MARK: - Scenario: the Queen picks up work without being asked
+
+    /// Everything needed for the Queen to open a chat on her own already
+    /// existed and was simply never called: `chooseNextOpenIssue(
+    /// startAfterChoosing: true)` reads the epic's open sub-issues, scores
+    /// them, and delegates the winner down the same path `/delegate` uses. Its
+    /// only two callers were the `/choose` command and the launch bootstrap,
+    /// and the bootstrap passed `false` - it named an issue and waited for a
+    /// human to type the next command.
+    ///
+    /// So this scenario is about the decision, not the mechanism: WHEN may she
+    /// start something, and when must she keep her hands off. The timer around
+    /// it is deliberately not tested through waiting - a test that sleeps to
+    /// observe a five-minute loop is a test that lies about what it proved.
+    static func runQueenPicksUpWorkHerself() async {
+        print("\n# Scenario: the Queen picks up work herself (#1278)")
+
+        typealias VM = ChatViewModel
+
+        check(
+            VM.autonomyBlockReason(
+                enabled: true, hasInbox: true, runningWorkers: 0, budgetActive: true
+            ) == nil,
+            "idle, enabled, in budget, with an inbox: she starts something"
+        )
+
+        // Capacity. The ceiling is four; three running still leaves room, and
+        // that is the case that makes this asynchronous rather than serial.
+        check(
+            VM.autonomyBlockReason(
+                enabled: true, hasInbox: true, runningWorkers: 3, budgetActive: true
+            ) == nil,
+            "three bees running still leaves room for a fourth - she works in parallel, not in turn"
+        )
+        check(
+            VM.autonomyBlockReason(
+                enabled: true, hasInbox: true, runningWorkers: 4, budgetActive: true
+            )?.contains("limit 4") == true,
+            "at the ceiling she stops, and says which ceiling"
+        )
+
+        // The three refusals, each naming itself. A supervisor that declines
+        // silently is indistinguishable from one that is broken.
+        check(
+            VM.autonomyBlockReason(
+                enabled: false, hasInbox: true, runningWorkers: 0, budgetActive: true
+            ) == "autonomy is switched off",
+            "switched off means off, whatever capacity is free"
+        )
+        check(
+            VM.autonomyBlockReason(
+                enabled: true, hasInbox: true, runningWorkers: 0, budgetActive: false
+            )?.contains("safety budget") == true,
+            "a spent safety budget stops her - the budget is the whole point of having one"
+        )
+        check(
+            VM.autonomyBlockReason(
+                enabled: true, hasInbox: false, runningWorkers: 0, budgetActive: true
+            )?.contains("no supervisor inbox") == true,
+            "a release build never starts work by itself, whatever the stored preference says"
+        )
+
+        // Order matters: the inbox check comes first, so a release build is
+        // refused for being a release build rather than for a coincidence of
+        // budget or capacity. Read the wrong reason and you go and top up a
+        // budget that was never the problem.
+        check(
+            VM.autonomyBlockReason(
+                enabled: false, hasInbox: false, runningWorkers: 9, budgetActive: false
+            )?.contains("no supervisor inbox") == true,
+            "with every reason true at once, the structural one is the one reported"
+        )
+
+        // The loop must not exist in a shipped build. Asserted on the source,
+        // because the guard is what makes the preference above safe to default
+        // to true.
+        let source = (try? String(
+            contentsOfFile: "\(ProjectPaths.root)/rings/SR-02/ChatViewModel.swift",
+            encoding: .utf8
+        )) ?? ""
+        let lines = source.components(separatedBy: .newlines)
+        guard let loopIndex = lines.firstIndex(where: {
+            $0.contains("func startQueenAutonomyLoop()")
+        }) else {
+            fail("startQueenAutonomyLoop is gone - the Queen cannot pick up work at all")
+            return
+        }
+        let guardWindow = lines[loopIndex...min(loopIndex + 3, lines.count - 1)]
+        check(
+            guardWindow.contains { $0.contains("ProjectPaths.hasSupervisorInbox") },
+            "the loop refuses to start outside a supervisor build, on its first line"
+        )
+        check(
+            source.contains("await chooseNextOpenIssue(startAfterChoosing: true)"),
+            "and the tick starts the chosen issue rather than only naming it - the bootstrap's mistake"
         )
     }
 }
