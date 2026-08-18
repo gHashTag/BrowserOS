@@ -121,10 +121,26 @@ actor ModelHealthService: ModelHealthServiceProtocol {
             storedHealth = probeResult.health
         }
 
+        // Every field the probe established, not three of them. `failureKind`
+        // and `retryAfter` were parsed correctly by probeCloud - the 401/403,
+        // 413 and 429 branches all set them - and then dropped here, because
+        // this rebuilds the result from scratch and only `quota` was carried
+        // across. That is exactly why the three quota tests passed while the
+        // retry-after and failure-kind ones did not: the one copied field
+        // worked.
+        //
+        // Not cosmetic. `ModelWarmupService` feeds both into
+        // `ProviderCircuitBreaker.recordFailure`, where `retryAfter` overrides
+        // the cooldown and the kind selects its floor. With both nil, a probe
+        // that got `Retry-After: 90` re-probed on the breaker's own backoff
+        // instead of the provider's window, and a dead key fell to the generic
+        // floor instead of the auth one.
         let result = ModelHealthResult(
             health: storedHealth,
             latencyMs: latencyMs,
-            quota: probeResult.quota
+            quota: probeResult.quota,
+            failureKind: probeResult.failureKind,
+            retryAfter: probeResult.retryAfter
         )
         cache[key] = CacheEntry(result: result, timestamp: Date(), failureStreak: newStreak)
         return result

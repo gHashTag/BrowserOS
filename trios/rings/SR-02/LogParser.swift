@@ -758,7 +758,18 @@ struct LogRotationPolicy: Sendable {
         } catch {
             return true
         }
-        guard task.terminationStatus == 0 else { return true }
+        // `lsof <path>` exits 1 when NOTHING has the file open. That is the
+        // normal case for an idle log, and this used to read it as "somebody is
+        // writing" and cancel the rotation - so the retention policy was inert
+        // for precisely the files it exists to rotate. Every quiet log grew
+        // without bound while the code that should have trimmed it decided,
+        // every time, that it was busy.
+        //
+        // The exit status cannot distinguish "no matches" from "lsof failed";
+        // the OUTPUT can, and the line below already judged by it. So the
+        // status is no longer consulted. A spawn failure still means unknown,
+        // and unknown still means do not truncate - that is the conservative
+        // direction and it is the one the catch above takes.
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         guard let output = String(data: data, encoding: .utf8), !output.isEmpty else { return false }
         let ourPID = ProcessInfo.processInfo.processIdentifier
@@ -1329,7 +1340,22 @@ enum LogParser {
         if lower.hasSuffix(".stdout.log") || lower.hasSuffix(".stderr.log") {
             return .service
         }
-        if lower.hasPrefix("event-log") || lower.hasPrefix("cron-log") || lower.hasPrefix("queen-log") || lower.contains("browseros-companion") {
+        // Matched on the stem with separators normalised, because the names
+        // this looked for are not the names on disk. The runtime logs this
+        // project actually writes are `event_log.jsonl`, `cron.log` and
+        // `queen.log`; the tests here were `event-log`, `cron-log`,
+        // `queen-log`. Nothing matched, so every one of the app's own runtime
+        // logs fell through to `.artifact` - and filtering the LOGS tab to
+        // "runtime" showed none of the runtime logs.
+        //
+        // After the `.stdout`/`.stderr` branch above on purpose: `cron.stdout
+        // .log` is a service log that happens to start with a runtime stem,
+        // and it is claimed before this line is reached.
+        let stem = ((lower as NSString).deletingPathExtension)
+            .replacingOccurrences(of: "-", with: "_")
+        let runtimeStems = ["event_log", "cron", "queen", "browseros_companion"]
+        if runtimeStems.contains(where: { stem == $0 || stem.hasPrefix($0 + "_") })
+            || lower.contains("browseros-companion") {
             return .runtime
         }
         return .artifact
@@ -1444,8 +1470,12 @@ enum LogParser {
         let window = Array(allLines.suffix(maxLines))
         let parsed = window.map { parser($0, id) }
         let deduped = deduplicateConsecutive(parsed)
-        let errorCount = deduped.filter { $0.level == .error || $0.level == .fatal }.count
-        let warningCount = deduped.filter { $0.level == .warn }.count
+        // Counted before deduplication, not after. `deduped` collapses repeats
+        // into one row carrying a x N badge, so a log with the same error
+        // twenty times reported one error - the badge on the row said twenty
+        // and the header said one, and the header is what the operator scans.
+        let errorCount = parsed.filter { $0.level == .error || $0.level == .fatal }.count
+        let warningCount = parsed.filter { $0.level == .warn }.count
         let totalDuplicates = deduped.reduce(0) { $0 + max(0, $1.duplicateCount - 1) }
         return LogSource(
             id: id,
@@ -1517,8 +1547,12 @@ enum LogParser {
         }
 
         let deduped = deduplicateConsecutive(combinedRaw)
-        let errorCount = deduped.filter { $0.level == .error || $0.level == .fatal }.count
-        let warningCount = deduped.filter { $0.level == .warn }.count
+        // Counted before deduplication, not after. `deduped` collapses repeats
+        // into one row carrying a x N badge, so a log with the same error
+        // twenty times reported one error - the badge on the row said twenty
+        // and the header said one, and the header is what the operator scans.
+        let errorCount = combinedRaw.filter { $0.level == .error || $0.level == .fatal }.count
+        let warningCount = combinedRaw.filter { $0.level == .warn }.count
         let totalDuplicates = deduped.reduce(0) { $0 + max(0, $1.duplicateCount - 1) }
 
         return LogSource(
@@ -1879,7 +1913,12 @@ enum LogParser {
                 if !searchText.isEmpty {
                     guard matchesQuery(line, tokens: tokens, source: source) else { continue }
                 }
-                let date = parseLineTimestamp(line.timestamp) ?? Date.distantPast
+                // A line whose timestamp cannot be parsed sorts LAST, not
+                // first. `distantPast` put it at the top of a chronological
+                // merge and the `suffix(maxRows)` cap then threw it away - so
+                // the lines the parser understood least were the ones
+                // guaranteed to vanish, which is the opposite of useful.
+                let date = parseLineTimestamp(line.timestamp) ?? Date.distantFuture
                 timeline.append((line: line, source: source, date: date))
             }
         }

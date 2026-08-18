@@ -167,8 +167,15 @@ actor LocalAuthProvider: LocalAuthProviding {
             // "forever", and threw a good token away. Recording adoption rather
             // than special-casing the answer keeps the NEXT question - has it
             // been in use longer than fallbackMaxAge - meaningful.
+            // Decide FIRST, then record. Recording adoption sets `fetchedAt`,
+            // which is the very thing `holdingStoredToken` consults through
+            // `hasNeverFetched` - so doing it in the other order made the guard
+            // dead on arrival: by the time it asked, the answer had already
+            // been changed by the line above it. My own bug, from the commit
+            // that added the guard.
+            let refreshNeeded = await shouldRefreshPrecisely(holdingStoredToken: true)
             await monitor.recordAdoptedStoredToken()
-            if await shouldRefreshPrecisely(holdingStoredToken: true) {
+            if refreshNeeded {
                 return try await refreshTokensIfNeeded()
             }
             return token

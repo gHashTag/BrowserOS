@@ -188,9 +188,23 @@ actor WarmupVolatilityTracker: Sendable {
         let boundedBase = max(minInterval, min(maxInterval, baseInterval))
         let rate = failureRate(for: candidate)
         let severity = windows[candidate]?.averageFailureSeverity ?? 1.0
-        // Square the rate like before, but additionally dampen by severity so
-        // auth/balance/context-length failures shrink the interval faster.
-        let scale = (1.0 - (rate * rate)) * severity
+        // Square the COMPLEMENT, not the rate.
+        //
+        // `(1.0 - rate * rate)` makes the complement larger, so for every rate
+        // in (0,1) this scale exceeded the TTL scale above - and with equal
+        // bases and equal floors that means the refresh interval was always at
+        // or beyond the TTL. The doc comment one line up says the opposite, and
+        // it is the doc comment that is right: severe kinds must push the
+        // interval DOWN quickly.
+        //
+        // The consequence was backwards where it matters most. The store feeds
+        // both formulas from defaults that are equal (predictiveWarmupTTL and
+        // predictiveWarmupInterval are both 60), so the warmed entry expired at
+        // or before the next scheduled refresh - and when a provider went
+        // flaky, precisely when warmup earns its keep, the scheduler backed off
+        // instead of tightening and the send path paid a synchronous probe.
+        let complement = 1.0 - rate
+        let scale = complement * complement * severity
         let scaled = minInterval + (boundedBase - minInterval) * scale
         return max(minInterval, min(maxInterval, scaled))
     }
