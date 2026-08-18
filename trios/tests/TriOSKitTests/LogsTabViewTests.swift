@@ -2,6 +2,20 @@ import XCTest
 @testable import TriOSKit
 
 final class LogsTabViewTests: XCTestCase {
+    /// The calendar these assertions are written in.
+    ///
+    /// `Calendar.current` reads whatever the machine is set to, and on a
+    /// Thai-region machine that is the Buddhist era: a correctly parsed
+    /// 2026-07-24 comes back as year 2569, and the test fails on a value the
+    /// parser got right. The instant under test is absolute; only the reading
+    /// of it was locale-dependent, so the reading is pinned and the parser is
+    /// left alone.
+    private static let gregorian: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone.current
+        return calendar
+    }()
+
 
     // MARK: - Event log parsing
 
@@ -564,6 +578,20 @@ final class LogsTabViewTests: XCTestCase {
 
     // MARK: - Correlated timeline
 
+    /// Read in UTC, because the input says UTC.
+    ///
+    /// `...T12:00:00Z` is 19:00 in Bangkok, and this used to assert hour 12
+    /// against `Calendar.current` - passing only where local time happens to be
+    /// UTC. It failed here for the opposite of the obvious reason: the parser
+    /// had not handled the `Z` at all and returned nil, so the hour was never
+    /// compared. Once it parsed correctly the reading was the thing that was
+    /// wrong.
+    private static let utcGregorian: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "UTC") ?? .current
+        return calendar
+    }()
+
     func testParseLineTimestampHandlesISO8601() {
         let date = LogParser.parseLineTimestamp("2026-07-24T12:00:00Z")
         // A failed XCTAssertNotNil followed by `date!` kills the whole
@@ -573,7 +601,7 @@ final class LogsTabViewTests: XCTestCase {
             XCTFail("date was nil")
             return
         }
-        let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: dateValue)
+        let components = Self.utcGregorian.dateComponents([.year, .month, .day, .hour, .minute, .second], from: dateValue)
         XCTAssertEqual(components.year, 2026)
         XCTAssertEqual(components.month, 7)
         XCTAssertEqual(components.day, 24)
@@ -589,7 +617,7 @@ final class LogsTabViewTests: XCTestCase {
             XCTFail("date was nil")
             return
         }
-        let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute, .second], from: dateValue)
+        let components = Self.gregorian.dateComponents([.year, .month, .day, .hour, .minute, .second], from: dateValue)
         XCTAssertEqual(components.year, 2026)
         XCTAssertEqual(components.month, 7)
         XCTAssertEqual(components.day, 24)
@@ -607,7 +635,7 @@ final class LogsTabViewTests: XCTestCase {
             XCTFail("date was nil")
             return
         }
-        let components = Calendar.current.dateComponents([.hour, .minute, .second], from: dateValue)
+        let components = Self.gregorian.dateComponents([.hour, .minute, .second], from: dateValue)
         XCTAssertEqual(components.hour, 8)
         XCTAssertEqual(components.minute, 15)
         XCTAssertEqual(components.second, 30)

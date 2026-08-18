@@ -715,6 +715,16 @@ struct LogRotationPolicy: Sendable {
     static var experience: LogRotationPolicy { LogRetentionSettings.shared.effectivePolicy(for: "experience", base: experiencePolicy) }
 
     func rotateIfNeeded(path: String) {
+        // Ageing out old archives does not depend on the live file, and used to.
+        // A family whose current log was deleted or renamed still has archives
+        // on disk; gating their removal on the presence of the file they came
+        // from meant those never aged out - the unbounded growth this policy
+        // exists to stop, in the one case nobody is watching.
+        //
+        // `defer` so it runs on every exit, including the external-writer
+        // guard below: another process holding the live file open is a reason
+        // not to truncate it, not a reason to keep last month's archives.
+        defer { cleanupOldArchives(path: path) }
         guard FileManager.default.fileExists(atPath: path) else { return }
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
               let size = attrs[.size] as? UInt64,
@@ -732,7 +742,6 @@ struct LogRotationPolicy: Sendable {
             truncate(path: path, keepingLast: keepTailLines)
             cleanupArchives(of: path)
         }
-        cleanupOldArchives(path: path)
     }
 
     private func hasExternalWriters(path: String) -> Bool {
@@ -1782,6 +1791,20 @@ enum LogParser {
         guard let value = value, !value.isEmpty else { return nil }
         let trimmed = value.trimmingCharacters(in: CharacterSet(charactersIn: "[]"))
 
+        // ISO8601 with an explicit zone, before the naive form below. TriosLogBus
+        // writes `...Z`, and the naive pattern has no place to put the Z, so it
+        // returned nil for the app's own timestamps - the LOGS tab could not
+        // order its own bus.
+        let isoZoned = ISO8601DateFormatter()
+        isoZoned.formatOptions = [.withInternetDateTime]
+        if let date = isoZoned.date(from: trimmed) {
+            return date
+        }
+        let isoFractional = ISO8601DateFormatter()
+        isoFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = isoFractional.date(from: trimmed) {
+            return date
+        }
         let isoFormatter = DateFormatter()
         isoFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
         isoFormatter.locale = Locale(identifier: "en_US_POSIX")
@@ -2063,11 +2086,42 @@ enum LogParser {
 
     // MARK: - Helpers
 
+    /// Whether `token` appears in `lower` as a whole word.
+    ///
+    /// Delimited, so "warn" does not match inside "warnings: 0" - which is what
+    /// the narrow `warn:` / `warning:` test below was reaching for, and why it
+    /// missed the commonest form of all.
+    private static func containsToken(_ token: String, in lower: String) -> Bool {
+        var searchRange = lower.startIndex..<lower.endIndex
+        while let found = lower.range(of: token, range: searchRange) {
+            let beforeOK = found.lowerBound == lower.startIndex
+                || !lower[lower.index(before: found.lowerBound)].isLetter
+            let afterOK = found.upperBound == lower.endIndex
+                || !lower[found.upperBound].isLetter
+            if beforeOK && afterOK { return true }
+            guard found.upperBound < lower.endIndex else { return false }
+            searchRange = found.upperBound..<lower.endIndex
+        }
+        return false
+    }
+
     static func inferLevel(from text: String) -> LogLevel {
         let lower = text.lowercased()
         if lower.contains("fatal") { return .fatal }
         if lower.contains("error") && !lower.contains("no error") { return .error }
-        if lower.contains("warning") || lower.contains("warn:") || lower.contains("warning:") { return .warn }
+        // `[WARN]` is the commonest shape a plain-text log writes, and it was
+        // the one shape this missed: the test asked for "warning", "warn:" or
+        // "warning:", none of which occur in "[warn] connection slow". Every
+        // other level here matches its bare word, so warn alone was strict -
+        // and the consequence is visible in the app, not just in a test: a
+        // warning line reads as info, the level chip says the wrong thing, and
+        // filtering to warnings hides the warnings.
+        //
+        // Matched as a delimited token rather than by loosening to a bare
+        // `contains`, which would call "warnings: 0" a warning.
+        if containsToken("warn", in: lower) || containsToken("warning", in: lower) {
+            return .warn
+        }
         if lower.contains("debug") { return .debug }
         return .info
     }
