@@ -160,7 +160,15 @@ actor LocalAuthProvider: LocalAuthProviding {
         if !forcingRefresh, let token = try? await tokenStore.read() {
             cachedToken = token
             cachedRefreshToken = try? await tokenStore.readRefreshToken()
-            if await shouldRefreshPrecisely() {
+            // Adopting a stored token starts the age clock. Without this the
+            // heuristic has no reference point at all: the monitor's metadata
+            // is in-memory and the store is durable, so every launch asked "how
+            // long since I fetched" about a process that never had, got
+            // "forever", and threw a good token away. Recording adoption rather
+            // than special-casing the answer keeps the NEXT question - has it
+            // been in use longer than fallbackMaxAge - meaningful.
+            await monitor.recordAdoptedStoredToken()
+            if await shouldRefreshPrecisely(holdingStoredToken: true) {
                 return try await refreshTokensIfNeeded()
             }
             return token
@@ -186,9 +194,27 @@ actor LocalAuthProvider: LocalAuthProviding {
 
     /// True if we have server-side TTL info and it is within the refresh
     /// margin, or if we lack TTL info and the age-based heuristic says stale.
-    private func shouldRefreshPrecisely() async -> Bool {
+    ///
+    /// `holdingStoredToken` is the case this used to get wrong. The monitor's
+    /// `shouldProactivelyRefresh` answers "have I fetched recently", and for a
+    /// monitor that has never fetched the answer is yes, refresh - correct, and
+    /// a deliberate contract of its own. But the monitor's metadata lives only
+    /// in memory while the token store is durable, so after every launch the
+    /// provider held a perfectly good stored token, asked a question about the
+    /// monitor's history, got "stale", and bootstrapped a new family. The store
+    /// could never be used. The log shows the result: page after page of
+    /// "Token refresh failed; bootstrapping a new local-auth family".
+    ///
+    /// A token of unknown age is not a token known to be expired. The authority
+    /// on whether it still works is the server rejecting it, and the 401 path
+    /// already recovers - so an unknown age is used, not discarded. Without a
+    /// token in hand the old answer stands: nothing to lose, go and fetch.
+    private func shouldRefreshPrecisely(holdingStoredToken: Bool = false) async -> Bool {
         if let info = cachedInfo {
             return Date().addingTimeInterval(Self.expiryRefreshMargin) >= info.expiresAt
+        }
+        if holdingStoredToken, await monitor.hasNeverFetched {
+            return false
         }
         return await monitor.shouldProactivelyRefresh(maxAge: fallbackMaxAge)
     }

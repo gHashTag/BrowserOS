@@ -142,6 +142,25 @@ actor LocalAuthMonitor: Sendable {
         (currentState, metadata)
     }
 
+    /// Whether this monitor has ever recorded a successful fetch.
+    ///
+    /// Separate from `shouldProactivelyRefresh` because the two questions have
+    /// the same answer only when there is no durable token store. This metadata
+    /// is in-memory, so "never fetched" means "not in THIS process" - which
+    /// says nothing about a token loaded from disk.
+    var hasNeverFetched: Bool { metadata.fetchedAt == nil }
+
+    /// Starts the age clock for a token adopted from the durable store.
+    ///
+    /// Deliberately not `recordFetchSuccess`: nothing was fetched, and the
+    /// audit trail should not say it was. All this sets is the reference point
+    /// the age heuristic needs - "in use since now" - so the token is trusted
+    /// once and then aged normally.
+    func recordAdoptedStoredToken() {
+        guard metadata.fetchedAt == nil else { return }
+        metadata.fetchedAt = Date()
+    }
+
     func shouldProactivelyRefresh(maxAge: TimeInterval = proactiveRefreshInterval) -> Bool {
         guard let fetchedAt = metadata.fetchedAt else { return true }
         return Date().timeIntervalSince(fetchedAt) >= maxAge
