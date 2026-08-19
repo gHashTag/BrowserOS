@@ -319,24 +319,54 @@ final class ChatViewModel: ObservableObject {
         self.delegationRegistry = delegationRegistry ?? .shared
         self.fetchIssueBody = fetchIssueBody ?? { issue in
             // Primary path: GitHub API (requires Keychain token).
-            if let body = try? await GitHubAPIClient().fetchIssue(
-                repo: "\(issue.owner)/\(issue.repo)", number: issue.number
-            ).body, !body.isEmpty {
-                TriosLogBus.shared.info(
-                    .queen, "queen.fetchIssueBody",
-                    "Issue contract read via API",
-                    ["issue": "\(issue.owner)/\(issue.repo)#\(issue.number)", "source": "api"]
+            // The primary failure used to be swallowed by `try?`, so every
+            // fallback said "API empty" whatever had actually gone wrong -
+            // missing token, 404, rate limit. The reason is the diagnostic.
+            var primaryFailure: String?
+            do {
+                let fetched = try await GitHubAPIClient().fetchIssue(
+                    repo: "\(issue.owner)/\(issue.repo)", number: issue.number
+                ).body ?? ""
+                if fetched.isEmpty {
+                    primaryFailure = "the API returned an empty body"
+                } else {
+                    TriosLogBus.shared.info(
+                        .queen, "queen.fetchIssueBody",
+                        "Issue contract read via API",
+                        [
+                            "issue": "\(issue.owner)/\(issue.repo)#\(issue.number)",
+                            "source": "api",
+                        ]
+                    )
+                    return fetched
+                }
+            } catch {
+                primaryFailure = error.localizedDescription
+            }
+            if let primaryFailure {
+                TriosLogBus.shared.warn(
+                    .queen, "queen.fetchIssueBody.primary_failed",
+                    "API path failed before the fallback: \(primaryFailure)",
+                    ["issue": "\(issue.owner)/\(issue.repo)#\(issue.number)"]
                 )
-                return body
             }
 
-            // Fallback: plain HTTPS GET — the repository is public, so
-            // no token is required.  Replaces the gh CLI subprocess that
+            // Fallback: HTTPS GET. Replaces the gh CLI subprocess that
             // added ~38 s to scoring and broke Finder launches.
+            // Fallback, authenticated. The comment here used to say the
+            // repository is public so no token is required; GitHub answered 403
+            // and the Queen delegated with no contract at all - no acceptance
+            // criteria, nothing for the reviewer to judge against. Whether the
+            // repository is public or not, an unauthenticated caller gets sixty
+            // requests an hour, and a supervisor polling issues exhausts that
+            // before the operator wakes up.
             var req = URLRequest(
                 url: URL(string: "https://api.github.com/repos/\(issue.owner)/\(issue.repo)/issues/\(issue.number)")!
             )
             req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+            if let token = ChatViewModel.githubToken() {
+                req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            }
 
             let (data, response): (Data, URLResponse)
             do {
@@ -7920,7 +7950,21 @@ final class ChatViewModel: ObservableObject {
     ///
     /// Returns `nil` when neither source has a token. The token itself is
     /// never logged — only which source supplied it.
+    /// One token source for every GitHub read.
+    ///
+    /// Static because the issue-body fetcher is built in `init`, before `self`
+    /// exists, and an instance method is therefore unreachable from it. That is
+    /// the whole reason the fallback GET went out unauthenticated for as long
+    /// as it did - not a decision, an ordering.
+    nonisolated static func githubToken() -> String? {
+        githubTokenSource()
+    }
+
     nonisolated func githubTokenForTimeline() -> String? {
+        Self.githubTokenSource()
+    }
+
+    nonisolated static func githubTokenSource() -> String? {
         // 1. Keychain — same service/account as GitHubAPIClient.
         if let token = try? KeychainSecrets.read(
             service: "ai.browseros.trios",
