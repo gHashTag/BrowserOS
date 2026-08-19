@@ -1510,3 +1510,50 @@ failed.
 **And cancel rather than fail.** Nobody failed - the dispatch did not happen.
 Recording it as a failure would count against the issue in the retry policy and
 tell the next bee that the last one produced nothing.
+
+## A message that names a cause nobody measured
+
+`"API key is unavailable - the Keychain did not respond."` The code observed
+one thing: the resolved key was empty. It could have come from three places,
+and the message picked one and blamed it. Everyone who read that line - me
+included, for a whole night - went looking at the Keychain.
+
+The truth, once the refusal reported every source it consulted:
+`~/.trios/config.json` held both provider keys with **zero-length values**. A
+file that looks configured to anyone who opens it and supplies nothing to every
+consumer. The fallback meant to cover the Keychain's intermittency had never
+worked once.
+
+**Rule:** an error message may state what was observed and must not state what
+was inferred. If three sources feed a value, the failure names all three and
+what each returned. The cost of the shortcut is not the wrong word - it is
+every future reader searching the wrong layer.
+
+**Same shape, twice in one night:** the issue fetcher logged "API empty"
+whatever had actually failed, because the real error was swallowed by `try?`.
+
+## Present-but-empty is not absent
+
+Both are falsy and they send a reader to opposite places. "Absent" asks whether
+the file exists and whether the path is right. "Present but empty" points at
+the single line that is wrong.
+
+This is the third form of the same distinction in this project:
+
+- `nil` committed-file count is "not tallied", `0` is "tallied and empty"
+- a branch that does not exist is not a branch with no commits
+- a config key with `""` is not a missing config key
+
+**Rule:** wherever a value can be missing OR blank, report which. Collapsing
+them with `?? default` is how a wrong story survives contact with the evidence.
+
+## Correct the record when you find out you were wrong
+
+I wrote in a commit message that `resolvedAPIKey` reads `~/.trios/config.json`
+"and the key is there". It is not there. The dev variant reads
+`~/.trios-dev/secrets/`, and I generalised from that to the release without
+opening the file.
+
+A wrong sentence in a commit message is durable in a way a wrong sentence in
+chat is not: it is what the next person greps. Correct it in the next commit,
+by name, rather than quietly writing the truth beside it.
