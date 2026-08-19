@@ -4711,11 +4711,11 @@ final class ChatViewModel: ObservableObject {
 
         // Commit the changes with an incompleteness marker so the partial work
         // is preserved on the branch, clearly marked as unfinished.
-        let outcome = await QueenBranchCommitter.commitWorkerChanges(
+        let outcome = await commitWorkerOutput(
+            task: task,
             branch: branch,
             baselineTree: baselineTree,
-            message: "queen(\(task.issue.slug)) [INCOMPLETE: \(reason)]: \(task.title)",
-            ownedPaths: task.ownedPaths
+            message: "queen(\(task.issue.slug)) [INCOMPLETE: \(reason)]: \(task.title)"
         )
 
         // Per-file log so the journal says by name what happened to each file.
@@ -4935,11 +4935,11 @@ final class ChatViewModel: ObservableObject {
                 )
             }
 
-            let outcome = await QueenBranchCommitter.commitWorkerChanges(
+            let outcome = await commitWorkerOutput(
+                task: task,
                 branch: branch,
                 baselineTree: workerBaselineTrees[task.conversationId],
-                message: "queen(\(task.issue.slug)): \(task.title)",
-                ownedPaths: task.ownedPaths
+                message: "queen(\(task.issue.slug)): \(task.title)"
             )
             notice += "\n" + outcome.summary
             registry.recordCommittedFiles(taskID: task.id, count: outcome.fileCount)
@@ -6496,6 +6496,41 @@ final class ChatViewModel: ObservableObject {
     /// `excluding` is the task whose worker just finished, handled by the
     /// caller directly. Nil when the sweep runs on a timer, because then
     /// there is no such task and every parked one is fair game.
+    /// Commits a worker's changes from wherever that worker actually wrote.
+    ///
+    /// `commitWorkerChanges` assembles a tree by overlay from the SHARED
+    /// checkout - correct while every bee edited that checkout, and wrong the
+    /// moment they stopped. With worktrees the bee's edits live in its own
+    /// directory, the shared tree is untouched (which is the whole point), and
+    /// the overlay therefore committed nothing: `committedFiles: 0`,
+    /// auto-accept refused for "no committed files", and the task parked in
+    /// awaitingReview with its work stranded uncommitted in the worktree.
+    ///
+    /// `QueenBranchCommitter.commitInWorktree` already existed for exactly
+    /// this, written under #1142 - documented, guarded against the shared
+    /// checkout, staging only owned paths - and had no callers at all. It does
+    /// now.
+    private func commitWorkerOutput(
+        task: DelegatedTask,
+        branch: String,
+        baselineTree: String?,
+        message: String
+    ) async -> QueenBranchCommitter.Outcome {
+        if let worktree = task.worktreePath {
+            return await QueenBranchCommitter.commitInWorktree(
+                worktreePath: worktree,
+                message: message,
+                ownedPaths: task.ownedPaths
+            )
+        }
+        return await QueenBranchCommitter.commitWorkerChanges(
+            branch: branch,
+            baselineTree: baselineTree,
+            message: message,
+            ownedPaths: task.ownedPaths
+        )
+    }
+
     func sweepAwaitingReview(excluding excluded: UUID?, trigger: String) async {
         let registry = delegationRegistry
         // ── #1156: every awaitingReview task gets its verdicts ──────────
