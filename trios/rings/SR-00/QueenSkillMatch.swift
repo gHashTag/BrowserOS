@@ -23,7 +23,7 @@ enum QueenSkillMatch {
     static let rules: [(matches: (String) -> Bool, skill: String)] = [
         ({ $0.contains("tests/") || $0.hasSuffix("Tests.swift") }, "e2e-testing"),
         ({ $0.hasSuffix("build.sh") || $0.hasSuffix("Makefile") }, "agent-safe-build"),
-        ({ $0.contains("rings/RUST-") }, "tri-pipeline"),
+        ({ $0.contains("rings/RUST-") }, "t27-tri-pipeline"),
         ({ $0.hasSuffix(".swift") }, "agent-safe-build"),
     ]
 

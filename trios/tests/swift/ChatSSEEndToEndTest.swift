@@ -7830,6 +7830,24 @@ struct ChatSSEEndToEndTests {
             "a switched-off skill is not quietly handed over - the operator turning it off was a decision"
         )
 
+        // Every skill a rule names must exist on disk.
+        //
+        // The match returns nil for a skill that is not installed, which is
+        // safe and silent - so a rule naming a skill that never existed simply
+        // never fires, and nothing says so. Mine named `tri-pipeline` while the
+        // installed one is `t27-tri-pipeline`, and the Rust rule was dead from
+        // the moment it was written.
+        let skillsRoot = "\(ProjectPaths.root)/.claude/skills"
+        let installedOnDisk = Set(
+            (try? FileManager.default.contentsOfDirectory(atPath: skillsRoot)) ?? []
+        )
+        for named in Set(QueenSkillMatch.rules.map(\.skill)) {
+            check(
+                installedOnDisk.contains(named),
+                "the rule naming `\(named)` points at a skill that exists - a rule naming a missing one never fires and says nothing"
+            )
+        }
+
         // The wiring: an explicit name must still win over the match.
         let source = (try? String(
             contentsOfFile: "\(ProjectPaths.root)/rings/SR-02/ChatViewModel.swift",
