@@ -1595,3 +1595,30 @@ which also makes self-blocking visible at a glance.
 
 **Rule:** a refusal that mentions a resource conflict names the holder, its
 state, and its age. A block nobody can attribute is a block nobody clears.
+
+## Unblocking a deadlock can produce a spin
+
+The reaper that cancels an undispatched task unfroze four issues and
+immediately created a cycle: choose the issue, refuse the dispatch on a missing
+key, leave it queued, reap it ten minutes later, choose it again. Fresh branch
+each round - r1, r2, r3, r4 - while nothing could possibly start.
+
+A permanent block and a permanent retry are both wrong, and the second is
+harder to see: the log is busy, states are changing, work looks like it is
+happening.
+
+**Rule:** when adding anything that frees a stuck item, ask what happens on the
+next cycle if the original obstruction is still there. A reaper without a
+back-off is a spin generator.
+
+**Where the check belongs:** at the top of the round, not at the end. If a
+condition makes the entire round pointless - no key, no capacity, no network -
+test it before the work of choosing rather than discovering it at dispatch. The
+difference is a log that says "not picking up work: the provider key resolves
+empty" once, versus a cycle of branch creation.
+
+**Ordering inside the block reasons is worth a test of its own.** Consent and
+budget outrank a missing key: those are decisions, and a decision outranks a
+resource. But a missing key outranks capacity, because with a full swarm AND no
+key the actionable fact is the key. Each of those is one assertion and they
+catch reorderings that read as harmless.
