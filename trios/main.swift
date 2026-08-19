@@ -357,6 +357,56 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             ]
         )
 
+        // #1162 criterion 2: "the worker answered" is where the probe used to
+        // stop, and it is exactly as far as the run that motivated the issue
+        // got — the Queen had chosen and delegated, the bee flew, and nothing
+        // could say whether the work reached the branch. Answered and committed
+        // are different facts: a bee can answer from a clean tree, and a
+        // write outside the boundary is refused by design. This assertion
+        // makes the commit observable from the same probe, as its own verdict
+        // rather than a field on the answer, because a run that answered and
+        // never committed is not a pass.
+        //
+        // Opt-in via TRIOS_E2E_DELEGATE_EXPECT_COMMIT=1 so read-only probes
+        // (the default delegate-probe TASK is an audit) keep passing without
+        // asserting a commit they never asked the bee to make.
+        if environment["TRIOS_E2E_DELEGATE_EXPECT_COMMIT"] == "1" {
+            // The commit happens between the runner dropping its flag and the
+            // registry leaving `.running` (finish → observe → commit →
+            // awaitingReview), so reading `committedFiles` the moment the wait
+            // above exits races it. Wait for the state to settle first, the
+            // same discipline the review commands above already spell out.
+            var settled: DelegatedTask?
+            for _ in 0..<240 {
+                if let current = QueenDelegationRegistry.shared
+                    .task(forConversation: task.conversationId),
+                   current.state != .running {
+                    settled = current
+                    break
+                }
+                try? await Task.sleep(nanoseconds: 250_000_000)
+            }
+            let committed = settled?.committedFiles ?? 0
+            let commitReport = committed > 0 ? TriosLogBus.shared.info : TriosLogBus.shared.error
+            commitReport(
+                .queen,
+                committed > 0
+                    ? "queen.selftest.commit.passed"
+                    : "queen.selftest.commit.failed",
+                committed > 0
+                    ? "The task the Queen chose reached a commit on its branch"
+                    : (settled == nil
+                        ? "The task never left .running — no commit could be recorded"
+                        : "The worker answered but nothing reached the task's branch"),
+                [
+                    "issue": task.issue.slug,
+                    "branch": settled?.virtualBranch ?? task.virtualBranch ?? "(none)",
+                    "committedFiles": String(committed),
+                    "state": settled?.state.rawValue ?? state?.rawValue ?? "unknown"
+                ]
+            )
+        }
+
         // A second turn on the same conversation, when asked for. The orphan
         // regression only shows itself on the *next* send: the first turn
         // leaves a tool call unanswered, and the send after it is the one that
