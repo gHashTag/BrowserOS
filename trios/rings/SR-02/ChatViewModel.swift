@@ -274,6 +274,11 @@ final class ChatViewModel: ObservableObject {
     /// fingerprint argument. At acceptance time, this takes precedence over
     /// the task's own field — if neither is set, `isStale` returns false and
     /// the verdicts stand, which is what "missing ≠ stale" means (#1131).
+    ///
+    /// Written only through `sealVerdictsWithBoundaryState`, which clears any
+    /// earlier binding first and asserts the write landed — removing that
+    /// write fires `queen.assertion.fingerprint_not_recorded` in the journal
+    /// (#1131 criterion 4).
     private var verdictTreeStates: [UUID: String] = [:]
     /// Observer concerns already reported, keyed by task, so a warning fires
     /// once rather than on every streamed delta.
@@ -1947,7 +1952,50 @@ final class ChatViewModel: ObservableObject {
                 observedTotalTokens: nil,
                 finishReason: nil)
         }
-        let runtimeConfiguration = await modelStore.runtimeConfiguration
+        var runtimeConfiguration = await modelStore.runtimeConfiguration
+        // A keyless request to a provider that needs one is a 500 already sent.
+        //
+        // The delegation path has had this guard for a while - its comment even
+        // names this exact error, "the request is doomed to a 500 'z.ai
+        // provider requires apiKey' before it is sent" - and the chat path
+        // never got it. The window is real and narrow: the keychain launch gate
+        // lowers, the first key read still comes back empty, and the warm-up
+        // needs several attempts. A message typed inside that window was built
+        // with `has_key: no`, sent anyway, and came back as an opaque provider
+        // error that blames z.ai for the app's timing.
+        //
+        // So: wait briefly for the warm-up rather than refuse outright, because
+        // this resolves on its own within seconds, and only then say something
+        // true if it has not.
+        // Real transport only. The test harness injects a stubbed transport
+        // that needs no credential, and gating it here made nine tests refuse
+        // to send - the delegation path's equivalent guard has carried exactly
+        // this exemption from the start (`type(of: transport) is
+        // SSETransport.Type`) and I failed to carry it across with the rest.
+        let usesLiveTransport = type(of: transport) is SSETransport.Type
+        if usesLiveTransport,
+           runtimeConfiguration.provider.requiresAPIKey,
+           (runtimeConfiguration.apiKey ?? "").isEmpty {
+            warmupProviderKey()
+            for _ in 0..<10 {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                runtimeConfiguration = await modelStore.runtimeConfiguration
+                if !(runtimeConfiguration.apiKey ?? "").isEmpty { break }
+            }
+        }
+        if usesLiveTransport,
+           runtimeConfiguration.provider.requiresAPIKey,
+           (runtimeConfiguration.apiKey ?? "").isEmpty {
+            TriosLogBus.shared.error(
+                .chat, "chat.send.no_key",
+                "Refusing to send to \(runtimeConfiguration.provider.rawValue) without a key: "
+                    + "the keychain has not answered yet.",
+                ["provider": runtimeConfiguration.provider.rawValue]
+            )
+            throw ChatViewModelError.providerKeyUnavailable(
+                provider: runtimeConfiguration.provider.displayName
+            )
+        }
         guard let requestBody = try? ChatRequestBuilder(
             conversationId: conversationId,
             message: text,
@@ -2217,8 +2265,26 @@ final class ChatViewModel: ObservableObject {
             .joined(separator: "\n")
     }
 
-    private enum ChatViewModelError: Error {
+    private enum ChatViewModelError: Error, LocalizedError {
         case requestBuildFailed
+        /// The provider needs a key and the keychain has not produced one yet.
+        ///
+        /// Its own case rather than a generic failure, because the user-visible
+        /// difference matters: "z.ai provider requires apiKey" coming back as a
+        /// 500 reads as a broken provider or a missing key, and the truth is
+        /// that the key exists and the keychain was still waking up.
+        case providerKeyUnavailable(provider: String)
+
+        var errorDescription: String? {
+            switch self {
+            case .requestBuildFailed:
+                return "The request could not be built."
+            case .providerKeyUnavailable(let provider):
+                return "The \(provider) key is stored but the keychain has not "
+                    + "released it yet. Nothing was sent. Try again in a moment - "
+                    + "this clears itself once the first read succeeds."
+            }
+        }
     }
 
     func cancelStreaming() {
@@ -3966,8 +4032,15 @@ final class ChatViewModel: ObservableObject {
         // a bee that cannot get its own directory should still work, just
         // without the isolation.
         if let branch = task.virtualBranch {
-            if let worktree = await prepareWorktree(for: task, branch: branch) {
-                registry.setWorktreePath(taskID: task.id, path: worktree)
+            if let prepared = await prepareWorktree(for: task, branch: branch) {
+                registry.setWorktreePath(taskID: task.id, path: prepared.path)
+                // The branch too, and this is the load-bearing half. Everything
+                // downstream - the committer, the combined build, the pull
+                // request - reads `virtualBranch`, and it named a branch the
+                // bee was not on.
+                if prepared.branch != branch {
+                    registry.setVirtualBranch(taskID: task.id, branch: prepared.branch)
+                }
             } else if let reason = await createVirtualBranch(named: branch) {
                 registry.transition(taskID: task.id, to: .cancelled)
                 await postQueenNotice(
@@ -4190,10 +4263,28 @@ final class ChatViewModel: ObservableObject {
     /// The branch is cut here rather than by `createVirtualBranch`, because
     /// `git worktree add -B` does both in one step and cannot leave a branch
     /// pointing somewhere no checkout exists.
-    private func prepareWorktree(for task: DelegatedTask, branch: String) async -> String? {
+    /// The checkout and the branch it was actually cut on.
+    ///
+    /// Both, because they can differ: when the wanted branch is a leftover cut
+    /// before HEAD, a fresh suffixed name is used instead. Returning only the
+    /// path left the registry holding the ORIGINAL name while the bee worked on
+    /// the new one - so the committer wrote to `queen/1127-r5` and the combined
+    /// build read `queen/1127`, a branch 140 commits stale. The build could not
+    /// compile, acceptance refused with "the combined state does not build
+    /// together", and every finished task parked.
+    struct PreparedWorktree {
+        let path: String
+        let branch: String
+    }
+
+    private func prepareWorktree(for task: DelegatedTask, branch: String) async -> PreparedWorktree? {
         let root = ProjectPaths.root
-        let path = QueenWorktree.path(forIssue: task.issue.number, projectRoot: root)
-        return await Task.detached(priority: .utility) { () -> String? in
+        let path = QueenWorktree.path(
+            forIssue: task.issue.number,
+            projectRoot: root,
+            variant: ProjectPaths.variant.rawValue
+        )
+        return await Task.detached(priority: .utility) { () -> PreparedWorktree? in
             func git(_ args: [String], timeout: TimeInterval = 25) -> String {
                 QueenStatusViewModel.runProcess(
                     "/usr/bin/git", arguments: args, workDir: root, timeout: timeout
@@ -4209,7 +4300,8 @@ final class ChatViewModel: ObservableObject {
                     "Reusing the existing checkout for \(task.issue.slug)",
                     ["path": path]
                 )
-                return path
+                let head = git(["-C", path, "rev-parse", "--abbrev-ref", "HEAD"])
+                return PreparedWorktree(path: path, branch: head.isEmpty ? branch : head)
             }
 
             // A branch left over from an older run is adopted silently by
@@ -4256,7 +4348,7 @@ final class ChatViewModel: ObservableObject {
                 "\(task.issue.slug) works in its own checkout on \(name)",
                 ["path": path, "branch": name]
             )
-            return path
+            return PreparedWorktree(path: path, branch: name)
         }.value
     }
 
@@ -4270,7 +4362,17 @@ final class ChatViewModel: ObservableObject {
     func releaseWorktree(for task: DelegatedTask) async {
         guard let path = task.worktreePath else { return }
         let root = ProjectPaths.root
-        guard QueenWorktree.isOwnedWorktree(path: path, projectRoot: root) else {
+        // Nothing there means nothing to remove, and the recorded path is
+        // simply out of date - a task written before the paths were scoped by
+        // variant carries the old shape. Without this the ownership guard below
+        // refuses it, forever, on every sweep, and says so each time.
+        guard FileManager.default.fileExists(atPath: path) else {
+            delegationRegistry.clearWorktreePath(taskID: task.id)
+            return
+        }
+        guard QueenWorktree.isOwnedWorktree(
+            path: path, projectRoot: root, variant: ProjectPaths.variant.rawValue
+        ) else {
             TriosLogBus.shared.error(
                 .queen, "queen.worktree.refused_removal",
                 "Refusing to remove \(path): it is not a checkout this code created",
@@ -4697,11 +4799,11 @@ final class ChatViewModel: ObservableObject {
 
         // Commit the changes with an incompleteness marker so the partial work
         // is preserved on the branch, clearly marked as unfinished.
-        let outcome = await QueenBranchCommitter.commitWorkerChanges(
+        let outcome = await commitWorkerOutput(
+            task: task,
             branch: branch,
             baselineTree: baselineTree,
-            message: "queen(\(task.issue.slug)) [INCOMPLETE: \(reason)]: \(task.title)",
-            ownedPaths: task.ownedPaths
+            message: Self.conventionalCommitMessage(task: task, note: "[INCOMPLETE: \(reason)]")
         )
 
         // Per-file log so the journal says by name what happened to each file.
@@ -4904,11 +5006,8 @@ final class ChatViewModel: ObservableObject {
             // recording time — not at acceptance, because what matters is
             // the state the verdicts were derived against, not the state
             // the decision is made in.
-            if (!evidenceVerdicts.isEmpty || !charResults.isEmpty),
-               let snapshot = await QueenBranchCommitter.fingerprintBoundary(
-                   ownedPaths: task.ownedPaths
-               ) {
-                verdictTreeStates[task.id] = snapshot
+            if !evidenceVerdicts.isEmpty || !charResults.isEmpty {
+                await sealVerdictsWithBoundaryState(task)
             }
             if !evidenceVerdicts.isEmpty || !charResults.isEmpty {
                 TriosLogBus.shared.info(
@@ -4921,11 +5020,11 @@ final class ChatViewModel: ObservableObject {
                 )
             }
 
-            let outcome = await QueenBranchCommitter.commitWorkerChanges(
+            let outcome = await commitWorkerOutput(
+                task: task,
                 branch: branch,
                 baselineTree: workerBaselineTrees[task.conversationId],
-                message: "queen(\(task.issue.slug)): \(task.title)",
-                ownedPaths: task.ownedPaths
+                message: Self.conventionalCommitMessage(task: task)
             )
             notice += "\n" + outcome.summary
             registry.recordCommittedFiles(taskID: task.id, count: outcome.fileCount)
@@ -5040,102 +5139,7 @@ final class ChatViewModel: ObservableObject {
         await appendSystemMessageToQueenChat(notice)
         await autoAcceptIfUnambiguous(taskID: task.id)
 
-        // ── #1156: every awaitingReview task gets its verdicts ──────────
-        //
-        // handleWorkerFinished asks the reviewer about the task whose worker
-        // just finished. A second parallel task already in awaitingReview is
-        // not re-examined: its criteria may be unanswered, auto-accept stays
-        // gated, and nobody comes back to ask the reviewer. The task parks
-        // in awaitingReview forever. This sweep closes that gap: every
-        // awaitingReview task with unanswered criteria gets its verdicts
-        // requested, then gets an auto-accept attempt — not just the one the
-        // human named.
-        //
-        // The filter matches the primary flow above: nil verdicts only,
-        // without the askedButUnanswered exclusion the original sweep had.
-        // That exclusion made the sweep inert — a task whose first reviewer
-        // request came back empty was permanently filtered out, so the sweep
-        // never retried it and the task was stuck in awaitingReview with no
-        // path to acceptance.
-        let otherAwaiting = registry.tasks.filter {
-            $0.state == .awaitingReview && $0.id != task.id
-        }
-        TriosLogBus.shared.info(
-            .queen,
-            "queen.review.sweep",
-            "Sweeping \(otherAwaiting.count) other task(s) in awaitingReview",
-            ["finished": task.issue.slug]
-        )
-        var verdictsRequested = 0
-        for other in otherAwaiting {
-            let current = registry.task(forIssue: other.issue) ?? other
-            let unanswered = current.acceptanceCriteria.filter {
-                current.criterionVerdicts[$0] == nil
-            }
-            guard !unanswered.isEmpty else {
-                TriosLogBus.shared.info(
-                    .queen,
-                    "queen.review.sweep.skip",
-                    "All criteria already have verdicts",
-                    [
-                        "issue": current.issue.slug,
-                        "criteria": String(current.acceptanceCriteria.count)
-                    ]
-                )
-                // All criteria have verdicts but the task is still in
-                // awaitingReview — give it the same acceptance attempt
-                // the primary task gets (line ~3770). Without this the
-                // skip leaves the task parked forever (#1156).
-                await autoAcceptIfUnambiguous(taskID: current.id)
-                continue
-            }
-            guard let branch = current.virtualBranch else {
-                TriosLogBus.shared.warn(
-                    .queen,
-                    "queen.review.sweep.skip",
-                    "No virtual branch — cannot request verdicts",
-                    [
-                        "issue": current.issue.slug,
-                        "unanswered": String(unanswered.count)
-                    ]
-                )
-                continue
-            }
-            let diffText = await diffForReview(
-                baselineTree: workerBaselineTrees[current.conversationId],
-                branch: branch,
-                ownedPaths: current.ownedPaths
-            )
-            let touchedFiles = await fileContentsForReview(
-                baselineTree: workerBaselineTrees[current.conversationId],
-                ownedPaths: current.ownedPaths,
-                criteria: unanswered
-            )
-            let returned = await requestReviewerVerdicts(
-                for: current,
-                criteria: unanswered,
-                diff: diffText,
-                fileContents: touchedFiles
-            )
-            verdictsRequested += 1
-            TriosLogBus.shared.info(
-                .queen,
-                "queen.review.sweep.requested",
-                "Requested verdicts for \(unanswered.count) criterion(s); reviewer returned \(returned)",
-                [
-                    "issue": current.issue.slug,
-                    "asked": String(unanswered.count),
-                    "returned": String(returned)
-                ]
-            )
-            await autoAcceptIfUnambiguous(taskID: current.id)
-        }
-        TriosLogBus.shared.info(
-            .queen,
-            "queen.review.sweep.done",
-            "Sweep complete: \(otherAwaiting.count) considered, \(verdictsRequested) got verdicts",
-            ["finished": task.issue.slug]
-        )
+        await sweepAwaitingReview(excluding: task.id, trigger: task.issue.slug)
 
         // When a worker finishes, immediately check for orphans left behind by
         // a concurrent delegation that was transitioned to .running but never
@@ -5847,11 +5851,8 @@ final class ChatViewModel: ObservableObject {
         // so the Queen's state writes cannot age a verdict. The reviewer saw
         // the committed diff; the fingerprint is the state the boundary was
         // in when the verdicts were derived.
-        if recorded > 0,
-           let snapshot = await QueenBranchCommitter.fingerprintBoundary(
-               ownedPaths: task.ownedPaths
-           ) {
-            verdictTreeStates[task.id] = snapshot
+        if recorded > 0 {
+            await sealVerdictsWithBoundaryState(task)
         }
 
         // Criteria the reviewer answered — whether from the retry or the
@@ -6566,6 +6567,182 @@ final class ChatViewModel: ObservableObject {
     /// happened - a turn opened, a byte at this time, the stream ended this
     /// way - rather than from sampling "is a stream running for this
     /// conversation right now". That sample is stale the moment it is taken.
+    /// Asks the reviewer about every task parked in awaitingReview.
+    ///
+    /// Extracted from `handleWorkerFinished` because living there made it
+    /// reachable only when a worker finished - and when nothing finishes,
+    /// nothing sweeps. Three tasks sat in awaitingReview for fourteen hours
+    /// with the sweep never running once: the log had `queen.review.posted`
+    /// (a report) and not a single `queen.review.sweep`.
+    ///
+    /// `excluding` is the task whose worker just finished, handled by the
+    /// caller directly. Nil when the sweep runs on a timer, because then
+    /// there is no such task and every parked one is fair game.
+    /// Commits a worker's changes from wherever that worker actually wrote.
+    ///
+    /// `commitWorkerChanges` assembles a tree by overlay from the SHARED
+    /// checkout - correct while every bee edited that checkout, and wrong the
+    /// moment they stopped. With worktrees the bee's edits live in its own
+    /// directory, the shared tree is untouched (which is the whole point), and
+    /// the overlay therefore committed nothing: `committedFiles: 0`,
+    /// auto-accept refused for "no committed files", and the task parked in
+    /// awaitingReview with its work stranded uncommitted in the worktree.
+    ///
+    /// `QueenBranchCommitter.commitInWorktree` already existed for exactly
+    /// this, written under #1142 - documented, guarded against the shared
+    /// checkout, staging only owned paths - and had no callers at all. It does
+    /// now.
+    /// A commit message this repository will actually accept.
+    ///
+    /// Every bee commit was rejected, silently as far as the Queen could see.
+    /// The message began `queen(gHashTag/trios#1137):` and lefthook's
+    /// `conventional` hook allows only feat|fix|docs|style|refactor|perf|test|
+    /// chore|ci|build|revert - so `git commit` exited non-zero, the files
+    /// stayed staged, `committedFiles` stayed 0, auto-accept refused for "no
+    /// committed files", and no delegated task has ever reached a pull request.
+    /// For the whole life of the swarm. The supervisor's own commit convention
+    /// violated the repository's.
+    ///
+    /// The type is derived from what the bee was allowed to touch, which is the
+    /// only evidence available without reading the diff: docs for prose, test
+    /// for tests, fix otherwise. `Closes #N` in the body is L1 TRACEABILITY,
+    /// which the old format also failed to satisfy.
+    static func conventionalCommitMessage(task: DelegatedTask, note: String? = nil) -> String {
+        let paths = task.ownedPaths
+        let type: String
+        if !paths.isEmpty, paths.allSatisfy({ $0.hasPrefix("docs/") || $0.hasSuffix(".md") }) {
+            type = "docs"
+        } else if !paths.isEmpty, paths.allSatisfy({ $0.contains("tests/") }) {
+            type = "test"
+        } else {
+            type = "fix"
+        }
+        let subject = task.title.replacingOccurrences(of: "\n", with: " ")
+        let head = note.map { "\(type)(trios): \($0) \(subject)" } ?? "\(type)(trios): \(subject)"
+        return head + "\n\nCloses #\(task.issue.number)\n\nDelegated to \(task.worker) by the Trinity Queen."
+    }
+
+    private func commitWorkerOutput(
+        task: DelegatedTask,
+        branch: String,
+        baselineTree: String?,
+        message: String
+    ) async -> QueenBranchCommitter.Outcome {
+        if let worktree = task.worktreePath {
+            return await QueenBranchCommitter.commitInWorktree(
+                worktreePath: worktree,
+                message: message,
+                ownedPaths: task.ownedPaths
+            )
+        }
+        return await QueenBranchCommitter.commitWorkerChanges(
+            branch: branch,
+            baselineTree: baselineTree,
+            message: message,
+            ownedPaths: task.ownedPaths
+        )
+    }
+
+    func sweepAwaitingReview(excluding excluded: UUID?, trigger: String) async {
+        let registry = delegationRegistry
+        // ── #1156: every awaitingReview task gets its verdicts ──────────
+        //
+        // handleWorkerFinished asks the reviewer about the task whose worker
+        // just finished. A second parallel task already in awaitingReview is
+        // not re-examined: its criteria may be unanswered, auto-accept stays
+        // gated, and nobody comes back to ask the reviewer. The task parks
+        // in awaitingReview forever. This sweep closes that gap: every
+        // awaitingReview task with unanswered criteria gets its verdicts
+        // requested, then gets an auto-accept attempt — not just the one the
+        // human named.
+        //
+        // The filter matches the primary flow above: nil verdicts only,
+        // without the askedButUnanswered exclusion the original sweep had.
+        // That exclusion made the sweep inert — a task whose first reviewer
+        // request came back empty was permanently filtered out, so the sweep
+        // never retried it and the task was stuck in awaitingReview with no
+        // path to acceptance.
+        let otherAwaiting = registry.tasks.filter {
+            $0.state == .awaitingReview && $0.id != excluded
+        }
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.review.sweep",
+            "Sweeping \(otherAwaiting.count) other task(s) in awaitingReview",
+            ["trigger": trigger]
+        )
+        var verdictsRequested = 0
+        for other in otherAwaiting {
+            let current = registry.task(forIssue: other.issue) ?? other
+            let unanswered = current.acceptanceCriteria.filter {
+                current.criterionVerdicts[$0] == nil
+            }
+            guard !unanswered.isEmpty else {
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.review.sweep.skip",
+                    "All criteria already have verdicts",
+                    [
+                        "issue": current.issue.slug,
+                        "criteria": String(current.acceptanceCriteria.count)
+                    ]
+                )
+                // All criteria have verdicts but the task is still in
+                // awaitingReview — give it the same acceptance attempt
+                // the primary task gets (line ~3770). Without this the
+                // skip leaves the task parked forever (#1156).
+                await autoAcceptIfUnambiguous(taskID: current.id)
+                continue
+            }
+            guard let branch = current.virtualBranch else {
+                TriosLogBus.shared.warn(
+                    .queen,
+                    "queen.review.sweep.skip",
+                    "No virtual branch — cannot request verdicts",
+                    [
+                        "issue": current.issue.slug,
+                        "unanswered": String(unanswered.count)
+                    ]
+                )
+                continue
+            }
+            let diffText = await diffForReview(
+                baselineTree: workerBaselineTrees[current.conversationId],
+                branch: branch,
+                ownedPaths: current.ownedPaths
+            )
+            let touchedFiles = await fileContentsForReview(
+                baselineTree: workerBaselineTrees[current.conversationId],
+                ownedPaths: current.ownedPaths,
+                criteria: unanswered
+            )
+            let returned = await requestReviewerVerdicts(
+                for: current,
+                criteria: unanswered,
+                diff: diffText,
+                fileContents: touchedFiles
+            )
+            verdictsRequested += 1
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.review.sweep.requested",
+                "Requested verdicts for \(unanswered.count) criterion(s); reviewer returned \(returned)",
+                [
+                    "issue": current.issue.slug,
+                    "asked": String(unanswered.count),
+                    "returned": String(returned)
+                ]
+            )
+            await autoAcceptIfUnambiguous(taskID: current.id)
+        }
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.review.sweep.done",
+            "Sweep complete: \(otherAwaiting.count) considered, \(verdictsRequested) got verdicts",
+            ["trigger": trigger]
+        )
+    }
+
     func reapStalledWorkers(now: Date = Date()) async {
         let registry = delegationRegistry
 
@@ -6929,7 +7106,8 @@ final class ChatViewModel: ObservableObject {
     /// shipped build cannot open chats by itself whatever this says.
     var queenAutonomyEnabled: Bool {
         get {
-            UserDefaults.standard.object(forKey: Self.queenAutonomyKey) as? Bool ?? true
+            UserDefaults.standard.object(forKey: Self.queenAutonomyKey) as? Bool
+                ?? ProjectPaths.autonomyDefault
         }
         set {
             UserDefaults.standard.set(newValue, forKey: Self.queenAutonomyKey)
@@ -7015,6 +7193,11 @@ final class ChatViewModel: ObservableObject {
         // be released even on the ticks where there is no room to start a new
         // one, which is exactly when the swarm is busiest.
         await releaseSettledWorktrees()
+        // And ask the reviewer about anything parked. The sweep used to run
+        // only when a worker finished, so when nothing finished nothing swept:
+        // three tasks sat in awaitingReview for fourteen hours while the tick
+        // beside them kept choosing new work.
+        await sweepAwaitingReview(excluding: nil, trigger: "autonomy tick")
         let budget = QueenSelfImprovementService.loadBudget()
         if let reason = Self.autonomyBlockReason(
             enabled: queenAutonomyEnabled,
@@ -7232,8 +7415,64 @@ final class ChatViewModel: ObservableObject {
         // and the criteria name symbols that are present in them. When
         // they do, skip that candidate, journal why, and take the next.
         // A candidate that is not done is proposed exactly as before.
+        // An issue that already has a live task is not a candidate.
+        //
+        // Without this the autonomous tick spun: every five minutes it chose
+        // the same highest-scored issue, `delegateIssueToWorker` refused it
+        // with "already delegated", and the tick ended there rather than
+        // moving to the next one. Three tasks sat in awaitingReview, one slot
+        // of four stayed free, and nothing new was ever started - twenty-three
+        // delegations in ten minutes, all of them the same refusal.
+        //
+        // The refusal itself is right: one chat per issue. What was wrong is
+        // treating it as the end of the tick instead of as "try the next one".
+        // Anything already SPOKEN FOR, not merely anything running.
+        //
+        // `open` excludes terminal states, and `accepted` is terminal - so an
+        // accepted-but-unmerged task vanished from this filter while its issue
+        // stayed open on the forge. She chose it again, delegated it again, and
+        // accepted it again: #1127 existed twice in one registry, once accepted
+        // and once running, minutes apart. A loop that burns a worker slot and
+        // a provider bill to redo settled work.
+        //
+        // `failed` is deliberately NOT here: a failure nobody has looked at is
+        // work still to do, and it should be choosable again.
+        let spokenFor: Set<DelegatedTaskState> = [
+            .queued, .running, .awaitingReview, .rejected, .accepted, .merged
+        ]
+        let liveIssueNumbers = Set(
+            delegationRegistry.tasks
+                .filter { spokenFor.contains($0.state) }
+                .map(\.issue.number)
+        )
+
         var chosenScored: ScoredIssue!
         for candidate in sorted {
+            // Boundary conflicts too, and for the same reason. `delegate`
+            // refuses a candidate whose files another live task already owns -
+            // correctly - and the tick again treated that refusal as the end
+            // rather than as "try the next one". Third instance of the same
+            // shape today; filtered here with the very policy that would
+            // otherwise refuse it, so the two can never disagree.
+            if let paths = candidate.paths, !paths.isEmpty,
+               !QueenDelegationPolicy.conflictingTasks(
+                   for: paths, among: delegationRegistry.tasks
+               ).isEmpty {
+                TriosLogBus.shared.info(
+                    .queen, "queen.choose.boundary_taken",
+                    "Skipping #\(candidate.number): its files are owned by a live task",
+                    ["issue": "gHashTag/trios#\(candidate.number)"]
+                )
+                continue
+            }
+            if liveIssueNumbers.contains(candidate.number) {
+                TriosLogBus.shared.info(
+                    .queen, "queen.choose.already_running",
+                    "Skipping #\(candidate.number): a worker already has it",
+                    ["issue": "gHashTag/trios#\(candidate.number)"]
+                )
+                continue
+            }
             if let evidence = Self.looksAlreadyDone(
                 body: candidate.body,
                 paths: candidate.paths
@@ -7687,6 +7926,19 @@ final class ChatViewModel: ObservableObject {
             self.summary = result.summary
             self.combinedTreeSha = result.combinedTreeSha
         }
+
+        /// The honest proof for "there was nothing to combine".
+        ///
+        /// Not a failure and not a fabricated success: with no lane carrying
+        /// content there is no divergence to find, and the summary says so
+        /// rather than pretending a build ran. Kept as a separate initialiser
+        /// so the failing-result path above stays the only way a REAL build
+        /// can produce a proof.
+        fileprivate init(emptyAgainst base: String) {
+            self.summary = "No lane carried content to combine against \(base); "
+                + "there is nothing that could diverge."
+            self.combinedTreeSha = nil
+        }
     }
 
     /// #1128: the outcome of one watchdog run, for one acceptance. `refused`
@@ -7752,8 +8004,29 @@ final class ChatViewModel: ObservableObject {
             )
         }
 
+        // Only lanes that can actually contribute. A queued or running bee has
+        // no commits yet, and a leftover branch cut before the base drags old
+        // content into the overlay - five of those were enough to fail every
+        // acceptance, so one stale lane held thirteen healthy ones.
+        let contributing = await Task.detached(priority: .utility) {
+            QueenBranchCommitter.contributingBranches(branches, baseRef: base)
+        }.value
+        if contributing.count != branches.count {
+            TriosLogBus.shared.info(
+                .queen, "queen.combined.narrowed",
+                "Combining \(contributing.count) of \(branches.count) lanes; "
+                    + "the rest have nothing to contribute or predate the base",
+                ["kept": contributing.joined(separator: ", ")]
+            )
+        }
+        guard !contributing.isEmpty else {
+            // Nothing to combine is not a failure to combine. With no lane
+            // carrying content there is no divergence to find, and refusing
+            // here would block the first acceptance of every fresh swarm.
+            return .passed(CombinedBuildProof(emptyAgainst: base))
+        }
         let result = await QueenBranchCommitter.verifyCombinedBuild(
-            branches: branches, baseRef: base
+            branches: contributing, baseRef: base
         )
         if let proof = CombinedBuildProof(result: result) {
             return .passed(proof)
@@ -7885,33 +8158,22 @@ final class ChatViewModel: ObservableObject {
             }
             let currentTreeState = currentBoundaryState ?? ""
 
-            // --- The interface divergence watchdog (#1128) ---
-            // The combined state is assembled and built once, here, before
-            // the contract is consulted. The order is deliberate: criteria
-            // are judged inside a tree, and if the tree that would land
-            // does not compile, there is no tree to judge them in. A
-            // refusal from this gate is a different kind of refusal from
-            // the one below - "does not build together" is not "criterion
-            // not met" - so it gets its own words, its own log event, and
-            // it never touches the verdicts.
-            let watchdogProof: CombinedBuildProof
-            let divergenceGate = await runInterfaceDivergenceWatchdog(
-                accepting: task, in: registry
-            )
-            switch divergenceGate {
-            case .refused(let summary, let branches):
-                await refuseAcceptanceForDivergence(
-                    issue: issue, summary: summary, branches: branches
-                )
-                return
-            case .passed(let proof):
-                watchdogProof = proof
-            }
-
             // Acceptance is checked against the contract before it is checked
             // against anything else. This is the whole point of writing criteria
             // down: without it the Queen signs off on an impression, and the
             // specification becomes decoration that made the brief longer.
+            //
+            // Ahead of the divergence watchdog below, and the ordering matters.
+            // The watchdog was placed first with a stated reason - criteria are
+            // judged inside a tree, and a tree that does not compile is no
+            // place to judge them - which is true of criteria and NOT true of
+            // the contract refusals: "the reviewer was asked and gave no
+            // answer" is a fact about the reviewer, established without any
+            // tree at all. Running the watchdog first replaced that answer with
+            // "does not build together" and lost the distinction #1117 exists
+            // to keep. So: refusals that need no tree are reported first, and
+            // the watchdog guards the case where the contract is satisfied and
+            // something is actually about to land.
             if let reason = acceptanceBlockReasonDistinguishingEmptyAnswers(
                 for: task,
                 verdictTreeState: verdictTreeState,
@@ -7943,6 +8205,27 @@ final class ChatViewModel: ObservableObject {
                         + "`/verify \(issue.slug) <criterion text> met|unmet`."
                 )
                 return
+            }
+
+            // --- The interface divergence watchdog (#1128) ---
+            // The contract is satisfied, so something is about to land. The
+            // combined state of every open lane is assembled and built once,
+            // here. A refusal from this gate is a different kind of refusal
+            // from the contract's - "does not build together" is not
+            // "criterion not met" - so it gets its own words, its own log
+            // event, and it never touches the verdicts.
+            let watchdogProof: CombinedBuildProof
+            let divergenceGate = await runInterfaceDivergenceWatchdog(
+                accepting: task, in: registry
+            )
+            switch divergenceGate {
+            case .refused(let summary, let branches):
+                await refuseAcceptanceForDivergence(
+                    issue: issue, summary: summary, branches: branches
+                )
+                return
+            case .passed(let proof):
+                watchdogProof = proof
             }
             // The proof is the entry ticket (#1128 criterion 4): without
             // the watchdog having passed above, this call does not compile.
@@ -8359,6 +8642,72 @@ final class ChatViewModel: ObservableObject {
         registry.pruneArchive()
     }
 
+    /// Seals a task's verdicts against the boundary state they were carved
+    /// from (#1131).
+    ///
+    /// Called at every moment verdicts are recorded — the evidence pass, the
+    /// reviewer's answer, a verdict recorded by hand — so the fingerprint and
+    /// the verdicts share one instant. Only the task's `ownedPaths` are
+    /// hashed, so the Queen's own state writes cannot age a verdict.
+    ///
+    /// A re-seal starts from nothing: the binding from an earlier recording
+    /// is cleared first, so verdicts recorded now are never silently
+    /// presented as checked against an older tree. If the fingerprint then
+    /// cannot be computed (git refused to stage or write the tree), the
+    /// binding stays missing — which reads as "missing, not stale" at
+    /// acceptance (#1131 criterion 3), never as a freshness it did not earn.
+    ///
+    /// The closing assertion is #1131 criterion 4: if the write below is
+    /// removed or bypassed, `queen.assertion.fingerprint_not_recorded` fires
+    /// in the journal — verdicts recorded without a state binding make the
+    /// staleness check blind, and the blindness is named rather than passed
+    /// silently. That is the sense in which "the check breaks if you remove
+    /// the fingerprint recording."
+    private func sealVerdictsWithBoundaryState(_ task: DelegatedTask) async {
+        // An empty boundary has nothing to fingerprint. nil is "missing,"
+        // not "stale" — the verdicts stand as they were (#1131 criterion 3).
+        guard !task.ownedPaths.isEmpty else { return }
+        // Clear the earlier binding before computing the new one: verdicts
+        // recorded now must not inherit the tree an earlier recording was
+        // sealed against — especially not through a failed computation.
+        verdictTreeStates.removeValue(forKey: task.id)
+        let snapshot = await QueenBranchCommitter.fingerprintBoundary(
+            ownedPaths: task.ownedPaths
+        )
+        guard let snapshot else {
+            // A distinct, named case (#1131): git could not produce the
+            // tree. This is not the removed-write regression below — the
+            // write ran and had nothing to write. The binding stays
+            // missing, which acceptance reads as "missing ≠ stale".
+            TriosLogBus.shared.warn(
+                .queen, "queen.review.fingerprint_unavailable",
+                "Boundary fingerprint could not be computed; verdicts are recorded without a state binding",
+                [
+                    "issue": task.issue.slug,
+                    "owned_paths": task.ownedPaths.joined(separator: ", ")
+                ]
+            )
+            return
+        }
+        verdictTreeStates[task.id] = snapshot
+        // Regression guard (#1131 criterion 4): a snapshot existed, yet the
+        // binding is missing — the write above was removed or bypassed.
+        // Without the binding, `isStale` answers false for every verdict
+        // and the gate can never block on moved code, which is exactly the
+        // original defect: the mechanism written, the wiring gone, every
+        // acceptance passing on a check that cannot fire.
+        if verdictTreeStates[task.id] == nil {
+            TriosLogBus.shared.warn(
+                .queen, "queen.assertion.fingerprint_not_recorded",
+                "Verdicts were recorded but no state fingerprint was bound — the staleness check is blind. If the write in sealVerdictsWithBoundaryState was removed or bypassed, this is that break (#1131 criterion 4).",
+                [
+                    "issue": task.issue.slug,
+                    "owned_paths": task.ownedPaths.joined(separator: ", ")
+                ]
+            )
+        }
+    }
+
     /// Records what was found when one acceptance criterion was checked.
     func recordCriterionVerdict(
         issue: IssueReference,
@@ -8390,11 +8739,7 @@ final class ChatViewModel: ObservableObject {
         // recorded by hand (#1131). Only the task's own files are hashed,
         // so the Queen's state writes cannot age a verdict. This is the
         // moment the fingerprint is written — at verdict recording time.
-        if let snapshot = await QueenBranchCommitter.fingerprintBoundary(
-            ownedPaths: task.ownedPaths
-        ) {
-            verdictTreeStates[task.id] = snapshot
-        }
+        await sealVerdictsWithBoundaryState(task)
         // A criterion that was asked-but-unanswered and now has a recorded
         // verdict is no longer unanswered. Clearing it here keeps the
         // tracking from going stale (#1117).
