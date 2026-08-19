@@ -80,7 +80,30 @@ final class QueenWorkerRunner: ObservableObject {
 
     /// Starts the worker on its briefing. Returns immediately; the turn runs in
     /// the background and reports through `onFinish`.
+    /// The last task actually handed to `start`, and how many times.
+    ///
+    /// A record rather than a protocol. The runner is an `ObservableObject`
+    /// that views bind to, so putting it behind a protocol to allow a stub
+    /// would change every binding; and the question a test needs answered is
+    /// narrow - *what struct did the dispatcher hand over* - not *what does a
+    /// runner do*.
+    ///
+    /// The question is not academic. The dispatcher used to pass a value copied
+    /// before `prepareWorktree` filled in `worktreePath`, so the bee was sent to
+    /// the shared checkout while an empty worktree sat unused, and the commit
+    /// that followed was manufactured out of whatever happened to be dirty. The
+    /// fix is one line at the call site and nothing could see it from outside.
+    private(set) static var lastDispatched: DelegatedTask?
+    private(set) static var dispatchCount = 0
+
+    static func resetDispatchRecord() {
+        lastDispatched = nil
+        dispatchCount = 0
+    }
+
     func start(task: DelegatedTask, brief: String) {
+        Self.lastDispatched = task
+        Self.dispatchCount += 1
         guard runs[task.conversationId] == nil else { return }
         runningConversationIds.insert(task.conversationId)
         // Synchronously, before the run task is even created: a sweep that

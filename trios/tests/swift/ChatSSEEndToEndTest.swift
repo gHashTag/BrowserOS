@@ -955,6 +955,35 @@ struct ChatSSEEndToEndTests {
             print("    [delegate] notices: \(said)")
             fail("an approved issue with a runner still opened no task"); return
         }
+
+        // What was actually handed to the runner, not what the registry says
+        // afterwards. The dispatcher used to pass a value copied before
+        // `prepareWorktree` filled in `worktreePath`, so the struct the bee ran
+        // from said it had no checkout while the registry knew otherwise. Two
+        // things read that field: the working directory the bee is sent to, and
+        // which committer collects its work. Both were wrong, and nothing
+        // outside the call site could see it.
+        //
+        // Asserted against the registry's own copy rather than a literal, so
+        // this stays true whether or not a worktree could be created in the
+        // harness environment.
+        if let dispatched = QueenWorkerRunner.lastDispatched {
+            check(
+                dispatched.id == opened.id,
+                "the runner was handed this task and not another"
+            )
+            check(
+                dispatched.worktreePath == opened.worktreePath,
+                "and handed it as the registry holds it - a copy taken before the "
+                    + "worktree was prepared sends the bee to the shared checkout"
+            )
+            check(
+                dispatched.virtualBranch == opened.virtualBranch,
+                "including its branch, which decides where its commit lands"
+            )
+        } else {
+            fail("nothing reached the runner, so the dispatch cannot be checked")
+        }
         check(opened.worker == "queen-swift", "the named worker is the one recorded")
         check(opened.ownedPaths == ["docs"], "and the boundary from --paths reaches the task")
         // The global output budget and its per-conversation override. Nothing
