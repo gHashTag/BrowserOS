@@ -365,6 +365,7 @@ struct ChatSSEEndToEndTests {
         ("runABoundaryPathIsAPathNotProse", { await runABoundaryPathIsAPathNotProse() }),
         ("runAnEnglishIssueIsStillDelegatable", { await runAnEnglishIssueIsStillDelegatable() }),
         ("runWorkInASecondEpicIsVisible", { await runWorkInASecondEpicIsVisible() }),
+        ("runAbsentIsNotZeroAndTheBeeGetsItsWorktree", { await runAbsentIsNotZeroAndTheBeeGetsItsWorktree() }),
     ]
 
     static func main() async {
@@ -7936,6 +7937,84 @@ struct ChatSSEEndToEndTests {
     /// Red is not the Queen's to fix. The bee that opened the pull request is
     /// woken with the names of the failing checks and works on the same branch
     /// until the gate is green.
+    // MARK: - Scenario: absent is not zero, and the bee gets its own worktree
+
+    /// Two defects found by a forensic pass over a task that was recorded
+    /// `accepted` with `committedFiles: 1` and a branch that does not exist.
+    ///
+    /// First: `classify` collapsed `nil` into `0`. Absent means the branch was
+    /// never tallied; zero means it was tallied and held nothing, and only the
+    /// second says anything about the worker. The collapse labelled #1282
+    /// `producedNothing` while its branch carried a 288-line commit - a false
+    /// claim that counts against the issue exactly as a real failure does.
+    /// `QueenReviewDigest` in the same ring had always kept the two apart.
+    ///
+    /// Second, the discriminator that explained the whole picture: the task
+    /// struct handed to the runner was a value captured before
+    /// `prepareWorktree` filled in `worktreePath`. #1280 was refused at first
+    /// dispatch and re-sent by the key-warmup path, which re-reads the registry
+    /// and therefore had the worktree - "Committed 1 file(s) in worktree".
+    /// #1282 went out on the ordinary path with the stale copy, so the bee was
+    /// sent to the shared checkout and its file is still untracked there. Same
+    /// code, two paths, two outcomes.
+    static func runAbsentIsNotZeroAndTheBeeGetsItsWorktree() async {
+        print("\n# Scenario: absent is not zero, and the bee gets its own worktree")
+
+        typealias P = QueenRetryPolicy
+
+        check(
+            P.classify(streamOutcome: "terminal", completedTurns: 1, toolCalls: 9,
+                       committedFiles: nil) == .unmeasured,
+            "an untallied branch is unmeasured, not empty"
+        )
+        check(
+            P.classify(streamOutcome: "terminal", completedTurns: 1, toolCalls: 9,
+                       committedFiles: 0) == .producedNothing,
+            "a tallied branch holding nothing is still producedNothing"
+        )
+        check(
+            QueenFailureKind.unmeasured.countsAgainstTheIssue,
+            "unmeasured still counts against the issue - the attempt did end in failure"
+        )
+        check(
+            !QueenFailureKind.unmeasured.briefingLine.contains("committed nothing"),
+            "but the next bee is not told the last one committed nothing"
+        )
+        check(
+            QueenFailureKind.unmeasured.briefingLine.contains("look at the branch"),
+            "it is told to look at the branch instead: \(QueenFailureKind.unmeasured.briefingLine)"
+        )
+
+        // The interruption rule must survive the new case.
+        check(
+            P.decision(priorAttempts: [.interrupted, .unmeasured]) == .attempt(number: 2),
+            "one unmeasured attempt earns a second; the interruption beside it still does not count"
+        )
+        guard case .escalate = P.decision(priorAttempts: [.unmeasured, .unmeasured]) else {
+            fail("two unmeasured attempts must stop the loop like any other pair")
+            return
+        }
+
+        // And the dispatch fix, at the level that can be checked without a
+        // network: the worker's directory is a function of the task it is
+        // handed, so handing it a copy without the worktree sends it to the
+        // shared tree.
+        let root = "/r/trios"
+        let withTree = QueenWorktree.workerDirectory(
+            worktreePath: "/r/trios/.worktrees/prod/queen-1282",
+            projectRoot: root,
+            repositoryRoot: "/r"
+        )
+        check(
+            withTree == "/r/trios/.worktrees/prod/queen-1282/trios",
+            "a task carrying its worktree sends the bee into that checkout"
+        )
+        check(
+            withTree != root,
+            "which is not the shared tree - the difference the stale copy erased"
+        )
+    }
+
     // MARK: - Scenario: work in a second epic is visible
 
     /// The epic number was written into eight places, one of them a URL. Six

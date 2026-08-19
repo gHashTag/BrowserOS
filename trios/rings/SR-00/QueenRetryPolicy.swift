@@ -24,6 +24,13 @@ enum QueenFailureKind: String, Codable, Equatable, Sendable, CaseIterable {
     /// The worker did real work and it was judged unacceptable. This is the
     /// only kind that is genuinely about the task being hard.
     case workedButFailed
+    /// Nobody tallied the branch, so nothing is known about what it produced.
+    ///
+    /// A separate kind rather than a guess in either direction. It counts
+    /// against the issue - the attempt did end in failure - but it must not
+    /// tell the next bee that the last one committed nothing, because on the
+    /// occasion that produced this case the last one had committed 288 lines.
+    case unmeasured
 
     /// Whether an attempt of this kind counts against the issue.
     ///
@@ -42,6 +49,9 @@ enum QueenFailureKind: String, Codable, Equatable, Sendable, CaseIterable {
             return "the previous attempt ran to the end and committed nothing"
         case .workedButFailed:
             return "the previous attempt produced work that did not pass review"
+        case .unmeasured:
+            return "an earlier attempt ended without its branch being tallied, so what "
+                + "it left behind is unknown - look at the branch before assuming it is empty"
         }
     }
 }
@@ -81,7 +91,20 @@ enum QueenRetryPolicy {
         if streamOutcome == "open" && (completedTurns ?? 0) == 0 {
             return .interrupted
         }
-        if (committedFiles ?? 0) == 0 {
+        // `nil` is not zero. Absent means the branch was never tallied; zero
+        // means it was tallied and held nothing, and only the second is a
+        // statement about the worker.
+        //
+        // Collapsing them with `?? 0` labelled #1282 `producedNothing` while
+        // its branch carried a 288-line commit - a false claim about a bee that
+        // had done the work, and one that counts against the issue in exactly
+        // the same way as a real failure. `QueenReviewDigest` in this same ring
+        // has always kept the two apart; this one did not, and the one that was
+        // wrong is the one that decides whether another bee is sent.
+        guard let committedFiles else {
+            return .unmeasured
+        }
+        if committedFiles == 0 {
             return .producedNothing
         }
         return .workedButFailed

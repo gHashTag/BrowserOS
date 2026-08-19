@@ -211,6 +211,11 @@ final class ChatViewModel: ObservableObject {
     /// amount of nagging, and a restart is a reasonable moment to be reminded
     /// that several things are waiting on you.
     var escalatedReviewTaskIDs: Set<UUID> = []
+    /// Criteria whose fossil "unmet" verdict this run has already re-asked,
+    /// keyed by task UUID and criterion text. In memory, like
+    /// `escalatedReviewTaskIDs`: one re-ask per app run is enough, and the
+    /// reviewer's answer — either way — is what stops the asking.
+    private var reAskedPhantomVerdicts: Set<String> = []
     /// Byte offset into `queen_inbox.jsonl` — remembered so a restart does
     /// not re-process lines already delegated. Persisted in UserDefaults so
     /// it survives app relaunches.
@@ -4270,7 +4275,25 @@ final class ChatViewModel: ObservableObject {
         registry.transition(taskID: task.id, to: .running)
         workerBaselineTrees[conversationId] = baseline
         registry.setBaselineTree(taskID: task.id, baselineTree: baseline)
-        runner.start(task: task, brief: brief)
+        // Re-read rather than trusting the copy taken before the worktree was
+        // prepared. `task` is a value, captured above `prepareWorktree`, so the
+        // struct handed to the runner still says `worktreePath: nil` while the
+        // registry knows better.
+        //
+        // Two things read that field and both were wrong on this path.
+        // `workerWorkingDirectory` sends the bee to `ProjectPaths.root`, so the
+        // whole worktree isolation was inert and an empty checkout sat unused;
+        // and `commitWorkerOutput` routed to the shared-tree committer, which
+        // manufactures a commit out of whatever is dirty and leaves the dirt
+        // behind. #1282 went out this way and its file is still untracked in
+        // the shared tree.
+        //
+        // #1280 took the key-warmup path instead, which iterates the registry
+        // and therefore had the worktree - same code, two paths, two outcomes.
+        // `reapStalledWorkers` already states this discipline in as many words;
+        // this applies the rule the file already keeps.
+        let dispatched = registry.tasks.first(where: { $0.id == task.id }) ?? task
+        runner.start(task: dispatched, brief: brief)
         TriosLogBus.shared.info(
             .queen,
             "queen.worker.dispatched",
@@ -5159,7 +5182,8 @@ final class ChatViewModel: ObservableObject {
                 let touchedFiles = await fileContentsForReview(
                     baselineTree: workerBaselineTrees[task.conversationId],
                     ownedPaths: task.ownedPaths,
-                    criteria: unanswered
+                    criteria: unanswered,
+                    branch: branch
                 )
                 reviewerVerdictsRecorded = await requestReviewerVerdicts(
                     for: task,
@@ -5482,10 +5506,25 @@ final class ChatViewModel: ObservableObject {
     /// drowning the diff and the criteria under code. The region selection
     /// header names how many lines were chosen from how many and which
     /// names drove the selection.
+    ///
+    /// **Which copy of a file** the reviewer gets: when `branch` carries
+    /// commits of its own, owned-path contents are read from the branch tip —
+    /// the tree the diff describes, the tree a pull request would carry. The
+    /// shared working tree can lag the branch by whole runs, and a brief
+    /// whose diff says one thing while its "full contents" show another is
+    /// unanswerable — the reviewer must refuse, and did (#1130's repeat,
+    /// 2026-08-19: "could not check", sources contradict). An empty branch
+    /// carries nothing of its own, so there the working tree remains the
+    /// source, matching the "judge the files as they are now" the empty-
+    /// branch diff message says. A file the branch *removed* (it is in the
+    /// baseline, not on the branch) is said to be deleted rather than shown
+    /// from the working tree — the disagreement runs both directions
+    /// (#1132 criteria 2 and 3).
     private func fileContentsForReview(
         baselineTree: String?,
         ownedPaths: [String],
-        criteria: [String] = []
+        criteria: [String] = [],
+        branch: String? = nil
     ) async -> [String: String] {
         return await Task.detached(priority: .utility) {
             // Criterion and boundary paths are project-relative (`rings/SR-02/…`,
@@ -5498,6 +5537,42 @@ final class ChatViewModel: ObservableObject {
             var result: [String: String] = [:]
             let maxFiles = 20
 
+            // Whose copy of the file is the reviewer to read? (#1132
+            // criterion 3). When the branch carries the worker's commits, the
+            // work under review IS the branch — the pull request would carry
+            // it, and the diff above describes it. The shared working tree is
+            // moved by every worker in the swarm and can lag the branch by
+            // whole runs: #1130's repeat review was handed a diff that rewrote
+            // the note alongside "full contents" of the note's *previous*
+            // version, and the reviewer rightly refused to pick between two
+            // sources that disagreed — "could not check", 0 verdicts of 1
+            // (2026-08-19 17:28Z, glm-5.2). The contents must come from the
+            // same tree the diff reads. An empty branch carries nothing of
+            // its own, so there the working tree stays the world — "the files
+            // as they are now" — which is what the empty-branch message in
+            // `diffForReview` already promises.
+            var branchTipSHA: String?
+            if let branch {
+                let tip = QueenStatusViewModel.runProcess(
+                    "/usr/bin/git",
+                    arguments: ["rev-parse", "--verify", "refs/heads/\(branch)"],
+                    workDir: ProjectPaths.root,
+                    timeout: 10
+                ).trimmingCharacters(in: .whitespacesAndNewlines)
+                let fork = QueenStatusViewModel.runProcess(
+                    "/usr/bin/git",
+                    arguments: ["merge-base", "refs/heads/\(branch)", "HEAD"],
+                    workDir: ProjectPaths.root,
+                    timeout: 10
+                ).trimmingCharacters(in: .whitespacesAndNewlines)
+                let carriesWork =
+                    !tip.isEmpty && !tip.hasPrefix("fatal")
+                    && !fork.isEmpty && !fork.hasPrefix("fatal")
+                    && tip != fork
+                branchTipSHA = carriesWork ? tip : nil
+            }
+            var servedFromBranch: [String] = []
+
             // --- Boundary files (owned paths) ---
             // A worker that changed nothing still produced work — the criteria
             // describe the result, not the delta. If the reviewer only sees
@@ -5507,22 +5582,73 @@ final class ChatViewModel: ObservableObject {
             for rawPath in ownedPaths {
                 let path = QueenDelegationPolicy.normalizePath(rawPath)
                 guard !path.isEmpty else { continue }
-                let content = QueenStatusViewModel.runProcess(
-                    "/bin/cat",
-                    arguments: ["\(projectRoot)/\(path)"],
-                    workDir: ProjectPaths.root,
-                    timeout: 10
-                )
-                // An empty string from cat means the file does not exist or is
-                // genuinely empty. Either way it carries no information for the
-                // reviewer, so it is omitted rather than added as a blank entry
-                // that would pad the brief without adding context.
-                guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                var content: String?
+                if let tip = branchTipSHA, let branchName = branch {
+                    if let blobSHA = ChatViewModel.gitBlobSHA(
+                        treeish: tip, path: path
+                    ) {
+                        let fromBranch = QueenStatusViewModel.runProcess(
+                            "/usr/bin/git",
+                            arguments: ["cat-file", "blob", blobSHA],
+                            workDir: ProjectPaths.root,
+                            timeout: 10
+                        )
+                        if !fromBranch.trimmingCharacters(
+                            in: .whitespacesAndNewlines
+                        ).isEmpty {
+                            content = fromBranch
+                            servedFromBranch.append(path)
+                        }
+                    } else if ChatViewModel.gitBlobSHA(
+                        treeish: baselineTree, path: path
+                    ) != nil {
+                        // The branch does not carry the file but the baseline
+                        // did: the work under review removed it. Showing the
+                        // working tree's copy would contradict the diff's
+                        // `deleted file mode` — the same two-sources
+                        // disagreement as the stale copy, in the other
+                        // direction (#1132 criterion 2). The removal is part
+                        // of what is being reviewed, so it is said, not
+                        // papered over with a file that is not in the work.
+                        result[path] = "(deleted on branch \(branchName); "
+                            + "not present in the work under review)"
+                        if result.count >= maxFiles { break }
+                        continue
+                    }
+                }
+                if content == nil {
+                    content = QueenStatusViewModel.runProcess(
+                        "/bin/cat",
+                        arguments: ["\(projectRoot)/\(path)"],
+                        workDir: ProjectPaths.root,
+                        timeout: 10
+                    )
+                }
+                // An empty string means the file does not exist in the source
+                // it was read from or is genuinely empty. Either way it
+                // carries no information for the reviewer, so it is omitted
+                // rather than added as a blank entry that would pad the brief
+                // without adding context.
+                guard let content,
+                      !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 else { continue }
                 result[path] = ChatViewModel.regionExtractedContent(
                     fullContent: content, criteria: criteria, filePath: path
                 )
                 if result.count >= maxFiles { break }
+            }
+            if !servedFromBranch.isEmpty, let branch {
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.review.contents_source",
+                    "Owned-file contents served from branch \(branch) — the "
+                        + "diff and the contents describe the same tree; the "
+                        + "working tree can lag the branch (#1132)",
+                    [
+                        "branch": branch,
+                        "paths": servedFromBranch.joined(separator: ",")
+                    ]
+                )
             }
 
             // --- Criterion-mentioned files ---
@@ -5701,6 +5827,31 @@ final class ChatViewModel: ObservableObject {
     /// with no content at all logs `queen.review.contentsEmpty` and
     /// returns an empty string; a truly missing file keeps its
     /// placeholder at the call site.
+    /// The blob SHA a tree holds for a project-relative path, or nil when the
+    /// tree does not carry the file. `git ls-tree` resolves its pathspec
+    /// against the working directory the same way `git diff` does in
+    /// `diffForReview`, so the project-relative owned paths need no
+    /// rewriting. One line comes back per match; owned paths are files, and
+    /// the first line's meta is taken.
+    private nonisolated static func gitBlobSHA(
+        treeish: String?,
+        path: String
+    ) -> String? {
+        guard let treeish else { return nil }
+        let line = QueenStatusViewModel.runProcess(
+            "/usr/bin/git",
+            arguments: ["ls-tree", treeish, "--", path],
+            workDir: ProjectPaths.root,
+            timeout: 10
+        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !line.isEmpty, !line.hasPrefix("fatal") else { return nil }
+        // "100644 blob <sha>\t<path>"
+        let fields = line.components(separatedBy: "\t").first?
+            .components(separatedBy: " ") ?? []
+        guard fields.count >= 3, fields[1] == "blob" else { return nil }
+        return fields[2]
+    }
+
     private nonisolated static func regionExtractedContent(
         fullContent: String,
         criteria: [String],
@@ -7035,8 +7186,57 @@ final class ChatViewModel: ObservableObject {
         var verdictsRequested = 0
         for other in otherAwaiting {
             let current = registry.task(forIssue: other.issue) ?? other
-            let unanswered = current.acceptanceCriteria.filter {
+            var unanswered = current.acceptanceCriteria.filter {
                 current.criterionVerdicts[$0] == nil
+            }
+            // Which fossils this pass re-asked, with the verdict each carried
+            // in — so the reviewer's answer can be compared against it below.
+            // A re-ask whose result nobody observes is a question with no
+            // answer: the sweep would log that it asked, and the replacement
+            // of the fossil would be indistinguishable from its survival
+            // (#1132 criterion 3 — the run must SHOW the met, not hope for it).
+            var reAskedFossils: [(criterion: String, was: QueenCriterionVerdict)] = []
+            // A fossil verdict, re-asked (#1132 criterion 3). The sweep
+            // treats any recorded verdict as settled, so an "unmet" carved
+            // from the phantom-deletion diff — or recorded by the old empty
+            // measurement that read absence into silence — stands forever:
+            // send-backs run out, nothing re-asks the reviewer, and the task
+            // parks on "1 criterion still unmet" while the very file the
+            // criterion names sits on disk. #1130 sat through three runs on
+            // exactly that fossil. Its signature is checkable: the verdict
+            // says unmet, the criterion names a path, and the path exists.
+            // A criterion whose file is genuinely absent keeps its verdict
+            // untouched — that "unmet" is about the world, not about a
+            // comparison someone made badly. Re-asked once per app run; the
+            // reviewer's answer replaces the fossil and ends the asking.
+            for criterion in current.acceptanceCriteria
+            where !unanswered.contains(criterion) {
+                guard current.criterionVerdicts[criterion] == .unmet else { continue }
+                let mentioned = QueenAcceptancePolicy.pathsMentioned(in: criterion)
+                guard !mentioned.isEmpty else { continue }
+                let onDisk = mentioned.contains { path in
+                    FileManager.default.fileExists(
+                        atPath: ProjectPaths.root + "/"
+                            + QueenDelegationPolicy.normalizePath(path)
+                    )
+                }
+                guard onDisk else { continue }
+                let key = current.id.uuidString + " ‖ " + criterion
+                guard !reAskedPhantomVerdicts.contains(key) else { continue }
+                reAskedPhantomVerdicts.insert(key)
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.review.reask_fossil",
+                    "Re-asking an unmet verdict whose named file exists — the "
+                        + "verdict may be a fossil of the phantom-deletion diff "
+                        + "(#1132)",
+                    [
+                        "issue": current.issue.slug,
+                        "criterion": String(criterion.prefix(80))
+                    ]
+                )
+                unanswered.append(criterion)
+                reAskedFossils.append((criterion, .unmet))
             }
             guard !unanswered.isEmpty else {
                 TriosLogBus.shared.info(
@@ -7068,15 +7268,25 @@ final class ChatViewModel: ObservableObject {
                 )
                 continue
             }
+            // The task may have been dispatched — and its baseline captured —
+            // in an earlier process; after a restart the in-memory dictionary
+            // is empty and the registry's persisted copy is the only one
+            // left. Without this fallback the sweep handed the reviewer
+            // "(No baseline snapshot — nothing to compare.)" for a task whose
+            // baseline exists on disk, and a repeat review could not see what
+            // the worker actually started from (#1132 criterion 3).
+            let baseline = workerBaselineTrees[current.conversationId]
+                ?? current.baselineTree
             let diffText = await diffForReview(
-                baselineTree: workerBaselineTrees[current.conversationId],
+                baselineTree: baseline,
                 branch: branch,
                 ownedPaths: current.ownedPaths
             )
             let touchedFiles = await fileContentsForReview(
-                baselineTree: workerBaselineTrees[current.conversationId],
+                baselineTree: baseline,
                 ownedPaths: current.ownedPaths,
-                criteria: unanswered
+                criteria: unanswered,
+                branch: branch
             )
             let returned = await requestReviewerVerdicts(
                 for: current,
@@ -7085,6 +7295,45 @@ final class ChatViewModel: ObservableObject {
                 fileContents: touchedFiles
             )
             verdictsRequested += 1
+            // The fossil's fate, read back from the registry rather than
+            // assumed from the request (#1132 criterion 3). The reviewer was
+            // asked; the answer is whatever the task now carries. A replaced
+            // fossil and a surviving one get different, named events, so a
+            // re-ask that changed nothing cannot read as one that worked —
+            // and the verdict that ended #1130's parking is on the record
+            // with its before and after, not only in the reviewer's prose.
+            if !reAskedFossils.isEmpty,
+               let after = registry.task(forIssue: current.issue) {
+                for fossil in reAskedFossils {
+                    let now = after.criterionVerdicts[fossil.criterion]
+                    if now == nil || now == fossil.was {
+                        TriosLogBus.shared.info(
+                            .queen,
+                            "queen.review.fossil_stood",
+                            "Re-asked \(current.issue.slug); the reviewer left "
+                                + "the verdict as it was (\(fossil.was.rawValue))",
+                            [
+                                "issue": current.issue.slug,
+                                "criterion": String(fossil.criterion.prefix(80)),
+                                "verdict": fossil.was.rawValue
+                            ]
+                        )
+                    } else {
+                        TriosLogBus.shared.info(
+                            .queen,
+                            "queen.review.fossil_replaced",
+                            "Re-asked \(current.issue.slug); verdict replaced: "
+                                + "\(fossil.was.rawValue) → \(now?.rawValue ?? "?")",
+                            [
+                                "issue": current.issue.slug,
+                                "criterion": String(fossil.criterion.prefix(80)),
+                                "was": fossil.was.rawValue,
+                                "now": now?.rawValue ?? "?"
+                            ]
+                        )
+                    }
+                }
+            }
             TriosLogBus.shared.info(
                 .queen,
                 "queen.review.sweep.requested",
