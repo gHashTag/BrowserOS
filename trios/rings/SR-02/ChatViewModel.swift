@@ -1952,7 +1952,42 @@ final class ChatViewModel: ObservableObject {
                 observedTotalTokens: nil,
                 finishReason: nil)
         }
-        let runtimeConfiguration = await modelStore.runtimeConfiguration
+        var runtimeConfiguration = await modelStore.runtimeConfiguration
+        // A keyless request to a provider that needs one is a 500 already sent.
+        //
+        // The delegation path has had this guard for a while - its comment even
+        // names this exact error, "the request is doomed to a 500 'z.ai
+        // provider requires apiKey' before it is sent" - and the chat path
+        // never got it. The window is real and narrow: the keychain launch gate
+        // lowers, the first key read still comes back empty, and the warm-up
+        // needs several attempts. A message typed inside that window was built
+        // with `has_key: no`, sent anyway, and came back as an opaque provider
+        // error that blames z.ai for the app's timing.
+        //
+        // So: wait briefly for the warm-up rather than refuse outright, because
+        // this resolves on its own within seconds, and only then say something
+        // true if it has not.
+        if runtimeConfiguration.provider.requiresAPIKey,
+           (runtimeConfiguration.apiKey ?? "").isEmpty {
+            warmupProviderKey()
+            for _ in 0..<10 {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                runtimeConfiguration = await modelStore.runtimeConfiguration
+                if !(runtimeConfiguration.apiKey ?? "").isEmpty { break }
+            }
+        }
+        if runtimeConfiguration.provider.requiresAPIKey,
+           (runtimeConfiguration.apiKey ?? "").isEmpty {
+            TriosLogBus.shared.error(
+                .chat, "chat.send.no_key",
+                "Refusing to send to \(runtimeConfiguration.provider.rawValue) without a key: "
+                    + "the keychain has not answered yet.",
+                ["provider": runtimeConfiguration.provider.rawValue]
+            )
+            throw ChatViewModelError.providerKeyUnavailable(
+                provider: runtimeConfiguration.provider.displayName
+            )
+        }
         guard let requestBody = try? ChatRequestBuilder(
             conversationId: conversationId,
             message: text,
@@ -2222,8 +2257,26 @@ final class ChatViewModel: ObservableObject {
             .joined(separator: "\n")
     }
 
-    private enum ChatViewModelError: Error {
+    private enum ChatViewModelError: Error, LocalizedError {
         case requestBuildFailed
+        /// The provider needs a key and the keychain has not produced one yet.
+        ///
+        /// Its own case rather than a generic failure, because the user-visible
+        /// difference matters: "z.ai provider requires apiKey" coming back as a
+        /// 500 reads as a broken provider or a missing key, and the truth is
+        /// that the key exists and the keychain was still waking up.
+        case providerKeyUnavailable(provider: String)
+
+        var errorDescription: String? {
+            switch self {
+            case .requestBuildFailed:
+                return "The request could not be built."
+            case .providerKeyUnavailable(let provider):
+                return "The \(provider) key is stored but the keychain has not "
+                    + "released it yet. Nothing was sent. Try again in a moment - "
+                    + "this clears itself once the first read succeeds."
+            }
+        }
     }
 
     func cancelStreaming() {
@@ -8484,6 +8537,72 @@ final class ChatViewModel: ObservableObject {
             )
         }
         registry.pruneArchive()
+    }
+
+    /// Seals a task's verdicts against the boundary state they were carved
+    /// from (#1131).
+    ///
+    /// Called at every moment verdicts are recorded — the evidence pass, the
+    /// reviewer's answer, a verdict recorded by hand — so the fingerprint and
+    /// the verdicts share one instant. Only the task's `ownedPaths` are
+    /// hashed, so the Queen's own state writes cannot age a verdict.
+    ///
+    /// A re-seal starts from nothing: the binding from an earlier recording
+    /// is cleared first, so verdicts recorded now are never silently
+    /// presented as checked against an older tree. If the fingerprint then
+    /// cannot be computed (git refused to stage or write the tree), the
+    /// binding stays missing — which reads as "missing, not stale" at
+    /// acceptance (#1131 criterion 3), never as a freshness it did not earn.
+    ///
+    /// The closing assertion is #1131 criterion 4: if the write below is
+    /// removed or bypassed, `queen.assertion.fingerprint_not_recorded` fires
+    /// in the journal — verdicts recorded without a state binding make the
+    /// staleness check blind, and the blindness is named rather than passed
+    /// silently. That is the sense in which "the check breaks if you remove
+    /// the fingerprint recording."
+    private func sealVerdictsWithBoundaryState(_ task: DelegatedTask) async {
+        // An empty boundary has nothing to fingerprint. nil is "missing,"
+        // not "stale" — the verdicts stand as they were (#1131 criterion 3).
+        guard !task.ownedPaths.isEmpty else { return }
+        // Clear the earlier binding before computing the new one: verdicts
+        // recorded now must not inherit the tree an earlier recording was
+        // sealed against — especially not through a failed computation.
+        verdictTreeStates.removeValue(forKey: task.id)
+        let snapshot = await QueenBranchCommitter.fingerprintBoundary(
+            ownedPaths: task.ownedPaths
+        )
+        guard let snapshot else {
+            // A distinct, named case (#1131): git could not produce the
+            // tree. This is not the removed-write regression below — the
+            // write ran and had nothing to write. The binding stays
+            // missing, which acceptance reads as "missing ≠ stale".
+            TriosLogBus.shared.warn(
+                .queen, "queen.review.fingerprint_unavailable",
+                "Boundary fingerprint could not be computed; verdicts are recorded without a state binding",
+                [
+                    "issue": task.issue.slug,
+                    "owned_paths": task.ownedPaths.joined(separator: ", ")
+                ]
+            )
+            return
+        }
+        verdictTreeStates[task.id] = snapshot
+        // Regression guard (#1131 criterion 4): a snapshot existed, yet the
+        // binding is missing — the write above was removed or bypassed.
+        // Without the binding, `isStale` answers false for every verdict
+        // and the gate can never block on moved code, which is exactly the
+        // original defect: the mechanism written, the wiring gone, every
+        // acceptance passing on a check that cannot fire.
+        if verdictTreeStates[task.id] == nil {
+            TriosLogBus.shared.warn(
+                .queen, "queen.assertion.fingerprint_not_recorded",
+                "Verdicts were recorded but no state fingerprint was bound — the staleness check is blind. If the write in sealVerdictsWithBoundaryState was removed or bypassed, this is that break (#1131 criterion 4).",
+                [
+                    "issue": task.issue.slug,
+                    "owned_paths": task.ownedPaths.joined(separator: ", ")
+                ]
+            )
+        }
     }
 
     /// Records what was found when one acceptance criterion was checked.
