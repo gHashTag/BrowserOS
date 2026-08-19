@@ -51,6 +51,48 @@ enum QueenWorktree {
     /// Pure so the decision can be driven without a repository. `mergeBase` is
     /// the merge-base of the branch and HEAD; `head` is HEAD. They are equal
     /// exactly when the branch already contains everything HEAD does.
+    /// Where a worker should actually stand inside its worktree.
+    ///
+    /// A worktree is a checkout of the *repository*, and this project is a
+    /// directory inside it: the repository root is `BrowserOS`, the project is
+    /// `BrowserOS/trios`. The worker was given the worktree root as its working
+    /// directory, so a boundary written `docs/counter-negative.md` - which is
+    /// project-relative, and correct in the no-worktree case where the working
+    /// directory IS the project - resolved one level too high, and the bee
+    /// created `<worktree>/docs/counter-negative.md`.
+    ///
+    /// It then did exactly what it was told and got nothing for it. The
+    /// committer stages repository-relative paths, so it asked git for
+    /// `trios/docs/counter-negative.md`, which does not exist in that worktree,
+    /// staged nothing, and recorded "The worker changed no files" - the
+    /// commonest real failure in the release registry, on tasks whose files
+    /// were sitting right there, written correctly, one directory up.
+    ///
+    /// The invariant this restores: a worker's working directory is the project
+    /// root, whichever checkout that project is in. Then a boundary means the
+    /// same thing in both modes, and the committer's frame and the worker's
+    /// frame are the same frame.
+    static func workerDirectory(
+        worktreePath: String,
+        projectRoot: String,
+        repositoryRoot: String
+    ) -> String {
+        let root = normalized(repositoryRoot)
+        let project = normalized(projectRoot)
+        // The project is the repository, or is not inside it at all: the
+        // worktree root is already the right place to stand.
+        guard project.hasPrefix(root + "/"), project != root else {
+            return worktreePath
+        }
+        let prefix = String(project.dropFirst(root.count + 1))
+        guard !prefix.isEmpty else { return worktreePath }
+        return normalized(worktreePath) + "/" + prefix
+    }
+
+    private static func normalized(_ path: String) -> String {
+        path.hasSuffix("/") ? String(path.dropLast()) : path
+    }
+
     static func staleBranchReason(
         branchExists: Bool,
         mergeBase: String?,

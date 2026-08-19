@@ -149,7 +149,14 @@ final class QueenWorkerRunner: ObservableObject {
             // The task's own checkout when it has one, the shared tree when it
             // does not. Anything else and the bee's edits and its branch end up
             // in different checkouts.
-            workingDirectory: task.worktreePath ?? ProjectPaths.root
+            //
+            // The PROJECT inside that checkout, not its root. A worktree is a
+            // checkout of the repository and this project is a directory inside
+            // it, so standing at the worktree root made every project-relative
+            // boundary resolve one level too high - the bee wrote
+            // `<worktree>/docs/x.md` where the committer looked for
+            // `trios/docs/x.md`, and its work was reported as no work at all.
+            workingDirectory: Self.workerWorkingDirectory(for: task)
         ).build() else {
             await finish(task: task, transcript: &transcript, failure: "Could not build the worker request.")
             return
@@ -331,11 +338,25 @@ final class QueenWorkerRunner: ObservableObject {
 
     /// The worker's standing orders. Kept separate from the briefing so the
     /// boundary survives even if a worker is re-briefed later.
+    /// Where this worker stands. See `QueenWorktree.workerDirectory`.
+    ///
+    /// Used for both the request's working directory and the sentence in the
+    /// system prompt that names it, so the bee cannot be told one root and
+    /// given another.
+    static func workerWorkingDirectory(for task: DelegatedTask) -> String {
+        guard let worktree = task.worktreePath else { return ProjectPaths.root }
+        return QueenWorktree.workerDirectory(
+            worktreePath: worktree,
+            projectRoot: ProjectPaths.root,
+            repositoryRoot: QueenBranchCommitter.repositoryRoot()
+        )
+    }
+
     static func workerSystemPrompt(for task: DelegatedTask) -> String {
         var lines = [
             "You are \(task.worker), a worker agent supervised by the Trinity Queen.",
             "You work on exactly one GitHub issue: \(task.issue.slug) (\(task.issue.url)).",
-            "The repository is \(task.worktreePath ?? ProjectPaths.root). Work only "
+            "The repository is \(Self.workerWorkingDirectory(for: task)). Work only "
                 + "inside it: other checkouts of this project exist on this machine "
                 + "and editing one of those puts your work where nobody looks for it."
                 + (task.worktreePath == nil

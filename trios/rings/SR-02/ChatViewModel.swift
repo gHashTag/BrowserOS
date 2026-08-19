@@ -5043,10 +5043,29 @@ final class ChatViewModel: ObservableObject {
             // naming none is left unchecked, so the gate still stops on the
             // questions a person has to answer and no longer stops on the ones
             // nobody needed to be asked.
-            let evidenceVerdicts = QueenAcceptancePolicy.mechanicalVerdicts(
-                criteria: task.acceptanceCriteria,
-                changedPaths: measured.map { QueenBranchCommitter.projectRelative($0) }
-            )
+            //
+            // An empty measurement is silence, not absence (#1132). A repeat
+            // run whose file a previous run already wrote changes nothing
+            // between the two snapshots, and a bee working in its own
+            // worktree never moves the shared tree at all — in both cases
+            // `measured` is empty while the criterion's file sits on disk
+            // exactly as the task asks. Recording "unmet" from that emptiness
+            // is the same false "no" the phantom deletion diff made: a
+            // comparison against a base taken after someone else's work,
+            // read as this run's failure. It kept #1130 parked on one "unmet"
+            // criterion through two worker returns while the file existed the
+            // whole time. With nothing measured, the path-naming criteria are
+            // left for the reviewer, which reads the files as they are — a
+            // missing file still comes back "unmet", from the file itself
+            // rather than from an empty diff (#1132 criterion 3).
+            let evidenceVerdicts: [String: QueenCriterionVerdict] = measured.isEmpty
+                ? [:]
+                : QueenAcceptancePolicy.mechanicalVerdicts(
+                    criteria: task.acceptanceCriteria,
+                    changedPaths: measured.map {
+                        QueenBranchCommitter.projectRelative($0)
+                    }
+                )
             for (criterion, verdict) in evidenceVerdicts {
                 registry.recordVerdict(taskID: task.id, criterion: criterion, verdict: verdict)
             }
@@ -5334,6 +5353,27 @@ final class ChatViewModel: ObservableObject {
                 !tip.isEmpty && !tip.hasPrefix("fatal")
                 && !fork.isEmpty && !fork.hasPrefix("fatal")
                 && tip == fork
+            // An empty branch is not diffed at all (#1132 criterion 1). The
+            // baseline is a snapshot of the whole working tree taken when the
+            // worker started, so it can hold files a previous run wrote that
+            // the fork point never saw; diffing the two reads those files as
+            // deletions nobody performed — the phantom that made a repeat
+            // review of #1130 answer "unmet" on a file that exists. Said
+            // plainly, twice: to the journal here, and to the reviewer in the
+            // returned string, which points the verdicts at the file
+            // contents the brief already carries.
+            if branchCarriesNoCommits {
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.diff.unavailable",
+                    "Branch \(branch) has no commits of its own; there is "
+                        + "nothing to compare",
+                    ["branch": branch]
+                )
+                return "(Branch \(branch) has no commits of its own — nothing "
+                    + "to compare. This run changed nothing on the branch; "
+                    + "judge the criteria from the files as they are now.)"
+            }
             // Direction: baseline → branch tip. Files the worker added appear
             // as new (all +), files removed as deleted (all -). Reversing the
             // arguments would invert the reading: a created file would read
@@ -5359,6 +5399,14 @@ final class ChatViewModel: ObservableObject {
             // the comparison with a post-work base is restored. It cannot
             // fire on a genuine deletion: a branch that really removed a file
             // carries commits, so branchCarriesNoCommits is false here.
+            //
+            // The check does not stop at observing. A guard that logs the
+            // phantom and then hands it over anyway fired at runtime on
+            // 2026-08-19 (queen/9932) "without a single consequence": the
+            // reviewer still received the deletions and answered from them.
+            // So here the phantom is withheld — the reviewer gets the same
+            // honest message the early return gives, and removing the early
+            // return breaks this check loudly AND fails safe.
             if branchCarriesNoCommits && diff.contains("deleted file mode") {
                 let header = diff.components(separatedBy: "\n")
                     .first { $0.contains("deleted file mode") } ?? ""
@@ -5371,6 +5419,30 @@ final class ChatViewModel: ObservableObject {
                         + "work, so the comparison reads that work as removed "
                         + "(#1132)",
                     ["branch": branch, "deleted_header": header]
+                )
+                return "(Branch \(branch) has no commits of its own — nothing "
+                    + "to compare. This run changed nothing on the branch; "
+                    + "judge the criteria from the files as they are now.)"
+            }
+            // What the reviewer was handed, in the journal rather than only
+            // in the reviewer's paraphrase of it (#1132 criterion 2): the
+            // file headers of the diff, which say "new file mode" for a file
+            // the worker created and "deleted file mode" for one removed.
+            // The direction of the comparison is visible here first-hand.
+            let headers = diff.components(separatedBy: "\n")
+                .filter {
+                    $0.hasPrefix("diff --git")
+                        || $0.hasPrefix("new file mode")
+                        || $0.hasPrefix("deleted file mode")
+                        || $0.hasPrefix("rename ")
+                }
+                .joined(separator: " | ")
+            if !headers.isEmpty {
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.review.diff_summary",
+                    "Reviewer diff for \(branch): \(headers)",
+                    ["branch": branch, "headers": headers]
                 )
             }
             return diff
@@ -8105,14 +8177,37 @@ final class ChatViewModel: ObservableObject {
     /// Extracts the path-shaped token from a boundary line. The token has no
     /// spaces, contains "/" or ends in a dotted file extension, and is stripped
     /// of trailing prose punctuation (commas, semicolons, backticks, etc.).
-    private static func boundaryPathToken(from line: String) -> String? {
+    static func boundaryPathToken(from line: String) -> String? {
         for raw in line.split(separator: " ", omittingEmptySubsequences: true) {
-            let debacked = String(raw)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "`"))
-            // Strip trailing prose punctuation glued to the path end.
-            var cleaned = debacked
-            while let last = cleaned.last, ",;:!?)".contains(last) {
-                cleaned.removeLast()
+            // Strip backticks and prose punctuation from both ends, in any
+            // order, until nothing more comes off.
+            //
+            // The two passes used to be sequential - backticks first, then
+            // trailing punctuation - and that order fails on the commonest
+            // shape of all: a path in backticks followed by a comma. The
+            // trailing character is the comma, so the backtick strip does not
+            // reach the backtick; the punctuation strip then removes the comma
+            // and leaves it exposed at the end, where nothing looks again.
+            //
+            // Five of the sixty-three boundary paths in the live registries
+            // carried a trailing backtick because of it, all of them
+            // `rings/SR-02/ChatViewModel.swift` + "`". A path like that matches
+            // nothing: `git add --` does not stage it, and the boundary filter
+            // drops the worker's real edits to that file as being outside its
+            // boundary. The bee is then recorded as having produced nothing,
+            // which is the commonest failure in the registry.
+            var cleaned = String(raw)
+            var changed = true
+            while changed, !cleaned.isEmpty {
+                changed = false
+                if let first = cleaned.first, "`\"'(".contains(first) {
+                    cleaned.removeFirst()
+                    changed = true
+                }
+                if let last = cleaned.last, "`\"'.,;:!?)".contains(last) {
+                    cleaned.removeLast()
+                    changed = true
+                }
             }
             guard !cleaned.isEmpty else { continue }
             if cleaned.contains("/")

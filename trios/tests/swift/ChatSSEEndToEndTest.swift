@@ -361,6 +361,8 @@ struct ChatSSEEndToEndTests {
         ("runABeeIsNotSentAtTheSameWallForever", { await runABeeIsNotSentAtTheSameWallForever() }),
         ("runAJudgedTaskDoesNotWaitForAHuman", { await runAJudgedTaskDoesNotWaitForAHuman() }),
         ("runUnreadableHistoryIsNotOverwritten", { await runUnreadableHistoryIsNotOverwritten() }),
+        ("runABeeStandsInTheProjectNotTheRepository", { await runABeeStandsInTheProjectNotTheRepository() }),
+        ("runABoundaryPathIsAPathNotProse", { await runABoundaryPathIsAPathNotProse() }),
     ]
 
     static func main() async {
@@ -7932,6 +7934,118 @@ struct ChatSSEEndToEndTests {
     /// Red is not the Queen's to fix. The bee that opened the pull request is
     /// woken with the names of the failing checks and works on the same branch
     /// until the gate is green.
+    // MARK: - Scenario: a boundary path is a path, not prose
+
+    /// Five of the sixty-three boundary paths in the live registries carried a
+    /// trailing backtick - all of them `rings/SR-02/ChatViewModel.swift` with
+    /// one stuck to the end. A path like that matches nothing: `git add --`
+    /// will not stage it, and the boundary filter drops the worker\'s real
+    /// edits to that file as being outside its own boundary. The bee is then
+    /// recorded as having produced nothing, which is the commonest failure in
+    /// the registry.
+    ///
+    /// The cause was the order of two cleanups. Backticks were stripped from
+    /// both ends first, then trailing prose punctuation - and the commonest
+    /// shape of all is a backticked path followed by a comma, where the
+    /// trailing character is the comma, so the backtick strip never reaches the
+    /// backtick and the punctuation strip then leaves it exposed at the end.
+    static func runABoundaryPathIsAPathNotProse() async {
+        print("\n# Scenario: a boundary path is a path, not prose")
+
+        typealias V = ChatViewModel
+        let path = "rings/SR-02/ChatViewModel.swift"
+
+        check(V.boundaryPathToken(from: path) == path, "a bare path is taken as it is")
+        check(
+            V.boundaryPathToken(from: "`\(path)`") == path,
+            "backticks around a path come off"
+        )
+        // The shape that produced all five corrupted entries.
+        check(
+            V.boundaryPathToken(from: "`\(path)`, see notes") == path,
+            "a backticked path followed by a comma loses both, in either order"
+        )
+        check(
+            V.boundaryPathToken(from: "`\(path)`.") == path,
+            "and followed by a full stop"
+        )
+        check(
+            V.boundaryPathToken(from: "(`\(path)`);") == path,
+            "and wrapped in brackets with a semicolon after it"
+        )
+        check(
+            V.boundaryPathToken(from: "\"\(path)\",") == path,
+            "quotes are prose punctuation too"
+        )
+        check(
+            V.boundaryPathToken(from: "see \(path) for the detail") == path,
+            "the path is picked out of a sentence rather than the sentence being taken"
+        )
+        check(
+            V.boundaryPathToken(from: "no path on this line at all") == nil,
+            "a line with no path yields none rather than a plausible word"
+        )
+    }
+
+    // MARK: - Scenario: a bee stands in the project, not the repository
+
+    /// The commonest real failure in the release registry was `producedNothing`
+    /// - two turns, ten to sixteen tool calls, zero committed files - on tasks
+    /// whose file was sitting in the worktree, written correctly, one directory
+    /// up from where the committer looked.
+    ///
+    /// A worktree is a checkout of the *repository*. This project is a
+    /// directory inside it: the repository root is `BrowserOS`, the project is
+    /// `BrowserOS/trios`. The worker was given the worktree root as its working
+    /// directory, so the boundary `docs/counter-negative.md` - project-relative,
+    /// and correct in the no-worktree case where the working directory IS the
+    /// project - resolved to `<worktree>/docs/counter-negative.md`. The
+    /// committer stages repository-relative paths, so it asked git for
+    /// `trios/docs/counter-negative.md`, matched nothing, and reported that the
+    /// worker had changed no files.
+    ///
+    /// Proven at the time by dry run, which mutates nothing:
+    ///   git add --dry-run -- docs/counter-negative.md        -> add \'docs/...\'
+    ///   git add --dry-run -- trios/docs/counter-negative.md  -> fatal: pathspec
+    static func runABeeStandsInTheProjectNotTheRepository() async {
+        print("\n# Scenario: a bee stands in the project, not the repository")
+
+        typealias W = QueenWorktree
+
+        check(
+            W.workerDirectory(
+                worktreePath: "/r/trios/.worktrees/dev/queen-1153",
+                projectRoot: "/r/trios",
+                repositoryRoot: "/r"
+            ) == "/r/trios/.worktrees/dev/queen-1153/trios",
+            "a worker stands in the project inside its worktree, not at the worktree root"
+        )
+        check(
+            W.workerDirectory(
+                worktreePath: "/r/.worktrees/x", projectRoot: "/r", repositoryRoot: "/r"
+            ) == "/r/.worktrees/x",
+            "when the project IS the repository there is no subdirectory to descend into"
+        )
+        check(
+            W.workerDirectory(
+                worktreePath: "/r/w", projectRoot: "/elsewhere/trios", repositoryRoot: "/r"
+            ) == "/r/w",
+            "a project outside the repository cannot be located inside its worktree"
+        )
+        check(
+            W.workerDirectory(
+                worktreePath: "/r/w/", projectRoot: "/r/trios/", repositoryRoot: "/r/"
+            ) == "/r/w/trios",
+            "trailing separators do not produce a doubled one"
+        )
+        check(
+            W.workerDirectory(
+                worktreePath: "/r/w", projectRoot: "/r/a/b", repositoryRoot: "/r"
+            ) == "/r/w/a/b",
+            "a project nested more than one level deep keeps its whole prefix"
+        )
+    }
+
     // MARK: - Scenario: unreadable history is not overwritten
 
     /// Sixteen conversations in the release store cannot be decrypted. The
