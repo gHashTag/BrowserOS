@@ -479,6 +479,47 @@ enum QueenDelegationPolicy {
         }
     }
 
+    /// A queued task that was never dispatched, and how long it has sat.
+    ///
+    /// Nothing in the system ever looked at `queued`. `reapStalledWorkers`
+    /// handles `running`; a task that was created and whose dispatch then
+    /// failed - no runner, no key, no capacity - simply stays queued.
+    ///
+    /// That is not idle, it is a deadlock. A queued task holds its file
+    /// boundary, so its OWN issue can never be chosen again: the Queen
+    /// considers the issue, finds a live task owning exactly those paths, and
+    /// reports "its files are owned by a live task" - which is true, and the
+    /// live task is the one she opened for that same issue. Four issues were
+    /// frozen this way, including the two that begin the T27 migration, and the
+    /// log read "all 26 candidates look already done".
+    ///
+    /// "Never dispatched" is read from the runner's own record rather than from
+    /// elapsed time alone: a stream that opened leaves `streamOutcome` set, and
+    /// a turn that completed leaves `completedTurns`. Neither means the runner
+    /// never took it.
+    static func staleQueuedReason(
+        state: DelegatedTaskState,
+        createdAt: Date,
+        streamOutcome: WorkerStreamOutcome?,
+        completedTurns: Int?,
+        now: Date = Date(),
+        after: TimeInterval = queuedDispatchGrace
+    ) -> String? {
+        guard state == .queued else { return nil }
+        guard streamOutcome == nil, (completedTurns ?? 0) == 0 else { return nil }
+        let waited = now.timeIntervalSince(createdAt)
+        guard waited >= after else { return nil }
+        let minutes = Int(waited / 60)
+        return "queued for \(minutes) minute(s) with no turn ever opened, so the "
+            + "dispatch did not happen; it holds its boundary and blocks its own issue"
+    }
+
+    /// How long a queued task may wait before it is treated as undispatched.
+    ///
+    /// Ten minutes: two autonomy ticks. One tick could be a slot that was full
+    /// at that moment, which is ordinary backpressure and not a failure.
+    static let queuedDispatchGrace: TimeInterval = 600
+
     static func normalizePath(_ path: String) -> String {
         var value = path.trimmingCharacters(in: .whitespacesAndNewlines)
         while value.hasPrefix("./") { value.removeFirst(2) }

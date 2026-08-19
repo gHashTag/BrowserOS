@@ -449,6 +449,22 @@ final class ChatViewModel: ObservableObject {
                 try? lines.joined(separator: "\n")
                     .write(to: dumpFile, atomically: true, encoding: .utf8)
             }
+            // #1132 criterion 4, driven: when TRIOS_E2E_DRILL_1132=1, run
+            // the empty-branch deletion drill once at startup. A guard that
+            // has never fired is a claim, not a check — the assertion inside
+            // diffForReview sat behind the empty-branch early return and had
+            // never once been evaluated against a real diff. The drill
+            // restores exactly the comparison the old code made — a base
+            // taken after someone else's work against an empty branch — on
+            // real repository history, expects the phantom deletions to
+            // appear, expects the check to fire on them, and expects the
+            // shipped path to refuse the empty branch anyway. Its verdict
+            // lands in the journal (queen.drill.empty_branch_deletion.*),
+            // so the proof is a run, not a comment. Env-gated so it costs
+            // nothing unless asked for.
+            if ProcessInfo.processInfo.environment["TRIOS_E2E_DRILL_1132"] == "1" {
+                await runEmptyBranchDeletionDrill()
+            }
             await checkHealth()
             let skipA2AStartup = ProcessInfo.processInfo.environment[
                 "TRIOS_SKIP_A2A_STARTUP"
@@ -5428,6 +5444,47 @@ final class ChatViewModel: ObservableObject {
             // returned string, which points the verdicts at the file
             // contents the brief already carries.
             if branchCarriesNoCommits {
+                // The check, run live on every empty branch rather than held
+                // in reserve (#1132 criterion 4). The comparison the old code
+                // made — the post-work baseline against this empty branch,
+                // scoped to the owned paths exactly as the reviewer's diff
+                // would have been — is produced here so the guard's condition
+                // is evaluated against a real diff, not only in the world
+                // where someone deletes the early return below. When the
+                // baseline holds a boundary file the fork point never saw,
+                // that diff shows the file as deleted: the phantom that made
+                // a repeat review of #1130 answer "unmet" on a file that
+                // exists. The check fires — named, in the journal — and the
+                // phantom is still withheld: firing is the point, handing it
+                // to the reviewer never is. Restoring the old comparison as
+                // the reviewer's diff breaks exactly here, loudly.
+                var probeArgs = ["diff", baselineTree, branchTree]
+                if !ownedPaths.isEmpty {
+                    probeArgs.append("--")
+                    probeArgs.append(contentsOf: ownedPaths.map {
+                        QueenDelegationPolicy.normalizePath($0)
+                    })
+                }
+                let withheld = QueenStatusViewModel.runProcess(
+                    "/usr/bin/git",
+                    arguments: probeArgs,
+                    workDir: ProjectPaths.root,
+                    timeout: 30
+                )
+                if withheld.contains("deleted file mode") {
+                    let header = withheld.components(separatedBy: "\n")
+                        .first { $0.contains("deleted file mode") } ?? ""
+                    TriosLogBus.shared.warn(
+                        .queen,
+                        "queen.assertion.empty_branch_deletions",
+                        "The comparison the old code made — the post-work "
+                            + "baseline against the empty branch \(branch) — "
+                            + "shows deletions nobody made: \(header). The "
+                            + "check fires; the reviewer still gets nothing "
+                            + "to compare (#1132)",
+                        ["branch": branch, "deleted_header": header]
+                    )
+                }
                 TriosLogBus.shared.info(
                     .queen,
                     "queen.diff.unavailable",
@@ -5512,6 +5569,266 @@ final class ChatViewModel: ObservableObject {
             }
             return diff
         }.value
+    }
+
+    // MARK: - #1132 drill
+
+    /// Drives the #1132 check from the failing side (#1132 criterion 4).
+    ///
+    /// The defect: a repeat run's branch is empty — no commits of its own —
+    /// while the baseline, snapshotted when the worker started, already
+    /// holds a file a previous run wrote. Diffing the two reads that file as
+    /// deleted, and the reviewer answered "unmet" twice on a file that
+    /// exists (#1130's repeat). The fix refuses to diff an empty branch at
+    /// all. A guard proving that refusal had never fired once, and an
+    /// unproven guard is a claim — so this drill restores the comparison on
+    /// real repository history, where every ingredient is genuine:
+    ///
+    /// 1. **The phantom reproduces.** It takes the most recent commit that
+    ///    added a source file, stands "an empty branch" on the state before
+    ///    that commit, and uses HEAD's tree as the base *taken after
+    ///    someone else's work* — exactly what a dispatch-time snapshot is
+    ///    when earlier runs have landed since the fork. The old comparison,
+    ///    `git diff <post-work base> <empty branch tree>` scoped to that
+    ///    file, must show `deleted file mode`. If it does not, the drill is
+    ///    broken and says so; it does not pass by failing quietly.
+    ///
+    /// 2. **The check fires.** The same condition the live probe inside
+    ///    `diffForReview` evaluates — an empty branch whose old comparison
+    ///    carries deletions — fires `queen.assertion.empty_branch_deletions`
+    ///    here, on the record, with the phantom's header named.
+    ///
+    /// 3. **The shipped path holds.** A real empty branch among `queen/*`
+    ///    (tip equal to its merge-base with HEAD — the same test
+    ///    `diffForReview` applies) is handed to `diffForReview` with the
+    ///    post-work base. It must answer "no commits of its own — nothing to
+    ///    compare" and must not contain a deletions diff. The live probe
+    ///    inside fires too when that branch's fork predates the file's
+    ///    arrival; the verdict records whether it did.
+    ///
+    /// Everything the drill does to git is read-only: rev-parse, merge-base,
+    /// diff, for-each-ref. No branch is created, moved, or deleted. Gated
+    /// behind `TRIOS_E2E_DRILL_1132` (see the init task) so a normal launch
+    /// never pays for it.
+    private func runEmptyBranchDeletionDrill() async {
+        // The scenario, resolved against the real repository. A tuple of
+        // Sendable values so it can cross out of the detached task.
+        typealias Scenario = (
+            file: String,               // a file someone else's work added
+            addedBy: String,            // the commit that added it
+            postWorkBase: String,       // HEAD's tree: the base taken after
+            emptyBranch: String,        // a real queen/* branch, tip == fork
+            phantomHeader: String,      // the phantom's own header line
+            liveProbeFires: Bool        // would the in-function probe fire?
+        )
+        let scenario: Scenario? = await Task.detached(priority: .utility) { () -> Scenario? in
+            // The drill's git runs from the REPOSITORY root, unlike
+            // diffForReview's project root: the paths `git log --name-only`
+            // yields are repository-relative, and a pathspec is interpreted
+            // relative to the working directory — `trios/docs/x.md` from
+            // inside `trios/` matches nothing, and the phantom quietly
+            // fails to reproduce. The frame a path arrives in and the frame
+            // it is spent in must agree (#1132).
+            let repoRoot = QueenBranchCommitter.repositoryRoot()
+            func git(_ args: [String], timeout: TimeInterval = 15) -> String {
+                QueenStatusViewModel.runProcess(
+                    "/usr/bin/git", arguments: args, workDir: repoRoot, timeout: timeout
+                ).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+
+            // ── 1. The phantom reproduces ────────────────────────────────
+            //
+            // The newest commit that added a file which still exists at
+            // HEAD. Dot-paths (.trinity*, .worktrees, state churn) and tmp/
+            // are not work; the drill stands on a real source file so the
+            // "deletion" it is about to show is undeniable.
+            let logOutput = git(
+                ["log", "--diff-filter=A", "-n", "40", "--format=%H", "--name-only", "HEAD"],
+                timeout: 30
+            )
+            var currentSHA = ""
+            var candidate: (sha: String, file: String)?
+            outer: for rawLine in logOutput.components(separatedBy: "\n") {
+                let line = rawLine.trimmingCharacters(in: .whitespaces)
+                if line.isEmpty { continue }
+                if line.count == 40, line.allSatisfy({ $0.isHexDigit }) {
+                    currentSHA = line
+                    continue
+                }
+                guard !currentSHA.isEmpty else { continue }
+                guard !line.hasPrefix("."), !line.hasPrefix("tmp/") else { continue }
+                // The file must still exist at HEAD: if the comparison is
+                // to show it "deleted", the deletion can only come from the
+                // comparison, not from a file that is genuinely gone.
+                let exists = git(["rev-parse", "HEAD:\(line)"])
+                guard !exists.isEmpty, !exists.hasPrefix("fatal") else { continue }
+                // An empty branch needs somewhere to stand: the commit's
+                // parent. A root commit has none; keep looking.
+                let parent = git(["rev-parse", "\(currentSHA)^"])
+                guard !parent.isEmpty, !parent.hasPrefix("fatal") else { continue }
+                candidate = (currentSHA, line)
+                break outer
+            }
+            guard let found = candidate else {
+                TriosLogBus.shared.error(
+                    .queen,
+                    "queen.drill.empty_branch_deletion.failed",
+                    "Could not find a recent commit that added a surviving "
+                        + "source file — the drill has nothing to stand on "
+                        + "and refuses to pass (#1132)",
+                    ["log_head": String(logOutput.prefix(120))]
+                )
+                return nil
+            }
+            // The tree an empty branch cut BEFORE that work would carry:
+            // the parent's tree, not the commit's own (which already holds
+            // the file — diffing HEAD against it shows nothing, and the
+            // first drill run failed on exactly that mistake, loudly, as
+            // designed).
+            let parent = git(["rev-parse", "\(found.sha)^"])
+            let parentTree = git(["rev-parse", "\(parent)^{tree}"])
+            let postWorkBase = git(["rev-parse", "HEAD^{tree}"])
+            guard !parentTree.isEmpty, !parentTree.hasPrefix("fatal"),
+                  !postWorkBase.isEmpty, !postWorkBase.hasPrefix("fatal") else {
+                TriosLogBus.shared.error(
+                    .queen,
+                    "queen.drill.empty_branch_deletion.failed",
+                    "Could not resolve the trees the drill compares "
+                        + "(parent \(parentTree.prefix(12)), base \(postWorkBase.prefix(12))) (#1132)",
+                    ["file": found.file]
+                )
+                return nil
+            }
+            // The old comparison itself: post-work base → empty branch,
+            // scoped to the owned file, exactly as the reviewer's diff was.
+            let oldComparison = git(
+                ["diff", "--no-color", postWorkBase, parentTree, "--", found.file],
+                timeout: 30
+            )
+            guard let phantomHeader = oldComparison.components(separatedBy: "\n")
+                .first(where: { $0.contains("deleted file mode") }) else {
+                TriosLogBus.shared.error(
+                    .queen,
+                    "queen.drill.empty_branch_deletion.failed",
+                    "The restored comparison did not show the phantom: "
+                        + "\(found.file) at HEAD vs an empty branch before "
+                        + "its arrival produced no 'deleted file mode'. The "
+                        + "drill is broken, not green (#1132)",
+                    ["file": found.file, "diff_head": String(oldComparison.prefix(160))]
+                )
+                return nil
+            }
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.drill.empty_branch_deletion.started",
+                "Standing on \(found.file), added by \(found.sha.prefix(8)) "
+                    + "— an empty branch at its parent against HEAD's tree, "
+                    + "a base taken after someone else's work (#1132)",
+                ["file": found.file, "added_by": String(found.sha.prefix(8))]
+            )
+
+            // ── 2. The check fires ───────────────────────────────────────
+            //
+            // The same condition the live probe evaluates, driven here on
+            // the restored comparison so the event exists on the record
+            // even before any real empty-branch review meets a phantom.
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.assertion.empty_branch_deletions",
+                "drill: the comparison with a post-work base restored — "
+                    + "an empty branch diffed against work that landed after "
+                    + "its fork — shows deletions nobody made: "
+                    + "\(phantomHeader) (#1132)",
+                [
+                    "drill": "1132",
+                    "file": found.file,
+                    "deleted_header": phantomHeader
+                ]
+            )
+
+            // ── 3. A real empty branch for the shipped path ──────────────
+            //
+            // Prefer one whose fork predates the file's arrival, so the
+            // live probe inside diffForReview fires on this very call; take
+            // any empty branch if none qualifies. fork predates the add
+            // exactly when merge-base(fork, add) == fork.
+            let refs = git(["for-each-ref", "refs/heads/queen", "--format=%(refname:short)"])
+                .components(separatedBy: "\n")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+            var emptyBranch = ""
+            var liveProbeFires = false
+            for ref in refs {
+                let tip = git(["rev-parse", "--verify", ref])
+                guard !tip.isEmpty, !tip.hasPrefix("fatal") else { continue }
+                let fork = git(["merge-base", ref, "HEAD"])
+                guard !fork.isEmpty, !fork.hasPrefix("fatal"), tip == fork else { continue }
+                let qualifies = git(["merge-base", fork, found.sha]) == fork
+                let tipTree = git(["rev-parse", "\(ref)^{tree}"])
+                let wouldFire = git(
+                    ["diff", "--no-color", postWorkBase, tipTree, "--", found.file],
+                    timeout: 30
+                ).contains("deleted file mode")
+                if wouldFire && qualifies {
+                    emptyBranch = ref
+                    liveProbeFires = true
+                    break
+                }
+                if emptyBranch.isEmpty {
+                    emptyBranch = ref
+                    liveProbeFires = wouldFire
+                }
+            }
+            guard !emptyBranch.isEmpty else {
+                TriosLogBus.shared.error(
+                    .queen,
+                    "queen.drill.empty_branch_deletion.failed",
+                    "No empty queen/* branch exists to exercise the shipped "
+                        + "path with — the drill refuses to pass without one "
+                        + "(#1132)",
+                    [:]
+                )
+                return nil
+            }
+            return (found.file, found.sha, postWorkBase, emptyBranch, phantomHeader, liveProbeFires)
+        }.value
+        guard let scenario else { return }
+
+        // The shipped path, on the same kind of pair: a base taken after
+        // someone else's work, a branch with no commits of its own, the
+        // drill's file as the owned path — in the project-relative frame
+        // diffForReview expects for owned paths.
+        let shipped = await diffForReview(
+            baselineTree: scenario.postWorkBase,
+            branch: scenario.emptyBranch,
+            ownedPaths: [QueenBranchCommitter.projectRelative(scenario.file)]
+        )
+        let refused = shipped.contains("no commits of its own")
+        let clean = !shipped.contains("deleted file mode")
+        if refused && clean {
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.drill.empty_branch_deletion.passed",
+                "The check fired on the restored comparison and the shipped "
+                    + "path refused the empty branch \(scenario.emptyBranch): "
+                    + "\(shipped.prefix(120)) (#1132)",
+                [
+                    "file": scenario.file,
+                    "branch": scenario.emptyBranch,
+                    "live_probe_fired": scenario.liveProbeFires ? "true" : "false",
+                    "deleted_header": scenario.phantomHeader
+                ]
+            )
+        } else {
+            TriosLogBus.shared.error(
+                .queen,
+                "queen.drill.empty_branch_deletion.failed",
+                "The shipped path did not refuse the empty branch "
+                    + "\(scenario.emptyBranch): refused=\(refused), "
+                    + "carries deletions=\(!clean) — \(shipped.prefix(160)) (#1132)",
+                ["file": scenario.file, "branch": scenario.emptyBranch]
+            )
+        }
     }
 
     /// The full contents of files the reviewer needs, read from the working
@@ -7853,6 +8170,7 @@ final class ChatViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: delay)
                 guard !Task.isCancelled, let self else { break }
                 delay = Self.queenAutonomyInterval
+                await self.reapUndispatchedTasks()
                 await self.queenAutonomyTick()
             }
         }
@@ -7966,6 +8284,39 @@ final class ChatViewModel: ObservableObject {
             if correction.needsOperator { out.append((task, correction)) }
         }
         return out
+    }
+
+    /// Cancels queued tasks whose dispatch never happened.
+    ///
+    /// A queued task holds its file boundary, so until it is settled its own
+    /// issue can never be chosen again - the Queen looks at the issue, finds a
+    /// live task owning exactly those paths, and refuses. Four issues were
+    /// frozen that way, two of them the start of the T27 migration, while the
+    /// log said "all 26 candidates look already done".
+    ///
+    /// Cancelled rather than failed: nobody failed. The dispatch did not
+    /// happen, and `cancelled` is the state that says so without accusing a
+    /// worker that never ran.
+    func reapUndispatchedTasks() async {
+        let registry = delegationRegistry
+        for task in registry.tasks {
+            guard let reason = QueenDelegationPolicy.staleQueuedReason(
+                state: task.state,
+                createdAt: task.createdAt,
+                streamOutcome: task.streamOutcome,
+                completedTurns: task.completedTurns
+            ) else { continue }
+            guard registry.transition(taskID: task.id, to: .cancelled) else { continue }
+            TriosLogBus.shared.warn(
+                .queen, "queen.task.undispatched",
+                "\(task.issue.slug) cancelled: \(reason)",
+                ["issue": task.issue.slug]
+            )
+            await appendSystemMessageToQueenChat(
+                SystemNoticeClassifier.warningMarker
+                    + "\(task.issue.slug): \(reason). Its issue is choosable again."
+            )
+        }
     }
 
     /// Says out loud where the record and the repository disagree.

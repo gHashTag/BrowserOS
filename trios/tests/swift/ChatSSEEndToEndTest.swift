@@ -370,6 +370,7 @@ struct ChatSSEEndToEndTests {
         ("runTheRecordIsComparedAgainstTheRepository", { await runTheRecordIsComparedAgainstTheRepository() }),
         ("runSheProposesAndWaitsForAWord", { await runSheProposesAndWaitsForAWord() }),
         ("runApplyingAProposalActuallyMovesTheRecord", { await runApplyingAProposalActuallyMovesTheRecord() }),
+        ("runAQueuedTaskDoesNotBlockItsOwnIssue", { await runAQueuedTaskDoesNotBlockItsOwnIssue() }),
     ]
 
     static func main() async {
@@ -7970,6 +7971,96 @@ struct ChatSSEEndToEndTests {
     /// Red is not the Queen's to fix. The bee that opened the pull request is
     /// woken with the names of the failing checks and works on the same branch
     /// until the gate is green.
+    // MARK: - Scenario: a queued task does not block its own issue forever
+
+    /// She was completely blocked and said so in the most reassuring possible
+    /// words: "all 26 candidates look already done". Almost every refusal was
+    /// `boundary_taken` - "its files are owned by a live task" - and the live
+    /// task owning them was, in four cases, the one she had opened for that
+    /// same issue.
+    ///
+    /// A task whose dispatch failed stays `queued`. Nothing ever looked at
+    /// `queued`: `reapStalledWorkers` handles `running`, and a task that was
+    /// created and never started simply holds its boundary forever. Its own
+    /// issue then cannot be chosen again, which is a deadlock, not idleness.
+    /// Two of the four were the start of the T27 migration.
+    static func runAQueuedTaskDoesNotBlockItsOwnIssue() async {
+        print("\n# Scenario: a queued task does not block its own issue forever")
+
+        typealias P = QueenDelegationPolicy
+        let now = Date()
+        let old = now.addingTimeInterval(-3600)
+
+        check(
+            P.staleQueuedReason(
+                state: .queued, createdAt: old, streamOutcome: nil, completedTurns: nil,
+                now: now
+            ) != nil,
+            "an hour queued with no turn ever opened is a dispatch that did not happen"
+        )
+        check(
+            P.staleQueuedReason(
+                state: .queued, createdAt: now.addingTimeInterval(-60),
+                streamOutcome: nil, completedTurns: nil, now: now
+            ) == nil,
+            "a minute is ordinary backpressure - a slot that was full - not a failure"
+        )
+
+        // "Never dispatched" is read from the runner's record, not from the
+        // clock. A worker that opened a stream took the task, whatever state
+        // the registry happens to show.
+        check(
+            P.staleQueuedReason(
+                state: .queued, createdAt: old, streamOutcome: .open, completedTurns: nil,
+                now: now
+            ) == nil,
+            "a stream that opened means the runner took it, however long ago"
+        )
+        check(
+            P.staleQueuedReason(
+                state: .queued, createdAt: old, streamOutcome: nil, completedTurns: 1,
+                now: now
+            ) == nil,
+            "and so does a completed turn"
+        )
+        check(
+            P.staleQueuedReason(
+                state: .running, createdAt: old, streamOutcome: nil, completedTurns: nil,
+                now: now
+            ) == nil,
+            "only queued tasks are reaped here - running ones belong to the stall reaper"
+        )
+
+        guard let reason = P.staleQueuedReason(
+            state: .queued, createdAt: old, streamOutcome: nil, completedTurns: nil, now: now
+        ) else {
+            fail("expected a reason"); return
+        }
+        check(
+            reason.contains("blocks its own issue"),
+            "and the reason names the consequence, not just the age: \(reason)"
+        )
+
+        // The deadlock itself: the conflict check finds the task the Queen
+        // opened for this very issue.
+        var stuck = DelegatedTask(
+            issue: IssueReference(owner: "gHashTag", repo: "trios", number: 1284),
+            title: "Ring 01",
+            worker: "queen-swift",
+            ownedPaths: ["rings/T27-01/a2a.t27"]
+        )
+        stuck.state = .queued
+        check(
+            !P.conflictingTasks(for: ["rings/T27-01/a2a.t27"], among: [stuck]).isEmpty,
+            "a queued task does own its boundary - which is why leaving it there freezes the issue"
+        )
+        stuck.state = .cancelled
+        check(
+            P.conflictingTasks(for: ["rings/T27-01/a2a.t27"], among: [stuck]).isEmpty,
+            "and cancelling it - nobody failed, the dispatch did not happen - frees the path"
+        )
+    }
+
     // MARK: - Scenario: applying a proposal actually moves the record
 
     /// The proposal machinery was proven at the level of the decision and not
