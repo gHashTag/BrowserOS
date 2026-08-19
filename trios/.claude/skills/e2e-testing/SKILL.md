@@ -1422,3 +1422,49 @@ Separate the historical from the urgent, or the report becomes noise: eight
 rows carrying a count written before commits were recorded are not eight
 emergencies, and listing them beside three real disagreements teaches the
 reader to skip all eleven.
+
+## An assertion asked at the wrong moment passes for the wrong reason
+
+I checked "a proposal number out of range is refused by name" *after* applying
+the only proposal. With the list empty the command correctly answers
+"everything agrees" - a different sentence entirely - and the check passed
+while testing nothing.
+
+This is the fourth time in this project a check has passed for the wrong
+reason, and the shape is always the same: **the precondition the assertion
+needs was destroyed by the step before it.** Asked while the list still had
+something in it, the same check tests what it claims to.
+
+**Rule:** for any assertion about a refusal, ask what state must exist for the
+refusal to be reachable, and put the check where that state is still true. A
+refusal that is unreachable is indistinguishable from a refusal that works.
+
+## Proving the offer is not proving the effect
+
+A gate that refuses correctly and an `apply` that does nothing look identical
+from outside. The decision layer was tested - correct proposals, correct
+"waits for a word" - and the effect was not, so `apply` could have been an
+empty branch and every check would still be green.
+
+**Rule:** for a command with a side effect, read the store afterwards, not the
+message. `check(registry.task(...)?.committedFiles == 0)` survives an
+implementation that only *says* it cleared the count; `check(messages.contains
+"cleared"))` does not.
+
+**Break it the same way:** make the command announce the repair without
+performing it. If nothing goes red, the test is about the announcement.
+
+## Detection, proposal, application - three separate steps on purpose
+
+- **Detect** and say nothing else. Advancing a state from a scan is a judgement
+  about work nobody read.
+- **Propose**, numbered, with the reason in terms of the repository rather than
+  the record.
+- **Apply** only on an explicit word, and let showing and doing be different
+  words rather than a flag - a typo in a flag should not be the difference
+  between a report and an edit.
+
+The reason for the ceremony is not caution. A registry made to agree with the
+repository by construction stops being evidence about anything; the
+disagreement IS the finding, and a supervisor that quietly repairs its own past
+verdicts is worse than one that leaves a wrong number visible.
