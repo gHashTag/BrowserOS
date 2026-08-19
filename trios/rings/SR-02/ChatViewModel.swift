@@ -6996,13 +6996,23 @@ final class ChatViewModel: ObservableObject {
                 )
                 continue
             }
+            // The task may have been dispatched — and its baseline captured —
+            // in an earlier process, so the in-memory dictionary is empty here
+            // and the registry copy is the only one left. `setBaselineTree`
+            // persists the baseline for exactly this restart case, and
+            // `settleFailedWorkerEdits` already reads it with the same
+            // fallback. Without it the sweep handed the reviewer "(No baseline
+            // snapshot — nothing to compare.)" for a task whose baseline
+            // existed on disk, and a re-review could not say met (#1132).
+            let baseline = workerBaselineTrees[current.conversationId]
+                ?? current.baselineTree
             let diffText = await diffForReview(
-                baselineTree: workerBaselineTrees[current.conversationId],
+                baselineTree: baseline,
                 branch: branch,
                 ownedPaths: current.ownedPaths
             )
             let touchedFiles = await fileContentsForReview(
-                baselineTree: workerBaselineTrees[current.conversationId],
+                baselineTree: baseline,
                 ownedPaths: current.ownedPaths,
                 criteria: unanswered
             )
