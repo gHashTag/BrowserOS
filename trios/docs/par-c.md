@@ -1,7 +1,15 @@
-# File Boundaries — `par-c`
+# Parallel Work — Line C (`par-c`)
 
-1. Each source file in the Trios project owns exactly one architectural layer. A file that mixes concerns from two layers — say, presentation and infrastructure — becomes impossible to test in isolation and impossible to reason about during code review. When a new feature spans multiple layers, it must be split across multiple files rather than crammed into a single one that "works."
+Line C of the parallel split (#1090) covers the discipline of the shared checkout: how several workers, one build, and the user coexist in a single working copy without stepping on each other.
 
-2. Files must stay within a readable size. A source file longer than roughly 400 lines is a signal that responsibilities have accumulated and a split is overdue. Large files slow down navigation, make merge conflicts more likely, and hide structure that smaller files reveal at a glance. Prefer several focused files over one omnibus file, even if the omnibus file is technically valid.
+## The checkout is read-everything, write-scoped
 
-3. Naming and placement follow the onion-ring architecture: Core files live at the project root, Infrastructure files sit one level deeper, Application files above the Presentation layer, and so on. A file placed in the wrong ring breaks dependency direction and creates import cycles. When in doubt, check which layers import what — if a file in an inner ring imports from an outer ring, the boundary has been violated and the file must move.
+Every party reads the same checkout: the build reads it, the user reads it, sibling workers read it. Reading is free — gathering context from any file is always allowed, because context prevents wrong work. Writing is not: a worker may only create or edit the paths named in the boundary of its specification. Anything written outside the boundary is dropped rather than reviewed, so an out-of-bounds edit costs the worker its turn and the project nothing.
+
+## No branch ceremony in the checkout
+
+Workers do not check out task branches, do not create them, and do not commit. Attribution is the Queen's job: after a worker's turn, the Queen maps the edits to the task branch (`queen/<issue>-<line>`) and lands what survives review. The working tree stays stable for the user and the build while parallel work happens around it.
+
+## Stopping is a report, not a summary
+
+A worker stops by answering its acceptance criteria one at a time — met, not met, or could not check — and never compresses that part. An unchecked criterion is not a pass; the review reads the answers first and the diff second.
