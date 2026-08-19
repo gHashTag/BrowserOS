@@ -266,6 +266,16 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// as zero, which is correct - nothing could have returned them.
     var sendBacks: Int?
 
+    /// The commit the worker's files landed in, when any did.
+    ///
+    /// Stored beside `committedFiles` so the count has something behind it. A
+    /// number alone cannot be checked afterwards; a commit can be looked up,
+    /// and a branch that no longer holds it is a fact rather than a suspicion.
+    ///
+    /// Optional because stores written before it existed must still decode, and
+    /// because a task that committed nothing has nothing to name.
+    var committedSHA: String?
+
     /// When the runner opened this worker's stream.
     ///
     /// Time-to-first-byte is unmeasurable without it, and until it existed the
@@ -692,6 +702,15 @@ enum QueenDelegationPolicy {
     ) -> Bool {
         guard task.state == .awaitingReview else { return false }
         guard committedFiles > 0 else { return false }
+        // A count with no commit behind it is not evidence. It is true at the
+        // instant it is measured and unverifiable ever after, which is how a
+        // task came to be recorded `accepted` with `committedFiles: 1` and a
+        // branch that did not exist - nothing in the record could have caught
+        // it, because there was nothing to look for.
+        //
+        // The Queen may close her own worker's work only when she can name the
+        // commit it is in.
+        guard let sha = task.committedSHA, !sha.isEmpty else { return false }
         guard !task.ownedPaths.isEmpty else { return false }
         guard !isExpensive(task) else { return false }
         guard !task.acceptanceCriteria.isEmpty else { return false }

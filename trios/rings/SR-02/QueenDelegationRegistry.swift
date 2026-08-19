@@ -361,9 +361,25 @@ final class QueenDelegationRegistry: ObservableObject {
             .reduce(0, +)
     }
 
-    func recordCommittedFiles(taskID: UUID, count: Int) {
+    /// Records what landed and the commit it landed in.
+    ///
+    /// The commit is not decoration. A count on its own is true at the instant
+    /// it is measured and unverifiable ever after: a task was found recorded
+    /// `accepted` with `committedFiles: 1` and a branch that did not exist, and
+    /// nothing in the record could have caught it, because there was nothing to
+    /// look for. With the identity stored, "one file landed" becomes a claim
+    /// that can be checked against the repository.
+    ///
+    /// Called on the failure path too. The measurement was always taken there -
+    /// `settleFailedWorkerEdits` holds the outcome - and always discarded, so a
+    /// bee that committed real work before dying was recorded as having
+    /// produced nothing. #1282 committed 288 lines that way.
+    func recordCommittedFiles(taskID: UUID, count: Int, commit: String? = nil) {
         guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
         tasks[index].committedFiles = count
+        if let commit, !commit.isEmpty {
+            tasks[index].committedSHA = commit
+        }
         persist()
     }
 

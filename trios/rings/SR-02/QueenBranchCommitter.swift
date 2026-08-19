@@ -25,6 +25,17 @@ enum QueenBranchCommitter {
         /// second means the boundary and the task did not describe the same
         /// piece of work. Zero in every case that committed something.
         var filesOutsideBoundary: Int = 0
+        /// The commit this outcome wrote, when it wrote one.
+        ///
+        /// Until this existed, `fileCount` was a number with nothing behind it:
+        /// true at the instant it was measured and unverifiable ever after. A
+        /// task was found recorded `accepted` with `committedFiles: 1` and a
+        /// branch that did not exist, and nothing in the record could have
+        /// caught it - there was no commit to look for.
+        ///
+        /// Carrying the identity turns "she says one file landed" into "she can
+        /// name the commit it is in", which is a claim that can be checked.
+        var commit: String?
     }
 
     /// Snapshots the working tree and returns the tree object id.
@@ -489,7 +500,8 @@ enum QueenBranchCommitter {
             return Outcome(
                 committed: true,
                 summary: "Committed \(changed.count) file(s) to `\(branch)`: \(names)\(extra).",
-                fileCount: changed.count
+                fileCount: changed.count,
+                commit: commit
             )
         }.value
     }
@@ -711,10 +723,19 @@ enum QueenBranchCommitter {
                 )
             }
 
+            // Read back what the commit actually became. `git commit` does not
+            // print a usable id, and a count without the commit it belongs to
+            // is the unverifiable number this field exists to replace.
+            let (headOk, headOut) = runGitInDir(["rev-parse", "HEAD"], workDir: worktreePath)
+            let head = headOk
+                ? headOut.trimmingCharacters(in: .whitespacesAndNewlines)
+                : ""
+
             return Outcome(
                 committed: true,
                 summary: "Committed \(stagedCount) file(s) in worktree `\(worktreePath)`.",
-                fileCount: stagedCount
+                fileCount: stagedCount,
+                commit: head.isEmpty ? nil : head
             )
         }.value
     }

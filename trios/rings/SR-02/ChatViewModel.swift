@@ -4762,7 +4762,7 @@ final class ChatViewModel: ObservableObject {
                 var filesSettled = 0
                 let taskCount = remaining.count
                 while let task = remaining.popLast() {
-                    let (_, rescued) = await self.settleFailedWorkerEdits(
+                    let (_, rescued, _) = await self.settleFailedWorkerEdits(
                         task: task,
                         reason: "did not survive a restart"
                     )
@@ -4861,10 +4861,17 @@ final class ChatViewModel: ObservableObject {
     /// is never silent.
     ///
     /// Returns a human-readable summary for the Queen's notice.
+    /// Returns the commit as well, because the failure path always measured it
+    /// and always threw it away.
+    ///
+    /// A bee that commits real work and then dies was recorded as having
+    /// produced nothing - #1282 committed 288 lines that way and its record
+    /// says `committedFiles: None`. The measurement was right here the whole
+    /// time, in `outcome`, discarded by callers that took only the summary.
     private func settleFailedWorkerEdits(
         task: DelegatedTask,
         reason: String
-    ) async -> (summary: String, filesRescued: Int) {
+    ) async -> (summary: String, filesRescued: Int, commit: String?) {
         let baselineTree = workerBaselineTrees[task.conversationId] ?? task.baselineTree
         let measured = await QueenBranchCommitter.changedPaths(since: baselineTree, ownedPaths: task.ownedPaths)
         let measuredRelative = measured.map { QueenBranchCommitter.projectRelative($0) }
@@ -4877,7 +4884,7 @@ final class ChatViewModel: ObservableObject {
                 "\(task.worker) died but changed no files; the tree is clean",
                 ["issue": task.issue.slug, "worker": task.worker, "reason": reason]
             )
-            return ("\(task.worker) changed no files before it stopped.", 0)
+            return ("\(task.worker) changed no files before it stopped.", 0, nil)
         }
 
         guard let branch = task.virtualBranch else {
@@ -4899,7 +4906,7 @@ final class ChatViewModel: ObservableObject {
             return ("\(task.worker) left \(measuredRelative.count) file(s) changed "
                 + "but has no branch to attribute them to — the tree needs "
                 + "manual attention: \(measuredRelative.joined(separator: ", ")).",
-                measuredRelative.count)
+                measuredRelative.count, nil)
         }
 
         // Commit the changes with an incompleteness marker so the partial work
@@ -4925,7 +4932,15 @@ final class ChatViewModel: ObservableObject {
             ]
         )
 
-        return (outcome.summary, measuredRelative.count)
+        // The count of what LANDED, not of what was measured before the
+        // commit: `outcome.fileCount` is the branch's answer and
+        // `measuredRelative.count` is the working tree's guess. They differ
+        // whenever the boundary dropped something.
+        return (
+            outcome.summary,
+            outcome.committed ? outcome.fileCount : measuredRelative.count,
+            outcome.commit
+        )
     }
 
     /// #1219: recognises failure messages that describe connectivity
@@ -5151,7 +5166,9 @@ final class ChatViewModel: ObservableObject {
                 message: Self.conventionalCommitMessage(task: task)
             )
             notice += "\n" + outcome.summary
-            registry.recordCommittedFiles(taskID: task.id, count: outcome.fileCount)
+            registry.recordCommittedFiles(
+                taskID: task.id, count: outcome.fileCount, commit: outcome.commit
+            )
             TriosLogBus.shared.info(
                 .queen,
                 outcome.committed ? "queen.branch.committed" : "queen.branch.empty",
@@ -5196,7 +5213,16 @@ final class ChatViewModel: ObservableObject {
             // A dead worker's edits are still in the shared tree. Settle them
             // so they are attributed to its branch with an incompleteness
             // marker, or reported loudly if they cannot be.
-            let (settlement, _) = await settleFailedWorkerEdits(task: task, reason: failure!)
+            let (settlement, landed, commit) = await settleFailedWorkerEdits(
+                task: task, reason: failure!
+            )
+            // Recorded on the failure side too. Safe: `qualifiesForAutoAccept`
+            // gates on `state == .awaitingReview`, so a failed task cannot be
+            // accepted by having a count - it can only stop being described as
+            // having produced nothing when it did not.
+            if landed > 0 {
+                registry.recordCommittedFiles(taskID: task.id, count: landed, commit: commit)
+            }
             notice += "\n" + settlement
         }
         workerBaselineTrees[task.conversationId] = nil
@@ -7451,7 +7477,7 @@ final class ChatViewModel: ObservableObject {
             guard registry.transition(taskID: task.id, to: .cancelled) else { continue }
             // A cancelled worker's edits are as unattributed as a failed one's.
             // Settle them the same way before clearing the baseline.
-            let (settlement, _) = await settleFailedWorkerEdits(
+            let (settlement, _, _) = await settleFailedWorkerEdits(
                 task: task,
                 reason: "cancelled after exhausting restarts"
             )

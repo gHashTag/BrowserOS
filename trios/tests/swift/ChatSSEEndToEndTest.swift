@@ -366,6 +366,7 @@ struct ChatSSEEndToEndTests {
         ("runAnEnglishIssueIsStillDelegatable", { await runAnEnglishIssueIsStillDelegatable() }),
         ("runWorkInASecondEpicIsVisible", { await runWorkInASecondEpicIsVisible() }),
         ("runAbsentIsNotZeroAndTheBeeGetsItsWorktree", { await runAbsentIsNotZeroAndTheBeeGetsItsWorktree() }),
+        ("runACountWithNoCommitIsNotEvidence", { await runACountWithNoCommitIsNotEvidence() }),
     ]
 
     static func main() async {
@@ -7966,6 +7967,67 @@ struct ChatSSEEndToEndTests {
     /// Red is not the Queen's to fix. The bee that opened the pull request is
     /// woken with the names of the failing checks and works on the same branch
     /// until the gate is green.
+    // MARK: - Scenario: a count with no commit behind it is not evidence
+
+    /// A task was found recorded `accepted` with `committedFiles: 1` and a
+    /// branch that did not exist. Nothing in the record could have caught it:
+    /// the count was true at the instant it was measured and unverifiable ever
+    /// after, because no commit identity was kept.
+    ///
+    /// The Queen may now close her own worker's work only when she can name the
+    /// commit it is in.
+    static func runACountWithNoCommitIsNotEvidence() async {
+        print("\n# Scenario: a count with no commit behind it is not evidence")
+
+        func task(files: Int?, sha: String?) -> DelegatedTask {
+            var t = DelegatedTask(
+                issue: IssueReference(owner: "gHashTag", repo: "trios", number: 1280),
+                title: "Ring 0",
+                worker: "queen-swift",
+                state: .awaitingReview,
+                ownedPaths: ["rings/T27-00/queen_core.t27"],
+                acceptanceCriteria: ["it generates valid Rust"]
+            )
+            t.committedFiles = files
+            t.committedSHA = sha
+            return t
+        }
+
+        check(
+            !QueenDelegationPolicy.qualifiesForAutoAccept(
+                task(files: 1, sha: nil), committedFiles: 1
+            ),
+            "one file and no commit to name does not qualify - this is the live case"
+        )
+        check(
+            !QueenDelegationPolicy.qualifiesForAutoAccept(
+                task(files: 1, sha: ""), committedFiles: 1
+            ),
+            "and an empty string is not a commit either"
+        )
+        check(
+            QueenDelegationPolicy.qualifiesForAutoAccept(
+                task(files: 1, sha: "9120ba77b"), committedFiles: 1
+            ),
+            "with the commit named, the same task qualifies"
+        )
+        check(
+            !QueenDelegationPolicy.qualifiesForAutoAccept(
+                task(files: 0, sha: "9120ba77b"), committedFiles: 0
+            ),
+            "a commit that landed nothing still does not - the file rule is not replaced"
+        )
+
+        // The state gate is what makes recording on the failure path safe: a
+        // failed task cannot be accepted by acquiring a count.
+        var failed = task(files: 3, sha: "deadbeef")
+        failed.state = .failed
+        check(
+            !QueenDelegationPolicy.qualifiesForAutoAccept(failed, committedFiles: 3),
+            "a failed task with a real commit is still not auto-accepted"
+        )
+    }
+
     // MARK: - Scenario: absent is not zero, and the bee gets its own worktree
 
     /// Two defects found by a forensic pass over a task that was recorded
