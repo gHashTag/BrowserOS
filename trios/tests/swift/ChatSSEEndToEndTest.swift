@@ -372,6 +372,7 @@ struct ChatSSEEndToEndTests {
         ("runApplyingAProposalActuallyMovesTheRecord", { await runApplyingAProposalActuallyMovesTheRecord() }),
         ("runAQueuedTaskDoesNotBlockItsOwnIssue", { await runAQueuedTaskDoesNotBlockItsOwnIssue() }),
         ("runARefusalNamesWhatItObserved", { await runARefusalNamesWhatItObserved() }),
+        ("runNoKeyMeansNoChoosing", { await runNoKeyMeansNoChoosing() }),
     ]
 
     static func main() async {
@@ -7972,6 +7973,70 @@ struct ChatSSEEndToEndTests {
     /// Red is not the Queen's to fix. The bee that opened the pull request is
     /// woken with the names of the failing checks and works on the same branch
     /// until the gate is green.
+    // MARK: - Scenario: no key means no choosing
+
+    /// Fixing the queued deadlock turned it into a spin. The reaper cancels an
+    /// undispatched task after ten minutes; the next tick chooses the same
+    /// issue again; dispatch refuses at the end of that tick because the
+    /// provider key resolves empty; the task sits queued; ten minutes later
+    /// the reaper cancels it again. #1284 and #1285 cycled that way through
+    /// branches r1, r2, r3, r4 while nothing could possibly start.
+    ///
+    /// A permanent deadlock and a permanent spin are both wrong. The key is
+    /// the condition that makes the entire round pointless, so it belongs
+    /// before the choosing rather than after it.
+    static func runNoKeyMeansNoChoosing() async {
+        print("\n# Scenario: no key means no choosing")
+
+        typealias V = ChatViewModel
+
+        check(
+            V.autonomyBlockReason(
+                enabled: true, hasInbox: true, runningWorkers: 0,
+                budgetActive: true, hasProviderKey: true
+            ) == nil,
+            "with a key and a free slot she proceeds"
+        )
+        guard let reason = V.autonomyBlockReason(
+            enabled: true, hasInbox: true, runningWorkers: 0,
+            budgetActive: true, hasProviderKey: false
+        ) else {
+            fail("a missing provider key must stop the tick before it chooses")
+            return
+        }
+        check(
+            reason.contains("nothing could be dispatched"),
+            "and says why choosing would be pointless rather than merely refusing: \(reason)"
+        )
+
+        // Order matters. The key check must come before the capacity check:
+        // with no key and a full swarm, the actionable fact is the key, not
+        // the queue.
+        check(
+            V.autonomyBlockReason(
+                enabled: true, hasInbox: true, runningWorkers: 4,
+                budgetActive: true, hasProviderKey: false
+            )?.contains("provider key") == true,
+            "with both a full swarm and no key, the key is the reason reported"
+        )
+        // But consent and budget still come first - they are decisions, and a
+        // decision outranks a resource.
+        check(
+            V.autonomyBlockReason(
+                enabled: false, hasInbox: true, runningWorkers: 0,
+                budgetActive: true, hasProviderKey: false
+            ) == "autonomy is switched off",
+            "switched off outranks a missing key - she is not supposed to be choosing at all"
+        )
+        check(
+            V.autonomyBlockReason(
+                enabled: true, hasInbox: true, runningWorkers: 0,
+                budgetActive: false, hasProviderKey: false
+            )?.contains("budget") == true,
+            "and so does a spent budget"
+        )
+    }
+
     // MARK: - Scenario: a refusal names what it observed
 
     /// The dispatch refusal said "the Keychain did not respond". The code

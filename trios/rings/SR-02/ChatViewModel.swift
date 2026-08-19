@@ -8182,11 +8182,25 @@ final class ChatViewModel: ObservableObject {
         enabled: Bool,
         hasInbox: Bool,
         runningWorkers: Int,
-        budgetActive: Bool
+        budgetActive: Bool,
+        hasProviderKey: Bool = true
     ) -> String? {
         guard hasInbox else { return "this build has no supervisor inbox" }
         guard enabled else { return "autonomy is switched off" }
         guard budgetActive else { return "the safety budget is spent or halted" }
+        // Choosing without a key is not work, it is churn. Dispatch refuses at
+        // the end of the same tick, the task is left queued, the reaper
+        // cancels it ten minutes later, and the next tick chooses it again -
+        // cutting a fresh branch each round. #1284 and #1285 cycled that way
+        // through r1, r2, r3, r4 while nothing could possibly start.
+        //
+        // The reaper turned a permanent deadlock into a permanent spin. Both
+        // are wrong; this is the condition that makes the whole round
+        // pointless, so it belongs before the choosing rather than after it.
+        guard hasProviderKey else {
+            return "the provider key resolves empty, so nothing could be "
+                + "dispatched even if an issue were chosen"
+        }
         guard QueenDelegationPolicy.canStartAnother(running: runningWorkers) else {
             return "\(runningWorkers) workers already running "
                 + "(limit \(QueenDelegationPolicy.maximumConcurrentWorkers))"
@@ -8467,7 +8481,12 @@ final class ChatViewModel: ObservableObject {
             enabled: queenAutonomyEnabled,
             hasInbox: ProjectPaths.hasSupervisorInbox,
             runningWorkers: delegationRegistry.running.count,
-            budgetActive: budget?.isActive ?? false
+            budgetActive: budget?.isActive ?? false,
+            // Only the live transport cares: the harness injects a stub with
+            // no key, and gating on it there would block every delegation in
+            // the suite - the same exemption the dispatch precheck makes.
+            hasProviderKey: !(type(of: transport) is SSETransport.Type)
+                || !modelStore.resolvedAPIKey(for: modelStore.selectedProvider).isEmpty
         ) {
             TriosLogBus.shared.debug(
                 .queen, "queen.autonomy.skipped", "Not picking up work: \(reason)",
