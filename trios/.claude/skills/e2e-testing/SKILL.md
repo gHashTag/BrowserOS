@@ -1222,3 +1222,56 @@ queen.failure.classified   #4243 failed as producedNothing
 Two consecutive lines that contradict each other, in a run that passed.
 **Read the log of a green suite.** The assertions only cover what someone
 thought to assert.
+
+## Count the things, not the lines about the things
+
+I reported "410 undecryptable conversations in the release". It was 410 log
+lines: sixteen conversations, re-reported once per launch across twenty-six
+launches. The number was off by a factor of twenty-five and it was in a report
+I wrote to be read while asleep.
+
+**Rule:** before quoting a count from a log, collapse it by identity. One
+`grep -c` answers "how often was this said", never "how many things are wrong".
+
+## A filter that silently empties the result must say what it removed
+
+The branch committer diffs the whole tree, then drops every path outside the
+task boundary. When nothing survives it reported "The worker changed no files"
+- the same sentence as a worker that genuinely did nothing.
+
+So a bee that wrote six files in the wrong place was recorded as idle,
+classified `producedNothing`, counted against the issue by the retry policy,
+and shown to the operator as lazy. The real fault - a boundary and a task that
+describe different work - is fixable in one line of a brief, and nothing in the
+system said it out loud.
+
+**Rule:** wherever a filter can reduce a non-empty input to an empty output,
+the empty case needs two branches. "There was nothing" and "there was
+something and I removed all of it" are different facts about different
+problems, and only one of them is the worker's fault.
+
+## Data that cannot be read today is not data that is gone
+
+Sixteen conversations decrypt to nothing because the key was created on 25 July
+and overwritten on 27 July. `load` returned `[]` for them - which is exactly
+what an empty conversation returns - so the app showed sixteen blank chats and
+would have saved a short new history over 23KB-507KB of real ciphertext at the
+first message.
+
+The key paths that caused it were already guarded by the time I looked, so the
+fix was not there. It was in the read: quarantine the bytes on first failure,
+and refuse to write into a conversation whose stored form could not be
+decrypted.
+
+**Rule:** when a decode fails, the caller must be able to tell "empty" from
+"unreadable". Returning the empty value for both is the step that converts a
+recoverable problem into a permanent one, and it always looks like graceful
+degradation.
+
+## Not reproducible is a finding, not a gap
+
+One suite run reported a failure that six consecutive runs afterwards could not
+reproduce. The likeliest cause was environmental - the same worktree flicker
+that, minutes later, handed the compiler an empty source file git considered
+unmodified. Say that. A flake reported as fixed because it stopped appearing is
+the same sentence as a flake nobody looked at.
