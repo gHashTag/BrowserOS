@@ -204,6 +204,13 @@ final class ChatViewModel: ObservableObject {
     private var queenInboxPollTask: Task<Void, Never>?
     /// The autonomy loop, so a rebuild or a settings change can stop it.
     var queenAutonomyTask: Task<Void, Never>?
+
+    /// Tasks already announced as needing a person, so the sweep says it once.
+    ///
+    /// In memory rather than persisted: one notice per app run is the right
+    /// amount of nagging, and a restart is a reasonable moment to be reminded
+    /// that several things are waiting on you.
+    var escalatedReviewTaskIDs: Set<UUID> = []
     /// Byte offset into `queen_inbox.jsonl` — remembered so a restart does
     /// not re-process lines already delegated. Persisted in UserDefaults so
     /// it survives app relaunches.
@@ -5207,12 +5214,21 @@ final class ChatViewModel: ObservableObject {
                     + "be mistaken for done."
             }
         }
-        registry.transition(taskID: task.id, to: failure == nil ? .awaitingReview : .failed)
+        let moved = registry.transition(
+            taskID: task.id, to: failure == nil ? .awaitingReview : .failed
+        )
         // Classify immediately after the move, while the measurements this
         // task was judged on are still the ones in the store. Deferring it to
         // read time would classify against whatever the record looked like
         // later, which is a different question.
-        if failure != nil {
+        //
+        // Only when the move actually happened. A cancelled task refuses the
+        // transition to `failed` - correctly - and writing a failure kind onto
+        // it anyway would make a task nobody failed at look like one that did,
+        // to the very policy that counts failures. Seen in the suite:
+        // "Cannot move #4243 from cancelled to failed" immediately followed by
+        // "#4243 failed as producedNothing".
+        if failure != nil, moved {
             registry.recordFailureKind(taskID: task.id)
         }
         // The notice belongs in the Queen's chat even when she is not the open
@@ -5220,6 +5236,7 @@ final class ChatViewModel: ObservableObject {
         // worker chat is lost.
         await appendSystemMessageToQueenChat(notice)
         await autoAcceptIfUnambiguous(taskID: task.id)
+        await actOnCompletedReview(taskID: task.id)
 
         await sweepAwaitingReview(excluding: task.id, trigger: task.issue.slug)
 
@@ -5245,12 +5262,25 @@ final class ChatViewModel: ObservableObject {
     /// The branch tip carries only this worker's committed changes, so the diff
     /// is exactly what landed on the branch. The direction `git diff A B` reads
     /// A→B: a file the worker added appears as a new file, never as a deleted
-    /// one. When the branch is empty (no commits beyond its parent), the diff is
-    /// genuinely empty and the brief already says "(no changes detected)".
+    /// one (#1132 criterion 2).
+    ///
+    /// An empty branch is not diffed at all. "Empty" means the branch tip is
+    /// its own merge-base with HEAD — no commits of its own, the same test
+    /// `QueenBranchCommitter.branchPoint` applies to refuse a pull request.
+    /// The baseline is a snapshot of the whole working tree taken when the
+    /// worker started, and it can contain work that is not on this branch: a
+    /// repeat run of an issue whose file a previous run already wrote has that
+    /// file in the baseline but not at the fork point, and diffing the two
+    /// reads it as deleted — a deletion nobody performed (#1130's repeat
+    /// answered "unmet" twice on exactly that phantom). The empty branch
+    /// returns a parenthetical "nothing to compare" instead, and the reviewer
+    /// judges the criteria from the file contents the brief already carries
+    /// (#1132 criterion 1).
     ///
     /// Returns a parenthetical "nothing to compare" message when the baseline
-    /// was never captured or the branch cannot be resolved, so the reviewer is
-    /// never handed a blank diff with no explanation (#1132).
+    /// was never captured, the branch cannot be resolved, or the branch has
+    /// no commits of its own, so the reviewer is never handed a blank diff
+    /// with no explanation — and never a deletion phantom (#1132).
     private func diffForReview(
         baselineTree: String?,
         branch: String?,
@@ -5283,6 +5313,27 @@ final class ChatViewModel: ObservableObject {
                   !branchTree.hasPrefix("fatal") else {
                 return "(Branch \(branch) could not be resolved — nothing to compare.)"
             }
+            // Is the branch empty — no commits of its own? The tip is compared
+            // with its merge-base against HEAD, the same test branchPoint
+            // applies to decide there is nothing to open a pull request for.
+            // Both git answers must resolve; a merge-base that fails falls
+            // through to the diff rather than guessing emptiness.
+            let tip = QueenStatusViewModel.runProcess(
+                "/usr/bin/git",
+                arguments: ["rev-parse", "--verify", branchRef],
+                workDir: ProjectPaths.root,
+                timeout: 10
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            let fork = QueenStatusViewModel.runProcess(
+                "/usr/bin/git",
+                arguments: ["merge-base", branchRef, "HEAD"],
+                workDir: ProjectPaths.root,
+                timeout: 10
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            let branchCarriesNoCommits =
+                !tip.isEmpty && !tip.hasPrefix("fatal")
+                && !fork.isEmpty && !fork.hasPrefix("fatal")
+                && tip == fork
             // Direction: baseline → branch tip. Files the worker added appear
             // as new (all +), files removed as deleted (all -). Reversing the
             // arguments would invert the reading: a created file would read
@@ -5294,12 +5345,35 @@ final class ChatViewModel: ObservableObject {
                     QueenDelegationPolicy.normalizePath($0)
                 })
             }
-            return QueenStatusViewModel.runProcess(
+            let diff = QueenStatusViewModel.runProcess(
                 "/usr/bin/git",
                 arguments: args,
                 workDir: ProjectPaths.root,
                 timeout: 30
             )
+            // Regression guard (#1132 criterion 4): an empty branch must never
+            // be handed a diff, because the only diff an empty branch can
+            // produce against a baseline captured after someone else's work
+            // is deletions nobody made. This fires if the early return above
+            // is removed — that is the sense in which the check breaks when
+            // the comparison with a post-work base is restored. It cannot
+            // fire on a genuine deletion: a branch that really removed a file
+            // carries commits, so branchCarriesNoCommits is false here.
+            if branchCarriesNoCommits && diff.contains("deleted file mode") {
+                let header = diff.components(separatedBy: "\n")
+                    .first { $0.contains("deleted file mode") } ?? ""
+                TriosLogBus.shared.warn(
+                    .queen,
+                    "queen.assertion.empty_branch_deletions",
+                    "An empty branch was diffed against its baseline and the "
+                        + "result carries deletions nobody made: \(header). "
+                        + "The baseline was captured after another worker's "
+                        + "work, so the comparison reads that work as removed "
+                        + "(#1132)",
+                    ["branch": branch, "deleted_header": header]
+                )
+            }
+            return diff
         }.value
     }
 
@@ -6362,6 +6436,139 @@ final class ChatViewModel: ObservableObject {
     /// something, and cost nothing unusual. Everything else waits for a human,
     /// because an orchestrator that rubber-stamps its own workers has no
     /// reviewer at all. Off unless `TRIOS_QUEEN_AUTONOMY=1`.
+    /// Returns a task to its worker with a reason, and restarts it.
+    ///
+    /// One implementation for the command and for the automatic path. They were
+    /// about to be two, and two implementations of "send it back" drift the
+    /// moment either learns something - the counter being the obvious thing one
+    /// of them would forget.
+    ///
+    /// Reports whether the worker is actually running again, because "rejected"
+    /// with no runner is a task moved out of the review queue into nothing,
+    /// which is worse than leaving it where it was.
+    @discardableResult
+    private func sendTaskBackToWorker(task: DelegatedTask, reason: String) async -> Bool {
+        let registry = delegationRegistry
+        guard registry.transition(taskID: task.id, to: .rejected) else {
+            await postQueenNotice(
+                SystemNoticeClassifier.failureMarker
+                    + (registry.lastError ?? "Could not return \(task.issue.slug).")
+            )
+            return false
+        }
+        guard let runner = workerRunner,
+              registry.transition(taskID: task.id, to: .running) else {
+            await postQueenNotice(
+                SystemNoticeClassifier.failureMarker
+                    + "Returned \(task.issue.slug), but the worker could not be restarted."
+            )
+            return false
+        }
+        let total = registry.recordSendBack(taskID: task.id)
+        let rebrief = QueenBriefing.text(for: task)
+            + "\n\nThe Queen returned your previous attempt. Reason: \(reason)"
+        workerBaselineTrees[task.conversationId] = await QueenBranchCommitter.snapshotWorkingTree()
+        runner.start(task: task, brief: rebrief)
+        TriosLogBus.shared.info(
+            .queen, "queen.review.sent_back",
+            "Returned \(task.issue.slug) to \(task.worker) (return \(total) of "
+                + "\(QueenReviewDecision.maximumSendBacks))",
+            ["issue": task.issue.slug, "returns": String(total)]
+        )
+        return true
+    }
+
+    /// Acts on a completed review instead of parking it.
+    ///
+    /// Eight tasks sat in `awaitingReview` in the release registry, the oldest
+    /// fifteen hours, every one of them fully judged and every one with an
+    /// unmet criterion. The judgement was done and nothing consumed it: the
+    /// send-back existed but only a human typing `/review ... reject` had ever
+    /// called it. Meanwhile each task held its file boundary, which is why the
+    /// autonomous tick kept reporting that all 24 candidates looked already
+    /// done - there was work, and every path to it was owned by something
+    /// nobody had finished.
+    ///
+    /// Called after auto-accept declines, because accept is the cheaper answer
+    /// and should be tried first.
+    private func actOnCompletedReview(taskID: UUID) async {
+        let registry = delegationRegistry
+        guard let task = registry.tasks.first(where: { $0.id == taskID }),
+              task.state == .awaitingReview else { return }
+
+        // Only `met` and `unmet` are answers. `unchecked` is nobody having
+        // looked, and `stale` is an answer about a tree that no longer exists -
+        // counting either as a failure would return work over a question that
+        // was never asked.
+        let verdicts: [(criterion: String, met: Bool)] = task.acceptanceCriteria.compactMap {
+            criterion in
+            switch task.criterionVerdicts[criterion] {
+            case .met: return (criterion, true)
+            case .unmet: return (criterion, false)
+            case .unchecked, .stale, nil: return nil
+            }
+        }
+        let decision = QueenReviewDecision.decide(
+            verdicts: verdicts,
+            totalCriteria: task.acceptanceCriteria.count,
+            committedFiles: task.committedFiles,
+            priorSendBacks: task.sendBacks ?? 0
+        )
+
+        switch decision {
+        case .accept, .wait:
+            // Accept is auto-accept's business and it has already run; waiting
+            // is not an action. Both are silent on purpose - a log line every
+            // sweep for every unjudged task buries the ones that moved.
+            return
+        case .sendBack(let unmet):
+            // A return puts a worker back on the wing, so it spends a slot.
+            // Without this the sweep would return every judged task at once -
+            // eight of them, against a ceiling of four - and the ceiling would
+            // be enforced by nothing. The task keeps its place in the queue and
+            // goes back when there is room for it.
+            let running = registry.tasks.filter { $0.state == .running }.count
+            guard QueenDelegationPolicy.canStartAnother(running: running) else {
+                TriosLogBus.shared.info(
+                    .queen, "queen.review.send_back_deferred",
+                    "\(task.issue.slug) is ready to go back but \(running) workers are "
+                        + "already flying",
+                    ["issue": task.issue.slug]
+                )
+                return
+            }
+            let note = QueenReviewDecision.sendBackNote(
+                unmet: unmet, attempt: (task.sendBacks ?? 0) + 1
+            )
+            guard await sendTaskBackToWorker(task: task, reason: note) else { return }
+            await postQueenNotice(
+                SystemNoticeClassifier.infoMarker
+                    + "Returned \(task.issue.slug) to \(task.worker): "
+                    + "\(unmet.count) criterion(s) unmet."
+            )
+        case .escalate(let reason):
+            // Left in awaitingReview deliberately. Escalation is not a state
+            // change, it is the absence of one - the task stays exactly where a
+            // person will look for it, and the notice says why nobody else can
+            // move it.
+            // Once per task per run. The sweep passes over every awaiting task
+            // on every tick, and a stuck task is stuck for hours - saying so
+            // every five minutes would bury the tasks that actually moved
+            // under the ones that cannot.
+            guard !escalatedReviewTaskIDs.contains(task.id) else { return }
+            escalatedReviewTaskIDs.insert(task.id)
+            TriosLogBus.shared.warn(
+                .queen, "queen.review.escalated",
+                "\(task.issue.slug) needs you: \(reason)",
+                ["issue": task.issue.slug]
+            )
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "\(task.issue.slug) is yours to decide: \(reason)"
+            )
+        }
+    }
+
     private func autoAcceptIfUnambiguous(taskID: UUID) async {
         let autonomy: Bool
         if let envValue = ProcessInfo.processInfo.environment["TRIOS_QUEEN_AUTONOMY"] {
@@ -6774,6 +6981,7 @@ final class ChatViewModel: ObservableObject {
                 // the primary task gets (line ~3770). Without this the
                 // skip leaves the task parked forever (#1156).
                 await autoAcceptIfUnambiguous(taskID: current.id)
+                await actOnCompletedReview(taskID: current.id)
                 continue
             }
             guard let branch = current.virtualBranch else {
@@ -6816,6 +7024,7 @@ final class ChatViewModel: ObservableObject {
                 ]
             )
             await autoAcceptIfUnambiguous(taskID: current.id)
+            await actOnCompletedReview(taskID: current.id)
         }
         TriosLogBus.shared.info(
             .queen,
@@ -8406,22 +8615,7 @@ final class ChatViewModel: ObservableObject {
                 )
                 return
             }
-            guard registry.transition(taskID: task.id, to: .rejected) else {
-                await postQueenNotice(SystemNoticeClassifier.failureMarker + (registry.lastError ?? "Could not reject \(issue.slug)."))
-                return
-            }
-            guard let runner = workerRunner,
-                  registry.transition(taskID: task.id, to: .running) else {
-                await postQueenNotice(
-                    SystemNoticeClassifier.failureMarker
-                        + "Rejected \(issue.slug), but the worker could not be restarted."
-                )
-                return
-            }
-            let rebrief = QueenBriefing.text(for: task)
-                + "\n\nThe Queen returned your previous attempt. Reason: \(note)"
-            workerBaselineTrees[task.conversationId] = await QueenBranchCommitter.snapshotWorkingTree()
-            runner.start(task: task, brief: rebrief)
+            guard await sendTaskBackToWorker(task: task, reason: note) else { return }
             await postQueenNotice(SystemNoticeClassifier.infoMarker
                     + "Sent \(issue.slug) back to \(task.worker) with your reason: \(note). "
                     + "Same chat, same branch - it picks up where it left off rather than "

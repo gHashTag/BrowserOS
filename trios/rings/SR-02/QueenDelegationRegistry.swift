@@ -227,6 +227,21 @@ final class QueenDelegationRegistry: ObservableObject {
         return task
     }
 
+    /// Counts one return of a task to its worker, and reports the new total.
+    ///
+    /// Incremented where the return happens rather than where it is decided,
+    /// so a return started from the command, from the sweep, or from anywhere
+    /// added later cannot forget to count itself - which is the only way an
+    /// automatic send-back becomes an unbounded one.
+    @discardableResult
+    func recordSendBack(taskID: UUID) -> Int {
+        guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return 0 }
+        let total = (tasks[index].sendBacks ?? 0) + 1
+        tasks[index].sendBacks = total
+        persist()
+        return total
+    }
+
     /// Records why a task failed, classified from what the runner measured.
     ///
     /// Separate from `transition` rather than a parameter on it because the

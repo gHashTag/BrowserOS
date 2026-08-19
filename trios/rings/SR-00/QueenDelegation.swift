@@ -256,6 +256,16 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// stores written before it existed must still decode.
     var failureKind: QueenFailureKind?
 
+    /// How many times the Queen has returned this task to its worker.
+    ///
+    /// Kept because the return is now automatic, and an automatic return with
+    /// no counter is a loop. Two is the ceiling; see
+    /// `QueenReviewDecision.maximumSendBacks`.
+    ///
+    /// Optional so stores written before it existed still decode; absent reads
+    /// as zero, which is correct - nothing could have returned them.
+    var sendBacks: Int?
+
     /// When the runner opened this worker's stream.
     ///
     /// Time-to-first-byte is unmeasurable without it, and until it existed the

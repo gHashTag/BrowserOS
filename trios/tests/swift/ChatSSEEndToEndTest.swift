@@ -359,6 +359,7 @@ struct ChatSSEEndToEndTests {
         ("runEveryBeeIsHandedARehearsal", { await runEveryBeeIsHandedARehearsal() }),
         ("runNothingMergesPastTheGate", { await runNothingMergesPastTheGate() }),
         ("runABeeIsNotSentAtTheSameWallForever", { await runABeeIsNotSentAtTheSameWallForever() }),
+        ("runAJudgedTaskDoesNotWaitForAHuman", { await runAJudgedTaskDoesNotWaitForAHuman() }),
     ]
 
     static func main() async {
@@ -7883,6 +7884,102 @@ struct ChatSSEEndToEndTests {
     /// Red is not the Queen's to fix. The bee that opened the pull request is
     /// woken with the names of the failing checks and works on the same branch
     /// until the gate is green.
+    // MARK: - Scenario: a judged task does not wait for a human
+
+    /// Eight tasks sat in `awaitingReview` in the release registry, the oldest
+    /// for fifteen hours. All eight were fully judged. All eight had at least
+    /// one unmet criterion. The review was complete and nothing consumed it:
+    /// the send-back existed and only a human typing `/review ... reject` had
+    /// ever called it.
+    ///
+    /// Each of them held its file boundary while it waited, which is why the
+    /// autonomous tick kept reporting that all 24 candidates looked already
+    /// done. The queue was not slow - it had no exit.
+    static func runAJudgedTaskDoesNotWaitForAHuman() async {
+        print("\n# Scenario: a judged task does not wait for a human")
+
+        typealias R = QueenReviewDecision
+
+        check(
+            R.decide(verdicts: [("a", true), ("b", true)], totalCriteria: 2,
+                     committedFiles: 3, priorSendBacks: 0) == .accept,
+            "everything met with a diff behind it is an accept"
+        )
+
+        // "Met" against an empty diff is the failure this whole path exists to
+        // catch, so it must not be the same answer as a real pass.
+        guard case .escalate(let emptyReason) = R.decide(
+            verdicts: [("a", true)], totalCriteria: 1,
+            committedFiles: 0, priorSendBacks: 0
+        ) else {
+            fail("every criterion met with nothing committed cannot be an accept")
+            return
+        }
+        check(
+            emptyReason.contains("empty diff"),
+            "and it says what is wrong with it: \(emptyReason)"
+        )
+
+        check(
+            R.decide(verdicts: [("a", true), ("b", false)], totalCriteria: 2,
+                     committedFiles: 2, priorSendBacks: 0)
+                == .sendBack(unmet: ["b"]),
+            "an unmet criterion returns the task, naming exactly which one"
+        )
+        check(
+            R.decide(verdicts: [("a", false)], totalCriteria: 1,
+                     committedFiles: 1, priorSendBacks: 1)
+                == .sendBack(unmet: ["a"]),
+            "a second return is still allowed - the first one is the one that teaches"
+        )
+        guard case .escalate(let exhausted) = R.decide(
+            verdicts: [("a", false)], totalCriteria: 1,
+            committedFiles: 1, priorSendBacks: 2
+        ) else {
+            fail("two returns must be the end of the automatic loop")
+            return
+        }
+        check(
+            exhausted.contains("has not moved"),
+            "and the third is refused as a conversation that is going nowhere: \(exhausted)"
+        )
+
+        // Partial judgement must do nothing at all. Returning work over a
+        // question nobody asked is worse than waiting.
+        check(
+            R.decide(verdicts: [("a", false)], totalCriteria: 3,
+                     committedFiles: 1, priorSendBacks: 0)
+                == .wait(reason: "1 of 3 criteria judged so far"),
+            "one unmet answer out of three questions is not a verdict on the task"
+        )
+        guard case .escalate(let noContract) = R.decide(
+            verdicts: [], totalCriteria: 0, committedFiles: 5, priorSendBacks: 0
+        ) else {
+            fail("a task with no criteria has no contract and cannot be judged")
+            return
+        }
+        check(
+            noContract.contains("nothing to judge it against"),
+            "and says so rather than passing it: \(noContract)"
+        )
+
+        // The note is the whole value of the return.
+        let note = R.sendBackNote(unmet: ["the reviewer is not the author", "tests pass"],
+                                  attempt: 1)
+        check(
+            note.contains("the reviewer is not the author") && note.contains("tests pass"),
+            "the returned worker is given the criteria verbatim, not 'it did not pass'"
+        )
+        check(
+            note.contains("second pass"),
+            "and told which pass this is"
+        )
+        check(
+            note.contains("say so and say why"),
+            "with the one answer that is not more code left open to it"
+        )
+    }
+
     // MARK: - Scenario: a bee is not sent at the same wall forever
 
     /// The dev registry held nineteen tasks and fourteen failures: #1127
