@@ -4278,10 +4278,18 @@ final class ChatViewModel: ObservableObject {
                 TriosLogBus.shared.warn(
                     .queen,
                     "queen.worker.api_key_unavailable",
-                    "API key is unavailable — the Keychain did not respond. "
-                        + "\(worker) is not dispatched for \(issue.slug); "
-                        + "the task stays where it is, no resume attempt counted.",
-                    ["issue": issue.slug, "worker": worker]
+                    "API key for \(modelStore.selectedProvider.rawValue) resolved "
+                        + "empty. \(worker) is not dispatched for \(issue.slug); "
+                        + "the task stays where it is, no resume attempt counted. "
+                        + modelStore.credentialDiagnosis(for: modelStore.selectedProvider),
+                    [
+                        "issue": issue.slug,
+                        "worker": worker,
+                        "provider": modelStore.selectedProvider.rawValue,
+                        "diagnosis": modelStore.credentialDiagnosis(
+                            for: modelStore.selectedProvider
+                        ),
+                    ]
                 )
                 await postQueenNotice(
                     SystemNoticeClassifier.warningMarker

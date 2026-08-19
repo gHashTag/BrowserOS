@@ -371,6 +371,7 @@ struct ChatSSEEndToEndTests {
         ("runSheProposesAndWaitsForAWord", { await runSheProposesAndWaitsForAWord() }),
         ("runApplyingAProposalActuallyMovesTheRecord", { await runApplyingAProposalActuallyMovesTheRecord() }),
         ("runAQueuedTaskDoesNotBlockItsOwnIssue", { await runAQueuedTaskDoesNotBlockItsOwnIssue() }),
+        ("runARefusalNamesWhatItObserved", { await runARefusalNamesWhatItObserved() }),
     ]
 
     static func main() async {
@@ -7971,6 +7972,90 @@ struct ChatSSEEndToEndTests {
     /// Red is not the Queen's to fix. The bee that opened the pull request is
     /// woken with the names of the failing checks and works on the same branch
     /// until the gate is green.
+    // MARK: - Scenario: a refusal names what it observed
+
+    /// The dispatch refusal said "the Keychain did not respond". The code
+    /// cannot know that: it observes only that the resolved key is empty, and
+    /// there are three places the key could have come from - the credential
+    /// store, `~/.trios/config.json`, and the environment.
+    ///
+    /// Naming a cause nobody measured is how a wrong diagnosis survives. It is
+    /// the same shape as the issue fetcher logging "API empty" whatever had
+    /// actually failed, which cost a night of guessing across three layers.
+    static func runARefusalNamesWhatItObserved() async {
+        print("\n# Scenario: a refusal names what it observed")
+
+        let suite = "trios.test.creds.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            fail("could not open a scratch defaults suite"); return
+        }
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+
+        let withEnv = ModelConfigurationStore(
+            defaults: defaults,
+            environment: ["TRIOS_ZAI_API_KEY": "present"],
+            reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
+        )
+        let envDiagnosis = withEnv.credentialDiagnosis(for: .zai)
+        check(
+            envDiagnosis.contains("environment: TRIOS_ZAI_API_KEY set"),
+            "the diagnosis says what the environment held: \(envDiagnosis)"
+        )
+        check(
+            envDiagnosis.contains("store:") && envDiagnosis.contains("config file:"),
+            "and reports every source that was consulted, not just the one blamed"
+        )
+
+        let withoutEnv = ModelConfigurationStore(
+            defaults: defaults,
+            environment: [:],
+            reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
+        )
+        check(
+            withoutEnv.credentialDiagnosis(for: .zai)
+                .contains("environment: TRIOS_ZAI_API_KEY unset"),
+            "an absent variable is stated as absent rather than left out"
+        )
+        check(
+            !withoutEnv.credentialDiagnosis(for: .zai).contains("did not respond"),
+            "and nothing claims a source failed to answer when nobody asked it that"
+        )
+
+        // Each provider is diagnosed against its own variable - a diagnosis
+        // that names the wrong key is worse than none.
+        check(
+            withEnv.credentialDiagnosis(for: .anthropic)
+                .contains("TRIOS_ANTHROPIC_API_KEY"),
+            "and the variable named is the one that provider actually uses"
+        )
+
+        // The distinction that found the live cause. `~/.trios/config.json` on
+        // this machine holds both provider keys with zero-length values: it
+        // reads as "no key" to every consumer while looking, to anyone who
+        // opens it, exactly like a configured fallback. Reported as absent, it
+        // sends the reader to check whether the file exists; reported as empty,
+        // it sends them to the one line that is actually wrong.
+        let dir = NSTemporaryDirectory() + "creds-\(UUID().uuidString)"
+        try? FileManager.default.createDirectory(
+            atPath: dir + "/.trios", withIntermediateDirectories: true
+        )
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        try? #"{"TRIOS_ZAI_API_KEY": ""}"#.write(
+            toFile: dir + "/.trios/config.json", atomically: true, encoding: .utf8
+        )
+        let withEmptyFile = ModelConfigurationStore(
+            defaults: defaults,
+            environment: ["HOME": dir],
+            reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
+        )
+        let emptyDiagnosis = withEmptyFile.credentialDiagnosis(for: .zai)
+        check(
+            emptyDiagnosis.contains("present but EMPTY"),
+            "a key present with an empty value is reported as empty, not as absent: "
+                + emptyDiagnosis
+        )
+    }
+
     // MARK: - Scenario: a queued task does not block its own issue forever
 
     /// She was completely blocked and said so in the most reassuring possible

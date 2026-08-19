@@ -579,6 +579,57 @@ final class ModelConfigurationStore: ObservableObject {
 
     /// Resolves the API key for a provider from Keychain, `~/.trios/config.json`,
     /// or an environment variable, in that order.
+    /// Why `resolvedAPIKey` came back empty, source by source.
+    ///
+    /// The dispatch refusal used to say "the Keychain did not respond", which
+    /// the code cannot know: it observes only that the resolved key is empty,
+    /// and there are three places it could have come from. Naming a cause
+    /// nobody measured is how a wrong diagnosis survives - the same shape as
+    /// the issue fetcher logging "API empty" whatever had actually failed.
+    ///
+    /// Reports what each source said, in the order they are consulted.
+    func credentialDiagnosis(for provider: ModelProvider) -> String {
+        var parts: [String] = []
+
+        let entries = ModelCredentialStore.list(for: provider)
+        let active = ModelCredentialStore.activeEntryID(for: provider)
+        if entries.isEmpty {
+            parts.append("store: no entries listed (a launch gate or a cooldown "
+                + "makes this empty even when items exist)")
+        } else {
+            let stored = UserDefaults.standard.string(
+                forKey: "trios.activeModelKey.\(provider.rawValue)"
+            )
+            let dangling = stored != nil && !entries.contains { $0.id == stored }
+            parts.append("store: \(entries.count) entr(y/ies), active "
+                + "\(active ?? "none")\(dangling ? " (the stored pointer names one that is not there)" : "")")
+        }
+
+        // Present-but-empty is not absent, and telling them apart is the whole
+        // value of this line. `~/.trios/config.json` on this machine holds both
+        // provider keys with zero-length values - which reads as "no key" to
+        // every consumer while looking, to anyone who opens the file, exactly
+        // like a configured fallback. That is why the Keychain has been the
+        // only working source and nobody knew.
+        let name = Self.providerEnvironmentKey(provider)
+        switch Self.apiKeyFromConfigFile(for: provider) {
+        case .none:
+            parts.append("config file: no \(name) (or the file is unreadable)")
+        case .some(let value) where value.isEmpty:
+            parts.append("config file: \(name) is present but EMPTY - it looks "
+                + "configured and supplies nothing")
+        case .some:
+            parts.append("config file: has \(name)")
+        }
+
+        let envVar = Self.providerEnvironmentKey(provider)
+        parts.append((environment[envVar]?.isEmpty == false)
+            ? "environment: \(envVar) set"
+            : "environment: \(envVar) unset")
+
+        return parts.joined(separator: "; ")
+    }
+
     func resolvedAPIKey(for provider: ModelProvider) -> String {
         if let keychain = ModelCredentialStore.read(for: provider), !keychain.isEmpty {
             return keychain
