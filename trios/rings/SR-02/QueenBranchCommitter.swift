@@ -18,6 +18,13 @@ enum QueenBranchCommitter {
         /// How many files landed. The Queen's auto-accept rule needs a count,
         /// not prose it would have to parse back out.
         var fileCount: Int = 0
+        /// How many files the worker changed that its boundary excluded.
+        ///
+        /// A count rather than a flag because "one stray file" and "the entire
+        /// diff was elsewhere" are different mistakes: the first is a slip, the
+        /// second means the boundary and the task did not describe the same
+        /// piece of work. Zero in every case that committed something.
+        var filesOutsideBoundary: Int = 0
     }
 
     /// Snapshots the working tree and returns the tree object id.
@@ -410,6 +417,7 @@ enum QueenBranchCommitter {
             // An explicit boundary wins over the diff: files the worker was not
             // allowed to touch must not ride along on its branch even if
             // something else changed them while it ran.
+            let changedBeforeBoundary = changed
             if !ownedPaths.isEmpty {
                 let owned = ownedPaths.map { repositoryRelative($0, projectRoot: projectRoot) }
                 changed = changed.filter { path in
@@ -418,6 +426,35 @@ enum QueenBranchCommitter {
                 }
             }
             guard !changed.isEmpty else {
+                // Two different things used to say the same sentence, and the
+                // sentence was the wrong one in the case that matters.
+                //
+                // A worker that edited six files, none of them inside the
+                // boundary it was given, has its whole diff dropped here - and
+                // was then reported as having "changed no files". Downstream
+                // that is recorded as `producedNothing`, counted against the
+                // issue by the retry policy, and shown to the operator as a bee
+                // that did nothing. The bee worked. It worked in the wrong
+                // place, which is a fixable briefing problem and not the same
+                // failure at all.
+                let outside = changedBeforeBoundary.filter { !changed.contains($0) }
+                guard outside.isEmpty else {
+                    let named = outside.prefix(5).joined(separator: ", ")
+                    let more = outside.count > 5 ? " and \(outside.count - 5) more" : ""
+                    TriosLogBus.shared.warn(
+                        .queen, "queen.commit.outside_boundary",
+                        "Dropped \(outside.count) file(s) the worker changed outside its "
+                            + "boundary on `\(branch)`",
+                        ["branch": branch, "dropped": String(outside.count)]
+                    )
+                    return Outcome(
+                        committed: false,
+                        summary: "The worker changed \(outside.count) file(s), all of them "
+                            + "outside its boundary, so `\(branch)` is unchanged. It wrote to "
+                            + "\(named)\(more); it owns \(ownedPaths.joined(separator: ", "))."
+                        , filesOutsideBoundary: outside.count
+                    )
+                }
                 return Outcome(committed: false, summary: "The worker changed no files, so `\(branch)` is unchanged.")
             }
 

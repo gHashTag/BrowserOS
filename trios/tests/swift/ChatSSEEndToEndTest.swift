@@ -360,6 +360,7 @@ struct ChatSSEEndToEndTests {
         ("runNothingMergesPastTheGate", { await runNothingMergesPastTheGate() }),
         ("runABeeIsNotSentAtTheSameWallForever", { await runABeeIsNotSentAtTheSameWallForever() }),
         ("runAJudgedTaskDoesNotWaitForAHuman", { await runAJudgedTaskDoesNotWaitForAHuman() }),
+        ("runUnreadableHistoryIsNotOverwritten", { await runUnreadableHistoryIsNotOverwritten() }),
     ]
 
     static func main() async {
@@ -5419,6 +5420,53 @@ struct ChatSSEEndToEndTests {
             ownedPaths: ["docs"], projectRoot: root
         )
         check(!refused.committed, "without a baseline the committer refuses rather than guessing")
+
+        // A bee that worked hard in the wrong place is not a bee that did
+        // nothing, and the two used to produce the same sentence.
+        //
+        // This is how the release's commonest real failure reads:
+        // `producedNothing`, two turns, sixteen tool calls, zero files. Every
+        // one of those numbers is consistent with a worker that wrote a great
+        // deal outside the boundary it was given - which is a briefing problem
+        // and fixable, not the bee being idle.
+        let strayBaseline = await QueenBranchCommitter.snapshotWorkingTree(projectRoot: root)
+        try? "a\n".write(toFile: "\(root)/stray-one.md", atomically: true, encoding: .utf8)
+        try? "b\n".write(toFile: "\(root)/stray-two.md", atomically: true, encoding: .utf8)
+        let strayed = await QueenBranchCommitter.commitWorkerChanges(
+            branch: "queen/1-test",
+            baselineTree: strayBaseline,
+            message: "queen: stray",
+            ownedPaths: ["docs"],
+            projectRoot: root
+        )
+        check(!strayed.committed, "nothing lands when the whole diff is outside the boundary")
+        check(
+            strayed.filesOutsideBoundary == 2,
+            "and the count of what was dropped is reported, not just the absence of a commit"
+        )
+        check(
+            !strayed.summary.contains("changed no files"),
+            "the summary does not say the worker changed no files when it changed two"
+        )
+        check(
+            strayed.summary.contains("stray-one.md") && strayed.summary.contains("stray-two.md"),
+            "it names where the worker actually wrote"
+        )
+        check(
+            strayed.summary.contains("docs"),
+            "and what it was allowed to write, which is the pair a briefing needs"
+        )
+
+        // The genuinely-idle case must still read as idle.
+        let idleBaseline = await QueenBranchCommitter.snapshotWorkingTree(projectRoot: root)
+        let idle = await QueenBranchCommitter.commitWorkerChanges(
+            branch: "queen/1-test", baselineTree: idleBaseline, message: "queen: idle",
+            ownedPaths: ["docs"], projectRoot: root
+        )
+        check(
+            idle.summary.contains("changed no files") && idle.filesOutsideBoundary == 0,
+            "a worker that truly changed nothing still says so"
+        )
     }
 
     // MARK: - Scenario: the bee board reflects state transitions without a reload
@@ -7884,6 +7932,71 @@ struct ChatSSEEndToEndTests {
     /// Red is not the Queen's to fix. The bee that opened the pull request is
     /// woken with the names of the failing checks and works on the same branch
     /// until the gate is green.
+    // MARK: - Scenario: unreadable history is not overwritten
+
+    /// Sixteen conversations in the release store cannot be decrypted. The
+    /// conversation key was created on 25 July and overwritten on 27 July, so
+    /// everything written between those dates is ciphertext nobody holds the
+    /// key to - 23KB to 507KB each, real data, not corruption. Both paths that
+    /// could overwrite a key have since been closed, so the set will not grow.
+    ///
+    /// What was still live is what happens next: `load` returned `[]`, which is
+    /// what an empty conversation returns, so the app showed sixteen blank
+    /// chats and would have saved a short new history over a long unreadable
+    /// one at the first message. That is the difference between data that
+    /// cannot be read today and data that is destroyed.
+    static func runUnreadableHistoryIsNotOverwritten() async {
+        print("\n# Scenario: unreadable history is not overwritten")
+
+        let suite = "trios.test.unreadable.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            fail("could not open a scratch defaults suite")
+            return
+        }
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+
+        let id = UUID()
+        let key = "trios.conversation." + id.uuidString
+        // Bytes that are neither valid ciphertext for the current key nor a
+        // marked plaintext record: exactly the shape of the sixteen.
+        let ciphertext = Data((0..<512).map { UInt8($0 % 251) })
+        defaults.set(ciphertext, forKey: key)
+
+        let persister = ConversationPersister(suiteName: suite)
+        let loaded = await persister.load(conversationId: id)
+        check(loaded.isEmpty, "an unreadable conversation still loads as no messages")
+
+        let quarantined = defaults.data(forKey: "trios.conversation.unreadable." + id.uuidString)
+        check(
+            quarantined == ciphertext,
+            "but its bytes are copied aside first, so a recovered key still has something to read"
+        )
+
+        await persister.save(
+            messages: [ChatMessage(role: .user, content: "a new first message")],
+            conversationId: id
+        )
+        check(
+            defaults.data(forKey: key) == ciphertext,
+            "and saving over it is refused - the original ciphertext is untouched"
+        )
+
+        // A conversation that is merely empty must still be writable, or the
+        // guard has broken every new chat in the app.
+        let fresh = UUID()
+        let freshPersister = ConversationPersister(suiteName: suite)
+        _ = await freshPersister.load(conversationId: fresh)
+        await freshPersister.save(
+            messages: [ChatMessage(role: .user, content: "hello")],
+            conversationId: fresh
+        )
+        let written = defaults.data(forKey: "trios.conversation." + fresh.uuidString)
+        check(
+            written != nil && !(written?.isEmpty ?? true),
+            "a genuinely new conversation is still saved normally"
+        )
+    }
+
     // MARK: - Scenario: a judged task does not wait for a human
 
     /// Eight tasks sat in `awaitingReview` in the release registry, the oldest

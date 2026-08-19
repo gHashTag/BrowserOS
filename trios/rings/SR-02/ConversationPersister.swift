@@ -24,6 +24,23 @@ actor ConversationPersister: ChatPersisterProtocol {
 
     func save(messages: [ChatMessage], conversationId: UUID) async {
         let key = keyPrefix + conversationId.uuidString
+        // A conversation whose ciphertext could not be read is not a blank
+        // page to write on. `load` returned `[]` for it, so anything that
+        // appends here would save a short new history over a long unreadable
+        // one - turning "we cannot read this today" into "this is gone".
+        //
+        // The quarantine copy would survive, but the primary record is what a
+        // recovery would look at first, so it is left alone.
+        if unreadableConversations.contains(conversationId) {
+            TriosLogBus.shared.warn(
+                .chat,
+                "conversation.persist.write_refused",
+                "Refused to write over conversation \(conversationId): its stored bytes "
+                    + "cannot be decrypted and overwriting them would destroy them",
+                ["conversation": conversationId.uuidString]
+            )
+            return
+        }
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = .prettyPrinted
@@ -77,12 +94,48 @@ actor ConversationPersister: ChatPersisterProtocol {
             }
         }
 
+        // Unreadable is not empty, and until now the caller could not tell.
+        //
+        // Sixteen conversations in the release store cannot be decrypted: the
+        // key was created on 25 July and overwritten on 27 July, so everything
+        // written between those dates is ciphertext nobody holds the key to.
+        // Both paths that could overwrite a key have since been closed, so this
+        // set will not grow - but it is 23KB to 507KB of real ciphertext, and
+        // returning `[]` for it meant the app showed sixteen empty
+        // conversations and would cheerfully save new messages over them. That
+        // is the difference between data that is currently unreadable and data
+        // that is destroyed.
+        //
+        // The blob is copied aside once, under a key nothing else writes, so a
+        // recovered key later still has something to decrypt.
+        let quarantine = unreadableKey(for: conversationId)
+        if defaults.data(forKey: quarantine) == nil {
+            defaults.set(stored, forKey: quarantine)
+            TriosLogBus.shared.warn(
+                .chat,
+                "conversation.persist.quarantined",
+                "Conversation \(conversationId) cannot be decrypted; its \(stored.count) bytes "
+                    + "are preserved and it will not be written over",
+                ["conversation": conversationId.uuidString, "bytes": String(stored.count)]
+            )
+        }
+        unreadableConversations.insert(conversationId)
         TriosLogBus.shared.warn(
             .chat,
             "conversation.persist.decrypt_failed",
             "Could not decrypt or decode conversation \(conversationId)"
         )
         return []
+    }
+
+    /// Conversations this process has found unreadable.
+    ///
+    /// In memory: the quarantine copy on disk is the durable record, and this
+    /// is only here so `save` can refuse without re-reading.
+    private var unreadableConversations: Set<UUID> = []
+
+    private func unreadableKey(for id: UUID) -> String {
+        "trios.conversation.unreadable." + id.uuidString
     }
 
     func saveSettings(_ settings: ConversationSettings, conversationId: UUID) async {

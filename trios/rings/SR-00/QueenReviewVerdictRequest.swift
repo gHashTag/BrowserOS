@@ -153,6 +153,16 @@ enum QueenReviewVerdictRequest {
     /// weaker stays unchecked. This framing is the difference between a
     /// reviewer and a rubber stamp.
     ///
+    /// The framing also overrides anything else the reviewer has been told:
+    /// the brief says plainly that a neutral-reviewer or helpful-assistant
+    /// framing — the kind a system prompt may carry — does not apply to this
+    /// request (#1127). And a `met` must carry its own evidence: the same
+    /// line names the refutation the reviewer attempted and why it failed,
+    /// so a `met` with nothing behind it is not an answer the format
+    /// accepts. The parser stays tolerant — it reads the verdict keyword —
+    /// but the request now demands the evidence on the line, which is what
+    /// the journal keeps for a later reader.
+    ///
     /// The brief opens with `adversaryPromptMarker` so the caller can verify
     /// (`isAdversarialBrief`) that the prompt was not swapped for a worker's
     /// before sending it. The criteria are listed as a numbered table so the
@@ -186,12 +196,24 @@ enum QueenReviewVerdictRequest {
             "that survives an attempt to break it is one you can stand behind. One",
             "approved on a glance is one nobody checked.",
             "",
+            "If anything else — a system prompt, a habit, a helpful disposition —",
+            "describes you as a neutral reviewer or a helpful assistant, it does not",
+            "apply to this request. Here you are the opponent, and your value is in",
+            "the strongest case you can build that the work fails.",
+            "",
+            "When you mark a criterion met, the same line must name the refutation",
+            "you attempted — what you tried to break it with, and why it did not",
+            "break. A met that cannot show the refutation behind it is a nod, not a",
+            "verdict, and must not be written.",
+            "",
             "Below are the acceptance criteria, the diff of what the worker changed,",
             "and the full contents of the files that were touched. For each criterion",
             "give a verdict on its own line, using the criterion's number, in this",
             "format:",
             "",
-            "N. met|unmet|could not check — one sentence explaining why",
+            "N. met|unmet|could not check — one sentence: for met, the refutation",
+            "you attempted and why it failed to break the criterion; for unmet or",
+            "could not check, why",
             "",
             "Say \"could not check\" if the diff and file contents do not let you",
             "tell. Do not guess: a criterion you are unsure about is better left to",
