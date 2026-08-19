@@ -155,13 +155,57 @@ Load these skills when their functionality matches the task.
 
 ---
 
+## L0b — TERRITORY: the seed and the boards belong to another agent
+
+A second agent owns the **t27 repository** and the **FPGA stands** (wave W931,
+branch `claude/igla-fpga-improvements`), with an active yosys/nextpnr sweep and
+the TNF publication gate.
+
+- **Do not edit `/Users/playra/t27`.** Compiler gaps are reported to them.
+- **Do not program a board.** A route job may be in flight.
+- `t27/fpga/HARDWARE_SSOT.md` is authoritative for hardware. Do not keep a
+  second register here; point at it.
+
+This repository owns the `.t27` ring sources, their parity harnesses, and the
+service that runs them.
+
+---
+
+## L0 — SOURCE: everything is T27 except the seed
+
+**Added 2026-08-19 by the operator's decision. Sits above L1.**
+
+Every component below the user interface is written in `.t27` and generated to
+its target. Swift keeps the interface and nothing under it. The single
+exception is the seed: `t27/bootstrap`, the minimal Rust compiler `t27c`, where
+hand-written Rust is the point.
+
+A rule transcribed into Swift, Rust, Zig and Verilog is four rules that agree
+until someone edits one. Generated from one `.t27` it is one rule. That is the
+whole argument.
+
+**Generated files are artifacts.** They are not edited. A diff that changes a
+generated file without changing its `.t27` is a defect.
+
+Migration goes in rings, innermost first, and a ring is not started until the
+one inside it runs in production. See `.claude/skills/t27-backend/SKILL.md` for
+the ring table, the verified toolchain, the compiler gaps that block generation
+today, and the Railway and A2A modules to build on rather than replace.
+
+**Targets:** `t27c gen-rust` (server), `gen` (Zig), `gen-c`, `gen-verilog`
+(silicon). The Zynq XC7Z020 on this machine answers over JTAG, and the flow
+`yosys` + `nextpnr-xilinx` + `openFPGALoader` needs no Vivado - so a ring that
+claims to be synthesisable is checkable, and must be checked rather than read.
+
+---
+
 ## The 7 Invariant Laws (trios adaptation)
 
 | Law | Name | Description |
 |------|------|-------------|
 | L1 | TRACEABILITY | No code merged without `Closes #N` |
 | L2 | GENERATION | Agent instructions/skills/specs are source of truth; canon Swift files (`BR-OUTPUT/`, selected `rings/`) are generated/reviewed artifacts; hand edits require Agent V waiver |
-| L3 | PURITY | Source files ASCII-only with English identifiers |
+| L3 | PURITY | **Everything is written in English** - source, comments, documentation, issues, commit messages. Source files ASCII-only. Extended from "English identifiers" by the operator on 2026-08-19; issues written before that date are in Russian, which is why `## Границы` and `## Boundary` both open a boundary section |
 | L4 | TESTABILITY | Every change must pass `./build.sh` + e2e flow + agent V verdict |
 | L5 | IDENTITY | φ² = φ + 1; φ² + φ⁻² = 3; sacred constants in UI (GoldenFloat) |
 | L6 | CEILING | `ProjectPaths.swift` + `TriosTheme.swift` are UI SSOT |

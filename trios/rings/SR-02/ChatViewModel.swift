@@ -8113,7 +8113,7 @@ final class ChatViewModel: ObservableObject {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("## ") {
                 if inBounds { break }
-                inBounds = trimmed.hasPrefix("## Границы")
+                inBounds = ChatViewModel.isBoundaryHeading(trimmed)
                 if inBounds { found = true }
                 continue
             }
@@ -8147,7 +8147,7 @@ final class ChatViewModel: ObservableObject {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("## ") {
                 if inBounds { break }
-                inBounds = trimmed.hasPrefix("## Границы")
+                inBounds = ChatViewModel.isBoundaryHeading(trimmed)
                 if inBounds { found = true }
                 continue
             }
@@ -8177,6 +8177,18 @@ final class ChatViewModel: ObservableObject {
     /// Extracts the path-shaped token from a boundary line. The token has no
     /// spaces, contains "/" or ends in a dotted file extension, and is stripped
     /// of trailing prose punctuation (commas, semicolons, backticks, etc.).
+    /// Whether a heading opens the boundary section.
+    ///
+    /// Two spellings, because the repository writes its documentation and code
+    /// in English while every issue written before that rule says `Границы`.
+    /// The heading is a parser token, not prose: recognising only one spelling
+    /// would have made every English issue undelegatable, and the failure would
+    /// have read as "no boundary section, so there is nothing to delegate" -
+    /// true of the parser, not of the issue.
+    static func isBoundaryHeading(_ trimmed: String) -> Bool {
+        trimmed.hasPrefix("## Границы") || trimmed.hasPrefix("## Boundary")
+    }
+
     static func boundaryPathToken(from line: String) -> String? {
         for raw in line.split(separator: " ", omittingEmptySubsequences: true) {
             // Strip backticks and prose punctuation from both ends, in any

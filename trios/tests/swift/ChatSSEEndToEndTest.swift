@@ -363,6 +363,7 @@ struct ChatSSEEndToEndTests {
         ("runUnreadableHistoryIsNotOverwritten", { await runUnreadableHistoryIsNotOverwritten() }),
         ("runABeeStandsInTheProjectNotTheRepository", { await runABeeStandsInTheProjectNotTheRepository() }),
         ("runABoundaryPathIsAPathNotProse", { await runABoundaryPathIsAPathNotProse() }),
+        ("runAnEnglishIssueIsStillDelegatable", { await runAnEnglishIssueIsStillDelegatable() }),
     ]
 
     static func main() async {
@@ -7934,6 +7935,36 @@ struct ChatSSEEndToEndTests {
     /// Red is not the Queen's to fix. The bee that opened the pull request is
     /// woken with the names of the failing checks and works on the same branch
     /// until the gate is green.
+    // MARK: - Scenario: an English issue is still delegatable
+
+    /// The repository writes its documentation and code in English. Every issue
+    /// written before that rule opens its boundary with `## Границы`, and the
+    /// parser knew only that spelling - so the first English issue would have
+    /// been skipped with "no Границы section, so there is nothing to delegate",
+    /// which is true of the parser and not of the issue.
+    ///
+    /// The heading is a parser token. Both spellings open the same section.
+    static func runAnEnglishIssueIsStillDelegatable() async {
+        print("\n# Scenario: an English issue is still delegatable")
+
+        check(
+            ChatViewModel.isBoundaryHeading("## Границы"),
+            "the spelling every existing issue uses still opens the section"
+        )
+        check(
+            ChatViewModel.isBoundaryHeading("## Boundary"),
+            "and so does the one every new issue will use"
+        )
+        check(
+            !ChatViewModel.isBoundaryHeading("## Готово, когда"),
+            "another heading does not open it"
+        )
+        check(
+            !ChatViewModel.isBoundaryHeading("## Boundaries of the approach"),
+            "and neither does prose that merely starts with the word"
+        )
+    }
+
     // MARK: - Scenario: a boundary path is a path, not prose
 
     /// Five of the sixty-three boundary paths in the live registries carried a

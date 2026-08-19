@@ -1,0 +1,211 @@
+// RING-00 — the Queen's decision core.
+//
+// The innermost ring of the trunk: every decision the supervisor makes that
+// depends on nothing but numbers already in hand. No clock, no network, no
+// store, no strings. That is what makes it the first ring to move - it can be
+// generated to Rust for the server, to Zig for an embedded runner, and to
+// Verilog for silicon, and all four answer identically because they are one
+// source.
+//
+// Each function below already exists in Swift and is already tested there
+// (QueenRetryPolicy, QueenReviewDecision, QueenMergeGate,
+// QueenDelegationPolicy). This file is not a new design - it is the same law,
+// written where it can be generated instead of transcribed. The Swift keeps the
+// UI; this keeps the reasoning.
+//
+// phi^2 + 1/phi^2 = 3 | TRINITY
+
+pub module queen_core;
+
+// ---------------------------------------------------------------------------
+// Constants of the swarm
+// ---------------------------------------------------------------------------
+
+// How many workers may fly at once. Four, because the review of a fifth costs
+// more attention than the fifth worker returns.
+pub const MAX_CONCURRENT_WORKERS: i32 = 4;
+
+// Real attempts an issue is worth before it becomes a person's problem. The
+// second attempt is the one that can differ from the first - it is briefed with
+// what the first hit - and a third identical failure is evidence about the
+// issue rather than about the workers.
+pub const MAX_REAL_ATTEMPTS: i32 = 2;
+
+// Times a judged task may be returned to its worker before the same rule
+// applies to the conversation.
+pub const MAX_SEND_BACKS: i32 = 2;
+
+// ---------------------------------------------------------------------------
+// How an attempt ended
+// ---------------------------------------------------------------------------
+
+// The registry had one word for two different endings, and the difference
+// decides whether another bee is worth sending. A worker killed by a rebuild
+// and a worker that ran forty-one tool calls and committed nothing are not the
+// same failure.
+pub const FailureKind = enum(i8) {
+    // The process died under the worker. Nobody failed.
+    interrupted = 0,
+    // It ran to the end and committed nothing.
+    produced_nothing = 1,
+    // It produced work that did not pass review.
+    worked_but_failed = 2
+}
+
+// Whether an ending counts against the issue.
+//
+// An interruption is the supervisor's accident, not the issue's difficulty.
+// Counting it would retire issues for the crime of being open while somebody
+// rebuilt the app.
+pub fn counts_against_issue(kind: FailureKind) bool {
+    switch (kind) {
+        .interrupted => false,
+        .produced_nothing => true,
+        .worked_but_failed => true
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Whether to send another bee
+// ---------------------------------------------------------------------------
+
+pub const RetryVerdict = enum(i8) {
+    // Send one. The attempt number is `real_attempts + 1`.
+    attempt = 0,
+    // Stop choosing this issue; it needs a person.
+    escalate = 1
+}
+
+// `real_attempts` is the count of endings that counted, filtered by
+// `counts_against_issue` before it gets here. Taking the filtered count rather
+// than the raw one is deliberate: the filter belongs to the law, not to
+// whoever remembers to apply it.
+pub fn retry_verdict(real_attempts: i32) RetryVerdict {
+    if (real_attempts >= MAX_REAL_ATTEMPTS) {
+        return .escalate;
+    }
+    return .attempt;
+}
+
+// ---------------------------------------------------------------------------
+// What happens to a task once every criterion has a verdict
+// ---------------------------------------------------------------------------
+
+pub const ReviewVerdict = enum(i8) {
+    // Not judged yet. Do nothing and count it as nothing.
+    wait = 0,
+    // Every criterion met and a diff to show for it.
+    accept = 1,
+    // Something is unmet. Back to the bee, with the failures named.
+    send_back = 2,
+    // A person is needed. Bees will not fix this one.
+    escalate = 3
+}
+
+// `judged` counts criteria with a real answer - `met` or `unmet`. An
+// `unchecked` or `stale` verdict is not an answer, and returning work over a
+// question nobody asked is worse than waiting.
+//
+// `committed_files` matters independently of the verdicts: every criterion met
+// against an empty diff is not a pass, it is a reviewer that had nothing in
+// front of it and answered anyway.
+pub fn review_verdict(
+    total_criteria: i32,
+    judged: i32,
+    unmet: i32,
+    committed_files: i32,
+    prior_send_backs: i32
+) ReviewVerdict {
+    if (total_criteria <= 0) {
+        return .escalate;
+    }
+    if (judged < total_criteria) {
+        return .wait;
+    }
+    if (unmet <= 0) {
+        if (committed_files <= 0) {
+            return .escalate;
+        }
+        return .accept;
+    }
+    if (prior_send_backs >= MAX_SEND_BACKS) {
+        return .escalate;
+    }
+    return .send_back;
+}
+
+// ---------------------------------------------------------------------------
+// Whether a pull request has earned its merge
+// ---------------------------------------------------------------------------
+
+pub const Rollup = enum(i8) {
+    none = 0,
+    pending = 1,
+    success = 2,
+    failure = 3,
+    error = 4
+}
+
+pub const MergeVerdict = enum(i8) {
+    // Every required check passed.
+    merge = 0,
+    // Checks are still running. Ask again; wake nobody.
+    wait = 1,
+    // A check failed. The bee that opened it is woken.
+    wake_worker = 2,
+    // Nothing to merge, or no amount of bee work will change it.
+    refuse = 3
+}
+
+// `checks_configured` matters more than it looks. A repository with no CI
+// reports `none`, and reading that as failure blocks every merge forever in a
+// project that has no checks - while reading it as success makes this gate a
+// decoration in a project that MEANT to have them. The caller states which
+// world it is in.
+pub fn merge_verdict(
+    rollup: Rollup,
+    mergeable: bool,
+    is_draft: bool,
+    checks_configured: bool
+) MergeVerdict {
+    if (is_draft) {
+        return .refuse;
+    }
+    if (!mergeable) {
+        return .refuse;
+    }
+    switch (rollup) {
+        .success => .merge,
+        .pending => .wait,
+        .failure => .wake_worker,
+        .error => .wake_worker,
+        .none => merge_verdict_for_no_checks(checks_configured)
+    }
+}
+
+// Split out because a switch arm that has to decide something of its own is a
+// second rule hiding inside the first.
+pub fn merge_verdict_for_no_checks(checks_configured: bool) MergeVerdict {
+    if (checks_configured) {
+        return .wait;
+    }
+    return .merge;
+}
+
+// ---------------------------------------------------------------------------
+// Capacity
+// ---------------------------------------------------------------------------
+
+// Whether one more worker may be started.
+pub fn can_start_another(running: i32) bool {
+    return running < MAX_CONCURRENT_WORKERS;
+}
+
+// How many may still be started. Never negative: a swarm that has somehow
+// exceeded its ceiling has zero room, not room measured backwards.
+pub fn free_slots(running: i32) i32 {
+    if (running >= MAX_CONCURRENT_WORKERS) {
+        return 0;
+    }
+    return MAX_CONCURRENT_WORKERS - running;
+}
