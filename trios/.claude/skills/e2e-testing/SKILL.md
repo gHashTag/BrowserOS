@@ -1313,3 +1313,62 @@ statement about the parser and a false one about the issue.
 places that parse the old convention. A heading, a prefix or a filename that a
 machine reads is a token, not prose, and both spellings have to work for as
 long as both exist in the corpus.
+
+## `git add -A` in a shared checkout owns whatever the bees left there
+
+Three bees' work ended up inside commits whose messages describe my own
+changes: a 209-line ring rewrite, a 363-line parity harness and a 288-line
+Verilog harness, all under a commit titled "the bee was handed a copy of its
+task". The branch was already pushed, so rewriting that history would cost more
+than the wrong attribution does - but it is wrong, and it happened because
+`git add -A rings tests` cannot tell my edits from theirs.
+
+The cause and the defect being fixed in that same commit are the same thing:
+the bees were writing into the shared checkout because the task struct handed
+to the runner was copied before its worktree existed. Fixing dispatch stops it
+recurring; it does not undo it.
+
+**Rule:** in a repository where agents write concurrently, stage by path, not
+by `-A`. `git add <the files I edited>` is three seconds of typing and the
+difference between a commit that says what it does and one that quietly
+absorbs someone else's day.
+
+**Tell:** `git show --stat <your commit>` listing files you never opened.
+
+## A count is not evidence unless something can be looked up
+
+`committedFiles: 1` on a task whose branch does not exist. The number was true
+when it was measured and unverifiable ever after, because nothing recorded
+*which commit* those files landed in.
+
+The same shape appears wherever a measurement is stored without its subject: a
+test count with no run id, a coverage percentage with no commit, a "healthy"
+with no probe timestamp. Each is a claim that cannot be rechecked, and each
+degrades silently rather than failing.
+
+**Rule:** store the identity beside the measurement, and make the gate require
+it. `qualifiesForAutoAccept` now refuses a task whose commit cannot be named -
+so the Queen may close her own worker's work only when there is something to
+look at.
+
+**Corollary for the other side of the branch:** the failure path had computed
+the same number all along and dropped it, so a bee that committed 288 lines and
+then died was recorded as having produced nothing. If a measurement is worth
+taking on success it is worth recording on failure - that is exactly where the
+record is most likely to be wrong and least likely to be checked.
+
+## Three targets, one table, or the claim is decoration
+
+Ring 00's whole argument is that a rule generated into Rust, Zig and Verilog is
+one rule rather than four. That is only worth saying if the three are run
+against the same inputs and compared:
+
+```
+ring00_parity.sh    generated Rust vs the Swift table   (rustc --crate-type lib)
+ring00_verilog.sh   generated Verilog vs the same table (iverilog + vvp)
+```
+
+Both skip rather than fail when the toolchain is missing - the compiler lives
+in a sibling repository - because a machine without `iverilog` should not be
+told the ring is broken. Proven red by changing one constant in the `.t27`:
+two of thirty-five rows disagree and the harness prints both sides.
