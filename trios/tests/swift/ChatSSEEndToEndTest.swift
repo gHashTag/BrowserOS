@@ -369,6 +369,7 @@ struct ChatSSEEndToEndTests {
         ("runACountWithNoCommitIsNotEvidence", { await runACountWithNoCommitIsNotEvidence() }),
         ("runTheRecordIsComparedAgainstTheRepository", { await runTheRecordIsComparedAgainstTheRepository() }),
         ("runSheProposesAndWaitsForAWord", { await runSheProposesAndWaitsForAWord() }),
+        ("runApplyingAProposalActuallyMovesTheRecord", { await runApplyingAProposalActuallyMovesTheRecord() }),
     ]
 
     static func main() async {
@@ -7969,6 +7970,111 @@ struct ChatSSEEndToEndTests {
     /// Red is not the Queen's to fix. The bee that opened the pull request is
     /// woken with the names of the failing checks and works on the same branch
     /// until the gate is green.
+    // MARK: - Scenario: applying a proposal actually moves the record
+
+    /// The proposal machinery was proven at the level of the decision and not
+    /// at the level of the effect - I said so at the time. A gate that refuses
+    /// correctly and an `apply` that does nothing look identical from the
+    /// outside, and only one of them is any use.
+    ///
+    /// This drives the command against a real registry: a task claiming a file
+    /// with a branch that does not exist, listed as a proposal, then applied.
+    static func runApplyingAProposalActuallyMovesTheRecord() async {
+        print("\n# Scenario: applying a proposal actually moves the record")
+
+        let store = NSTemporaryDirectory() + "reconcile-apply-\(UUID().uuidString).json"
+        defer { try? FileManager.default.removeItem(atPath: store) }
+        let registry = QueenDelegationRegistry(storePath: store)
+
+        let issue = IssueReference(owner: "gHashTag", repo: "trios", number: 4310)
+        guard let task = registry.delegate(
+            issue: issue,
+            title: "A claim with nothing behind it",
+            worker: "queen-swift",
+            conversationId: UUID(),
+            ownedPaths: ["docs"],
+            acceptanceCriteria: ["docs/x.md exists"]
+        ) else {
+            fail("could not open a task to reconcile")
+            return
+        }
+        // A branch name nothing will ever resolve, and a count that claims work
+        // landed on it. This is #1280's shape exactly.
+        registry.setVirtualBranch(taskID: task.id, branch: "queen/4310-does-not-exist")
+        registry.recordCommittedFiles(taskID: task.id, count: 1)
+        check(
+            registry.tasks.first(where: { $0.id == task.id })?.committedFiles == 1,
+            "the registry starts out claiming one file"
+        )
+
+        let vm = ChatViewModel(
+            transport: MockChatTransport(),
+            healthCheck: MockHealthCheck(),
+            parser: UIMessageStreamParser(),
+            persister: InMemoryPersister(),
+            stateMachine: ConversationStateMachine(),
+            a2aClient: nil,
+            modelStore: ModelConfigurationStore(
+                defaults: UserDefaults(suiteName: "trios-reconcile-apply") ?? .standard,
+                environment: [:],
+                reliabilityService: ModelReliabilityService(store: VolatileMemoryStore())
+            ),
+            memoryService: AgentMemoryService(
+                store: VolatileMemoryStore(), fingerprintKey: testFingerprintKey
+            ),
+            todoPlanner: TODOPlanner(
+                store: VolatileMemoryStore(),
+                preferences: UserDefaults(suiteName: "trios-reconcile-apply") ?? .standard
+            ),
+            delegationRegistry: registry
+        )
+        try? await Task.sleep(nanoseconds: 50_000_000)
+
+        // Showing must not change anything. That is the whole reason the verb
+        // is a separate word.
+        await vm.runQueenCommand("/reconcile")
+        check(
+            registry.tasks.first(where: { $0.id == task.id })?.committedFiles == 1,
+            "listing the proposals leaves the record exactly as it was"
+        )
+        check(
+            vm.messages.contains { $0.content.contains("4310") && $0.content.contains("clear") },
+            "and the list names the task and what would be done to it"
+        )
+
+        // Out of range while the list still has something in it. Asked after
+        // applying, this passes for the wrong reason: with no proposals left
+        // the command correctly answers "everything agrees", which is a
+        // different sentence entirely.
+        await vm.runQueenCommand("/reconcile apply 9")
+        check(
+            vm.messages.contains { $0.content.contains("is not one of them") },
+            "a proposal number out of range is refused by name"
+        )
+        check(
+            registry.tasks.first(where: { $0.id == task.id })?.committedFiles == 1,
+            "and refusing it changed nothing"
+        )
+
+        await vm.runQueenCommand("/reconcile apply 1")
+        check(
+            registry.tasks.first(where: { $0.id == task.id })?.committedFiles == 0,
+            "applying it clears the count that had nothing behind it"
+        )
+        check(
+            vm.messages.contains { $0.content.contains("file count cleared") },
+            "and she says what she did rather than only that she did something"
+        )
+
+        // And once there is nothing left to fix, she says so rather than
+        // listing an empty list.
+        await vm.runQueenCommand("/reconcile")
+        check(
+            vm.messages.contains { $0.content.contains("agree on every task") },
+            "with the disagreement gone she says the record and the repository agree"
+        )
+    }
+
     // MARK: - Scenario: she proposes the repair and waits for a word
 
     /// Eight disagreements sat visible and motionless for a whole round,
