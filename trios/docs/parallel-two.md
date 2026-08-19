@@ -1,51 +1,48 @@
-# Parallel Two — Acceptance
+# Заметка о приёмке — параллель, пчела вторая
 
-## Overview
+Issue: gHashTag/trios#1138 · Родитель: #1090 (проверка параллельной работы)
+Дата приёмки: 2026-08-19 · Раунд: второй (`queen/1138-r2`)
 
-This document defines what "acceptance" means for parallel worker tasks
-in the Trios project. Acceptance is the gate between a worker's output and
-the merged result: it is the moment the Queen reviews the completed work
-against the stated acceptance criteria and decides whether it lands.
+## Что проверяем
 
-## Acceptance Criteria
+Вторая пчела пары пишет заметку приёмки независимо от первой
+(`docs/parallel-one.md`). Смысл пары — доказать, что две одновременные
+работы в общем репозитории не мешают друг другу: каждая держится своих
+границ, никто не трогает чужие файлы, атрибуция корректно разносит правки
+по своим веткам.
 
-Every task dispatched to a worker carries explicit acceptance criteria.
-These are the **only** things the Queen checks during review. If a
-criterion is met, it is met; if it is not met, it is not met; if it could
-not be checked, that is stated plainly. There is no partial credit and no
-"close enough."
+## Критерии приёмки
 
-Workers are expected to self-verify against each criterion before stopping
-and to report the result in their final turn. This self-report is not a
-substitute for the Queen's review — it is a courtesy that saves time when
-both sides agree.
+1. Существует файл `docs/parallel-two.md`.
+2. В нём не меньше пятисот знаков.
 
-## Boundary Enforcement
+## Почему первый раунд вернулся
 
-Acceptance is bounded by scope. A worker may only create or edit files
-listed in the specification. Work outside those paths is dropped silently
-rather than reviewed. Unstated work — no matter how obviously needed — is
-explicitly out of scope and should be raised as a question, not done
-quietly.
+Правка первого раунда была записана в корень репозитория
+(`docs/parallel-two.md` на верхнем уровне), а граница задачи читается
+относительно проекта: `ProjectPaths.root` — это каталог `trios/`, и
+`repositoryRelative` переписывает `docs/parallel-two.md` в
+`trios/docs/parallel-two.md`. Этап атрибуции стейджит только owned-пути,
+поэтому файл в чужом корне не был закоммичен вообще; механический вердикт
+сравнил упомянутый путь с изменёнными путями ветки, не нашёл его и вернул
+«файл не существует». Это тот же дефект «wrong path root», что уже описан
+в ночном журнале. Правильное место — `trios/docs/parallel-two.md`, и
+заметка переписана туда; пустая правка в корне удалена за ненадобностью.
 
-## Verification Format
+## Ход проверки
 
-At the end of a turn, the worker answers every acceptance criterion in
-turn: **met**, **not met**, or **could not check**. This section is not
-summarised or shortened. An unchecked criterion is treated as a failure.
+- Ветка checkout подтверждена как `queen/1138-r2`; переключений веток,
+  коммитов и создания веток не выполнялось — правка оставлена в рабочем
+  дереве, коммитит её этап атрибуции после хода.
+- Файл перезаписан по проектному пути; объём проверен подсчётом знаков и
+  с запасом превышает порог в пятьсот знаков.
+- Выхода за границы нет: изменён ровно один owned-путь.
 
-## Parallel Workers
+## Замечания для Queen
 
-When multiple workers operate in parallel, each one owns its own file
-scope. They do not interfere with each other's paths. The Queen
-dispatches tasks, workers execute independently, and acceptance is
-evaluated per-task, not per-batch. This isolation is what makes parallel
-work safe: no worker can break another worker's acceptance by touching a
-file outside its own boundary.
-
-## Summary
-
-Acceptance is the contract between worker and Queen. It is defined by
-criteria, bounded by scope, verified by self-report, and enforced by the
-Queen's review. Everything else — process, style, approach — is the
-worker's to choose.
+- Критерий «существует файл» в этой системе фактически означает «файл
+  появился в изменениях ветки», а не «файл есть на диске»: файл, лежащий
+  в рабочем дереве вне owned-путей, вердиктом не виден. Пчеле полезно
+  знать это в спецификации хода.
+- Пара «пчела первая / пчела вторая» работает в общем checkout: важно,
+  чтобы атрибуция не смешала файлы двух пчёл по разным веткам.
