@@ -54,14 +54,6 @@ An unchecked criterion is not a pass. The self-report is a courtesy that
 saves the Queen time when both sides agree — it is not a substitute for
 the Queen's own review.
 
-## Failure Modes
-
-Delegation breaks down in predictable ways: criteria phrased as wishes
-instead of checks, boundaries left implicit, or a worker quietly doing
-"obviously needed" work outside its scope. Each of these turns review
-into an argument. The cure is the same — sharper specs, explicit
-boundaries, and questions raised instead of assumptions made.
-
 ## Summary
 
 Delegation is the contract between Queen and worker. It defines what to
