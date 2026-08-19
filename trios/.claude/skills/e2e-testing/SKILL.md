@@ -1161,3 +1161,64 @@ second. The briefing carries the kinds, in order, and an explicit instruction
 not to repeat the approach, plus: if you reach the same wall, name it rather
 than stopping quietly. An empty branch and a named obstacle cost the same and
 are worth very different amounts.
+
+## The fourth mechanism built and never called
+
+The list in this project so far: the autonomy preference (a setter with no
+caller), the worktree committer (`commitInWorktree`, declared and unused), the
+skill match (matched against the wrong shape, so inert), and now the review
+send-back. `/review <slug> reject <why>` returns a task to its worker, rebriefs
+it and restarts the runner. It worked. Nothing had ever called it but a human
+typing the command, so eight fully-judged tasks sat in `awaitingReview` for up
+to fifteen hours, each holding its file boundary, and the autonomous tick
+reported "all 24 candidates look already done" because every path to real work
+was owned by something nobody had finished.
+
+**The tell is a queue that only a person drains.** When a state has an exit
+that exists but no rule that takes it, the queue does not look broken - it
+looks busy. Ask of every terminal-ish state: what moves a task out of here
+without a human, and if the answer is "nothing", that is the bug, not the
+backlog.
+
+**Search for it directly.** For each function that changes state, grep for its
+callers. One caller that is a command handler and none that are policy means
+the mechanism is manual-only, whatever the design says.
+
+## A new automatic action spends whatever the manual one spent
+
+The send-back puts a worker back on the wing, so it costs a slot. The manual
+command could ignore the ceiling because a human issues one at a time; the
+automatic sweep runs over every judged task at once. Eight would have started
+against a ceiling of four.
+
+The guard went in at the last minute and earned itself on the first run:
+
+```
+queen.review.send_back_deferred | #1149 is ready to go back but 4 workers are already flying
+```
+
+**Rule:** when converting a manual action into an automatic one, re-ask every
+resource question the manual version never had to answer. Rate, concurrency,
+cost, and idempotence were all implicitly bounded by the human doing it.
+
+**And the notice needs bounding too.** The sweep passes over every waiting task
+every tick. An escalation that speaks each time buries the tasks that moved
+under the ones that cannot. Once per task per run.
+
+## A refused transition still ran the code after it
+
+`registry.transition(...)` returns whether the move happened, and the line
+after it recorded a failure kind unconditionally. A cancelled task refuses the
+move to `failed` - correctly - and was then stamped `producedNothing`, feeding
+a failure to the policy that counts failures against an issue.
+
+Found by reading the suite's own log rather than its verdict:
+
+```
+queen.transition.rejected  Cannot move #4243 from cancelled to failed.
+queen.failure.classified   #4243 failed as producedNothing
+```
+
+Two consecutive lines that contradict each other, in a run that passed.
+**Read the log of a green suite.** The assertions only cover what someone
+thought to assert.
