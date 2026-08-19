@@ -1967,7 +1967,14 @@ final class ChatViewModel: ObservableObject {
         // So: wait briefly for the warm-up rather than refuse outright, because
         // this resolves on its own within seconds, and only then say something
         // true if it has not.
-        if runtimeConfiguration.provider.requiresAPIKey,
+        // Real transport only. The test harness injects a stubbed transport
+        // that needs no credential, and gating it here made nine tests refuse
+        // to send - the delegation path's equivalent guard has carried exactly
+        // this exemption from the start (`type(of: transport) is
+        // SSETransport.Type`) and I failed to carry it across with the rest.
+        let usesLiveTransport = type(of: transport) is SSETransport.Type
+        if usesLiveTransport,
+           runtimeConfiguration.provider.requiresAPIKey,
            (runtimeConfiguration.apiKey ?? "").isEmpty {
             warmupProviderKey()
             for _ in 0..<10 {
@@ -1976,7 +1983,8 @@ final class ChatViewModel: ObservableObject {
                 if !(runtimeConfiguration.apiKey ?? "").isEmpty { break }
             }
         }
-        if runtimeConfiguration.provider.requiresAPIKey,
+        if usesLiveTransport,
+           runtimeConfiguration.provider.requiresAPIKey,
            (runtimeConfiguration.apiKey ?? "").isEmpty {
             TriosLogBus.shared.error(
                 .chat, "chat.send.no_key",
@@ -7904,6 +7912,19 @@ final class ChatViewModel: ObservableObject {
             self.summary = result.summary
             self.combinedTreeSha = result.combinedTreeSha
         }
+
+        /// The honest proof for "there was nothing to combine".
+        ///
+        /// Not a failure and not a fabricated success: with no lane carrying
+        /// content there is no divergence to find, and the summary says so
+        /// rather than pretending a build ran. Kept as a separate initialiser
+        /// so the failing-result path above stays the only way a REAL build
+        /// can produce a proof.
+        fileprivate init(emptyAgainst base: String) {
+            self.summary = "No lane carried content to combine against \(base); "
+                + "there is nothing that could diverge."
+            self.combinedTreeSha = nil
+        }
     }
 
     /// #1128: the outcome of one watchdog run, for one acceptance. `refused`
@@ -7969,8 +7990,29 @@ final class ChatViewModel: ObservableObject {
             )
         }
 
+        // Only lanes that can actually contribute. A queued or running bee has
+        // no commits yet, and a leftover branch cut before the base drags old
+        // content into the overlay - five of those were enough to fail every
+        // acceptance, so one stale lane held thirteen healthy ones.
+        let contributing = await Task.detached(priority: .utility) {
+            QueenBranchCommitter.contributingBranches(branches, baseRef: base)
+        }.value
+        if contributing.count != branches.count {
+            TriosLogBus.shared.info(
+                .queen, "queen.combined.narrowed",
+                "Combining \(contributing.count) of \(branches.count) lanes; "
+                    + "the rest have nothing to contribute or predate the base",
+                ["kept": contributing.joined(separator: ", ")]
+            )
+        }
+        guard !contributing.isEmpty else {
+            // Nothing to combine is not a failure to combine. With no lane
+            // carrying content there is no divergence to find, and refusing
+            // here would block the first acceptance of every fresh swarm.
+            return .passed(CombinedBuildProof(emptyAgainst: base))
+        }
         let result = await QueenBranchCommitter.verifyCombinedBuild(
-            branches: branches, baseRef: base
+            branches: contributing, baseRef: base
         )
         if let proof = CombinedBuildProof(result: result) {
             return .passed(proof)

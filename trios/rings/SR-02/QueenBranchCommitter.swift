@@ -557,6 +557,51 @@ enum QueenBranchCommitter {
     /// `ownedPaths` are staged explicitly so files the bee was not allowed
     /// to touch cannot ride along, even if they exist in the worktree.
     /// When `ownedPaths` is empty, all changes are staged.
+    /// The branches that can actually contribute to a combined build.
+    ///
+    /// Two kinds are dropped, and both were sinking every acceptance once the
+    /// swarm grew past a handful:
+    ///
+    /// - **Nothing to contribute.** A lane that is queued or still running has
+    ///   no commits on its branch yet. Overlaying it adds no content and no
+    ///   divergence - there is nothing there to diverge FROM - while its mere
+    ///   presence is one more chance for the assembly to go wrong.
+    /// - **Cut before the base.** A branch that predates the base drags its old
+    ///   content into the overlay, which is the "drops everything newer"
+    ///   hazard the worktree work already met once. Five leftovers pointing 140
+    ///   commits back were enough to make every combined build fail, so one
+    ///   stale lane held thirteen healthy ones hostage.
+    ///
+    /// The interface-divergence check this feeds exists to catch two bees whose
+    /// signatures disagree. A branch with no commits cannot disagree with
+    /// anything, and a branch cut before the base disagrees with the base
+    /// rather than with a bee.
+    static func contributingBranches(
+        _ branches: [String],
+        baseRef: String,
+        projectRoot: String = ProjectPaths.root
+    ) -> [String] {
+        branches.filter { branch in
+            let ahead = QueenStatusViewModel.runProcess(
+                "/usr/bin/git",
+                arguments: ["rev-list", "--count", "\(baseRef)..\(branch)"],
+                workDir: projectRoot, timeout: 15
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let count = Int(ahead), count > 0 else { return false }
+            let mergeBase = QueenStatusViewModel.runProcess(
+                "/usr/bin/git", arguments: ["merge-base", branch, baseRef],
+                workDir: projectRoot, timeout: 15
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            let baseSHA = QueenStatusViewModel.runProcess(
+                "/usr/bin/git", arguments: ["rev-parse", baseRef],
+                workDir: projectRoot, timeout: 15
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            return QueenWorktree.staleBranchReason(
+                branchExists: true, mergeBase: mergeBase, head: baseSHA
+            ) == nil
+        }
+    }
+
     static func commitInWorktree(
         worktreePath: String,
         message: String,
