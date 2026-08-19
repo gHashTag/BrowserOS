@@ -1557,3 +1557,41 @@ opening the file.
 A wrong sentence in a commit message is durable in a way a wrong sentence in
 chat is not: it is what the next person greps. Correct it in the next commit,
 by name, rather than quietly writing the truth beside it.
+
+## Count the reasons; do not narrate one of them
+
+```
+All 26 candidate(s) look already done — nothing to choose
+```
+
+One of the twenty-six was already done. Sixteen were blocked, seven had a
+worker, one had no boundary. The sentence picked the most comfortable reason
+and generalised it, and it survived two separate investigations - it hid a
+queued deadlock for hours, and after that deadlock was fixed it went on hiding
+the escalation backlog underneath.
+
+```
+Nothing to choose from 26 candidate(s): 16 held by another task,
+7 already has a worker, 1 looks already done, 1 no boundary
+```
+
+**Rule:** when a loop refuses N items for M different reasons, the summary
+carries the histogram, not a representative. The cost of a representative is
+that the biggest cause is invisible precisely when it is the one that matters.
+
+**Tell:** a summary sentence whose subject is "all" or "every". Ask what
+proportion of the cases it actually describes.
+
+## Name the holder of any lock you report as held
+
+"Its files are owned by a live task" is anonymous, and sixteen of those in a
+row read as a busy swarm. Five of the holders were tasks escalated to the
+operator hours earlier, sitting in `awaitingReview` with their send-backs
+exhausted, holding their paths while they waited for a decision that nobody
+knew was owed.
+
+Now: `Skipping #1284: its files are held by gHashTag/trios#1284 (queued, 2m)` -
+which also makes self-blocking visible at a glance.
+
+**Rule:** a refusal that mentions a resource conflict names the holder, its
+state, and its age. A block nobody can attribute is a block nobody clears.
