@@ -364,6 +364,7 @@ struct ChatSSEEndToEndTests {
         ("runABeeStandsInTheProjectNotTheRepository", { await runABeeStandsInTheProjectNotTheRepository() }),
         ("runABoundaryPathIsAPathNotProse", { await runABoundaryPathIsAPathNotProse() }),
         ("runAnEnglishIssueIsStillDelegatable", { await runAnEnglishIssueIsStillDelegatable() }),
+        ("runWorkInASecondEpicIsVisible", { await runWorkInASecondEpicIsVisible() }),
     ]
 
     static func main() async {
@@ -7935,6 +7936,54 @@ struct ChatSSEEndToEndTests {
     /// Red is not the Queen's to fix. The bee that opened the pull request is
     /// woken with the names of the failing checks and works on the same branch
     /// until the gate is green.
+    // MARK: - Scenario: work in a second epic is visible
+
+    /// The epic number was written into eight places, one of them a URL. Six
+    /// well-formed sub-issues were opened under #1279 - acceptance criteria,
+    /// disjoint boundaries, everything the selection needs - and the Queen
+    /// could not see one of them. Not refuse them: see them. She reported "all
+    /// 24 candidates look already done" while six untouched tasks sat one epic
+    /// away.
+    ///
+    /// Which work exists is the operator's decision, so it is stored and the
+    /// code supplies only a default.
+    static func runWorkInASecondEpicIsVisible() async {
+        print("\n# Scenario: work in a second epic is visible")
+
+        typealias E = QueenEpics
+
+        check(
+            E.defaultEpics.contains(1090) && E.defaultEpics.contains(1279),
+            "both epics are read by default - the supervisor one and the T27 backend"
+        )
+        check(
+            E.deduplicated([1090, 1279, 1090]) == [1090, 1279],
+            "a repeated epic is read once; twice would double-count every sub-issue in it"
+        )
+        check(
+            E.deduplicated([1279, 1090]) == [1279, 1090],
+            "and the operator's order survives - sorting would overrule a statement of priority"
+        )
+
+        guard let url = E.timelineURL(epic: 1279) else {
+            fail("an epic must produce a timeline URL")
+            return
+        }
+        check(
+            url.absoluteString
+                == "https://api.github.com/repos/gHashTag/trios/issues/1279/timeline?per_page=100",
+            "the URL is built from the number rather than written out"
+        )
+        check(
+            E.timelineURL(epic: 1090)?.absoluteString.contains("/issues/1090/") == true,
+            "and each epic gets its own, so one number cannot fetch another's board"
+        )
+        check(
+            E.describedList.contains("#1090") && E.describedList.contains("#1279"),
+            "log lines name the epics actually read: \(E.describedList)"
+        )
+    }
+
     // MARK: - Scenario: an English issue is still delegatable
 
     /// The repository writes its documentation and code in English. Every issue

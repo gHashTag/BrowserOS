@@ -4812,14 +4812,14 @@ final class ChatViewModel: ObservableObject {
                         .queen,
                         "queen.subissue.refresh",
                         "Background refresh updated store: \(subIssues.count) sub-issue\(subIssues.count == 1 ? "" : "s")",
-                        ["epic": "gHashTag/trios#1090", "count": String(subIssues.count)]
+                        ["epic": QueenEpics.describedList, "count": String(subIssues.count)]
                     )
                 } else {
                     TriosLogBus.shared.warn(
                         .queen,
                         "queen.subissue.refresh",
                         "Background refresh failed (\(failureMessage)); store left untouched",
-                        ["epic": "gHashTag/trios#1090", "error": failureMessage]
+                        ["epic": QueenEpics.describedList, "error": failureMessage]
                     )
                 }
             }
@@ -7368,32 +7368,44 @@ final class ChatViewModel: ObservableObject {
         var seen = Set<Int>()
         var subIssues: [(number: Int, title: String, body: String)] = []
 
-        var timelineRequest = URLRequest(
-            url: URL(string: "https://api.github.com/repos/gHashTag/trios/issues/1090/timeline?per_page=100")!
-        )
-        timelineRequest.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        if let token = githubTokenForTimeline() {
-            timelineRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-
-        var timelineData = Data()
+        // Every configured epic, not one. The number used to be written into
+        // the URL, which was fine while there was one epic and became a wall
+        // the moment there were two: six well-formed sub-issues under #1279
+        // were invisible to a Queen that reported "all 24 candidates look
+        // already done".
         var networkOK = false
         var failureMessage = ""
-        do {
-            let (data, response) = try await URLSession.shared.data(for: timelineRequest)
-            timelineData = data
-            if let httpResp = response as? HTTPURLResponse,
-               (200...299).contains(httpResp.statusCode) {
-                networkOK = true
-            } else {
-                let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-                failureMessage = "HTTP \(code)"
+        for epic in QueenEpics.configured {
+            guard let url = QueenEpics.timelineURL(epic: epic) else { continue }
+            var timelineRequest = URLRequest(url: url)
+            timelineRequest.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+            if let token = githubTokenForTimeline() {
+                timelineRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             }
-        } catch {
-            failureMessage = error.localizedDescription
-        }
 
-        if networkOK {
+            var timelineData = Data()
+            var epicOK = false
+            do {
+                let (data, response) = try await URLSession.shared.data(for: timelineRequest)
+                timelineData = data
+                if let httpResp = response as? HTTPURLResponse,
+                   (200...299).contains(httpResp.statusCode) {
+                    epicOK = true
+                } else {
+                    let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+                    // Named, because "HTTP 404" without the epic is a message
+                    // that cannot be acted on when there is more than one.
+                    failureMessage = "#\(epic): HTTP \(code)"
+                }
+            } catch {
+                failureMessage = "#\(epic): \(error.localizedDescription)"
+            }
+
+            // One reachable epic is enough to have read the board. Treating a
+            // single unreachable epic as total failure would let a typo in one
+            // number stop work that is sitting open in another.
+            if epicOK { networkOK = true } else { continue }
+
             if let events = try? JSONSerialization.jsonObject(with: timelineData) as? [[String: Any]] {
                 for event in events {
                     guard event["event"] as? String == "cross-referenced" else { continue }
@@ -7408,6 +7420,9 @@ final class ChatViewModel: ObservableObject {
                     }
                 }
             }
+        }
+
+        if networkOK {
 
             let storePayload: [String: Any] = [
                 "readAt": ISO8601DateFormatter().string(from: Date()),
@@ -7634,7 +7649,7 @@ final class ChatViewModel: ObservableObject {
                     "queen.choose",
                     "Timeline request failed (\(failureMessage)); using \(subIssues.count) sub-issue\(subIssues.count == 1 ? "" : "s") from store — \(loaded.disclaimer)",
                     [
-                        "epic": "gHashTag/trios#1090",
+                        "epic": QueenEpics.describedList,
                         "source": "store",
                         "age": loaded.disclaimer,
                         "count": String(subIssues.count),
@@ -7646,11 +7661,11 @@ final class ChatViewModel: ObservableObject {
                     .queen,
                     "queen.choose",
                     "Timeline request failed: \(failureMessage)",
-                    ["epic": "gHashTag/trios#1090", "chosen": "(none)"]
+                    ["epic": QueenEpics.describedList, "chosen": "(none)"]
                 )
                 await postQueenNotice(
                     SystemNoticeClassifier.warningMarker
-                        + "Cannot choose: failed to read sub-issues of epic #1090 "
+                        + "Cannot choose: failed to read sub-issues of \(QueenEpics.describedList) "
                         + "(\(failureMessage))."
                 )
                 return
@@ -7662,14 +7677,14 @@ final class ChatViewModel: ObservableObject {
                 .queen,
                 "queen.choose",
                 "Using \(subIssues.count) sub-issue\(subIssues.count == 1 ? "" : "s") — \(disclaimer)",
-                ["epic": "gHashTag/trios#1090", "count": String(subIssues.count), "source": "store"]
+                ["epic": QueenEpics.describedList, "count": String(subIssues.count), "source": "store"]
             )
         } else {
             TriosLogBus.shared.info(
                 .queen,
                 "queen.choose",
-                "Read \(subIssues.count) open sub-issue\(subIssues.count == 1 ? "" : "s") from #1090 timeline",
-                ["epic": "gHashTag/trios#1090", "count": String(subIssues.count)]
+                "Read \(subIssues.count) open sub-issue\(subIssues.count == 1 ? "" : "s") from \(QueenEpics.describedList)",
+                ["epic": QueenEpics.describedList, "count": String(subIssues.count)]
             )
         }
 
@@ -7678,7 +7693,7 @@ final class ChatViewModel: ObservableObject {
                 .queen,
                 "queen.choose",
                 "Nothing to choose — no open sub-issues on #1090",
-                ["epic": "gHashTag/trios#1090", "considered": "0", "chosen": "(none)"]
+                ["epic": QueenEpics.describedList, "considered": "0", "chosen": "(none)"]
             )
             await postQueenNotice(
                 SystemNoticeClassifier.infoMarker

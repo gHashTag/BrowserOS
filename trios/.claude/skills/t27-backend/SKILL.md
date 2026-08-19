@@ -129,8 +129,11 @@ Railway deploy/build/http streams are readable without the machine being awake.
 ## TNF — Ternary Network Floats
 
 Sign, exponent in balanced ternary trits, M-bit mantissa, `1 + E_t + M = N`.
-The point is a datapath with no multiplier: a weight is a code and multiplying
-by it is a choice of sign.
+
+The ternary network is multiplier-free — that property belongs to the network,
+not to any number format. A weight is a code and applying it is a choice of
+sign. TNF is the format the accumulator spends its range on, which is a
+different and smaller claim.
 
 **Not implemented in trios.** The article is `~/Downloads/TNF_статья_ru.md`
 (12 Aug 2026), with `tnf_paper.pdf` and the architecture PDF beside it.
