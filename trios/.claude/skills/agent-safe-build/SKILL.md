@@ -644,3 +644,52 @@ no.
 
 **Tell:** a log with the same refusal repeating at the loop interval. That is
 never healthy backpressure; it is a loop that cannot advance.
+
+## A comment in the tree already knew
+
+Before overriding a guard, read what it says about itself. `DevSecretStore`
+opens with the reason the dev build avoids the Keychain: the dev binary is
+ad-hoc signed, so its identity changes on every rebuild and macOS treats each
+build as a different application asking for someone else's secret. It does not
+prompt once and remember. It demands the **login keychain password**, per
+secret, per rebuild.
+
+I read the fence as answering the wrong question - "is this prod?" rather than
+"is anyone at the keyboard?" - and moved dev onto the real Keychain. The dev
+app then came up as an empty window standing behind a password dialog. The
+reasoning was sound in the abstract and wrong about this machine, and the
+paragraph that would have stopped me was three files away.
+
+**Tell:** an app that launches, reports healthy in its log, and draws nothing.
+Look for a modal owned by the system, not by the app - it will not be in the
+app's log, because from the app's side the call has simply not returned yet.
+
+## One flag, two lifetimes
+
+The same change moved dev's *data-at-rest* key along with its *credential*
+store, because one property answered both. Every conversation dev had written
+under the old key stopped decrypting - 18 `conversation.persist.decrypt_failed`
+in a single launch.
+
+The two are different in kind and the difference is durable:
+
+- A **provider API key** belongs to the person. Sharing it across builds is the
+  point of having it.
+- A **data-at-rest key** belongs to a data root. `.trinity-dev` and `.trinity`
+  are separate by construction, so the key must stay where the data was
+  written. Moving it does not fail loudly - it makes existing data unreadable
+  while everything reports success.
+
+**Rule:** before repointing a secret store, ask what was encrypted with the old
+one. If the answer is "the user's history", that is a migration, not a flag.
+
+## Check what a variant already has before adding a way to give it one
+
+Dev's missing API key was the wrong diagnosis twice over. The path I checked,
+`~/.trios/secrets/`, is not the dev store - it is `~/.trios-dev/secrets/`, and
+it exists. And dev never needed either: `resolvedAPIKey` reads
+`~/.trios/config.json` as its second source and the key was already there. The
+warm-up succeeds on attempt 1 with the fence fully in place.
+
+**Rule:** read the resolution order end to end before concluding a credential
+is absent. A store returning nil is the first source, not the answer.

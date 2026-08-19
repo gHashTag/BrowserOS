@@ -1055,3 +1055,62 @@ correctly and then dropped, or compared against the wrong companion.
 - A migration ladder re-tested the immutable original version at every rung, so
   it could only ever climb one. **A stepwise migration needs a running value;
   testing the entry condition inside each step is a ladder with one rung.**
+
+## A control nobody can reach is a constant
+
+`queenAutonomyEnabled` was a stored preference with a getter, a setter, and a
+default. It had no callers of its setter - not in the UI, not in a command, not
+in a test. For as long as it existed it therefore only ever held its default,
+and in the dev variant that default is off. The build meant for testing the
+Queen was the one build in which she could not be started.
+
+Every test passed. They set the value directly and asserted on the reader,
+which is a test of a variable, not of a preference.
+
+**Rule:** for anything described as "the operator's choice", the test must go
+through whatever the operator would touch. If nothing in the app can reach it,
+that is the finding - write it down before writing a test that hides it.
+
+**Two-sided proof, from one log:**
+
+```
+queen.autonomy.skipped  | Not picking up work: autonomy is switched off
+queen.autonomy.tick     | Capacity free - choosing and starting the next open sub-issue
+queen.autonomy.approved | Approved gHashTag/trios#1129 on her own authority - autonomy is on
+```
+
+The first line is what the fix had to change. Keeping both in the same log is
+cheaper and more convincing than any assertion about either alone.
+
+## Layout defects need a screenshot, not a reading
+
+"The design jumps" and "the fonts are unreadable" cannot be verified from
+source, and both were true here in ways the code did not obviously show:
+
+- A status label written straight from an enum - `queued`, `running`,
+  `awaitingReview` - is 6, 7 and 14 characters. Placed after a `Spacer` it
+  resizes its neighbours every time the work advances. Nothing in the file
+  looks wrong.
+- An `HStack` that does not fit does not clip, it *compresses*, and which child
+  loses depends on what the others happen to contain. That produced a label
+  reading `committ / ed` across two lines - a wrap inside a nine-character
+  word.
+
+**Method that worked:** `screencapture -x -o` the whole screen, crop with
+`sips`, read the image. Faster than any UI automation and it needs no
+permissions. Bring the window forward first with
+`osascript -e 'tell application id "<bundle-id>" to activate'` - `System
+Events` position/size calls need assistive access and will fail.
+
+**Reserve, do not conditionally insert.** Both fixes are the same shape: render
+the widest thing the slot can ever hold, hidden, and put the real content over
+it. Derive the widest from the data (`allCases.map(\.rawValue).max(by: count)`),
+so a case added later widens the reservation instead of overflowing it.
+
+## A floor belongs in one place or it is not a floor
+
+618 hard-coded font sizes, 317 of them 10pt or smaller. No single one is a
+defect and the sum is an unreadable app. The fix that holds is not 317 edits,
+it is one function every size passes through, plus a gate that fails on a raw
+`.system(size:)` anywhere else. Without the gate the 618th is indistinguishable
+from the 617 that came before it.
