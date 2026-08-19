@@ -4081,6 +4081,29 @@ final class ChatViewModel: ObservableObject {
         // A named skill is handed over whole. Refused rather than silently
         // ignored: a worker briefed without the procedure it was promised looks
         // like it disobeyed.
+        // When nobody named a skill, choose one from the boundary.
+        //
+        // Not one delegation in this project's history has carried a skill: the
+        // slot has existed since the briefing was written, `--skill` has always
+        // been accepted, and the field was always nil - so every bee improvised
+        // beside twenty-six written procedures. An explicit name still wins;
+        // this only fills a silence.
+        //
+        // Conservative by construction: `QueenSkillMatch` returns nil unless
+        // every path in the boundary agrees on one skill, because a worker
+        // briefed with the wrong rehearsal is worse off than one briefed with
+        // none - it will follow it.
+        let skill = skill ?? QueenSkillMatch.skill(
+            forBoundary: paths,
+            available: Set(skillStore.enabled.map(\.id))
+        )
+        if skill != nil {
+            TriosLogBus.shared.info(
+                .queen, "queen.brief.skill",
+                "Briefing \(worker) with the `\(skill ?? "-")` procedure",
+                ["issue": issue.slug, "skill": skill ?? "-"]
+            )
+        }
         var skillBody: String?
         if let skill {
             guard let descriptor = skillStore.skill(named: skill),

@@ -356,6 +356,7 @@ struct ChatSSEEndToEndTests {
         ("runQueenPicksUpWorkHerself", { await runQueenPicksUpWorkHerself() }),
         ("runEachBeeGetsItsOwnCheckout", { await runEachBeeGetsItsOwnCheckout() }),
         ("runAppStartsItsOwnServer", { await runAppStartsItsOwnServer() }),
+        ("runEveryBeeIsHandedARehearsal", { await runEveryBeeIsHandedARehearsal() }),
     ]
 
     static func main() async {
@@ -7759,6 +7760,83 @@ struct ChatSSEEndToEndTests {
         check(
             !source.contains("FileHandle.nullDevice"),
             "the spawned server's output is kept, not discarded - a server that dies must say why"
+        )
+    }
+
+    // MARK: - Scenario: a bee is handed a rehearsal, not left to improvise
+
+    /// Twenty-six skills sit in `.claude/skills/`, the briefing has carried a
+    /// `skillBody` slot since it was written, `/delegate --skill` has always
+    /// accepted a name - and not one delegation in this project's history has
+    /// ever carried one. The field was always nil, so every bee worked from
+    /// first principles beside a shelf of written procedures.
+    ///
+    /// The match is conservative on purpose: a worker briefed with the WRONG
+    /// rehearsal is worse off than one briefed with none, because it will
+    /// follow it.
+    static func runEveryBeeIsHandedARehearsal() async {
+        print("\n# Scenario: a bee is handed a rehearsal (#1090)")
+
+        let installed: Set<String> = ["e2e-testing", "agent-safe-build", "tri-pipeline"]
+
+        check(
+            QueenSkillMatch.skill(
+                forBoundary: ["tests/TriOSKitTests/ChatFailureTests.swift"], available: installed
+            ) == "e2e-testing",
+            "a test boundary is handed the testing procedure"
+        )
+        check(
+            QueenSkillMatch.skill(forBoundary: ["build.sh"], available: installed)
+                == "agent-safe-build",
+            "a build boundary is handed the safe-build procedure"
+        )
+        check(
+            QueenSkillMatch.skill(
+                forBoundary: ["rings/SR-02/ChatViewModel.swift"], available: installed
+            ) == "agent-safe-build",
+            "ordinary Swift work is handed the procedure that keeps the running app alive"
+        )
+
+        // Order inside the rules matters: a path under tests/ that also ends in
+        // .swift must read as a test, not as ordinary Swift.
+        check(
+            QueenSkillMatch.skill(
+                forBoundary: ["tests/swift/ChatSSEEndToEndTest.swift"], available: installed
+            ) == "e2e-testing",
+            "a .swift file under tests/ reads as a test, not as ordinary Swift"
+        )
+
+        // Silence rather than a guess. Each of these would be a plausible
+        // wrong answer, and a bee follows what it is handed.
+        check(
+            QueenSkillMatch.skill(forBoundary: [], available: installed) == nil,
+            "no boundary, no rehearsal - there is nothing to match on"
+        )
+        check(
+            QueenSkillMatch.skill(forBoundary: ["docs/note.md"], available: installed) == nil,
+            "prose matches no rule, so nothing is handed over"
+        )
+        check(
+            QueenSkillMatch.skill(
+                forBoundary: ["tests/x.swift", "build.sh"], available: installed
+            ) == nil,
+            "a boundary spanning two rehearsals has no single one - picking the first would be a coin toss"
+        )
+        check(
+            QueenSkillMatch.skill(
+                forBoundary: ["tests/x.swift"], available: ["agent-safe-build"]
+            ) == nil,
+            "a switched-off skill is not quietly handed over - the operator turning it off was a decision"
+        )
+
+        // The wiring: an explicit name must still win over the match.
+        let source = (try? String(
+            contentsOfFile: "\(ProjectPaths.root)/rings/SR-02/ChatViewModel.swift",
+            encoding: .utf8
+        )) ?? ""
+        check(
+            source.contains("let skill = skill ?? QueenSkillMatch.skill("),
+            "the match only fills a silence - a named skill still wins"
         )
     }
 }
