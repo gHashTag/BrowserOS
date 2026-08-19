@@ -257,19 +257,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        // What the registry holds before the Queen's commands run. With an
+        // empty ISSUE there is no number to look the watched task up by, so
+        // the probe must recognise her work by what it created: the task to
+        // watch is the newest one absent from this snapshot. Recorded here,
+        // before the commands, because afterwards the two are inseparable.
+        let preCommandTaskIDs = Set(
+            QueenDelegationRegistry.shared.tasks.map(\.id)
+        )
+
         await runE2EQueenCommand(environment: environment)
 
         // When the Queen chose the work herself (`/choose --start`),
-        // issueText is empty. The registry still holds the task it
-        // registered, so fall back to the most recent non-terminal one
-        // instead of declaring failure. An empty registry stays a
-        // failure with the same record.
+        // issueText is empty and there is no issue number to resolve the
+        // task by. Fall back to the newest task her commands created —
+        // the ones missing from the snapshot taken before she ran. Any
+        // state counts, terminal ones included: a bee that failed in the
+        // seconds the commands took is still a bee this probe owes a
+        // verdict to, and reporting it as "did not register a task" was
+        // how a run the Queen started herself went unwatched (#1162).
+        // When her commands created nothing, there is nothing to watch
+        // and the same failure record stands.
         let lookup: () -> DelegatedTask? = {
             if let issue = IssueReference.parse(issueText) {
                 return QueenDelegationRegistry.shared.task(forIssue: issue)
             }
             return QueenDelegationRegistry.shared.tasks
-                .filter { !$0.state.isTerminal }
+                .filter { !preCommandTaskIDs.contains($0.id) }
                 .max { $0.createdAt < $1.createdAt }
         }
 
@@ -431,9 +445,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             ["issue": issue.slug, "command": verb, "state": reviewed?.rawValue ?? "unknown"]
         )
 
-        // Queen command runs AFTER delegation so a probe can assert on
-        // delegation results before exercising a slash command.
-        await runE2EQueenCommand(environment: environment)
+        // The Queen command already ran, before the wait. With an empty
+        // ISSUE the task to watch does not exist until `/choose --start`
+        // has delegated one, so the command cannot run after the verdict.
+        // Running it again there was not an innocent replay either: a
+        // second `/choose --start` delegated a second bee after the probe
+        // had already reported, leaving a run the Queen started with
+        // nobody watching it — the exact shape this probe exists to end.
+        // One probe, one execution.
     }
 
     /// Runs a raw queen slash command from `TRIOS_E2E_QUEEN_COMMAND`, independently
