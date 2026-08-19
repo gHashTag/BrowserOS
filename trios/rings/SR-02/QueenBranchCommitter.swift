@@ -660,10 +660,34 @@ enum QueenBranchCommitter {
             if let sha = commitSHA, !sha.isEmpty {
                 commitExists = git(["cat-file", "-e", "\(sha)^{commit}"]).ok
             }
+            // Which of the branch's own files HEAD does not already hold.
+            //
+            // `diff --name-only base...branch` - three dots - is the branch's
+            // side of the fork only, so files that changed on HEAD afterwards
+            // are not counted as the bee's. Without the third dot every stale
+            // branch reads as having touched a hundred files it never opened.
+            var unlanded = 0
+            if branchExists, branchCommits > 0, let branch, !branch.isEmpty {
+                let (ok, out) = git(["diff", "--name-only", "\(baseRef)...\(branch)"])
+                if ok {
+                    for path in out.split(separator: "\n") {
+                        let file = path.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !file.isEmpty else { continue }
+                        let inHead = git(["cat-file", "-e", "\(baseRef):\(file)"]).ok
+                        if !inHead { unlanded += 1; continue }
+                        let a = git(["rev-parse", "\(baseRef):\(file)"]).output
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        let b = git(["rev-parse", "\(branch):\(file)"]).output
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        if a != b, !a.isEmpty, !b.isEmpty { unlanded += 1 }
+                    }
+                }
+            }
             return QueenReconciliation.RepositoryFacts(
                 branchExists: branchExists,
                 branchCommits: branchCommits,
-                commitExists: commitExists
+                commitExists: commitExists,
+                unlandedFiles: unlanded
             )
         }.value
     }

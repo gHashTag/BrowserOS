@@ -7983,11 +7983,12 @@ struct ChatSSEEndToEndTests {
         print("\n# Scenario: the record is compared against the repository")
 
         typealias R = QueenReconciliation
-        func facts(branch: Bool = true, commits: Int = 0, commit: Bool = true)
-            -> R.RepositoryFacts
+        func facts(branch: Bool = true, commits: Int = 0, commit: Bool = true,
+                   unlanded: Int = 1) -> R.RepositoryFacts
         {
             R.RepositoryFacts(
-                branchExists: branch, branchCommits: commits, commitExists: commit
+                branchExists: branch, branchCommits: commits, commitExists: commit,
+                unlandedFiles: unlanded
             )
         }
 
@@ -7998,12 +7999,22 @@ struct ChatSSEEndToEndTests {
         )
         check(
             R.check(state: .queued, committedFiles: nil, committedSHA: nil,
-                    facts: facts(commits: 1)) == .unrecordedWork(commits: 1),
-            "a queued task with a commit is work nobody is looking at - this is #1281"
+                    facts: facts(commits: 1, unlanded: 1)) == .unrecordedWork(commits: 1),
+            "a queued task with a commit HEAD does not hold is work nobody is looking at"
+        )
+        // The refinement that turned twelve warnings into two. Every bee commit
+        // touched exactly one file - its own boundary - and all but two of
+        // those files were already in HEAD, swept in by somebody else's
+        // `git add -A`. Work that arrived by another road is not stranded, and
+        // raising it is the noise this report exists to avoid.
+        check(
+            R.check(state: .failed, committedFiles: nil, committedSHA: nil,
+                    facts: facts(commits: 3, unlanded: 0)) == .agrees,
+            "a commit whose files HEAD already holds is not stranded work"
         )
         check(
             R.check(state: .failed, committedFiles: nil, committedSHA: nil,
-                    facts: facts(commits: 1)) == .unrecordedWork(commits: 1),
+                    facts: facts(commits: 1, unlanded: 1)) == .unrecordedWork(commits: 1),
             "and so is a failed one - this is #1282"
         )
         check(

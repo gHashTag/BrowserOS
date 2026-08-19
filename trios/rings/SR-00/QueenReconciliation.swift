@@ -52,6 +52,19 @@ enum QueenReconciliation {
         var branchExists: Bool
         var branchCommits: Int
         var commitExists: Bool
+        /// Files the branch's own commits touched whose content is NOT what
+        /// HEAD already holds.
+        ///
+        /// The difference between work that is stranded and work that has
+        /// simply arrived by another road. Twelve branches were reported as
+        /// carrying unaccounted work; on inspection every bee commit touched
+        /// exactly one file - its own boundary - and all but two of those files
+        /// were already in HEAD, swept in by somebody else's `git add -A`.
+        ///
+        /// Raising twelve when two are real is the noise this report was
+        /// written to avoid, so the count of what is actually missing decides,
+        /// not the count of commits.
+        var unlandedFiles: Int = 0
     }
 
     /// States in which a commit on the branch is unremarkable.
@@ -80,6 +93,7 @@ enum QueenReconciliation {
         // Work on the branch of a task nobody thinks did any.
         if facts.branchExists,
            facts.branchCommits > 0,
+           facts.unlandedFiles > 0,
            !statesThatExpectWork.contains(state) {
             return .unrecordedWork(commits: facts.branchCommits)
         }
