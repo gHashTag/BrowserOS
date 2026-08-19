@@ -324,6 +324,68 @@ actor GitHubAPIClient {
     /// Fetches one pull request, which is the only endpoint that reports
     /// `merged`. List endpoints omit it, and without it a closed pull request
     /// cannot be told from a landed one.
+    /// The combined state of a pull request's checks, and which ones failed.
+    ///
+    /// The REST combined-status endpoint covers commit statuses; check RUNS
+    /// (which is what GitHub Actions writes) live on a second endpoint. Both
+    /// are asked, because a repository can use either and a gate that reads
+    /// only one reports SUCCESS for a red pull request whose failures it never
+    /// looked at.
+    func checkRollup(repo: String, sha: String) async throws -> (QueenMergeGate.Rollup, [String]) {
+        var failing: [String] = []
+        var sawAny = false
+        var sawPending = false
+        var sawFailure = false
+
+        let statusPath = try GitHubEndpoint.repositoryPath(repo, "/commits/\(sha)/status")
+        if let (data, _) = try? await URLSession.shared.data(for: try request(statusPath)),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            let state = (json["state"] as? String)?.uppercased() ?? ""
+            let statuses = (json["statuses"] as? [[String: Any]]) ?? []
+            if !statuses.isEmpty {
+                sawAny = true
+                for s in statuses {
+                    let st = (s["state"] as? String)?.lowercased() ?? ""
+                    if st == "failure" || st == "error" {
+                        sawFailure = true
+                        failing.append((s["context"] as? String) ?? "status")
+                    } else if st == "pending" {
+                        sawPending = true
+                    }
+                }
+            } else if state == "PENDING" {
+                sawPending = true
+            }
+        }
+
+        let runsPath = try GitHubEndpoint.repositoryPath(repo, "/commits/\(sha)/check-runs")
+        if let (data, _) = try? await URLSession.shared.data(for: try request(runsPath)),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let runs = json["check_runs"] as? [[String: Any]] {
+            for run in runs {
+                sawAny = true
+                let status = (run["status"] as? String)?.lowercased() ?? ""
+                let conclusion = (run["conclusion"] as? String)?.lowercased() ?? ""
+                let name = (run["name"] as? String) ?? "check"
+                if status != "completed" {
+                    sawPending = true
+                } else if ["failure", "timed_out", "action_required"].contains(conclusion) {
+                    sawFailure = true
+                    failing.append(name)
+                } else if conclusion == "cancelled" {
+                    // Cancelled is neither pass nor fail. Treated as pending so
+                    // nothing merges past it and nobody is woken for it.
+                    sawPending = true
+                }
+            }
+        }
+
+        if !sawAny { return (.none, []) }
+        if sawFailure { return (.failure, failing) }
+        if sawPending { return (.pending, []) }
+        return (.success, [])
+    }
+
     func fetchPullRequest(repo: String, number: Int) async throws -> GitHubPullRequest {
         let path = try GitHubEndpoint.repositoryPath(repo, "/pulls/\(number)")
         let (data, _) = try await URLSession.shared.data(for: try request(path))

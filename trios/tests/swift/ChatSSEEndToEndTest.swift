@@ -357,6 +357,7 @@ struct ChatSSEEndToEndTests {
         ("runEachBeeGetsItsOwnCheckout", { await runEachBeeGetsItsOwnCheckout() }),
         ("runAppStartsItsOwnServer", { await runAppStartsItsOwnServer() }),
         ("runEveryBeeIsHandedARehearsal", { await runEveryBeeIsHandedARehearsal() }),
+        ("runNothingMergesPastTheGate", { await runNothingMergesPastTheGate() }),
     ]
 
     static func main() async {
@@ -7837,6 +7838,98 @@ struct ChatSSEEndToEndTests {
         check(
             source.contains("let skill = skill ?? QueenSkillMatch.skill("),
             "the match only fills a silence - a named skill still wins"
+        )
+    }
+
+    // MARK: - Scenario: nothing merges past the gate, and red wakes the bee
+
+    /// The Queen asked the forge to merge and took the answer. GitHub refuses a
+    /// red pull request only when branch protection makes it refuse; without
+    /// that the merge succeeds and a failing change lands. Three of hers merged
+    /// that way and only luck decided they were green.
+    ///
+    /// Red is not the Queen's to fix. The bee that opened the pull request is
+    /// woken with the names of the failing checks and works on the same branch
+    /// until the gate is green.
+    static func runNothingMergesPastTheGate() async {
+        print("\n# Scenario: nothing merges past the gate (#1090)")
+
+        typealias G = QueenMergeGate
+
+        check(
+            G.decision(rollup: .success, mergeable: true, isDraft: false, checksConfigured: true)
+                == .merge,
+            "green merges"
+        )
+        check(
+            G.decision(rollup: .pending, mergeable: true, isDraft: false, checksConfigured: true)
+                == .wait(reason: "checks are still running"),
+            "running checks mean wait - not merge, and not wake anybody either"
+        )
+        guard case .wakeWorker = G.decision(
+            rollup: .failure, mergeable: true, isDraft: false, checksConfigured: true
+        ) else {
+            fail("a failed check must wake the worker")
+            return
+        }
+        guard case .wakeWorker(let errorReason) = G.decision(
+            rollup: .error, mergeable: true, isDraft: false, checksConfigured: true
+        ) else {
+            fail("an errored check must wake the worker too")
+            return
+        }
+        check(
+            errorReason.contains("errored"),
+            "and an errored run is named as such - it did not complete, which is not the same as failing"
+        )
+
+        // The NONE case is the one that cannot be guessed, and both guesses are
+        // bad: read it as failure and nothing ever merges in a project without
+        // CI; read it as success and the gate is decoration in a project that
+        // meant to have checks.
+        check(
+            G.decision(rollup: .none, mergeable: true, isDraft: false, checksConfigured: false)
+                == .merge,
+            "no checks and none configured: nothing to wait for"
+        )
+        guard case .wait = G.decision(
+            rollup: .none, mergeable: true, isDraft: false, checksConfigured: true
+        ) else {
+            fail("checks configured but none reported must wait, not merge past the gate")
+            return
+        }
+
+        // Refusals that no amount of bee work will change.
+        guard case .refuse = G.decision(
+            rollup: .success, mergeable: true, isDraft: true, checksConfigured: true
+        ) else {
+            fail("a draft is refused even when green")
+            return
+        }
+        guard case .refuse = G.decision(
+            rollup: .success, mergeable: false, isDraft: false, checksConfigured: true
+        ) else {
+            fail("a pull request the forge calls unmergeable is refused, not retried")
+            return
+        }
+
+        // The wake-up has to carry something actionable. A worker told only
+        // "it is red" repeats what it did.
+        let instruction = G.wakeInstruction(
+            prNumber: 71, reason: "a check failed", failingChecks: ["Fast gates", "xctest"]
+        )
+        check(
+            instruction.contains("Fast gates") && instruction.contains("xctest"),
+            "the wake-up names the failing checks"
+        )
+        check(
+            instruction.contains("Do not open a new pull request"),
+            "and says to push to the same branch - a second pull request for one task is the mess this avoids"
+        )
+        check(
+            G.wakeInstruction(prNumber: 71, reason: "x", failingChecks: [])
+                .contains("did not name which check"),
+            "when the forge names nothing, the instruction says so rather than inventing a check"
         )
     }
 }

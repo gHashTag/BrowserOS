@@ -3567,6 +3567,22 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Whether this repository runs checks the gate must wait for.
+    ///
+    /// Stated rather than inferred. A repository with no CI reports NONE, and
+    /// guessing from that is a coin toss with two bad sides: read it as failure
+    /// and nothing ever merges; read it as success and the gate is a
+    /// decoration in a project that meant to have checks. `.github/workflows`
+    /// existing is the fact, and it is cheap to ask.
+    static var repositoryHasChecks: Bool {
+        let root = (ProjectPaths.root as NSString).deletingLastPathComponent
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(
+            atPath: "\(root)/.github/workflows", isDirectory: &isDirectory
+        )
+        return exists && isDirectory.boolValue
+    }
+
     /// Puts a correction where the worker will read it.
     ///
     /// Written straight through the persister rather than into `messages`,
@@ -8585,6 +8601,60 @@ final class ChatViewModel: ObservableObject {
             if QueenDelegationPolicy.outcome(
                 merged: pullRequest.isMerged, closedUnmerged: pullRequest.isClosedUnmerged
             ) == .pending {
+                // The gate, before the merge and not instead of it.
+                //
+                // GitHub refuses a red pull request only when branch protection
+                // makes it refuse; without protection the merge succeeds and a
+                // failing change lands. Three of hers merged that way and only
+                // luck decided they were green.
+                let (rollup, failingChecks) = (try? await client.checkRollup(
+                    repo: prRepo, sha: reviewedSHA ?? ""
+                )) ?? (.none, [])
+                let gate = QueenMergeGate.decision(
+                    rollup: rollup,
+                    mergeable: nil,
+                    isDraft: false,
+                    checksConfigured: Self.repositoryHasChecks
+                )
+                switch gate {
+                case .wait(let why):
+                    TriosLogBus.shared.info(
+                        .queen, "queen.pr.gate_waiting",
+                        "Not merging #\(number) yet: \(why)",
+                        ["issue": task.issue.slug, "pr": "\(number)", "rollup": rollup.rawValue]
+                    )
+                    return
+                case .refuse(let why):
+                    TriosLogBus.shared.warn(
+                        .queen, "queen.pr.gate_refused",
+                        "Will not merge #\(number): \(why)",
+                        ["issue": task.issue.slug, "pr": "\(number)"]
+                    )
+                    return
+                case .wakeWorker(let why):
+                    // Red means the bee goes back to work, not that the Queen
+                    // fixes it. The instruction names the failing checks,
+                    // because a wake-up that says only "it is red" gives the
+                    // worker nothing to act on and it repeats what it did.
+                    TriosLogBus.shared.warn(
+                        .queen, "queen.pr.gate_red",
+                        "#\(number) is red: \(why). Waking \(task.worker).",
+                        [
+                            "issue": task.issue.slug, "pr": "\(number)",
+                            "checks": failingChecks.joined(separator: ", "),
+                        ]
+                    )
+                    await appendCorrectionToWorkerChat(
+                        task: task,
+                        text: QueenMergeGate.wakeInstruction(
+                            prNumber: number, reason: why, failingChecks: failingChecks
+                        )
+                    )
+                    registry.transition(taskID: task.id, to: .rejected)
+                    return
+                case .merge:
+                    break
+                }
                 TriosLogBus.shared.info(
                     .queen, "queen.pr.merge_attempt", "Attempting to merge a reviewed pull request",
                     ["issue": task.issue.slug, "pr": "\(number)"]
