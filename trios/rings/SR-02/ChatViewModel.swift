@@ -4807,6 +4807,19 @@ final class ChatViewModel: ObservableObject {
             }
         }
 
+        // Outside the "no active tasks" branch on purpose. I first put it
+        // inside, which skipped the scan exactly when the swarm was busy - and
+        // a busy swarm is when work goes missing. The scan is cheap and reads
+        // only git, so it runs every launch regardless of what is in flight.
+        Task { [weak self] in
+            guard let self else { return }
+            let gateDeadline = Date().addingTimeInterval(30)
+            while KeychainSecrets.isLaunching, Date() < gateDeadline {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+            await self.reconcileRecordAgainstRepository()
+        }
+
         // #1224: Warm the provider key in the background after the keychain
         // gate lowers, so the ModelCredentialStore cache is filled at launch
         // without any request triggering it. Runs regardless of active work.
@@ -7841,6 +7854,71 @@ final class ChatViewModel: ObservableObject {
                 await self.queenAutonomyTick()
             }
         }
+    }
+
+    /// Says out loud where the record and the repository disagree.
+    ///
+    /// The registry is a claim; the repository is a fact; nothing compared
+    /// them. A hand scan of thirty-five tasks found twenty-two branches
+    /// carrying the bees' own commits, eleven of them belonging to tasks the
+    /// registry called `queued` or `failed` - work that exists and that nobody
+    /// is looking at. One task was `accepted` with a branch that is gone.
+    ///
+    /// Reports; does not correct. Advancing a state from a git scan is a
+    /// judgement about work nobody reviewed. Saying the two disagree is not,
+    /// and it is the half that was missing.
+    func reconcileRecordAgainstRepository() async {
+        let tasks = delegationRegistry.tasks
+        guard !tasks.isEmpty else { return }
+        // HEAD, not a named branch. `dev..branch` counts every commit on the
+        // current working branch as well - the first run of this reported "507
+        // commits" for a bee that made one, which is the third time I have
+        // compared against the wrong base and the second time after writing a
+        // warning about it into the helper's own comment.
+        //
+        // `HEAD..branch` is exactly "commits on that branch that are not
+        // already here", which is the bee's own work and nothing else.
+        let base = "HEAD"
+        var findings: [QueenReconciliation.Finding] = []
+        var urgentLines: [String] = []
+
+        for task in tasks {
+            let facts = await QueenBranchCommitter.repositoryFacts(
+                branch: task.virtualBranch,
+                commitSHA: task.committedSHA,
+                baseRef: base
+            )
+            let finding = QueenReconciliation.check(
+                state: task.state,
+                committedFiles: task.committedFiles,
+                committedSHA: task.committedSHA,
+                facts: facts
+            )
+            findings.append(finding)
+            guard finding.isUrgent else { continue }
+            let line = QueenReconciliation.describe(
+                issue: task.issue.slug, finding: finding
+            )
+            urgentLines.append(line)
+            TriosLogBus.shared.warn(
+                .queen, "queen.reconcile.disagrees", line,
+                ["issue": task.issue.slug, "state": task.state.rawValue]
+            )
+        }
+
+        let summary = QueenReconciliation.summary(findings: findings)
+        TriosLogBus.shared.info(.queen, "queen.reconcile", summary, [:])
+
+        // Silence when everything agrees. A notice every launch saying nothing
+        // is wrong trains the reader to skip the one that says something is.
+        guard !urgentLines.isEmpty else { return }
+        await postQueenNotice(
+            SystemNoticeClassifier.warningMarker
+                + summary + "\n" + urgentLines.prefix(8).joined(separator: "\n")
+                + (urgentLines.count > 8
+                    ? "\n...and \(urgentLines.count - 8) more"
+                    : "")
+        )
     }
 
     /// Removes the checkouts of tasks that have finished.

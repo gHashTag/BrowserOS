@@ -625,6 +625,49 @@ enum QueenBranchCommitter {
     /// signatures disagree. A branch with no commits cannot disagree with
     /// anything, and a branch cut before the base disagrees with the base
     /// rather than with a bee.
+    /// What the repository holds for one task, for comparison with the record.
+    ///
+    /// Gathered here because this is where git lives, and returned as facts
+    /// rather than a verdict so the judgement stays pure and testable.
+    ///
+    /// `branchCommits` counts only commits unique to the branch. A branch cut
+    /// from an old base is BEHIND, not ahead, and a two-way diff would call
+    /// every stale branch productive - a mistake I made twice while measuring
+    /// this by hand, once against a base that did not exist at all.
+    static func repositoryFacts(
+        branch: String?,
+        commitSHA: String?,
+        baseRef: String,
+        projectRoot: String = ProjectPaths.root
+    ) async -> QueenReconciliation.RepositoryFacts {
+        await Task.detached(priority: .utility) {
+            let root = repositoryRoot(projectRoot: projectRoot)
+            func git(_ args: [String]) -> (ok: Bool, output: String) {
+                runGitInDir(args, workDir: root)
+            }
+            var branchExists = false
+            var branchCommits = 0
+            if let branch, !branch.isEmpty {
+                branchExists = git(["rev-parse", "--verify", branch]).ok
+                if branchExists {
+                    let (ok, out) = git(["rev-list", "--count", "\(baseRef)..\(branch)"])
+                    branchCommits = ok
+                        ? Int(out.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+                        : 0
+                }
+            }
+            var commitExists = false
+            if let sha = commitSHA, !sha.isEmpty {
+                commitExists = git(["cat-file", "-e", "\(sha)^{commit}"]).ok
+            }
+            return QueenReconciliation.RepositoryFacts(
+                branchExists: branchExists,
+                branchCommits: branchCommits,
+                commitExists: commitExists
+            )
+        }.value
+    }
+
     static func contributingBranches(
         _ branches: [String],
         baseRef: String,

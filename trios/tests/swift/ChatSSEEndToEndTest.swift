@@ -367,6 +367,7 @@ struct ChatSSEEndToEndTests {
         ("runWorkInASecondEpicIsVisible", { await runWorkInASecondEpicIsVisible() }),
         ("runAbsentIsNotZeroAndTheBeeGetsItsWorktree", { await runAbsentIsNotZeroAndTheBeeGetsItsWorktree() }),
         ("runACountWithNoCommitIsNotEvidence", { await runACountWithNoCommitIsNotEvidence() }),
+        ("runTheRecordIsComparedAgainstTheRepository", { await runTheRecordIsComparedAgainstTheRepository() }),
     ]
 
     static func main() async {
@@ -7967,6 +7968,93 @@ struct ChatSSEEndToEndTests {
     /// Red is not the Queen's to fix. The bee that opened the pull request is
     /// woken with the names of the failing checks and works on the same branch
     /// until the gate is green.
+    // MARK: - Scenario: the record is compared against the repository
+
+    /// The registry is a claim and the repository is a fact, and nothing
+    /// compared them. A scan of thirty-five tasks found twenty-two branches
+    /// carrying the bees' own commits, and for eleven of those the registry
+    /// said `queued` or `failed` - work that exists and that the Queen does not
+    /// know about. #1281 is `queued` beside a 363-line harness; #1282 is
+    /// `failed` beside a 288-line one.
+    ///
+    /// Detection before correction. Advancing a state from a git scan is a
+    /// judgement about work nobody reviewed; saying the two disagree is not.
+    static func runTheRecordIsComparedAgainstTheRepository() async {
+        print("\n# Scenario: the record is compared against the repository")
+
+        typealias R = QueenReconciliation
+        func facts(branch: Bool = true, commits: Int = 0, commit: Bool = true)
+            -> R.RepositoryFacts
+        {
+            R.RepositoryFacts(
+                branchExists: branch, branchCommits: commits, commitExists: commit
+            )
+        }
+
+        check(
+            R.check(state: .accepted, committedFiles: 1, committedSHA: "abc",
+                    facts: facts(commits: 2)) == .agrees,
+            "an accepted task with work on its branch is the record being right"
+        )
+        check(
+            R.check(state: .queued, committedFiles: nil, committedSHA: nil,
+                    facts: facts(commits: 1)) == .unrecordedWork(commits: 1),
+            "a queued task with a commit is work nobody is looking at - this is #1281"
+        )
+        check(
+            R.check(state: .failed, committedFiles: nil, committedSHA: nil,
+                    facts: facts(commits: 1)) == .unrecordedWork(commits: 1),
+            "and so is a failed one - this is #1282"
+        )
+        check(
+            R.check(state: .running, committedFiles: nil, committedSHA: nil,
+                    facts: facts(commits: 1)) == .agrees,
+            "a running task is expected to be building something; that is not a disagreement"
+        )
+        check(
+            R.check(state: .accepted, committedFiles: 1, committedSHA: nil,
+                    facts: facts(branch: false)) == .branchMissing,
+            "files claimed with no branch to hold them - this is #1280"
+        )
+        check(
+            R.check(state: .accepted, committedFiles: 1, committedSHA: "deadbeef",
+                    facts: facts(commit: false)) == .commitMissing,
+            "a named commit that is not in the repository is the sharpest disagreement"
+        )
+        check(
+            R.check(state: .accepted, committedFiles: 1, committedSHA: nil,
+                    facts: facts(commits: 1)) == .countWithoutCommit,
+            "a count with no commit named is historical, not alarming"
+        )
+
+        // Urgency separates what needs a person now from what every record
+        // written before the commit field looks like.
+        check(
+            !R.Finding.countWithoutCommit.isUrgent,
+            "seventeen historical rows must not read as seventeen emergencies"
+        )
+        check(
+            R.Finding.unrecordedWork(commits: 1).isUrgent
+                && R.Finding.branchMissing.isUrgent
+                && R.Finding.commitMissing.isUrgent,
+            "and the three that mean something do"
+        )
+
+        let line = R.describe(issue: "gHashTag/trios#1282",
+                              finding: .unrecordedWork(commits: 1))
+        check(
+            line.contains("#1282") && line.contains("nobody is looking at it"),
+            "each disagreement names its issue and says what is wrong: \(line)"
+        )
+        let sum = R.summary(findings: [.agrees, .agrees, .unrecordedWork(commits: 1),
+                                       .countWithoutCommit])
+        check(
+            sum.contains("4 task(s) checked") && sum.contains("2 agree")
+                && sum.contains("1 disagree"),
+            "and the summary counts rather than judging: \(sum)"
+        )
+    }
+
     // MARK: - Scenario: a count with no commit behind it is not evidence
 
     /// A task was found recorded `accepted` with `committedFiles: 1` and a
