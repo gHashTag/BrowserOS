@@ -2985,6 +2985,57 @@ private struct QueenBeeBoard: View {
 
 // MARK: - Bee Card
 
+/// The form an issue badge must have: `#` followed by the number's own
+/// digits, and nothing else (#1129).
+///
+/// An issue number is an identifier — a name that happens to be written in
+/// digits — not a quantity. Routed through a value formatter it comes back
+/// wearing a group separator at the thousand boundary and reads `#1,124`:
+/// by that rendering the issue cannot be found on GitHub, and the number
+/// cannot be copied out of the card. The card therefore prints
+/// `Text(verbatim: IssueBadgeForm.badge(...))` — no locale, no formatter —
+/// and that one expression serves the wide window and the narrow panel
+/// alike: one card, both modes. The screen renders the same function the
+/// check beside the render interrogates, so restoring value formatting to
+/// the badge is something the check catches, not just the eye.
+///
+/// The functions below state that contract as code, beside the rendering
+/// they describe, so the property and its proof cannot drift apart. Every
+/// one of them takes the number as a parameter and answers a question about
+/// the FORM of the result — none of them knows or cares which number it is.
+private enum IssueBadgeForm {
+    /// The badge exactly as the card renders it: "#" plus raw digits.
+    static func badge(_ number: Int) -> String { "#\(number)" }
+
+    /// The same digits rendered as a quantity — what `Text("#\(number)")`
+    /// resolves to through `LocalizedStringKey` and `IntegerFormatStyle`
+    /// with grouping. en_US is pinned so the contrast reads the same on
+    /// every machine, not whatever this developer's locale happens to be.
+    static func asQuantity(_ number: Int) -> String {
+        number.formatted(
+            IntegerFormatStyle(locale: Locale(identifier: "en_US"))
+                .grouping(.automatic)
+        )
+    }
+
+    /// The contract: "#" first, ASCII digits after, nothing else — no comma,
+    /// no space, no narrow no-break space, no separator any locale uses.
+    /// Holds for every number the registry can carry.
+    static func isRawDigits(_ badge: String) -> Bool {
+        guard badge.first == "#", badge.count > 1 else { return false }
+        return badge.dropFirst().allSatisfy { $0.isASCII && $0.isNumber }
+    }
+
+    /// The teeth: past the grouping threshold the quantity rendering of the
+    /// same digits is not the identifier rendering — the separator is what
+    /// a formatter adds back. This is what makes the contract falsifiable
+    /// rather than a hope: restore value formatting into the badge and
+    /// there is a real, visible difference for a check to catch.
+    static func quantityAddsSeparator(_ number: Int) -> Bool {
+        asQuantity(number) != "\(number)"
+    }
+}
+
 /// One task card on the bee board.
 ///
 /// The card answers four questions at a glance: which issue, which bee, what
@@ -3052,8 +3103,31 @@ private struct BeeCard: View {
     // MARK: - Card Info
 
     private var cardInfo: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            // Row 1 — status word + issue number
+        // #1129, checked where the badge renders. The first assert is the
+        // contract: the issue number is an identifier — a name written in
+        // digits — so the badge is "#" plus raw digits and nothing else, for
+        // whatever number this task carries, in either display mode, because
+        // both modes render this one card. The second is what keeps the first
+        // from being decoration: past the grouping threshold — the point
+        // where a separator can first appear, a property of grouping, not a
+        // value the check is about — the quantity rendering of the same
+        // digits provably differs from the identifier rendering, so value
+        // formatting restored anywhere in this path has something visible
+        // to break.
+        assert(
+            IssueBadgeForm.isRawDigits(IssueBadgeForm.badge(task.issue.number)),
+            "#1129: the issue badge must be '#' plus raw digits — an identifier, not a formatted quantity"
+        )
+        if task.issue.number >= 1_000 {
+            assert(
+                IssueBadgeForm.quantityAddsSeparator(task.issue.number),
+                "#1129: past the grouping threshold the quantity rendering must differ, or the raw-digits contract has nothing left to catch"
+            )
+        }
+        return VStack(alignment: .leading, spacing: 5) {
+            // Row 1 — status word + issue number. The number renders through
+            // Text(verbatim:) — no locale, no formatter — so no group
+            // separator ever reaches the screen (#1129).
             HStack(spacing: 6) {
                 Image(systemName: stateIcon)
                     .font(.system(size: 9, weight: .semibold))
@@ -3065,7 +3139,7 @@ private struct BeeCard: View {
 
                 Spacer(minLength: 4)
 
-                Text(verbatim: "#\(task.issue.number)")
+                Text(verbatim: IssueBadgeForm.badge(task.issue.number))
                     .font(.system(size: 10, weight: .semibold, design: .monospaced))
                     .foregroundColor(.white.opacity(0.55))
             }
