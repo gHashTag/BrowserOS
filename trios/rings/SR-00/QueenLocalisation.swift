@@ -12,36 +12,39 @@ import Foundation
 /// # Measurement record (#1173, repeated 2026-08-19)
 ///
 /// Identifiers extracted from each issue body exactly as
-/// `ChatViewModel.identifiers(from:)` extracts them, then driven through
+/// `ChatViewModel.identifiers(from:)` extracts them, driven through
 /// `region(in:mentioning:)` against `rings/SR-02/ChatViewModel.swift`
-/// (9 527 lines at the time of measuring):
+/// (9 527 lines):
 ///
-/// | задача | идентификаторы из тела        | сужение     | совпало с названным человеком |
-/// |--------|-------------------------------|-------------|------------------------------|
-/// | #1156  | awaitingReview, characterCount, ChatViewModel | молчание | нет — тело не называет ни одного объявления |
-/// | #1158  | autoAcceptIfUnambiguous, acceptanceBlockReason…, ProcessInfo, processInfo, awaitingReview, ChatViewModel | 6275-6493 `autoAcceptIfUnambiguous` | да |
-/// | #1165  | ChatViewModel                 | молчание    | нет — тело не называет ничего, кроме имени типа |
-/// | #1166  | startAfterChoosing, qualifiesForAutoAccept, fileCount, ownedPaths, isEmpty, ChatViewModel | 7217-7516 `chooseNextOpenIssue` (через параметр `startAfterChoosing`) | да |
+/// | задача | сужение | указано на | совпало | правило |
+/// |---|---|---|---|---|
+/// | #1156 | 4832-5131 | `handleWorkerFinished` | да | unique: `characterCount` встречается в файле ровно один раз — внутри литерала `"queen.review.characterCount"` (строка 4984), внутри `handleWorkerFinished` |
+/// | #1158 | 6275-6493 | `autoAcceptIfUnambiguous` | да | name, richness 7 против 1 у соседнего стража, которого тело тоже называет |
+/// | #1165 | молчание | — | нет | см. ниже |
+/// | #1166 | 7217-7516 | `chooseNextOpenIssue` | да | parameter: `startAfterChoosing` — параметр только этой функции |
 ///
-/// Two of four. The bar set by #1173 was three of four, and the two misses
-/// are not reachable by any rule over these bodies: #1156's body never
-/// writes `handleWorkerFinished` and #1165's never writes
-/// `requestReviewerVerdicts` — the premise "тело задачи почти всегда называет
-/// виновника" (#1173) is false for exactly these two bodies. The earlier hit
-/// on #1156 came from density landing right on the day's file state; measured
-/// today, density lands in `pollPullRequests` (8416-8543), confidently wrong.
+/// Three of four. The miss is #1165, and it is an input limitation, not a
+/// rule choice: `identifiers(from:)` yields exactly one identifier for that
+/// body — `ChatViewModel`, the type name from the boundary path. The body's
+/// real signal, `queen.review.verdicts`, is a dotted event name and is
+/// filtered out before `region` sees anything; the literal exists at line
+/// 5951, inside `requestReviewerVerdicts` (5629-6005). No rule over
+/// `["ChatViewModel"]` can select `requestReviewerVerdicts` among two hundred
+/// functions except guessing, and guessing was measured worse than silence
+/// (#1175). The fix belongs in the extractor, outside this file.
 ///
-/// The check breaks when the name preference is removed, as #1173 requires:
-/// with density alone (the pre-#1173 rule) the same measurement gives zero
-/// of four and three wrong ranges (#1158 → `reset()` 67-366, #1166 →
-/// `reset()` 67-366, #1165 → 7337-7383, #1156 → `pollPullRequests`
-/// 8416-8543).
+/// Break check (criterion: the check must fail when the name preference is
+/// removed): with the density rule that stood when #1173 was filed — density
+/// decides, no name preference — the same measurement gives **0 of 4**, all
+/// four ranges wrong: #1156 → 8416-8543 (`pollPullRequests` area, not a
+/// declaration), #1158 → 67-366 (`reset()`), #1165 → 7337-7383,
+/// #1166 → 67-366 (`reset()`).
 ///
-/// Side effect measured over every open sub-issue × boundary file: exactly
-/// one other change — #1131 now narrows to
-/// `acceptanceBlockReasonDistinguishingEmptyAnswers` (6027-6203), because its
-/// evidence quotes that function's `verdictTreeState`/`currentTreeState`
-/// parameters verbatim; before it was silence.
+/// Regression sweep, every open sub-issue × boundary file over 300 lines
+/// (21 pairs): one change besides the four — #1131 now narrows to
+/// `acceptanceBlockReasonDistinguishingEmptyAnswers` (6027-6203) through its
+/// `verdictTreeState`/`currentTreeState` parameters, quoted verbatim in that
+/// issue's evidence. Before: silence.
 enum QueenLocalisation {
 
     /// Maximum number of lines a returned range may span.
@@ -55,24 +58,34 @@ enum QueenLocalisation {
     /// Returns the range (1-indexed) of the declaration the identifiers point
     /// at, or `nil` when they point at nothing the file declares.
     ///
-    /// Evidence, strongest first (#1173, #1174):
+    /// Evidence, strongest first:
     ///
-    /// 1. A declaration whose **name** is one of the identifiers.
-    /// 2. A declaration with a **parameter** named like one of the identifiers
-    ///    (`startAfterChoosing:` names `chooseNextOpenIssue`).
+    /// 1. **Name** — a declaration whose own name is one of the identifiers.
+    /// 2. **Parameter** — a declaration with a parameter named like one of the
+    ///    identifiers (`startAfterChoosing:` names `chooseNextOpenIssue`; a
+    ///    call-site label is not a declaration and never matches).
+    /// 3. **Unique mention** — an identifier that occurs exactly once in the
+    ///    whole file, **including inside string literals**. An issue that
+    ///    quotes a log line (`#1149  characterCount`) names the one place that
+    ///    emits it; event names live in string literals, so literals are
+    ///    searched even though they are blanked for brace tracking.
     ///
-    /// When several declarations match — a spec can name both the culprit and
-    /// its neighbour guard — the one whose body actually uses the identifiers
-    /// densest wins: the subject of an issue mentions the things the issue
-    /// talks about, a function named in passing does not. Ties go to the
+    /// A name match beats any parameter, a parameter beats any unique mention:
+    /// a unique word can sit inside a neighbouring guard (#1166's
+    /// `qualifiesForAutoAccept` occurs once, inside `autoAcceptIfUnambiguous`,
+    /// while the parameter `startAfterChoosing` names `chooseNextOpenIssue`
+    /// outright). When several candidates share a tier — a spec can name both
+    /// the culprit and its neighbour guard — the one whose body is richest in
+    /// the spec's identifiers wins: the subject of an issue uses the things the
+    /// issue talks about, a function named in passing does not. Ties go to the
     /// earlier declaration.
     ///
     /// When nothing matches, the answer is `nil` — silence, not a guess
-    /// (#1175): a spec without a range was always safe, a spec with a wrong
+    /// (#1175): a brief without a range was always safe, a brief with a wrong
     /// range sends the bee to the wrong place with confidence. Density
-    /// counting was removed after four measurements ranked it below every
-    /// alternative: it points at whichever large early function holds the most
-    /// ordinary words, which in a 9 000-line file is never the subject.
+    /// counting is gone and stays gone: across five measurements it pointed at
+    /// whichever large early function held the most ordinary words, which in a
+    /// 9 000-line file is never the subject (#1173, #1175).
     ///
     /// - Parameters:
     ///   - source: Swift source text.
@@ -88,12 +101,19 @@ enum QueenLocalisation {
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
 
-        let masked = maskCommentsAndStrings(cleaned)
-        let lines = masked.components(separatedBy: "\n")
-        let depths = braceDepths(lines: lines)
+        // Two views of the same lines. Braces are counted on the view with
+        // strings blanked — a literal containing `{` would otherwise corrupt
+        // the depth walk. Identifiers are searched on the view with strings
+        // kept — that is where event names live (#1173: `characterCount`
+        // exists exactly once in ChatViewModel.swift, inside the
+        // "queen.review.characterCount" literal, inside handleWorkerFinished).
+        let structure = maskCommentsAndStrings(cleaned).components(separatedBy: "\n")
+        let text = maskComments(cleaned).components(separatedBy: "\n")
+        let depths = braceDepths(lines: structure)
 
         guard let winner = bestCandidate(
-            in: lines,
+            structure: structure,
+            text: text,
             depths: depths,
             identifiers: identifiers
         ) else {
@@ -107,14 +127,14 @@ enum QueenLocalisation {
         // declare the name that won. If capping or any other step shifted the
         // start, the range points into the middle of something — silence it
         // rather than mislead.
-        guard declarationName(on: lines[capped.lowerBound]) == winner.declaredName else {
+        guard declarationName(on: structure[capped.lowerBound]) == winner.declaredName else {
             return nil
         }
 
         return (capped.lowerBound + 1)...(capped.upperBound + 1)
     }
 
-    // MARK: - Comment & string masking
+    // MARK: - Masking
 
     /// Returns a copy of `source` in which every character inside a comment or
     /// string literal is replaced with a space. Newlines are preserved so line
@@ -151,11 +171,9 @@ enum QueenLocalisation {
             } else if inString {
                 if c == "\\", next != nil {
                     // An escape consumes the backslash and the escaped
-                    // character — but a backslash-newline continuation
-                    // must keep its newline, or every line after it
-                    // shifts and the returned range points four lines
-                    // above the declaration it names (measured on
-                    // ChatViewModel.swift's reviewer prompt, #1173).
+                    // character — but a backslash-newline continuation must
+                    // keep its newline, or every line after it shifts and the
+                    // returned range points above the declaration it names.
                     output.append(" ")
                     output.append(next == "\n" ? "\n" : " ")
                     i += 2
@@ -180,6 +198,75 @@ enum QueenLocalisation {
                 } else if c == "\"" {
                     inString = true
                     output.append(" ")
+                    i += 1
+                } else {
+                    output.append(c)
+                    i += 1
+                }
+            }
+        }
+
+        return String(output)
+    }
+
+    /// Returns a copy of `source` in which comments are blanked but string
+    /// literals are kept verbatim. Newlines are preserved so line numbers stay
+    /// aligned with the fully masked view.
+    ///
+    /// Comment detection is suspended inside string literals (`"//"` is not a
+    /// comment), and escapes are consumed as pairs so a `\"` never ends the
+    /// literal early.
+    private static func maskComments(_ source: String) -> String {
+        var output = [Character]()
+        output.reserveCapacity(source.count)
+
+        let chars = Array(source)
+        var i = 0
+        var blockDepth = 0
+        var inString = false
+
+        while i < chars.count {
+            let c = chars[i]
+            let next: Character? = i + 1 < chars.count ? chars[i + 1] : nil
+
+            if blockDepth > 0 {
+                if c == "/", next == "*" {
+                    blockDepth += 1
+                    output.append(" "); output.append(" ")
+                    i += 2
+                } else if c == "*", next == "/" {
+                    blockDepth -= 1
+                    output.append(" "); output.append(" ")
+                    i += 2
+                } else {
+                    output.append(c == "\n" ? c : " ")
+                    i += 1
+                }
+            } else if inString {
+                if c == "\\", next != nil {
+                    output.append(c); output.append(next!)
+                    i += 2
+                } else if c == "\"" {
+                    inString = false
+                    output.append(c)
+                    i += 1
+                } else {
+                    output.append(c)
+                    i += 1
+                }
+            } else {
+                if c == "/", next == "/" {
+                    while i < chars.count, chars[i] != "\n" {
+                        output.append(" ")
+                        i += 1
+                    }
+                } else if c == "/", next == "*" {
+                    blockDepth = 1
+                    output.append(" "); output.append(" ")
+                    i += 2
+                } else if c == "\"" {
+                    inString = true
+                    output.append(c)
                     i += 1
                 } else {
                     output.append(c)
@@ -247,6 +334,9 @@ enum QueenLocalisation {
             case name
             /// One of its parameters is one of the identifiers.
             case parameter
+            /// An identifier occurs exactly once in the file, inside this
+            /// declaration.
+            case unique
         }
 
         let kind: Kind
@@ -256,70 +346,83 @@ enum QueenLocalisation {
         let bodyEnd: Int
         /// The name the self-check must find on the first line of the range.
         let declaredName: String
-        /// The identifier that produced the match (for ranking and logs).
-        let matchedIdentifier: String
     }
 
     /// The strongest declaration the identifiers point at, or `nil` when
-    /// none of them names a declaration or a parameter of one.
+    /// none of them names a declaration, a parameter, or a unique place.
     private static func bestCandidate(
-        in lines: [String],
+        structure: [String],
+        text: [String],
         depths: [Int],
         identifiers: [String]
     ) -> Candidate? {
         let idSet = Set(identifiers)
         var candidates: [Candidate] = []
 
-        for (idx, line) in lines.enumerated() {
+        func append(_ kind: Candidate.Kind, declLine: Int, name: String) {
+            guard let end = declarationEnd(declLine, depths: depths) else { return }
+            candidates.append(
+                Candidate(kind: kind, declLine: declLine, bodyEnd: end, declaredName: name)
+            )
+        }
+
+        // Tiers 1 and 2 read the structure view (strings blanked): a name or
+        // a parameter is a declaration, and a declaration line never lives
+        // inside a literal.
+        for (idx, line) in structure.enumerated() {
             guard let name = declarationName(on: line) else { continue }
 
-            // Name match — the strongest evidence there is.
             if idSet.contains(name) {
-                if let end = declarationEnd(idx, depths: depths, lines: lines) {
-                    candidates.append(
-                        Candidate(
-                            kind: .name,
-                            declLine: idx,
-                            bodyEnd: end,
-                            declaredName: name,
-                            matchedIdentifier: name
-                        )
-                    )
-                }
+                append(.name, declLine: idx, name: name)
             }
+            for param in parameterNames(startingAt: idx, lines: structure)
+            where idSet.contains(param) {
+                append(.parameter, declLine: idx, name: name)
+            }
+        }
 
-            // Parameter match — weaker, but a spec that says
-            // "the `startAfterChoosing` branch" names the function through
-            // its parameter when it never writes the function's own name.
-            for param in parameterNames(startingAt: idx, lines: lines) where idSet.contains(param) {
-                if let end = declarationEnd(idx, depths: depths, lines: lines) {
-                    candidates.append(
-                        Candidate(
-                            kind: .parameter,
-                            declLine: idx,
-                            bodyEnd: end,
-                            declaredName: name,
-                            matchedIdentifier: param
-                        )
-                    )
+        // Tier 3 reads the text view (strings kept). An identifier with a
+        // single occurrence in the whole file points at the one place that
+        // has it — often a log event name inside a literal.
+        for identifier in identifiers {
+            var total = 0
+            var hitLine: Int?
+            for (idx, line) in text.enumerated() {
+                let matches = countMatchesOnLine(line, [identifier])
+                if matches > 0 {
+                    total += matches
+                    if total > 1 { break }
+                    hitLine = idx
                 }
             }
+            guard total == 1, let hit = hitLine else { continue }
+            guard let (declLine, name) = enclosingDeclaration(
+                ofHit: hit,
+                structure: structure,
+                depths: depths
+            ) else { continue }
+            append(.unique, declLine: declLine, name: name)
         }
 
         guard !candidates.isEmpty else { return nil }
 
-        // Rank. A name match beats a parameter match (#1174's order of
-        // strength). Among equals, the declaration whose body is richest in
-        // the spec's identifiers wins — measured, not assumed: for #1158 the
-        // body's `autoAcceptIfUnambiguous` calls and guards five more of the
-        // issue's identifiers while the neighbour guard named in the same
-        // body mentions none of them. Ties go to the earlier declaration.
+        // Rank. Lower tier number wins outright; within a tier the richest
+        // body wins; ties go to the earlier declaration.
+        func rank(_ kind: Candidate.Kind) -> Int {
+            switch kind {
+            case .name: return 0
+            case .parameter: return 1
+            case .unique: return 2
+            }
+        }
         func richness(_ c: Candidate) -> Int {
-            totalMentions(in: c.declLine...c.bodyEnd, lines: lines, identifiers: identifiers)
+            totalMentions(in: c.declLine...c.bodyEnd, lines: text, identifiers: identifiers)
         }
 
         return candidates.min { a, b in
-            if a.kind != b.kind { return a.kind == .name }
+            let ra = rank(a.kind)
+            let rb = rank(b.kind)
+            if ra != rb { return ra < rb }
             let ha = richness(a)
             let hb = richness(b)
             if ha != hb { return ha > hb }
@@ -327,22 +430,48 @@ enum QueenLocalisation {
         }
     }
 
+    /// The `func`/`init` declaration enclosing a hit line, walking the depth
+    /// array outwards and then back to the declaration keyword.
+    private static func enclosingDeclaration(
+        ofHit hit: Int,
+        structure: [String],
+        depths: [Int]
+    ) -> (declLine: Int, name: String)? {
+        let hitDepth = depths[hit]
+
+        // Mention at file scope — no enclosing declaration.
+        if hitDepth == 0 { return nil }
+
+        // First line whose start-depth is below the hit's is the scope entry.
+        var scopeEntry = hit
+        while scopeEntry > 0, depths[scopeEntry] >= hitDepth {
+            scopeEntry -= 1
+        }
+
+        // Walk further back to the `func`/`init` line so multi-line
+        // signatures anchor at the keyword.
+        var declStart = scopeEntry
+        while declStart > 0, declarationName(on: structure[declStart]) == nil {
+            declStart -= 1
+        }
+        guard let name = declarationName(on: structure[declStart]) else {
+            return nil
+        }
+        return (declStart, name)
+    }
+
     /// Last 0-based line of the declaration starting at `idx`, walking the
-    /// same signature-then-body depth path the old rule walked.
+    /// signature forward until the body opens, then to the closing brace.
     ///
     /// Returns `nil` when no body opens within a sane distance (a protocol
-    /// stub or a one-line declaration).
+    /// stub or a declaration without a body).
     private static func declarationEnd(
         _ idx: Int,
-        depths: [Int],
-        lines: [String]
+        depths: [Int]
     ) -> Int? {
         let startDepth = depths[idx]
         var end = idx
 
-        // Walk forward through signature lines (same depth) until the body
-        // opens (depth increases), then through the body until the closing
-        // brace brings depth back down.
         while end + 1 < depths.count, depths[end + 1] >= startDepth {
             if depths[end + 1] > startDepth {
                 end += 1
@@ -357,8 +486,7 @@ enum QueenLocalisation {
             }
         }
 
-        // Never entered the body (e.g. protocol stub) — not a declaration
-        // with a body, so not a place the range can start.
+        // Never entered the body — not a declaration with a range to return.
         if depths[end] <= startDepth && end > idx {
             return nil
         }
@@ -369,10 +497,10 @@ enum QueenLocalisation {
     /// Parameter names of the declaration starting at `idx`, read from the
     /// signature between `(` and the body's `{`.
     ///
-    /// `startAfterChoosing: Bool = false` yields `startAfterChoosing`;
-    /// an omitted external label (`_ x: Int`) yields `x`. The walk stops at
-    /// the first closing parenthesis or the body brace, whichever comes
-    /// first, bounded so a stray line cannot drag in half the file.
+    /// `startAfterChoosing: Bool = false` yields `startAfterChoosing`; an
+    /// omitted external label (`_ x: Int`) yields `x`. The walk stops at the
+    /// first closing parenthesis or the body brace, bounded so a stray line
+    /// cannot drag in half the file.
     private static func parameterNames(startingAt idx: Int, lines: [String]) -> [String] {
         var signature = lines[idx]
         var j = idx
