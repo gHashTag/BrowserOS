@@ -450,6 +450,16 @@ final class QueenDelegationRegistry: ObservableObject {
         persist()
     }
 
+    /// Records the branch the worker is actually on.
+    ///
+    /// Needed because the branch a task ASKS for and the branch it GETS can
+    /// differ: a leftover cut before HEAD is sidestepped with a suffix.
+    func setVirtualBranch(taskID: UUID, branch: String) {
+        guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        tasks[index].virtualBranch = branch
+        persist()
+    }
+
     func setWorktreePath(taskID: UUID, path: String) {
         guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
         tasks[index].worktreePath = path

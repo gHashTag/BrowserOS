@@ -274,6 +274,11 @@ final class ChatViewModel: ObservableObject {
     /// fingerprint argument. At acceptance time, this takes precedence over
     /// the task's own field — if neither is set, `isStale` returns false and
     /// the verdicts stand, which is what "missing ≠ stale" means (#1131).
+    ///
+    /// Written only through `sealVerdictsWithBoundaryState`, which clears any
+    /// earlier binding first and asserts the write landed — removing that
+    /// write fires `queen.assertion.fingerprint_not_recorded` in the journal
+    /// (#1131 criterion 4).
     private var verdictTreeStates: [UUID: String] = [:]
     /// Observer concerns already reported, keyed by task, so a warning fires
     /// once rather than on every streamed delta.
@@ -3966,8 +3971,15 @@ final class ChatViewModel: ObservableObject {
         // a bee that cannot get its own directory should still work, just
         // without the isolation.
         if let branch = task.virtualBranch {
-            if let worktree = await prepareWorktree(for: task, branch: branch) {
-                registry.setWorktreePath(taskID: task.id, path: worktree)
+            if let prepared = await prepareWorktree(for: task, branch: branch) {
+                registry.setWorktreePath(taskID: task.id, path: prepared.path)
+                // The branch too, and this is the load-bearing half. Everything
+                // downstream - the committer, the combined build, the pull
+                // request - reads `virtualBranch`, and it named a branch the
+                // bee was not on.
+                if prepared.branch != branch {
+                    registry.setVirtualBranch(taskID: task.id, branch: prepared.branch)
+                }
             } else if let reason = await createVirtualBranch(named: branch) {
                 registry.transition(taskID: task.id, to: .cancelled)
                 await postQueenNotice(
@@ -4190,14 +4202,28 @@ final class ChatViewModel: ObservableObject {
     /// The branch is cut here rather than by `createVirtualBranch`, because
     /// `git worktree add -B` does both in one step and cannot leave a branch
     /// pointing somewhere no checkout exists.
-    private func prepareWorktree(for task: DelegatedTask, branch: String) async -> String? {
+    /// The checkout and the branch it was actually cut on.
+    ///
+    /// Both, because they can differ: when the wanted branch is a leftover cut
+    /// before HEAD, a fresh suffixed name is used instead. Returning only the
+    /// path left the registry holding the ORIGINAL name while the bee worked on
+    /// the new one - so the committer wrote to `queen/1127-r5` and the combined
+    /// build read `queen/1127`, a branch 140 commits stale. The build could not
+    /// compile, acceptance refused with "the combined state does not build
+    /// together", and every finished task parked.
+    struct PreparedWorktree {
+        let path: String
+        let branch: String
+    }
+
+    private func prepareWorktree(for task: DelegatedTask, branch: String) async -> PreparedWorktree? {
         let root = ProjectPaths.root
         let path = QueenWorktree.path(
             forIssue: task.issue.number,
             projectRoot: root,
             variant: ProjectPaths.variant.rawValue
         )
-        return await Task.detached(priority: .utility) { () -> String? in
+        return await Task.detached(priority: .utility) { () -> PreparedWorktree? in
             func git(_ args: [String], timeout: TimeInterval = 25) -> String {
                 QueenStatusViewModel.runProcess(
                     "/usr/bin/git", arguments: args, workDir: root, timeout: timeout
@@ -4213,7 +4239,8 @@ final class ChatViewModel: ObservableObject {
                     "Reusing the existing checkout for \(task.issue.slug)",
                     ["path": path]
                 )
-                return path
+                let head = git(["-C", path, "rev-parse", "--abbrev-ref", "HEAD"])
+                return PreparedWorktree(path: path, branch: head.isEmpty ? branch : head)
             }
 
             // A branch left over from an older run is adopted silently by
@@ -4260,7 +4287,7 @@ final class ChatViewModel: ObservableObject {
                 "\(task.issue.slug) works in its own checkout on \(name)",
                 ["path": path, "branch": name]
             )
-            return path
+            return PreparedWorktree(path: path, branch: name)
         }.value
     }
 
@@ -4918,11 +4945,8 @@ final class ChatViewModel: ObservableObject {
             // recording time — not at acceptance, because what matters is
             // the state the verdicts were derived against, not the state
             // the decision is made in.
-            if (!evidenceVerdicts.isEmpty || !charResults.isEmpty),
-               let snapshot = await QueenBranchCommitter.fingerprintBoundary(
-                   ownedPaths: task.ownedPaths
-               ) {
-                verdictTreeStates[task.id] = snapshot
+            if !evidenceVerdicts.isEmpty || !charResults.isEmpty {
+                await sealVerdictsWithBoundaryState(task)
             }
             if !evidenceVerdicts.isEmpty || !charResults.isEmpty {
                 TriosLogBus.shared.info(
@@ -5766,11 +5790,8 @@ final class ChatViewModel: ObservableObject {
         // so the Queen's state writes cannot age a verdict. The reviewer saw
         // the committed diff; the fingerprint is the state the boundary was
         // in when the verdicts were derived.
-        if recorded > 0,
-           let snapshot = await QueenBranchCommitter.fingerprintBoundary(
-               ownedPaths: task.ownedPaths
-           ) {
-            verdictTreeStates[task.id] = snapshot
+        if recorded > 0 {
+            await sealVerdictsWithBoundaryState(task)
         }
 
         // Criteria the reviewer answered — whether from the retry or the
@@ -8496,11 +8517,7 @@ final class ChatViewModel: ObservableObject {
         // recorded by hand (#1131). Only the task's own files are hashed,
         // so the Queen's state writes cannot age a verdict. This is the
         // moment the fingerprint is written — at verdict recording time.
-        if let snapshot = await QueenBranchCommitter.fingerprintBoundary(
-            ownedPaths: task.ownedPaths
-        ) {
-            verdictTreeStates[task.id] = snapshot
-        }
+        await sealVerdictsWithBoundaryState(task)
         // A criterion that was asked-but-unanswered and now has a recorded
         // verdict is no longer unanswered. Clearing it here keeps the
         // tracking from going stale (#1117).
