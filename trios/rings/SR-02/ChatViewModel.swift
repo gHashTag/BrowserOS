@@ -2704,6 +2704,30 @@ final class ChatViewModel: ObservableObject {
                     "The Queen called a tool she is told not to call",
                     ["tool": toolCall.name]
                 )
+                // And say it where she can read it, which is what a bee gets.
+                //
+                // The worker model is not "log the violation": `observeWorker`
+                // sends a correction INTO the worker's chat the moment it
+                // writes outside its boundary, and the worker changes course on
+                // the next turn. Until now the Queen's equivalent rule produced
+                // a log line nobody in the conversation could see - the model
+                // was carried across as a detector and not as the correction it
+                // exists to deliver.
+                //
+                // Still not enforcement: the call has already been made and
+                // this cannot unmake it. It is the same instrument a bee gets,
+                // pointed at the supervisor, and it is honest about being that.
+                let correction = QueenObserver.correctionText(concerns: [
+                    "You called `\(toolCall.name)`, which is on the list of tools "
+                        + "you do not call. That call is the signal to delegate: open "
+                        + "a worker for the issue and let it make the change on its "
+                        + "own branch. Do not repeat the call."
+                ])
+                Task { [weak self] in
+                    await self?.postQueenNotice(
+                        SystemNoticeClassifier.warningMarker + correction
+                    )
+                }
             }
             await todoPlanner.markToolActivity(name: toolCall.name)
             guard isCurrentStream(expectedGeneration) else { return }
@@ -7426,9 +7450,23 @@ final class ChatViewModel: ObservableObject {
         //
         // The refusal itself is right: one chat per issue. What was wrong is
         // treating it as the end of the tick instead of as "try the next one".
+        // Anything already SPOKEN FOR, not merely anything running.
+        //
+        // `open` excludes terminal states, and `accepted` is terminal - so an
+        // accepted-but-unmerged task vanished from this filter while its issue
+        // stayed open on the forge. She chose it again, delegated it again, and
+        // accepted it again: #1127 existed twice in one registry, once accepted
+        // and once running, minutes apart. A loop that burns a worker slot and
+        // a provider bill to redo settled work.
+        //
+        // `failed` is deliberately NOT here: a failure nobody has looked at is
+        // work still to do, and it should be choosable again.
+        let spokenFor: Set<DelegatedTaskState> = [
+            .queued, .running, .awaitingReview, .rejected, .accepted, .merged
+        ]
         let liveIssueNumbers = Set(
-            delegationRegistry.open
-                .filter { !$0.state.isTerminal }
+            delegationRegistry.tasks
+                .filter { spokenFor.contains($0.state) }
                 .map(\.issue.number)
         )
 
