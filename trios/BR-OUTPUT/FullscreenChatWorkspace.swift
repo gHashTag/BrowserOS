@@ -755,7 +755,18 @@ private struct TaskHistorySidebar: View {
         var previousWeek: [ChatConversation] = []
         var older: [ChatConversation] = []
 
-        for conversation in filteredConversations {
+        // The Queen and the swarm are already drawn above - she has her own
+        // pinned row and every delegated chat has a Swarm entry. Listing them
+        // again here put a second "Trinity Queen" under Today, below the first
+        // one, which reads as two Queens.
+        //
+        // `ChatSidebarView` has excluded exactly these for a while (line 130
+        // there); this view was written later and never got the same filter.
+        let alreadyShown = Set(
+            QueenDelegationRegistry.shared.open.map(\.conversationId)
+        ).union([ChatConversation.trinityQueenId])
+
+        for conversation in filteredConversations where !alreadyShown.contains(conversation.id) {
             if calendar.isDateInToday(conversation.updatedAt) {
                 today.append(conversation)
             } else if let days = calendar.dateComponents(
