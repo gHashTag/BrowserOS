@@ -5226,12 +5226,19 @@ final class ChatViewModel: ObservableObject {
     /// The branch tip carries only this worker's committed changes, so the diff
     /// is exactly what landed on the branch. The direction `git diff A B` reads
     /// A→B: a file the worker added appears as a new file, never as a deleted
-    /// one. When the branch is empty (no commits beyond its parent), the diff is
-    /// genuinely empty and the brief already says "(no changes detected)".
+    /// one (#1132 criterion 2).
+    ///
+    /// An empty branch — a tip that is its own merge-base with HEAD, no
+    /// commits of its own — is not diffed at all. The baseline was snapshotted
+    /// from the whole working tree and can hold a previous run's files, which
+    /// the fork point never saw; diffing the two reads those files as deleted,
+    /// a deletion nobody performed. That phantom is what made a repeat review
+    /// of #1130 answer "unmet" twice on a file that exists (#1132 criterion 1).
     ///
     /// Returns a parenthetical "nothing to compare" message when the baseline
-    /// was never captured or the branch cannot be resolved, so the reviewer is
-    /// never handed a blank diff with no explanation (#1132).
+    /// was never captured, the branch cannot be resolved, or the branch has no
+    /// commits of its own, so the reviewer is never handed a blank diff with
+    /// no explanation — and never a deletion nobody made (#1132).
     private func diffForReview(
         baselineTree: String?,
         branch: String?,
@@ -5264,6 +5271,53 @@ final class ChatViewModel: ObservableObject {
                   !branchTree.hasPrefix("fatal") else {
                 return "(Branch \(branch) could not be resolved — nothing to compare.)"
             }
+            // #1132 criterion 1: an empty branch has no commits of its own,
+            // so there is nothing to compare. "Empty" is decided the same way
+            // the pull-request path decides there is nothing to open a PR
+            // for: the branch tip is its own merge-base with HEAD, meaning
+            // the branch never moved past the point it was cut from.
+            let tip = QueenStatusViewModel.runProcess(
+                "/usr/bin/git",
+                arguments: ["rev-parse", "--verify", branchRef],
+                workDir: ProjectPaths.root,
+                timeout: 10
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            let fork = QueenStatusViewModel.runProcess(
+                "/usr/bin/git",
+                arguments: ["merge-base", branchRef, "HEAD"],
+                workDir: ProjectPaths.root,
+                timeout: 10
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            let branchIsEmpty =
+                !tip.isEmpty && !tip.hasPrefix("fatal")
+                && !fork.isEmpty && !fork.hasPrefix("fatal")
+                && tip == fork
+            // Negative control (#1132 criterion 4): flip to true to restore
+            // the pre-fix behaviour — diffing an empty branch against a
+            // baseline captured after other work landed. The assertion at
+            // the bottom of this function must fire when this is true. The
+            // normal value is false and nothing else reads this flag.
+            let restorePreFixComparison = false
+            // The baseline is a snapshot of the whole working tree taken when
+            // the worker started, so it can contain files another run wrote —
+            // files this branch's fork point never saw. Diffing the two reads
+            // those files as deletions nobody made: that phantom is what made
+            // a repeat review of #1130 answer "unmet" on a file that exists.
+            // An empty branch is therefore not diffed at all, and that is
+            // said directly, to the reviewer and to the journal.
+            if branchIsEmpty && !restorePreFixComparison {
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.diff.unavailable",
+                    "Branch \(branch) has no commits of its own; "
+                        + "there is nothing to compare",
+                    ["branch": branch]
+                )
+                return "(Branch \(branch) has no commits of its own — "
+                    + "nothing to compare. This run changed nothing on the "
+                    + "branch; judge the criteria from the files as they "
+                    + "are now.)"
+            }
             // Direction: baseline → branch tip. Files the worker added appear
             // as new (all +), files removed as deleted (all -). Reversing the
             // arguments would invert the reading: a created file would read
@@ -5275,12 +5329,34 @@ final class ChatViewModel: ObservableObject {
                     QueenDelegationPolicy.normalizePath($0)
                 })
             }
-            return QueenStatusViewModel.runProcess(
+            let diff = QueenStatusViewModel.runProcess(
                 "/usr/bin/git",
                 arguments: args,
                 workDir: ProjectPaths.root,
                 timeout: 30
             )
+            // #1132 criterion 4: an empty branch must never be handed a diff,
+            // because the only diff "empty branch vs baseline" can produce is
+            // deletions nobody made — the baseline holds another worker's
+            // files and the fork point does not. If the short-circuit above
+            // is removed, this fires and names the phantom deletion. It
+            // cannot fire on a genuine deletion: a branch that really removed
+            // a file carries commits of its own and is not empty.
+            if branchIsEmpty && diff.contains("deleted file mode") {
+                let header = diff.components(separatedBy: "\n")
+                    .first { $0.contains("deleted file mode") } ?? ""
+                TriosLogBus.shared.warn(
+                    .queen,
+                    "queen.assertion.empty_branch_deletions",
+                    "An empty branch was diffed against its baseline and the "
+                        + "result carries deletions nobody made: \(header). "
+                        + "The baseline was captured after another worker's "
+                        + "work, so the comparison reads that work as "
+                        + "removed (#1132)",
+                    ["branch": branch, "deleted_header": header]
+                )
+            }
+            return diff
         }.value
     }
 
