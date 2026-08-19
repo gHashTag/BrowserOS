@@ -3,26 +3,28 @@
 // The innermost ring of the trunk: every decision the supervisor makes that
 // depends on nothing but numbers already in hand. No clock, no network, no
 // store, no strings. That is what makes it the first ring to move - it can be
-// generated to Rust for the server and to Verilog for silicon, and both answer
-// identically because they are one source.
+// generated to Rust for the server, to Zig for an embedded runner, and to
+// Verilog for silicon, and all of them answer identically because they are one
+// source.
 //
-// Each decision below already exists in Swift and is already tested there
+// Each function below already exists in Swift and is already tested there
 // (QueenRetryPolicy, QueenReviewDecision, QueenMergeGate,
 // QueenDelegationPolicy). This file is not a new design - it is the same law,
 // written where it can be generated instead of transcribed. The Swift keeps the
 // UI; this keeps the reasoning.
 //
-// Verdicts are coded as integer constants, not enums. Not a taste: the seed
-// compiler's enum paths are not generation-safe yet (variant shorthand emits as
-// `variant::`, switch arms are dropped, and enum derives drag `serde` into code
-// that must compile under bare `rustc --crate-type lib`). Every verdict set
-// gets its constants from one block below, so the coding stays one table, not
-// scattered magic numbers. When the seed grows up, the constants become an
-// enum and nothing else in this file changes shape.
-//
-// No floating point anywhere in this ring, by law: it is integers and booleans
-// all the way down, which is exactly why it can be synthesised without
-// argument.
+// Why integer codes and not enums, for now: the seed (t27c) as of 2026-08-19
+// cannot carry a `pub enum` through `gen-rust` to a library that compiles
+// under a bare `rustc --crate-type lib` - every emitted enum drags a
+// `serde::Serialize` derive that no bare rustc can resolve, enum literals
+// come out malformed, and a `switch` body loses its arms. Those are seed
+// bugs, listed in .claude/skills/t27-backend/SKILL.md, and they are worth
+// fixing in the seed rather than routing around here forever. Until they are,
+// the verdicts live as named `i8` constants: the codes are stable, they are
+// the same numbers the enums carried (and the same numbers the Swift and the
+// Verilog see), and nothing downstream has to guess. When the seed can emit
+// enums again, these constants become enums again and every caller of a
+// number becomes a caller of a name.
 //
 // phi^2 + 1/phi^2 = 3 | TRINITY
 
@@ -47,45 +49,42 @@ pub const MAX_REAL_ATTEMPTS: i32 = 2;
 pub const MAX_SEND_BACKS: i32 = 2;
 
 // ---------------------------------------------------------------------------
-// Coding: how an attempt ended
+// How an attempt ended
 // ---------------------------------------------------------------------------
 
 // The registry had one word for two different endings, and the difference
 // decides whether another bee is worth sending. A worker killed by a rebuild
 // and a worker that ran forty-one tool calls and committed nothing are not the
-// same failure.
-pub const FAILURE_INTERRUPTED: i32 = 0;
-pub const FAILURE_PRODUCED_NOTHING: i32 = 1;
-pub const FAILURE_WORKED_BUT_FAILED: i32 = 2;
+// same failure. The codes are the discriminants of the Swift FailureKind.
+pub const FAIL_INTERRUPTED: i8 = 0;
+pub const FAIL_PRODUCED_NOTHING: i8 = 1;
+pub const FAIL_WORKED_BUT_FAILED: i8 = 2;
 
 // Whether an ending counts against the issue.
 //
 // An interruption is the supervisor's accident, not the issue's difficulty.
 // Counting it would retire issues for the crime of being open while somebody
-// rebuilt the app. Only the two endings that are the issue's own doing count;
-// anything else a future registry invents does not, until this file says so.
-pub fn counts_against_issue(kind: i32) bool {
-    if (kind == FAILURE_PRODUCED_NOTHING) {
-        return true;
+// rebuilt the app.
+pub fn counts_against_issue(kind: i8) bool {
+    if (kind == FAIL_INTERRUPTED) {
+        return false;
     }
-    if (kind == FAILURE_WORKED_BUT_FAILED) {
-        return true;
-    }
-    return false;
+    return true;
 }
 
 // ---------------------------------------------------------------------------
-// Decision 1 of 4 — retry: whether to send another bee
+// Whether to send another bee
 // ---------------------------------------------------------------------------
 
-pub const RETRY_ATTEMPT: i32 = 0;
-pub const RETRY_ESCALATE: i32 = 1;
+// The codes are the discriminants of the Swift RetryVerdict.
+pub const RETRY_ATTEMPT: i8 = 0;
+pub const RETRY_ESCALATE: i8 = 1;
 
 // `real_attempts` is the count of endings that counted, filtered by
 // `counts_against_issue` before it gets here. Taking the filtered count rather
 // than the raw one is deliberate: the filter belongs to the law, not to
 // whoever remembers to apply it.
-pub fn retry_verdict(real_attempts: i32) i32 {
+pub fn retry_verdict(real_attempts: i32) i8 {
     if (real_attempts >= MAX_REAL_ATTEMPTS) {
         return RETRY_ESCALATE;
     }
@@ -93,14 +92,14 @@ pub fn retry_verdict(real_attempts: i32) i32 {
 }
 
 // ---------------------------------------------------------------------------
-// Decision 2 of 4 — review: what happens to a task once every criterion has a
-// verdict
+// What happens to a task once every criterion has a verdict
 // ---------------------------------------------------------------------------
 
-pub const REVIEW_WAIT: i32 = 0;
-pub const REVIEW_ACCEPT: i32 = 1;
-pub const REVIEW_SEND_BACK: i32 = 2;
-pub const REVIEW_ESCALATE: i32 = 3;
+// The codes are the discriminants of the Swift ReviewVerdict.
+pub const REVIEW_WAIT: i8 = 0;
+pub const REVIEW_ACCEPT: i8 = 1;
+pub const REVIEW_SEND_BACK: i8 = 2;
+pub const REVIEW_ESCALATE: i8 = 3;
 
 // `judged` counts criteria with a real answer - `met` or `unmet`. An
 // `unchecked` or `stale` verdict is not an answer, and returning work over a
@@ -115,7 +114,7 @@ pub fn review_verdict(
     unmet: i32,
     committed_files: i32,
     prior_send_backs: i32
-) i32 {
+) i8 {
     if (total_criteria <= 0) {
         return REVIEW_ESCALATE;
     }
@@ -135,31 +134,33 @@ pub fn review_verdict(
 }
 
 // ---------------------------------------------------------------------------
-// Decision 3 of 4 — merge gate: whether a pull request has earned its merge
+// Whether a pull request has earned its merge
 // ---------------------------------------------------------------------------
 
-pub const ROLLUP_NONE: i32 = 0;
-pub const ROLLUP_PENDING: i32 = 1;
-pub const ROLLUP_SUCCESS: i32 = 2;
-pub const ROLLUP_FAILURE: i32 = 3;
-pub const ROLLUP_ERROR: i32 = 4;
+// The codes are the discriminants of the Swift Rollup.
+pub const ROLLUP_NONE: i8 = 0;
+pub const ROLLUP_PENDING: i8 = 1;
+pub const ROLLUP_SUCCESS: i8 = 2;
+pub const ROLLUP_FAILURE: i8 = 3;
+pub const ROLLUP_ERROR: i8 = 4;
 
-pub const MERGE_APPROVE: i32 = 0;
-pub const MERGE_WAIT: i32 = 1;
-pub const MERGE_WAKE_WORKER: i32 = 2;
-pub const MERGE_REFUSE: i32 = 3;
+// The codes are the discriminants of the Swift MergeVerdict.
+pub const MERGE_MERGE: i8 = 0;
+pub const MERGE_WAIT: i8 = 1;
+pub const MERGE_WAKE_WORKER: i8 = 2;
+pub const MERGE_REFUSE: i8 = 3;
 
 // `checks_configured` matters more than it looks. A repository with no CI
-// reports `ROLLUP_NONE`, and reading that as failure blocks every merge
-// forever in a project that has no checks - while reading it as success makes
-// this gate a decoration in a project that MEANT to have them. The caller
-// states which world it is in.
+// reports `none`, and reading that as failure blocks every merge forever in a
+// project that has no checks - while reading it as success makes this gate a
+// decoration in a project that MEANT to have them. The caller states which
+// world it is in.
 pub fn merge_verdict(
-    rollup: i32,
+    rollup: i8,
     mergeable: bool,
     is_draft: bool,
     checks_configured: bool
-) i32 {
+) i8 {
     if (is_draft) {
         return MERGE_REFUSE;
     }
@@ -167,7 +168,7 @@ pub fn merge_verdict(
         return MERGE_REFUSE;
     }
     if (rollup == ROLLUP_SUCCESS) {
-        return MERGE_APPROVE;
+        return MERGE_MERGE;
     }
     if (rollup == ROLLUP_PENDING) {
         return MERGE_WAIT;
@@ -181,17 +182,17 @@ pub fn merge_verdict(
     return merge_verdict_for_no_checks(checks_configured);
 }
 
-// Split out because a branch that has to decide something of its own is a
-// second rule hiding inside the first.
-pub fn merge_verdict_for_no_checks(checks_configured: bool) i32 {
+// Split out because a decision path that has to decide something of its own is
+// a second rule hiding inside the first.
+pub fn merge_verdict_for_no_checks(checks_configured: bool) i8 {
     if (checks_configured) {
         return MERGE_WAIT;
     }
-    return MERGE_APPROVE;
+    return MERGE_MERGE;
 }
 
 // ---------------------------------------------------------------------------
-// Decision 4 of 4 — capacity: whether the swarm has room for one more
+// Capacity
 // ---------------------------------------------------------------------------
 
 // Whether one more worker may be started.
