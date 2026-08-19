@@ -8711,6 +8711,11 @@ final class ChatViewModel: ObservableObject {
         )
 
         var chosenScored: ScoredIssue!
+        // Why each candidate was passed over. The summary at the end used to
+        // say "all candidates look already done" whatever the reasons were -
+        // the most reassuring sentence in the system, printed while five tasks
+        // sat escalated to the operator holding twelve issues' paths.
+        var skipReasons: [String: Int] = [:]
         for candidate in sorted {
             // A candidate with no boundary cannot be delegated at all, and
             // that is knowable here: the paths were parsed during scoring.
@@ -8721,6 +8726,7 @@ final class ChatViewModel: ObservableObject {
             // the same: a condition the selection could test is instead left
             // for the refusal to find.
             if (candidate.paths ?? []).isEmpty {
+                skipReasons["no boundary", default: 0] += 1
                 TriosLogBus.shared.info(
                     .queen, "queen.choose.no_boundary",
                     "Skipping #\(candidate.number): no Границы section, so there is nothing to delegate",
@@ -8734,18 +8740,36 @@ final class ChatViewModel: ObservableObject {
             // rather than as "try the next one". Third instance of the same
             // shape today; filtered here with the very policy that would
             // otherwise refuse it, so the two can never disagree.
-            if let paths = candidate.paths, !paths.isEmpty,
-               !QueenDelegationPolicy.conflictingTasks(
-                   for: paths, among: delegationRegistry.tasks
-               ).isEmpty {
-                TriosLogBus.shared.info(
-                    .queen, "queen.choose.boundary_taken",
-                    "Skipping #\(candidate.number): its files are owned by a live task",
-                    ["issue": "gHashTag/trios#\(candidate.number)"]
+            if let paths = candidate.paths, !paths.isEmpty {
+                let holders = QueenDelegationPolicy.conflictingTasks(
+                    for: paths, among: delegationRegistry.tasks
                 )
-                continue
+                if !holders.isEmpty {
+                    // Name the holder and its state. "Owned by a live task" is
+                    // anonymous, and six of these in a row read as a busy swarm
+                    // when in fact five tasks were escalated to the operator
+                    // hours earlier and are holding their paths while they
+                    // wait. A block nobody can attribute is a block nobody
+                    // clears.
+                    let named = holders.map { holder -> String in
+                        let age = Int(Date().timeIntervalSince(holder.updatedAt) / 60)
+                        return "\(holder.issue.slug) (\(holder.state.rawValue), "
+                            + "\(age)m)"
+                    }.joined(separator: ", ")
+                    skipReasons["held by another task", default: 0] += 1
+                TriosLogBus.shared.info(
+                        .queen, "queen.choose.boundary_taken",
+                        "Skipping #\(candidate.number): its files are held by \(named)",
+                        [
+                            "issue": "gHashTag/trios#\(candidate.number)",
+                            "held_by": named,
+                        ]
+                    )
+                    continue
+                }
             }
             if liveIssueNumbers.contains(candidate.number) {
+                skipReasons["already has a worker", default: 0] += 1
                 TriosLogBus.shared.info(
                     .queen, "queen.choose.already_running",
                     "Skipping #\(candidate.number): a worker already has it",
@@ -8763,6 +8787,7 @@ final class ChatViewModel: ObservableObject {
             if case .escalate(let reason) = QueenRetryPolicy.decision(
                 priorAttempts: priorFailures
             ) {
+                skipReasons["attempts exhausted", default: 0] += 1
                 TriosLogBus.shared.warn(
                     .queen, "queen.choose.exhausted",
                     "Skipping #\(candidate.number): \(reason)",
@@ -8777,6 +8802,7 @@ final class ChatViewModel: ObservableObject {
                 body: candidate.body,
                 paths: candidate.paths
             ) {
+                skipReasons["looks already done", default: 0] += 1
                 TriosLogBus.shared.info(
                     .queen, "queen.choose.already_done",
                     "Skipping #\(candidate.number): looks already done — \(evidence)",
@@ -8797,19 +8823,27 @@ final class ChatViewModel: ObservableObject {
 
         guard let chosen = chosenScored else {
             let doneIssues = sorted.map { "#\($0.number)" }.joined(separator: ", ")
+            let breakdown = skipReasons
+                .sorted { $0.value > $1.value }
+                .map { "\($0.value) \($0.key)" }
+                .joined(separator: ", ")
             TriosLogBus.shared.info(
                 .queen, "queen.choose",
-                "All \(sorted.count) candidate(s) look already done — nothing to choose",
+                "Nothing to choose from \(sorted.count) candidate(s): "
+                    + (breakdown.isEmpty ? "no reasons recorded" : breakdown),
                 [
                     "considered": String(sorted.count),
                     "chosen": "(none)",
                     "skipped": doneIssues,
+                    "why": breakdown,
                 ]
             )
             await postQueenNotice(
                 SystemNoticeClassifier.infoMarker
-                    + "Every open sub-issue under #1090 looks already done "
-                    + "(\(doneIssues)). Nothing to act on."
+                    + "Nothing to act on among \(sorted.count) candidate(s): "
+                    + (breakdown.isEmpty ? "no reasons recorded" : breakdown)
+                    + ". A count against \"held by another task\" is work waiting "
+                    + "on a decision, not work in progress."
             )
             return
         }
