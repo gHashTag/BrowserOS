@@ -227,6 +227,49 @@ final class QueenDelegationRegistry: ObservableObject {
         return task
     }
 
+    /// Records why a task failed, classified from what the runner measured.
+    ///
+    /// Separate from `transition` rather than a parameter on it because the
+    /// caller that knows the measurements is not always the caller that moves
+    /// the state, and a parameter defaulting to nil would have been left at nil
+    /// by whichever of them forgot - which is how the field came not to exist
+    /// for so long.
+    @discardableResult
+    func recordFailureKind(taskID: UUID) -> QueenFailureKind? {
+        guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return nil }
+        let task = tasks[index]
+        let kind = QueenRetryPolicy.classify(
+            streamOutcome: task.streamOutcome?.rawValue,
+            completedTurns: task.completedTurns,
+            toolCalls: task.toolCalls,
+            committedFiles: task.committedFiles
+        )
+        tasks[index].failureKind = kind
+        persist()
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.failure.classified",
+            "\(task.issue.slug) failed as \(kind.rawValue)",
+            ["issue": task.issue.slug, "kind": kind.rawValue]
+        )
+        return kind
+    }
+
+    /// Every ended attempt on an issue, oldest first.
+    ///
+    /// Reads the whole registry rather than a counter, because a counter is a
+    /// second copy of the truth and the registry already holds it.
+    func priorFailures(forIssue number: Int) -> [QueenFailureKind] {
+        tasks
+            .filter { $0.issue.number == number && $0.state == .failed }
+            .sorted { $0.updatedAt < $1.updatedAt }
+            // A failure recorded before this field existed is unclassifiable
+            // now. Counted as a real attempt, because the alternative - not
+            // counting it - lets an issue with a long history of defeats look
+            // untouched and start the count over.
+            .map { $0.failureKind ?? .workedButFailed }
+    }
+
     /// Moves a task through its lifecycle, refusing illegal jumps.
     @discardableResult
     func transition(taskID: UUID, to state: DelegatedTaskState) -> Bool {
@@ -548,6 +591,13 @@ final class QueenDelegationRegistry: ObservableObject {
         var reconciled: [DelegatedTask] = []
         for index in orphans {
             tasks[index].state = .failed
+            // Recorded, not inferred. This is the one place that KNOWS the
+            // worker was interrupted rather than beaten - it is reconciling a
+            // process that no longer exists - and until now it threw that
+            // knowledge away and wrote the same `failed` as a real defeat.
+            // Downstream the difference decides whether the issue is worth
+            // another bee.
+            tasks[index].failureKind = .interrupted
             tasks[index].updatedAt = now
             TriosLogBus.shared.warn(
                 .queen,

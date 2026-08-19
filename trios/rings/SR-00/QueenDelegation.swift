@@ -243,6 +243,19 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// stream object exists right now".
     var streamOutcome: WorkerStreamOutcome?
 
+    /// Why this task ended in `failed`, once it has.
+    ///
+    /// The registry spelled every ending the same way, so a worker killed by a
+    /// rebuild and a worker that ran forty tool calls and committed nothing
+    /// were the same word afterwards. That word was all the Queen had when she
+    /// decided whether to try the issue again - and with no way to tell the two
+    /// apart she always did, with the same brief, indefinitely. #1127 collected
+    /// seven attempts that way.
+    ///
+    /// Optional because it is meaningless in every other state and because
+    /// stores written before it existed must still decode.
+    var failureKind: QueenFailureKind?
+
     /// When the runner opened this worker's stream.
     ///
     /// Time-to-first-byte is unmeasurable without it, and until it existed the

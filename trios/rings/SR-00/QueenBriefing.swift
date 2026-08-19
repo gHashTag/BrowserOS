@@ -13,8 +13,22 @@ enum QueenBriefing {
     /// changes; a brief that carries the procedure cannot. The skill goes last
     /// so the boundary is read first - a worker that only skims gets the rules
     /// before the recipe.
-    static func text(for task: DelegatedTask, skillBody: String? = nil) -> String {
+    /// `priorAttempts` is what happened to the bees sent at this issue before.
+    ///
+    /// It goes near the top, ahead of the procedure, because it changes what
+    /// the worker should do rather than how it should do it. Without it a
+    /// retry is not a second attempt - it is the first attempt run again, with
+    /// a worker that has no way of knowing it is repeating anyone. #1127 was
+    /// run that way seven times.
+    static func text(
+        for task: DelegatedTask,
+        skillBody: String? = nil,
+        priorAttempts: [QueenFailureKind] = []
+    ) -> String {
         var text = core(for: task)
+        if let history = QueenRetryPolicy.retryBriefing(priorAttempts: priorAttempts) {
+            text += "\n\n" + history
+        }
         if let skillBody, !skillBody.isEmpty {
             text += "\n\nFollow this procedure:\n\n" + skillBody
         }

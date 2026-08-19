@@ -358,6 +358,7 @@ struct ChatSSEEndToEndTests {
         ("runAppStartsItsOwnServer", { await runAppStartsItsOwnServer() }),
         ("runEveryBeeIsHandedARehearsal", { await runEveryBeeIsHandedARehearsal() }),
         ("runNothingMergesPastTheGate", { await runNothingMergesPastTheGate() }),
+        ("runABeeIsNotSentAtTheSameWallForever", { await runABeeIsNotSentAtTheSameWallForever() }),
     ]
 
     static func main() async {
@@ -7882,6 +7883,121 @@ struct ChatSSEEndToEndTests {
     /// Red is not the Queen's to fix. The bee that opened the pull request is
     /// woken with the names of the failing checks and works on the same branch
     /// until the gate is green.
+    // MARK: - Scenario: a bee is not sent at the same wall forever
+
+    /// The dev registry held nineteen tasks and fourteen failures: #1127
+    /// attempted seven times, #1129 five, #1128 four. Every attempt was the
+    /// same brief against the same issue, because nothing counted them and
+    /// nothing told the next worker that anyone had been there.
+    ///
+    /// Ten of those fourteen had `streamOutcome: open` and no completed turns -
+    /// the signature of a process that went away under the worker, not of a
+    /// worker that failed. Counting those against the issue would retire issues
+    /// for the crime of being open while somebody rebuilt the app.
+    static func runABeeIsNotSentAtTheSameWallForever() async {
+        print("\n# Scenario: a bee is not sent at the same wall forever")
+
+        typealias P = QueenRetryPolicy
+
+        // Classification reads the measurements, because the label is what was
+        // missing in the first place.
+        check(
+            P.classify(streamOutcome: "open", completedTurns: nil, toolCalls: nil,
+                       committedFiles: nil) == .interrupted,
+            "an open stream with no completed turn is a process that went away, not a defeat"
+        )
+        check(
+            P.classify(streamOutcome: "terminal", completedTurns: 1, toolCalls: 41,
+                       committedFiles: 0) == .producedNothing,
+            "forty-one tool calls and nothing committed is a real attempt that produced nothing"
+        )
+        check(
+            P.classify(streamOutcome: "terminal", completedTurns: 1, toolCalls: 12,
+                       committedFiles: 3) == .workedButFailed,
+            "work that landed on a branch and still failed is the third kind"
+        )
+
+        // Interruptions must not consume the issue's budget. This is the whole
+        // reason the kinds exist rather than a counter.
+        check(
+            P.decision(priorAttempts: [.interrupted, .interrupted, .interrupted, .interrupted])
+                == .attempt(number: 1),
+            "four interruptions leave the issue untouched - it is still a first attempt"
+        )
+        check(
+            P.decision(priorAttempts: [.producedNothing]) == .attempt(number: 2),
+            "one real failure earns a second attempt, and it is numbered as such"
+        )
+        guard case .escalate(let reason) = P.decision(
+            priorAttempts: [.producedNothing, .workedButFailed]
+        ) else {
+            fail("two real failures must stop the loop rather than start a third bee")
+            return
+        }
+        check(
+            reason.contains("needs you"),
+            "and the reason says whose problem it now is: \(reason)"
+        )
+        check(
+            P.decision(priorAttempts: [.interrupted, .producedNothing, .interrupted])
+                == .attempt(number: 2),
+            "interruptions interleaved with a real failure still do not count"
+        )
+
+        // The briefing is the half that makes a retry a second attempt rather
+        // than the first attempt run twice.
+        check(
+            P.retryBriefing(priorAttempts: []) == nil,
+            "a first attempt is told nothing about attempts that never happened"
+        )
+        check(
+            P.retryBriefing(priorAttempts: [.interrupted]) == nil,
+            "and an interruption is not history worth burdening a worker with"
+        )
+        guard let briefing = P.retryBriefing(
+            priorAttempts: [.producedNothing, .interrupted]
+        ) else {
+            fail("a real prior failure must produce a briefing")
+            return
+        }
+        check(
+            briefing.contains("attempted 1 time"),
+            "the briefing counts only the attempts that were the worker's own"
+        )
+        check(
+            briefing.contains("committed nothing"),
+            "and says what the previous one actually did: \(briefing.prefix(60))"
+        )
+        check(
+            briefing.contains("Do not repeat the previous approach"),
+            "a retry that repeats the approach is not a retry"
+        )
+
+        // And the brief a worker receives carries it, which is the only place
+        // any of this reaches an actual bee.
+        let task = DelegatedTask(
+            issue: IssueReference(owner: "gHashTag", repo: "trios", number: 1127),
+            title: "Judge and defendant are one model",
+            worker: "queen-swift",
+            ownedPaths: ["rings/SR-02/ChatViewModel.swift"],
+            acceptanceCriteria: ["the reviewer is not the author"]
+        )
+        let fresh = QueenBriefing.text(for: task)
+        let retry = QueenBriefing.text(for: task, priorAttempts: [.workedButFailed])
+        check(
+            !fresh.contains("attempted"),
+            "a first brief is not cluttered with a history it does not have"
+        )
+        check(
+            retry.contains("attempted 1 time"),
+            "a retry brief opens with what happened before"
+        )
+        check(
+            retry.count > fresh.count,
+            "and it is the same brief plus that, not a different one"
+        )
+    }
+
     static func runNothingMergesPastTheGate() async {
         print("\n# Scenario: nothing merges past the gate (#1090)")
 

@@ -2993,7 +2993,7 @@ private struct QueenBeeBoard: View {
 /// wearing a group separator at the thousand boundary and reads `#1,124`:
 /// by that rendering the issue cannot be found on GitHub, and the number
 /// cannot be copied out of the card. The card therefore prints
-/// `Text(verbatim: IssueBadgeForm.badge(...))` — no locale, no formatter —
+/// the value of `IssueBadgeForm.badge(...)` through `Text(verbatim:)` — no locale, no formatter —
 /// and that one expression serves the wide window and the narrow panel
 /// alike: one card, both modes. The screen renders the same function the
 /// check beside the render interrogates, so restoring value formatting to

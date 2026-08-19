@@ -4145,8 +4145,20 @@ final class ChatViewModel: ObservableObject {
                 for: task.ownedPaths, from: issueBody, issueSlug: issue.slug
             )
         }
-        let brief = QueenBriefing.text(for: task, skillBody: skillBody)
-            + (narrowedHints.isEmpty ? "" : "\n" + narrowedHints.joined(separator: "\n"))
+        // What the bees before this one hit. Gathered from the registry rather
+        // than passed along, so a retry started from any path carries it.
+        let priorAttempts = registry.priorFailures(forIssue: issue.number)
+        if !priorAttempts.filter(\.countsAgainstTheIssue).isEmpty {
+            TriosLogBus.shared.info(
+                .queen, "queen.brief.retry",
+                "Briefing \(worker) with what \(priorAttempts.filter(\.countsAgainstTheIssue).count) "
+                    + "earlier attempt(s) on \(issue.slug) ran into",
+                ["issue": issue.slug]
+            )
+        }
+        let brief = QueenBriefing.text(
+            for: task, skillBody: skillBody, priorAttempts: priorAttempts
+        ) + (narrowedHints.isEmpty ? "" : "\n" + narrowedHints.joined(separator: "\n"))
         // Materialise the chat before naming it. renameConversation renames a
         // record that exists; the comment above claimed the persister creates
         // one "the moment messages are saved against a fresh id", which is true
@@ -5196,6 +5208,13 @@ final class ChatViewModel: ObservableObject {
             }
         }
         registry.transition(taskID: task.id, to: failure == nil ? .awaitingReview : .failed)
+        // Classify immediately after the move, while the measurements this
+        // task was judged on are still the ones in the store. Deferring it to
+        // read time would classify against whatever the record looked like
+        // later, which is a different question.
+        if failure != nil {
+            registry.recordFailureKind(taskID: task.id)
+        }
         // The notice belongs in the Queen's chat even when she is not the open
         // conversation, otherwise a result reported while the user is reading a
         // worker chat is lost.
@@ -7567,6 +7586,26 @@ final class ChatViewModel: ObservableObject {
                     .queen, "queen.choose.already_running",
                     "Skipping #\(candidate.number): a worker already has it",
                     ["issue": "gHashTag/trios#\(candidate.number)"]
+                )
+                continue
+            }
+            // A failure is choosable again - that much the comment above is
+            // right about. What it did not say is how many times. #1127 was
+            // attempted seven times in one registry, #1129 five, #1128 four,
+            // every one of them the same brief against the same issue, because
+            // nothing counted. Interruptions are excluded from the count by the
+            // policy: a worker that died in a rebuild did not fail at anything.
+            let priorFailures = delegationRegistry.priorFailures(forIssue: candidate.number)
+            if case .escalate(let reason) = QueenRetryPolicy.decision(
+                priorAttempts: priorFailures
+            ) {
+                TriosLogBus.shared.warn(
+                    .queen, "queen.choose.exhausted",
+                    "Skipping #\(candidate.number): \(reason)",
+                    [
+                        "issue": "gHashTag/trios#\(candidate.number)",
+                        "attempts": String(priorFailures.filter(\.countsAgainstTheIssue).count),
+                    ]
                 )
                 continue
             }
