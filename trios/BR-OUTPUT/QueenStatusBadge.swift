@@ -10,7 +10,7 @@ struct QueenStatusBadge: View {
         }) {
             HStack(spacing: 4) {
                 Text("[Q]")
-                    .font(.system(size: 13))
+                    .font(TriosType.font(13))
                 Circle()
                     .fill(statusColor)
                     .frame(width: 6, height: 6)

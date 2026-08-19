@@ -234,7 +234,7 @@ struct TerminalTabView: View {
     private var header: some View {
         HStack(spacing: 8) {
             Text("Terminal")
-                .font(.system(size: 13, weight: .semibold))
+                .font(TriosType.font(13, weight: .semibold))
                 .foregroundColor(.grokText)
             Spacer()
             if vm.isRunning {
@@ -243,13 +243,13 @@ struct TerminalTabView: View {
             }
             Button(action: { vm.clear() }) {
                 Image(systemName: "trash")
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .foregroundColor(.grokMuted)
             }
             .buttonStyle(.plain)
             Button(action: { vm.kill() }) {
                 Image(systemName: "stop.fill")
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .foregroundColor(.grokMuted)
             }
             .buttonStyle(.plain)
@@ -262,7 +262,7 @@ struct TerminalTabView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 Text(vm.output)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TriosType.font(11, design: .monospaced))
                     .foregroundColor(.grokMuted)
                     .padding(8)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -283,7 +283,7 @@ struct TerminalTabView: View {
     private var inputBar: some View {
         HStack(spacing: 8) {
             TextField("Run command...", text: $command)
-                .font(.system(size: 12, design: .monospaced))
+                .font(TriosType.font(12, design: .monospaced))
                 .foregroundColor(.grokText)
                 .textFieldStyle(PlainTextFieldStyle())
                 .onSubmit {
@@ -292,7 +292,7 @@ struct TerminalTabView: View {
 
             Button(action: submit) {
                 Image(systemName: "return")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(TriosType.font(12, weight: .semibold))
                     .foregroundColor(.grokAccent)
             }
             .buttonStyle(.plain)

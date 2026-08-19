@@ -120,7 +120,7 @@ struct TODOListView: View {
         HStack(spacing: 10) {
             Button(action: toggleCollapsed) {
                 Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(TriosType.font(11, weight: .semibold))
                     .frame(width: 22, height: 22)
                     .contentShape(Rectangle())
             }
@@ -130,13 +130,13 @@ struct TODOListView: View {
             .accessibilityValue(isCollapsed ? "Collapsed" : "Expanded")
 
             Image(systemName: planStatus.icon)
-                .font(.system(size: 13, weight: .semibold))
+                .font(TriosType.font(13, weight: .semibold))
                 .foregroundColor(planStatus.color)
                 .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(goalText)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(TriosType.font(13, weight: .semibold))
                     .foregroundColor(.grokText)
                     .lineLimit(1)
 
@@ -146,13 +146,13 @@ struct TODOListView: View {
                     Text("|\(completedCount)/\(totalCount) done")
                         .foregroundColor(.grokDim)
                 }
-                .font(.system(size: 10, weight: .medium))
+                .font(TriosType.font(10, weight: .medium))
             }
 
             Spacer(minLength: 8)
 
             Text("\(progressPercent)%")
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .font(TriosType.font(12, weight: .semibold, design: .monospaced))
                 .foregroundColor(.grokText)
                 .accessibilityLabel("Plan progress")
                 .accessibilityValue("\(progressPercent) percent")
@@ -173,7 +173,7 @@ struct TODOListView: View {
                 HStack(spacing: 5) {
                     Image(systemName: "memorychip")
                     Text("\(recalledMemories.count)")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                        .font(TriosType.font(10, weight: .semibold, design: .monospaced))
                 }
                 .padding(.horizontal, 8)
                 .frame(height: 24)
@@ -217,7 +217,7 @@ struct TODOListView: View {
         VStack(spacing: 10) {
             if let warning = planner.persistenceWarning {
                 Label(warning, systemImage: "externaldrive.badge.exclamationmark")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TriosType.font(10, weight: .medium))
                     .foregroundColor(.orange)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityLabel("Planner storage warning")
@@ -262,11 +262,11 @@ struct TODOListView: View {
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: showAllCompleted ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(TriosType.font(9, weight: .semibold))
                         Text(showAllCompleted
                              ? "Hide \(hiddenCount) completed"
                              : "\(hiddenCount) completed")
-                            .font(.system(size: 10, weight: .medium))
+                            .font(TriosType.font(10, weight: .medium))
                         Spacer(minLength: 0)
                     }
                     .foregroundColor(.grokDim)
@@ -301,7 +301,7 @@ struct TODOListView: View {
                 }
             } label: {
                 Image(systemName: itemStatus(item.state).icon)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(TriosType.font(14, weight: .medium))
                     .foregroundColor(itemStatus(item.state).color)
                     .frame(width: 22, height: 22)
                     .contentShape(Rectangle())
@@ -314,7 +314,7 @@ struct TODOListView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(item.title)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(TriosType.font(12, weight: .medium))
                         .foregroundColor(item.state == .completed ? .grokMuted : .grokText)
                         .strikethrough(item.state == .completed, color: .grokMuted)
                         .lineLimit(2)
@@ -322,7 +322,7 @@ struct TODOListView: View {
                     Spacer(minLength: 6)
 
                     Text(itemStatus(item.state).label)
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(TriosType.font(9, weight: .semibold))
                         .foregroundColor(itemStatus(item.state).color)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 3)
@@ -332,7 +332,7 @@ struct TODOListView: View {
 
                 if let detail = item.detail, !detail.isEmpty {
                     Text(detail)
-                        .font(.system(size: 10))
+                        .font(TriosType.font(10))
                         .foregroundColor(.grokDim)
                         .lineLimit(2)
                 }
@@ -361,13 +361,13 @@ struct TODOListView: View {
     private var taskEntry: some View {
         HStack(spacing: 8) {
             Image(systemName: "plus")
-                .font(.system(size: 11, weight: .semibold))
+                .font(TriosType.font(11, weight: .semibold))
                 .foregroundColor(.grokMuted)
                 .accessibilityHidden(true)
 
             TextField("Add a task", text: $taskDraft)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(TriosType.font(12))
                 .foregroundColor(.grokText)
                 .focused($focusTarget, equals: .taskEntry)
                 .onSubmit(addTask)
@@ -378,7 +378,7 @@ struct TODOListView: View {
 
             Button(action: addTask) {
                 Image(systemName: "arrow.up")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(TriosType.font(10, weight: .bold))
                     .frame(width: 24, height: 24)
                     .background(Color.white.opacity(canAddTask ? 0.90 : 0.08))
                     .foregroundColor(canAddTask ? .black : .grokDim)
@@ -449,10 +449,10 @@ struct TODOListView: View {
                 .foregroundColor(.grokMuted)
             VStack(alignment: .leading, spacing: 2) {
                 Text("No active plan")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(TriosType.font(12, weight: .semibold))
                     .foregroundColor(.grokText)
                 Text("A plan appears before the next request starts.")
-                    .font(.system(size: 10))
+                    .font(TriosType.font(10))
                     .foregroundColor(.grokDim)
             }
             Spacer()
@@ -470,18 +470,18 @@ struct TODOListView: View {
                 Image(systemName: "memorychip")
                     .foregroundColor(.grokMuted)
                 Text("Memory")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(TriosType.font(11, weight: .semibold))
                     .foregroundColor(.grokText)
                 Spacer()
                 Text("\(displayedMemories.count) shown")
-                    .font(.system(size: 9, weight: .medium, design: .monospaced))
+                    .font(TriosType.font(9, weight: .medium, design: .monospaced))
                     .foregroundColor(.grokDim)
 
                 Button {
                     pendingMemoryConfirmation = .clearConversation
                 } label: {
                     Label("Clear task", systemImage: "trash")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(TriosType.font(9, weight: .semibold))
                         .foregroundColor(.red.opacity(0.84))
                         .padding(.horizontal, 7)
                         .frame(height: 23)
@@ -497,13 +497,13 @@ struct TODOListView: View {
 
             HStack(spacing: 7) {
                 Image(systemName: "magnifyingglass")
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .foregroundColor(.grokMuted)
                     .accessibilityHidden(true)
 
                 TextField("Search saved memory", text: $memoryQuery)
                     .textFieldStyle(.plain)
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .foregroundColor(.grokText)
                     .focused($focusTarget, equals: .memoryQuery)
                     .onSubmit(searchMemory)
@@ -519,7 +519,7 @@ struct TODOListView: View {
                 } else {
                     Button(action: searchMemory) {
                         Text("Search")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(TriosType.font(10, weight: .semibold))
                             .padding(.horizontal, 8)
                             .frame(height: 24)
                             .background(Color.white.opacity(canSearchMemory ? 0.88 : 0.08))
@@ -539,14 +539,14 @@ struct TODOListView: View {
 
             if let memoryActionError {
                 Label(memoryActionError, systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TriosType.font(10, weight: .medium))
                     .foregroundColor(.red.opacity(0.88))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityLabel("Memory action failed")
                     .accessibilityValue(memoryActionError)
             } else if let memoryActionReceipt {
                 Label(memoryActionReceipt, systemImage: "checkmark.circle.fill")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TriosType.font(10, weight: .medium))
                     .foregroundColor(.green.opacity(0.88))
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityLabel("Memory action completed")
@@ -558,7 +558,7 @@ struct TODOListView: View {
                     ProgressView()
                         .controlSize(.small)
                     Text("Loading saved memory...")
-                        .font(.system(size: 10))
+                        .font(TriosType.font(10))
                         .foregroundColor(.grokDim)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -567,7 +567,7 @@ struct TODOListView: View {
                 .accessibilityLabel("Loading saved memory")
             } else if displayedMemories.isEmpty {
                 Text(memoryEmptyMessage)
-                    .font(.system(size: 10))
+                    .font(TriosType.font(10))
                     .foregroundColor(.grokDim)
                     .padding(.vertical, 4)
                     .accessibilityLabel(memoryEmptyMessage)
@@ -589,7 +589,7 @@ struct TODOListView: View {
         HStack(alignment: .top, spacing: 8) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(match.record.displayBody)
-                    .font(.system(size: 10))
+                    .font(TriosType.font(10))
                     .foregroundColor(.grokText.opacity(0.90))
                     .lineLimit(3)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -606,7 +606,7 @@ struct TODOListView: View {
                         Text("Saved")
                     }
                 }
-                .font(.system(size: 8, weight: .medium, design: .monospaced))
+                .font(TriosType.font(8, weight: .medium, design: .monospaced))
                 .foregroundColor(.grokDim)
             }
             .accessibilityElement(children: .combine)
@@ -617,7 +617,7 @@ struct TODOListView: View {
                 pendingMemoryConfirmation = .forget(match)
             } label: {
                 Label("Forget", systemImage: "trash")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(TriosType.font(9, weight: .semibold))
                     .foregroundColor(.red.opacity(0.82))
                     .padding(.horizontal, 7)
                     .frame(height: 23)
@@ -1084,9 +1084,9 @@ private struct TODOActionLabel: View {
     var body: some View {
         HStack(spacing: 5) {
             Image(systemName: icon)
-                .font(.system(size: 10, weight: .semibold))
+                .font(TriosType.font(10, weight: .semibold))
             Text(title)
-                .font(.system(size: 10, weight: .semibold))
+                .font(TriosType.font(10, weight: .semibold))
         }
         .foregroundColor(isDestructive ? .red.opacity(0.84) : .grokMuted)
         .padding(.horizontal, 9)

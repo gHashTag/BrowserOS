@@ -148,7 +148,7 @@ struct UnifiedDiffView: View {
                 .foregroundColor(.white.opacity(0.72))
 
             Text(document.displayPath)
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .font(TriosType.font(11, weight: .semibold, design: .monospaced))
                 .foregroundColor(.white.opacity(0.9))
                 .lineLimit(1)
 
@@ -167,7 +167,7 @@ struct UnifiedDiffView: View {
             .buttonStyle(.plain)
             .help("Copy diff")
         }
-        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+        .font(TriosType.font(11, weight: .semibold, design: .monospaced))
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
         .background(Color.white.opacity(0.045))
@@ -200,7 +200,7 @@ private struct UnifiedDiffLineView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.trailing, 12)
         }
-        .font(.system(size: 11, weight: .regular, design: .monospaced))
+        .font(TriosType.font(11, weight: .regular, design: .monospaced))
         .frame(minHeight: 20)
         .background(backgroundColor)
     }
@@ -408,7 +408,7 @@ private struct DetailTypeBadge: View {
 
     var body: some View {
         Text(summary)
-            .font(.system(size: 10, weight: .medium, design: .monospaced))
+            .font(TriosType.font(10, weight: .medium, design: .monospaced))
             .foregroundColor(.secondary)
             .padding(.horizontal, 5)
             .padding(.vertical, 2)

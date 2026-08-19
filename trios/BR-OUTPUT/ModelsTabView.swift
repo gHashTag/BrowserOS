@@ -139,10 +139,10 @@ struct ModelsTabView: View {
     private var header: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text("Models & API keys")
-                .font(.system(size: 22, weight: .bold))
+                .font(TriosType.font(22, weight: .bold))
                 .foregroundColor(.grokText)
             Text("Choose the runtime used by new messages. Secrets stay in macOS Keychain.")
-                .font(.system(size: 12))
+                .font(TriosType.font(12))
                 .foregroundColor(.grokMuted)
         }
     }
@@ -162,7 +162,7 @@ struct ModelsTabView: View {
                                 .lineLimit(1)
                             Spacer(minLength: 0)
                         }
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(TriosType.font(12, weight: .semibold))
                         .foregroundColor(.grokText)
                         .padding(.horizontal, 10)
                         .frame(height: 38)
@@ -193,7 +193,7 @@ struct ModelsTabView: View {
                 if store.isPredictiveSelectionEnabled {
                     HStack(spacing: 10) {
                         Text("Cost tier:")
-                            .font(.system(size: 12))
+                            .font(TriosType.font(12))
                             .foregroundColor(.grokText)
                         Picker("Cost tier", selection: $store.preferredCostTier) {
                             ForEach(ModelCostTier.allCases) { tier in
@@ -214,7 +214,7 @@ struct ModelsTabView: View {
 
                     if let reason = store.predictiveSelectionReason {
                         Text(reason)
-                            .font(.system(size: 10))
+                            .font(TriosType.font(10))
                             .foregroundColor(.grokDim)
                     }
                 }
@@ -230,20 +230,20 @@ struct ModelsTabView: View {
                         .foregroundColor(.green)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(store.selectedModel)
-                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                            .font(TriosType.font(13, weight: .semibold, design: .monospaced))
                             .foregroundColor(.grokText)
                             .textSelection(.enabled)
                         HStack(spacing: 6) {
                             Text(store.selectedProvider.displayName)
-                                .font(.system(size: 10))
+                                .font(TriosType.font(10))
                                 .foregroundColor(.grokDim)
                             if isConversationModelPinned {
                                 HStack(spacing: 3) {
                                     Image(systemName: "pin.fill")
-                                        .font(.system(size: 8))
+                                        .font(TriosType.font(8))
                                     Text("pinned")
                                 }
-                                .font(.system(size: 9, weight: .semibold))
+                                .font(TriosType.font(9, weight: .semibold))
                                 .foregroundColor(.blue)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
@@ -252,7 +252,7 @@ struct ModelsTabView: View {
                             }
                             if store.unhealthyModels.contains(store.selectedModel) {
                                 Text("unavailable")
-                                    .font(.system(size: 9, weight: .semibold))
+                                    .font(TriosType.font(9, weight: .semibold))
                                     .foregroundColor(.red)
                                     .padding(.horizontal, 5)
                                     .padding(.vertical, 1)
@@ -267,10 +267,10 @@ struct ModelsTabView: View {
                 if isConversationModelPinned, let constraint = conversationModelConstraint {
                     HStack(spacing: 6) {
                         Image(systemName: "link")
-                            .font(.system(size: 10))
+                            .font(TriosType.font(10))
                             .foregroundColor(.grokDim)
                         Text(constraint.candidate.baseURL)
-                            .font(.system(size: 10, design: .monospaced))
+                            .font(TriosType.font(10, design: .monospaced))
                             .foregroundColor(.grokDim)
                             .lineLimit(1)
                             .truncationMode(.middle)
@@ -293,21 +293,21 @@ struct ModelsTabView: View {
                         "This conversation is pinned to \(pinnedModelLabel). Changing the global default here does not affect the pinned conversation.",
                         systemImage: "info.circle"
                     )
-                    .font(.system(size: 10))
+                    .font(TriosType.font(10))
                     .foregroundColor(.grokDim)
                 }
 
                 if let ceiling = effectiveOutputCeiling {
                     HStack(spacing: 6) {
                         Image(systemName: "waveform.circle")
-                            .font(.system(size: 11))
+                            .font(TriosType.font(11))
                             .foregroundColor(.grokDim)
                         Text("Effective output limit: \(formatCompact(ceiling))")
-                            .font(.system(size: 11))
+                            .font(TriosType.font(11))
                             .foregroundColor(.grokDim)
                         if let learned = learnedLimitBadge(for: store.selectedModel) {
                             Text("• \(learned.label)")
-                                .font(.system(size: 11))
+                                .font(TriosType.font(11))
                                 .foregroundColor(learned.color)
                         }
                     }
@@ -346,26 +346,26 @@ struct ModelsTabView: View {
 
                 if let reason = store.lastAdaptiveWarmupReason {
                     Label(reason, systemImage: "bolt.horizontal.circle")
-                        .font(.system(size: 11))
+                        .font(TriosType.font(11))
                         .foregroundColor(.grokDim)
                 }
 
                 if let lastAt = store.lastAdaptiveWarmupAt {
                     Text("Last send-path warmup: \(formatRelativeDate(lastAt))")
-                        .font(.system(size: 10))
+                        .font(TriosType.font(10))
                         .foregroundColor(.grokMuted)
                 }
 
                 if store.isPredictiveWarmupEnabled {
                     if let reason = store.lastPredictiveWarmupReason {
                         Label(reason, systemImage: "calendar.bolt.circle")
-                            .font(.system(size: 11))
+                            .font(TriosType.font(11))
                             .foregroundColor(.grokDim)
                     }
 
                     if let lastAt = store.lastPredictiveWarmupAt {
                         Text("Last background warmup: \(formatRelativeDate(lastAt))")
-                            .font(.system(size: 10))
+                            .font(TriosType.font(10))
                             .foregroundColor(.grokMuted)
                     }
 
@@ -378,7 +378,7 @@ struct ModelsTabView: View {
                     .onChange(of: store.predictiveWarmupTTL) { _, newValue in
                         store.setPredictiveWarmupTTL(newValue)
                     }
-                    .font(.system(size: 12))
+                    .font(TriosType.font(12))
 
                     Stepper(
                         "Refresh interval: \(Int(store.predictiveWarmupInterval))s",
@@ -389,7 +389,7 @@ struct ModelsTabView: View {
                     .onChange(of: store.predictiveWarmupInterval) { _, newValue in
                         store.setPredictiveWarmupInterval(newValue)
                     }
-                    .font(.system(size: 12))
+                    .font(TriosType.font(12))
 
                     Stepper(
                         "Max staleness: \(Int(store.predictiveWarmupMaxStaleness))s",
@@ -400,7 +400,7 @@ struct ModelsTabView: View {
                     .onChange(of: store.predictiveWarmupMaxStaleness) { _, newValue in
                         store.setPredictiveWarmupMaxStaleness(newValue)
                     }
-                    .font(.system(size: 12))
+                    .font(TriosType.font(12))
 
                     HStack(spacing: 10) {
                         if let ttl = warmupRemainingTTL {
@@ -416,12 +416,12 @@ struct ModelsTabView: View {
                                 .foregroundColor(warmupFailureRate > 0.5 ? .orange : .grokMuted)
                         }
                     }
-                    .font(.system(size: 10))
+                    .font(TriosType.font(10))
                     .foregroundColor(.grokMuted)
 
                     if isWarmupCacheRefreshing {
                         Label("Refreshing in background", systemImage: "arrow.clockwise")
-                            .font(.system(size: 10))
+                            .font(TriosType.font(10))
                             .foregroundColor(.grokMuted)
                     }
 
@@ -430,7 +430,7 @@ struct ModelsTabView: View {
                             "Learning from \(warmupVolatilityHistoryCount) candidate(s)",
                             systemImage: "brain.head.profile"
                         )
-                        .font(.system(size: 10))
+                        .font(TriosType.font(10))
                         .foregroundColor(.grokMuted)
                     }
 
@@ -488,10 +488,10 @@ struct ModelsTabView: View {
                                     .foregroundColor(quotaColor(for: entry.quota))
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(entry.provider.displayName)
-                                        .font(.system(size: 12, weight: .semibold))
+                                        .font(TriosType.font(12, weight: .semibold))
                                         .foregroundColor(.grokText)
                                     Text(quotaLabel(for: entry.quota))
-                                        .font(.system(size: 9))
+                                        .font(TriosType.font(9))
                                         .foregroundColor(quotaColor(for: entry.quota))
                                 }
                                 Spacer()
@@ -600,13 +600,13 @@ struct ModelsTabView: View {
                         "Pinned conversations ignore cross-provider failover and stay on \(pinnedModelLabel).",
                         systemImage: "pin.circle"
                     )
-                    .font(.system(size: 10))
+                    .font(TriosType.font(10))
                     .foregroundColor(.grokDim)
                 }
 
                 if let reason = store.crossProviderFailoverReason {
                     Label(reason, systemImage: "arrow.left.arrow.right.circle")
-                        .font(.system(size: 11))
+                        .font(TriosType.font(11))
                         .foregroundColor(.grokDim)
                 }
 
@@ -634,17 +634,17 @@ struct ModelsTabView: View {
                                     .foregroundColor(providerHealthColor(for: entry.result.health))
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(entry.provider.displayName)
-                                        .font(.system(size: 12, weight: .semibold))
+                                        .font(TriosType.font(12, weight: .semibold))
                                         .foregroundColor(.grokText)
                                     Text(entry.baseURL)
-                                        .font(.system(size: 9, design: .monospaced))
+                                        .font(TriosType.font(9, design: .monospaced))
                                         .foregroundColor(.grokDim)
                                         .lineLimit(1)
                                         .truncationMode(.middle)
                                 }
                                 Spacer()
                                 Text(providerHealthLabel(for: entry.result.health))
-                                    .font(.system(size: 9, weight: .semibold))
+                                    .font(TriosType.font(9, weight: .semibold))
                                     .foregroundColor(providerHealthColor(for: entry.result.health))
                             }
                             .padding(.horizontal, 10)
@@ -663,22 +663,22 @@ struct ModelsTabView: View {
                                     .foregroundColor(circuitBreakerColor(for: entry.state))
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(entry.provider.displayName)
-                                        .font(.system(size: 12, weight: .semibold))
+                                        .font(TriosType.font(12, weight: .semibold))
                                         .foregroundColor(.grokText)
                                     Text(entry.baseURL)
-                                        .font(.system(size: 9, design: .monospaced))
+                                        .font(TriosType.font(9, design: .monospaced))
                                         .foregroundColor(.grokDim)
                                         .lineLimit(1)
                                         .truncationMode(.middle)
                                     if let label = circuitBreakerDetail(for: entry.state, kind: entry.lastFailureKind, nextRetry: entry.nextRetry) {
                                         Text(label)
-                                            .font(.system(size: 9))
+                                            .font(TriosType.font(9))
                                             .foregroundColor(.grokDim)
                                     }
                                 }
                                 Spacer()
                                 Text(circuitBreakerLabel(for: entry.state))
-                                    .font(.system(size: 9, weight: .semibold))
+                                    .font(TriosType.font(9, weight: .semibold))
                                     .foregroundColor(circuitBreakerColor(for: entry.state))
                             }
                             .padding(.horizontal, 10)
@@ -806,11 +806,11 @@ struct ModelsTabView: View {
                 HStack(spacing: 6) {
                     if let lastCheck = store.lastHealthCheckAt {
                         Text("Last check: \(Self.format(lastCheck))")
-                            .font(.system(size: 10))
+                            .font(TriosType.font(10))
                             .foregroundColor(.grokDim)
                     } else {
                         Text("Background health polling idle")
-                            .font(.system(size: 10))
+                            .font(TriosType.font(10))
                             .foregroundColor(.grokDim)
                     }
                     Spacer()
@@ -818,7 +818,7 @@ struct ModelsTabView: View {
 
                 if let error = store.discoveryError {
                     Label(error, systemImage: "exclamationmark.triangle.fill")
-                        .font(.system(size: 11))
+                        .font(TriosType.font(11))
                         .foregroundColor(.orange)
                 }
 
@@ -834,13 +834,13 @@ struct ModelsTabView: View {
                                 Image(systemName: model == store.selectedModel ? "checkmark.circle.fill" : (isUnhealthy ? "xmark.circle.fill" : "circle"))
                                     .foregroundColor(model == store.selectedModel ? .green : (isUnhealthy ? .red : .grokDim))
                                 Text(model)
-                                    .font(.system(size: 11, design: .monospaced))
+                                    .font(TriosType.font(11, design: .monospaced))
                                     .foregroundColor(isUnhealthy ? .grokDim : .grokText)
                                     .lineLimit(1)
                                     .truncationMode(.middle)
                                 if isUnhealthy {
                                     Text("unavailable")
-                                        .font(.system(size: 9, weight: .semibold))
+                                        .font(TriosType.font(9, weight: .semibold))
                                         .foregroundColor(.red)
                                         .padding(.horizontal, 5)
                                         .padding(.vertical, 1)
@@ -849,7 +849,7 @@ struct ModelsTabView: View {
                                 }
                                 if let badge = statusBadge(for: model) {
                                     Text(badge.label)
-                                        .font(.system(size: 9, weight: .semibold))
+                                        .font(TriosType.font(9, weight: .semibold))
                                         .foregroundColor(badge.color)
                                         .padding(.horizontal, 5)
                                         .padding(.vertical, 1)
@@ -858,7 +858,7 @@ struct ModelsTabView: View {
                                 }
                                 if let latencyBadge = latencyBadge(for: model) {
                                     Text(latencyBadge.label)
-                                        .font(.system(size: 9, weight: .semibold))
+                                        .font(TriosType.font(9, weight: .semibold))
                                         .foregroundColor(latencyBadge.color)
                                         .padding(.horizontal, 5)
                                         .padding(.vertical, 1)
@@ -867,7 +867,7 @@ struct ModelsTabView: View {
                                 }
                                 if let learned = learnedLimitBadge(for: model) {
                                     Text(learned.label)
-                                        .font(.system(size: 9, weight: .semibold))
+                                        .font(TriosType.font(9, weight: .semibold))
                                         .foregroundColor(learned.color)
                                         .padding(.horizontal, 5)
                                         .padding(.vertical, 1)
@@ -901,7 +901,7 @@ struct ModelsTabView: View {
         let rotating = store.isKeyRotationEnabled
         if entries.isEmpty {
             Label("No keys stored yet. Paste one below to get started.", systemImage: "key")
-                .font(.system(size: 11))
+                .font(TriosType.font(11))
                 .foregroundColor(.grokDim)
         } else {
             VStack(alignment: .leading, spacing: 6) {
@@ -924,10 +924,10 @@ struct ModelsTabView: View {
 
                         VStack(alignment: .leading, spacing: 1) {
                             Text(entry.label)
-                                .font(.system(size: 12, weight: entry.id == activeID ? .semibold : .regular))
+                                .font(TriosType.font(12, weight: entry.id == activeID ? .semibold : .regular))
                                 .foregroundColor(.grokText)
                             Text(entry.maskedValue)
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(TriosType.font(10, design: .monospaced))
                                 .foregroundColor(.grokDim)
                         }
 
@@ -938,7 +938,7 @@ struct ModelsTabView: View {
                                 store.resetKeyCooldown(entryID: entry.id, for: store.selectedProvider)
                             } label: {
                                 Text(reason.displayName)
-                                    .font(.system(size: 9, weight: .medium))
+                                    .font(TriosType.font(9, weight: .medium))
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 3)
                                     .background(
@@ -954,7 +954,7 @@ struct ModelsTabView: View {
                             .help("Parked by rotation. Click to put this key back in service.")
                         } else if let created = entry.createdAt {
                             Text(created, style: .date)
-                                .font(.system(size: 10))
+                                .font(TriosType.font(10))
                                 .foregroundColor(.grokDim)
                         }
 
@@ -1040,20 +1040,20 @@ struct ModelsTabView: View {
                     HStack(spacing: 12) {
                         if let keyURL = keyManagementURL {
                             Link("Open \(store.selectedProvider.displayName) key dashboard", destination: keyURL)
-                                .font(.system(size: 11))
+                                .font(TriosType.font(11))
                         }
                         Spacer()
                         TabLogsButton(tab: .models)
                     }
                 } else {
                     Label("Ollama runs locally and does not need an API key.", systemImage: "lock.open")
-                        .font(.system(size: 12))
+                        .font(TriosType.font(12))
                         .foregroundColor(.grokMuted)
                 }
 
                 if let credentialMessage {
                     Text(credentialMessage)
-                        .font(.system(size: 11))
+                        .font(TriosType.font(11))
                         .foregroundColor(credentialMessage.hasPrefix("Saved") || credentialMessage.hasPrefix("Key valid") ? .green : .orange)
                 }
 
@@ -1063,11 +1063,11 @@ struct ModelsTabView: View {
                             Image(systemName: apiKeyTestResult.iconName)
                                 .foregroundColor(apiKeyTestResult.accent)
                             Text(apiKeyTestResult.title)
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(TriosType.font(12, weight: .semibold))
                                 .foregroundColor(apiKeyTestResult.accent)
                             if let status = apiKeyTestResult.httpStatus {
                                 Text("HTTP \(status)")
-                                    .font(.system(size: 10, design: .monospaced))
+                                    .font(TriosType.font(10, design: .monospaced))
                                     .foregroundColor(.grokDim)
                                     .padding(.horizontal, 5)
                                     .padding(.vertical, 2)
@@ -1077,14 +1077,14 @@ struct ModelsTabView: View {
                             Spacer()
                         }
                         Text(apiKeyTestResult.subtitle)
-                            .font(.system(size: 11))
+                            .font(TriosType.font(11))
                             .foregroundColor(apiKeyTestResult.accent)
                             .lineLimit(nil)
                             .fixedSize(horizontal: false, vertical: true)
 
                         if let warning = apiKeyTestResult.warning {
                             Text(warning)
-                                .font(.system(size: 11, weight: .medium))
+                                .font(TriosType.font(11, weight: .medium))
                                 .foregroundColor(.orange)
                                 .lineLimit(nil)
                                 .fixedSize(horizontal: false, vertical: true)
@@ -1094,14 +1094,14 @@ struct ModelsTabView: View {
                             DisclosureGroup("Diagnostics") {
                                 ScrollView {
                                     Text(apiKeyTestResult.logs.joined(separator: "\n"))
-                                        .font(.system(size: 10, design: .monospaced))
+                                        .font(TriosType.font(10, design: .monospaced))
                                         .foregroundColor(.grokText)
                                         .textSelection(.enabled)
                                         .frame(maxWidth: .infinity, alignment: .leading)
                                 }
                                 .frame(maxHeight: 180)
                             }
-                            .font(.system(size: 11))
+                            .font(TriosType.font(11))
                             .foregroundColor(.grokMuted)
                         }
                     }
@@ -1185,7 +1185,7 @@ struct ModelsTabView: View {
 
                     if let last = diagnostics.lastRunAt {
                         Text(last, style: .relative)
-                            .font(.system(size: 10))
+                            .font(TriosType.font(10))
                             .foregroundColor(.grokDim)
                     }
                     Spacer(minLength: 0)
@@ -1196,29 +1196,29 @@ struct ModelsTabView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(alignment: .top, spacing: 6) {
                             Image(systemName: check.status.symbolName)
-                                .font(.system(size: 11))
+                                .font(TriosType.font(11))
                                 .foregroundColor(color(for: check.status))
                                 .frame(width: 14)
                             Text(check.title)
-                                .font(.system(size: 11, weight: .medium))
+                                .font(TriosType.font(11, weight: .medium))
                                 .foregroundColor(.grokText)
                             if let ms = check.latencyMs, check.status != .pending {
                                 Text("\(ms) ms")
-                                    .font(.system(size: 9, design: .monospaced))
+                                    .font(TriosType.font(9, design: .monospaced))
                                     .foregroundColor(.grokDim)
                             }
                             Spacer(minLength: 0)
                         }
                         if !check.detail.isEmpty {
                             Text(check.detail)
-                                .font(.system(size: 10))
+                                .font(TriosType.font(10))
                                 .foregroundColor(.grokMuted)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .padding(.leading, 20)
                         }
                         if let remedy = check.remedy, check.status == .fail || check.status == .warn {
                             Text(remedy)
-                                .font(.system(size: 10))
+                                .font(TriosType.font(10))
                                 .foregroundColor(.orange)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .padding(.leading, 20)
@@ -1263,21 +1263,21 @@ struct ModelsTabView: View {
                 set: { store.isKeyRotationEnabled = $0 }
             )) {
                 Text("Rotate keys")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(TriosType.font(11, weight: .medium))
             }
             .toggleStyle(.switch)
             .controlSize(.mini)
             .help("Spread requests across stored keys so one key does not absorb the whole rate limit")
 
             Text("\(available) of \(total) ready")
-                .font(.system(size: 10))
+                .font(TriosType.font(10))
                 .foregroundColor(available == total ? .grokDim : .orange)
 
             Spacer()
 
             if available == 0 && total > 0 {
                 Text("every key is parked")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TriosType.font(10, weight: .medium))
                     .foregroundColor(.orange)
             }
         }
@@ -1325,9 +1325,9 @@ struct ModelsTabView: View {
                         } label: {
                             HStack(spacing: 4) {
                                 Image(systemName: isCurrent ? "checkmark.circle.fill" : "circle")
-                                    .font(.system(size: 10))
+                                    .font(TriosType.font(10))
                                 Text(preset.label)
-                                    .font(.system(size: 11, weight: isCurrent ? .semibold : .regular))
+                                    .font(TriosType.font(11, weight: isCurrent ? .semibold : .regular))
                             }
                             .padding(.horizontal, 9)
                             .padding(.vertical, 5)
@@ -1345,7 +1345,7 @@ struct ModelsTabView: View {
                 }
                 if let current = presets.first(where: { $0.url == store.baseURL }) {
                     Text(current.note)
-                        .font(.system(size: 10))
+                        .font(TriosType.font(10))
                         .foregroundColor(.grokDim)
                 }
             }
@@ -1370,7 +1370,7 @@ struct ModelsTabView: View {
                     .buttonStyle(.bordered)
                 }
                 Text(store.baseURL)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TriosType.font(10, design: .monospaced))
                     .foregroundColor(.grokDim)
                     .textSelection(.enabled)
             }
@@ -1484,23 +1484,23 @@ struct ModelsTabView: View {
                 .onChange(of: store.contextWindowMargin) { _, newValue in
                     store.setContextWindowMargin(newValue)
                 }
-                .font(.system(size: 12))
+                .font(TriosType.font(12))
 
                 Toggle("Pause stream on context limit", isOn: $store.isStreamingContextWatchdogEnabled)
                     .onChange(of: store.isStreamingContextWatchdogEnabled) { _, newValue in
                         store.setStreamingContextWatchdogEnabled(newValue)
                     }
-                    .font(.system(size: 12))
+                    .font(TriosType.font(12))
 
                 if let reason = store.lastContextRoutingReason {
                     Label(reason, systemImage: "arrow.left.arrow.right.circle")
-                        .font(.system(size: 11))
+                        .font(TriosType.font(11))
                         .foregroundColor(.grokDim)
                 }
 
                 if let lastAt = store.lastContextRoutedAt {
                     Text("Last context route: \(formatRelativeDate(lastAt))")
-                        .font(.system(size: 10))
+                        .font(TriosType.font(10))
                         .foregroundColor(.grokMuted)
                 }
             }
@@ -1585,10 +1585,10 @@ struct ModelsTabView: View {
         VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(TriosType.font(14, weight: .semibold))
                     .foregroundColor(.grokText)
                 Text(subtitle)
-                    .font(.system(size: 10))
+                    .font(TriosType.font(10))
                     .foregroundColor(.grokDim)
             }
             content()
@@ -1602,7 +1602,7 @@ struct ModelsTabView: View {
     private func modelTextField(_ placeholder: String, text: Binding<String>) -> some View {
         TextField(placeholder, text: text)
             .textFieldStyle(.plain)
-            .font(.system(size: 11, design: .monospaced))
+            .font(TriosType.font(11, design: .monospaced))
             .padding(.horizontal, 10)
             .frame(height: 36)
             .background(Color.grokSurface)

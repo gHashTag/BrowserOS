@@ -50,7 +50,7 @@ struct QueenCompactSupervisorBar: View {
             HStack(spacing: 6) {
                 QueenTaskStatusPill(state: task.state, isLive: isLive, compact: true)
                 Text(task.issue.slug)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(TriosType.font(10, design: .monospaced))
                     .foregroundColor(.grokMuted)
                     .lineLimit(1)
                 Spacer(minLength: 4)
@@ -64,7 +64,7 @@ struct QueenCompactSupervisorBar: View {
                 barButton("Queen", .yellow.opacity(0.8), action: onOpenQueen)
             }
             Text(task.virtualBranch ?? "no branch")
-                .font(.system(size: 9, design: .monospaced))
+                .font(TriosType.font(9, design: .monospaced))
                 .foregroundColor(.grokDim)
                 .lineLimit(1)
         }
@@ -83,13 +83,13 @@ struct QueenCompactSupervisorBar: View {
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                        .font(.system(size: 8, weight: .semibold))
+                        .font(TriosType.font(8, weight: .semibold))
                         .foregroundColor(.grokMuted)
                     Image(systemName: "point.3.filled.connected.trianglepath.dotted")
-                        .font(.system(size: 10))
+                        .font(TriosType.font(10))
                         .foregroundColor(.grokMuted)
                     Text(summary)
-                        .font(.system(size: 10, weight: .medium))
+                        .font(TriosType.font(10, weight: .medium))
                         .foregroundColor(waitingCount > 0 ? .yellow : .grokMuted)
                         .lineLimit(1)
                     Spacer(minLength: 4)
@@ -133,12 +133,12 @@ struct QueenCompactSupervisorBar: View {
                     .fill(QueenTaskStyle.color(for: task.state, isLive: isLive))
                     .frame(width: 5, height: 5)
                 Text(task.title)
-                    .font(.system(size: 10))
+                    .font(TriosType.font(10))
                     .foregroundColor(.grokText)
                     .lineLimit(1)
                 Spacer(minLength: 4)
                 Text(QueenTaskStyle.label(for: task.state, isLive: isLive))
-                    .font(.system(size: 9, weight: .medium))
+                    .font(TriosType.font(9, weight: .medium))
                     .foregroundColor(QueenTaskStyle.color(for: task.state, isLive: isLive))
             }
             .padding(.leading, 14)
@@ -156,7 +156,7 @@ struct QueenCompactSupervisorBar: View {
     ) -> some View {
         Button(title, action: action)
             .buttonStyle(.plain)
-            .font(.system(size: 9, weight: .semibold))
+            .font(TriosType.font(9, weight: .semibold))
             .foregroundColor(tint)
     }
 

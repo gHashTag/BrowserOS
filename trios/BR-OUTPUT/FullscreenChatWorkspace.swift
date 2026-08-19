@@ -87,16 +87,16 @@ struct AdaptiveChatWorkspace: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "rectangle.split.3x1")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(TriosType.font(9, weight: .semibold))
                     .foregroundColor(.white.opacity(0.4))
                 Text("Open Dashboard")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(TriosType.font(10, weight: .bold))
                     .foregroundColor(.white.opacity(0.5))
                     .textCase(.uppercase)
                     .tracking(0.5)
                 Spacer()
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(TriosType.font(8, weight: .semibold))
                     .foregroundColor(.grokMuted)
             }
             .contentShape(Rectangle())
@@ -212,7 +212,7 @@ private struct ExpandedChatWorkspace: View {
         HStack(spacing: 12) {
             Button(action: { sidebarCollapsed.toggle() }) {
                 Image(systemName: sidebarCollapsed ? "sidebar.left" : "sidebar.left")
-                    .font(.system(size: 13, weight: .medium))
+                    .font(TriosType.font(13, weight: .medium))
                     .foregroundColor(.grokMuted)
                     .frame(width: 28, height: 28)
             }
@@ -229,7 +229,7 @@ private struct ExpandedChatWorkspace: View {
                     isDashboardExpanded = false
                 } label: {
                     Image(systemName: "rectangle.compress.vertical")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(TriosType.font(13, weight: .medium))
                         .foregroundColor(.grokMuted)
                         .frame(width: 28, height: 28)
                 }
@@ -239,7 +239,7 @@ private struct ExpandedChatWorkspace: View {
             }
 
             Text(currentTitle)
-                .font(.system(size: 13, weight: .semibold))
+                .font(TriosType.font(13, weight: .semibold))
                 .foregroundColor(.grokText)
                 .lineLimit(1)
 
@@ -313,22 +313,22 @@ private struct TaskHistorySidebar: View {
             } label: {
                 HStack(spacing: 9) {
                     Image(systemName: "crown.fill")
-                        .font(.system(size: 15))
+                        .font(TriosType.font(15))
                         .foregroundColor(.yellow)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(queen.title)
-                            .font(.system(size: 13, weight: .bold))
+                            .font(TriosType.font(13, weight: .bold))
                             .foregroundColor(.grokText)
                             .lineLimit(1)
                         Text(queenSubtitle)
-                            .font(.system(size: 10))
+                            .font(TriosType.font(10))
                             .foregroundColor(.grokMuted)
                             .lineLimit(1)
                     }
                     Spacer(minLength: 4)
                     if !registry.reviewQueue.isEmpty {
                         Text("\(registry.reviewQueue.count)")
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .font(TriosType.font(10, weight: .bold, design: .monospaced))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
                             .background(Capsule().fill(Color.orange.opacity(0.22)))
@@ -375,13 +375,13 @@ private struct TaskHistorySidebar: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 5) {
                     Image(systemName: "point.3.connected.trianglepath.dotted")
-                        .font(.system(size: 9))
+                        .font(TriosType.font(9))
                     Text("Swarm")
                     Spacer()
                     Text("\(registry.running.count)/\(QueenDelegationPolicy.maximumConcurrentWorkers)")
-                        .font(.system(size: 9, design: .monospaced))
+                        .font(TriosType.font(9, design: .monospaced))
                 }
-                .font(.system(size: 10, weight: .semibold))
+                .font(TriosType.font(10, weight: .semibold))
                 .foregroundColor(.grokMuted)
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
@@ -410,15 +410,15 @@ private struct TaskHistorySidebar: View {
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: archiveExpanded ? "chevron.down" : "chevron.right")
-                            .font(.system(size: 8, weight: .semibold))
+                            .font(TriosType.font(8, weight: .semibold))
                         Image(systemName: "archivebox")
-                            .font(.system(size: 9))
+                            .font(TriosType.font(9))
                         Text("Archive")
                         Spacer()
                         Text("\(settled.count)")
-                            .font(.system(size: 9, design: .monospaced))
+                            .font(TriosType.font(9, design: .monospaced))
                     }
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(TriosType.font(10, weight: .semibold))
                     .foregroundColor(.grokMuted)
                     .padding(.horizontal, 12)
                     .padding(.top, 8)
@@ -432,7 +432,7 @@ private struct TaskHistorySidebar: View {
                     }
                     if settled.count > 20 {
                         Text("+\(settled.count - 20) older")
-                            .font(.system(size: 9))
+                            .font(TriosType.font(9))
                             .foregroundColor(.grokDim)
                             .padding(.horizontal, 12)
                     }
@@ -454,7 +454,7 @@ private struct TaskHistorySidebar: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(task.title)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(TriosType.font(12, weight: .medium))
                             .foregroundColor(.grokText)
                             .lineLimit(1)
                         Spacer(minLength: 4)
@@ -462,14 +462,14 @@ private struct TaskHistorySidebar: View {
                     }
                     HStack(spacing: 5) {
                         Text(task.issue.slug)
-                            .font(.system(size: 9, design: .monospaced))
+                            .font(TriosType.font(9, design: .monospaced))
                             .foregroundColor(.grokDim)
                         if let branch = task.virtualBranch {
                             Image(systemName: "arrow.triangle.branch")
-                                .font(.system(size: 8))
+                                .font(TriosType.font(8))
                                 .foregroundColor(.grokDim)
                             Text(branch)
-                                .font(.system(size: 9, design: .monospaced))
+                                .font(TriosType.font(9, design: .monospaced))
                                 .foregroundColor(.grokDim)
                                 .lineLimit(1)
                         }
@@ -490,9 +490,9 @@ private struct TaskHistorySidebar: View {
             Button(action: { viewModel.newConversation() }) {
                 HStack(spacing: 9) {
                     Image(systemName: "square.and.pencil")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(TriosType.font(13, weight: .medium))
                     Text("New task")
-                        .font(.system(size: 13, weight: .medium))
+                        .font(TriosType.font(13, weight: .medium))
                     Spacer()
                 }
                 .foregroundColor(.grokText)
@@ -511,18 +511,18 @@ private struct TaskHistorySidebar: View {
     private var searchField: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 11))
+                .font(TriosType.font(11))
                 .foregroundColor(.grokDim)
 
             TextField("Search tasks", text: $searchText)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(TriosType.font(12))
                 .foregroundColor(.grokText)
 
             if !searchText.isEmpty {
                 Button(action: { searchText = "" }) {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11))
+                        .font(TriosType.font(11))
                         .foregroundColor(.grokDim)
                 }
                 .buttonStyle(.plain)
@@ -556,7 +556,7 @@ private struct TaskHistorySidebar: View {
                     ForEach(historySections) { section in
                         VStack(alignment: .leading, spacing: 4) {
                             Text(section.title)
-                                .font(.system(size: 10, weight: .semibold))
+                                .font(TriosType.font(10, weight: .semibold))
                                 .foregroundColor(.grokDim)
                                 .padding(.horizontal, 10)
 
@@ -576,13 +576,13 @@ private struct TaskHistorySidebar: View {
         VStack(spacing: 8) {
             Spacer()
             Image(systemName: icon)
-                .font(.system(size: 22))
+                .font(TriosType.font(22))
                 .foregroundColor(.grokDim)
             Text(title)
-                .font(.system(size: 12, weight: .semibold))
+                .font(TriosType.font(12, weight: .semibold))
                 .foregroundColor(.grokMuted)
             Text(detail)
-                .font(.system(size: 10))
+                .font(TriosType.font(10))
                 .foregroundColor(.grokDim)
                 .multilineTextAlignment(.center)
             Spacer()
@@ -601,7 +601,7 @@ private struct TaskHistorySidebar: View {
                 if isEditing {
                     TextField("Task title", text: $draftTitle)
                         .textFieldStyle(.plain)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(TriosType.font(12, weight: .semibold))
                         .foregroundColor(.grokText)
                         .focused($focusedConversationId, equals: conversation.id)
                         .onSubmit {
@@ -612,7 +612,7 @@ private struct TaskHistorySidebar: View {
                         }
                 } else {
                     Text(conversation.title)
-                        .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                        .font(TriosType.font(12, weight: isSelected ? .semibold : .regular))
                         .foregroundColor(.grokText)
                         .lineLimit(1)
                         .contentShape(Rectangle())
@@ -625,7 +625,7 @@ private struct TaskHistorySidebar: View {
                 }
 
                 Text(conversation.updatedAt, style: .relative)
-                    .font(.system(size: 9))
+                    .font(TriosType.font(9))
                     .foregroundColor(.grokDim)
             }
 
@@ -634,7 +634,7 @@ private struct TaskHistorySidebar: View {
             if isEditing {
                 Button(action: { saveTitle(for: conversation) }) {
                     Image(systemName: "checkmark")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(TriosType.font(10, weight: .semibold))
                         .foregroundColor(.grokText)
                         .frame(width: 22, height: 22)
                 }
@@ -644,7 +644,7 @@ private struct TaskHistorySidebar: View {
 
                 Button(action: cancelTitleEditing) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(TriosType.font(10, weight: .semibold))
                         .foregroundColor(.grokMuted)
                         .frame(width: 22, height: 22)
                 }
@@ -654,7 +654,7 @@ private struct TaskHistorySidebar: View {
             } else if isHovered {
                 Button(action: { startTitleEditing(conversation) }) {
                     Image(systemName: "pencil")
-                        .font(.system(size: 10))
+                        .font(TriosType.font(10))
                         .foregroundColor(.grokMuted)
                         .frame(width: 22, height: 22)
                 }
@@ -666,7 +666,7 @@ private struct TaskHistorySidebar: View {
                     Task { await viewModel.deleteConversation(id: conversation.id) }
                 }) {
                     Image(systemName: "trash")
-                        .font(.system(size: 10))
+                        .font(TriosType.font(10))
                         .foregroundColor(.grokMuted)
                         .frame(width: 22, height: 22)
                 }
@@ -733,7 +733,7 @@ private struct TaskHistorySidebar: View {
                 .fill(viewModel.isServerReachable ? Color.green : Color.red)
                 .frame(width: 7, height: 7)
             Text(viewModel.isServerReachable ? "BrowserOS connected" : "BrowserOS offline")
-                .font(.system(size: 10, weight: .medium))
+                .font(TriosType.font(10, weight: .medium))
                 .foregroundColor(.grokMuted)
             Spacer()
         }

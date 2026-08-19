@@ -36,12 +36,12 @@ struct ChatSidebarView: View {
     private var headerBar: some View {
         HStack(spacing: 8) {
             Text("Conversations")
-                .font(.system(size: 13, weight: .semibold))
+                .font(TriosType.font(13, weight: .semibold))
                 .foregroundColor(.grokText)
             Spacer()
             Button(action: { viewModel.createNewConversation() }) {
                 Image(systemName: "plus")
-                    .font(.system(size: 12))
+                    .font(TriosType.font(12))
                     .foregroundColor(.grokAccent)
             }
             .buttonStyle(.plain)
@@ -54,16 +54,16 @@ struct ChatSidebarView: View {
     private var searchField: some View {
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
-                .font(.system(size: 10))
+                .font(TriosType.font(10))
                 .foregroundColor(.grokMuted)
             TextField("Search", text: $searchText)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(TriosType.font(12))
                 .foregroundColor(.grokText)
             if !searchText.isEmpty {
                 Button(action: { searchText = "" }) {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 10))
+                        .font(TriosType.font(10))
                         .foregroundColor(.grokMuted)
                 }
                 .buttonStyle(.plain)
@@ -93,13 +93,13 @@ struct ChatSidebarView: View {
                 } header: {
                     HStack(spacing: 5) {
                         Image(systemName: "point.3.connected.trianglepath.dotted")
-                            .font(.system(size: 9))
+                            .font(TriosType.font(9))
                         Text("Swarm")
                         Spacer()
                         Text("\(registry.running.count)/\(QueenDelegationPolicy.maximumConcurrentWorkers)")
-                            .font(.system(size: 9, design: .monospaced))
+                            .font(TriosType.font(9, design: .monospaced))
                     }
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(TriosType.font(10, weight: .semibold))
                     .foregroundColor(.grokMuted)
                     .textCase(nil)
                 }
@@ -113,7 +113,7 @@ struct ChatSidebarView: View {
                     }
                 } header: {
                     Text("Pinned")
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(TriosType.font(10, weight: .semibold))
                         .foregroundColor(.grokMuted)
                         .textCase(nil)
                 }
@@ -147,15 +147,15 @@ struct ChatSidebarView: View {
                 } label: {
                     HStack(spacing: 9) {
                         Image(systemName: "crown.fill")
-                            .font(.system(size: 14))
+                            .font(TriosType.font(14))
                             .foregroundColor(.yellow)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(queen.title)
-                                .font(.system(size: 13, weight: .bold))
+                                .font(TriosType.font(13, weight: .bold))
                                 .foregroundColor(.grokText)
                                 .lineLimit(1)
                             Text(queenSubtitle)
-                                .font(.system(size: 10))
+                                .font(TriosType.font(10))
                                 .foregroundColor(.grokMuted)
                                 .lineLimit(1)
                         }
@@ -163,7 +163,7 @@ struct ChatSidebarView: View {
                         if !registry.reviewQueue.isEmpty {
                             // Work waiting on her decision, not just running.
                             Text("\(registry.reviewQueue.count)")
-                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .font(TriosType.font(10, weight: .bold, design: .monospaced))
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 3)
                                 .background(Capsule().fill(Color.orange.opacity(0.22)))
@@ -211,19 +211,19 @@ struct ChatSidebarView: View {
                     .frame(width: 7, height: 7)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(task.title)
-                        .font(.system(size: 12, weight: .medium))
+                        .font(TriosType.font(12, weight: .medium))
                         .foregroundColor(.grokText)
                         .lineLimit(1)
                     HStack(spacing: 5) {
                         Text(task.issue.slug)
-                            .font(.system(size: 9, design: .monospaced))
+                            .font(TriosType.font(9, design: .monospaced))
                             .foregroundColor(.grokDim)
                         if let branch = task.virtualBranch {
                             Image(systemName: "arrow.triangle.branch")
-                                .font(.system(size: 8))
+                                .font(TriosType.font(8))
                                 .foregroundColor(.grokDim)
                             Text(branch)
-                                .font(.system(size: 9, design: .monospaced))
+                                .font(TriosType.font(9, design: .monospaced))
                                 .foregroundColor(.grokDim)
                                 .lineLimit(1)
                         }
@@ -231,7 +231,7 @@ struct ChatSidebarView: View {
                 }
                 Spacer(minLength: 4)
                 Text(task.state.rawValue)
-                    .font(.system(size: 9, weight: .medium))
+                    .font(TriosType.font(9, weight: .medium))
                     .foregroundColor(color(for: task.state))
             }
             .padding(.vertical, 3)
@@ -294,11 +294,11 @@ struct ChatSidebarView: View {
             // Pin indicator (or crown for reserved Trinity Queen)
             if conversation.isReserved {
                 Image(systemName: "crown.fill")
-                    .font(.system(size: 8))
+                    .font(TriosType.font(8))
                     .foregroundColor(.orange)
             } else if conversation.isPinned {
                 Image(systemName: "pin.fill")
-                    .font(.system(size: 8))
+                    .font(TriosType.font(8))
                     .foregroundColor(.orange)
             }
 
@@ -309,7 +309,7 @@ struct ChatSidebarView: View {
                     if editingConversationId == conversation.id {
                         TextField("Name", text: $editedName)
                             .textFieldStyle(.plain)
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(TriosType.font(12, weight: .semibold))
                             .foregroundColor(.grokText)
                             .focused($isEditingName)
                             .onSubmit {
@@ -317,7 +317,7 @@ struct ChatSidebarView: View {
                             }
                     } else {
                         Text(conversation.title)
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(TriosType.font(12, weight: .semibold))
                             .foregroundColor(.grokText)
                     }
                     
@@ -325,21 +325,21 @@ struct ChatSidebarView: View {
                     
                     if let last = last {
                         Text(last.timestamp.formatted(date: .omitted, time: .shortened))
-                            .font(.system(size: 9))
+                            .font(TriosType.font(9))
                             .foregroundColor(.grokDim)
                     }
                 }
                 
                 HStack(spacing: 4) {
                     Text(preview(for: last))
-                        .font(.system(size: 11))
+                        .font(TriosType.font(11))
                         .foregroundColor(.grokMuted)
                         .lineLimit(1)
                     Spacer()
                     
                     if conversation.unreadCount > 0 {
                         Text("\(conversation.unreadCount)")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(TriosType.font(10, weight: .semibold))
                             .foregroundColor(.white)
                             .frame(minWidth: 16, minHeight: 16)
                             .padding(.horizontal, 4)
@@ -411,13 +411,13 @@ struct ChatSidebarView: View {
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "message")
-                .font(.system(size: 28))
+                .font(TriosType.font(28))
                 .foregroundColor(.grokMuted)
             Text("No conversations")
-                .font(.system(size: 12, weight: .semibold))
+                .font(TriosType.font(12, weight: .semibold))
                 .foregroundColor(.grokText)
             Text("Start a new chat to begin")
-                .font(.system(size: 10))
+                .font(TriosType.font(10))
                 .foregroundColor(.grokDim)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -433,7 +433,7 @@ struct ChatSidebarView: View {
                 )
                 .frame(width: 36, height: 36)
             Image(systemName: conversation.icon)
-                .font(.system(size: 14))
+                .font(TriosType.font(14))
                 .foregroundColor(conversation.isReserved ? .orange : .grokAccent)
         }
     }
@@ -473,7 +473,7 @@ struct MenuButton: View {
                 }
             } label: {
                 Image(systemName: "ellipsis.circle")
-                    .font(.system(size: 10))
+                    .font(TriosType.font(10))
                     .foregroundColor(.grokMuted)
             }
             .menuStyle(.borderlessButton)

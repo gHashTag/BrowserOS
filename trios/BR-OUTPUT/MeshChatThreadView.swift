@@ -52,11 +52,11 @@ struct MeshChatThreadView: View {
                 .frame(width: 28, height: 28)
                 .overlay(
                     Text("N")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(TriosType.font(12, weight: .semibold))
                         .foregroundColor(.grokAccent)
                 )
             Text("Node \(peer)")
-                .font(.system(size: 13, weight: .semibold))
+                .font(TriosType.font(13, weight: .semibold))
                 .foregroundColor(.grokText)
             Spacer()
             channelBadge
@@ -68,9 +68,9 @@ struct MeshChatThreadView: View {
     private var channelBadge: some View {
         HStack(spacing: 4) {
             Image(systemName: "antenna.radiowaves.left.and.right")
-                .font(.system(size: 9))
+                .font(TriosType.font(9))
             Text("Ch \(String(viewModel.currentChannel))")
-                .font(.system(size: 9, weight: .semibold))
+                .font(TriosType.font(9, weight: .semibold))
         }
         .foregroundColor(.grokAccent)
         .padding(.horizontal, 6)
@@ -98,7 +98,7 @@ struct MeshChatThreadView: View {
 
     private func dateHeader(_ day: String) -> some View {
         Text(dayLabel(day))
-            .font(.system(size: 9, weight: .semibold))
+            .font(TriosType.font(9, weight: .semibold))
             .foregroundColor(.grokDim)
             .padding(.vertical, 4)
             .padding(.horizontal, 8)
@@ -128,11 +128,11 @@ struct MeshChatThreadView: View {
                 }
                 HStack(spacing: 4) {
                     Text(message.formattedTime)
-                        .font(.system(size: 9))
+                        .font(TriosType.font(9))
                         .foregroundColor(.grokDim)
                     if message.isOutgoing {
                         Image(systemName: message.acked ? "checkmark" : "ellipsis")
-                            .font(.system(size: 8))
+                            .font(TriosType.font(8))
                             .foregroundColor(message.acked ? .green : .grokDim)
                     }
                 }
@@ -160,7 +160,7 @@ struct MeshChatThreadView: View {
 
     private func textContent(_ message: MeshChatMessage) -> some View {
         Text(message.displayText)
-            .font(.system(size: 12))
+            .font(TriosType.font(12))
             .foregroundColor(.grokText)
             .fixedSize(horizontal: false, vertical: true)
     }
@@ -168,14 +168,14 @@ struct MeshChatThreadView: View {
     private func mediaContent(_ message: MeshChatMessage) -> some View {
         VStack(spacing: 6) {
             Image(systemName: message.messageKind.iconName)
-                .font(.system(size: 22))
+                .font(TriosType.font(22))
                 .foregroundColor(.grokAccent)
             Text(message.messageKind.localizedLabel)
-                .font(.system(size: 10, weight: .semibold))
+                .font(TriosType.font(10, weight: .semibold))
                 .foregroundColor(.grokText)
             if !message.displayText.isEmpty {
                 Text(message.displayText)
-                    .font(.system(size: 10))
+                    .font(TriosType.font(10))
                     .foregroundColor(.grokMuted)
             }
         }
@@ -186,7 +186,7 @@ struct MeshChatThreadView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 TextEditor(text: $viewModel.composerText)
-                    .font(.system(size: 12))
+                    .font(TriosType.font(12))
                     .foregroundColor(.grokText)
                     .scrollContentBackground(.hidden)
                     .background(Color.grokElevated.opacity(0.2))
@@ -213,7 +213,7 @@ struct MeshChatThreadView: View {
                     }
                 }) {
                     Image(systemName: "paperplane.fill")
-                        .font(.system(size: 14))
+                        .font(TriosType.font(14))
                         .foregroundColor(.white)
                         .frame(width: 32, height: 32)
                         .background(
@@ -231,7 +231,7 @@ struct MeshChatThreadView: View {
             HStack {
                 Spacer()
                 Text("\(viewModel.composerText.utf8.count)/200")
-                    .font(.system(size: 9))
+                    .font(TriosType.font(9))
                     .foregroundColor(viewModel.composerText.utf8.count > 180 ? .orange : .grokDim)
             }
             .padding(.horizontal, 10)

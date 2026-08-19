@@ -60,7 +60,7 @@ struct MessageBubbleView: View {
 
     private var avatarView: some View {
         Image(systemName: message.role == .user ? "person.fill" : "cpu")
-            .font(.system(size: 12, weight: .medium))
+            .font(TriosType.font(12, weight: .medium))
             .foregroundColor(message.role == .user ? .grokText : .grokMuted)
             .frame(width: 24, height: 24)
             .background(
@@ -80,7 +80,7 @@ struct MessageBubbleView: View {
 
     private func senderLabel(_ senderName: String) -> some View {
         Text(senderName)
-            .font(.system(size: 11, weight: .medium))
+            .font(TriosType.font(11, weight: .medium))
             .foregroundColor(.grokMuted)
             .padding(.bottom, 2)
     }
@@ -89,7 +89,7 @@ struct MessageBubbleView: View {
 
     private var timestampView: some View {
         Text(message.timestamp, style: .relative)
-            .font(.system(size: 9))
+            .font(TriosType.font(9))
             .foregroundColor(.grokDim)
             .padding(.top, 2)
     }
@@ -104,7 +104,7 @@ struct MessageBubbleView: View {
                 // substitution on macOS (Latin/Cyrillic chars become placeholder
                 // glyphs like "фффф" or "9999").
                 Text(message.content)
-                    .font(.system(size: 15, weight: .regular, design: .default))
+                    .font(TriosType.font(15, weight: .regular, design: .default))
                     .foregroundColor(.grokText)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
@@ -156,10 +156,10 @@ struct MessageBubbleView: View {
         return VStack(alignment: .leading, spacing: 4) {
             HStack(alignment: .top, spacing: 6) {
                 Image(systemName: notice.kind.symbolName)
-                    .font(.system(size: 12))
+                    .font(TriosType.font(12))
                     .foregroundColor(tint)
                 Text(notice.text)
-                    .font(.system(size: 13, weight: .medium, design: .default))
+                    .font(TriosType.font(13, weight: .medium, design: .default))
                     .foregroundColor(.grokText)
                     .textSelection(.enabled)
                     .contextMenu {
@@ -173,7 +173,7 @@ struct MessageBubbleView: View {
                         copyNotice(notice.text)
                     } label: {
                         Image(systemName: "doc.on.doc")
-                            .font(.system(size: 11))
+                            .font(TriosType.font(11))
                             .foregroundColor(.grokMuted)
                     }
                     .buttonStyle(.plain)
@@ -256,7 +256,7 @@ struct MessageBubbleView: View {
 
         case .text(let text):
             RichMessageView(text: text, isUser: false)
-                .font(.system(size: 15, weight: .regular, design: .default))
+                .font(TriosType.font(15, weight: .regular, design: .default))
                 .foregroundColor(.grokText)
                 .textSelection(.enabled)
                 .contextMenu {
@@ -274,7 +274,7 @@ struct MessageBubbleView: View {
 
         case .error(let text):
             Text(text)
-                .font(.system(size: 13, weight: .medium))
+                .font(TriosType.font(13, weight: .medium))
                 .foregroundColor(.red)
                 .textSelection(.enabled)
         }
@@ -352,7 +352,7 @@ private struct MessageActionBar: View {
                 }
             }) {
                 Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                    .font(.system(size: 12, weight: .medium, design: .default))
+                    .font(TriosType.font(12, weight: .medium, design: .default))
                     .foregroundColor(copied ? .grokText : .grokDim)
             }
             .buttonStyle(PlainButtonStyle())
@@ -362,7 +362,7 @@ private struct MessageActionBar: View {
                 onRegenerate?()
             }) {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 12, weight: .medium, design: .default))
+                    .font(TriosType.font(12, weight: .medium, design: .default))
                     .foregroundColor(.grokDim)
             }
             .buttonStyle(PlainButtonStyle())
@@ -375,7 +375,7 @@ private struct MessageActionBar: View {
                 onFeedback?(true)
             }) {
                 Image(systemName: liked == true ? "hand.thumbsup.fill" : "hand.thumbsup")
-                    .font(.system(size: 12, weight: .medium, design: .default))
+                    .font(TriosType.font(12, weight: .medium, design: .default))
                     .foregroundColor(liked == true ? .grokText : .grokDim)
             }
             .buttonStyle(PlainButtonStyle())
@@ -386,7 +386,7 @@ private struct MessageActionBar: View {
                 onFeedback?(false)
             }) {
                 Image(systemName: liked == false ? "hand.thumbsdown.fill" : "hand.thumbsdown")
-                    .font(.system(size: 12, weight: .medium, design: .default))
+                    .font(TriosType.font(12, weight: .medium, design: .default))
                     .foregroundColor(liked == false ? .grokText : .grokDim)
             }
             .buttonStyle(PlainButtonStyle())
@@ -413,7 +413,7 @@ private struct HoverCopyBar: View {
                 }
             }) {
                 Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                    .font(.system(size: 11, weight: .medium, design: .default))
+                    .font(TriosType.font(11, weight: .medium, design: .default))
                     .foregroundColor(copied ? .grokText : .grokDim)
             }
             .buttonStyle(PlainButtonStyle())

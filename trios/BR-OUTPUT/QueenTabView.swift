@@ -103,17 +103,17 @@ struct QueenTabView: View {
     private var missingSourceView: some View {
         VStack(spacing: 12) {
             Image(systemName: "crown.fill")
-                .font(.system(size: 28, weight: .semibold))
+                .font(TriosType.font(28, weight: .semibold))
                 .foregroundColor(.orange)
             Text("Trinity Queen source is unavailable")
-                .font(.system(size: 14, weight: .semibold))
+                .font(TriosType.font(14, weight: .semibold))
                 .foregroundColor(.grokText)
             Text(embedding.packageRoot)
-                .font(.system(size: 10, design: .monospaced))
+                .font(TriosType.font(10, design: .monospaced))
                 .foregroundColor(.grokMuted)
                 .textSelection(.enabled)
             Text("Set TRINITY_ROOT to the gHashTag/trinity checkout and rebuild Trios.")
-                .font(.system(size: 10))
+                .font(TriosType.font(10))
                 .foregroundColor(.grokDim)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

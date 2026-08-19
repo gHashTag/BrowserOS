@@ -32,7 +32,7 @@ struct GitWorkspaceView: View {
         let isSelected = selectedSubTab == tab
         return Button(action: { selectedSubTab = tab }) {
             Text(tab.rawValue)
-                .font(.system(size: 12, weight: isSelected ? .semibold : .regular))
+                .font(TriosType.font(12, weight: isSelected ? .semibold : .regular))
                 .foregroundColor(isSelected ? .grokText : .grokMuted)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 6)
@@ -65,14 +65,14 @@ struct GitHubIssuesView: View {
         VStack {
             Spacer()
             Image(systemName: "checkmark.circle")
-                .font(.system(size: 40))
+                .font(TriosType.font(40))
                 .foregroundColor(.grokDim)
             Text("Issues")
-                .font(.system(size: 16, weight: .semibold))
+                .font(TriosType.font(16, weight: .semibold))
                 .foregroundColor(.grokText)
                 .padding(.top, 12)
             Text("Select a repo to view issues")
-                .font(.system(size: 12))
+                .font(TriosType.font(12))
                 .foregroundColor(.grokMuted)
             Spacer()
         }

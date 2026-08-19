@@ -7164,16 +7164,34 @@ final class ChatViewModel: ObservableObject {
     /// a stored preference rather than a constant, because withdrawing consent
     /// must be as easy as giving it.
     ///
-    /// Defaults to ON in the supervisor variants and is unavailable in release:
-    /// `startQueenAutonomyLoop` refuses outside `hasSupervisorInbox`, so a
-    /// shipped build cannot open chats by itself whatever this says.
+    /// Defaults to ON in release and OFF in dev and test - see
+    /// `BuildVariant.autonomyDefault` for why exactly one variant may start
+    /// work unprompted. The comment here used to claim the opposite ("on in the
+    /// supervisor variants, unavailable in release"), which was true before
+    /// `hasSupervisorInbox` became true everywhere and was never corrected.
+    ///
+    /// Instance access forwards to the static below so the two cannot drift.
+    /// They already had: this property had a setter and, for as long as it
+    /// existed, not one caller. The default was therefore the only value it
+    /// ever held, which is why dev - where the default is OFF - could not be
+    /// driven at all. A stored preference nobody can store is a constant.
     var queenAutonomyEnabled: Bool {
+        get { Self.storedAutonomyPreference }
+        set { Self.storedAutonomyPreference = newValue }
+    }
+
+    /// The operator's answer, readable and writable from the view layer.
+    ///
+    /// `nonisolated` because the control that flips it is a SwiftUI toggle in
+    /// the supervisor strip, and routing a checkbox through the actor to set a
+    /// UserDefaults key would buy nothing.
+    nonisolated static var storedAutonomyPreference: Bool {
         get {
-            UserDefaults.standard.object(forKey: Self.queenAutonomyKey) as? Bool
+            UserDefaults.standard.object(forKey: queenAutonomyKey) as? Bool
                 ?? ProjectPaths.autonomyDefault
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: Self.queenAutonomyKey)
+            UserDefaults.standard.set(newValue, forKey: queenAutonomyKey)
         }
     }
 

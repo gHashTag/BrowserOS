@@ -48,28 +48,27 @@ enum BuildVariant: String, Equatable, Sendable {
 
     /// The shipped app the user runs. The one variant that must be protected
     /// from every harness convenience below.
-    ///
-    /// Both predicates that follow are `!isRelease`, deliberately written
-    /// against one source rather than repeating the comparison: they answer
-    /// different questions and may diverge later, but until they do, a drift
-    /// between two copies of the same rule is a defect waiting for a fourth
-    /// variant.
     var isRelease: Bool { self == .prod }
 
     /// Whether this variant keeps its secrets in files instead of the Keychain.
     ///
     /// Split out of `isDevVariant`, which was answering two different questions
     /// with one word. Ten call sites meant "do not touch the Keychain" and
-    /// three meant "this is the dev supervisor build"; they agreed only for as
-    /// long as there were exactly two variants. The moment `test` became
-    /// buildable, the first ten would have sent the harness at the real
-    /// Keychain - which does not fail, it BLOCKS on a dialog nobody is there to
-    /// answer, so the suite would hang rather than go red.
+    /// three meant "this is the dev supervisor build".
     ///
-    /// Phrased as "not prod" rather than "dev or test" on purpose: a fourth
-    /// variant added later is a non-release build until someone deliberately
-    /// says otherwise, and the safe default for a secret store is the one that
-    /// cannot reach the user's real credentials.
+    /// I once changed this to `self == .test` on the reasoning that the fence
+    /// is really about whether anyone is at the keyboard to answer a dialog,
+    /// and that a dev build launched by hand can afford to ask. Both halves of
+    /// that were wrong, and `DevSecretStore`'s own comment says why: the dev
+    /// binary is ad-hoc signed, so its identity changes on every rebuild and
+    /// macOS treats each build as a new application asking for someone else's
+    /// secret. It does not ask once. It demands the *login keychain password*,
+    /// per secret, per rebuild. The dev app came up as an empty window behind
+    /// that dialog.
+    ///
+    /// Dev does not need the Keychain to be driven in the first place:
+    /// `resolvedAPIKey` reads `~/.trios/config.json` as its second source, and
+    /// the key is already there.
     var usesFileSecretStore: Bool { !isRelease }
 
     /// Whether this variant runs the Queen's delegation inbox.

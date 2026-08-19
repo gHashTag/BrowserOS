@@ -50,10 +50,10 @@ struct TabLogsButton: View {
         } label: {
             if compact {
                 Image(systemName: "doc.text.magnifyingglass")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(TriosType.font(11, weight: .medium))
             } else {
                 Label("Logs", systemImage: "doc.text.magnifyingglass")
-                    .font(.system(size: 11, weight: .medium))
+                    .font(TriosType.font(11, weight: .medium))
             }
         }
         .buttonStyle(.plain)

@@ -62,18 +62,18 @@ struct SkillsTabView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Text("SKILLS")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(TriosType.font(11, weight: .semibold))
                     .foregroundColor(.grokMuted)
                     .tracking(1.1)
                 Text("\(store.enabled.count) of \(store.skills.count) available to the Queen")
-                    .font(.system(size: 10))
+                    .font(TriosType.font(10))
                     .foregroundColor(.grokDim)
                 Spacer()
                 Button {
                     store.reload()
                 } label: {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 11))
+                        .font(TriosType.font(11))
                         .foregroundColor(.grokMuted)
                 }
                 .buttonStyle(.plain)
@@ -82,7 +82,7 @@ struct SkillsTabView: View {
 
             TextField("Search skills", text: $query)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(TriosType.font(12))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background(Color.grokElevated.opacity(0.4))
@@ -106,7 +106,7 @@ struct SkillsTabView: View {
             sourceFilter = source
         } label: {
             Text(label)
-                .font(.system(size: 10, weight: isSelected ? .semibold : .regular))
+                .font(TriosType.font(10, weight: isSelected ? .semibold : .regular))
                 .foregroundColor(isSelected ? .grokText : .grokMuted)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
@@ -120,13 +120,13 @@ struct SkillsTabView: View {
         VStack(spacing: 6) {
             Spacer()
             Image(systemName: "wand.and.stars")
-                .font(.system(size: 22))
+                .font(TriosType.font(22))
                 .foregroundColor(.grokDim)
             Text(query.isEmpty ? "No SKILL.md files found." : "Nothing matches \"\(query)\".")
-                .font(.system(size: 12))
+                .font(TriosType.font(12))
                 .foregroundColor(.grokMuted)
             Text("Skills live in .claude/skills/<name>/SKILL.md")
-                .font(.system(size: 10))
+                .font(TriosType.font(10))
                 .foregroundColor(.grokDim)
             Spacer()
         }
@@ -153,18 +153,18 @@ struct SkillsTabView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Text(skill.id)
-                            .font(.system(size: 12, weight: .medium, design: .monospaced))
+                            .font(TriosType.font(12, weight: .medium, design: .monospaced))
                             .foregroundColor(isEnabled ? .grokText : .grokDim)
                         if store.runningIDs.contains(skill.id) {
                             ProgressView().controlSize(.mini)
                         }
                         Spacer(minLength: 4)
                         Text(skill.source.displayName)
-                            .font(.system(size: 9))
+                            .font(TriosType.font(9))
                             .foregroundColor(.grokDim)
                     }
                     Text(skill.description)
-                        .font(.system(size: 10))
+                        .font(TriosType.font(10))
                         .foregroundColor(.grokMuted)
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
@@ -192,7 +192,7 @@ struct SkillsTabView: View {
                 } else {
                     ScrollView {
                         Text(runOutput ?? "No output yet. Run it to see what it does.")
-                            .font(.system(size: 11, design: .monospaced))
+                            .font(TriosType.font(11, design: .monospaced))
                             .foregroundColor(runOutput == nil ? .grokDim : .grokText)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -204,13 +204,13 @@ struct SkillsTabView: View {
         } else {
             VStack(spacing: 6) {
                 Image(systemName: "sparkles")
-                    .font(.system(size: 22))
+                    .font(TriosType.font(22))
                     .foregroundColor(.grokDim)
                 Text("Pick a skill to read it or run it.")
-                    .font(.system(size: 12))
+                    .font(TriosType.font(12))
                     .foregroundColor(.grokMuted)
                 Text("Switching one off removes it from the Queen's vocabulary.")
-                    .font(.system(size: 10))
+                    .font(TriosType.font(10))
                     .foregroundColor(.grokDim)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -221,14 +221,14 @@ struct SkillsTabView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Text(skill.id)
-                    .font(.system(size: 14, weight: .semibold, design: .monospaced))
+                    .font(TriosType.font(14, weight: .semibold, design: .monospaced))
                     .foregroundColor(.grokText)
                 Spacer()
                 Button {
                     NSWorkspace.shared.selectFile(skill.path, inFileViewerRootedAtPath: "")
                 } label: {
                     Text("Reveal")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(TriosType.font(10, weight: .medium))
                         .foregroundColor(.grokMuted)
                 }
                 .buttonStyle(.plain)
@@ -244,7 +244,7 @@ struct SkillsTabView: View {
                     }
                 } label: {
                     Text(isEditing ? "Cancel" : "Edit")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(TriosType.font(10, weight: .medium))
                         .foregroundColor(.grokMuted)
                 }
                 .buttonStyle(.plain)
@@ -255,7 +255,7 @@ struct SkillsTabView: View {
                         if saveError == nil { isEditing = false }
                     } label: {
                         Text("Save")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(TriosType.font(10, weight: .semibold))
                             .foregroundColor(.green)
                     }
                     .buttonStyle(.plain)
@@ -267,7 +267,7 @@ struct SkillsTabView: View {
                         }
                     } label: {
                         Text("Run")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(TriosType.font(10, weight: .semibold))
                             .foregroundColor(store.isEnabled(skill) ? .green : .grokDim)
                     }
                     .buttonStyle(.plain)
@@ -276,7 +276,7 @@ struct SkillsTabView: View {
             }
 
             Text(skill.description)
-                .font(.system(size: 11))
+                .font(TriosType.font(11))
                 .foregroundColor(.grokMuted)
                 .textSelection(.enabled)
 
@@ -313,20 +313,20 @@ struct SkillsTabView: View {
         VStack(alignment: .leading, spacing: 6) {
             if let saveError {
                 Text(saveError)
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .foregroundColor(.red)
                     .textSelection(.enabled)
                     .padding(.horizontal, 12)
             }
             TextEditor(text: $draft)
-                .font(.system(size: 11, design: .monospaced))
+                .font(TriosType.font(11, design: .monospaced))
                 .scrollContentBackground(.hidden)
                 .background(Color.grokElevated.opacity(0.25))
                 .padding(.horizontal, 8)
                 .padding(.bottom, 8)
             Text("Saving validates the frontmatter. A skill that no longer parses "
                 + "would vanish from the catalog, so it is refused rather than written.")
-                .font(.system(size: 9))
+                .font(TriosType.font(9))
                 .foregroundColor(.grokDim)
                 .padding(.horizontal, 12)
                 .padding(.bottom, 8)
@@ -336,10 +336,10 @@ struct SkillsTabView: View {
     private func metric(_ name: String, _ value: String) -> some View {
         HStack(spacing: 4) {
             Text(name)
-                .font(.system(size: 9))
+                .font(TriosType.font(9))
                 .foregroundColor(.grokDim)
             Text(value)
-                .font(.system(size: 9, design: .monospaced))
+                .font(TriosType.font(9, design: .monospaced))
                 .foregroundColor(.grokMuted)
         }
     }

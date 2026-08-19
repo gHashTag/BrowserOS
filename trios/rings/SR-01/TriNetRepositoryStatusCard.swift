@@ -22,7 +22,7 @@ struct TriNetRepositoryStatusCard: View {
         VStack(alignment: .leading, spacing: 9) {
             header
             Text(snapshot.repositoryDescription)
-                .font(.system(size: 10))
+                .font(TriosType.font(10))
                 .foregroundColor(.grokMuted)
                 .lineLimit(context == .git ? 2 : 1)
 
@@ -34,11 +34,11 @@ struct TriNetRepositoryStatusCard: View {
 
             HStack {
                 Text("Recent main")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(TriosType.font(10, weight: .semibold))
                     .foregroundColor(.grokMuted)
                 Spacer()
                 Text("merge \(snapshot.shortMergeSHA)")
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(TriosType.font(9, design: .monospaced))
                     .foregroundColor(.grokDim)
             }
 
@@ -54,7 +54,7 @@ struct TriNetRepositoryStatusCard: View {
                     Text("Live refresh unavailable: \(error). Showing verified data.")
                         .lineLimit(2)
                 }
-                .font(.system(size: 9))
+                .font(TriosType.font(9))
                 .foregroundColor(.orange.opacity(0.85))
             }
         }
@@ -73,14 +73,14 @@ struct TriNetRepositoryStatusCard: View {
     private var header: some View {
         HStack(spacing: 7) {
             Image(systemName: "point.3.connected.trianglepath.dotted")
-                .font(.system(size: 13, weight: .semibold))
+                .font(TriosType.font(13, weight: .semibold))
                 .foregroundColor(.grokText)
             Text("gHashTag/tri-net")
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                .font(TriosType.font(12, weight: .semibold, design: .monospaced))
                 .foregroundColor(.grokText)
 
             Text(snapshot.source.label)
-                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                .font(TriosType.font(8, weight: .bold, design: .monospaced))
                 .foregroundColor(snapshot.source == .live ? Color.green : Color.orange)
                 .padding(.horizontal, 5)
                 .padding(.vertical, 2)
@@ -101,7 +101,7 @@ struct TriNetRepositoryStatusCard: View {
                 Task { await store.refresh() }
             } label: {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TriosType.font(10, weight: .medium))
                     .foregroundColor(.grokMuted)
             }
             .buttonStyle(.plain)
@@ -117,7 +117,7 @@ struct TriNetRepositoryStatusCard: View {
         if let url = URL(string: snapshot.repositoryURL) {
             Link(destination: url) {
                 Image(systemName: "arrow.up.right.square")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TriosType.font(10, weight: .medium))
                     .foregroundColor(.grokMuted)
             }
             .buttonStyle(.plain)
@@ -133,21 +133,21 @@ struct TriNetRepositoryStatusCard: View {
                         Image(systemName: "arrow.triangle.merge")
                         Text(snapshot.pullRequestStatusText)
                     }
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .font(TriosType.font(10, weight: .bold, design: .monospaced))
                     .foregroundColor(snapshot.pullRequestMerged ? Color.green : Color.orange)
                 }
                 .buttonStyle(.plain)
             }
 
             Text("\(snapshot.pullRequestCommitCount) commits")
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .font(TriosType.font(9, weight: .semibold, design: .monospaced))
                 .foregroundColor(.grokMuted)
 
             Spacer()
 
             if snapshot.isExactPullRequestMerge {
                 Label("exact", systemImage: "checkmark.seal.fill")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(TriosType.font(9, weight: .semibold))
                     .foregroundColor(.green.opacity(0.9))
             }
         }
@@ -157,17 +157,17 @@ struct TriNetRepositoryStatusCard: View {
     private var mainRow: some View {
         HStack(spacing: 6) {
             Image(systemName: "arrow.triangle.branch")
-                .font(.system(size: 10, weight: .medium))
+                .font(TriosType.font(10, weight: .medium))
                 .foregroundColor(.grokMuted)
             if let url = URL(string: "\(snapshot.repositoryURL)/commit/\(snapshot.currentMainSHA)") {
                 Link(snapshot.mainProgressText, destination: url)
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(TriosType.font(10, weight: .semibold, design: .monospaced))
                     .foregroundColor(.grokText)
                     .lineLimit(1)
                     .buttonStyle(.plain)
             } else {
                 Text(snapshot.mainProgressText)
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(TriosType.font(10, weight: .semibold, design: .monospaced))
                     .foregroundColor(.grokText)
             }
             Spacer()
@@ -179,10 +179,10 @@ struct TriNetRepositoryStatusCard: View {
         if !snapshot.deliveryFocusText.isEmpty {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: "scope")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(TriosType.font(9, weight: .semibold))
                     .foregroundColor(.orange.opacity(0.9))
                 Text(snapshot.deliveryFocusText)
-                    .font(.system(size: 9, weight: .medium))
+                    .font(TriosType.font(9, weight: .medium))
                     .foregroundColor(.grokMuted)
                     .lineLimit(2)
                 Spacer(minLength: 0)
@@ -198,18 +198,18 @@ struct TriNetRepositoryStatusCard: View {
                 .fill(commitColor(commit.headline))
                 .frame(width: 5, height: 5)
             Text(commit.shortSHA)
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .font(TriosType.font(9, weight: .semibold, design: .monospaced))
                 .foregroundColor(.grokMuted)
             if let url = URL(string: commit.url) {
                 Link(commit.headline, destination: url)
-                    .font(.system(size: 9))
+                    .font(TriosType.font(9))
                     .foregroundColor(.grokText)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .buttonStyle(.plain)
             } else {
                 Text(commit.headline)
-                    .font(.system(size: 9))
+                    .font(TriosType.font(9))
                     .foregroundColor(.grokText)
                     .lineLimit(1)
             }

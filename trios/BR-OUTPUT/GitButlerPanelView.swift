@@ -18,7 +18,7 @@ struct GitButlerPanelView: View {
     private var header: some View {
         HStack(spacing: 8) {
             Text("Virtual Branches")
-                .font(.system(size: 13, weight: .semibold))
+                .font(TriosType.font(13, weight: .semibold))
                 .foregroundColor(.grokText)
             Spacer()
             if vm.isApplying {
@@ -27,7 +27,7 @@ struct GitButlerPanelView: View {
             }
             Button(action: { vm.loadBranches() }) {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .foregroundColor(.grokMuted)
             }
             .buttonStyle(.plain)
@@ -42,13 +42,13 @@ struct GitButlerPanelView: View {
                 VStack(spacing: 8) {
                     Spacer()
                     Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 32))
+                        .font(TriosType.font(32))
                         .foregroundColor(.grokDim)
                     Text("No branches")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(TriosType.font(14, weight: .semibold))
                         .foregroundColor(.grokText)
                     Text("Create a new branch to get started")
-                        .font(.system(size: 11))
+                        .font(TriosType.font(11))
                         .foregroundColor(.grokMuted)
                     Spacer()
                 }
@@ -61,14 +61,14 @@ struct GitButlerPanelView: View {
                             .frame(width: 6, height: 6)
 
                         Text(branch.name)
-                            .font(.system(size: 12, design: .monospaced))
+                            .font(TriosType.font(12, design: .monospaced))
                             .foregroundColor(.grokText)
 
                         Spacer()
 
                         if branch.isConflicted {
                             Text("Conflict")
-                                .font(.system(size: 9))
+                                .font(TriosType.font(9))
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 1)
                                 .background(Color.red.opacity(0.2))
@@ -77,13 +77,13 @@ struct GitButlerPanelView: View {
                         }
 
                         Text("\(branch.files)f \(branch.commitCount)c")
-                            .font(.system(size: 9))
+                            .font(TriosType.font(9))
                             .foregroundColor(.grokMuted)
                     }
 
                     if let upstream = branch.upstream {
                         Text(upstream)
-                            .font(.system(size: 9))
+                            .font(TriosType.font(9))
                             .foregroundColor(.grokDim)
                     }
 
@@ -92,7 +92,7 @@ struct GitButlerPanelView: View {
                             Button("Switch") {
                                 vm.switchBranch(branch)
                             }
-                            .font(.system(size: 10))
+                            .font(TriosType.font(10))
                             .foregroundColor(.grokAccent)
                             .buttonStyle(.plain)
                         }
@@ -100,14 +100,14 @@ struct GitButlerPanelView: View {
                         Button("Push") {
                             vm.pushBranch(branch)
                         }
-                        .font(.system(size: 10))
+                        .font(TriosType.font(10))
                         .foregroundColor(.grokMuted)
                         .buttonStyle(.plain)
 
                         Button("Commit") {
                             selectedBranch = branch
                         }
-                        .font(.system(size: 10))
+                        .font(TriosType.font(10))
                         .foregroundColor(.grokMuted)
                         .buttonStyle(.plain)
 
@@ -115,7 +115,7 @@ struct GitButlerPanelView: View {
                             Button("Delete") {
                                 vm.deleteBranch(branch)
                             }
-                            .font(.system(size: 10))
+                            .font(TriosType.font(10))
                             .foregroundColor(.red.opacity(0.6))
                             .buttonStyle(.plain)
                         }
@@ -131,7 +131,7 @@ struct GitButlerPanelView: View {
                 VStack(spacing: 0) {
                     Divider().overlay(Color.grokBorder)
                     Text(vm.consoleOutput)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TriosType.font(10, design: .monospaced))
                         .foregroundColor(.grokMuted)
                         .padding(8)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -149,7 +149,7 @@ struct GitButlerPanelView: View {
     private var createBranchBar: some View {
         HStack(spacing: 8) {
             TextField("New branch...", text: $newBranchName)
-                .font(.system(size: 12))
+                .font(TriosType.font(12))
                 .foregroundColor(.grokText)
                 .textFieldStyle(PlainTextFieldStyle())
 
@@ -159,7 +159,7 @@ struct GitButlerPanelView: View {
                 newBranchName = ""
             }) {
                 Image(systemName: "plus")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(TriosType.font(11, weight: .semibold))
                     .foregroundColor(.grokAccent)
             }
             .buttonStyle(.plain)
@@ -172,11 +172,11 @@ struct GitButlerPanelView: View {
     private func commitSheet(for branch: VirtualBranch) -> some View {
         VStack(spacing: 12) {
             Text("Commit \(branch.name)")
-                .font(.system(size: 13, weight: .semibold))
+                .font(TriosType.font(13, weight: .semibold))
                 .foregroundColor(.grokText)
 
             TextField("Message", text: $commitMessage)
-                .font(.system(size: 12))
+                .font(TriosType.font(12))
                 .textFieldStyle(PlainTextFieldStyle())
                 .padding(8)
                 .background(Color.grokElevated)

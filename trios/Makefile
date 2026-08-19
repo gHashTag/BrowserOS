@@ -752,6 +752,33 @@ MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP DEV_BIN RELEASE_BIN DEV_PROC \
 	SOURCES_MANIFEST SOURCES_APP_ONLY SOURCES_TEST_ONLY
 
 .PHONY: make-dollars
+# Fail if any view sets a font size directly instead of through TriosType.
+#
+# The app had 618 hard-coded sizes and 317 of them were 10pt or smaller, down
+# to 8pt monospaced, because nothing held a floor and every view picked its own
+# number. They are all routed through `TriosType.font` now, which raises
+# anything below 11pt and applies the operator's scale. This gate is what stops
+# the drift from starting again: one new `.system(size: 9)` is invisible in
+# review and indistinguishable from the other 617 once it lands.
+#
+# TriosTheme.swift is exempt because that is where the real call lives.
+type-floor:
+	@offenders=$$(grep -rn '\.system(size: [0-9]' \
+		--include='*.swift' "$(ROOT)/BR-OUTPUT" "$(ROOT)/rings" 2>/dev/null \
+		| grep -v 'BR-OUTPUT/TriosTheme.swift' || true); \
+	if [ -n "$$offenders" ]; then \
+		echo "[FAIL] font sizes set outside TriosType (no legibility floor applies):"; \
+		echo "$$offenders" | head -20 | sed 's/^/  /'; \
+		echo "       use TriosType.font(<size>, weight:, design:) instead"; \
+		exit 1; \
+	fi; \
+	floor=$$(grep -c 'legibilityFloor: CGFloat = 11' "$(ROOT)/BR-OUTPUT/TriosTheme.swift"); \
+	if [ "$$floor" != "1" ]; then \
+		echo "[FAIL] TriosType.legibilityFloor is no longer 11pt"; \
+		exit 1; \
+	fi; \
+	echo "[OK] every font size goes through TriosType, floor is 11pt"
+
 make-dollars:
 	@af=$$(mktemp /tmp/trios_md.XXXXXX); \
 	printf '%s\n' \
@@ -1312,7 +1339,7 @@ vendor-step:
 		exit 1; \
 	fi
 
-check: check-selftest keychain-doors make-dollars empty-sources sources-drift sources-drift-selftest finish-mark-order guard-shapes variant-fence parse-tests run-completeness-selftest cassette-isolation vendor-step dev warnings test cassettes mutants-changed
+check: check-selftest keychain-doors type-floor make-dollars empty-sources sources-drift sources-drift-selftest finish-mark-order guard-shapes variant-fence parse-tests run-completeness-selftest cassette-isolation vendor-step dev warnings test cassettes mutants-changed
 
 # Replay every cassette and assert the expected signal appears in the log.
 #

@@ -89,17 +89,17 @@ struct HotkeyChip: View {
         }) {
             HStack(spacing: 6) {
                 Image(systemName: icon)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(TriosType.font(11, weight: .semibold))
                     .foregroundColor(color)
                 
                 Text(label)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(TriosType.font(11, weight: .medium))
                     .foregroundColor(.grokText)
                 
                 HStack(spacing: 2) {
                     ForEach(keys, id: \.self) { key in
                         Text(key)
-                            .font(.system(size: 10, weight: .bold, design: .monospaced))
+                            .font(TriosType.font(10, weight: .bold, design: .monospaced))
                             .foregroundColor(.grokDim)
                             .padding(.horizontal, 4)
                             .padding(.vertical, 2)
@@ -135,14 +135,14 @@ struct HotkeyHelpOverlay: View {
             // Header
             HStack {
                 Text("Keyboard Shortcuts")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(TriosType.font(18, weight: .semibold))
                     .foregroundColor(.grokText)
                 
                 Spacer()
                 
                 Button(action: { dismiss() }) {
                     Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 20))
+                        .font(TriosType.font(20))
                         .foregroundColor(.grokDim)
                 }
                 .buttonStyle(.plain)
@@ -197,18 +197,18 @@ struct HotkeyHelpOverlay: View {
                             Image(systemName: "lightbulb.fill")
                                 .foregroundColor(.yellow)
                             Text("Pro Tips")
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(TriosType.font(14, weight: .semibold))
                                 .foregroundColor(.grokText)
                         }
                         
                         Text("• Use arrow keys to quickly recall previous messages")
-                            .font(.system(size: 12))
+                            .font(TriosType.font(12))
                             .foregroundColor(.grokDim)
                         Text("• Shift+Enter to format multi-line messages")
-                            .font(.system(size: 12))
+                            .font(TriosType.font(12))
                             .foregroundColor(.grokDim)
                         Text("• Command+K to quickly clear and start fresh")
-                            .font(.system(size: 12))
+                            .font(TriosType.font(12))
                             .foregroundColor(.grokDim)
                     }
                     .padding(12)
@@ -233,7 +233,7 @@ struct ShortcutCategory: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(title)
-                .font(.system(size: 13, weight: .semibold))
+                .font(TriosType.font(13, weight: .semibold))
                 .foregroundColor(.grokDim)
                 .textCase(.uppercase)
             
@@ -241,7 +241,7 @@ struct ShortcutCategory: View {
                 ForEach(shortcuts, id: \.description) { shortcut in
                     HStack {
                         Text(shortcut.description)
-                            .font(.system(size: 13))
+                            .font(TriosType.font(13))
                             .foregroundColor(.grokText)
                         
                         Spacer()
@@ -249,7 +249,7 @@ struct ShortcutCategory: View {
                         HStack(spacing: 3) {
                             ForEach(shortcut.keys, id: \.self) { key in
                                 Text(key)
-                                    .font(.system(size: 11, weight: .medium, design: .monospaced))
+                                    .font(TriosType.font(11, weight: .medium, design: .monospaced))
                                     .foregroundColor(.grokDim)
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 3)

@@ -30,13 +30,13 @@ struct MeshChatView: View {
     private var emptyDetail: some View {
         VStack(spacing: 12) {
             Image(systemName: "message.fill")
-                .font(.system(size: 32))
+                .font(TriosType.font(32))
                 .foregroundColor(.grokMuted)
             Text("Select a conversation")
-                .font(.system(size: 13, weight: .semibold))
+                .font(TriosType.font(13, weight: .semibold))
                 .foregroundColor(.grokText)
             Text("Or start a new mesh chat from the sidebar")
-                .font(.system(size: 10))
+                .font(TriosType.font(10))
                 .foregroundColor(.grokDim)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

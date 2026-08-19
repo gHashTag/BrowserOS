@@ -20,17 +20,38 @@ struct QueenDashboardView: View {
     private var running: [DelegatedTask] { registry.running }
     private var waiting: [DelegatedTask] { registry.reviewQueue }
 
+    /// Mirrors the stored preference so the toggle redraws when flipped.
+    @State private var autonomyOn: Bool = ChatViewModel.storedAutonomyPreference
+
+    /// How many rows are shown before the strip scrolls instead of growing.
+    ///
+    /// Four is the worker ceiling, so a full swarm fits exactly. Past that the
+    /// strip keeps its height and scrolls: a supervisor panel that grows with
+    /// its contents pushes the transcript underneath it down by a different
+    /// amount every tick, which is the single largest source of the screen
+    /// moving while you read it.
+    private static let maxVisibleRows = 4
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             header
-            if registry.active.isEmpty && waiting.isEmpty {
+            if rows.isEmpty {
                 Text("No bees in flight. /delegate <owner/repo#N> <worker> <title> to start one.")
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .foregroundColor(.grokDim)
+                    // Same height as one row, so the first bee to launch does
+                    // not shove the conversation down as it appears.
+                    .frame(height: Self.rowHeight, alignment: .leading)
             } else {
-                ForEach(rows, id: \.id) { task in
-                    row(task)
+                let visible = min(rows.count, Self.maxVisibleRows)
+                ScrollView(.vertical, showsIndicators: rows.count > Self.maxVisibleRows) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(rows, id: \.id) { task in
+                            row(task)
+                        }
+                    }
                 }
+                .frame(height: Self.rowHeight * CGFloat(visible))
             }
         }
         .padding(.horizontal, 14)
@@ -53,22 +74,53 @@ struct QueenDashboardView: View {
     private var header: some View {
         HStack(spacing: 8) {
             Image(systemName: "point.3.filled.connected.trianglepath.dotted")
-                .font(.system(size: 11))
+                .font(TriosType.font(11))
                 .foregroundColor(.grokMuted)
             Text("SWARM")
-                .font(.system(size: 10, weight: .semibold))
+                .font(TriosType.font(11, weight: .semibold))
                 .foregroundColor(.grokMuted)
                 .tracking(1.1)
             Text("\(running.count)/\(QueenDelegationPolicy.maximumConcurrentWorkers) running")
-                .font(.system(size: 10))
+                .font(TriosType.font(11))
                 .foregroundColor(.grokDim)
-            if !waiting.isEmpty {
-                Text("\(waiting.count) awaiting you")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.yellow)
-            }
+                // Reserved: the count changes on every dispatch, and a label
+                // that resizes drags everything after it sideways.
+                .frame(width: Self.runningCountWidth, alignment: .leading)
+            // Always drawn, so the strip does not reflow the moment a bee
+            // finishes. Dimmed to nothing when there is nobody waiting.
+            Text("\(waiting.count) awaiting you")
+                .font(TriosType.font(11, weight: .semibold))
+                .foregroundColor(waiting.isEmpty ? .clear : .yellow)
             Spacer()
+            autonomyToggle
         }
+    }
+
+    /// The one control that decides whether the Queen starts work by herself.
+    ///
+    /// It lives here because this strip is the only place on screen that
+    /// answers "what is the swarm doing", and "nothing, because you never
+    /// turned it on" is one of the answers. Before this there was no control at
+    /// all: the preference had a setter and no caller, so in dev - where it
+    /// defaults off - the Queen could not be started by any means the app
+    /// offered.
+    private var autonomyToggle: some View {
+        Toggle(isOn: Binding(
+            get: { autonomyOn },
+            set: { newValue in
+                autonomyOn = newValue
+                ChatViewModel.storedAutonomyPreference = newValue
+            }
+        )) {
+            Text("Autonomy")
+                .font(TriosType.font(11, weight: .medium))
+                .foregroundColor(autonomyOn ? .grokText : .grokDim)
+        }
+        .toggleStyle(.switch)
+        .controlSize(.mini)
+        .help(autonomyOn
+            ? "The Queen picks up open issues on her own, every five minutes."
+            : "The Queen acts only when you ask her to.")
     }
 
     private func row(_ task: DelegatedTask) -> some View {
@@ -80,11 +132,11 @@ struct QueenDashboardView: View {
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(task.title)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(TriosType.font(13, weight: .medium))
                     .foregroundColor(.grokText)
                     .lineLimit(1)
                 Text("\(task.issue.slug)  \(task.worker)  \(task.virtualBranch ?? "-")")
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(TriosType.font(11, design: .monospaced))
                     .foregroundColor(.grokDim)
                     .lineLimit(1)
             }
@@ -93,29 +145,74 @@ struct QueenDashboardView: View {
 
             // A registry state of `running` with no live stream is a stuck bee.
             // Saying so beats a green dot that lies.
-            Text(task.state == .running && !isLive ? "no stream" : task.state.rawValue)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundColor(statusColor(task, isLive: isLive))
-
-            if task.state.needsQueenAttention {
-                Button("Review") { onReview(task) }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.yellow)
+            //
+            // Reserved to the width of the longest thing it can ever say. The
+            // label changes on its own as work progresses - `queued` to
+            // `running` to `awaitingReview` is 6, 7 and 14 characters - and
+            // because it sits after a Spacer, every one of those transitions
+            // used to resize the title column beside it. The row appeared to
+            // twitch for no reason a supervisor could see.
+            ZStack(alignment: .trailing) {
+                Text(Self.widestStatusLabel)
+                    .font(TriosType.font(11, weight: .medium))
+                    .hidden()
+                Text(task.state == .running && !isLive ? "no stream" : task.state.rawValue)
+                    .font(TriosType.font(11, weight: .medium))
+                    .foregroundColor(statusColor(task, isLive: isLive))
+                    .lineLimit(1)
             }
-            // Available while it runs, which is the only time stopping helps.
-            if task.state == .running {
-                Button("Stop") { onCancel(task) }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(.orange)
+
+            // One reserved slot rather than two conditional buttons. A task
+            // moving from `running` to `awaitingReview` swaps Stop for Review,
+            // and the two are different widths, so the swap shifted the row.
+            ZStack(alignment: .trailing) {
+                Text("Review")
+                    .font(TriosType.font(11, weight: .semibold))
+                    .hidden()
+                if task.state.needsQueenAttention {
+                    Button("Review") { onReview(task) }
+                        .buttonStyle(.plain)
+                        .font(TriosType.font(11, weight: .semibold))
+                        .foregroundColor(.yellow)
+                } else if task.state == .running {
+                    // Available while it runs, which is the only time stopping
+                    // helps.
+                    Button("Stop") { onCancel(task) }
+                        .buttonStyle(.plain)
+                        .font(TriosType.font(11, weight: .semibold))
+                        .foregroundColor(.orange)
+                }
             }
         }
-        .padding(.vertical, 2)
+        .frame(height: Self.rowHeight)
         .contentShape(Rectangle())
         .onTapGesture { onOpenTask(task.conversationId) }
         .help("Open \(task.issue.slug)")
     }
+
+    /// The longest label the status column can ever hold.
+    ///
+    /// Derived from the enum rather than typed out, so a state added later
+    /// widens the reservation instead of overflowing it. `no stream` is in the
+    /// list because the row can say it and it is not a case of the enum.
+    static let widestStatusLabel: String = {
+        let candidates = DelegatedTaskState.allCases.map(\.rawValue) + ["no stream"]
+        return candidates.max(by: { $0.count < $1.count }) ?? "awaitingReview"
+    }()
+
+    /// Width reserved for the running count in the header.
+    ///
+    /// `4/4 running` is the widest it gets, and it is measured at the current
+    /// type scale rather than fixed, because the scale is the operator's to
+    /// change and a reservation that ignores it clips the text it was meant to
+    /// protect.
+    static var runningCountWidth: CGFloat { TriosType.size(11) * 6.2 }
+
+    /// One row: two lines of text plus the breathing room around them.
+    ///
+    /// Scales with the type so raising the type size grows the strip instead of
+    /// cropping its second line.
+    static var rowHeight: CGFloat { TriosType.size(13) + TriosType.size(11) + 10 }
 
     private func statusColor(_ task: DelegatedTask, isLive: Bool) -> Color {
         switch task.state {

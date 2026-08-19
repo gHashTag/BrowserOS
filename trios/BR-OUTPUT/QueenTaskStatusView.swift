@@ -81,44 +81,52 @@ struct QueenTaskBanner: View {
             HStack(spacing: 8) {
                 QueenTaskStatusPill(state: task.state, isLive: isLive)
 
+                // Both pinned to one line and their natural width. Left free,
+                // `gHashTag/trios#1127` broke after the slash and the issue
+                // number landed on a line of its own - the one string on this
+                // banner that must be read at a glance, split in half.
                 Text(task.issue.slug)
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .font(TriosType.font(11, weight: .semibold, design: .monospaced))
                     .foregroundColor(.grokText)
+                    .lineLimit(1)
+                    .fixedSize()
 
                 Text(task.worker)
-                    .font(.system(size: 10))
+                    .font(TriosType.font(11))
                     .foregroundColor(.grokMuted)
+                    .lineLimit(1)
+                    .fixedSize()
 
                 Spacer()
 
                 if task.state.needsQueenAttention {
                     Button("Accept", action: onAccept)
                         .buttonStyle(.plain)
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(TriosType.font(10, weight: .semibold))
                         .foregroundColor(.green)
                     Button("Send back", action: onReject)
                         .buttonStyle(.plain)
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(TriosType.font(10, weight: .semibold))
                         .foregroundColor(.orange)
                 }
 
                 if task.state == .running {
                     Button("Stop", action: onCancel)
                         .buttonStyle(.plain)
-                        .font(.system(size: 10, weight: .semibold))
+                        .font(TriosType.font(10, weight: .semibold))
                         .foregroundColor(.orange)
                 }
 
                 Button(action: onOpenQueen) {
                     Image(systemName: "crown.fill")
-                        .font(.system(size: 10))
+                        .font(TriosType.font(10))
                         .foregroundColor(.yellow.opacity(0.8))
                 }
                 .buttonStyle(.plain)
                 .help("Back to the Queen")
             }
 
-            HStack(spacing: 10) {
+            WrappingHStack(horizontalSpacing: 10, verticalSpacing: 4) {
                 metric("branch", task.virtualBranch ?? "-")
                 metric("owns", task.ownedPaths.isEmpty ? "unrestricted" : task.ownedPaths.joined(separator: ", "))
                 if let files = task.committedFiles {
@@ -127,7 +135,6 @@ struct QueenTaskBanner: View {
                 if let spend = spendLabel {
                     metric("spend", spend)
                 }
-                Spacer()
             }
         }
         .padding(.horizontal, 14)
@@ -173,15 +180,26 @@ struct QueenTaskBanner: View {
         CompactCount.format(tokens)
     }
 
+    /// One labelled fact. The label is never allowed to wrap or shrink - a cut
+    /// label ("committ / ed") names nothing - and the value truncates in the
+    /// middle, which is the only place a branch name or a path can lose
+    /// characters and stay recognisable: `queen/1127-judge` and
+    /// `rings/SR-02/ChatViewModel.swift` are told apart by both ends, not by
+    /// their beginnings.
     private func metric(_ name: String, _ value: String) -> some View {
         HStack(spacing: 4) {
             Text(name)
-                .font(.system(size: 9))
+                .font(TriosType.font(11))
                 .foregroundColor(.grokDim)
+                .lineLimit(1)
+                .fixedSize()
             Text(value)
-                .font(.system(size: 9, design: .monospaced))
+                .font(TriosType.font(11, design: .monospaced))
                 .foregroundColor(.grokMuted)
                 .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 260, alignment: .leading)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 }

@@ -243,7 +243,7 @@ struct MarkdownTableView: View {
 
     private func tableCell(_ content: String, column: Int, isHeader: Bool) -> some View {
         InlineMarkdownText(text: content, isUser: false)
-            .font(.system(size: 13, weight: isHeader ? .semibold : .regular))
+            .font(TriosType.font(13, weight: isHeader ? .semibold : .regular))
             .lineLimit(nil)
             .fixedSize(horizontal: false, vertical: true)
             .frame(
@@ -348,15 +348,15 @@ struct ReasoningCollapsibleView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "brain.head.profile")
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .foregroundColor(.grokMuted)
                 Text(isExpanded ? "Thought process" : "Thinking...")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(TriosType.font(11, weight: .semibold))
                     .foregroundColor(.grokMuted)
 
                 if !isExpanded {
                     Text("\(lineCount) steps")
-                        .font(.system(size: 10))
+                        .font(TriosType.font(10))
                         .foregroundColor(.grokDim)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -367,7 +367,7 @@ struct ReasoningCollapsibleView: View {
                 Spacer()
 
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 10))
+                    .font(TriosType.font(10))
                     .foregroundColor(.grokDim)
             }
             .padding(.horizontal, 12)
@@ -385,7 +385,7 @@ struct ReasoningCollapsibleView: View {
                     .padding(.horizontal, 12)
 
                 Text(content)
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .foregroundColor(.grokDim)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)

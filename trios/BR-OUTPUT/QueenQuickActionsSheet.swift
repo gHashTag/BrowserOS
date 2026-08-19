@@ -26,7 +26,7 @@ struct QueenQuickActionsSheet: View {
     private var headerBar: some View {
         HStack {
             Text("Queen Trinity")
-                .font(.system(size: 14, weight: .semibold))
+                .font(TriosType.font(14, weight: .semibold))
                 .foregroundColor(.grokText)
             Spacer()
             if viewModel.isRunningAction {
@@ -53,10 +53,10 @@ struct QueenQuickActionsSheet: View {
         Button(action: action) {
             VStack(spacing: 4) {
                 Image(systemName: icon)
-                    .font(.system(size: 16, weight: .semibold))
+                    .font(TriosType.font(16, weight: .semibold))
                     .foregroundColor(.grokText)
                 Text(label)
-                    .font(.system(size: 9, weight: .medium))
+                    .font(TriosType.font(9, weight: .medium))
                     .foregroundColor(.grokMuted)
             }
             .frame(maxWidth: .infinity)
@@ -82,12 +82,12 @@ struct QueenQuickActionsSheet: View {
     private func miniCard(_ comp: StatusComponent) -> some View {
         HStack(spacing: 8) {
             Image(systemName: comp.icon)
-                .font(.system(size: 12))
+                .font(TriosType.font(12))
                 .foregroundColor(.grokMuted)
                 .frame(width: 20)
 
             Text(comp.name)
-                .font(.system(size: 11, weight: .medium))
+                .font(TriosType.font(11, weight: .medium))
                 .foregroundColor(.grokText)
 
             Spacer()
@@ -97,7 +97,7 @@ struct QueenQuickActionsSheet: View {
                 .frame(width: 6, height: 6)
 
             Text(comp.detail)
-                .font(.system(size: 10))
+                .font(TriosType.font(10))
                 .foregroundColor(.grokMuted)
                 .lineLimit(1)
 
@@ -106,7 +106,7 @@ struct QueenQuickActionsSheet: View {
                     runAction(for: comp.name)
                 }) {
                     Text(action)
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(TriosType.font(9, weight: .semibold))
                         .foregroundColor(.grokAccent)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -144,7 +144,7 @@ struct QueenQuickActionsSheet: View {
     private var closeButton: some View {
         Button(action: { isPresented = false }) {
             Text("Close")
-                .font(.system(size: 12, weight: .semibold))
+                .font(TriosType.font(12, weight: .semibold))
                 .foregroundColor(.grokMuted)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)

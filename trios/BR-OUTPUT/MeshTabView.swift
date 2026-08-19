@@ -43,7 +43,7 @@ struct MeshTabView: View {
         Picker("Mesh tab", selection: $selectedTab) {
             ForEach(MeshTab.allCases, id: \.self) { tab in
                 Text(tab.rawValue)
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .tag(tab)
             }
         }
@@ -83,10 +83,10 @@ struct MeshTabView: View {
     private var headerBar: some View {
         HStack(spacing: 8) {
             Image(systemName: "antenna.radiowaves.left.and.right")
-                .font(.system(size: 13, weight: .semibold))
+                .font(TriosType.font(13, weight: .semibold))
                 .foregroundColor(.grokText)
             Text("Mesh / tri-net")
-                .font(.system(size: 13, weight: .semibold))
+                .font(TriosType.font(13, weight: .semibold))
                 .foregroundColor(.grokText)
             Spacer()
             if viewModel.isLoading {
@@ -97,7 +97,7 @@ struct MeshTabView: View {
                 Task { await viewModel.refresh() }
             }) {
                 Image(systemName: "arrow.clockwise")
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .foregroundColor(.grokMuted)
             }
             .buttonStyle(.plain)
@@ -115,10 +115,10 @@ struct MeshTabView: View {
                 .frame(width: 10, height: 10)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Node \(viewModel.nodeId)")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(TriosType.font(12, weight: .semibold))
                     .foregroundColor(.grokText)
                 Text(viewModel.isReachable ? "clade-meshd reachable" : "clade-meshd unreachable")
-                    .font(.system(size: 10))
+                    .font(TriosType.font(10))
                     .foregroundColor(viewModel.isReachable ? Color.green : Color.red)
             }
             Spacer()
@@ -137,7 +137,7 @@ struct MeshTabView: View {
     private var neighborsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Neighbors")
-                .font(.system(size: 11, weight: .semibold))
+                .font(TriosType.font(11, weight: .semibold))
                 .foregroundColor(.grokMuted)
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                 ForEach(viewModel.neighbors) { neighbor in
@@ -151,10 +151,10 @@ struct MeshTabView: View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Image(systemName: "network")
-                    .font(.system(size: 12))
+                    .font(TriosType.font(12))
                     .foregroundColor(.grokMuted)
                 Text("Node \(neighbor.id)")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(TriosType.font(12, weight: .semibold))
                     .foregroundColor(.grokText)
                 Spacer()
                 Circle()
@@ -162,7 +162,7 @@ struct MeshTabView: View {
                     .frame(width: 8, height: 8)
             }
             Text("ETX: \(String(format: "%.2f", neighbor.etx)) (\(neighbor.etx_label))")
-                .font(.system(size: 10))
+                .font(TriosType.font(10))
                 .foregroundColor(.grokDim)
         }
         .padding(10)
@@ -179,21 +179,21 @@ struct MeshTabView: View {
     private var routesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Learned Routes")
-                .font(.system(size: 11, weight: .semibold))
+                .font(TriosType.font(11, weight: .semibold))
                 .foregroundColor(.grokMuted)
             ForEach(viewModel.routes) { route in
                 HStack(spacing: 8) {
                     Text("-> \(route.destination)")
-                        .font(.system(size: 11))
+                        .font(TriosType.font(11))
                         .foregroundColor(.grokText)
                     Spacer()
                     if let nextHop = route.next_hop, let etx = route.path_etx {
                         Text("via \(nextHop) / ETX \(String(format: "%.2f", etx))")
-                            .font(.system(size: 10))
+                            .font(TriosType.font(10))
                             .foregroundColor(.grokDim)
                     } else {
                         Text("unreachable")
-                            .font(.system(size: 10))
+                            .font(TriosType.font(10))
                             .foregroundColor(Color.red)
                     }
                 }
@@ -210,16 +210,16 @@ struct MeshTabView: View {
     private var sessionsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Crypto Sessions")
-                .font(.system(size: 11, weight: .semibold))
+                .font(TriosType.font(11, weight: .semibold))
                 .foregroundColor(.grokMuted)
             FlowLayout(spacing: 8) {
                 ForEach(viewModel.sessions) { session in
                     HStack(spacing: 4) {
                         Image(systemName: session.has_session ? "lock.fill" : "lock.open")
-                            .font(.system(size: 10))
+                            .font(TriosType.font(10))
                             .foregroundColor(session.has_session ? Color.green : Color.red)
                         Text("Peer \(session.peer)")
-                            .font(.system(size: 10))
+                            .font(TriosType.font(10))
                             .foregroundColor(.grokText)
                     }
                     .padding(.horizontal, 8)
@@ -236,7 +236,7 @@ struct MeshTabView: View {
     private var metricsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Convergence Metrics")
-                .font(.system(size: 11, weight: .semibold))
+                .font(TriosType.font(11, weight: .semibold))
                 .foregroundColor(.grokMuted)
             HStack(spacing: 8) {
                 metricChip(
@@ -254,10 +254,10 @@ struct MeshTabView: View {
     private func metricChip(label: String, value: Float?) -> some View {
         VStack(spacing: 2) {
             Text(value.map { String(format: "%.0f ms", $0) } ?? "-")
-                .font(.system(size: 12, weight: .semibold))
+                .font(TriosType.font(12, weight: .semibold))
                 .foregroundColor(.grokText)
             Text(label)
-                .font(.system(size: 9))
+                .font(TriosType.font(9))
                 .foregroundColor(.grokDim)
         }
         .frame(maxWidth: .infinity)
@@ -271,7 +271,7 @@ struct MeshTabView: View {
     private var controlsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Simulate")
-                .font(.system(size: 11, weight: .semibold))
+                .font(TriosType.font(11, weight: .semibold))
                 .foregroundColor(.grokMuted)
             HStack(spacing: 8) {
                 peerStepper
@@ -306,21 +306,21 @@ struct MeshTabView: View {
     private var peerStepper: some View {
         HStack(spacing: 8) {
             Text("Target peer:")
-                .font(.system(size: 11))
+                .font(TriosType.font(11))
                 .foregroundColor(.grokText)
             Button(action: { if selectedPeer > 1 { selectedPeer -= 1 } }) {
                 Image(systemName: "minus")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(TriosType.font(10, weight: .semibold))
                     .foregroundColor(.grokText)
             }
             .buttonStyle(.plain)
             Text("\(selectedPeer)")
-                .font(.system(size: 12, weight: .semibold))
+                .font(TriosType.font(12, weight: .semibold))
                 .foregroundColor(.grokText)
                 .frame(width: 32)
             Button(action: { selectedPeer += 1 }) {
                 Image(systemName: "plus")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(TriosType.font(10, weight: .semibold))
                     .foregroundColor(.grokText)
             }
             .buttonStyle(.plain)
@@ -334,7 +334,7 @@ struct MeshTabView: View {
     private func actionButton(_ title: String, isDestructive: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 10, weight: .semibold))
+                .font(TriosType.font(10, weight: .semibold))
                 .foregroundColor(isDestructive ? Color.red : .grokAccent)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
@@ -347,10 +347,10 @@ struct MeshTabView: View {
     private func errorBadge(_ message: String) -> some View {
         HStack(spacing: 6) {
             Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 11))
+                .font(TriosType.font(11))
                 .foregroundColor(Color.red)
             Text(message)
-                .font(.system(size: 10))
+                .font(TriosType.font(10))
                 .foregroundColor(Color.red)
                 .lineLimit(2)
             Spacer()

@@ -25,12 +25,12 @@ struct MeshChatListView: View {
     private var headerBar: some View {
         HStack(spacing: 8) {
             Text("Mesh Chat")
-                .font(.system(size: 13, weight: .semibold))
+                .font(TriosType.font(13, weight: .semibold))
                 .foregroundColor(.grokText)
             Spacer()
             Button(action: { isAddingPeer.toggle() }) {
                 Image(systemName: "square.and.pencil")
-                    .font(.system(size: 12))
+                    .font(TriosType.font(12))
                     .foregroundColor(.grokAccent)
             }
             .buttonStyle(.plain)
@@ -62,24 +62,24 @@ struct MeshChatListView: View {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 4) {
                     Text(peerName(conversation.peer))
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(TriosType.font(12, weight: .semibold))
                         .foregroundColor(.grokText)
                     Spacer()
                     if let last = last {
                         Text(last.formattedTime)
-                            .font(.system(size: 9))
+                            .font(TriosType.font(9))
                             .foregroundColor(.grokDim)
                     }
                 }
                 HStack(spacing: 4) {
                     Text(preview(for: last))
-                        .font(.system(size: 11))
+                        .font(TriosType.font(11))
                         .foregroundColor(.grokMuted)
                         .lineLimit(1)
                     Spacer()
                     if conversation.unread > 0 {
                         Text("\(conversation.unread)")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(TriosType.font(10, weight: .semibold))
                             .foregroundColor(.white)
                             .frame(minWidth: 16, minHeight: 16)
                             .padding(.horizontal, 4)
@@ -98,7 +98,7 @@ struct MeshChatListView: View {
         HStack(spacing: 8) {
             TextField("Node ID", text: $newPeerText)
                 .textFieldStyle(.plain)
-                .font(.system(size: 12))
+                .font(TriosType.font(12))
                 .foregroundColor(.grokText)
             Button("Add") {
                 if let id = UInt32(newPeerText) {
@@ -107,7 +107,7 @@ struct MeshChatListView: View {
                     isAddingPeer = false
                 }
             }
-            .font(.system(size: 11, weight: .semibold))
+            .font(TriosType.font(11, weight: .semibold))
             .foregroundColor(.grokAccent)
             .buttonStyle(.plain)
         }
@@ -119,13 +119,13 @@ struct MeshChatListView: View {
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "antenna.radiowaves.left.and.right")
-                .font(.system(size: 28))
+                .font(TriosType.font(28))
                 .foregroundColor(.grokMuted)
             Text("No mesh conversations")
-                .font(.system(size: 12, weight: .semibold))
+                .font(TriosType.font(12, weight: .semibold))
                 .foregroundColor(.grokText)
             Text("Tap + to start a chat with a Node ID")
-                .font(.system(size: 10))
+                .font(TriosType.font(10))
                 .foregroundColor(.grokDim)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -137,7 +137,7 @@ struct MeshChatListView: View {
                 .fill(Color.grokElevated.opacity(0.5))
                 .frame(width: 36, height: 36)
             Text(String(peerName(peer).prefix(1)))
-                .font(.system(size: 14, weight: .semibold))
+                .font(TriosType.font(14, weight: .semibold))
                 .foregroundColor(.grokAccent)
         }
     }

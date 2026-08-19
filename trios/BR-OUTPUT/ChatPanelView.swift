@@ -167,7 +167,7 @@ struct ChatPanelView: View {
                     .controlSize(.small)
                 }
                 Text(viewModel.recoveryProgress.currentFile)
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .foregroundColor(.grokDim)
                     .lineLimit(1)
             }
@@ -357,10 +357,10 @@ struct ChatPanelView: View {
                 .fill(Color.grokDivider.opacity(0.5))
                 .frame(height: 1)
             Image(systemName: "globe")
-                .font(.system(size: 10))
+                .font(TriosType.font(10))
                 .foregroundColor(.grokDim)
             Text("BrowserOS")
-                .font(.system(size: 10, weight: .medium))
+                .font(TriosType.font(10, weight: .medium))
                 .foregroundColor(.grokDim)
             Rectangle()
                 .fill(Color.grokDivider.opacity(0.5))
@@ -453,7 +453,7 @@ struct ChatPanelView: View {
             TypingIndicatorView(color: responseIndicatorColor)
             if let label {
                 Text(label)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TriosType.font(10, weight: .medium))
                     .foregroundColor(responseIndicatorColor)
             }
         }
@@ -476,7 +476,7 @@ struct ChatPanelView: View {
             logoView(size: CGSize(width: 52, height: 44))
 
             Text("How can I help?")
-                .font(.system(size: 16, weight: .regular, design: .default))
+                .font(TriosType.font(16, weight: .regular, design: .default))
                 .foregroundColor(.grokMuted)
 
             VStack(spacing: 8) {
@@ -519,11 +519,11 @@ struct ChatPanelView: View {
     private func emptyStateHint(icon: String, text: String, color: Color) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: icon)
-                .font(.system(size: 11))
+                .font(TriosType.font(11))
                 .foregroundColor(color)
                 .padding(.top, 2)
             Text(text)
-                .font(.system(size: 12))
+                .font(TriosType.font(12))
                 .foregroundColor(.grokDim)
                 .multilineTextAlignment(.leading)
             Spacer()
@@ -549,7 +549,7 @@ struct ChatPanelView: View {
             triggerSend()
         }) {
             Text(text)
-                .font(.system(size: 12))
+                .font(TriosType.font(12))
                 .foregroundColor(.grokDim)
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
@@ -589,7 +589,7 @@ struct ChatPanelView: View {
                         Text(attachmentNotice)
                             .lineLimit(2)
                     }
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TriosType.font(10, weight: .medium))
                     .foregroundColor(.orange.opacity(0.9))
                     .transition(.opacity)
                 }
@@ -666,7 +666,7 @@ struct ChatPanelView: View {
                             .controlSize(.small)
                             .tint(.white)
                         Text("Adding \(pendingAttachmentImports)")
-                            .font(.system(size: 10, weight: .medium))
+                            .font(TriosType.font(10, weight: .medium))
                             .foregroundColor(.white.opacity(0.7))
                     }
                     .padding(.horizontal, 10)
@@ -686,12 +686,12 @@ struct ChatPanelView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(attachment.displayName)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(TriosType.font(10, weight: .semibold))
                     .foregroundColor(.white.opacity(0.9))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 Text(formatBytes(attachment.byteCount))
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(TriosType.font(9, design: .monospaced))
                     .foregroundColor(.white.opacity(0.42))
             }
             .frame(maxWidth: 118, alignment: .leading)
@@ -700,7 +700,7 @@ struct ChatPanelView: View {
                 removeAttachment(attachment)
             } label: {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .bold))
+                    .font(TriosType.font(9, weight: .bold))
                     .foregroundColor(.white.opacity(0.68))
                     .frame(width: 20, height: 20)
                     .background(Circle().fill(Color.white.opacity(0.07)))
@@ -731,7 +731,7 @@ struct ChatPanelView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         } else {
             Image(systemName: attachment.kind == .image ? "photo" : "doc.fill")
-                .font(.system(size: 15, weight: .medium))
+                .font(TriosType.font(15, weight: .medium))
                 .foregroundColor(.white.opacity(0.72))
                 .frame(width: 36, height: 36)
                 .background(Color.white.opacity(0.065))
@@ -756,9 +756,9 @@ struct ChatPanelView: View {
             )
             HStack(spacing: 9) {
                 Image(systemName: "tray.and.arrow.down.fill")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(TriosType.font(17, weight: .semibold))
                 Text("Drop files or images")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(TriosType.font(13, weight: .semibold))
             }
             .foregroundColor(.white)
         }
@@ -798,7 +798,7 @@ struct ChatPanelView: View {
 
             if viewModel.inputText.isEmpty {
                 Text(inputPlaceholder)
-                    .font(.system(size: 15, weight: .regular))
+                    .font(TriosType.font(15, weight: .regular))
                     .foregroundColor(.white.opacity(0.42))
                     .padding(.horizontal, 1)
                     .padding(.vertical, 5)
@@ -836,7 +836,7 @@ struct ChatPanelView: View {
                 triggerSend()
             }) {
                 Image(systemName: sendButtonIcon)
-                    .font(.system(size: 15, weight: .bold))
+                    .font(TriosType.font(15, weight: .bold))
                     .foregroundColor(sendButtonForeground)
                     .frame(width: 34, height: 34)
                     .background(Circle().fill(sendButtonBackground))
@@ -854,9 +854,9 @@ struct ChatPanelView: View {
                 } label: {
                     HStack(spacing: 3) {
                         Image(systemName: "pin.slash")
-                            .font(.system(size: 9))
+                            .font(TriosType.font(9))
                         Text("Clear pin & send")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(TriosType.font(10, weight: .semibold))
                     }
                     .foregroundColor(.blue)
                     .padding(.horizontal, 8)
@@ -895,7 +895,7 @@ struct ChatPanelView: View {
             }
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 14, weight: .medium))
+                .font(TriosType.font(14, weight: .medium))
                 .foregroundColor(.white.opacity(0.88))
                 .frame(width: 32, height: 32)
                 .background(Circle().fill(Color.white.opacity(0.075)))
@@ -957,20 +957,20 @@ struct ChatPanelView: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "cpu")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TriosType.font(10, weight: .medium))
                     .foregroundColor(.white.opacity(0.62))
                 if viewModel.hasConversationModelOverride {
                     Image(systemName: "pin.fill")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(TriosType.font(9, weight: .semibold))
                         .foregroundColor(.white.opacity(0.72))
                 }
                 Text(composerModelLabel)
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(TriosType.font(10, weight: .semibold, design: .monospaced))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .layoutPriority(1)
             }
-            .font(.system(size: 10, design: .monospaced))
+            .font(TriosType.font(10, design: .monospaced))
             .foregroundColor(.white.opacity(0.72))
             .padding(.horizontal, 9)
             .frame(
@@ -999,12 +999,12 @@ struct ChatPanelView: View {
                     .fill(contextUtilizationColor(for: percent))
                     .frame(width: 6, height: 6)
                 Text(String(format: "%.0f%%", percent))
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .font(TriosType.font(9, weight: .semibold, design: .monospaced))
                     .foregroundColor(contextUtilizationColor(for: percent))
                     .lineLimit(1)
                 if let label = viewModel.contextRoutingLabel {
                     Text(label)
-                        .font(.system(size: 9))
+                        .font(TriosType.font(9))
                         .foregroundColor(.white.opacity(0.55))
                         .lineLimit(1)
                 }
@@ -1017,10 +1017,10 @@ struct ChatPanelView: View {
         HStack(spacing: 4) {
             if let status = viewModel.draftContextStatus {
                 Image(systemName: status.isTooLarge ? "exclamationmark.triangle.fill" : "pencil.circle")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(TriosType.font(9, weight: .semibold))
                     .foregroundColor(draftContextStatusColor(for: status.utilizationPercent))
                 Text(String(format: "%.0f%%", status.utilizationPercent))
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .font(TriosType.font(9, weight: .semibold, design: .monospaced))
                     .foregroundColor(draftContextStatusColor(for: status.utilizationPercent))
                     .lineLimit(1)
             }
@@ -1072,12 +1072,12 @@ struct ChatPanelView: View {
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "waveform")
-                    .font(.system(size: 9, weight: .medium))
+                    .font(TriosType.font(9, weight: .medium))
                 Text(composerOutputBudgetLabel)
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .font(TriosType.font(9, weight: .semibold, design: .monospaced))
                     .lineLimit(1)
             }
-            .font(.system(size: 9, design: .monospaced))
+            .font(TriosType.font(9, design: .monospaced))
             .foregroundColor(.white.opacity(0.55))
             .frame(height: CGFloat(composerStatusMetrics.controlHeight))
         }
@@ -1144,14 +1144,14 @@ struct ChatPanelView: View {
     private var composerTokenStatus: some View {
         HStack(spacing: 4) {
             Image(systemName: "chart.bar.xaxis")
-                .font(.system(size: 10, weight: .medium))
+                .font(TriosType.font(10, weight: .medium))
             Text(composerStatusMetrics.showsTokenBreakdown
                 ? viewModel.tokenUsage.compactBreakdown
                 : viewModel.tokenUsage.compactTotal)
                 .fontWeight(.semibold)
                 .lineLimit(1)
         }
-        .font(.system(size: 9, design: .monospaced))
+        .font(TriosType.font(9, design: .monospaced))
         .foregroundColor(.white.opacity(0.52))
         .frame(height: CGFloat(composerStatusMetrics.controlHeight))
         .help(viewModel.tokenUsage.detailText)
@@ -1179,13 +1179,13 @@ struct ChatPanelView: View {
                         .frame(width: 12, height: 12)
                 } else {
                     Image(systemName: "arrow.up.arrow.down.square")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(TriosType.font(11, weight: .medium))
                 }
                 if workspaceMode == .expanded {
                     Text("Recovery")
                 }
             }
-            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+            .font(TriosType.font(9, weight: .semibold, design: .monospaced))
             .foregroundColor(.white.opacity(0.62))
             .frame(minWidth: 24)
             .frame(height: CGFloat(composerStatusMetrics.controlHeight))
@@ -1206,7 +1206,7 @@ struct ChatPanelView: View {
                 .frame(width: 6, height: 6)
             if composerStatusMetrics.showsCDPLabel {
                 Text("CDP 9102")
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(TriosType.font(9, design: .monospaced))
                     .foregroundColor(.white.opacity(0.52))
             }
             // Start TRIOS, restart MCP and run cron had no route into the app.
@@ -1233,7 +1233,7 @@ struct ChatPanelView: View {
         VStack(alignment: .leading, spacing: 6) {
             if let label = viewModel.streamingContextPauseLabel {
                 Text(label)
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .foregroundColor(.orange.opacity(0.9))
                     .padding(.horizontal, 2)
             }
@@ -1281,7 +1281,7 @@ struct ChatPanelView: View {
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Image(systemName: status.limitKind == .outputTokens ? "arrow.up.circle" : "bubble.left.and.bubble.right")
-                    .font(.system(size: 10))
+                    .font(TriosType.font(10))
                     .foregroundColor(progressColor)
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
@@ -1295,7 +1295,7 @@ struct ChatPanelView: View {
                 }
                 .frame(height: 4)
                 Text(label)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TriosType.font(10, weight: .medium))
                     .foregroundColor(.grokDim)
             }
         }
@@ -1306,10 +1306,10 @@ struct ChatPanelView: View {
     private func contextWarningBanner(_ warning: String) -> some View {
         HStack(spacing: 5) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 11))
+                .font(TriosType.font(11))
                 .foregroundColor(.orange.opacity(0.9))
             Text(warning)
-                .font(.system(size: 11))
+                .font(TriosType.font(11))
                 .foregroundColor(.orange.opacity(0.9))
                 .lineLimit(2)
             Spacer()
@@ -1320,7 +1320,7 @@ struct ChatPanelView: View {
     private struct ContextLimitButtonStyle: ButtonStyle {
         func makeBody(configuration: Configuration) -> some View {
             configuration.label
-                .font(.system(size: 11, weight: .semibold))
+                .font(TriosType.font(11, weight: .semibold))
                 .foregroundColor(.white.opacity(configuration.isPressed ? 0.7 : 0.9))
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
@@ -1797,7 +1797,7 @@ private struct SessionRecoveryDuplicateSheet: View {
             Text("Conversation already exists")
                 .font(.headline)
             Text("\"\(duplicate.title)\" has the same ID as an existing conversation. What would you like to do?")
-                .font(.system(size: 13))
+                .font(TriosType.font(13))
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
 
@@ -2277,7 +2277,7 @@ private struct BrowserOSMessageBubble: View {
                 } else {
                     VStack(alignment: .leading, spacing: 4) {
                         RichMessageView(text: message.content, isUser: message.role == .user)
-                            .font(.system(size: 14, weight: .regular, design: .default))
+                            .font(TriosType.font(14, weight: .regular, design: .default))
                             .padding(12)
                             .background(
                                 message.role == .user
@@ -2309,7 +2309,7 @@ private struct BrowserOSMessageBubble: View {
 
     private var avatarView: some View {
         Image(systemName: "person.fill")
-            .font(.system(size: 12, weight: .medium))
+            .font(TriosType.font(12, weight: .medium))
             .foregroundColor(.grokMuted)
             .frame(width: 24, height: 24)
             .background(Circle().fill(Color.grokElevated.opacity(0.3)))
@@ -2324,14 +2324,14 @@ private struct BrowserOSMessageBubble: View {
 
     private func senderLabel(_ senderName: String) -> some View {
         Text(senderName)
-            .font(.system(size: 11, weight: .medium))
+            .font(TriosType.font(11, weight: .medium))
             .foregroundColor(.grokMuted)
             .padding(.bottom, 2)
     }
 
     private var timestampView: some View {
         Text(message.timestamp, style: .relative)
-            .font(.system(size: 9))
+            .font(TriosType.font(9))
             .foregroundColor(.grokDim)
             .padding(.top, 2)
     }
@@ -2339,10 +2339,10 @@ private struct BrowserOSMessageBubble: View {
     private var errorBadge: some View {
         HStack(alignment: .top, spacing: 6) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 12))
+                .font(TriosType.font(12))
                 .foregroundColor(.yellow)
             Text(BrowserOSMessageBubble.cleanErrorContent(message.content))
-                .font(.system(size: 13, weight: .medium, design: .default))
+                .font(TriosType.font(13, weight: .medium, design: .default))
                 .foregroundColor(.grokText)
             // The failure text is a summary; the bus holds the full record.
             TabLogsButton(tab: .chat, compact: true)
@@ -2379,7 +2379,7 @@ private struct BrowserOSToolCallCard: View {
                     .foregroundColor(.grokMuted)
                     .font(.caption)
                 Text(tool.name)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(TriosType.font(11, weight: .medium))
                     .foregroundColor(.grokText)
                 Spacer()
                 Button(action: { isExpanded.toggle() }) {
@@ -2392,7 +2392,7 @@ private struct BrowserOSToolCallCard: View {
             if isExpanded, let result = tool.result {
                 if diffDocuments.isEmpty {
                     Text(result)
-                        .font(.system(size: 11))
+                        .font(TriosType.font(11))
                         .foregroundColor(.grokMuted)
                         .padding(6)
                         .background(Color.grokElevated.opacity(0.4))
@@ -2583,16 +2583,16 @@ private struct PinnedSpecHeader: View {
     ) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "doc.text.magnifyingglass")
-                .font(.system(size: 12, weight: .medium))
+                .font(TriosType.font(12, weight: .medium))
                 .foregroundColor(.white.opacity(0.6))
 
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 6) {
                     Text(task.issue.slug)
-                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .font(TriosType.font(11, weight: .semibold, design: .monospaced))
                         .foregroundColor(.white.opacity(0.88))
                     Text(task.title)
-                        .font(.system(size: 11))
+                        .font(TriosType.font(11))
                         .foregroundColor(.grokMuted)
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -2613,9 +2613,9 @@ private struct PinnedSpecHeader: View {
                     if isBlocked {
                         HStack(spacing: 3) {
                             Image(systemName: "lock.fill")
-                                .font(.system(size: 8, weight: .bold))
+                                .font(TriosType.font(8, weight: .bold))
                             Text("blocked")
-                                .font(.system(size: 9, weight: .semibold))
+                                .font(TriosType.font(9, weight: .semibold))
                         }
                         .foregroundColor(.red.opacity(0.9))
                     }
@@ -2630,7 +2630,7 @@ private struct PinnedSpecHeader: View {
                 }
             } label: {
                 Image(systemName: isCollapsed ? "chevron.down" : "chevron.up")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(TriosType.font(10, weight: .semibold))
                     .foregroundColor(.white.opacity(0.5))
                     .frame(width: 22, height: 22)
             }
@@ -2667,7 +2667,7 @@ private struct PinnedSpecHeader: View {
                 .frame(width: 14, height: 14)
                 .padding(.top, 1)
             Text("\(index). \(text)")
-                .font(.system(size: 11))
+                .font(TriosType.font(11))
                 .foregroundColor(verdictTextColor(verdict))
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
@@ -2681,7 +2681,7 @@ private struct PinnedSpecHeader: View {
             Circle()
                 .fill(verdictColor(verdict).opacity(0.18))
             Image(systemName: verdictIcon(verdict))
-                .font(.system(size: 8, weight: .bold))
+                .font(TriosType.font(8, weight: .bold))
                 .foregroundColor(verdictColor(verdict))
         }
     }
@@ -2689,9 +2689,9 @@ private struct PinnedSpecHeader: View {
     private func verdictPill(count: Int, label: String, color: Color) -> some View {
         HStack(spacing: 3) {
             Text("\(count)")
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                .font(TriosType.font(9, weight: .bold, design: .monospaced))
             Text(label)
-                .font(.system(size: 9))
+                .font(TriosType.font(9))
         }
         .foregroundColor(color.opacity(0.9))
         .padding(.horizontal, 5)
@@ -2706,11 +2706,11 @@ private struct PinnedSpecHeader: View {
     private func blockReasonBanner(reason: String) -> some View {
         HStack(alignment: .top, spacing: 6) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 10, weight: .semibold))
+                .font(TriosType.font(10, weight: .semibold))
                 .foregroundColor(.red.opacity(0.85))
                 .padding(.top, 1)
             Text(reason)
-                .font(.system(size: 10, weight: .medium))
+                .font(TriosType.font(10, weight: .medium))
                 .foregroundColor(.red.opacity(0.8))
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
@@ -2844,10 +2844,10 @@ private struct QueenBeeBoard: View {
     private var emptyMessage: some View {
         HStack(spacing: 6) {
             Image(systemName: "moon.zzz")
-                .font(.system(size: 9))
+                .font(TriosType.font(9))
                 .foregroundColor(.grokDim)
             Text("No bees in flight. /delegate <owner/repo#N> <worker> <title> to start one.")
-                .font(.system(size: 10))
+                .font(TriosType.font(10))
                 .foregroundColor(.grokDim)
                 .lineLimit(1)
             Spacer(minLength: 4)
@@ -2865,28 +2865,28 @@ private struct QueenBeeBoard: View {
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "rectangle.grid.2x2.fill")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(TriosType.font(9, weight: .semibold))
                     .foregroundColor(.white.opacity(0.4))
                 Text("Show Bee Board")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(TriosType.font(10, weight: .bold))
                     .foregroundColor(.white.opacity(0.5))
                     .textCase(.uppercase)
                     .tracking(0.5)
                 Text("\(registry.open.count)")
-                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .font(TriosType.font(9, weight: .semibold, design: .monospaced))
                     .foregroundColor(.white.opacity(0.35))
                 if hasAttentionTasks {
                     HStack(spacing: 2) {
                         Image(systemName: "exclamationmark.circle.fill")
-                            .font(.system(size: 8))
+                            .font(TriosType.font(8))
                         Text("\(waitingTasks.count) waiting")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(TriosType.font(9, weight: .semibold))
                     }
                     .foregroundColor(.yellow.opacity(0.9))
                 }
                 Spacer()
                 Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(TriosType.font(8, weight: .semibold))
                     .foregroundColor(.grokMuted)
             }
             .contentShape(Rectangle())
@@ -2908,24 +2908,24 @@ private struct QueenBeeBoard: View {
     private var boardHeader: some View {
         HStack(spacing: 6) {
             Image(systemName: "rectangle.grid.2x2.fill")
-                .font(.system(size: 9, weight: .semibold))
+                .font(TriosType.font(9, weight: .semibold))
                 .foregroundColor(.white.opacity(0.4))
             Text("Bee Board")
-                .font(.system(size: 10, weight: .bold))
+                .font(TriosType.font(10, weight: .bold))
                 .foregroundColor(.white.opacity(0.5))
                 .textCase(.uppercase)
                 .tracking(0.5)
 
             Text("\(registry.open.count)")
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .font(TriosType.font(9, weight: .semibold, design: .monospaced))
                 .foregroundColor(.white.opacity(0.35))
 
             if hasAttentionTasks {
                 HStack(spacing: 2) {
                     Image(systemName: "exclamationmark.circle.fill")
-                        .font(.system(size: 8))
+                        .font(TriosType.font(8))
                     Text("\(waitingTasks.count) waiting on you")
-                        .font(.system(size: 9, weight: .semibold))
+                        .font(TriosType.font(9, weight: .semibold))
                 }
                 .foregroundColor(.yellow.opacity(0.9))
             }
@@ -2934,7 +2934,7 @@ private struct QueenBeeBoard: View {
                 isBoardVisible = false
             } label: {
                 Image(systemName: "chevron.up")
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(TriosType.font(9, weight: .semibold))
                     .foregroundColor(.grokMuted)
             }
             .buttonStyle(.plain)
@@ -2951,12 +2951,12 @@ private struct QueenBeeBoard: View {
     private func sectionHeader(_ title: String, count: Int) -> some View {
         HStack(spacing: 4) {
             Text(title)
-                .font(.system(size: 9, weight: .bold))
+                .font(TriosType.font(9, weight: .bold))
                 .foregroundColor(.white.opacity(0.5))
                 .textCase(.uppercase)
                 .tracking(0.5)
             Text("\(count)")
-                .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                .font(TriosType.font(9, weight: .semibold, design: .monospaced))
                 .foregroundColor(.white.opacity(0.35))
             Spacer()
         }
@@ -3130,23 +3130,23 @@ private struct BeeCard: View {
             // separator ever reaches the screen (#1129).
             HStack(spacing: 6) {
                 Image(systemName: stateIcon)
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(TriosType.font(9, weight: .semibold))
                     .foregroundColor(accentColor)
                 Text(stateLabel)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(TriosType.font(10, weight: .semibold))
                     .foregroundColor(accentColor)
                     .lineLimit(1)
 
                 Spacer(minLength: 4)
 
                 Text(verbatim: IssueBadgeForm.badge(task.issue.number))
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .font(TriosType.font(10, weight: .semibold, design: .monospaced))
                     .foregroundColor(.white.opacity(0.55))
             }
 
             // Row 2 — task title
             Text(task.title)
-                .font(.system(size: 11))
+                .font(TriosType.font(11))
                 .foregroundColor(.white.opacity(0.82))
                 .lineLimit(2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -3155,21 +3155,21 @@ private struct BeeCard: View {
             // Row 3 — bee + branch
             HStack(spacing: 4) {
                 Image(systemName: "ant.fill")
-                    .font(.system(size: 8))
+                    .font(TriosType.font(8))
                     .foregroundColor(accentColor.opacity(0.7))
                 Text(task.worker)
-                    .font(.system(size: 9, weight: .medium))
+                    .font(TriosType.font(9, weight: .medium))
                     .foregroundColor(.grokMuted)
                     .lineLimit(1)
                 if let branch = task.virtualBranch {
                     Text("·")
-                        .font(.system(size: 9))
+                        .font(TriosType.font(9))
                         .foregroundColor(.grokDim)
                     Image(systemName: "arrow.triangle.branch")
-                        .font(.system(size: 7))
+                        .font(TriosType.font(7))
                         .foregroundColor(.grokDim)
                     Text(branch)
-                        .font(.system(size: 9, design: .monospaced))
+                        .font(TriosType.font(9, design: .monospaced))
                         .foregroundColor(.grokMuted)
                         .lineLimit(1)
                         .truncationMode(.middle)
@@ -3191,7 +3191,7 @@ private struct BeeCard: View {
                 if task.state.needsQueenAttention {
                     Button(action: onAccept) {
                         Text("Accept")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(TriosType.font(9, weight: .semibold))
                             .foregroundColor(.green)
                     }
                     .buttonStyle(.plain)
@@ -3200,7 +3200,7 @@ private struct BeeCard: View {
                 if task.state == .running {
                     Button(action: onCancel) {
                         Text("Cancel")
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(TriosType.font(9, weight: .semibold))
                             .foregroundColor(.orange)
                     }
                     .buttonStyle(.plain)

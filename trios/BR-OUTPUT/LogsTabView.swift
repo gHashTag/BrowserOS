@@ -188,18 +188,18 @@ struct LogsTabView: View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
                 Text("LOGS")
-                    .font(.system(size: 22, weight: .bold))
+                    .font(TriosType.font(22, weight: .bold))
                     .foregroundColor(.grokText)
                 Spacer()
                 liveToggle
                 Toggle("Show build/test logs", isOn: $showArtifactLogs)
                     .toggleStyle(.switch)
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .foregroundColor(.grokMuted)
                     .frame(width: 160)
                 Button(action: loadAll) {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(TriosType.font(12, weight: .semibold))
                 }
                 .buttonStyle(.borderless)
                 .disabled(isLoading)
@@ -207,18 +207,18 @@ struct LogsTabView: View {
                     showingRetentionSheet = true
                 } label: {
                     Image(systemName: "gearshape")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(TriosType.font(12, weight: .semibold))
                 }
                 .buttonStyle(.borderless)
                 .help("Retention settings")
             }
             HStack(spacing: 6) {
                 Text("Runtime logs from .trinity and app services.")
-                    .font(.system(size: 12))
+                    .font(TriosType.font(12))
                     .foregroundColor(.grokMuted)
                 if let lastRefresh {
                     Text("Updated \(timeAgo(lastRefresh))")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(TriosType.font(11, weight: .medium))
                         .foregroundColor(isLive ? .green : .grokDim)
                 }
             }
@@ -232,12 +232,12 @@ struct LogsTabView: View {
                 .frame(width: 6, height: 6)
             Toggle("Live", isOn: $isLive)
                 .toggleStyle(.switch)
-                .font(.system(size: 11))
+                .font(TriosType.font(11))
                 .foregroundColor(.grokMuted)
                 .frame(width: 70)
             if isLive && isFollowPaused {
                 Text("paused")
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TriosType.font(10, weight: .medium))
                     .foregroundColor(.orange)
             }
         }
@@ -286,13 +286,13 @@ struct LogsTabView: View {
     private func insightChip(icon: String, value: String, label: String, tint: Color) -> some View {
         HStack(spacing: 5) {
             Image(systemName: icon)
-                .font(.system(size: 10))
+                .font(TriosType.font(10))
                 .foregroundColor(tint)
             Text(value)
-                .font(.system(size: 12, weight: .bold))
+                .font(TriosType.font(12, weight: .bold))
                 .foregroundColor(.grokText)
             Text(label)
-                .font(.system(size: 10))
+                .font(TriosType.font(10))
                 .foregroundColor(.grokMuted)
         }
         .padding(.horizontal, 8)
@@ -321,14 +321,14 @@ struct LogsTabView: View {
                 } label: {
                     HStack(spacing: 5) {
                         Image(systemName: source.icon)
-                            .font(.system(size: 10))
+                            .font(TriosType.font(10))
                             .foregroundColor(isHidden ? .grokDim : tint)
                         Text(source.displayName)
-                            .font(.system(size: 11, weight: .medium))
+                            .font(TriosType.font(11, weight: .medium))
                             .foregroundColor(isHidden ? .grokDim : .grokText)
                         if source.errorCount > 0 {
                             Text("\(source.errorCount)")
-                                .font(.system(size: 9, weight: .bold))
+                                .font(TriosType.font(9, weight: .bold))
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 1)
@@ -355,12 +355,12 @@ struct LogsTabView: View {
     private var sourceCards: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Log sources")
-                .font(.system(size: 14, weight: .semibold))
+                .font(TriosType.font(14, weight: .semibold))
                 .foregroundColor(.grokText)
 
             if visibleSources.isEmpty && !isLoading {
                 Text("No log sources found.")
-                    .font(.system(size: 12))
+                    .font(TriosType.font(12))
                     .foregroundColor(.grokMuted)
             }
 
@@ -374,15 +374,15 @@ struct LogsTabView: View {
                             HStack(spacing: 5) {
                                 Image(systemName: source.icon)
                                     .foregroundColor(tint)
-                                    .font(.system(size: 12))
+                                    .font(TriosType.font(12))
                                 Text(source.displayName)
-                                    .font(.system(size: 12, weight: .semibold))
+                                    .font(TriosType.font(12, weight: .semibold))
                                     .foregroundColor(.grokText)
                                     .lineLimit(1)
                                 Spacer(minLength: 0)
                             }
                             Text(source.name)
-                                .font(.system(size: 10))
+                                .font(TriosType.font(10))
                                 .foregroundColor(.grokMuted)
                                 .lineLimit(1)
                             HStack(spacing: 6) {
@@ -413,7 +413,7 @@ struct LogsTabView: View {
         Group {
             if show {
                 Text(text)
-                    .font(.system(size: 9, weight: .semibold))
+                    .font(TriosType.font(9, weight: .semibold))
                     .foregroundColor(tint)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 2)
@@ -456,35 +456,35 @@ struct LogsTabView: View {
                 Image(systemName: "timeline.selection")
                     .foregroundColor(.grokAccent)
                 Text("Correlated timeline")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(TriosType.font(14, weight: .semibold))
                     .foregroundColor(.grokText)
                 Spacer()
                 Text("\(visibleSources.count) sources | \(unifiedLines.count) rows")
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .foregroundColor(.grokDim)
                 Toggle("Dedup", isOn: $deduplicate)
                     .toggleStyle(.switch)
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .foregroundColor(.grokMuted)
                     .frame(width: 80)
                 Button("Copy") {
                     copyUnifiedLines()
                 }
                 .buttonStyle(.borderless)
-                .font(.system(size: 11))
+                .font(TriosType.font(11))
                 Button("Export") {
                     exportUnifiedLines()
                 }
                 .buttonStyle(.borderless)
-                .font(.system(size: 11))
+                .font(TriosType.font(11))
             }
             if let lastExportPath {
                 HStack(spacing: 5) {
                     Image(systemName: "arrow.down.circle")
-                        .font(.system(size: 10))
+                        .font(TriosType.font(10))
                         .foregroundColor(.green)
                     Text("Exported to \(lastExportPath)")
-                        .font(.system(size: 10))
+                        .font(TriosType.font(10))
                         .foregroundColor(.green.opacity(0.9))
                         .lineLimit(1)
                 }
@@ -546,9 +546,9 @@ struct LogsTabView: View {
                     Button(action: resumeLiveFollow) {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.down.circle")
-                                .font(.system(size: 10))
+                                .font(TriosType.font(10))
                             Text("Resume live")
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(TriosType.font(11, weight: .semibold))
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
@@ -570,10 +570,10 @@ struct LogsTabView: View {
         return HStack(alignment: .top, spacing: 6) {
             HStack(spacing: 2) {
                 Image(systemName: source?.icon ?? "doc.text")
-                    .font(.system(size: 8))
+                    .font(TriosType.font(8))
                     .foregroundColor(sourceTint)
                 Text(source?.displayName ?? line.sourceID)
-                    .font(.system(size: 8, weight: .semibold))
+                    .font(TriosType.font(8, weight: .semibold))
                     .foregroundColor(sourceTint)
                     .lineLimit(1)
             }
@@ -583,28 +583,28 @@ struct LogsTabView: View {
             .clipShape(Capsule())
 
             Image(systemName: line.level.icon)
-                .font(.system(size: 9))
+                .font(TriosType.font(9))
                 .foregroundColor(line.level.color)
                 .frame(width: 14)
             if let timestamp = line.timestamp {
                 Text(timestamp)
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(TriosType.font(9, design: .monospaced))
                     .foregroundColor(.grokDim)
                     .frame(minWidth: 70, alignment: .leading)
             } else {
                 Image(systemName: "clock.badge.questionmark")
-                    .font(.system(size: 9))
+                    .font(TriosType.font(9))
                     .foregroundColor(.grokDim)
                     .frame(width: 14)
             }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
                     Text(line.level.label)
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .font(TriosType.font(8, weight: .bold, design: .monospaced))
                         .foregroundColor(line.level.color)
                     if line.isDuplicateGroup {
                         Text("x\(line.duplicateCount)")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(TriosType.font(9, weight: .bold))
                             .foregroundColor(.white)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
@@ -613,18 +613,18 @@ struct LogsTabView: View {
                     }
                     if let event = line.event, !event.isEmpty {
                         Text(event)
-                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .font(TriosType.font(9, weight: .semibold, design: .monospaced))
                             .foregroundColor(.blue.opacity(0.8))
                     }
                 }
                 Text(line.message)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TriosType.font(11, design: .monospaced))
                     .foregroundColor(line.level.color)
                     .textSelection(.enabled)
                     .lineLimit(line.isDuplicateGroup ? 2 : 4)
                 if let details = line.details, !details.isEmpty, !line.isDuplicateGroup {
                     Text(details)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TriosType.font(10, design: .monospaced))
                         .foregroundColor(.grokMuted)
                         .lineLimit(2)
                 }
@@ -694,7 +694,7 @@ struct LogsTabView: View {
                     ForEach(0..<structured.count, id: \.self) { index in
                         let token = structured[index]
                         Text(queryTokenLabel(token))
-                            .font(.system(size: 9, weight: .semibold))
+                            .font(TriosType.font(9, weight: .semibold))
                             .foregroundColor(.grokText)
                             .padding(.horizontal, 7)
                             .padding(.vertical, 3)
@@ -724,7 +724,7 @@ struct LogsTabView: View {
     private var quickFiltersBar: some View {
         HStack(spacing: 8) {
             Text("Quick filters")
-                .font(.system(size: 11, weight: .medium))
+                .font(TriosType.font(11, weight: .medium))
                 .foregroundColor(.grokMuted)
 
             ScrollView(.horizontal, showsIndicators: false) {
@@ -735,7 +735,7 @@ struct LogsTabView: View {
                             applySavedSearch(search)
                         } label: {
                             Text(search.label)
-                                .font(.system(size: 10, weight: .semibold))
+                                .font(TriosType.font(10, weight: .semibold))
                                 .foregroundColor(isActive ? Color.black : .grokText)
                                 .padding(.horizontal, 8)
                                 .padding(.vertical, 4)
@@ -760,9 +760,9 @@ struct LogsTabView: View {
                     } label: {
                         HStack(spacing: 2) {
                             Image(systemName: "plus")
-                                .font(.system(size: 9, weight: .bold))
+                                .font(TriosType.font(9, weight: .bold))
                             Text("Save")
-                                .font(.system(size: 10, weight: .semibold))
+                                .font(TriosType.font(10, weight: .semibold))
                         }
                         .foregroundColor(.grokText)
                         .padding(.horizontal, 8)
@@ -781,7 +781,7 @@ struct LogsTabView: View {
                         resetSavedSearches()
                     } label: {
                         Text("Reset")
-                            .font(.system(size: 10, weight: .semibold))
+                            .font(TriosType.font(10, weight: .semibold))
                             .foregroundColor(.grokMuted)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
@@ -797,7 +797,7 @@ struct LogsTabView: View {
             if !recentSearches.isEmpty {
                 HStack(spacing: 8) {
                     Text("Recent")
-                        .font(.system(size: 11, weight: .medium))
+                        .font(TriosType.font(11, weight: .medium))
                         .foregroundColor(.grokMuted)
 
                     ScrollView(.horizontal, showsIndicators: false) {
@@ -809,9 +809,9 @@ struct LogsTabView: View {
                                 } label: {
                                     HStack(spacing: 3) {
                                         Image(systemName: "clock")
-                                            .font(.system(size: 9))
+                                            .font(TriosType.font(9))
                                         Text(recent.query)
-                                            .font(.system(size: 10, weight: .semibold))
+                                            .font(TriosType.font(10, weight: .semibold))
                                             .lineLimit(1)
                                     }
                                     .foregroundColor(isActive ? Color.black : .grokText)
@@ -843,7 +843,7 @@ struct LogsTabView: View {
                                 showingClearHistoryAlert = true
                             } label: {
                                 Text("Clear")
-                                    .font(.system(size: 10, weight: .semibold))
+                                    .font(TriosType.font(10, weight: .semibold))
                                     .foregroundColor(.grokMuted)
                                     .padding(.horizontal, 8)
                                     .padding(.vertical, 4)
@@ -861,10 +861,10 @@ struct LogsTabView: View {
             HStack(spacing: 10) {
                 HStack(spacing: 5) {
                     Image(systemName: "magnifyingglass")
-                        .font(.system(size: 11))
+                        .font(TriosType.font(11))
                         .foregroundColor(.grokDim)
                     TextField("Search messages, events, details", text: $searchText)
-                        .font(.system(size: 12))
+                        .font(TriosType.font(12))
                         .textFieldStyle(.plain)
                         .foregroundColor(.grokText)
                         .onSubmit {
@@ -878,7 +878,7 @@ struct LogsTabView: View {
                             searchText = ""
                         } label: {
                             Image(systemName: "xmark.circle.fill")
-                                .font(.system(size: 11))
+                                .font(TriosType.font(11))
                                 .foregroundColor(.grokDim)
                         }
                         .buttonStyle(.borderless)
@@ -901,13 +901,13 @@ struct LogsTabView: View {
 
                 Toggle("Dedup", isOn: $deduplicate)
                     .toggleStyle(.switch)
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .foregroundColor(.grokMuted)
                     .frame(width: 80)
 
                 Toggle("Quiet", isOn: $suppressNoise)
                     .toggleStyle(.switch)
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .foregroundColor(.grokMuted)
                     .frame(width: 80)
 
@@ -918,9 +918,9 @@ struct LogsTabView: View {
                 } label: {
                     HStack(spacing: 3) {
                         Image(systemName: "speaker.slash.fill")
-                            .font(.system(size: 9))
+                            .font(TriosType.font(9))
                         Text("Rules")
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(TriosType.font(11, weight: .semibold))
                     }
                     .foregroundColor(.grokText)
                     .padding(.horizontal, 8)
@@ -944,7 +944,7 @@ struct LogsTabView: View {
             minLevel = level
         } label: {
             Text(level.label)
-                .font(.system(size: 10, weight: .semibold))
+                .font(TriosType.font(10, weight: .semibold))
                 .foregroundColor(isSelected ? Color.black : level.color)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 4)
@@ -965,46 +965,46 @@ struct LogsTabView: View {
                         Image(systemName: source.icon)
                             .foregroundColor(tint)
                         Text(source.displayName)
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(TriosType.font(14, weight: .semibold))
                             .foregroundColor(.grokText)
                         Spacer()
                         let rowBase = deduplicate ? source.lines.count : source.rawLines.count
                         Text("\(filteredLines(for: source).count) / \(rowBase) rows")
-                            .font(.system(size: 11))
+                            .font(TriosType.font(11))
                             .foregroundColor(.grokDim)
                         Button("Jump to latest") {
                             resumeLiveFollow()
                         }
                         .buttonStyle(.borderless)
-                        .font(.system(size: 11))
+                        .font(TriosType.font(11))
                         Button("Copy") {
                             copyFilteredLines(source)
                         }
                         .buttonStyle(.borderless)
-                        .font(.system(size: 11))
+                        .font(TriosType.font(11))
                         Button("Export") {
                             exportFilteredLines(source)
                         }
                         .buttonStyle(.borderless)
-                        .font(.system(size: 11))
+                        .font(TriosType.font(11))
                     }
                     if source.wasCapped {
                         HStack(spacing: 5) {
                             Image(systemName: "ellipsis")
-                                .font(.system(size: 10))
+                                .font(TriosType.font(10))
                                 .foregroundColor(.yellow)
                             Text("Showing last \(maxLinesPerSource) of \(source.originalLineCount) lines. Older lines are available in the file.")
-                                .font(.system(size: 10))
+                                .font(TriosType.font(10))
                                 .foregroundColor(.yellow.opacity(0.9))
                         }
                     }
                     if let lastExportPath {
                         HStack(spacing: 5) {
                             Image(systemName: "arrow.down.circle")
-                                .font(.system(size: 10))
+                                .font(TriosType.font(10))
                                 .foregroundColor(.green)
                             Text("Exported to \(lastExportPath)")
-                                .font(.system(size: 10))
+                                .font(TriosType.font(10))
                                 .foregroundColor(.green.opacity(0.9))
                                 .lineLimit(1)
                         }
@@ -1020,7 +1020,7 @@ struct LogsTabView: View {
                 }
             } else {
                 Text("Select a log source to view its entries.")
-                    .font(.system(size: 12))
+                    .font(TriosType.font(12))
                     .foregroundColor(.grokMuted)
                     .padding(.top, 20)
             }
@@ -1061,9 +1061,9 @@ struct LogsTabView: View {
                     Button(action: resumeLiveFollow) {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.down.circle")
-                                .font(.system(size: 10))
+                                .font(TriosType.font(10))
                             Text("Resume live")
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(TriosType.font(11, weight: .semibold))
                         }
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
@@ -1082,23 +1082,23 @@ struct LogsTabView: View {
     private func logRow(_ line: ParsedLogLine) -> some View {
         HStack(alignment: .top, spacing: 6) {
             Image(systemName: line.level.icon)
-                .font(.system(size: 9))
+                .font(TriosType.font(9))
                 .foregroundColor(line.level.color)
                 .frame(width: 14)
             if let timestamp = line.timestamp {
                 Text(timestamp)
-                    .font(.system(size: 9, design: .monospaced))
+                    .font(TriosType.font(9, design: .monospaced))
                     .foregroundColor(.grokDim)
                     .frame(minWidth: 70, alignment: .leading)
             }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
                     Text(line.level.label)
-                        .font(.system(size: 8, weight: .bold, design: .monospaced))
+                        .font(TriosType.font(8, weight: .bold, design: .monospaced))
                         .foregroundColor(line.level.color)
                     if line.isDuplicateGroup {
                         Text("x\(line.duplicateCount)")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(TriosType.font(9, weight: .bold))
                             .foregroundColor(.white)
                             .padding(.horizontal, 5)
                             .padding(.vertical, 1)
@@ -1107,18 +1107,18 @@ struct LogsTabView: View {
                     }
                     if let event = line.event, !event.isEmpty {
                         Text(event)
-                            .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                            .font(TriosType.font(9, weight: .semibold, design: .monospaced))
                             .foregroundColor(.blue.opacity(0.8))
                     }
                 }
                 Text(line.message)
-                    .font(.system(size: 11, design: .monospaced))
+                    .font(TriosType.font(11, design: .monospaced))
                     .foregroundColor(line.level.color)
                     .textSelection(.enabled)
                     .lineLimit(line.isDuplicateGroup ? 2 : 4)
                 if let details = line.details, !details.isEmpty, !line.isDuplicateGroup {
                     Text(details)
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TriosType.font(10, design: .monospaced))
                         .foregroundColor(.grokMuted)
                         .lineLimit(2)
                 }
@@ -1177,7 +1177,7 @@ struct LogsTabView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 Text("Subsystem")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(TriosType.font(11, weight: .semibold))
                     .foregroundColor(.grokMuted)
                 if !focusedSubsystems.isEmpty {
                     Button("Show all") {
@@ -1185,7 +1185,7 @@ struct LogsTabView: View {
                         logsNavigator.clearFocus()
                     }
                     .buttonStyle(.plain)
-                    .font(.system(size: 10, weight: .medium))
+                    .font(TriosType.font(10, weight: .medium))
                     .foregroundColor(.blue)
                 }
             }
@@ -1200,7 +1200,7 @@ struct LogsTabView: View {
                         }
                     } label: {
                         Text(subsystem.displayName)
-                            .font(.system(size: 10, weight: .medium))
+                            .font(TriosType.font(10, weight: .medium))
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
                             .background(
@@ -1491,7 +1491,7 @@ struct NoiseProfileSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Text("Noise rules")
-                    .font(.system(size: 16, weight: .bold))
+                    .font(TriosType.font(16, weight: .bold))
                     .foregroundColor(.grokText)
                 Spacer()
                 Button("Import") {
@@ -1516,7 +1516,7 @@ struct NoiseProfileSheet: View {
 
             if !importExportStatus.isEmpty {
                 Text(importExportStatus)
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .foregroundColor(.grokMuted)
             }
 
@@ -1526,15 +1526,15 @@ struct NoiseProfileSheet: View {
                         Image(systemName: "eye.slash")
                             .foregroundColor(.grokAccent)
                         Text("Preview: \"\(pendingRule.label)\"")
-                            .font(.system(size: 12, weight: .semibold))
+                            .font(TriosType.font(12, weight: .semibold))
                             .foregroundColor(.grokText)
                         Spacer()
                         Text("matches \(previewCount) line\(previewCount == 1 ? "" : "s")")
-                            .font(.system(size: 11))
+                            .font(TriosType.font(11))
                             .foregroundColor(previewCount > 0 ? .orange : .grokDim)
                     }
                     Text("Event: \(pendingRule.event ?? "-") | Message: \(pendingRule.message ?? "-") | Raw: \(pendingRule.raw ?? "-")")
-                        .font(.system(size: 10, design: .monospaced))
+                        .font(TriosType.font(10, design: .monospaced))
                         .foregroundColor(.grokMuted)
                         .lineLimit(2)
                     sourceScopeChips(for: pendingRule.sourceIDs, fontSize: 10)
@@ -1549,7 +1549,7 @@ struct NoiseProfileSheet: View {
                             dismiss()
                         } label: {
                             Text("Add rule")
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(TriosType.font(11, weight: .semibold))
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
@@ -1568,11 +1568,11 @@ struct NoiseProfileSheet: View {
             suggestionsSection
 
             Text("Built-in rules are always applied when Quiet is on. Custom rules are saved to \(ProjectPaths.trinity)/state/logs_noise_profile.json.")
-                .font(.system(size: 11))
+                .font(TriosType.font(11))
                 .foregroundColor(.grokMuted)
 
             Text("Custom rules")
-                .font(.system(size: 13, weight: .semibold))
+                .font(TriosType.font(13, weight: .semibold))
                 .foregroundColor(.grokText)
 
             ScrollView {
@@ -1586,7 +1586,7 @@ struct NoiseProfileSheet: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Add rule")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(TriosType.font(12, weight: .semibold))
                     .foregroundColor(.grokText)
                 HStack(spacing: 6) {
                     TextField("Label", text: $newLabel)
@@ -1663,12 +1663,12 @@ struct NoiseProfileSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Text("Suggested rules")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(TriosType.font(13, weight: .semibold))
                     .foregroundColor(.grokText)
                 Spacer()
                 if suggestions.isEmpty {
                     Text("No repetitive patterns detected in current logs.")
-                        .font(.system(size: 11))
+                        .font(TriosType.font(11))
                         .foregroundColor(.grokMuted)
                 }
             }
@@ -1690,7 +1690,7 @@ struct NoiseProfileSheet: View {
         HStack(spacing: 8) {
             let sourceName = availableSources.first { $0.id == suggestion.sourceID }?.displayName ?? suggestion.sourceID
             Text(sourceName)
-                .font(.system(size: 10, weight: .semibold))
+                .font(TriosType.font(10, weight: .semibold))
                 .foregroundColor(.grokText)
                 .padding(.horizontal, 6)
                 .padding(.vertical, 2)
@@ -1702,14 +1702,14 @@ struct NoiseProfileSheet: View {
                 }
 
             Text(suggestion.rule.label)
-                .font(.system(size: 11, design: .monospaced))
+                .font(TriosType.font(11, design: .monospaced))
                 .foregroundColor(.grokText)
                 .lineLimit(1)
 
             Spacer()
 
             Text("Suppresses \(suggestion.matchedCount) line\(suggestion.matchedCount == 1 ? "" : "s")")
-                .font(.system(size: 10))
+                .font(TriosType.font(10))
                 .foregroundColor(.grokMuted)
 
             Button("Add") {
@@ -1717,7 +1717,7 @@ struct NoiseProfileSheet: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
-            .font(.system(size: 11, weight: .semibold))
+            .font(TriosType.font(11, weight: .semibold))
         }
         .padding(8)
         .background(Color.grokSurface)
@@ -1836,7 +1836,7 @@ struct NoiseProfileSheet: View {
             }
         } label: {
             Image(systemName: "ellipsis.circle")
-                .font(.system(size: 12))
+                .font(TriosType.font(12))
                 .foregroundColor(.grokMuted)
         }
         .menuStyle(.borderlessButton)
@@ -1907,7 +1907,7 @@ struct LogRetentionSettingsSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             HStack {
                 Text("Log retention")
-                    .font(.system(size: 16, weight: .bold))
+                    .font(TriosType.font(16, weight: .bold))
                     .foregroundColor(.grokText)
                 Spacer()
                 Button("Reset to defaults") {
@@ -1922,7 +1922,7 @@ struct LogRetentionSettingsSheet: View {
                 .controlSize(.small)
             }
             Text("Overrides merge with built-in defaults. Leave a field empty to keep the default.")
-                .font(.system(size: 11))
+                .font(TriosType.font(11))
                 .foregroundColor(.grokMuted)
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 14) {
@@ -1953,7 +1953,7 @@ struct LogRetentionSettingsSheet: View {
     private func policySection(name: String, label: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(label)
-                .font(.system(size: 13, weight: .semibold))
+                .font(TriosType.font(13, weight: .semibold))
                 .foregroundColor(.grokText)
             OptionalSizeField(title: "Max file size (MB)", bytes: overrideBinding(for: name).maxFileSizeBytes)
             OptionalIntField(title: "Max archive count", value: overrideBinding(for: name).maxArchiveCount)
@@ -2070,7 +2070,7 @@ private struct RetentionDashboardPanel: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("Current retention state")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(TriosType.font(13, weight: .semibold))
                     .foregroundColor(.grokText)
                 Spacer()
                 Button("Rotate now") {
@@ -2092,7 +2092,7 @@ private struct RetentionDashboardPanel: View {
             HStack {
                 Spacer()
                 Text(totalFootprint)
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .foregroundColor(.grokMuted)
             }
         }
@@ -2112,18 +2112,18 @@ private struct RetentionDashboardPanel: View {
         return VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text(label)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(TriosType.font(12, weight: .semibold))
                     .foregroundColor(.grokText)
                 Spacer()
                 Text(activeArchiveSummary(snapshot: snapshot))
-                    .font(.system(size: 11))
+                    .font(TriosType.font(11))
                     .foregroundColor(.grokMuted)
             }
             if let snapshot = snapshot {
                 usageBar(snapshot: snapshot)
                     .frame(height: 6)
                 Text(effectiveSummary(snapshot: snapshot))
-                    .font(.system(size: 10))
+                    .font(TriosType.font(10))
                     .foregroundColor(.grokMuted)
             }
         }
@@ -2213,7 +2213,7 @@ private struct OptionalSizeField: View {
     var body: some View {
         HStack {
             Text(title)
-                .font(.system(size: 11))
+                .font(TriosType.font(11))
                 .foregroundColor(.grokText)
                 .frame(width: 150, alignment: .leading)
             TextField("MB", text: Binding(
@@ -2227,7 +2227,7 @@ private struct OptionalSizeField: View {
                 }
             ))
             .textFieldStyle(.roundedBorder)
-            .font(.system(size: 12))
+            .font(TriosType.font(12))
             .frame(width: 80)
         }
     }
@@ -2240,7 +2240,7 @@ private struct OptionalIntField: View {
     var body: some View {
         HStack {
             Text(title)
-                .font(.system(size: 11))
+                .font(TriosType.font(11))
                 .foregroundColor(.grokText)
                 .frame(width: 150, alignment: .leading)
             TextField("count", text: Binding(
@@ -2254,7 +2254,7 @@ private struct OptionalIntField: View {
                 }
             ))
             .textFieldStyle(.roundedBorder)
-            .font(.system(size: 12))
+            .font(TriosType.font(12))
             .frame(width: 80)
         }
     }
@@ -2267,7 +2267,7 @@ private struct OptionalDaysField: View {
     var body: some View {
         HStack {
             Text(title)
-                .font(.system(size: 11))
+                .font(TriosType.font(11))
                 .foregroundColor(.grokText)
                 .frame(width: 150, alignment: .leading)
             TextField("days", text: Binding(
@@ -2281,7 +2281,7 @@ private struct OptionalDaysField: View {
                 }
             ))
             .textFieldStyle(.roundedBorder)
-            .font(.system(size: 12))
+            .font(TriosType.font(12))
             .frame(width: 80)
         }
     }

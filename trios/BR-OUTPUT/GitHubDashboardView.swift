@@ -21,7 +21,7 @@ struct GitHubDashboardView: View {
         VStack(spacing: 0) {
             HStack {
                 Text("Repositories")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(TriosType.font(13, weight: .semibold))
                     .foregroundColor(.grokText)
                 Spacer()
                 if vm.isLoading {
@@ -43,15 +43,15 @@ struct GitHubDashboardView: View {
             if let error = vm.errorMessage {
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 10))
+                        .font(TriosType.font(10))
                         .foregroundColor(.yellow)
                     Text(error)
-                        .font(.system(size: 10))
+                        .font(TriosType.font(10))
                         .foregroundColor(.grokText)
                     Spacer()
                     Button(action: { vm.errorMessage = nil }) {
                         Image(systemName: "xmark")
-                            .font(.system(size: 10))
+                            .font(TriosType.font(10))
                             .foregroundColor(.grokMuted)
                     }
                     .buttonStyle(.plain)
@@ -68,13 +68,13 @@ struct GitHubDashboardView: View {
                 VStack(spacing: 8) {
                     Spacer()
                     Image(systemName: "folder")
-                        .font(.system(size: 32))
+                        .font(TriosType.font(32))
                         .foregroundColor(.grokDim)
                     Text("No repositories")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(TriosType.font(14, weight: .semibold))
                         .foregroundColor(.grokText)
                     Text("Check GitHub connection")
-                        .font(.system(size: 11))
+                        .font(TriosType.font(11))
                         .foregroundColor(.grokMuted)
                     Spacer()
                 }
@@ -84,14 +84,14 @@ struct GitHubDashboardView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "folder.fill")
                             .foregroundColor(.grokMuted)
-                            .font(.system(size: 12))
+                            .font(TriosType.font(12))
                         VStack(alignment: .leading, spacing: 2) {
                             Text(repo.name)
-                                .font(.system(size: 13, design: .monospaced))
+                                .font(TriosType.font(13, design: .monospaced))
                                 .foregroundColor(.grokText)
                             if let desc = repo.description {
                                 Text(desc)
-                                    .font(.system(size: 10))
+                                    .font(TriosType.font(10))
                                     .lineLimit(1)
                                     .foregroundColor(.grokMuted)
                             }
@@ -99,7 +99,7 @@ struct GitHubDashboardView: View {
                         Spacer()
                         if repo.open_issues_count > 0 {
                             Text("\(repo.open_issues_count)")
-                                .font(.system(size: 10))
+                                .font(TriosType.font(10))
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 1)
                                 .background(Color.red.opacity(0.2))
@@ -122,14 +122,14 @@ struct GitHubDashboardView: View {
             HStack(spacing: 8) {
                 Button(action: { selectedRepo = nil }) {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(TriosType.font(13, weight: .semibold))
                         .foregroundColor(.grokMuted)
                 }
                 .buttonStyle(.plain)
 
                 if let repo = selectedRepo {
                     Text(repo.name)
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                        .font(TriosType.font(13, weight: .semibold, design: .monospaced))
                         .foregroundColor(.grokText)
                 }
 
@@ -152,10 +152,10 @@ struct GitHubDashboardView: View {
                 VStack(spacing: 8) {
                     Spacer()
                     Image(systemName: "checkmark.circle")
-                        .font(.system(size: 32))
+                        .font(TriosType.font(32))
                         .foregroundColor(.grokDim)
                     Text("No issues")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(TriosType.font(14, weight: .semibold))
                         .foregroundColor(.grokText)
                     Spacer()
                 }
@@ -169,10 +169,10 @@ struct GitHubDashboardView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 4) {
                             Text(verbatim: "#\(issue.number)")
-                                .font(.system(size: 10, design: .monospaced))
+                                .font(TriosType.font(10, design: .monospaced))
                                 .foregroundColor(.grokMuted)
                             Text(issue.title)
-                                .font(.system(size: 12))
+                                .font(TriosType.font(12))
                                 .foregroundColor(.grokText)
                                 .lineLimit(1)
                         }
@@ -180,7 +180,7 @@ struct GitHubDashboardView: View {
                         HStack(spacing: 4) {
                             ForEach(issue.labels.prefix(2)) { label in
                                 Text(label.name)
-                                    .font(.system(size: 9))
+                                    .font(TriosType.font(9))
                                     .padding(.horizontal, 4)
                                     .padding(.vertical, 1)
                                     .background(Color(hex: label.color).opacity(0.2))

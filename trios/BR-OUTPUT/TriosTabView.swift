@@ -38,7 +38,7 @@ struct TriosTabView: View {
                     logoView(size: CGSize(width: 22, height: 18))
 
                     Text(TriosBranding.displayName)
-                        .font(.system(size: 12, weight: .bold, design: .default))
+                        .font(TriosType.font(12, weight: .bold, design: .default))
                         .foregroundColor(.grokText)
 
                     // Dev and release look identical, and their settings are
@@ -46,7 +46,7 @@ struct TriosTabView: View {
                     // appears to be ignored by the other.
                     if ProjectPaths.isDevVariant {
                         Text("DEV")
-                            .font(.system(size: 9, weight: .heavy, design: .monospaced))
+                            .font(TriosType.font(9, weight: .heavy, design: .monospaced))
                             .padding(.horizontal, 5)
                             .padding(.vertical, 2)
                             .background(Capsule().fill(Color.orange.opacity(0.25)))
@@ -66,7 +66,7 @@ struct TriosTabView: View {
                         .fill(viewModel.isServerReachable ? Color.green : Color.grokDim)
                         .frame(width: 6, height: 6)
                     Text(viewModel.isServerReachable ? "Online" : "Offline")
-                        .font(.system(size: 10, weight: .medium))
+                        .font(TriosType.font(10, weight: .medium))
                         .foregroundColor(.grokMuted)
                 }
                 .help("BrowserOS Agent server \(viewModel.isServerReachable ? "is reachable" : "is not reachable") on port \(ProjectPaths.mcpPort)")
@@ -77,7 +77,7 @@ struct TriosTabView: View {
                             .fill(Color.blue)
                             .frame(width: 6, height: 6)
                         Text("A2A")
-                            .font(.system(size: 10, weight: .medium))
+                            .font(TriosType.font(10, weight: .medium))
                             .foregroundColor(.grokMuted)
                     }
                     .help("A2A registry client is registered")
@@ -91,14 +91,14 @@ struct TriosTabView: View {
                 }
             }) {
                 Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(TriosType.font(12, weight: .semibold))
                     .foregroundColor(.grokMuted)
             }
             .buttonStyle(.plain)
 
             Button(action: toggleFullScreen) {
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(TriosType.font(11, weight: .semibold))
                     .foregroundColor(.grokMuted)
             }
             .buttonStyle(.plain)
@@ -124,12 +124,12 @@ struct TriosTabView: View {
         VStack(spacing: 0) {
             HStack {
                 Text("History")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(TriosType.font(14, weight: .semibold))
                     .foregroundColor(.grokText)
                 Spacer()
                 Button(action: { viewModel.showHistory = false }) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(TriosType.font(12, weight: .semibold))
                         .foregroundColor(.grokMuted)
                 }
                 .buttonStyle(.plain)
@@ -141,7 +141,7 @@ struct TriosTabView: View {
 
             if viewModel.conversations.isEmpty {
                 Text("No history yet")
-                    .font(.system(size: 12))
+                    .font(TriosType.font(12))
                     .foregroundColor(.grokDim)
                     .padding(.top, 20)
             } else {
@@ -151,11 +151,11 @@ struct TriosTabView: View {
                     }) {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(conv.title)
-                                .font(.system(size: 12))
+                                .font(TriosType.font(12))
                                 .foregroundColor(.grokText)
                                 .lineLimit(1)
                             Text(conv.updatedAt, style: .relative)
-                                .font(.system(size: 9))
+                                .font(TriosType.font(9))
                                 .foregroundColor(.grokDim)
                         }
                     }
