@@ -1114,3 +1114,50 @@ defect and the sum is an unreadable app. The fix that holds is not 317 edits,
 it is one function every size passes through, plus a gate that fails on a raw
 `.system(size:)` anywhere else. Without the gate the 618th is indistinguishable
 from the 617 that came before it.
+
+## One word for two endings makes the record useless
+
+The delegation registry spelled every failure `failed`. A worker killed by a
+rebuild and a worker that ran forty-one tool calls and committed nothing were
+the same word afterwards, so nothing downstream could treat them differently -
+and the thing downstream was the decision to send another bee. #1127 collected
+seven attempts that way.
+
+The two are separable from what was already recorded, without adding any new
+measurement:
+
+```
+streamOutcome == "open" && completedTurns == 0   -> interrupted
+committedFiles == 0                              -> produced nothing
+otherwise                                        -> worked and still failed
+```
+
+A worker that finishes closes its stream. One that was killed never gets to.
+
+**Rule:** when a state is reached from two causes with different consequences,
+record the cause at the moment it is known. `reconcileOrphanedWorkers` KNEW it
+was reconciling a dead process - it exists for that - and wrote the same word
+as a genuine defeat. The knowledge was there and discarded, which is cheaper to
+fix than to reconstruct.
+
+**Corollary for the fallback:** records written before the field existed cannot
+be classified now. Count them as the *real* kind, not the harmless one - the
+alternative lets an issue with a long history of defeats look untouched and
+start its budget over.
+
+## Do not let your own restarts read as the system failing
+
+Ten of the fourteen dev failures in this round were tasks I orphaned by killing
+the app during rebuilds. Presented as-is they would have been fourteen Queen
+defects. Check `streamOutcome` and the measurement fields before attributing a
+failure to the thing you are investigating: all-null measurements mean nobody
+ran, and if you restarted the app that hour, the likeliest cause is you.
+
+## A retry with an identical brief is the first attempt run twice
+
+Counting attempts is only half. The bee that goes second must be told what the
+first hit, or it cannot do anything different - it does not even know it is
+second. The briefing carries the kinds, in order, and an explicit instruction
+not to repeat the approach, plus: if you reach the same wall, name it rather
+than stopping quietly. An empty branch and a named obstacle cost the same and
+are worth very different amounts.
