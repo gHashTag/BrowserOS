@@ -7247,8 +7247,33 @@ final class ChatViewModel: ObservableObject {
         // and the criteria name symbols that are present in them. When
         // they do, skip that candidate, journal why, and take the next.
         // A candidate that is not done is proposed exactly as before.
+        // An issue that already has a live task is not a candidate.
+        //
+        // Without this the autonomous tick spun: every five minutes it chose
+        // the same highest-scored issue, `delegateIssueToWorker` refused it
+        // with "already delegated", and the tick ended there rather than
+        // moving to the next one. Three tasks sat in awaitingReview, one slot
+        // of four stayed free, and nothing new was ever started - twenty-three
+        // delegations in ten minutes, all of them the same refusal.
+        //
+        // The refusal itself is right: one chat per issue. What was wrong is
+        // treating it as the end of the tick instead of as "try the next one".
+        let liveIssueNumbers = Set(
+            delegationRegistry.open
+                .filter { !$0.state.isTerminal }
+                .map(\.issue.number)
+        )
+
         var chosenScored: ScoredIssue!
         for candidate in sorted {
+            if liveIssueNumbers.contains(candidate.number) {
+                TriosLogBus.shared.info(
+                    .queen, "queen.choose.already_running",
+                    "Skipping #\(candidate.number): a worker already has it",
+                    ["issue": "gHashTag/trios#\(candidate.number)"]
+                )
+                continue
+            }
             if let evidence = Self.looksAlreadyDone(
                 body: candidate.body,
                 paths: candidate.paths

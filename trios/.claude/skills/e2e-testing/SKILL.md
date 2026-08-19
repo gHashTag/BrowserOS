@@ -981,3 +981,77 @@ This is the second time the same mistake produced a publishable-looking number
 in this repository. Print the status alongside the timing, always, in the same
 line — not as a separate check that can be skipped when the numbers look
 plausible.
+
+## Triage by cause, not by file — and let an adversary kill the diagnoses
+
+Sixty-two failing tests across nineteen classes were triaged by nine read-only
+agents in parallel, one per related cluster, each asked to classify every cause
+as product-defect / test-defect / environment / design-question. Every claimed
+*product* defect was then handed to a separate agent told to **refute** it, with
+the instruction to default to refuted when unsure.
+
+Nine claims died there. What survived was almost all real, and most of it was
+product code rather than tests — the opposite of the assumption that a long-red
+suite is mostly stale tests.
+
+Two things made this work, and both are worth copying:
+
+- **Read-only diagnosis, serial repair.** Parallel agents that *build* Swift
+  will thrash a machine (load average hit 136 here) and parallel agents that
+  *edit* one tree reproduce the exact source-collision the worktree work had
+  just fixed. The expensive part is understanding, and understanding
+  parallelises safely.
+- **The adversary is not optional.** A plausible-but-wrong diagnosis costs more
+  than a missed one, because it gets acted on. Nine of twenty-two would have
+  been acted on.
+
+## Three numbers that are not the same number
+
+XCTest's summary counts **assertion failures**, not tests. "104 failures" was 74
+failing tests. Reports in this project quoted 122, 118, 105, 99 and 62
+interchangeably over several days — all assertion counts, none of them the
+number of broken tests.
+
+    grep -oE "^Test Case '-\[[^]]+\]' failed" run.log | sort -u | wc -l
+
+And a third, distinct number: how many of those fail **in isolation**. Running
+each class alone separates "broken" from "contaminated by a neighbour". Here
+every sampled class failed alone too — so there was no cross-test leakage to
+chase. Two classes failed *more* alone than together, which is order dependence
+in the direction nobody looks for: the full run was masking failures.
+
+## Machine configuration wearing an assertion
+
+`Calendar.current` on a Thai-region machine (`en_TH`) is the **Buddhist era**: a
+correctly parsed 2026 reads back as 2569, and the test fails on a value the
+parser got right. The same file asserted hour 12 for `...T12:00:00Z` while
+reading in local time, which is 19:00 in Bangkok.
+
+The instant under test is absolute. Only the *reading* of it was
+locale-dependent, so pin the reading and leave the parser alone. Any assertion
+that reads a date through `Calendar.current` is testing the machine.
+
+## Defects that hide in what a test does not compare
+
+Several of the confirmed product defects had the same shape: a value computed
+correctly and then dropped, or compared against the wrong companion.
+
+- `ModelHealthService.probe` rebuilt its result and carried three fields of
+  five. `quota` survived because it was the one field copied — which is exactly
+  why the three quota tests passed and the retry-after and failure-kind ones did
+  not. **When a subset of a cluster passes, ask what the passing ones have that
+  the failing ones lack; the answer is often the defect.**
+- `lsof <path>` exits **1** when nothing holds the file open — the normal case —
+  and the rotation policy read that as "somebody is writing" and cancelled
+  itself. The retention policy was inert for precisely the files it exists to
+  trim. **An exit status you did not read the manual for is a guess.**
+- `LogParser.category` looked for `event-log`, `cron-log`, `queen-log`; the
+  files this project writes are `event_log.jsonl`, `cron.log`, `queen.log`.
+  Nothing matched, ever. **Grep the tree for the names a matcher expects; if
+  none exist, the matcher has never matched.**
+- `TriOSEncryptionError.openFailure` was declared and unreachable, because
+  `decrypt` let CryptoKit's own error out. **An enum case nothing throws is
+  either dead or a missing `catch`.**
+- A migration ladder re-tested the immutable original version at every rung, so
+  it could only ever climb one. **A stepwise migration needs a running value;
+  testing the entry condition inside each step is a ladder with one rung.**

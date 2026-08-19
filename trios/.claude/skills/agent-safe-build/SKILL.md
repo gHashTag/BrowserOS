@@ -578,3 +578,69 @@ release bundle id — the single outcome the variant split exists to prevent
 would have been its default. Now explicit three-way `case` statements with an
 unreachable arm that fails loudly. The validation above them makes that arm
 dead; it is written anyway, because the two guards drift independently.
+
+## The app must start — and keep — the service it cannot work without
+
+Three times in one day the report was "the Queen is not working". Three times
+the cause was the same and it was never the Queen: no agent server.
+
+`ProjectPaths.agentServerEntrypoint` had pointed at the runtime for as long as
+the runtime had lived in the tree, and **nothing ever called it**. The app
+depended on a server it did not start, so the server was whatever somebody had
+left running by hand — and after a reboot, nothing. The supervisor then chooses
+an issue, delegates it, and the worker finds no transport. That reads like a
+broken supervisor and is not.
+
+Three separate mistakes had to be undone, and the middle one was mine:
+
+1. **The server refused to start without a browser.** The asymmetry was the
+   tell: once running it tolerated losing CDP perfectly well — `/health`
+   reported `cdpConnected:false` and stayed `ok` — but it would not *start*
+   without it. So "it worked yesterday" and "it refuses to start today" were
+   both true, which is the signature of a startup precondition that the running
+   state does not share.
+
+2. **I then made the HTTP failure non-fatal too, and that was wrong.** A
+   browser is optional; HTTP *is* the product. A process that could not bind —
+   because an older instance still held the port — logged a warning and kept
+   running. The older one died; this one never retried. What was left was live
+   processes serving nothing, and every launcher that asked "is a server
+   running?" by looking at processes saw one. Six delegated tasks waited six
+   hours behind that.
+
+   **Rule:** when deciding whether a startup failure is fatal, ask what the
+   process is *for*. Optional capability → degrade and retry. The reason the
+   process exists → exit, so the port frees and the next attempt is a real
+   attempt.
+
+3. **Starting at launch is not supervising.** The app started a server at
+   22:47; it died by 01:00; nothing looked again until a human noticed at 09:00.
+   A supervisor that supervises only at boot supervises nothing. Sixty-second
+   watch, and because `startIfNeeded` asks the port before spawning, the loop is
+   just the same question asked repeatedly.
+
+**Drive it, don't reason about it:** launch the app, confirm the port answers,
+`kill -9` the server, confirm the port goes dead, wait, confirm it answers
+again. Anything less proves only that it started once.
+
+**And do not throw away the evidence.** The first launcher sent the spawned
+server's output to `/dev/null`. It started, died, and there was nothing to
+read — the one question a launcher exists to answer had been discarded. The log
+is what then said `Port 9105 is already in use`, which is the state a health
+check cannot see: something holding the port without serving it. A test now
+asserts the output is not discarded.
+
+## A refusal is not the end of a loop
+
+The autonomous tick chose the highest-scored open issue every five minutes, was
+correctly refused with "already delegated to queen-swift", and stopped there.
+Twenty-three delegations in ten minutes, all the same refusal, one worker slot
+of four free the whole time and nothing new ever started.
+
+The refusal was right — one chat per issue. Treating it as "the tick is over"
+instead of "try the next candidate" was the defect. A selection loop must
+exclude what is already taken *before* choosing, not discover it by being told
+no.
+
+**Tell:** a log with the same refusal repeating at the loop interval. That is
+never healthy backpressure; it is a loop that cannot advance.
