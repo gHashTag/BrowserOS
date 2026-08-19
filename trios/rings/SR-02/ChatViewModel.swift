@@ -3686,6 +3686,8 @@ final class ChatViewModel: ObservableObject {
 
     private func executeQueenCommand(_ command: QueenCommand, originalText: String) async {
         switch command {
+        case .reconcile(let apply):
+            await handleReconcileCommand(apply: apply)
         case .help:
             await appendSystemMessageToQueenChat(QueenCommandParser.helpText)
         case .status:
@@ -7854,6 +7856,116 @@ final class ChatViewModel: ObservableObject {
                 await self.queenAutonomyTick()
             }
         }
+    }
+
+    /// Shows what disagrees and, on a word from the operator, fixes one.
+    ///
+    /// `/reconcile` never changes anything. `/reconcile apply 2` changes
+    /// exactly one thing, and `apply all` works through the list. Showing and
+    /// doing are separate words rather than a flag, because a typo in a flag
+    /// should not be the difference between a report and an edit.
+    ///
+    /// Why the Queen does not simply repair her own record on a timer: a
+    /// registry that is made to agree with the repository by construction
+    /// stops being evidence about anything. The disagreement is the finding.
+    private func handleReconcileCommand(apply: String?) async {
+        let proposals = await gatherReconciliationProposals()
+        guard !proposals.isEmpty else {
+            await appendSystemMessageToQueenChat(
+                SystemNoticeClassifier.infoMarker
+                    + "The record and the repository agree on every task."
+            )
+            return
+        }
+
+        guard let apply else {
+            var lines = ["\(proposals.count) proposal(s). Apply with `/reconcile apply <n>` "
+                + "or `/reconcile apply all`."]
+            for (index, item) in proposals.enumerated() {
+                if let line = QueenReconciliation.describeCorrection(
+                    index: index + 1, issue: item.task.issue.slug, correction: item.correction
+                ) {
+                    lines.append(line)
+                }
+            }
+            await appendSystemMessageToQueenChat(lines.joined(separator: "\n"))
+            return
+        }
+
+        let words = apply.split(separator: " ").map(String.init)
+        guard words.first?.lowercased() == "apply" else {
+            await appendSystemMessageToQueenChat(
+                SystemNoticeClassifier.warningMarker
+                    + "I understand `/reconcile` and `/reconcile apply <n>`; "
+                    + "`\(apply)` is neither."
+            )
+            return
+        }
+        let target = words.count > 1 ? words[1].lowercased() : ""
+        let chosen: [Int]
+        if target == "all" {
+            chosen = Array(proposals.indices)
+        } else if let n = Int(target), n >= 1, n <= proposals.count {
+            chosen = [n - 1]
+        } else {
+            await appendSystemMessageToQueenChat(
+                SystemNoticeClassifier.warningMarker
+                    + "There are \(proposals.count) proposals; `\(target)` is not one of them."
+            )
+            return
+        }
+
+        var done: [String] = []
+        for index in chosen {
+            let item = proposals[index]
+            switch item.correction {
+            case .none:
+                continue
+            case .sendToReview:
+                guard delegationRegistry.transition(
+                    taskID: item.task.id, to: .awaitingReview
+                ) else {
+                    done.append("\(item.task.issue.slug): refused - "
+                        + (delegationRegistry.lastError ?? "illegal transition"))
+                    continue
+                }
+                done.append("\(item.task.issue.slug): moved into review")
+            case .clearUnsupportedCount:
+                delegationRegistry.recordCommittedFiles(taskID: item.task.id, count: 0)
+                done.append("\(item.task.issue.slug): file count cleared")
+            }
+            TriosLogBus.shared.info(
+                .queen, "queen.reconcile.applied",
+                "\(item.task.issue.slug): correction applied on the operator's word",
+                ["issue": item.task.issue.slug]
+            )
+        }
+        await appendSystemMessageToQueenChat(
+            done.isEmpty ? "Nothing to apply." : done.joined(separator: "\n")
+        )
+    }
+
+    /// Every task whose record disagrees with the repository, with what to do.
+    private func gatherReconciliationProposals() async
+        -> [(task: DelegatedTask, correction: QueenReconciliation.Correction)]
+    {
+        var out: [(DelegatedTask, QueenReconciliation.Correction)] = []
+        for task in delegationRegistry.tasks {
+            let facts = await QueenBranchCommitter.repositoryFacts(
+                branch: task.virtualBranch,
+                commitSHA: task.committedSHA,
+                baseRef: "HEAD"
+            )
+            let finding = QueenReconciliation.check(
+                state: task.state,
+                committedFiles: task.committedFiles,
+                committedSHA: task.committedSHA,
+                facts: facts
+            )
+            let correction = QueenReconciliation.correction(for: finding)
+            if correction.needsOperator { out.append((task, correction)) }
+        }
+        return out
     }
 
     /// Says out loud where the record and the repository disagree.

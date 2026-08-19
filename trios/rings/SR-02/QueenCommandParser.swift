@@ -44,6 +44,9 @@ enum QueenCommand: Equatable {
     case memory
     case evolve
     case proposals
+    /// Compare the record against the repository. With `apply <n>` or
+    /// `apply all`, carry out the proposal instead of only showing it.
+    case reconcile(apply: String?)
     case evolveApply(UUID, confirmed: Bool)
     case evolveReject(UUID)
     case doctor(model: String?)
@@ -235,6 +238,12 @@ struct QueenCommandParser {
             )
         case "broadcast", "notify":
             return .broadcast(components.joined(separator: " "))
+        case "reconcile", "sync-record":
+            // `apply` is a separate word rather than a flag so that showing and
+            // doing cannot be confused by a typo: `/reconcile` never changes
+            // anything, and `/reconcile apply 2` changes exactly one thing.
+            let rest = components.joined(separator: " ")
+            return .reconcile(apply: rest.isEmpty ? nil : rest)
         case "audit":
             return .audit
         case "memory":

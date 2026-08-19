@@ -368,6 +368,7 @@ struct ChatSSEEndToEndTests {
         ("runAbsentIsNotZeroAndTheBeeGetsItsWorktree", { await runAbsentIsNotZeroAndTheBeeGetsItsWorktree() }),
         ("runACountWithNoCommitIsNotEvidence", { await runACountWithNoCommitIsNotEvidence() }),
         ("runTheRecordIsComparedAgainstTheRepository", { await runTheRecordIsComparedAgainstTheRepository() }),
+        ("runSheProposesAndWaitsForAWord", { await runSheProposesAndWaitsForAWord() }),
     ]
 
     static func main() async {
@@ -7968,6 +7969,90 @@ struct ChatSSEEndToEndTests {
     /// Red is not the Queen's to fix. The bee that opened the pull request is
     /// woken with the names of the failing checks and works on the same branch
     /// until the gate is green.
+    // MARK: - Scenario: she proposes the repair and waits for a word
+
+    /// Eight disagreements sat visible and motionless for a whole round,
+    /// because seeing them was all the machinery could do. Reporting was the
+    /// half that did not exist; acting on the report is the half after that,
+    /// and the two must not be the same step.
+    ///
+    /// Every correction asks first. A registry made to agree with the
+    /// repository by construction stops being evidence about anything - the
+    /// disagreement IS the finding.
+    static func runSheProposesAndWaitsForAWord() async {
+        print("\n# Scenario: she proposes the repair and waits for a word")
+
+        typealias R = QueenReconciliation
+
+        check(
+            R.correction(for: .agrees) == .none,
+            "agreement needs no repair"
+        )
+        check(
+            R.correction(for: .countWithoutCommit) == .none,
+            "and neither does a historical count - proposing thirteen no-ops is noise"
+        )
+        guard case .sendToReview(let reviewWhy) = R.correction(
+            for: .unrecordedWork(commits: 2)
+        ) else {
+            fail("unrecorded work must propose putting the task in front of someone")
+            return
+        }
+        check(
+            reviewWhy.contains("HEAD does not hold"),
+            "and says why in terms of the repository, not of the record: \(reviewWhy)"
+        )
+        guard case .clearUnsupportedCount(let clearWhy) = R.correction(for: .branchMissing)
+        else {
+            fail("a claim with no branch behind it must propose dropping the claim")
+            return
+        }
+        check(
+            clearWhy.contains("nothing behind it"),
+            "naming what makes the number empty: \(clearWhy)"
+        )
+        check(
+            R.correction(for: .commitMissing) != .none,
+            "a named commit that is absent is also repairable"
+        )
+
+        // The gate: nothing applies itself.
+        check(
+            R.Correction.sendToReview(reason: "x").needsOperator
+                && R.Correction.clearUnsupportedCount(reason: "x").needsOperator,
+            "every correction that changes anything waits for a word"
+        )
+        check(
+            !R.Correction.none.needsOperator,
+            "and the one that changes nothing does not ask"
+        )
+
+        check(
+            R.describeCorrection(index: 1, issue: "gHashTag/trios#1132",
+                                 correction: .sendToReview(reason: "two commits"))
+                == "1. gHashTag/trios#1132 -> review: two commits",
+            "each proposal is numbered so `apply 2` can mean exactly one thing"
+        )
+        check(
+            R.describeCorrection(index: 1, issue: "x", correction: .none) == nil,
+            "and a no-op is not listed at all"
+        )
+
+        // Parsing: showing and doing are separate words, not a flag.
+        check(
+            QueenCommandParser.parse("/reconcile") == .reconcile(apply: nil),
+            "`/reconcile` alone never changes anything"
+        )
+        check(
+            QueenCommandParser.parse("/reconcile apply 2") == .reconcile(apply: "apply 2"),
+            "and applying takes a word plus a number"
+        )
+        check(
+            QueenCommandParser.parse("/reconcile apply all") == .reconcile(apply: "apply all"),
+            "or the word all"
+        )
+    }
+
     // MARK: - Scenario: the record is compared against the repository
 
     /// The registry is a claim and the repository is a fact, and nothing

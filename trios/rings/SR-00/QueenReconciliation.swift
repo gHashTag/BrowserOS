@@ -104,6 +104,73 @@ enum QueenReconciliation {
         return .agrees
     }
 
+    /// What to do about a disagreement, and who may decide it.
+    ///
+    /// Reporting was the half that did not exist; acting on the report is the
+    /// half after that, and the two must not be the same step. Eight
+    /// disagreements sat visible and motionless for a whole round because
+    /// seeing them was all the machinery could do.
+    enum Correction: Equatable {
+        /// Nothing to do.
+        case none
+        /// Put the task in the review queue so its branch gets looked at.
+        ///
+        /// Needs a word from the operator: moving work into review is a claim
+        /// that it is ready to be judged, and nobody has read it.
+        case sendToReview(reason: String)
+        /// Erase a file count that has nothing behind it.
+        ///
+        /// Also needs a word, for a different reason. Removing the claim is not
+        /// a judgement about work - the work is provably not where the record
+        /// says - but it edits a task the Queen already called accepted, and a
+        /// supervisor that quietly rewrites its own past verdicts is worse than
+        /// one that leaves a wrong number visible.
+        case clearUnsupportedCount(reason: String)
+
+        var needsOperator: Bool { self != .none }
+    }
+
+    /// The correction a finding calls for.
+    ///
+    /// Pure, and deliberately conservative: every case that changes anything
+    /// asks first. The alternative - a supervisor that repairs its own record
+    /// on a timer - makes the record agree with the repository by construction
+    /// and therefore worth nothing as evidence.
+    static func correction(for finding: Finding) -> Correction {
+        switch finding {
+        case .agrees, .countWithoutCommit:
+            return .none
+        case .unrecordedWork(let commits):
+            return .sendToReview(
+                reason: "\(commits) commit(s) on the branch that HEAD does not hold; "
+                    + "moving it into review is what gets a person to look at them"
+            )
+        case .branchMissing:
+            return .clearUnsupportedCount(
+                reason: "the branch that would hold the claimed files is gone, so the "
+                    + "count is a number with nothing behind it"
+            )
+        case .commitMissing:
+            return .clearUnsupportedCount(
+                reason: "the commit named in the record is not in the repository"
+            )
+        }
+    }
+
+    /// How a proposal reads when she offers it.
+    static func describeCorrection(
+        index: Int, issue: String, correction: Correction
+    ) -> String? {
+        switch correction {
+        case .none:
+            return nil
+        case .sendToReview(let reason):
+            return "\(index). \(issue) -> review: \(reason)"
+        case .clearUnsupportedCount(let reason):
+            return "\(index). \(issue) -> clear the file count: \(reason)"
+        }
+    }
+
     /// One line for the log or a notice.
     static func describe(issue: String, finding: Finding) -> String {
         switch finding {
