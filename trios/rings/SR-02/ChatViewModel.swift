@@ -4795,7 +4795,7 @@ final class ChatViewModel: ObservableObject {
             task: task,
             branch: branch,
             baselineTree: baselineTree,
-            message: "queen(\(task.issue.slug)) [INCOMPLETE: \(reason)]: \(task.title)"
+            message: Self.conventionalCommitMessage(task: task, note: "[INCOMPLETE: \(reason)]")
         )
 
         // Per-file log so the journal says by name what happened to each file.
@@ -5016,7 +5016,7 @@ final class ChatViewModel: ObservableObject {
                 task: task,
                 branch: branch,
                 baselineTree: workerBaselineTrees[task.conversationId],
-                message: "queen(\(task.issue.slug)): \(task.title)"
+                message: Self.conventionalCommitMessage(task: task)
             )
             notice += "\n" + outcome.summary
             registry.recordCommittedFiles(taskID: task.id, count: outcome.fileCount)
@@ -6584,6 +6584,36 @@ final class ChatViewModel: ObservableObject {
     /// this, written under #1142 - documented, guarded against the shared
     /// checkout, staging only owned paths - and had no callers at all. It does
     /// now.
+    /// A commit message this repository will actually accept.
+    ///
+    /// Every bee commit was rejected, silently as far as the Queen could see.
+    /// The message began `queen(gHashTag/trios#1137):` and lefthook's
+    /// `conventional` hook allows only feat|fix|docs|style|refactor|perf|test|
+    /// chore|ci|build|revert - so `git commit` exited non-zero, the files
+    /// stayed staged, `committedFiles` stayed 0, auto-accept refused for "no
+    /// committed files", and no delegated task has ever reached a pull request.
+    /// For the whole life of the swarm. The supervisor's own commit convention
+    /// violated the repository's.
+    ///
+    /// The type is derived from what the bee was allowed to touch, which is the
+    /// only evidence available without reading the diff: docs for prose, test
+    /// for tests, fix otherwise. `Closes #N` in the body is L1 TRACEABILITY,
+    /// which the old format also failed to satisfy.
+    static func conventionalCommitMessage(task: DelegatedTask, note: String? = nil) -> String {
+        let paths = task.ownedPaths
+        let type: String
+        if !paths.isEmpty, paths.allSatisfy({ $0.hasPrefix("docs/") || $0.hasSuffix(".md") }) {
+            type = "docs"
+        } else if !paths.isEmpty, paths.allSatisfy({ $0.contains("tests/") }) {
+            type = "test"
+        } else {
+            type = "fix"
+        }
+        let subject = task.title.replacingOccurrences(of: "\n", with: " ")
+        let head = note.map { "\(type)(trios): \($0) \(subject)" } ?? "\(type)(trios): \(subject)"
+        return head + "\n\nCloses #\(task.issue.number)\n\nDelegated to \(task.worker) by the Trinity Queen."
+    }
+
     private func commitWorkerOutput(
         task: DelegatedTask,
         branch: String,
