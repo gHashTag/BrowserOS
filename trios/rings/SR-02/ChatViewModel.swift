@@ -7495,6 +7495,22 @@ final class ChatViewModel: ObservableObject {
 
         var chosenScored: ScoredIssue!
         for candidate in sorted {
+            // A candidate with no boundary cannot be delegated at all, and
+            // that is knowable here: the paths were parsed during scoring.
+            // Discovering it after the choice ends the tick with "Refused
+            // --start: no Границы section" and a free worker slot - the fourth
+            // instance of one shape, after "already delegated", "boundary
+            // conflict" and the accepted-task filter. The pattern is always
+            // the same: a condition the selection could test is instead left
+            // for the refusal to find.
+            if (candidate.paths ?? []).isEmpty {
+                TriosLogBus.shared.info(
+                    .queen, "queen.choose.no_boundary",
+                    "Skipping #\(candidate.number): no Границы section, so there is nothing to delegate",
+                    ["issue": "gHashTag/trios#\(candidate.number)"]
+                )
+                continue
+            }
             // Boundary conflicts too, and for the same reason. `delegate`
             // refuses a candidate whose files another live task already owns -
             // correctly - and the tick again treated that refusal as the end
