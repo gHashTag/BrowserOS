@@ -333,11 +333,27 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let stillRunning = vm.workerRunner?.isRunning(conversationId: task.conversationId) == true
         let tools = transcript.reduce(0) { $0 + $1.toolCalls.count }
         let state = QueenDelegationRegistry.shared.task(forConversation: task.conversationId)?.state
+
+        // #1162: a run the Queen started herself is watched to the end, and
+        // "the end" is the worker's own words, not a counter. Message and
+        // tool counts say that it spoke; the first line of its answer is the
+        // thing a person reading the log actually needs, and the one thing
+        // counters cannot stand in for. Without it the probe reports the
+        // shape of the turn while printing none of its substance.
+        let answerPreview = transcript
+            .last(where: { $0.role == .assistant && !$0.content.isEmpty })?
+            .content
+            .split(whereSeparator: \.isNewline)
+            .first
+            .map { String($0.prefix(160)) } ?? ""
+
         // "No answer yet" and "no answer ever" are different verdicts; reporting
         // a running worker as a failure is how a slow bee gets called a broken one.
         let verdict: String
         if answered {
-            verdict = "Worker answered"
+            verdict = answerPreview.isEmpty
+                ? "Worker answered"
+                : "Worker answered — \(answerPreview)"
         } else if stillRunning {
             verdict = "Worker still running at the \(Int(seconds))s deadline"
         } else {
