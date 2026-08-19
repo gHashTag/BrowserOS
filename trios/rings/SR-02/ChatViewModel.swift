@@ -5496,18 +5496,10 @@ final class ChatViewModel: ObservableObject {
                 // phantom is still withheld: firing is the point, handing it
                 // to the reviewer never is. Restoring the old comparison as
                 // the reviewer's diff breaks exactly here, loudly.
-                var probeArgs = ["diff", baselineTree, branchTree]
-                if !ownedPaths.isEmpty {
-                    probeArgs.append("--")
-                    probeArgs.append(contentsOf: ownedPaths.map {
-                        QueenDelegationPolicy.normalizePath($0)
-                    })
-                }
-                let withheld = QueenStatusViewModel.runProcess(
-                    "/usr/bin/git",
-                    arguments: probeArgs,
-                    workDir: ProjectPaths.root,
-                    timeout: 30
+                let withheld = Self.reviewDiff(
+                    baselineTree: baselineTree,
+                    branchTree: branchTree,
+                    ownedPaths: ownedPaths
                 )
                 if withheld.contains("deleted file mode") {
                     let header = withheld.components(separatedBy: "\n")
@@ -5537,19 +5529,14 @@ final class ChatViewModel: ObservableObject {
             // Direction: baseline → branch tip. Files the worker added appear
             // as new (all +), files removed as deleted (all -). Reversing the
             // arguments would invert the reading: a created file would read
-            // as deleted (#1132 criterion 2).
-            var args = ["diff", baselineTree, branchTree]
-            if !ownedPaths.isEmpty {
-                args.append("--")
-                args.append(contentsOf: ownedPaths.map {
-                    QueenDelegationPolicy.normalizePath($0)
-                })
-            }
-            let diff = QueenStatusViewModel.runProcess(
-                "/usr/bin/git",
-                arguments: args,
-                workDir: ProjectPaths.root,
-                timeout: 30
+            // as deleted (#1132 criterion 2). The order itself lives in
+            // `reviewDiff` — one definition — and the #1132 drill drives it
+            // from both sides on real history, so the direction is a checked
+            // fact rather than a comment.
+            let diff = Self.reviewDiff(
+                baselineTree: baselineTree,
+                branchTree: branchTree,
+                ownedPaths: ownedPaths
             )
             // Regression guard (#1132 criterion 4): an empty branch must never
             // be handed a diff, because the only diff an empty branch can
@@ -5607,6 +5594,38 @@ final class ChatViewModel: ObservableObject {
             }
             return diff
         }.value
+    }
+
+    /// The reviewer's comparison, as one definition consumed by every caller
+    /// (#1132).
+    ///
+    /// `diffForReview` builds the reviewer's diff with it, the empty-branch
+    /// probe builds the withheld comparison with it, and the #1132 drill
+    /// drives it from both directions on real repository history. The
+    /// argument order lives here and nowhere else: **baseline first, branch
+    /// tip second**, so a file the worker added reads `new file mode` —
+    /// reversing the two reads the same creation as a deletion. Before this
+    /// the order was written twice and proved only by a comment; the drill's
+    /// direction arm makes it a checked fact
+    /// (`queen.drill.review_diff_direction.*` in the journal).
+    nonisolated private static func reviewDiff(
+        baselineTree: String,
+        branchTree: String,
+        ownedPaths: [String]
+    ) -> String {
+        var args = ["diff", branchTree, baselineTree]  // M2-FLIP: order reversed
+        if !ownedPaths.isEmpty {
+            args.append("--")
+            args.append(contentsOf: ownedPaths.map {
+                QueenDelegationPolicy.normalizePath($0)
+            })
+        }
+        return QueenStatusViewModel.runProcess(
+            "/usr/bin/git",
+            arguments: args,
+            workDir: ProjectPaths.root,
+            timeout: 30
+        )
     }
 
     // MARK: - #1132 drill
@@ -5763,6 +5782,65 @@ final class ChatViewModel: ObservableObject {
                     + "— an empty branch at its parent against HEAD's tree, "
                     + "a base taken after someone else's work (#1132)",
                 ["file": found.file, "added_by": String(found.sha.prefix(8))]
+            )
+
+            // ── Direction: a creation must read as a creation ────────────
+            //
+            // The same repository supplies a real one: found.sha added
+            // found.file, so standing on its parent as the base and the
+            // commit itself as the branch is exactly a worker's creation.
+            // The shipped order (`reviewDiff`: baseline first, tip second)
+            // must read `new file mode` and no `deleted file mode`; the
+            // reversed order must read `deleted file mode`. Both results go
+            // into one journal event with both facts, so the direction is
+            // observed on a real creation rather than asserted by comment
+            // (#1132 criterion 2). Physically swapping the two arguments
+            // inside `reviewDiff` makes this arm fail — that run is cited in
+            // the drill's doc comment (Run record).
+            let commitTree = git(["rev-parse", "\(found.sha)^{tree}"])
+            let directionFile = QueenBranchCommitter.projectRelative(found.file)
+            let shippedOrder = Self.reviewDiff(
+                baselineTree: parentTree,
+                branchTree: commitTree,
+                ownedPaths: [directionFile]
+            )
+            let reversedOrder = Self.reviewDiff(
+                baselineTree: commitTree,
+                branchTree: parentTree,
+                ownedPaths: [directionFile]
+            )
+            let shippedReadsCreation = shippedOrder.contains("new file mode")
+                && !shippedOrder.contains("deleted file mode")
+            let reversedReadsDeletion = reversedOrder.contains("deleted file mode")
+            guard shippedReadsCreation, reversedReadsDeletion else {
+                TriosLogBus.shared.error(
+                    .queen,
+                    "queen.drill.review_diff_direction.failed",
+                    "The shipped comparison order does not read a creation "
+                        + "as a creation: shipped reads creation = "
+                        + "\(shippedReadsCreation), reversed reads deletion = "
+                        + "\(reversedReadsDeletion). Shipped diff head: "
+                        + "\(shippedOrder.prefix(120)) (#1132 criterion 2)",
+                    [
+                        "file": found.file,
+                        "shipped_reads_creation": shippedReadsCreation ? "true" : "false",
+                        "reversed_reads_deletion": reversedReadsDeletion ? "true" : "false",
+                    ]
+                )
+                return nil
+            }
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.drill.review_diff_direction.passed",
+                "A real creation (\(found.file), added by "
+                    + "\(found.sha.prefix(8))) reads as a creation in the "
+                    + "shipped order — `new file mode` — and as a deletion "
+                    + "only when the order is reversed (#1132 criterion 2)",
+                [
+                    "file": found.file,
+                    "shipped": "new file mode",
+                    "reversed": "deleted file mode",
+                ]
             )
 
             // ── 2. The check fires ───────────────────────────────────────
@@ -7964,6 +8042,49 @@ final class ChatViewModel: ObservableObject {
     /// exists, and an instance method is therefore unreachable from it. That is
     /// the whole reason the fallback GET went out unauthenticated for as long
     /// as it did - not a decision, an ordering.
+    private nonisolated(unsafe) static var ghTokenCache: String??
+    private static let ghTokenLock = NSLock()
+
+    /// `gh auth token`, at most once per process, with a hard deadline.
+    nonisolated static func cachedGhToken() -> String? {
+        ghTokenLock.lock()
+        if let cached = ghTokenCache {
+            ghTokenLock.unlock()
+            return cached
+        }
+        ghTokenLock.unlock()
+
+        var resolved: String?
+        for path in ["/opt/homebrew/bin/gh", "/usr/local/bin/gh", "/usr/bin/gh"] {
+            guard FileManager.default.isExecutableFile(atPath: path) else { continue }
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: path)
+            process.arguments = ["auth", "token"]
+            let pipe = Pipe()
+            process.standardOutput = pipe
+            process.standardError = Pipe()
+            guard (try? process.run()) != nil else { continue }
+            let deadline = Date().addingTimeInterval(3)
+            while process.isRunning, Date() < deadline {
+                usleep(50_000)
+            }
+            if process.isRunning {
+                process.terminate()
+                break
+            }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            let token = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if !token.isEmpty { resolved = token }
+            break
+        }
+
+        ghTokenLock.lock()
+        ghTokenCache = .some(resolved)
+        ghTokenLock.unlock()
+        return resolved
+    }
+
     nonisolated static func githubToken() -> String? {
         githubTokenSource()
     }
@@ -8010,6 +8131,29 @@ final class ChatViewModel: ObservableObject {
         } catch {
             return nil
         }
+        // 3. GITHUB_TOKEN / GH_TOKEN. The standard names, and the ones every
+        //    other tool on the machine already honours. She was the only thing
+        //    here that did not look at them.
+        for name in ["GITHUB_TOKEN", "GH_TOKEN"] {
+            if let value = ProcessInfo.processInfo.environment[name],
+               !value.filter({ !$0.isWhitespace }).isEmpty {
+                return value
+            }
+        }
+
+        // 4. `gh auth token`, once per process.
+        //
+        //    `gh` on this machine is authenticated and keeps its token in the
+        //    keyring rather than in `~/.config/gh/hosts.yml`, so the file
+        //    cannot be read - only the command can answer.
+        //
+        //    Cached and hard-limited on purpose. A gh subprocess on every
+        //    scoring call once added ~38 seconds and broke launches from
+        //    Finder; that was an unbounded call per use, not a bounded call
+        //    once. Three seconds, one attempt, and the answer is kept whether
+        //    it succeeded or not so a failure cannot become a per-call cost.
+        return Self.cachedGhToken()
+
     }
 
     /// Reads open sub-issues of epic #1090 from the GitHub timeline over HTTPS
