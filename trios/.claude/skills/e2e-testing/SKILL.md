@@ -1275,3 +1275,41 @@ reproduce. The likeliest cause was environmental - the same worktree flicker
 that, minutes later, handed the compiler an empty source file git considered
 unmodified. Say that. A flake reported as fixed because it stopped appearing is
 the same sentence as a flake nobody looked at.
+
+## A constant is the wrong shape for the operator's decision
+
+The epic number `1090` was written into eight places, one of them a URL. Six
+sub-issues were then opened under a second epic - acceptance criteria, disjoint
+boundaries, everything the selection needs - and the Queen could not see one of
+them. Not refuse them: **see** them. Her log said "all 24 candidates look
+already done" while six untouched tasks sat one epic away.
+
+That log line is the tell, and it is a comfortable one: it describes a board
+that has been fully considered. Nothing about it suggests the board is the
+wrong board.
+
+**Rule:** ask of every constant whether it encodes a law or a choice. A law
+(`MAX_CONCURRENT_WORKERS`) belongs in code. A choice - which repository, which
+epic, which branch, which model - belongs in a stored preference with the
+constant as its default. The test is whether the operator could reasonably want
+a different value tomorrow without a build.
+
+**Two consequences that are easy to miss when fanning one out to many:**
+
+- Deduplicate. A repeated epic reads the same timeline twice and every
+  sub-issue in it counts double, which looks like real work.
+- Do not let one failure become total failure. One unreachable epic must not
+  stop work sitting open in another - and the error must name *which* one,
+  because "HTTP 404" is unactionable the moment there is more than one source.
+
+## Rules arrive in pairs, and the second one breaks the first
+
+The operator asked for everything to be written in English. The Queen's
+boundary parser recognised `## Границы` and nothing else, so the first English
+issue would have been skipped as having no boundary section at all - a true
+statement about the parser and a false one about the issue.
+
+**Rule:** when a documentation or naming convention changes, grep for the
+places that parse the old convention. A heading, a prefix or a filename that a
+machine reads is a token, not prose, and both spellings have to work for as
+long as both exist in the corpus.
