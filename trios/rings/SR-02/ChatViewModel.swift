@@ -7396,6 +7396,23 @@ final class ChatViewModel: ObservableObject {
 
         var chosenScored: ScoredIssue!
         for candidate in sorted {
+            // Boundary conflicts too, and for the same reason. `delegate`
+            // refuses a candidate whose files another live task already owns -
+            // correctly - and the tick again treated that refusal as the end
+            // rather than as "try the next one". Third instance of the same
+            // shape today; filtered here with the very policy that would
+            // otherwise refuse it, so the two can never disagree.
+            if let paths = candidate.paths, !paths.isEmpty,
+               !QueenDelegationPolicy.conflictingTasks(
+                   for: paths, among: delegationRegistry.tasks
+               ).isEmpty {
+                TriosLogBus.shared.info(
+                    .queen, "queen.choose.boundary_taken",
+                    "Skipping #\(candidate.number): its files are owned by a live task",
+                    ["issue": "gHashTag/trios#\(candidate.number)"]
+                )
+                continue
+            }
             if liveIssueNumbers.contains(candidate.number) {
                 TriosLogBus.shared.info(
                     .queen, "queen.choose.already_running",
