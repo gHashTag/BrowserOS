@@ -1468,3 +1468,45 @@ The reason for the ceremony is not caution. A registry made to agree with the
 repository by construction stops being evidence about anything; the
 disagreement IS the finding, and a supervisor that quietly repairs its own past
 verdicts is worse than one that leaves a wrong number visible.
+
+## The most reassuring line in the log was the symptom
+
+```
+queen.choose | All 26 candidates look already done — nothing to choose
+```
+
+That sentence describes a board that has been fully considered and found
+finished. It is what a healthy idle supervisor says. Underneath it, four issues
+were deadlocked by tasks she had opened herself, and two of them were the start
+of a migration I had spent the night setting up.
+
+**A task whose dispatch fails stays `queued`, and nothing ever looked at
+`queued`.** The stall reaper handles `running`. A queued task still owns its
+file boundary, so the Queen considers its issue, finds a live task holding
+exactly those paths, and refuses with "its files are owned by a live task" -
+true, and the live task is hers, for that same issue.
+
+**Rule:** for every state in a lifecycle, name what moves a task out of it. If
+the answer for any state is "nothing", that state is a leak, and the symptom
+will not look like a leak - it will look like the system having nothing to do.
+
+**Corollary about resources held by non-running states.** Anything a task owns -
+a path, a lock, a slot - is held for as long as the task is non-terminal, not
+for as long as it is *working*. Ask of every held resource: which states hold
+it, and is there a state that holds it forever?
+
+## Read "never started" from the runner, not the clock
+
+Age alone cannot distinguish a task that was never dispatched from one that has
+been working for hours. The runner already records what it did: a stream that
+opened sets `streamOutcome`, a finished turn sets `completedTurns`. Either
+means the task was taken, whatever the registry state says and however long ago
+it was created.
+
+Grace of two ticks, not one: a single tick's refusal may be a slot that was
+full, which is backpressure working correctly rather than a dispatch that
+failed.
+
+**And cancel rather than fail.** Nobody failed - the dispatch did not happen.
+Recording it as a failure would count against the issue in the retry policy and
+tell the next bee that the last one produced nothing.
