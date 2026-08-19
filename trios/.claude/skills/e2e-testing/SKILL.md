@@ -1372,3 +1372,53 @@ Both skip rather than fail when the toolchain is missing - the compiler lives
 in a sibling repository - because a machine without `iverilog` should not be
 told the ring is broken. Proven red by changing one constant in the `.t27`:
 two of thirty-five rows disagree and the harness prints both sides.
+
+## The wrong base, three times
+
+Counting "what did the bee actually commit" needs a base to count from, and I
+have now chosen the wrong one three separate times:
+
+1. `origin/master..branch` in a repository whose default branch is `main`. The
+   ref does not exist, `rev-list` returns nothing, and every branch reads as
+   empty. **A base that does not exist looks exactly like a branch with no
+   work.**
+2. `dev..branch` when the branches were cut from the working branch. Every
+   commit of mine counted as the bee's - one bee's single commit reported as
+   507.
+3. The second one again, in code, *after* writing a warning about it into the
+   helper's own doc comment.
+
+**The question is always `HEAD..branch`** - commits on that branch that are not
+already here. Not a named branch, which is a guess about where the branch was
+cut from; not a two-way `diff`, which reports a stale branch as productive
+because it is *behind*.
+
+**Rule:** before quoting a commit or file count, run the same command by hand
+on one known case and check the number against what you can see. `#1283` was
+two commits; the code said 513; one `git rev-list` settled it in a second.
+
+**And a comment is not a guard.** I wrote the warning and then made the mistake
+in the function the warning was attached to. If a rule matters, put it in a
+signature or a test, not in prose above the code that breaks it.
+
+## Put the audit outside the branch that skips it
+
+The reconciliation scan went in inside `if no active tasks at launch`, so it
+was skipped exactly when the swarm was busy - and a busy swarm is when work
+goes missing. The scan reads only git and costs nothing; there was no reason to
+gate it at all.
+
+**Rule:** an audit that only runs when the system is idle audits the state you
+were least worried about. Ask what condition you have attached it to and
+whether that condition correlates with the failure you are looking for.
+
+## Detection before correction
+
+The scan reports and does not fix. Advancing a task's state from a git scan is
+a judgement about work nobody reviewed; saying that the record and the tree
+disagree is not, and it was the half that did not exist.
+
+Separate the historical from the urgent, or the report becomes noise: eight
+rows carrying a count written before commits were recorded are not eight
+emergencies, and listing them beside three real disagreements teaches the
+reader to skip all eleven.
