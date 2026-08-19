@@ -6370,9 +6370,16 @@ struct ChatSSEEndToEndTests {
         // The bee card: the fix routes the number through Text(verbatim:).
         // If verbatim: is stripped, the number re-enters the
         // LocalizedStringKey path and gains a group separator.
+        // Either spelling satisfies the requirement, which is that the number
+        // reaches the screen VERBATIM. The inline interpolation was the first
+        // fix; a bee later replaced it with a named form carrying its own rule
+        // and its own assertions, which is stronger - and this check, pinned to
+        // the literal, called that an regression. A check that names one
+        // spelling of a requirement fails the day someone improves the
+        // spelling.
         let verbatimUses = occurrences(
             "Text(verbatim: \"#\\(task.issue.number)\")", in: panelSource
-        )
+        ) + occurrences("Text(verbatim: IssueBadgeForm.badge(", in: panelSource)
         check(verbatimUses >= 1,
               "criterion 1: the bee card prints the issue number via Text(verbatim:) (\(verbatimUses) use) — an identifier, not a formatted quantity")
 
