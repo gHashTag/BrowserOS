@@ -37,7 +37,17 @@ enum QueenSkillMatch {
     /// Every path must agree. A task owning both a test file and a build script
     /// has no single rehearsal that covers it, and picking the first is a coin
     /// toss dressed as a decision.
+    /// Skill identifiers carry a leading slash in the store (`/agent-safe-build`),
+    /// and the rules above name them bare. Comparing the two shapes directly
+    /// matched nothing, so the whole match was inert while every test passed -
+    /// they supplied a synthetic `available` set in the bare shape and agreed
+    /// with themselves.
+    static func normalize(_ id: String) -> String {
+        id.hasPrefix("/") ? String(id.dropFirst()) : id
+    }
+
     static func skill(forBoundary paths: [String], available: Set<String>) -> String? {
+        let available = Set(available.map(normalize))
         guard !paths.isEmpty else { return nil }
         var chosen: String?
         for path in paths {

@@ -7830,6 +7830,19 @@ struct ChatSSEEndToEndTests {
             "a switched-off skill is not quietly handed over - the operator turning it off was a decision"
         )
 
+        // The store's OWN shape, not a convenient one.
+        //
+        // Identifiers there carry a leading slash. Every check above supplies a
+        // bare-name set and agrees with itself, so the match was inert in the
+        // running app while the scenario stayed green - a check validated
+        // against a cheaper thing than the one it guards.
+        check(
+            QueenSkillMatch.skill(
+                forBoundary: ["tests/x.swift"], available: ["/e2e-testing", "/agent-safe-build"]
+            ) == "e2e-testing",
+            "a boundary matches against identifiers in the store's slash-prefixed shape"
+        )
+
         // Every skill a rule names must exist on disk.
         //
         // The match returns nil for a skill that is not installed, which is
