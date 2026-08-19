@@ -752,6 +752,29 @@ MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP DEV_BIN RELEASE_BIN DEV_PROC \
 	SOURCES_MANIFEST SOURCES_APP_ONLY SOURCES_TEST_ONLY
 
 .PHONY: make-dollars
+# The decision core must answer the same in Swift, in generated Rust, and in
+# simulated Verilog.
+#
+# Ring 00 exists to be one rule rather than four that agree until someone edits
+# one. That claim is only worth making if it is checked, and it is checkable
+# cheaply: both harnesses generate from the same `.t27`, run a shared table of
+# inputs, and compare against the answers Swift gives.
+#
+# Skipped rather than failed when the toolchain is absent - t27c lives in a
+# sibling repository and iverilog is a brew install. A machine without them
+# should not be told the ring is broken.
+t27-rings:
+	@if [ ! -x "$(HOME)/t27/target/release/t27c" ]; then \
+		echo "[SKIP] t27-rings: no t27c at $(HOME)/t27/target/release/t27c"; \
+		exit 0; \
+	fi; \
+	bash "$(ROOT)/tests/t27/ring00_parity.sh" || exit 1; \
+	if command -v iverilog >/dev/null 2>&1; then \
+		bash "$(ROOT)/tests/t27/ring00_verilog.sh" || exit 1; \
+	else \
+		echo "[SKIP] t27-rings: iverilog not installed, Verilog half not run"; \
+	fi
+
 # Fail if any view sets a font size directly instead of through TriosType.
 #
 # The app had 618 hard-coded sizes and 317 of them were 10pt or smaller, down
@@ -1339,7 +1362,7 @@ vendor-step:
 		exit 1; \
 	fi
 
-check: check-selftest keychain-doors type-floor make-dollars empty-sources sources-drift sources-drift-selftest finish-mark-order guard-shapes variant-fence parse-tests run-completeness-selftest cassette-isolation vendor-step dev warnings test cassettes mutants-changed
+check: check-selftest keychain-doors type-floor t27-rings make-dollars empty-sources sources-drift sources-drift-selftest finish-mark-order guard-shapes variant-fence parse-tests run-completeness-selftest cassette-isolation vendor-step dev warnings test cassettes mutants-changed
 
 # Replay every cassette and assert the expected signal appears in the log.
 #
