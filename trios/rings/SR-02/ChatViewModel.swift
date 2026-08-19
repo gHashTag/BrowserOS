@@ -204,6 +204,13 @@ final class ChatViewModel: ObservableObject {
     private var queenInboxPollTask: Task<Void, Never>?
     /// The autonomy loop, so a rebuild or a settings change can stop it.
     var queenAutonomyTask: Task<Void, Never>?
+
+    /// Tasks already announced as needing a person, so the sweep says it once.
+    ///
+    /// In memory rather than persisted: one notice per app run is the right
+    /// amount of nagging, and a restart is a reasonable moment to be reminded
+    /// that several things are waiting on you.
+    var escalatedReviewTaskIDs: Set<UUID> = []
     /// Byte offset into `queen_inbox.jsonl` — remembered so a restart does
     /// not re-process lines already delegated. Persisted in UserDefaults so
     /// it survives app relaunches.
@@ -3567,6 +3574,22 @@ final class ChatViewModel: ObservableObject {
         }
     }
 
+    /// Whether this repository runs checks the gate must wait for.
+    ///
+    /// Stated rather than inferred. A repository with no CI reports NONE, and
+    /// guessing from that is a coin toss with two bad sides: read it as failure
+    /// and nothing ever merges; read it as success and the gate is a
+    /// decoration in a project that meant to have checks. `.github/workflows`
+    /// existing is the fact, and it is cheap to ask.
+    static var repositoryHasChecks: Bool {
+        let root = (ProjectPaths.root as NSString).deletingLastPathComponent
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(
+            atPath: "\(root)/.github/workflows", isDirectory: &isDirectory
+        )
+        return exists && isDirectory.boolValue
+    }
+
     /// Puts a correction where the worker will read it.
     ///
     /// Written straight through the persister rather than into `messages`,
@@ -4129,8 +4152,20 @@ final class ChatViewModel: ObservableObject {
                 for: task.ownedPaths, from: issueBody, issueSlug: issue.slug
             )
         }
-        let brief = QueenBriefing.text(for: task, skillBody: skillBody)
-            + (narrowedHints.isEmpty ? "" : "\n" + narrowedHints.joined(separator: "\n"))
+        // What the bees before this one hit. Gathered from the registry rather
+        // than passed along, so a retry started from any path carries it.
+        let priorAttempts = registry.priorFailures(forIssue: issue.number)
+        if !priorAttempts.filter(\.countsAgainstTheIssue).isEmpty {
+            TriosLogBus.shared.info(
+                .queen, "queen.brief.retry",
+                "Briefing \(worker) with what \(priorAttempts.filter(\.countsAgainstTheIssue).count) "
+                    + "earlier attempt(s) on \(issue.slug) ran into",
+                ["issue": issue.slug]
+            )
+        }
+        let brief = QueenBriefing.text(
+            for: task, skillBody: skillBody, priorAttempts: priorAttempts
+        ) + (narrowedHints.isEmpty ? "" : "\n" + narrowedHints.joined(separator: "\n"))
         // Materialise the chat before naming it. renameConversation renames a
         // record that exists; the comment above claimed the persister creates
         // one "the moment messages are saved against a fresh id", which is true
@@ -4777,14 +4812,14 @@ final class ChatViewModel: ObservableObject {
                         .queen,
                         "queen.subissue.refresh",
                         "Background refresh updated store: \(subIssues.count) sub-issue\(subIssues.count == 1 ? "" : "s")",
-                        ["epic": "gHashTag/trios#1090", "count": String(subIssues.count)]
+                        ["epic": QueenEpics.describedList, "count": String(subIssues.count)]
                     )
                 } else {
                     TriosLogBus.shared.warn(
                         .queen,
                         "queen.subissue.refresh",
                         "Background refresh failed (\(failureMessage)); store left untouched",
-                        ["epic": "gHashTag/trios#1090", "error": failureMessage]
+                        ["epic": QueenEpics.describedList, "error": failureMessage]
                     )
                 }
             }
@@ -5008,10 +5043,29 @@ final class ChatViewModel: ObservableObject {
             // naming none is left unchecked, so the gate still stops on the
             // questions a person has to answer and no longer stops on the ones
             // nobody needed to be asked.
-            let evidenceVerdicts = QueenAcceptancePolicy.mechanicalVerdicts(
-                criteria: task.acceptanceCriteria,
-                changedPaths: measured.map { QueenBranchCommitter.projectRelative($0) }
-            )
+            //
+            // An empty measurement is silence, not absence (#1132). A repeat
+            // run whose file a previous run already wrote changes nothing
+            // between the two snapshots, and a bee working in its own
+            // worktree never moves the shared tree at all — in both cases
+            // `measured` is empty while the criterion's file sits on disk
+            // exactly as the task asks. Recording "unmet" from that emptiness
+            // is the same false "no" the phantom deletion diff made: a
+            // comparison against a base taken after someone else's work,
+            // read as this run's failure. It kept #1130 parked on one "unmet"
+            // criterion through two worker returns while the file existed the
+            // whole time. With nothing measured, the path-naming criteria are
+            // left for the reviewer, which reads the files as they are — a
+            // missing file still comes back "unmet", from the file itself
+            // rather than from an empty diff (#1132 criterion 3).
+            let evidenceVerdicts: [String: QueenCriterionVerdict] = measured.isEmpty
+                ? [:]
+                : QueenAcceptancePolicy.mechanicalVerdicts(
+                    criteria: task.acceptanceCriteria,
+                    changedPaths: measured.map {
+                        QueenBranchCommitter.projectRelative($0)
+                    }
+                )
             for (criterion, verdict) in evidenceVerdicts {
                 registry.recordVerdict(taskID: task.id, criterion: criterion, verdict: verdict)
             }
@@ -5179,12 +5233,29 @@ final class ChatViewModel: ObservableObject {
                     + "be mistaken for done."
             }
         }
-        registry.transition(taskID: task.id, to: failure == nil ? .awaitingReview : .failed)
+        let moved = registry.transition(
+            taskID: task.id, to: failure == nil ? .awaitingReview : .failed
+        )
+        // Classify immediately after the move, while the measurements this
+        // task was judged on are still the ones in the store. Deferring it to
+        // read time would classify against whatever the record looked like
+        // later, which is a different question.
+        //
+        // Only when the move actually happened. A cancelled task refuses the
+        // transition to `failed` - correctly - and writing a failure kind onto
+        // it anyway would make a task nobody failed at look like one that did,
+        // to the very policy that counts failures. Seen in the suite:
+        // "Cannot move #4243 from cancelled to failed" immediately followed by
+        // "#4243 failed as producedNothing".
+        if failure != nil, moved {
+            registry.recordFailureKind(taskID: task.id)
+        }
         // The notice belongs in the Queen's chat even when she is not the open
         // conversation, otherwise a result reported while the user is reading a
         // worker chat is lost.
         await appendSystemMessageToQueenChat(notice)
         await autoAcceptIfUnambiguous(taskID: task.id)
+        await actOnCompletedReview(taskID: task.id)
 
         await sweepAwaitingReview(excluding: task.id, trigger: task.issue.slug)
 
@@ -5210,12 +5281,25 @@ final class ChatViewModel: ObservableObject {
     /// The branch tip carries only this worker's committed changes, so the diff
     /// is exactly what landed on the branch. The direction `git diff A B` reads
     /// A→B: a file the worker added appears as a new file, never as a deleted
-    /// one. When the branch is empty (no commits beyond its parent), the diff is
-    /// genuinely empty and the brief already says "(no changes detected)".
+    /// one (#1132 criterion 2).
+    ///
+    /// An empty branch is not diffed at all. "Empty" means the branch tip is
+    /// its own merge-base with HEAD — no commits of its own, the same test
+    /// `QueenBranchCommitter.branchPoint` applies to refuse a pull request.
+    /// The baseline is a snapshot of the whole working tree taken when the
+    /// worker started, and it can contain work that is not on this branch: a
+    /// repeat run of an issue whose file a previous run already wrote has that
+    /// file in the baseline but not at the fork point, and diffing the two
+    /// reads it as deleted — a deletion nobody performed (#1130's repeat
+    /// answered "unmet" twice on exactly that phantom). The empty branch
+    /// returns a parenthetical "nothing to compare" instead, and the reviewer
+    /// judges the criteria from the file contents the brief already carries
+    /// (#1132 criterion 1).
     ///
     /// Returns a parenthetical "nothing to compare" message when the baseline
-    /// was never captured or the branch cannot be resolved, so the reviewer is
-    /// never handed a blank diff with no explanation (#1132).
+    /// was never captured, the branch cannot be resolved, or the branch has
+    /// no commits of its own, so the reviewer is never handed a blank diff
+    /// with no explanation — and never a deletion phantom (#1132).
     private func diffForReview(
         baselineTree: String?,
         branch: String?,
@@ -5248,6 +5332,48 @@ final class ChatViewModel: ObservableObject {
                   !branchTree.hasPrefix("fatal") else {
                 return "(Branch \(branch) could not be resolved — nothing to compare.)"
             }
+            // Is the branch empty — no commits of its own? The tip is compared
+            // with its merge-base against HEAD, the same test branchPoint
+            // applies to decide there is nothing to open a pull request for.
+            // Both git answers must resolve; a merge-base that fails falls
+            // through to the diff rather than guessing emptiness.
+            let tip = QueenStatusViewModel.runProcess(
+                "/usr/bin/git",
+                arguments: ["rev-parse", "--verify", branchRef],
+                workDir: ProjectPaths.root,
+                timeout: 10
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            let fork = QueenStatusViewModel.runProcess(
+                "/usr/bin/git",
+                arguments: ["merge-base", branchRef, "HEAD"],
+                workDir: ProjectPaths.root,
+                timeout: 10
+            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            let branchCarriesNoCommits =
+                !tip.isEmpty && !tip.hasPrefix("fatal")
+                && !fork.isEmpty && !fork.hasPrefix("fatal")
+                && tip == fork
+            // An empty branch is not diffed at all (#1132 criterion 1). The
+            // baseline is a snapshot of the whole working tree taken when the
+            // worker started, so it can hold files a previous run wrote that
+            // the fork point never saw; diffing the two reads those files as
+            // deletions nobody performed — the phantom that made a repeat
+            // review of #1130 answer "unmet" on a file that exists. Said
+            // plainly, twice: to the journal here, and to the reviewer in the
+            // returned string, which points the verdicts at the file
+            // contents the brief already carries.
+            if branchCarriesNoCommits {
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.diff.unavailable",
+                    "Branch \(branch) has no commits of its own; there is "
+                        + "nothing to compare",
+                    ["branch": branch]
+                )
+                return "(Branch \(branch) has no commits of its own — nothing "
+                    + "to compare. This run changed nothing on the branch; "
+                    + "judge the criteria from the files as they are now.)"
+            }
             // Direction: baseline → branch tip. Files the worker added appear
             // as new (all +), files removed as deleted (all -). Reversing the
             // arguments would invert the reading: a created file would read
@@ -5259,12 +5385,67 @@ final class ChatViewModel: ObservableObject {
                     QueenDelegationPolicy.normalizePath($0)
                 })
             }
-            return QueenStatusViewModel.runProcess(
+            let diff = QueenStatusViewModel.runProcess(
                 "/usr/bin/git",
                 arguments: args,
                 workDir: ProjectPaths.root,
                 timeout: 30
             )
+            // Regression guard (#1132 criterion 4): an empty branch must never
+            // be handed a diff, because the only diff an empty branch can
+            // produce against a baseline captured after someone else's work
+            // is deletions nobody made. This fires if the early return above
+            // is removed — that is the sense in which the check breaks when
+            // the comparison with a post-work base is restored. It cannot
+            // fire on a genuine deletion: a branch that really removed a file
+            // carries commits, so branchCarriesNoCommits is false here.
+            //
+            // The check does not stop at observing. A guard that logs the
+            // phantom and then hands it over anyway fired at runtime on
+            // 2026-08-19 (queen/9932) "without a single consequence": the
+            // reviewer still received the deletions and answered from them.
+            // So here the phantom is withheld — the reviewer gets the same
+            // honest message the early return gives, and removing the early
+            // return breaks this check loudly AND fails safe.
+            if branchCarriesNoCommits && diff.contains("deleted file mode") {
+                let header = diff.components(separatedBy: "\n")
+                    .first { $0.contains("deleted file mode") } ?? ""
+                TriosLogBus.shared.warn(
+                    .queen,
+                    "queen.assertion.empty_branch_deletions",
+                    "An empty branch was diffed against its baseline and the "
+                        + "result carries deletions nobody made: \(header). "
+                        + "The baseline was captured after another worker's "
+                        + "work, so the comparison reads that work as removed "
+                        + "(#1132)",
+                    ["branch": branch, "deleted_header": header]
+                )
+                return "(Branch \(branch) has no commits of its own — nothing "
+                    + "to compare. This run changed nothing on the branch; "
+                    + "judge the criteria from the files as they are now.)"
+            }
+            // What the reviewer was handed, in the journal rather than only
+            // in the reviewer's paraphrase of it (#1132 criterion 2): the
+            // file headers of the diff, which say "new file mode" for a file
+            // the worker created and "deleted file mode" for one removed.
+            // The direction of the comparison is visible here first-hand.
+            let headers = diff.components(separatedBy: "\n")
+                .filter {
+                    $0.hasPrefix("diff --git")
+                        || $0.hasPrefix("new file mode")
+                        || $0.hasPrefix("deleted file mode")
+                        || $0.hasPrefix("rename ")
+                }
+                .joined(separator: " | ")
+            if !headers.isEmpty {
+                TriosLogBus.shared.info(
+                    .queen,
+                    "queen.review.diff_summary",
+                    "Reviewer diff for \(branch): \(headers)",
+                    ["branch": branch, "headers": headers]
+                )
+            }
+            return diff
         }.value
     }
 
@@ -6327,6 +6508,139 @@ final class ChatViewModel: ObservableObject {
     /// something, and cost nothing unusual. Everything else waits for a human,
     /// because an orchestrator that rubber-stamps its own workers has no
     /// reviewer at all. Off unless `TRIOS_QUEEN_AUTONOMY=1`.
+    /// Returns a task to its worker with a reason, and restarts it.
+    ///
+    /// One implementation for the command and for the automatic path. They were
+    /// about to be two, and two implementations of "send it back" drift the
+    /// moment either learns something - the counter being the obvious thing one
+    /// of them would forget.
+    ///
+    /// Reports whether the worker is actually running again, because "rejected"
+    /// with no runner is a task moved out of the review queue into nothing,
+    /// which is worse than leaving it where it was.
+    @discardableResult
+    private func sendTaskBackToWorker(task: DelegatedTask, reason: String) async -> Bool {
+        let registry = delegationRegistry
+        guard registry.transition(taskID: task.id, to: .rejected) else {
+            await postQueenNotice(
+                SystemNoticeClassifier.failureMarker
+                    + (registry.lastError ?? "Could not return \(task.issue.slug).")
+            )
+            return false
+        }
+        guard let runner = workerRunner,
+              registry.transition(taskID: task.id, to: .running) else {
+            await postQueenNotice(
+                SystemNoticeClassifier.failureMarker
+                    + "Returned \(task.issue.slug), but the worker could not be restarted."
+            )
+            return false
+        }
+        let total = registry.recordSendBack(taskID: task.id)
+        let rebrief = QueenBriefing.text(for: task)
+            + "\n\nThe Queen returned your previous attempt. Reason: \(reason)"
+        workerBaselineTrees[task.conversationId] = await QueenBranchCommitter.snapshotWorkingTree()
+        runner.start(task: task, brief: rebrief)
+        TriosLogBus.shared.info(
+            .queen, "queen.review.sent_back",
+            "Returned \(task.issue.slug) to \(task.worker) (return \(total) of "
+                + "\(QueenReviewDecision.maximumSendBacks))",
+            ["issue": task.issue.slug, "returns": String(total)]
+        )
+        return true
+    }
+
+    /// Acts on a completed review instead of parking it.
+    ///
+    /// Eight tasks sat in `awaitingReview` in the release registry, the oldest
+    /// fifteen hours, every one of them fully judged and every one with an
+    /// unmet criterion. The judgement was done and nothing consumed it: the
+    /// send-back existed but only a human typing `/review ... reject` had ever
+    /// called it. Meanwhile each task held its file boundary, which is why the
+    /// autonomous tick kept reporting that all 24 candidates looked already
+    /// done - there was work, and every path to it was owned by something
+    /// nobody had finished.
+    ///
+    /// Called after auto-accept declines, because accept is the cheaper answer
+    /// and should be tried first.
+    private func actOnCompletedReview(taskID: UUID) async {
+        let registry = delegationRegistry
+        guard let task = registry.tasks.first(where: { $0.id == taskID }),
+              task.state == .awaitingReview else { return }
+
+        // Only `met` and `unmet` are answers. `unchecked` is nobody having
+        // looked, and `stale` is an answer about a tree that no longer exists -
+        // counting either as a failure would return work over a question that
+        // was never asked.
+        let verdicts: [(criterion: String, met: Bool)] = task.acceptanceCriteria.compactMap {
+            criterion in
+            switch task.criterionVerdicts[criterion] {
+            case .met: return (criterion, true)
+            case .unmet: return (criterion, false)
+            case .unchecked, .stale, nil: return nil
+            }
+        }
+        let decision = QueenReviewDecision.decide(
+            verdicts: verdicts,
+            totalCriteria: task.acceptanceCriteria.count,
+            committedFiles: task.committedFiles,
+            priorSendBacks: task.sendBacks ?? 0
+        )
+
+        switch decision {
+        case .accept, .wait:
+            // Accept is auto-accept's business and it has already run; waiting
+            // is not an action. Both are silent on purpose - a log line every
+            // sweep for every unjudged task buries the ones that moved.
+            return
+        case .sendBack(let unmet):
+            // A return puts a worker back on the wing, so it spends a slot.
+            // Without this the sweep would return every judged task at once -
+            // eight of them, against a ceiling of four - and the ceiling would
+            // be enforced by nothing. The task keeps its place in the queue and
+            // goes back when there is room for it.
+            let running = registry.tasks.filter { $0.state == .running }.count
+            guard QueenDelegationPolicy.canStartAnother(running: running) else {
+                TriosLogBus.shared.info(
+                    .queen, "queen.review.send_back_deferred",
+                    "\(task.issue.slug) is ready to go back but \(running) workers are "
+                        + "already flying",
+                    ["issue": task.issue.slug]
+                )
+                return
+            }
+            let note = QueenReviewDecision.sendBackNote(
+                unmet: unmet, attempt: (task.sendBacks ?? 0) + 1
+            )
+            guard await sendTaskBackToWorker(task: task, reason: note) else { return }
+            await postQueenNotice(
+                SystemNoticeClassifier.infoMarker
+                    + "Returned \(task.issue.slug) to \(task.worker): "
+                    + "\(unmet.count) criterion(s) unmet."
+            )
+        case .escalate(let reason):
+            // Left in awaitingReview deliberately. Escalation is not a state
+            // change, it is the absence of one - the task stays exactly where a
+            // person will look for it, and the notice says why nobody else can
+            // move it.
+            // Once per task per run. The sweep passes over every awaiting task
+            // on every tick, and a stuck task is stuck for hours - saying so
+            // every five minutes would bury the tasks that actually moved
+            // under the ones that cannot.
+            guard !escalatedReviewTaskIDs.contains(task.id) else { return }
+            escalatedReviewTaskIDs.insert(task.id)
+            TriosLogBus.shared.warn(
+                .queen, "queen.review.escalated",
+                "\(task.issue.slug) needs you: \(reason)",
+                ["issue": task.issue.slug]
+            )
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "\(task.issue.slug) is yours to decide: \(reason)"
+            )
+        }
+    }
+
     private func autoAcceptIfUnambiguous(taskID: UUID) async {
         let autonomy: Bool
         if let envValue = ProcessInfo.processInfo.environment["TRIOS_QUEEN_AUTONOMY"] {
@@ -6739,6 +7053,7 @@ final class ChatViewModel: ObservableObject {
                 // the primary task gets (line ~3770). Without this the
                 // skip leaves the task parked forever (#1156).
                 await autoAcceptIfUnambiguous(taskID: current.id)
+                await actOnCompletedReview(taskID: current.id)
                 continue
             }
             guard let branch = current.virtualBranch else {
@@ -6753,24 +7068,13 @@ final class ChatViewModel: ObservableObject {
                 )
                 continue
             }
-            // The sweep is the repeat-review path: the task was dispatched —
-            // and its baseline captured — in an earlier process, so the
-            // in-memory dictionary is empty here and the registry copy is
-            // the only one left. `setBaselineTree` persists it for exactly
-            // this restart case and `settleFailedWorkerEdits` already reads
-            // it with this fallback; without it the sweep handed the
-            // reviewer "(No baseline snapshot — nothing to compare.)" for a
-            // task whose baseline was recorded all along, and a repeat
-            // review could never show that nothing was deleted (#1132).
-            let baseline = workerBaselineTrees[current.conversationId]
-                ?? current.baselineTree
             let diffText = await diffForReview(
-                baselineTree: baseline,
+                baselineTree: workerBaselineTrees[current.conversationId],
                 branch: branch,
                 ownedPaths: current.ownedPaths
             )
             let touchedFiles = await fileContentsForReview(
-                baselineTree: baseline,
+                baselineTree: workerBaselineTrees[current.conversationId],
                 ownedPaths: current.ownedPaths,
                 criteria: unanswered
             )
@@ -6792,6 +7096,7 @@ final class ChatViewModel: ObservableObject {
                 ]
             )
             await autoAcceptIfUnambiguous(taskID: current.id)
+            await actOnCompletedReview(taskID: current.id)
         }
         TriosLogBus.shared.info(
             .queen,
@@ -7063,32 +7368,44 @@ final class ChatViewModel: ObservableObject {
         var seen = Set<Int>()
         var subIssues: [(number: Int, title: String, body: String)] = []
 
-        var timelineRequest = URLRequest(
-            url: URL(string: "https://api.github.com/repos/gHashTag/trios/issues/1090/timeline?per_page=100")!
-        )
-        timelineRequest.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        if let token = githubTokenForTimeline() {
-            timelineRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        }
-
-        var timelineData = Data()
+        // Every configured epic, not one. The number used to be written into
+        // the URL, which was fine while there was one epic and became a wall
+        // the moment there were two: six well-formed sub-issues under #1279
+        // were invisible to a Queen that reported "all 24 candidates look
+        // already done".
         var networkOK = false
         var failureMessage = ""
-        do {
-            let (data, response) = try await URLSession.shared.data(for: timelineRequest)
-            timelineData = data
-            if let httpResp = response as? HTTPURLResponse,
-               (200...299).contains(httpResp.statusCode) {
-                networkOK = true
-            } else {
-                let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-                failureMessage = "HTTP \(code)"
+        for epic in QueenEpics.configured {
+            guard let url = QueenEpics.timelineURL(epic: epic) else { continue }
+            var timelineRequest = URLRequest(url: url)
+            timelineRequest.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+            if let token = githubTokenForTimeline() {
+                timelineRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
             }
-        } catch {
-            failureMessage = error.localizedDescription
-        }
 
-        if networkOK {
+            var timelineData = Data()
+            var epicOK = false
+            do {
+                let (data, response) = try await URLSession.shared.data(for: timelineRequest)
+                timelineData = data
+                if let httpResp = response as? HTTPURLResponse,
+                   (200...299).contains(httpResp.statusCode) {
+                    epicOK = true
+                } else {
+                    let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+                    // Named, because "HTTP 404" without the epic is a message
+                    // that cannot be acted on when there is more than one.
+                    failureMessage = "#\(epic): HTTP \(code)"
+                }
+            } catch {
+                failureMessage = "#\(epic): \(error.localizedDescription)"
+            }
+
+            // One reachable epic is enough to have read the board. Treating a
+            // single unreachable epic as total failure would let a typo in one
+            // number stop work that is sitting open in another.
+            if epicOK { networkOK = true } else { continue }
+
             if let events = try? JSONSerialization.jsonObject(with: timelineData) as? [[String: Any]] {
                 for event in events {
                     guard event["event"] as? String == "cross-referenced" else { continue }
@@ -7103,6 +7420,9 @@ final class ChatViewModel: ObservableObject {
                     }
                 }
             }
+        }
+
+        if networkOK {
 
             let storePayload: [String: Any] = [
                 "readAt": ISO8601DateFormatter().string(from: Date()),
@@ -7159,16 +7479,34 @@ final class ChatViewModel: ObservableObject {
     /// a stored preference rather than a constant, because withdrawing consent
     /// must be as easy as giving it.
     ///
-    /// Defaults to ON in the supervisor variants and is unavailable in release:
-    /// `startQueenAutonomyLoop` refuses outside `hasSupervisorInbox`, so a
-    /// shipped build cannot open chats by itself whatever this says.
+    /// Defaults to ON in release and OFF in dev and test - see
+    /// `BuildVariant.autonomyDefault` for why exactly one variant may start
+    /// work unprompted. The comment here used to claim the opposite ("on in the
+    /// supervisor variants, unavailable in release"), which was true before
+    /// `hasSupervisorInbox` became true everywhere and was never corrected.
+    ///
+    /// Instance access forwards to the static below so the two cannot drift.
+    /// They already had: this property had a setter and, for as long as it
+    /// existed, not one caller. The default was therefore the only value it
+    /// ever held, which is why dev - where the default is OFF - could not be
+    /// driven at all. A stored preference nobody can store is a constant.
     var queenAutonomyEnabled: Bool {
+        get { Self.storedAutonomyPreference }
+        set { Self.storedAutonomyPreference = newValue }
+    }
+
+    /// The operator's answer, readable and writable from the view layer.
+    ///
+    /// `nonisolated` because the control that flips it is a SwiftUI toggle in
+    /// the supervisor strip, and routing a checkbox through the actor to set a
+    /// UserDefaults key would buy nothing.
+    nonisolated static var storedAutonomyPreference: Bool {
         get {
-            UserDefaults.standard.object(forKey: Self.queenAutonomyKey) as? Bool
+            UserDefaults.standard.object(forKey: queenAutonomyKey) as? Bool
                 ?? ProjectPaths.autonomyDefault
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: Self.queenAutonomyKey)
+            UserDefaults.standard.set(newValue, forKey: queenAutonomyKey)
         }
     }
 
@@ -7311,7 +7649,7 @@ final class ChatViewModel: ObservableObject {
                     "queen.choose",
                     "Timeline request failed (\(failureMessage)); using \(subIssues.count) sub-issue\(subIssues.count == 1 ? "" : "s") from store — \(loaded.disclaimer)",
                     [
-                        "epic": "gHashTag/trios#1090",
+                        "epic": QueenEpics.describedList,
                         "source": "store",
                         "age": loaded.disclaimer,
                         "count": String(subIssues.count),
@@ -7323,11 +7661,11 @@ final class ChatViewModel: ObservableObject {
                     .queen,
                     "queen.choose",
                     "Timeline request failed: \(failureMessage)",
-                    ["epic": "gHashTag/trios#1090", "chosen": "(none)"]
+                    ["epic": QueenEpics.describedList, "chosen": "(none)"]
                 )
                 await postQueenNotice(
                     SystemNoticeClassifier.warningMarker
-                        + "Cannot choose: failed to read sub-issues of epic #1090 "
+                        + "Cannot choose: failed to read sub-issues of \(QueenEpics.describedList) "
                         + "(\(failureMessage))."
                 )
                 return
@@ -7339,14 +7677,14 @@ final class ChatViewModel: ObservableObject {
                 .queen,
                 "queen.choose",
                 "Using \(subIssues.count) sub-issue\(subIssues.count == 1 ? "" : "s") — \(disclaimer)",
-                ["epic": "gHashTag/trios#1090", "count": String(subIssues.count), "source": "store"]
+                ["epic": QueenEpics.describedList, "count": String(subIssues.count), "source": "store"]
             )
         } else {
             TriosLogBus.shared.info(
                 .queen,
                 "queen.choose",
-                "Read \(subIssues.count) open sub-issue\(subIssues.count == 1 ? "" : "s") from #1090 timeline",
-                ["epic": "gHashTag/trios#1090", "count": String(subIssues.count)]
+                "Read \(subIssues.count) open sub-issue\(subIssues.count == 1 ? "" : "s") from \(QueenEpics.describedList)",
+                ["epic": QueenEpics.describedList, "count": String(subIssues.count)]
             )
         }
 
@@ -7355,7 +7693,7 @@ final class ChatViewModel: ObservableObject {
                 .queen,
                 "queen.choose",
                 "Nothing to choose — no open sub-issues on #1090",
-                ["epic": "gHashTag/trios#1090", "considered": "0", "chosen": "(none)"]
+                ["epic": QueenEpics.describedList, "considered": "0", "chosen": "(none)"]
             )
             await postQueenNotice(
                 SystemNoticeClassifier.infoMarker
@@ -7506,6 +7844,22 @@ final class ChatViewModel: ObservableObject {
 
         var chosenScored: ScoredIssue!
         for candidate in sorted {
+            // A candidate with no boundary cannot be delegated at all, and
+            // that is knowable here: the paths were parsed during scoring.
+            // Discovering it after the choice ends the tick with "Refused
+            // --start: no Границы section" and a free worker slot - the fourth
+            // instance of one shape, after "already delegated", "boundary
+            // conflict" and the accepted-task filter. The pattern is always
+            // the same: a condition the selection could test is instead left
+            // for the refusal to find.
+            if (candidate.paths ?? []).isEmpty {
+                TriosLogBus.shared.info(
+                    .queen, "queen.choose.no_boundary",
+                    "Skipping #\(candidate.number): no Границы section, so there is nothing to delegate",
+                    ["issue": "gHashTag/trios#\(candidate.number)"]
+                )
+                continue
+            }
             // Boundary conflicts too, and for the same reason. `delegate`
             // refuses a candidate whose files another live task already owns -
             // correctly - and the tick again treated that refusal as the end
@@ -7528,6 +7882,26 @@ final class ChatViewModel: ObservableObject {
                     .queen, "queen.choose.already_running",
                     "Skipping #\(candidate.number): a worker already has it",
                     ["issue": "gHashTag/trios#\(candidate.number)"]
+                )
+                continue
+            }
+            // A failure is choosable again - that much the comment above is
+            // right about. What it did not say is how many times. #1127 was
+            // attempted seven times in one registry, #1129 five, #1128 four,
+            // every one of them the same brief against the same issue, because
+            // nothing counted. Interruptions are excluded from the count by the
+            // policy: a worker that died in a rebuild did not fail at anything.
+            let priorFailures = delegationRegistry.priorFailures(forIssue: candidate.number)
+            if case .escalate(let reason) = QueenRetryPolicy.decision(
+                priorAttempts: priorFailures
+            ) {
+                TriosLogBus.shared.warn(
+                    .queen, "queen.choose.exhausted",
+                    "Skipping #\(candidate.number): \(reason)",
+                    [
+                        "issue": "gHashTag/trios#\(candidate.number)",
+                        "attempts": String(priorFailures.filter(\.countsAgainstTheIssue).count),
+                    ]
                 )
                 continue
             }
@@ -7754,7 +8128,7 @@ final class ChatViewModel: ObservableObject {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("## ") {
                 if inBounds { break }
-                inBounds = trimmed.hasPrefix("## Границы")
+                inBounds = ChatViewModel.isBoundaryHeading(trimmed)
                 if inBounds { found = true }
                 continue
             }
@@ -7788,7 +8162,7 @@ final class ChatViewModel: ObservableObject {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("## ") {
                 if inBounds { break }
-                inBounds = trimmed.hasPrefix("## Границы")
+                inBounds = ChatViewModel.isBoundaryHeading(trimmed)
                 if inBounds { found = true }
                 continue
             }
@@ -7818,14 +8192,49 @@ final class ChatViewModel: ObservableObject {
     /// Extracts the path-shaped token from a boundary line. The token has no
     /// spaces, contains "/" or ends in a dotted file extension, and is stripped
     /// of trailing prose punctuation (commas, semicolons, backticks, etc.).
-    private static func boundaryPathToken(from line: String) -> String? {
+    /// Whether a heading opens the boundary section.
+    ///
+    /// Two spellings, because the repository writes its documentation and code
+    /// in English while every issue written before that rule says `Границы`.
+    /// The heading is a parser token, not prose: recognising only one spelling
+    /// would have made every English issue undelegatable, and the failure would
+    /// have read as "no boundary section, so there is nothing to delegate" -
+    /// true of the parser, not of the issue.
+    static func isBoundaryHeading(_ trimmed: String) -> Bool {
+        trimmed.hasPrefix("## Границы") || trimmed.hasPrefix("## Boundary")
+    }
+
+    static func boundaryPathToken(from line: String) -> String? {
         for raw in line.split(separator: " ", omittingEmptySubsequences: true) {
-            let debacked = String(raw)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "`"))
-            // Strip trailing prose punctuation glued to the path end.
-            var cleaned = debacked
-            while let last = cleaned.last, ",;:!?)".contains(last) {
-                cleaned.removeLast()
+            // Strip backticks and prose punctuation from both ends, in any
+            // order, until nothing more comes off.
+            //
+            // The two passes used to be sequential - backticks first, then
+            // trailing punctuation - and that order fails on the commonest
+            // shape of all: a path in backticks followed by a comma. The
+            // trailing character is the comma, so the backtick strip does not
+            // reach the backtick; the punctuation strip then removes the comma
+            // and leaves it exposed at the end, where nothing looks again.
+            //
+            // Five of the sixty-three boundary paths in the live registries
+            // carried a trailing backtick because of it, all of them
+            // `rings/SR-02/ChatViewModel.swift` + "`". A path like that matches
+            // nothing: `git add --` does not stage it, and the boundary filter
+            // drops the worker's real edits to that file as being outside its
+            // boundary. The bee is then recorded as having produced nothing,
+            // which is the commonest failure in the registry.
+            var cleaned = String(raw)
+            var changed = true
+            while changed, !cleaned.isEmpty {
+                changed = false
+                if let first = cleaned.first, "`\"'(".contains(first) {
+                    cleaned.removeFirst()
+                    changed = true
+                }
+                if let last = cleaned.last, "`\"'.,;:!?)".contains(last) {
+                    cleaned.removeLast()
+                    changed = true
+                }
             }
             guard !cleaned.isEmpty else { continue }
             if cleaned.contains("/")
@@ -8328,22 +8737,7 @@ final class ChatViewModel: ObservableObject {
                 )
                 return
             }
-            guard registry.transition(taskID: task.id, to: .rejected) else {
-                await postQueenNotice(SystemNoticeClassifier.failureMarker + (registry.lastError ?? "Could not reject \(issue.slug)."))
-                return
-            }
-            guard let runner = workerRunner,
-                  registry.transition(taskID: task.id, to: .running) else {
-                await postQueenNotice(
-                    SystemNoticeClassifier.failureMarker
-                        + "Rejected \(issue.slug), but the worker could not be restarted."
-                )
-                return
-            }
-            let rebrief = QueenBriefing.text(for: task)
-                + "\n\nThe Queen returned your previous attempt. Reason: \(note)"
-            workerBaselineTrees[task.conversationId] = await QueenBranchCommitter.snapshotWorkingTree()
-            runner.start(task: task, brief: rebrief)
+            guard await sendTaskBackToWorker(task: task, reason: note) else { return }
             await postQueenNotice(SystemNoticeClassifier.infoMarker
                     + "Sent \(issue.slug) back to \(task.worker) with your reason: \(note). "
                     + "Same chat, same branch - it picks up where it left off rather than "
@@ -8580,6 +8974,60 @@ final class ChatViewModel: ObservableObject {
             if QueenDelegationPolicy.outcome(
                 merged: pullRequest.isMerged, closedUnmerged: pullRequest.isClosedUnmerged
             ) == .pending {
+                // The gate, before the merge and not instead of it.
+                //
+                // GitHub refuses a red pull request only when branch protection
+                // makes it refuse; without protection the merge succeeds and a
+                // failing change lands. Three of hers merged that way and only
+                // luck decided they were green.
+                let (rollup, failingChecks) = (try? await client.checkRollup(
+                    repo: prRepo, sha: reviewedSHA ?? ""
+                )) ?? (.none, [])
+                let gate = QueenMergeGate.decision(
+                    rollup: rollup,
+                    mergeable: nil,
+                    isDraft: false,
+                    checksConfigured: Self.repositoryHasChecks
+                )
+                switch gate {
+                case .wait(let why):
+                    TriosLogBus.shared.info(
+                        .queen, "queen.pr.gate_waiting",
+                        "Not merging #\(number) yet: \(why)",
+                        ["issue": task.issue.slug, "pr": "\(number)", "rollup": rollup.rawValue]
+                    )
+                    return
+                case .refuse(let why):
+                    TriosLogBus.shared.warn(
+                        .queen, "queen.pr.gate_refused",
+                        "Will not merge #\(number): \(why)",
+                        ["issue": task.issue.slug, "pr": "\(number)"]
+                    )
+                    return
+                case .wakeWorker(let why):
+                    // Red means the bee goes back to work, not that the Queen
+                    // fixes it. The instruction names the failing checks,
+                    // because a wake-up that says only "it is red" gives the
+                    // worker nothing to act on and it repeats what it did.
+                    TriosLogBus.shared.warn(
+                        .queen, "queen.pr.gate_red",
+                        "#\(number) is red: \(why). Waking \(task.worker).",
+                        [
+                            "issue": task.issue.slug, "pr": "\(number)",
+                            "checks": failingChecks.joined(separator: ", "),
+                        ]
+                    )
+                    await appendCorrectionToWorkerChat(
+                        task: task,
+                        text: QueenMergeGate.wakeInstruction(
+                            prNumber: number, reason: why, failingChecks: failingChecks
+                        )
+                    )
+                    registry.transition(taskID: task.id, to: .rejected)
+                    return
+                case .merge:
+                    break
+                }
                 TriosLogBus.shared.info(
                     .queen, "queen.pr.merge_attempt", "Attempting to merge a reviewed pull request",
                     ["issue": task.issue.slug, "pr": "\(number)"]
