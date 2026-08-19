@@ -1,0 +1,410 @@
+// RING-01 — the A2A protocol.
+//
+// The contract already exists and is not redesigned here. Three files hold it:
+// the nine HTTP routes in agent-server/apps/server/src/api/routes/a2a.ts,
+// the PostgreSQL store in .../services/a2a/pg-agent-store.ts, the hybrid
+// registry in .../services/a2a/a2a-registry-service.ts, the Swift client in
+// rings/SR-02/A2ARegistryClient.swift, and the Swift types in
+// rings/SR-01/A2AMessage.swift and rings/SR-00/AgentIdentity.swift. This file
+// is not a new design - it is the same law, written where it can be generated
+// instead of transcribed, the same move ring 00 made for the supervisor's
+// decisions.
+//
+// Shapes are stated as counted ordinals, not struct declarations, and
+// vocabularies as integer constants, not enums. Not a taste: ring 00 measured
+// the seed compiler's limits and wrote them into its header - struct and enum
+// derives drag `serde` into code that must compile under bare
+// `rustc --crate-type lib`, and a string literal emits as a bare identifier,
+// so `"pending"` becomes `pending` and does not compile. Every shape below is
+// therefore a field count plus one named ordinal per field in declaration
+// order, and every vocabulary is one constant block. When the seed grows up,
+// each becomes a struct or an enum and nothing else in this file changes
+// shape.
+//
+// No I/O anywhere in this ring, by law: no Postgres, no HTTP, no clock, no
+// store. The pool, the routes, the SSE stream and the watchdog's timer are
+// ring 3. What stays here answers with numbers already in hand.
+//
+// phi^2 + 1/phi^2 = 3 | TRINITY
+
+module a2a;
+
+// ---------------------------------------------------------------------------
+// The agent card, field for field with the `agents` table
+// ---------------------------------------------------------------------------
+
+// The store's CREATE TABLE (pg-agent-store.ts, ensureSchema) and its AgentRow
+// interface. The card the protocol speaks and the table agree on exactly
+// these six fields; the table also keeps created_at / updated_at, which are
+// store bookkeeping no wire card has ever carried (A2aAgentCard in
+// a2a-registry-service.ts carries none of them), so the match the protocol
+// can claim is the six. Counted, so a seventh field cannot arrive silently.
+pub const AGENT_CARD_FIELDS: i32 = 6;
+
+// One ordinal per field, in the table's own column order. Each comment is the
+// column's SQL type and the representation ring 3 reads it as.
+pub const AGENT_FIELD_ID: i32 = 0;            // id TEXT PRIMARY KEY -> string
+pub const AGENT_FIELD_NAME: i32 = 1;          // name TEXT NOT NULL -> string
+pub const AGENT_FIELD_CAPABILITIES: i32 = 2;  // capabilities TEXT[] -> list of string
+pub const AGENT_FIELD_LAST_HEARTBEAT: i32 = 3; // last_heartbeat TIMESTAMPTZ -> epoch seconds (i64)
+pub const AGENT_FIELD_STATUS: i32 = 4;        // status TEXT -> status coding below
+pub const AGENT_FIELD_METADATA: i32 = 5;      // metadata JSONB -> opaque bytes of serialized JSON
+
+// The register route accepts a card with description, version and endpoint
+// (A2aAgentCard), and the store folds all three INTO metadata on insert
+// (upsertAgent stringifies {description, version, endpoint} into the JSONB
+// column). The card is six fields on the wire and six columns in the table
+// either way; the fold is why the count is not nine.
+//
+// Swift's own card (AgentCard in rings/SR-00/AgentIdentity.swift) keeps the
+// three out as fields; it is the app's reading of the same six, where
+// metadata has been opened. Nothing here contradicts it.
+
+// ---------------------------------------------------------------------------
+// Status coding — the two words the store writes
+// ---------------------------------------------------------------------------
+
+// The store writes exactly two status literals: 'online' on insert and on
+// heartbeat, 'offline' on prune and on unregister (pg-agent-store.ts). Coded
+// here as integers because the string literal does not survive generation
+// (see the header); the word each constant stands for is in its comment.
+pub const STATUS_ONLINE: i32 = 0;   // 'online'
+pub const STATUS_OFFLINE: i32 = 1;  // 'offline'
+
+// Whether a status is one the protocol has a word for. A status the store
+// invents later is not silently tolerated here; it is refused until this file
+// says what it means.
+pub fn status_is_known(status: i32) bool {
+    if (status == STATUS_ONLINE) {
+        return true;
+    }
+    if (status == STATUS_OFFLINE) {
+        return true;
+    }
+    return false;
+}
+
+// A heartbeat sets status back to 'online' (heartbeat(): UPDATE agents SET
+// status = 'online'). Stated as a function so the effect is callable and
+// pinnable, not a comment only.
+pub fn status_after_heartbeat() i32 {
+    return STATUS_ONLINE;
+}
+
+// The watchdog's prune sets status to 'offline' (pruneOffline). Unregister
+// writes the same word through markOffline. One law, two callers.
+pub fn status_after_prune() i32 {
+    return STATUS_OFFLINE;
+}
+
+// ---------------------------------------------------------------------------
+// The message, field for field with A2AMessage in Swift
+// ---------------------------------------------------------------------------
+
+// Swift's A2AMessage (rings/SR-01/A2AMessage.swift) and the wire's A2aMessage
+// (a2a-registry-service.ts) declare the same six fields in the same order.
+// Counted for the same reason the card is.
+pub const MESSAGE_FIELDS: i32 = 6;
+
+// One ordinal per field, in the order both declarations use.
+pub const MESSAGE_FIELD_ID: i32 = 0;         // id: UUID -> string
+pub const MESSAGE_FIELD_SENDER: i32 = 1;     // sender: AgentId -> string
+pub const MESSAGE_FIELD_RECIPIENT: i32 = 2;  // recipient: AgentId? -> present or absent
+pub const MESSAGE_FIELD_TYPE: i32 = 3;       // type: A2AMessageType -> coding below
+pub const MESSAGE_FIELD_PAYLOAD: i32 = 4;    // payload: Data -> bytes
+pub const MESSAGE_FIELD_TIMESTAMP: i32 = 5;  // timestamp: String -> ISO 8601 string
+
+// What the route checks before a message is anyone's to deliver. The /message
+// route (a2a.ts) answers 400 unless id, sender and type are all present.
+// recipient, payload and timestamp are not the route's business.
+pub fn message_is_accepted(has_id: bool, has_sender: bool, has_type: bool) bool {
+    if (!has_id) {
+        return false;
+    }
+    if (!has_sender) {
+        return false;
+    }
+    if (!has_type) {
+        return false;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Message type coding — A2AMessageType, all eight, no more
+// ---------------------------------------------------------------------------
+
+// A2AMessageType in rings/SR-01/A2AMessage.swift declares eight cases; the
+// wire spelling of each is the Swift case name (the route's taskAssign and
+// taskUpdate literals agree with it). Coded in declaration order.
+pub const MSG_DIRECT: i32 = 0;         // 'direct'
+pub const MSG_BROADCAST: i32 = 1;      // 'broadcast'
+pub const MSG_TASK_ASSIGN: i32 = 2;    // 'taskAssign'
+pub const MSG_TASK_UPDATE: i32 = 3;    // 'taskUpdate'
+pub const MSG_TASK_RESULT: i32 = 4;    // 'taskResult'
+pub const MSG_ADD_TOOL_CALL: i32 = 5;  // 'addToolCall'
+pub const MSG_HEARTBEAT: i32 = 6;      // 'heartbeat'
+pub const MSG_ERROR: i32 = 7;          // 'error'
+
+pub const MESSAGE_TYPE_COUNT: i32 = 8;
+
+// Whether a type code is one of the eight. Same rule as status: a ninth is
+// refused until this file grows a word for it.
+pub fn message_type_is_valid(message_type: i32) bool {
+    if (message_type >= MESSAGE_TYPE_COUNT) {
+        return false;
+    }
+    if (message_type < 0) {
+        return false;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Broadcast, read twice
+// ---------------------------------------------------------------------------
+
+// The contract says "broadcast" in two places that are not the same rule.
+// Swift says it as a message type - the sender chose the fan-out. The server
+// says it as an absent recipient - deliver() fans out to every subscriber
+// when message.recipient is unset, whatever the type field holds. Both are
+// stated; neither is promoted over the other.
+pub fn message_is_broadcast_type(message_type: i32) bool {
+    if (message_type == MSG_BROADCAST) {
+        return true;
+    }
+    return false;
+}
+
+pub fn delivery_is_broadcast(has_recipient: bool) bool {
+    if (has_recipient) {
+        return false;
+    }
+    return true;
+}
+
+// In a fan-out the sender is skipped (deliver(): "if (agentId === message.sender)
+// continue"), so a broadcast never returns to its author.
+pub fn receives_broadcast(is_sender: bool) bool {
+    if (is_sender) {
+        return false;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// The task, field for field with AgentTask in Swift
+// ---------------------------------------------------------------------------
+
+// AgentTask (rings/SR-01/A2AMessage.swift) holds nine fields. The wire's
+// A2aTask (a2a-registry-service.ts) holds the first eight and no result - the
+// result is the worker's answer, delivered in the payload of a taskResult
+// message, not a column the registry keeps. Swift models that answer as
+// AgentTaskResult, two fields, counted below.
+pub const TASK_FIELDS: i32 = 9;
+
+// One ordinal per field, in AgentTask's declaration order.
+pub const TASK_FIELD_ID: i32 = 0;           // id: UUID -> string
+pub const TASK_FIELD_TITLE: i32 = 1;        // title: String
+pub const TASK_FIELD_DESCRIPTION: i32 = 2;  // description: String
+pub const TASK_FIELD_STATE: i32 = 3;        // state: AgentTaskState -> coding below
+pub const TASK_FIELD_PRIORITY: i32 = 4;     // priority: AgentTaskPriority -> coding below
+pub const TASK_FIELD_ASSIGNEE: i32 = 5;     // assignee: AgentId -> string
+pub const TASK_FIELD_CREATED_AT: i32 = 6;   // createdAt: String -> ISO 8601
+pub const TASK_FIELD_UPDATED_AT: i32 = 7;   // updatedAt: String -> ISO 8601
+pub const TASK_FIELD_RESULT: i32 = 8;       // result: AgentTaskResult? -> present or absent
+
+// AgentTaskResult: summary is the answer a human reads, output the raw bytes
+// of the work, optional in Swift and optional here.
+pub const TASK_RESULT_FIELDS: i32 = 2;
+pub const TASK_RESULT_FIELD_SUMMARY: i32 = 0;  // summary: String
+pub const TASK_RESULT_FIELD_OUTPUT: i32 = 1;   // output: String?
+
+// ---------------------------------------------------------------------------
+// Task state coding — AgentTaskState, exactly six
+// ---------------------------------------------------------------------------
+
+// AgentTaskState declares six cases; the wire spelling of each is the Swift
+// case name ("inProgress" camel-cased, not "in_progress" - the displayName
+// with the space is for humans and never crosses the wire). Coded in
+// declaration order.
+pub const TASK_PENDING: i32 = 0;      // 'pending'
+pub const TASK_ASSIGNED: i32 = 1;     // 'assigned'
+pub const TASK_IN_PROGRESS: i32 = 2;  // 'inProgress'
+pub const TASK_COMPLETED: i32 = 3;    // 'completed'
+pub const TASK_FAILED: i32 = 4;       // 'failed'
+pub const TASK_CANCELLED: i32 = 5;    // 'cancelled'
+
+pub const TASK_STATE_COUNT: i32 = 6;
+
+// Whether a state code is one of the six - exactly the set AgentTaskState
+// holds, no synonyms, no extras.
+pub fn task_state_is_valid(state: i32) bool {
+    if (state >= TASK_STATE_COUNT) {
+        return false;
+    }
+    if (state < 0) {
+        return false;
+    }
+    return true;
+}
+
+// A task enters the registry as pending: assignTask() sets state = 'pending'
+// before it stores or delivers anything, whatever the caller handed it. The
+// assignment is the message; the state is the registry's to choose.
+pub fn task_state_after_assign() i32 {
+    return TASK_PENDING;
+}
+
+// ---------------------------------------------------------------------------
+// Task state transitions
+// ---------------------------------------------------------------------------
+
+// Neither side validates a transition today: the route's /task/update accepts
+// any state string, and Swift's updateTaskState forwards what it is given.
+// The lifecycle the six states describe has never been written down, which is
+// why it belongs in the ring rather than in either caller. The law below is
+// that lifecycle and nothing more: work moves forward one stage at a time,
+// any live task may be cancelled, and an ended task stays ended.
+
+// The three ended states. completed and failed are the work's own endings;
+// cancelled is someone else's decision about work that had not ended.
+pub fn task_state_is_terminal(state: i32) bool {
+    if (state == TASK_COMPLETED) {
+        return true;
+    }
+    if (state == TASK_FAILED) {
+        return true;
+    }
+    if (state == TASK_CANCELLED) {
+        return true;
+    }
+    return false;
+}
+
+// The seven legal edges of the lifecycle:
+//   pending    -> assigned, cancelled
+//   assigned   -> in_progress, cancelled
+//   in_progress -> completed, failed, cancelled
+// pending cannot complete - no work has happened to complete. assigned cannot
+// fail - failure is an ending work earns by running. No state un-cancels,
+// un-completes or un-fails.
+pub fn can_transition_task(from_state: i32, to_state: i32) bool {
+    if (!task_state_is_valid(from_state)) {
+        return false;
+    }
+    if (!task_state_is_valid(to_state)) {
+        return false;
+    }
+    if (task_state_is_terminal(from_state)) {
+        return false;
+    }
+    if (from_state == TASK_PENDING) {
+        if (to_state == TASK_ASSIGNED) {
+            return true;
+        }
+        if (to_state == TASK_CANCELLED) {
+            return true;
+        }
+        return false;
+    }
+    if (from_state == TASK_ASSIGNED) {
+        if (to_state == TASK_IN_PROGRESS) {
+            return true;
+        }
+        if (to_state == TASK_CANCELLED) {
+            return true;
+        }
+        return false;
+    }
+    if (from_state == TASK_IN_PROGRESS) {
+        if (to_state == TASK_COMPLETED) {
+            return true;
+        }
+        if (to_state == TASK_FAILED) {
+            return true;
+        }
+        if (to_state == TASK_CANCELLED) {
+            return true;
+        }
+        return false;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// Priority — AgentTaskPriority's four ranks, in order
+// ---------------------------------------------------------------------------
+
+// AgentTaskPriority is an Int enum: low = 0, medium = 1, high = 2,
+// critical = 3, and Comparable on those raw values. The numbers are the law,
+// not an implementation detail - they cross the wire as `priority: number`.
+pub const PRIORITY_LOW: i32 = 0;
+pub const PRIORITY_MEDIUM: i32 = 1;
+pub const PRIORITY_HIGH: i32 = 2;
+pub const PRIORITY_CRITICAL: i32 = 3;
+
+pub const PRIORITY_COUNT: i32 = 4;
+
+pub fn priority_is_valid(priority: i32) bool {
+    if (priority >= PRIORITY_COUNT) {
+        return false;
+    }
+    if (priority < 0) {
+        return false;
+    }
+    return true;
+}
+
+// Swift's < on two priorities is rawValue < rawValue. Stated so ordering is
+// the ring's to answer, not each caller's memory.
+pub fn priority_is_lower_than(lhs: i32, rhs: i32) bool {
+    if (lhs < rhs) {
+        return true;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// What "alive" means, in terms of heartbeat
+// ---------------------------------------------------------------------------
+
+// The contract keeps two clocks, and they do not agree - so both are stated
+// rather than averaged into a fiction.
+//
+// The store's clock: pruneOffline(90) marks an agent offline when
+// last_heartbeat < NOW() - 90 seconds, so an agent exactly at 90 seconds of
+// silence is still online and one second past it is not. The watchdog calls
+// pruneOffline(90) every minute (a2a-registry-service.ts).
+pub const HEARTBEAT_TIMEOUT_SECONDS: i64 = 90;
+
+// The memory fallback's clock: when Postgres is absent, listAgents and the
+// watchdog drop an agent whose last heartbeat is 120_000 ms old, at ">=
+// 120_000" - at exactly 120 seconds the agent is gone, one second before it
+// is alive.
+pub const HEARTBEAT_MEMORY_TIMEOUT_SECONDS: i64 = 120;
+
+// Alive by the store's reading: the status must still say online, and the
+// silence must not have passed 90 seconds. An offline agent with a fresh
+// heartbeat row is not alive; an online agent with a stale one is next in
+// line for the prune.
+pub fn agent_alive_in_store(status: i32, seconds_since_heartbeat: i64) bool {
+    if (status != STATUS_ONLINE) {
+        return false;
+    }
+    if (seconds_since_heartbeat <= HEARTBEAT_TIMEOUT_SECONDS) {
+        return true;
+    }
+    return false;
+}
+
+// Alive by the memory fallback's reading: no status column exists there, so
+// the silence alone decides, and at exactly 120 seconds the agent is already
+// gone. The two functions disagree on purpose; the disagreement belongs to
+// the contract, and ring 3 reconciles it by choosing which store it runs on.
+pub fn agent_alive_in_memory(seconds_since_heartbeat: i64) bool {
+    if (seconds_since_heartbeat < HEARTBEAT_MEMORY_TIMEOUT_SECONDS) {
+        return true;
+    }
+    return false;
+}
