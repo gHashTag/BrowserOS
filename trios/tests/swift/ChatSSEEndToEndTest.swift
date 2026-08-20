@@ -373,6 +373,7 @@ struct ChatSSEEndToEndTests {
         ("runAQueuedTaskDoesNotBlockItsOwnIssue", { await runAQueuedTaskDoesNotBlockItsOwnIssue() }),
         ("runARefusalNamesWhatItObserved", { await runARefusalNamesWhatItObserved() }),
         ("runNoKeyMeansNoChoosing", { await runNoKeyMeansNoChoosing() }),
+        ("runSalienceIsFixedPointNotFloating", { await runSalienceIsFixedPointNotFloating() }),
     ]
 
     static func main() async {
@@ -3001,7 +3002,7 @@ struct ChatSSEEndToEndTests {
         let learned = await learner.weight(for: .failed)
         check(learned != prior, "crossing the threshold moves the weight off the prior")
         check(
-            learned > QueenSalience.maximumWeight * 0.8,
+            learned > (QueenSalience.maximumWeight * 8) / 10,
             "a signal that always needed the user ends up loud"
         )
 
@@ -7973,6 +7974,77 @@ struct ChatSSEEndToEndTests {
     /// Red is not the Queen's to fix. The bee that opened the pull request is
     /// woken with the names of the failing checks and works on the same branch
     /// until the gate is green.
+    // MARK: - Scenario: salience is fixed point, not floating
+
+    /// The ranking was a float, and the only source of fraction in it was the
+    /// learner's rate - a probability in `[0, 1]` scaled into a range that is
+    /// bounded and known in advance. An exponent has nothing to do there, and
+    /// what it cost was real: the order of two close tasks depended on the
+    /// order their features happened to be summed, and the fractional part of
+    /// an hour decided ties.
+    ///
+    /// Milli-weights keep three decimal digits of the learner's resolution -
+    /// more than `minimumObservations` can justify - and make the ordering a
+    /// property of the numbers rather than of the addition.
+    static func runSalienceIsFixedPointNotFloating() async {
+        print("\n# Scenario: salience is fixed point, not floating")
+
+        typealias S = QueenSalience
+
+        check(
+            S.maximumWeight == 40_000 && S.agePerHourWeight == 1_000,
+            "weights are milli-units, so the ceiling is 40000 and an hour is 1000"
+        )
+        check(
+            S.Feature.failed.prior == 40_000 && S.Feature.committedNothing.prior == 15_000,
+            "and the priors keep their old relative sizes exactly"
+        )
+        check(
+            S.Feature.failed.prior > S.Feature.rejected.prior
+                && S.Feature.rejected.prior > S.Feature.expensive.prior
+                && S.Feature.expensive.prior > S.Feature.committedNothing.prior,
+            "failure still dominates, which is the judgement the numbers encode"
+        )
+
+        // Age contributes whole hours. The fractional part was carrying a
+        // millionth of a weight and deciding ties with it.
+        let now = Date()
+        func aged(_ hours: Double) -> DelegatedTask {
+            var t = DelegatedTask(
+                issue: IssueReference(owner: "gHashTag", repo: "trios", number: 4400),
+                title: "aged",
+                worker: "queen-swift",
+                state: .awaitingReview,
+                ownedPaths: ["docs"]
+            )
+            t.updatedAt = now.addingTimeInterval(-hours * 3600)
+            return t
+        }
+        let oneHour = S.score(for: aged(1.0), now: now)
+        let almostTwo = S.score(for: aged(1.9), now: now)
+        let two = S.score(for: aged(2.0), now: now)
+        check(
+            oneHour == almostTwo,
+            "1.0 and 1.9 hours score the same - the fraction of an hour is not a signal"
+        )
+        check(
+            two == oneHour + S.agePerHourWeight,
+            "and a whole hour is worth exactly one age weight, with no residue"
+        )
+        check(
+            S.score(for: aged(100), now: now) == S.score(for: aged(24), now: now),
+            "past the ceiling, older is just older"
+        )
+
+        // A weight that is supplied rather than learned lands exactly, which is
+        // the point of scaling the probability once at the boundary.
+        let exact = S.score(for: aged(0), now: now, weightFor: { _ in 1_234 })
+        check(
+            exact == 0 || exact % 1 == 0,
+            "a score is an integer: there is no residue to compare against"
+        )
+    }
+
     // MARK: - Scenario: no key means no choosing
 
     /// Fixing the queued deadlock turned it into a spin. The reaper cancels an

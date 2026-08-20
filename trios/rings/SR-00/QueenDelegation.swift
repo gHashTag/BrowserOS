@@ -767,7 +767,7 @@ enum QueenDelegationPolicy {
     /// of.
     /// Supplies learned weights. Set once at startup; defaults to the priors so
     /// the policy stays pure and usable from tests with no learner behind it.
-    nonisolated(unsafe) static var learnedWeight: (QueenSalience.Feature) -> Double = { $0.prior }
+    nonisolated(unsafe) static var learnedWeight: (QueenSalience.Feature) -> Int = { $0.prior }
 
     static func reviewQueue(_ tasks: [DelegatedTask], now: Date = Date()) -> [DelegatedTask] {
         QueenSalience.reviewQueue(tasks, now: now, weightFor: learnedWeight)

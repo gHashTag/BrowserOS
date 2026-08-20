@@ -26,12 +26,22 @@ enum QueenSalience {
         /// Failure dominates: a bee that failed is the only state where waiting
         /// costs something that is not just time - the branch is half-written
         /// and the issue is still open.
-        var prior: Double {
+        /// Milli-weights, in `[0, 40000]`.
+        ///
+        /// Fixed point rather than floating, and the reason is ordering rather
+        /// than precision. The only source of fraction here is the learner's
+        /// rate, a probability in `[0, 1]` scaled into a bounded range that is
+        /// known in advance - so the exponent of a float has nothing to do, and
+        /// what it costs is real: two tasks whose scores differ by a millionth
+        /// swapped places depending on the order the features happened to be
+        /// added. Three decimal digits is more resolution than
+        /// `minimumObservations` can justify.
+        var prior: Int {
             switch self {
-            case .failed: return 40
-            case .rejected: return 25
-            case .expensive: return 20
-            case .committedNothing: return 15
+            case .failed: return 40_000
+            case .rejected: return 25_000
+            case .expensive: return 20_000
+            case .committedNothing: return 15_000
             }
         }
     }
@@ -39,9 +49,9 @@ enum QueenSalience {
     /// Ceiling a learned weight can reach, so learned and prior weights stay on
     /// one scale and a probability does not silently outrank a considered
     /// judgement by an order of magnitude.
-    static let maximumWeight = 40.0
-    static let agePerHourWeight = 1.0
-    static let ageCeiling = 24.0
+    static let maximumWeight = 40_000
+    static let agePerHourWeight = 1_000
+    static let ageCeiling = 24
 
     /// Which features a task currently carries.
     static func features(of task: DelegatedTask, now: Date) -> [Feature] {
@@ -65,10 +75,12 @@ enum QueenSalience {
     static func score(
         for task: DelegatedTask,
         now: Date,
-        weightFor: (Feature) -> Double = { $0.prior }
-    ) -> Double {
+        weightFor: (Feature) -> Int = { $0.prior }
+    ) -> Int {
         var score = features(of: task, now: now).reduce(0) { $0 + weightFor($1) }
-        let hours = max(0, now.timeIntervalSince(task.updatedAt)) / 3600
+        // Whole hours. The fractional part of an hour was carrying a millionth
+        // of a weight and deciding ties with it.
+        let hours = Int(max(0, now.timeIntervalSince(task.updatedAt)) / 3600)
         // Capped: past a day, older is not more urgent, it is just older. An
         // uncapped age term eventually drowns every other signal.
         score += min(hours, ageCeiling) * agePerHourWeight
@@ -82,7 +94,7 @@ enum QueenSalience {
     static func reviewQueue(
         _ tasks: [DelegatedTask],
         now: Date,
-        weightFor: (Feature) -> Double = { $0.prior }
+        weightFor: (Feature) -> Int = { $0.prior }
     ) -> [DelegatedTask] {
         tasks
             .filter { $0.state.needsQueenAttention }

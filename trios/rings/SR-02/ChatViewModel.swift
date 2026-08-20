@@ -10651,10 +10651,14 @@ final class ChatViewModel: ObservableObject {
         let learner = SalienceLearner.shared
         let lines = QueenSalience.Feature.allCases.map { feature -> String in
             let weight = learner.weight(for: feature)
-            let source = abs(weight - feature.prior) < 0.001 ? "prior" : "learned"
+            let source = weight == feature.prior ? "prior" : "learned"
+            // Shown in whole weights, stored in milli-weights: the operator is
+            // reading a ranking, not auditing the third decimal.
+            let shown = Double(weight) / 1000
+            let startedAt = Double(feature.prior) / 1000
             return String(
                 format: "  %@  weight %.1f (%@, started at %.0f)  -  %@",
-                feature.rawValue, weight, source, feature.prior,
+                feature.rawValue, shown, source, startedAt,
                 learner.evidence(for: feature)
             )
         }

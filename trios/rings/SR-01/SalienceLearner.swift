@@ -49,7 +49,7 @@ final class SalienceLearner {
     /// threshold automatically, instead of leaving a constant behind that used
     /// to make sense.
     var minimumObservations: Int {
-        let smallestGap = Self.smallestPriorGap / QueenSalience.maximumWeight
+        let smallestGap = Self.smallestPriorGap / Double(QueenSalience.maximumWeight)
         guard smallestGap > 0 else { return 8 }
         return max(4, Int(ceil(0.25 / (smallestGap * smallestGap))))
     }
@@ -57,7 +57,7 @@ final class SalienceLearner {
     /// Smallest distance between two distinct priors: the finest distinction
     /// the weights are trying to make.
     static var smallestPriorGap: Double {
-        let priors = QueenSalience.Feature.allCases.map(\.prior).sorted()
+        let priors = QueenSalience.Feature.allCases.map { Double($0.prior) }.sorted()
         var smallest = Double.greatestFiniteMagnitude
         for (left, right) in zip(priors, priors.dropFirst()) where right > left {
             smallest = min(smallest, right - left)
@@ -72,7 +72,7 @@ final class SalienceLearner {
     /// distinguish a signal that has settled from one that never moved.
     struct WeightSnapshot: Codable, Equatable {
         let at: Date
-        let weights: [String: Double]
+        let weights: [String: Int]
         let observations: [String: Int]
     }
 
@@ -86,11 +86,14 @@ final class SalienceLearner {
     /// Reported rather than the raw series: the question a week later is "did
     /// anything change and by how much", not "what were the intermediate
     /// values".
-    func drift() -> [(feature: QueenSalience.Feature, from: Double, to: Double, seen: Int)] {
+    func drift() -> [(feature: QueenSalience.Feature, from: Int, to: Int, seen: Int)] {
         QueenSalience.Feature.allCases.compactMap { feature in
             let now = weight(for: feature)
             let seen = tallies[feature.rawValue]?.seen ?? 0
-            guard abs(now - feature.prior) > 0.001 else { return nil }
+            // Any movement at all, now that the unit is a milli-weight: the old
+            // 0.001 threshold was a float-comparison guard, and on integers it
+            // would silently ignore a real one-milli-weight change.
+            guard now != feature.prior else { return nil }
             return (feature, feature.prior, now, seen)
         }
     }
@@ -138,12 +141,17 @@ final class SalienceLearner {
     /// Scaled so a feature that always needs the user lands near its prior's
     /// magnitude rather than at an arbitrary 1.0 - the priors encode a sense of
     /// proportion between signals that a bare probability throws away.
-    func weight(for feature: QueenSalience.Feature) -> Double {
+    /// Milli-weights, matching the priors' scale.
+    ///
+    /// The rate stays a probability - that is what it is - and is scaled into
+    /// the bounded integer range once, at the boundary, rather than being
+    /// carried as a float through a sum that then decides an ordering.
+    func weight(for feature: QueenSalience.Feature) -> Int {
         guard let tally = tallies[feature.rawValue],
               tally.seen >= minimumObservations else {
             return feature.prior
         }
-        return tally.rate * QueenSalience.maximumWeight
+        return Int((tally.rate * Double(QueenSalience.maximumWeight)).rounded())
     }
 
     /// Human-readable state, for the Queen to explain her own ranking.
