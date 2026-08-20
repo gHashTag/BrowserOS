@@ -28,7 +28,7 @@ final class QueenReviewScheduler {
     /// the swarm after reaping rather than before.
     var beforeReport: (() async -> Void)?
     /// Estimated spend today, so the report can mention the ceiling.
-    var spentToday: (() -> Double)?
+    var spentToday: (() -> Int)?
     var budget: SwarmBudget = .default
 
     init(

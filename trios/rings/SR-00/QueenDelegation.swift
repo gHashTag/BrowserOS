@@ -305,7 +305,8 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
 
     /// `nil` when the model is not in the price table. An unknown price must
     /// stay unknown rather than becoming an invented average.
-    var estimatedCostUSD: Double? {
+    /// Micro-dollars; see ModelPricing.
+    var estimatedCostUSD: Int? {
         guard let provider, let model else { return nil }
         return ModelPricing.estimatedCost(
             inputTokens: inputTokens ?? 0,

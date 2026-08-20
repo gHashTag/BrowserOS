@@ -153,7 +153,7 @@ enum QueenReviewDigest {
     }
 
     /// Appended to a report when the day's spend is worth mentioning.
-    static func budgetParagraph(spentToday: Double, budget: SwarmBudget) -> String? {
+    static func budgetParagraph(spentToday: Int, budget: SwarmBudget) -> String? {
         switch budget.verdict(spentToday: spentToday) {
         case .fine:
             return nil

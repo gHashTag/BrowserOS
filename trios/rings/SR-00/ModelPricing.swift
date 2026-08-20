@@ -10,12 +10,24 @@ import Foundation
 /// they do - deciding whether a worker is worth cancelling - and every figure
 /// the UI prints from them is labelled an estimate rather than a bill.
 struct ModelPrice: Equatable, Sendable {
-    let inputPerMillion: Double
-    let outputPerMillion: Double
+    /// Micro-dollars per million tokens. `0.60` per million is `600_000`.
+    ///
+    /// Integer minor units, because money is counted rather than measured.
+    /// Both binary and ternary floats represent `0.10` approximately, and this
+    /// number is summed over every task in a day and then compared against a
+    /// budget threshold - which is precisely the shape where the approximation
+    /// stops being invisible. `spentToday` was a `reduce(0, +)` over `Double`.
+    let inputPerMillion: Int
+    let outputPerMillion: Int
 
-    func cost(inputTokens: Int, outputTokens: Int) -> Double {
-        Double(inputTokens) / 1_000_000 * inputPerMillion
-            + Double(outputTokens) / 1_000_000 * outputPerMillion
+    /// Cost in micro-dollars.
+    ///
+    /// The division comes last so the intermediate keeps full resolution: a
+    /// thousand tokens at 600000 micro-dollars per million is 600 exactly,
+    /// where dividing first would have given zero.
+    func cost(inputTokens: Int, outputTokens: Int) -> Int {
+        (inputTokens * inputPerMillion) / 1_000_000
+            + (outputTokens * outputPerMillion) / 1_000_000
     }
 }
 
@@ -24,14 +36,14 @@ enum ModelPricing {
     /// has its own entry. Exact-match tables go stale the moment a provider
     /// ships a point release.
     static let table: [String: ModelPrice] = [
-        "glm-5": ModelPrice(inputPerMillion: 0.60, outputPerMillion: 2.20),
-        "glm-4": ModelPrice(inputPerMillion: 0.60, outputPerMillion: 2.20),
-        "claude-opus": ModelPrice(inputPerMillion: 15.0, outputPerMillion: 75.0),
-        "claude-sonnet": ModelPrice(inputPerMillion: 3.0, outputPerMillion: 15.0),
-        "claude-haiku": ModelPrice(inputPerMillion: 0.80, outputPerMillion: 4.0),
-        "gpt-5": ModelPrice(inputPerMillion: 1.25, outputPerMillion: 10.0),
-        "gpt-4": ModelPrice(inputPerMillion: 2.50, outputPerMillion: 10.0),
-        "deepseek": ModelPrice(inputPerMillion: 0.28, outputPerMillion: 0.42)
+        "glm-5": ModelPrice(inputPerMillion: 600000, outputPerMillion: 2200000),
+        "glm-4": ModelPrice(inputPerMillion: 600000, outputPerMillion: 2200000),
+        "claude-opus": ModelPrice(inputPerMillion: 15000000, outputPerMillion: 75000000),
+        "claude-sonnet": ModelPrice(inputPerMillion: 3000000, outputPerMillion: 15000000),
+        "claude-haiku": ModelPrice(inputPerMillion: 800000, outputPerMillion: 4000000),
+        "gpt-5": ModelPrice(inputPerMillion: 1250000, outputPerMillion: 10000000),
+        "gpt-4": ModelPrice(inputPerMillion: 2500000, outputPerMillion: 10000000),
+        "deepseek": ModelPrice(inputPerMillion: 280000, outputPerMillion: 420000)
     ]
 
     /// Models that run on the user's own machine cost nothing per token. Saying
@@ -58,16 +70,19 @@ enum ModelPricing {
         outputTokens: Int,
         model: String,
         provider: String
-    ) -> Double? {
+    ) -> Int? {
         price(forModel: model, provider: provider)?
             .cost(inputTokens: inputTokens, outputTokens: outputTokens)
     }
 
     /// Human-facing amount. Sub-cent spends read as "<$0.01" rather than
     /// "$0.00", which would look like nothing happened.
-    static func format(_ usd: Double) -> String {
-        if usd <= 0 { return "$0.00" }
-        if usd < 0.01 { return "<$0.01" }
+    static func format(_ micros: Int) -> String {
+        if micros <= 0 { return "$0.00" }
+        // Under a cent reads as "<$0.01" rather than "$0.00", which would look
+        // like nothing happened. 10_000 micro-dollars is one cent.
+        if micros < 10_000 { return "<$0.01" }
+        let usd = Double(micros) / 1_000_000
         if usd < 10 { return String(format: "$%.2f", usd) }
         return String(format: "$%.0f", usd)
     }
@@ -80,20 +95,24 @@ enum ModelPricing {
 /// nobody chose. The Queen stops *starting* new work instead, which is a
 /// decision that can be taken safely at any moment.
 struct SwarmBudget: Equatable, Sendable {
-    var dailyLimitUSD: Double
+    /// Micro-dollars. Ten dollars is `10_000_000`.
+    var dailyLimitUSD: Int
 
-    static let `default` = SwarmBudget(dailyLimitUSD: 10.0)
+    static let `default` = SwarmBudget(dailyLimitUSD: 10_000_000)
 
     enum Verdict: Equatable {
-        case fine(remaining: Double)
-        case nearingLimit(remaining: Double)
-        case exhausted(overBy: Double)
+        case fine(remaining: Int)
+        case nearingLimit(remaining: Int)
+        case exhausted(overBy: Int)
     }
 
-    func verdict(spentToday: Double) -> Verdict {
+    func verdict(spentToday: Int) -> Verdict {
         let remaining = dailyLimitUSD - spentToday
         if remaining <= 0 { return .exhausted(overBy: -remaining) }
-        if remaining <= dailyLimitUSD * 0.2 { return .nearingLimit(remaining: remaining) }
+        // A fifth, expressed as a division rather than a multiplication by 0.2
+        // - which is one of the values a binary float cannot hold exactly, and
+        // this comparison decides whether the swarm keeps working.
+        if remaining <= dailyLimitUSD / 5 { return .nearingLimit(remaining: remaining) }
         return .fine(remaining: remaining)
     }
 }

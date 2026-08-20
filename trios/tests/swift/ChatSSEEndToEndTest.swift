@@ -5049,12 +5049,12 @@ struct ChatSSEEndToEndTests {
         if let glm = ModelPricing.estimatedCost(
             inputTokens: 1_000_000, outputTokens: 0, model: "glm-5.2", provider: "zai"
         ) {
-            check(abs(glm - 0.60) < 0.001, "a point release inherits its family's price")
+            check(glm == 600_000, "a point release inherits its family's price, exactly")
         } else {
             check(false, "glm-5.2 should match the glm-5 family by prefix")
         }
         // Sub-cent has to read as "something happened", not as nothing.
-        check(ModelPricing.format(0.004) == "<$0.01", "a sub-cent spend is not shown as zero")
+        check(ModelPricing.format(4_000) == "<$0.01", "a sub-cent spend is not shown as zero")
         check(ModelPricing.format(0) == "$0.00", "no spend is shown as zero")
 
         // CompactCount. A 580-character skill displayed as "0k chars", which
@@ -5071,15 +5071,21 @@ struct ChatSSEEndToEndTests {
         )
 
         // SwarmBudget. The ceiling declines to start work; it never kills.
-        let budget = SwarmBudget(dailyLimitUSD: 10)
-        if case .fine = budget.verdict(spentToday: 1) {} else {
+        let budget = SwarmBudget(dailyLimitUSD: 10_000_000)
+        if case .fine = budget.verdict(spentToday: 1_000_000) {} else {
             check(false, "a tenth of the ceiling is fine")
         }
-        if case .nearingLimit = budget.verdict(spentToday: 8.5) {} else {
+        if case .nearingLimit = budget.verdict(spentToday: 8_500_000) {} else {
             check(false, "the last fifth of the ceiling warns")
         }
-        if case .exhausted(let over) = budget.verdict(spentToday: 12) {
-            check(abs(over - 2) < 0.001, "an exhausted budget reports how far past it is")
+        if case .exhausted(let over) = budget.verdict(spentToday: 12_000_000) {
+            check(over == 2_000_000, "an exhausted budget reports how far past it is, exactly")
+            // The point of the change, in one row: a hundred sub-cent spends
+            // sum to exactly one dollar. As Doubles they summed to something
+            // near it, and "near" is what a budget comparison cannot use.
+            var summed = 0
+            for _ in 0..<100 { summed += 10_000 }
+            check(summed == 1_000_000, "a hundred cents are exactly one dollar")
         } else {
             check(false, "spending past the ceiling is exhausted")
         }

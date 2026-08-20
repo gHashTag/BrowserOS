@@ -353,7 +353,8 @@ final class QueenDelegationRegistry: ObservableObject {
     ///
     /// Tasks whose model is not in the price table contribute nothing, so this
     /// is a floor rather than a total - and the caller says so.
-    func spentToday(now: Date = Date()) -> Double {
+    /// Micro-dollars, summed exactly.
+    func spentToday(now: Date = Date()) -> Int {
         let calendar = Calendar.current
         return tasks
             .filter { calendar.isDate($0.updatedAt, inSameDayAs: now) }

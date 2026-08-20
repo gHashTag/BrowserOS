@@ -615,7 +615,7 @@ final class QueenBackgroundService: ObservableObject {
     nonisolated static func registrySignature(
         swarm: [DelegatedTask],
         proposals: [QueenProposal],
-        spentToday: Double
+        spentToday: Int
     ) -> String {
         let taskPart = swarm
             .map { "\($0.issue.slug):\($0.state.rawValue)" }
