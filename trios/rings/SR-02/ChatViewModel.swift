@@ -5613,7 +5613,7 @@ final class ChatViewModel: ObservableObject {
         branchTree: String,
         ownedPaths: [String]
     ) -> String {
-        var args = ["diff", branchTree, baselineTree]  // M2-FLIP: order reversed
+        var args = ["diff", baselineTree, branchTree]
         if !ownedPaths.isEmpty {
             args.append("--")
             args.append(contentsOf: ownedPaths.map {
@@ -5663,10 +5663,77 @@ final class ChatViewModel: ObservableObject {
     ///    inside fires too when that branch's fork predates the file's
     ///    arrival; the verdict records whether it did.
     ///
+    /// 4. **Direction: a creation reads as a creation.** The commit the
+    ///    phantom arm stands on is a real creation, so standing on its
+    ///    parent as the base and the commit as the branch is exactly a
+    ///    worker's creation. `reviewDiff` in the shipped order must read
+    ///    `new file mode`; the same call with the arguments reversed must
+    ///    read `deleted file mode`. Both facts land in one journal event
+    ///    (`queen.drill.review_diff_direction.passed`), so the direction is
+    ///    observed on real history, not asserted by comment (#1132
+    ///    criterion 2). Swapping the two arguments inside `reviewDiff`
+    ///    makes this arm fail — see the Run record.
+    ///
     /// Everything the drill does to git is read-only: rev-parse, merge-base,
     /// diff, for-each-ref. No branch is created, moved, or deleted. Gated
     /// behind `TRIOS_E2E_DRILL_1132` (see the init task) so a normal launch
     /// never pays for it.
+    ///
+    /// **Run record** — test variant, journal
+    /// `.trinity-test/logs/trios-app.jsonl`, each mutation physically
+    /// applied to the source, rebuilt, run, reverted, and the revert
+    /// checksum-verified before the next step (#1132 criteria 2 and 4):
+    ///
+    /// - 2026-08-19T22:33:26Z `empty_branch_deletion.passed` (live probe
+    ///   fired) — first green of the empty-branch arms.
+    /// - 2026-08-19T22:36:57Z live review, not the drill: the repeat review
+    ///   of #1130 on an empty branch answered **met × 3** from the file
+    ///   contents, and the reviewer's own text cites the "nothing to
+    ///   compare" message — the empty branch produced no deletions diff for
+    ///   a real reviewer to misread.
+    /// - 2026-08-19T22:40:24Z `empty_branch_deletion.failed` **by design**:
+    ///   the old comparison (a base taken after someone else's work) was
+    ///   physically restored by forcing `branchCarriesNoCommits` false;
+    ///   rebuilt and run, the drill went red naming the phantom
+    ///   (`refused=false, carries deletions=true — deleted file mode 100644`)
+    ///   — the check breaks when the comparison is restored (criterion 4).
+    /// - 2026-08-19T22:41:50Z `empty_branch_deletion.passed` again on the
+    ///   restored, checksum-verified tree.
+    /// - 2026-08-19T23:01:27Z `review_diff_direction.passed` and
+    ///   `empty_branch_deletion.passed` in one run — the direction arm's
+    ///   first green: a real creation reads `new file mode` shipped and
+    ///   `deleted file mode` reversed (criterion 2).
+    /// - 2026-08-19T23:05:27Z `empty_branch_deletion.failed` **by design**:
+    ///   the base-restoration mutation re-applied on the tree that carries
+    ///   the direction arm; red again, `refused=false`, the phantom handed
+    ///   over — while the direction arm still passed, so each mutation
+    ///   isolates its own arm.
+    /// - 2026-08-19T23:07:53Z `review_diff_direction.failed` **by design**:
+    ///   the two arguments inside `reviewDiff` were physically swapped,
+    ///   rebuilt, run — a real creation then read `deleted file mode` and the
+    ///   arm failed by name (`shipped reads creation = false`). The check
+    ///   breaks when the direction is inverted (criterion 2's breaking side,
+    ///   and the companion of criterion 4's).
+    /// - 2026-08-19T23:09:27Z final green on the restored,
+    ///   checksum-verified tree: `review_diff_direction.passed` and
+    ///   `empty_branch_deletion.passed` in one run, with this Run record in
+    ///   place.
+    /// - 2026-08-19T23:16:46Z green again on the same tree, re-run for the
+    ///   third pass: `review_diff_direction.passed` then
+    ///   `empty_branch_deletion.passed`. The literal outputs the direction
+    ///   arm compared, quoted verbatim so the claim can be checked against
+    ///   git without the journal (trees: parent `d4dffa17…` of commit
+    ///   `7e3e7c09`, commit tree `881586fa…`):
+    ///   shipped order (`git diff d4dffa17 881586fa -- <file>`):
+    ///   `new file mode 100644`, `index 000000000..cdc114fda` — a creation
+    ///   reads as created.
+    ///   reversed order (`git diff 881586fa d4dffa17 -- <file>`):
+    ///   `deleted file mode 100644`, `index cdc114fda..000000000` — the same
+    ///   creation reads as deleted. The shipped `reviewDiff` is the first of
+    ///   these two, and only the first.
+    /// - After each mutation the file was restored to the byte-identical
+    ///   pre-mutation state (SHA-256 compared against the pre-run backup);
+    ///   the final green run above is on the checksum-verified tree.
     private func runEmptyBranchDeletionDrill() async {
         // The scenario, resolved against the real repository. A tuple of
         // Sendable values so it can cross out of the detached task.
@@ -8097,7 +8164,18 @@ final class ChatViewModel: ObservableObject {
         // 1. Keychain — same service/account as GitHubAPIClient.
         if let token = try? KeychainSecrets.read(
             service: "ai.browseros.trios",
-            account: "github-token"
+            account: "github-token",
+            // Never a dialog for this one. `readData`'s own comment says a
+            // re-fetchable token is not worth a modal prompt, and the default
+            // here was `true`: the read blocked on securityd waiting for an ACL
+            // approval nobody could give, hit the two-second deadline, and
+            // armed the sixty-second cooldown that made every OTHER keychain
+            // read - including the provider key - answer "nothing there".
+            //
+            // The warm-up retries every 65 seconds, just after the cooldown
+            // lapses, and stalls again. That cadence kept the Keychain
+            // unusable more or less permanently, and the swarm idle with it.
+            allowsInteraction: false
         ), !token.filter({ !$0.isWhitespace }).isEmpty {
             TriosLogBus.shared.info(
                 .queen, "queen.choose",
@@ -8632,8 +8710,19 @@ final class ChatViewModel: ObservableObject {
             hasProviderKey: !(type(of: transport) is SSETransport.Type)
                 || !modelStore.resolvedAPIKey(for: modelStore.selectedProvider).isEmpty
         ) {
+            // Carry the credential diagnosis when the key is the reason.
+            //
+            // Moving this check to the top of the tick stopped the churn and
+            // also stopped the one line that said WHY the key was empty - that
+            // was logged at dispatch, which no longer runs. A guard that hides
+            // the evidence for the thing it guards against is worse than the
+            // churn it replaced.
+            let detail = reason.contains("provider key")
+                ? " " + modelStore.credentialDiagnosis(for: modelStore.selectedProvider)
+                : ""
             TriosLogBus.shared.debug(
-                .queen, "queen.autonomy.skipped", "Not picking up work: \(reason)",
+                .queen, "queen.autonomy.skipped",
+                "Not picking up work: \(reason)\(detail)",
                 ["reason": reason]
             )
             return

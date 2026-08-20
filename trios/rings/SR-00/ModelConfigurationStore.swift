@@ -594,8 +594,8 @@ final class ModelConfigurationStore: ObservableObject {
         let entries = ModelCredentialStore.list(for: provider)
         let active = ModelCredentialStore.activeEntryID(for: provider)
         if entries.isEmpty {
-            parts.append("store: no entries listed (a launch gate or a cooldown "
-                + "makes this empty even when items exist)")
+            parts.append("store: no entries listed - "
+                + KeychainSecrets.lastEnumerationOutcome)
         } else {
             let stored = UserDefaults.standard.string(
                 forKey: "trios.activeModelKey.\(provider.rawValue)"

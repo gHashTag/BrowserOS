@@ -66,10 +66,24 @@ enum KeychainSecrets {
     /// waits about two seconds. When the read does not answer in time we throw
     /// the ordinary not-found result rather than hanging the main thread, and
     /// arm a 60-second cooldown.
+    /// `allowsInteraction` defaults to FALSE, and that is the important word.
+    ///
+    /// It defaulted to true, so every caller that did not think about it could
+    /// raise a login-keychain dialog. This app is ad-hoc signed and its items
+    /// live in the legacy file keychain, so macOS treats each rebuild as a new
+    /// application and the dialog is asked for constantly - with nobody there
+    /// to answer it in a background path. The read then blocks on securityd,
+    /// hits the two-second deadline, and arms a sixty-second cooldown that
+    /// makes every OTHER keychain read answer "nothing there".
+    ///
+    /// One inattentive caller therefore disabled the Keychain for the whole
+    /// process, and the provider key looked absent while sitting in plain view
+    /// of `security find-generic-password`. A caller that genuinely wants to
+    /// prompt - a settings screen with a person in front of it - says so.
     static func readData(
         service: String,
         account: String,
-        allowsInteraction: Bool = true
+        allowsInteraction: Bool = false
     ) throws -> Data {
         // Dev builds never touch the Keychain; see DevSecretStore.
         if ProjectPaths.usesFileSecretStore {
@@ -94,7 +108,17 @@ enum KeychainSecrets {
         }
         if readInFlight {
             readLock.unlock()
-            throw KeychainSecretsError.itemNotFound(service: service, account: account)
+            // Same reasoning as the enumeration: a collision is not an absence,
+            // and throwing `itemNotFound` here told every caller the credential
+            // did not exist because another read happened to be in flight.
+            guard waitForReadSlot() else {
+                throw KeychainSecretsError.itemNotFound(service: service, account: account)
+            }
+            readLock.lock()
+            if readInFlight {
+                readLock.unlock()
+                throw KeychainSecretsError.itemNotFound(service: service, account: account)
+            }
         }
         readInFlight = true
         readLock.unlock()
@@ -147,8 +171,21 @@ enum KeychainSecrets {
         // Timed out: the background read is still in flight. Arm the cooldown
         // so repeated callers don't pile up blocked reads, and return the
         // ordinary not-found result rather than hanging the main thread.
+        // Release the in-flight flag as well as arming the cooldown.
+        //
+        // The background block clears it when the call returns - and a read
+        // blocked on securityd waiting for an ACL approval nobody can give
+        // never returns, so the flag stayed raised for the life of the process.
+        // Every later enumeration then answered "another read held the slot",
+        // which the store reported as "no entries listed" and the Queen read as
+        // "there is no key". One stuck read at launch, and the app never
+        // touched the Keychain again.
+        //
+        // The flag exists to stop callers piling up, not to latch. Worst case
+        // the orphaned read finishes later and clears an already-clear flag.
         readLock.lock()
         readUnavailableUntil = Date().addingTimeInterval(60)
+        readInFlight = false
         readLock.unlock()
         throw KeychainSecretsError.itemNotFound(service: service, account: account)
     }
@@ -157,7 +194,7 @@ enum KeychainSecrets {
     static func read(
         service: String,
         account: String,
-        allowsInteraction: Bool = true
+        allowsInteraction: Bool = false
     ) throws -> String {
         let data = try readData(
             service: service,
@@ -176,28 +213,97 @@ enum KeychainSecrets {
     /// Shares the same read guard as ``readData``: at most one read in
     /// flight globally, a 60-second cooldown after a timeout, empty array
     /// on expiry.
+    /// Waits for an in-flight Keychain read to finish, briefly.
+    ///
+    /// `readInFlight` is a global single-flight lock, and both readers used to
+    /// answer "empty" the moment they found it taken. Empty is indistinguishable
+    /// from "no such item", so a *collision* was reported as an *absence* - and
+    /// this app reads the Keychain from several places at once: the key warm-up,
+    /// the timeline token, the issue fetcher and the credential resolve. Whoever
+    /// lost the race was told the key did not exist, refused the dispatch, and
+    /// left the swarm idle with "store: no entries listed".
+    ///
+    /// A single-flight lock is supposed to serialise callers, not fail them.
+    /// Bounded because the reason all of this is defensive is that a blocking
+    /// Keychain read once froze the app at launch: after the deadline the old
+    /// behaviour stands.
+    /// The wait must outlast the holder's own deadline.
+    ///
+    /// At 1.5 seconds against a 2-second read deadline the waiter gave up
+    /// half a second before the holder was obliged to finish, so it lost every
+    /// contested race - and reported the loss as "no entries listed", which the
+    /// Queen read as "there is no key" and refused to dispatch. The whole swarm
+    /// idled on half a second of arithmetic.
+    private static func waitForReadSlot(deadline: TimeInterval = 2.6) -> Bool {
+        let limit = Date().addingTimeInterval(deadline)
+        while Date() < limit {
+            readLock.lock()
+            let busy = readInFlight
+            readLock.unlock()
+            if !busy { return true }
+            usleep(25_000)
+        }
+        readLock.lock()
+        let stillBusy = readInFlight
+        readLock.unlock()
+        return !stillBusy
+    }
+
+    /// Why the last enumeration returned nothing. Read by the credential
+    /// diagnosis, because "no entries listed" has five different causes and
+    /// four of them are not "there are no entries".
+    private(set) nonisolated(unsafe) static var lastEnumerationOutcome = "not attempted"
+
     static func readAllAttributes(service: String) -> [[String: Any]] {
-        if isLaunching { return [] }
+        if isLaunching {
+            lastEnumerationOutcome = "refused: still inside the launch gate"
+            return []
+        }
 
         readLock.lock()
         if let until = readUnavailableUntil,
            Date() < until
         {
             readLock.unlock()
+            lastEnumerationOutcome = "refused: cooldown armed after an earlier stall"
             return []
         }
         if readInFlight {
             readLock.unlock()
-            return []
+            // Busy is not absent. Wait for the slot instead of reporting that
+            // the item does not exist.
+            guard waitForReadSlot() else {
+                lastEnumerationOutcome = "refused: another read held the slot"
+                return []
+            }
+            readLock.lock()
+            if readInFlight {
+                readLock.unlock()
+                return []
+            }
         }
         readInFlight = true
         readLock.unlock()
 
+        // Attributes only, and never a dialog.
+        //
+        // These items live in the legacy file keychain, where the ACL names the
+        // application that created them - and this app is ad-hoc signed, so a
+        // rebuilt binary is a different application to macOS. Without the skip,
+        // the enumeration blocks on securityd waiting for an approval nobody is
+        // there to give, hits the two-second deadline, arms the sixty-second
+        // cooldown, and returns empty. The warm-up then retries every 65
+        // seconds - straight back into the same trap.
+        //
+        // Reported to the caller as "no entries listed", which is why the swarm
+        // sat idle claiming the key did not exist while `security
+        // find-generic-password` found it from a terminal in one go.
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecReturnAttributes as String: true,
-            kSecMatchLimit as String: kSecMatchLimitAll
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip
         ]
 
         let semaphore = DispatchSemaphore(value: 0)
@@ -213,16 +319,23 @@ enum KeychainSecrets {
         }
 
         if semaphore.wait(timeout: .now() + 2.0) == .success {
-            guard status == errSecSuccess,
-                  let items = result as? [[String: Any]] else {
+            guard status == errSecSuccess else {
+                lastEnumerationOutcome = "SecItemCopyMatching returned \(status)"
                 return []
             }
+            guard let items = result as? [[String: Any]] else {
+                lastEnumerationOutcome = "the result could not be read as attributes"
+                return []
+            }
+            lastEnumerationOutcome = "\(items.count) item(s)"
             return items
         }
 
         readLock.lock()
         readUnavailableUntil = Date().addingTimeInterval(60)
+        readInFlight = false
         readLock.unlock()
+        lastEnumerationOutcome = "timed out after 2s; cooldown armed for 60s"
         return []
     }
 
