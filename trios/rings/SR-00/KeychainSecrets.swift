@@ -31,7 +31,22 @@ enum KeychainSecrets {
     // a 60-second cooldown so blocked calls don't pile up.
     private static let readLock = NSLock()
     private static var readInFlight: Bool = false
-    private static var readUnavailableUntil: Date?
+    /// Cooldowns, keyed by what actually stalled.
+    ///
+    /// This was one global date, so a single slow item disabled the Keychain
+    /// for every other item for a minute - the same "one inattentive caller
+    /// blinds the whole process" shape as the interaction default. The
+    /// provider key was refused for sixty seconds at a time because something
+    /// else had been slow, and the warm-up's 65-second cadence walked straight
+    /// back into the next window.
+    private static var readUnavailableUntil: [String: Date] = [:]
+
+    private static func cooledDown(_ key: String) -> Bool {
+        guard let until = readUnavailableUntil[key] else { return false }
+        if Date() < until { return true }
+        readUnavailableUntil[key] = nil
+        return false
+    }
 
     // Bounded-wait machinery for keychain writes, mirroring the read pattern.
     // At most one background write is allowed at a time, globally; a write
@@ -83,7 +98,8 @@ enum KeychainSecrets {
     static func readData(
         service: String,
         account: String,
-        allowsInteraction: Bool = false
+        allowsInteraction: Bool = false,
+        deadline: TimeInterval = 2.0
     ) throws -> Data {
         // Dev builds never touch the Keychain; see DevSecretStore.
         if ProjectPaths.usesFileSecretStore {
@@ -100,9 +116,7 @@ enum KeychainSecrets {
         // After a timeout, refuse all reads globally for 60 seconds.
         // At most one read in flight at a time.
         readLock.lock()
-        if let until = readUnavailableUntil,
-           Date() < until
-        {
+        if cooledDown("\(service)/\(account)") {
             readLock.unlock()
             throw KeychainSecretsError.itemNotFound(service: service, account: account)
         }
@@ -142,7 +156,21 @@ enum KeychainSecrets {
         var result: AnyObject?
         var status: OSStatus = errSecSuccess
 
+        // Measured: how long until the block even STARTS. A saturated global
+        // queue looks exactly like a slow Keychain from the caller's side, and
+        // the same query from an idle process returns in milliseconds.
+        let dispatchedAt = Date()
         DispatchQueue.global(qos: .utility).async {
+            let waited = Date().timeIntervalSince(dispatchedAt)
+            if waited > 0.2 {
+                TriosLogBus.shared.warn(
+                    .security, "keychain.queue.starved",
+                    "the keychain call waited "
+                        + String(format: "%.2f", waited)
+                        + "s for a queue slot before it could start",
+                    [:]
+                )
+            }
             status = SecItemCopyMatching(query as CFDictionary, &result)
             KeychainSecrets.readLock.lock()
             KeychainSecrets.readInFlight = false
@@ -150,7 +178,7 @@ enum KeychainSecrets {
             semaphore.signal()
         }
 
-        if semaphore.wait(timeout: .now() + 2.0) == .success {
+        if semaphore.wait(timeout: .now() + deadline) == .success {
             guard status == errSecSuccess else {
                 if status == errSecItemNotFound {
                     throw KeychainSecretsError.itemNotFound(service: service, account: account)
@@ -184,9 +212,21 @@ enum KeychainSecrets {
         // The flag exists to stop callers piling up, not to latch. Worst case
         // the orphaned read finishes later and clears an already-clear flag.
         readLock.lock()
-        readUnavailableUntil = Date().addingTimeInterval(60)
+        readUnavailableUntil["\(service)/\(account)"] = Date().addingTimeInterval(60)
         readInFlight = false
         readLock.unlock()
+        // Name the read that stalled. The cooldown it arms makes every other
+        // keychain read answer "nothing there" for a minute, so the caller that
+        // caused it is the only thing worth knowing - and until now the stall
+        // was silent, which is why four fixes went in before this one.
+        TriosLogBus.shared.warn(
+            .security,
+            "keychain.read.stalled",
+            "\(service) / \(account) did not answer in 2s "
+                + "(interaction \(allowsInteraction ? "allowed" : "skipped")); "
+                + "every keychain read is refused for 60s",
+            ["service": service, "account": account]
+        )
         throw KeychainSecretsError.itemNotFound(service: service, account: account)
     }
 
@@ -254,18 +294,31 @@ enum KeychainSecrets {
     /// four of them are not "there are no entries".
     private(set) nonisolated(unsafe) static var lastEnumerationOutcome = "not attempted"
 
-    static func readAllAttributes(service: String) -> [[String: Any]] {
+    /// `deadline` is how long the CALLER waits, not how long the Keychain is
+    /// given. Two seconds protects an interactive path; a background warm-up
+    /// has no responsiveness to protect and must not be told the key does not
+    /// exist because securityd took two and a half seconds.
+    ///
+    /// Measured here: the dispatched block starts immediately - there is no
+    /// queue starvation - and `SecItemCopyMatching` itself exceeds two seconds
+    /// inside the app, while the identical query from an idle process returns
+    /// in milliseconds. The app is ad-hoc signed and these items live in the
+    /// legacy file keychain, so its identity does not match the ACL recorded
+    /// when they were written.
+    static func readAllAttributes(
+        service: String,
+        deadline: TimeInterval = 2.0
+    ) -> [[String: Any]] {
         if isLaunching {
             lastEnumerationOutcome = "refused: still inside the launch gate"
             return []
         }
 
         readLock.lock()
-        if let until = readUnavailableUntil,
-           Date() < until
-        {
+        if cooledDown("list/\(service)") {
             readLock.unlock()
-            lastEnumerationOutcome = "refused: cooldown armed after an earlier stall"
+            lastEnumerationOutcome = "refused: cooldown armed after an earlier stall "
+                + "on this service"
             return []
         }
         if readInFlight {
@@ -310,7 +363,21 @@ enum KeychainSecrets {
         var result: CFTypeRef?
         var status: OSStatus = errSecSuccess
 
+        // Measured: how long until the block even STARTS. A saturated global
+        // queue looks exactly like a slow Keychain from the caller's side, and
+        // the same query from an idle process returns in milliseconds.
+        let dispatchedAt = Date()
         DispatchQueue.global(qos: .utility).async {
+            let waited = Date().timeIntervalSince(dispatchedAt)
+            if waited > 0.2 {
+                TriosLogBus.shared.warn(
+                    .security, "keychain.queue.starved",
+                    "the keychain call waited "
+                        + String(format: "%.2f", waited)
+                        + "s for a queue slot before it could start",
+                    [:]
+                )
+            }
             status = SecItemCopyMatching(query as CFDictionary, &result)
             KeychainSecrets.readLock.lock()
             KeychainSecrets.readInFlight = false
@@ -318,7 +385,7 @@ enum KeychainSecrets {
             semaphore.signal()
         }
 
-        if semaphore.wait(timeout: .now() + 2.0) == .success {
+        if semaphore.wait(timeout: .now() + deadline) == .success {
             guard status == errSecSuccess else {
                 lastEnumerationOutcome = "SecItemCopyMatching returned \(status)"
                 return []
@@ -332,10 +399,17 @@ enum KeychainSecrets {
         }
 
         readLock.lock()
-        readUnavailableUntil = Date().addingTimeInterval(60)
+        readUnavailableUntil["list/\(service)"] = Date().addingTimeInterval(60)
         readInFlight = false
         readLock.unlock()
-        lastEnumerationOutcome = "timed out after 2s; cooldown armed for 60s"
+        lastEnumerationOutcome = "timed out; cooldown armed for 60s on this service"
+        TriosLogBus.shared.warn(
+            .security,
+            "keychain.enumeration.stalled",
+            "listing \(service) did not answer in 2s; every keychain read is "
+                + "refused for 60s",
+            ["service": service]
+        )
         return []
     }
 

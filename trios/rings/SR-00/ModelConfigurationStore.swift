@@ -100,7 +100,10 @@ enum ModelCredentialStore {
         //
         // Routed through KeychainSecrets so the global gate — launch check,
         // bounded wait, cooldown — covers this listing path too.
-        let items = KeychainSecrets.readAllAttributes(service: service)
+        // Generous: this runs from the key warm-up and the autonomy tick, both
+        // background paths. Being told "no key" because securityd was slow
+        // costs the whole swarm; waiting eight seconds costs nobody.
+        let items = KeychainSecrets.readAllAttributes(service: service, deadline: 8.0)
         guard !items.isEmpty else {
             return []
         }
@@ -216,7 +219,8 @@ enum ModelCredentialStore {
         guard let data = try? KeychainSecrets.readData(
             service: service,
             account: cacheKey,
-            allowsInteraction: false
+            allowsInteraction: false,
+            deadline: 8.0
         ),
         let secret = String(data: data, encoding: .utf8) else {
             return nil
