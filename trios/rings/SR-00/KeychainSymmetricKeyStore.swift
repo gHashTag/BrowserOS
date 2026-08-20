@@ -69,7 +69,13 @@ enum KeychainSymmetricKeyStore {
     /// The app launches through this path, because a blocking read here freezes
     /// `applicationDidFinishLaunching` until the user answers - which is exactly
     /// how the app came to show "Application Not Responding" with no window.
-    static func read(keyName: String, allowsInteraction: Bool = true) throws -> SymmetricKey? {
+    /// `allowsInteraction` defaults to FALSE, matching `KeychainSecrets`.
+    ///
+    /// The same reasoning and the same symptom: a background path that raises
+    /// a login-keychain dialog asks a question nobody is positioned to answer,
+    /// and on this machine the operator was being asked repeatedly while the
+    /// night's work stood still. A caller with a person in front of it says so.
+    static func read(keyName: String, allowsInteraction: Bool = false) throws -> SymmetricKey? {
         if ProjectPaths.usesFileSecretStore {
             guard let data = DevSecretStore.read(service: service, account: keyName) else {
                 return nil

@@ -719,9 +719,32 @@ EOF
         # and this guard would reject an identity that codesign signs and
         # verifies perfectly well - a check that silently matches nothing.
         if [ "$SIGN_IDENTITY" != "-" ] && ! security find-identity -p codesigning | grep -q "$SIGN_IDENTITY"; then
-            echo "[WARN] Signing identity '$SIGN_IDENTITY' not found; falling back to ad-hoc."
-            echo "[WARN] Create one once with: bash scripts/create_dev_signing_identity.sh"
-            SIGN_IDENTITY="-"
+            # Before falling back, take any stable identity the machine already
+            # has. Ad-hoc is the thing that causes the password dialogs: an
+            # ad-hoc signature has no identity, so every rebuild is a NEW
+            # application to macOS, the keychain ACL recorded for the previous
+            # binary does not match, and the operator is asked for the login
+            # password again - per secret, per build. "Always Allow" cannot
+            # help, because it grants the binary that asked and that binary no
+            # longer exists after the next build.
+            #
+            # Any persistent certificate fixes it. An Apple Development
+            # identity is one, and this machine has had one all along while the
+            # build fell back to ad-hoc because a differently-named certificate
+            # was missing.
+            FALLBACK_IDENTITY="$(security find-identity -p codesigning \
+                | grep -oE '"Apple Development: [^"]+"' | head -1 | tr -d '"')"
+            if [ -n "$FALLBACK_IDENTITY" ]; then
+                echo "[INFO] '$SIGN_IDENTITY' not found; using '$FALLBACK_IDENTITY'."
+                echo "[INFO] A stable identity means the keychain asks once, not once per build."
+                SIGN_IDENTITY="$FALLBACK_IDENTITY"
+            else
+                echo "[WARN] Signing identity '$SIGN_IDENTITY' not found; falling back to ad-hoc."
+                echo "[WARN] Ad-hoc means the keychain will ask for your password after EVERY"
+                echo "[WARN] build, because each build is a different application to macOS."
+                echo "[WARN] Create one once with: bash scripts/create_dev_signing_identity.sh"
+                SIGN_IDENTITY="-"
+            fi
         fi
 
         # Unlock the signing keychain so codesign never prompts for a password.
