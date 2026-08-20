@@ -693,3 +693,37 @@ warm-up succeeds on attempt 1 with the fence fully in place.
 
 **Rule:** read the resolution order end to end before concluding a credential
 is absent. A store returning nil is the first source, not the answer.
+
+## The rebuild loop is the swarm's main hazard
+
+Twenty-two of the forty failures in the dev registry after a night's work are
+`interrupted` - workers orphaned by my own `pkill && open`. Not by the code
+under test, not by the provider, not by the issues. By the person verifying the
+fixes.
+
+Every rebuild-and-relaunch during a working swarm costs whatever those bees had
+in hand: the stream dies mid-turn, the task is reaped, and the branch keeps a
+half-written change nobody asked for. The bookkeeping survives - interruptions
+are recorded as such and do not count against the issue - but the work does
+not, and the cost was invisible because nothing ever said "you are about to
+kill three workers".
+
+**Rule:** `make relaunch` instead of `pkill && open`. It reads the registry,
+refuses while any worker is `running`, and names the count. `FORCE=1` overrides,
+for when the running app is the thing that is broken.
+
+**And read your own failure statistics before diagnosing anything.** I spent
+several rounds looking for why bees fail, with the largest single cause being
+my own verification loop, plainly labelled, in a field I had added myself for
+exactly this purpose.
+
+## Look at every variant before saying the system is stopped
+
+I reported "the swarm is stopped" eleven times. It was true of the release,
+where the Keychain would not answer, and false of dev, which keeps its key in a
+file and had been dispatching workers all along - thirteen accepted tasks, one
+with a recorded commit.
+
+**Rule:** when a symptom is environmental - credentials, signing, paths - check
+whether it is variant-specific before generalising. The variants differ exactly
+in the places environmental faults live, which is why they were separated.

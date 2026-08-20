@@ -776,6 +776,35 @@ t27-rings:
 		echo "[SKIP] t27-rings: iverilog not installed, Verilog half not run"; \
 	fi
 
+# Relaunch the app without killing bees that are mid-flight.
+#
+# 22 of the 40 failures in the dev registry tonight are `interrupted` - workers
+# orphaned by my own `pkill && open`. Every rebuild-and-relaunch during a
+# working swarm costs whatever those bees had in hand: the stream dies, the
+# task is reaped, and the branch keeps a half-written change nobody asked for.
+#
+# The reaper records them as interruptions and does not count them against the
+# issue, so the bookkeeping survives - but the work does not, and the cost was
+# invisible because nothing ever said "you are about to kill three workers".
+#
+# `FORCE=1` overrides, because sometimes the running app is the thing that is
+# broken.
+relaunch:
+	@running=$$(python3 -c "import json,sys; \
+	    d=json.load(open('$(ROOT)/.trinity/state/queen_delegation.json')); \
+	    t=d if isinstance(d,list) else d.get('tasks',d); \
+	    t=list(t.values()) if isinstance(t,dict) else t; \
+	    print(sum(1 for x in t if x.get('state')=='running'))" 2>/dev/null || echo 0); \
+	if [ "$$running" != "0" ] && [ -z "$(FORCE)" ]; then \
+		echo "[HOLD] $$running worker(s) are mid-flight; relaunching would orphan them."; \
+		echo "       Wait, or override with: make relaunch FORCE=1"; \
+		exit 1; \
+	fi; \
+	pkill -f "BrowserOS/trios/trios.app" 2>/dev/null || true; \
+	sleep 2; \
+	open "$(ROOT)/trios.app"; \
+	echo "[OK] relaunched (workers in flight at the time: $$running)"
+
 # Fail if any view sets a font size directly instead of through TriosType.
 #
 # The app had 618 hard-coded sizes and 317 of them were 10pt or smaller, down
