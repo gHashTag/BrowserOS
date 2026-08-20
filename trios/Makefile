@@ -769,6 +769,7 @@ t27-rings:
 		exit 0; \
 	fi; \
 	bash "$(ROOT)/tests/t27/ring00_parity.sh" || exit 1; \
+	bash "$(ROOT)/tests/t27/ring01_rules.sh" || exit 1; \
 	if command -v iverilog >/dev/null 2>&1; then \
 		bash "$(ROOT)/tests/t27/ring00_verilog.sh" || exit 1; \
 	else \

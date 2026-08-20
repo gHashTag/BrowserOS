@@ -1,0 +1,223 @@
+// RING-01 — the A2A protocol.
+//
+// The second layer of the trunk. It states what an agent, a message and a task
+// ARE, and the rules that follow from those definitions alone: whether an
+// agent counts as alive, whether a task state may move to another, whether a
+// message needs a named recipient.
+//
+// No I/O. Postgres and HTTP are ring 3. This ring must be answerable with the
+// numbers already in hand, exactly like ring 00, which is what lets it be
+// generated to Rust for the server and checked against the Swift that runs
+// today.
+//
+// The contract is NOT invented here. It already exists and is running: nine
+// routes in agent-server/apps/server/src/api/routes/a2a.ts, the `agents` table
+// in pg-agent-store.ts, and the Swift client in
+// rings/SR-02/A2ARegistryClient.swift. This file restates that contract where
+// it can be generated instead of transcribed.
+//
+// Verdicts are integer constants rather than enums, for the same reason ring 00
+// gives: the seed compiler's enum lowering is not generation-safe until
+// gHashTag/t27#2247 lands. Every coded set gets its constants from one block so
+// the coding stays one table rather than scattered numbers. When the seed grows
+// up these become enums and the call sites do not move.
+//
+// phi^2 + 1/phi^2 = 3 | TRINITY
+
+module a2a;
+
+// ---------------------------------------------------------------------------
+// Message kinds. Mirrors A2AMessageType in rings/SR-01/A2AMessage.swift.
+// ---------------------------------------------------------------------------
+
+pub const MSG_DIRECT: i32 = 0;
+pub const MSG_BROADCAST: i32 = 1;
+pub const MSG_TASK_ASSIGN: i32 = 2;
+pub const MSG_TASK_UPDATE: i32 = 3;
+pub const MSG_TASK_RESULT: i32 = 4;
+pub const MSG_ADD_TOOL_CALL: i32 = 5;
+pub const MSG_HEARTBEAT: i32 = 6;
+pub const MSG_ERROR: i32 = 7;
+
+// Whether a message of this kind must name a recipient.
+//
+// A broadcast with a recipient is a direct message that will be delivered to
+// everyone, which is the shape of an accident rather than an intent. A direct
+// message without one has nowhere to go and is dropped silently by the router -
+// the failure that is hardest to notice, because nothing errors.
+pub fn requires_recipient(kind: i32) bool {
+    if (kind == MSG_BROADCAST) {
+        return false;
+    }
+    if (kind == MSG_HEARTBEAT) {
+        return false;
+    }
+    return true;
+}
+
+// Whether a message belongs to the task lifecycle rather than to conversation.
+//
+// The three task kinds are the ones the registry must persist; the rest are
+// transport. Getting this wrong in either direction either loses task history
+// or fills the store with chatter.
+pub fn is_task_message(kind: i32) bool {
+    if (kind == MSG_TASK_ASSIGN) {
+        return true;
+    }
+    if (kind == MSG_TASK_UPDATE) {
+        return true;
+    }
+    if (kind == MSG_TASK_RESULT) {
+        return true;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// Task states. Exactly AgentTaskState, in its order.
+// ---------------------------------------------------------------------------
+
+pub const TASK_PENDING: i32 = 0;
+pub const TASK_ASSIGNED: i32 = 1;
+pub const TASK_IN_PROGRESS: i32 = 2;
+pub const TASK_COMPLETED: i32 = 3;
+pub const TASK_FAILED: i32 = 4;
+pub const TASK_CANCELLED: i32 = 5;
+
+// Whether a task in this state is finished.
+//
+// `cancelled` counts: nobody is coming back to it. `failed` counts too, which
+// is a decision rather than an observation - a failure that stays open forever
+// is the shape that filled the Queen's own registry with work nobody looked at.
+pub fn is_terminal(state: i32) bool {
+    if (state == TASK_COMPLETED) {
+        return true;
+    }
+    if (state == TASK_FAILED) {
+        return true;
+    }
+    if (state == TASK_CANCELLED) {
+        return true;
+    }
+    return false;
+}
+
+// Whether a task may move from one state to another.
+//
+// Written as a rule rather than a table because the rule is short and a table
+// of thirty-six cells hides which of them were considered. Terminal states go
+// nowhere: a completed task that can be reassigned is how one piece of work
+// gets done twice.
+pub fn can_transition(from: i32, to: i32) bool {
+    if (is_terminal(from)) {
+        return false;
+    }
+    if (from == to) {
+        return false;
+    }
+    // Anything unfinished may be cancelled - the operator's escape hatch, and
+    // the one transition that must never be refused.
+    if (to == TASK_CANCELLED) {
+        return true;
+    }
+    if (from == TASK_PENDING) {
+        if (to == TASK_ASSIGNED) {
+            return true;
+        }
+        return false;
+    }
+    if (from == TASK_ASSIGNED) {
+        if (to == TASK_IN_PROGRESS) {
+            return true;
+        }
+        if (to == TASK_FAILED) {
+            return true;
+        }
+        return false;
+    }
+    if (from == TASK_IN_PROGRESS) {
+        if (to == TASK_COMPLETED) {
+            return true;
+        }
+        if (to == TASK_FAILED) {
+            return true;
+        }
+        return false;
+    }
+    return false;
+}
+
+// ---------------------------------------------------------------------------
+// Agent liveness. The `agents` table stores `status` and `last_heartbeat`.
+// ---------------------------------------------------------------------------
+
+pub const AGENT_ONLINE: i32 = 0;
+pub const AGENT_OFFLINE: i32 = 1;
+
+// Heartbeat cadence, in seconds. The client sends one every 30.
+pub const HEARTBEAT_INTERVAL_SECONDS: i32 = 30;
+
+// How many beats may be missed before an agent is called offline.
+//
+// Three, not one. A single missed beat is a network hiccup or a busy moment,
+// and marking an agent offline for it makes the registry flap - which is worse
+// than being slightly stale, because every consumer then distrusts the status
+// field entirely.
+pub const MISSED_BEATS_BEFORE_OFFLINE: i32 = 3;
+
+pub fn offline_after_seconds() i32 {
+    return HEARTBEAT_INTERVAL_SECONDS * MISSED_BEATS_BEFORE_OFFLINE;
+}
+
+// Whether an agent counts as alive, given how long since its last heartbeat.
+//
+// Negative input means the clocks disagree and the last beat appears to be in
+// the future. Reading that as "very much alive" trusts a broken clock; it is
+// answered as alive but it is worth knowing the case exists, which is why it is
+// spelled out rather than falling through the arithmetic.
+pub fn is_alive(seconds_since_heartbeat: i32) bool {
+    if (seconds_since_heartbeat < 0) {
+        return true;
+    }
+    return seconds_since_heartbeat <= offline_after_seconds();
+}
+
+// The status an agent should be recorded with, from the same measurement.
+//
+// Separate from `is_alive` so the store and the reader cannot disagree: one
+// asks a question, the other writes a field, and both come from here.
+pub fn status_from_heartbeat(seconds_since_heartbeat: i32) i32 {
+    if (is_alive(seconds_since_heartbeat)) {
+        return AGENT_ONLINE;
+    }
+    return AGENT_OFFLINE;
+}
+
+// ---------------------------------------------------------------------------
+// Priority. Mirrors AgentTaskPriority, which is ordered and compared.
+// ---------------------------------------------------------------------------
+
+pub const PRIORITY_LOW: i32 = 0;
+pub const PRIORITY_MEDIUM: i32 = 1;
+pub const PRIORITY_HIGH: i32 = 2;
+pub const PRIORITY_CRITICAL: i32 = 3;
+
+// Whether the first priority outranks the second.
+pub fn outranks(a: i32, b: i32) bool {
+    return a > b;
+}
+
+// Whether a priority is one of the four defined values.
+//
+// An out-of-range priority arriving over the wire must not be silently clamped
+// into a real one: a task that says 99 and is treated as critical jumps every
+// queue in the system on the strength of a typo.
+pub fn is_valid_priority(p: i32) bool {
+    if (p < PRIORITY_LOW) {
+        return false;
+    }
+    if (p > PRIORITY_CRITICAL) {
+        return false;
+    }
+    return true;
+}
