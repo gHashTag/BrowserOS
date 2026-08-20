@@ -50,19 +50,29 @@ Measured, not assumed. Counts are occurrences of `Double` in `rings/SR-00` and
 The interesting result of measuring is that **most of this should not become
 TNF at all.**
 
-### Salience does not need a fraction
+### Salience needs a fraction, but a very small one
 
-`QueenSalience` is the supervisor's ranking function and the natural first
-candidate. Its weights are `40, 25, 20, 15`, age is `1.0` per hour to a ceiling
-of `24.0`, and the learned ceiling is `40.0`. Every quantity is an integer with
-a dynamic range under 64.
+**Correction.** An earlier version of this document said every salience
+quantity is an integer and the whole thing could become `i32`. That is true of
+the priors and false of what actually runs. `QueenDelegationPolicy.learnedWeight`
+is installed at startup from `SalienceLearner`, and its weight is
+`tally.rate * QueenSalience.maximumWeight` — a probability times 40. Once a
+feature has enough observations the live weights are fractional, and a plain
+integer conversion would quantise the learner away.
 
-It is a weighted integer sum wearing a float. Converting it to TNF would be
-replacing one unnecessary format with a more interesting unnecessary format;
-converting it to `i32` removes a class of bug — ordering that depends on the
-last bit of a sum — and costs nothing.
+The priors are `40, 25, 20, 15`; age is `1.0` per hour to a ceiling of `24.0`;
+the learned ceiling is `40.0`. So the real shape is: a bounded value in
+`[0, 40]` whose only source of fraction is a probability in `[0, 1]`.
 
-**Verdict: integers, not TNF.**
+That is a fixed-point quantity, not a float. Milli-weights in `i32` — `40000`
+for a failure, `rate * 40000` for a learned one — carry three decimal digits of
+the learner's resolution, and three is more than `minimumObservations` can
+justify. What that buys is an ordering that does not depend on the last bit of
+a sum: two tasks whose scores differ by a millionth currently swap places
+depending on the order the features were added.
+
+**Verdict: fixed-point `i32` milli-weights. Not a float, and not TNF either —
+the exponent has nothing to do here, because the range is `[0, 40]` and known.**
 
 ### Money must not be a float, and must not be TNF either
 
@@ -80,7 +90,10 @@ which float you were going to use.
 ### Bounded ratios are where TNF belongs
 
 What is left is the honest candidate set, and it has one shape: quantities in
-`[0, 1]` that are combined by exponential moving averages.
+`[0, 1]` that are combined by exponential moving averages. Salience's learned
+`rate` is such a quantity - but it is consumed once and scaled into a bounded
+integer, never accumulated, so it belongs with the fixed-point answer above
+rather than here.
 
 - reliability EMA, `alpha = 0.3`
 - context-limit learner EMA, `alpha = 0.3`
