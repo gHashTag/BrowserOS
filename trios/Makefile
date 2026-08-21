@@ -1564,10 +1564,17 @@ cassettes: test-app
 		   when the log has grown NOTHING for 120 s, when trios-test exits \
 		   without the marker, or at a 600 s total backstop. Each failure \
 		   message states which of those was measured."; \
-		found=0; started=0; idle=0; total=0; lastn=$$before; alive=0; \
+		: "Rotation-aware: the harness app rotates its own log on boot, and \
+		   a truncated file put the marker BELOW the pre-run line count - \
+		   tail read past EOF, the growth check compared against a stale \
+		   baseline, and a scenario that had SUCCEEDED (the marker was in \
+		   the file) failed as 'grew nothing for 120s'. A shrink resets the \
+		   read base to the top of the new file."; \
+		found=0; started=0; idle=0; total=0; lastn=$$before; alive=0; base=$$before; \
 		while :; do \
-			tail -n "+$$((before + 1))" "$(TEST_LOG)" 2>/dev/null | grep -q "$$marker" && { found=1; break; }; \
+			tail -n "+$$((base + 1))" "$(TEST_LOG)" 2>/dev/null | grep -q "$$marker" && { found=1; break; }; \
 			curn=$$(wc -l < "$(TEST_LOG)" 2>/dev/null || echo 0); \
+			if [ "$$curn" -lt "$$base" ]; then base=0; lastn=0; fi; \
 			if [ "$$curn" -gt "$$lastn" ]; then lastn=$$curn; idle=0; else idle=$$((idle + 2)); fi; \
 			if pgrep -f "trios-test.app/Contents/MacOS" >/dev/null 2>&1; then started=1; alive=1; \
 			else alive=0; [ $$started -eq 1 ] && break; fi; \
