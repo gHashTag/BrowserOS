@@ -15,6 +15,45 @@ function getShellArgs(): [string, string] {
   return [process.env.SHELL || '/bin/sh', '-c']
 }
 
+/**
+ * Environment the spawned shell receives.
+ *
+ * Measured 2026-08-21 on the live release server (ps eww): the inherited
+ * environment carried 52 variables including SSH_AUTH_SOCK, DATABASE_URL and
+ * KAGGLE_API_TOKEN - so every worker-bee shell command ran with an SSH agent
+ * socket and live credentials it never needed. The allowlist keeps what a
+ * build or git command actually uses and drops the rest.
+ *
+ * Off by default (TRIOS_BASH_ENV_ALLOWLIST=1 enables) because the running
+ * server cannot be restarted while a worker is in flight, and an env change
+ * this broad must be proven against a live worker turn before it is the
+ * default. The flag is read per spawn, so flipping it needs a server restart
+ * only to change the process env, not a code change.
+ */
+const ENV_ALLOWLIST = [
+  'PATH',
+  'HOME',
+  'USER',
+  'LOGNAME',
+  'SHELL',
+  'TMPDIR',
+  'LANG',
+  'LC_ALL',
+  'TERM',
+  'DEVELOPER_DIR',
+] as const
+
+function spawnEnv(): Record<string, string | undefined> {
+  if (process.env.TRIOS_BASH_ENV_ALLOWLIST !== '1') {
+    return { ...process.env }
+  }
+  const scrubbed: Record<string, string | undefined> = {}
+  for (const key of ENV_ALLOWLIST) {
+    if (process.env[key] !== undefined) scrubbed[key] = process.env[key]
+  }
+  return scrubbed
+}
+
 export function createBashTool(cwd: string) {
   return tool({
     description:
@@ -36,7 +75,7 @@ export function createBashTool(cwd: string) {
           cwd: resolvedCwd,
           stdout: 'pipe',
           stderr: 'pipe',
-          env: { ...process.env },
+          env: spawnEnv(),
         })
 
         let timedOut = false
