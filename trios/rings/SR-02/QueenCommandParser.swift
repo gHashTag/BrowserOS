@@ -29,6 +29,15 @@ enum QueenCommand: Equatable {
     case review(issue: IssueReference, decision: ReviewDecision, note: String)
     /// Stops a worker that is going nowhere.
     case cancelTask(issue: IssueReference, reason: String)
+    /// Files away every FAILED record of an issue after a person has looked.
+    ///
+    /// `failed` is deliberately not archivable and `task(forIssue:)` hides
+    /// terminal records from every other command - measured 2026-08-21: the
+    /// legal (.failed, .cancelled) transition existed in the table and
+    /// nothing could drive it, so looked-at failures haunted the reconcile
+    /// pass forever. The reason is mandatory: filing a failure away without
+    /// one is how it was never looked at.
+    case dismissTask(issue: IssueReference, reason: String)
     /// Records what was found when one acceptance criterion was checked.
     case verifyCriterion(issue: IssueReference, criterion: String, verdict: QueenCriterionVerdict)
     /// Records the user's agreement to a proposed piece of work.
@@ -191,6 +200,16 @@ struct QueenCommandParser {
                   let issue = IssueReference.parse(first) else { return .unknown(trimmed) }
             components.removeFirst()
             return .cancelTask(issue: issue, reason: components.joined(separator: " "))
+        case "dismiss", "file-away":
+            // `/dismiss <issue> <why>` - the why is not optional. A dismissal
+            // is the record that somebody looked; an empty reason is the
+            // absence of that record.
+            guard let first = components.first,
+                  let issue = IssueReference.parse(first) else { return .unknown(trimmed) }
+            components.removeFirst()
+            let reason = components.joined(separator: " ")
+            guard !reason.isEmpty else { return .unknown(trimmed) }
+            return .dismissTask(issue: issue, reason: reason)
         case "verify", "checked":
             // `/verify <issue> <criterion text> met|unmet`. The verdict is the
             // last word so the criterion can contain spaces without quoting -

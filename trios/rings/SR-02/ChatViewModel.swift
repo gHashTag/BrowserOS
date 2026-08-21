@@ -3780,6 +3780,8 @@ final class ChatViewModel: ObservableObject {
             )
         case .cancelTask(let issue, let reason):
             await cancelDelegatedTask(issue: issue, reason: reason)
+        case .dismissTask(let issue, let reason):
+            await dismissFailedTask(issue: issue, reason: reason)
         case .verifyCriterion(let issue, let criterion, let verdict):
             await recordCriterionVerdict(issue: issue, criterion: criterion, verdict: verdict)
         case .approveDelegation(let issue):
@@ -10970,6 +10972,43 @@ final class ChatViewModel: ObservableObject {
             "queen.worker.cancelled",
             "Worker stopped by request",
             ["issue": issue.slug, "worker": task.worker]
+        )
+        await loadConversations()
+    }
+
+    /// Files away every FAILED record of an issue, once somebody has looked.
+    ///
+    /// `failed` is deliberately not archivable so a failure gets eyes before
+    /// it disappears; this command IS the record of those eyes. It drives the
+    /// legal (.failed, .cancelled) transition that no command could reach -
+    /// measured 2026-08-21 when three queued /cancel verdicts were refused:
+    /// task(forIssue:) hides terminal records, so looked-at failures haunted
+    /// the reconcile pass with no way to retire them. All failed records of
+    /// the issue go together: the looking happened at issue level.
+    func dismissFailedTask(issue: IssueReference, reason: String) async {
+        let registry = delegationRegistry
+        let failed = registry.tasks.filter { $0.issue == issue && $0.state == .failed }
+        guard !failed.isEmpty else {
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "\(issue.slug) has no failed record to dismiss."
+            )
+            return
+        }
+        var moved = 0
+        for task in failed where registry.transition(taskID: task.id, to: .cancelled) {
+            moved += 1
+            TriosLogBus.shared.info(
+                .queen, "queen.task.dismissed",
+                "Dismissed a failed record of \(issue.slug): \(reason)",
+                ["issue": issue.slug, "record": task.id.uuidString]
+            )
+        }
+        await postQueenNotice(
+            SystemNoticeClassifier.infoMarker
+                + "Filed away \(moved) failed record(s) of \(issue.slug). "
+                + "Reason: \(reason). Branches and chats survive; the archive "
+                + "sweep will stamp them on its next pass."
         )
         await loadConversations()
     }

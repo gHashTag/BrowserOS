@@ -8464,6 +8464,22 @@ struct ChatSSEEndToEndTests {
             "and a no-op is not listed at all"
         )
 
+        // Dismissal files away a LOOKED-AT failure, and the reason is the
+        // record of the looking - an empty one is refused by the parser.
+        check(
+            QueenCommandParser.parse("/dismiss gHashTag/trios#1132 looked at: superseded")
+                == .dismissTask(
+                    issue: IssueReference(owner: "gHashTag", repo: "trios", number: 1132),
+                    reason: "looked at: superseded"
+                ),
+            "`/dismiss <issue> <why>` parses with its mandatory reason"
+        )
+        if case .unknown = QueenCommandParser.parse("/dismiss gHashTag/trios#1132") {
+            check(true, "a dismissal without a reason is refused - filing away unlooked-at failures is the defect")
+        } else {
+            fail("a reasonless /dismiss must not parse")
+        }
+
         // Parsing: showing and doing are separate words, not a flag.
         check(
             QueenCommandParser.parse("/reconcile") == .reconcile(apply: nil),
