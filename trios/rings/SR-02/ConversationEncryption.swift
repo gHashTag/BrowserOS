@@ -41,6 +41,13 @@ final class ConversationEncryption {
     func encrypt(_ plaintext: Data) throws -> Data {
         do {
             return try encryption.encrypt(plaintext)
+        } catch TriOSEncryptionError.keyUnavailableLocked {
+            // "The key cannot be read right now" and "sealing failed" are
+            // different facts. Collapsing them into sealFailure made every
+            // launch-window refusal log as "Failed to seal conversation
+            // data" - an encryption failure nobody measured, over a cipher
+            // that was never invoked.
+            throw TriOSEncryptionError.keyUnavailableLocked
         } catch is TriOSEncryptionError {
             throw ConversationEncryptionError.sealFailure
         } catch {
@@ -52,8 +59,11 @@ final class ConversationEncryption {
     func decrypt(_ combined: Data) throws -> Data {
         do {
             return try encryption.decrypt(combined)
-        } catch is TriOSEncryptionError {
-            throw ConversationEncryptionError.openFailure
+        } catch TriOSEncryptionError.keyUnavailableLocked {
+            // Same distinction on the read side: a refused key is not
+            // "wrong key or tampered ciphertext", and callers that cannot
+            // tell them apart quarantine healthy data.
+            throw TriOSEncryptionError.keyUnavailableLocked
         } catch {
             throw ConversationEncryptionError.openFailure
         }

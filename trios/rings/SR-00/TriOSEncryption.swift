@@ -175,30 +175,54 @@ final class TriOSEncryption {
         // waits with a bounded timeout (~2 s).  When the read answers in
         // time the key is cached and returned; when it does not, we throw
         // keyUnavailableLocked and leave the background read running so it
-        // can still cache for later callers — but only this one read.
+        // can still cache for later callers - but only this one read.
         let semaphore = DispatchSemaphore(value: 0)
         var result: SymmetricKey?
+        var refusal: Error?
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else {
                 semaphore.signal()
                 return
             }
-            let key = try? self.loadOrCreateSymmetricKey()
+            // Keep the error, not just its absence: the thrown value is the
+            // one line that says WHY the key was refused, and a `try?` here
+            // is how a sub-millisecond launch-gate refusal used to become
+            // indistinguishable from a hung securityd.
+            var key: SymmetricKey?
+            var thrown: Error?
+            do {
+                key = try self.loadOrCreateSymmetricKey()
+            } catch {
+                thrown = error
+            }
             self.lock.lock()
             if let key {
                 if self.cachedKey == nil {
                     self.cachedKey = key
                 }
                 result = key
+            } else {
+                refusal = thrown
             }
             self.readInFlight = false
             self.lock.unlock()
             semaphore.signal()
         }
 
-        if semaphore.wait(timeout: .now() + 2.0) == .success, let key = result {
-            return key
+        if semaphore.wait(timeout: .now() + 2.0) == .success {
+            if let key = result {
+                return key
+            }
+            // The read COMPLETED and refused - a deliberate answer, not a
+            // hang.  Measured 2026-08-21: the launch gate refuses in under a
+            // millisecond, and arming the stall cool-down here kept
+            // conversation encryption refused for 55 seconds after the gate
+            // had already lifted, writing the Queen's own transcript to
+            // plaintext three times.  The cool-down exists to stop callers
+            // piling up behind a hung securityd; a fast refusal is not that
+            // condition, so the next caller may retry immediately.
+            throw refusal ?? TriOSEncryptionError.keyUnavailableLocked
         }
 
         // Timed out: the background read is still in flight (and may never

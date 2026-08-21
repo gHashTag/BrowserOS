@@ -82,10 +82,15 @@ actor ConversationPersister: ChatPersisterProtocol {
             if let plaintext = try? JSONEncoder().encode(messages) {
                 let marked = Data(plaintextMarker.utf8) + plaintext
                 defaults.set(marked, forKey: key)
+                // The message carries the thrown reason, not the word
+                // "Encryption": all nine fallbacks measured on 2026-08-21
+                // were key reads refused during launch or a cool-down, and
+                // "Encryption failed" sent the reader to the cipher.
                 TriosLogBus.shared.warn(
                     .chat,
                     "conversation.persist.encrypt_fallback",
-                    "Encryption failed; stored conversation \(conversationId) as plaintext fallback",
+                    "Could not encrypt conversation \(conversationId) "
+                        + "(\(error.localizedDescription)); stored as plaintext fallback",
                     ["error": error.localizedDescription]
                 )
             } else {
@@ -99,26 +104,69 @@ actor ConversationPersister: ChatPersisterProtocol {
     }
 
     func load(conversationId: UUID) async -> [ChatMessage] {
+        // A quarantined blob that decrypts TODAY is history someone is
+        // waiting for; fold it back in before reading the slot.
+        recoverQuarantineIfPossible(conversationId)
+
         let key = keyPrefix + conversationId.uuidString
         guard let stored = defaults.data(forKey: key) else { return [] }
 
-        // Try decryption first — the normal path when the key is available.
-        if let plaintext = try? ConversationEncryption.shared.decrypt(stored) {
-            return (try? JSONDecoder().decode([ChatMessage].self, from: plaintext)) ?? []
-        }
-
-        // Decryption failed: check whether this is a marked plaintext record
-        // written by the fallback path in save.
+        // A marked plaintext record is decided by its marker, not by a
+        // failed decrypt: checking it first keeps a key outage from turning
+        // "this slot is a known fallback" into "this slot cannot be read".
         if stored.starts(with: Data(plaintextMarker.utf8)) {
             let payload = stored.dropFirst(plaintextMarker.utf8.count)
             if let messages = try? JSONDecoder().decode([ChatMessage].self, from: payload) {
-                TriosLogBus.shared.warn(
-                    .chat,
-                    "conversation.persist.read_plaintext",
-                    "Loaded conversation \(conversationId) from unencrypted fallback"
-                )
+                // A fallback slot nobody writes again rests unencrypted
+                // forever - measured 2026-08-21: twelve conversations,
+                // forty-three list passes each, zero re-encryptions. Heal on
+                // read when the key answers now.
+                if let ciphertext = try? ConversationEncryption.shared.encrypt(Data(payload)) {
+                    defaults.set(ciphertext, forKey: key)
+                    TriosLogBus.shared.info(
+                        .chat,
+                        "conversation.persist.reencrypted",
+                        "Conversation \(conversationId) was resting as a plaintext "
+                            + "fallback; the key answers again, so it is encrypted once more",
+                        ["conversation": conversationId.uuidString]
+                    )
+                } else {
+                    TriosLogBus.shared.warn(
+                        .chat,
+                        "conversation.persist.read_plaintext",
+                        "Loaded conversation \(conversationId) from unencrypted fallback"
+                    )
+                }
                 return messages
             }
+        }
+
+        // The normal path when the key is available.
+        do {
+            let plaintext = try ConversationEncryption.shared.decrypt(stored)
+            return (try? JSONDecoder().decode([ChatMessage].self, from: plaintext)) ?? []
+        } catch TriOSEncryptionError.keyUnavailableLocked {
+            // The key was refused THIS MINUTE; nothing was measured about the
+            // ciphertext. Preserve the bytes (quarantine below is written
+            // once) and say what actually happened - "could not decrypt"
+            // here used to read as data damage and it never was.
+            let quarantine = unreadableKey(for: conversationId)
+            if defaults.data(forKey: quarantine) == nil {
+                defaults.set(stored, forKey: quarantine)
+            }
+            unreadableConversations.insert(conversationId)
+            TriosLogBus.shared.warn(
+                .chat,
+                "conversation.persist.decrypt_deferred",
+                "Conversation \(conversationId) is unread because the encryption key "
+                    + "is unavailable right now; its \(stored.count) bytes are preserved "
+                    + "and will fold back in when the key answers",
+                ["conversation": conversationId.uuidString, "bytes": String(stored.count)]
+            )
+            return []
+        } catch {
+            // Fall through to the unreadable path below with the measured
+            // fact: the key answered and this ciphertext did not open.
         }
 
         // Unreadable is not empty, and until now the caller could not tell.
@@ -150,7 +198,9 @@ actor ConversationPersister: ChatPersisterProtocol {
         TriosLogBus.shared.warn(
             .chat,
             "conversation.persist.decrypt_failed",
-            "Could not decrypt or decode conversation \(conversationId)"
+            "Conversation \(conversationId): the key answered but this ciphertext "
+                + "did not open (wrong key or tampered bytes) - distinct from a key "
+                + "that is merely unavailable, which logs decrypt_deferred instead"
         )
         return []
     }
@@ -163,6 +213,75 @@ actor ConversationPersister: ChatPersisterProtocol {
 
     private func unreadableKey(for id: UUID) -> String {
         "trios.conversation.unreadable." + id.uuidString
+    }
+
+    /// Where a quarantined blob moves after it has been folded back in. The
+    /// bytes are kept - recovery must never be the second way to lose them -
+    /// but under a key `recoverQuarantineIfPossible` does not read, so a
+    /// recovery cannot run twice and re-prepend old history.
+    private func recoveredKey(for id: UUID) -> String {
+        "trios.conversation.recovered." + id.uuidString
+    }
+
+    /// Folds a quarantined ciphertext back into its conversation when both
+    /// sides are readable right now.
+    ///
+    /// The quarantine copy is written once, when a slot cannot be decrypted,
+    /// and until 2026-08-21 nothing ever read it back: a recovered key had
+    /// "something to decrypt" and no path that decrypts it. Measured that
+    /// day: the Queen's chat was reclaimed and restarted from [] while her
+    /// prior transcript sat byte-preserved under the quarantine key - a
+    /// transient key refusal had quarantined healthy ciphertext.
+    ///
+    /// The merge only runs when the quarantined bytes decrypt AND the current
+    /// slot is empty, decrypts, or is a marked plaintext fallback. A current
+    /// slot that is unreadable and different from the quarantine is left
+    /// alone: nothing has preserved it, so nothing may write over it.
+    private func recoverQuarantineIfPossible(_ id: UUID) {
+        let qKey = unreadableKey(for: id)
+        guard let preserved = defaults.data(forKey: qKey), !preserved.isEmpty else { return }
+        guard let plaintext = try? ConversationEncryption.shared.decrypt(preserved),
+              let recovered = try? JSONDecoder().decode([ChatMessage].self, from: plaintext),
+              !recovered.isEmpty
+        else { return }
+
+        var current: [ChatMessage] = []
+        if let stored = defaults.data(forKey: keyPrefix + id.uuidString), stored != preserved {
+            if stored.starts(with: Data(plaintextMarker.utf8)),
+               let msgs = try? JSONDecoder().decode(
+                   [ChatMessage].self,
+                   from: stored.dropFirst(plaintextMarker.utf8.count)
+               ) {
+                current = msgs
+            } else if let p = try? ConversationEncryption.shared.decrypt(stored),
+                      let msgs = try? JSONDecoder().decode([ChatMessage].self, from: p) {
+                current = msgs
+            } else {
+                return
+            }
+        }
+
+        let recoveredIds = Set(recovered.map(\.id))
+        let merged = recovered + current.filter { !recoveredIds.contains($0.id) }
+        guard let encoded = try? JSONEncoder().encode(merged),
+              let ciphertext = try? ConversationEncryption.shared.encrypt(encoded)
+        else { return }
+        defaults.set(ciphertext, forKey: keyPrefix + id.uuidString)
+        defaults.set(preserved, forKey: recoveredKey(for: id))
+        defaults.removeObject(forKey: qKey)
+        unreadableConversations.remove(id)
+        TriosLogBus.shared.info(
+            .chat,
+            "conversation.persist.recovered",
+            "Conversation \(id): \(recovered.count) quarantined message(s) decrypted "
+                + "again and were folded in front of \(current.count) current one(s); "
+                + "the original blob is kept under the recovered key",
+            [
+                "conversation": id.uuidString,
+                "recovered": String(recovered.count),
+                "current": String(current.count),
+            ]
+        )
     }
 
     /// True when the bytes currently in the conversation's slot are already
