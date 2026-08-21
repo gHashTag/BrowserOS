@@ -49,6 +49,20 @@ enum KeychainSecrets {
     private final class GaveUpFlag: @unchecked Sendable {
         var raised = false
     }
+
+    /// Values from stalled calls that settled successfully AFTER their caller
+    /// gave up. One-shot, keyed like the cooldowns, served to the next caller
+    /// instead of a refusal.
+    ///
+    /// Measured 2026-08-21 by keychain.read.settled: the "orphaned" calls this
+    /// process had written off as never-returning settle with OSStatus 0 in
+    /// 9.8-12.6 seconds - securityd is slow here, not broken. Before this
+    /// cache, a slow success armed a 60s cooldown and every caller inside it
+    /// was told "nothing there" about a value the process was already holding.
+    /// A successful settlement also clears the key's cooldown: the condition
+    /// the cooldown guards against is disproven by the answer arriving.
+    private static var lateSettledData: [String: Data] = [:]
+    private static var lateSettledLists: [String: [[String: Any]]] = [:]
     /// Cooldowns, keyed by what actually stalled.
     ///
     /// This was one global date, so a single slow item disabled the Keychain
@@ -135,9 +149,20 @@ enum KeychainSecrets {
             throw KeychainSecretsError.itemNotFound(service: service, account: account)
         }
 
-        // After a timeout, refuse all reads globally for 60 seconds.
-        // At most one read in flight at a time.
         readLock.lock()
+        // A stalled call that settled successfully is an answer in hand;
+        // serve it before the cooldown can refuse. One-shot: the next read
+        // goes to the Keychain again.
+        if let settled = lateSettledData.removeValue(forKey: "\(service)/\(account)") {
+            readLock.unlock()
+            TriosLogBus.shared.info(
+                .security, "keychain.read.served_late",
+                "\(service) / \(account) answered from the settlement of an "
+                    + "earlier stalled call",
+                ["service": service, "account": account]
+            )
+            return settled
+        }
         if cooledDown("\(service)/\(account)") {
             readLock.unlock()
             throw KeychainSecretsError.itemNotFound(service: service, account: account)
@@ -214,6 +239,13 @@ enum KeychainSecrets {
                 KeychainSecrets.readInFlight = false
             }
             let orphaned = callerGaveUp.raised
+            // A slow SUCCESS is an answer in hand: cache it for the next
+            // caller and clear this key's cooldown - the condition it guards
+            // against (a call that never returns) is disproven by returning.
+            if orphaned, status == errSecSuccess, let data = result as? Data {
+                KeychainSecrets.lateSettledData["\(service)/\(account)"] = data
+                KeychainSecrets.readUnavailableUntil["\(service)/\(account)"] = nil
+            }
             KeychainSecrets.readLock.unlock()
             if orphaned {
                 // The missing measurement of 2026-08-21: twelve stalls, and
@@ -387,6 +419,21 @@ enum KeychainSecrets {
         }
 
         readLock.lock()
+        // Serve the settlement of an earlier stalled listing before the
+        // cooldown can refuse; one-shot, same as the read path.
+        if let settled = lateSettledLists.removeValue(forKey: "list/\(service)") {
+            readLock.unlock()
+            lastEnumerationOutcome =
+                "\(settled.count) item(s), served from the settlement of an "
+                + "earlier stalled call"
+            TriosLogBus.shared.info(
+                .security, "keychain.read.served_late",
+                "listing \(service) answered from the settlement of an "
+                    + "earlier stalled call",
+                ["service": service]
+            )
+            return settled
+        }
         if cooledDown("list/\(service)") {
             readLock.unlock()
             lastEnumerationOutcome = "refused: cooldown armed after an earlier stall "
@@ -467,6 +514,11 @@ enum KeychainSecrets {
                 KeychainSecrets.readInFlight = false
             }
             let orphaned = callerGaveUp.raised
+            if orphaned, status == errSecSuccess,
+               let items = result as? [[String: Any]] {
+                KeychainSecrets.lateSettledLists["list/\(service)"] = items
+                KeychainSecrets.readUnavailableUntil["list/\(service)"] = nil
+            }
             KeychainSecrets.readLock.unlock()
             if orphaned {
                 TriosLogBus.shared.info(

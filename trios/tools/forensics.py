@@ -57,6 +57,7 @@ SIGNALS = [
     "keychain.enumeration.stalled",
     "keychain.read.stalled",
     "keychain.read.settled",
+    "keychain.read.served_late",
     "keychain.queue.starved",
 ]
 
