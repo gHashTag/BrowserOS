@@ -154,3 +154,23 @@ If the old string is still appearing, the binary is old - go back to step 1.
 `make relaunch` refuses while any worker is `running`; `FORCE=1` overrides.
 Killing the app mid-worker is the largest single cause of `interrupted` in the
 registry: 22 of 40 failures in one night were the rebuild loop, not the code.
+
+## Added 2026-08-22, after the first real-money day
+
+- **Measure the clock before declaring silence.** "30 minutes without a
+  heartbeat" was twice a misread wall clock: `date -u` against the log's
+  tail timestamp costs one second and both false alarms would have
+  triggered a relaunch over a healthy bee.
+- `make spend` now carries the day's burn against the SwarmBudget cap and
+  an EXHAUSTED marker. A resting swarm with money spent is by design, not
+  a stall - check spend before diagnosing idleness.
+- `keychain.read.settled` / `keychain.read.served_late` are the stall
+  family's resolution: settled says what a stalled call ultimately
+  returned (measured tails 9.8s-215.6s, always OSStatus 0 so far);
+  served_late says the value reached the next caller. Stalls WITHOUT
+  later settles are the only remaining mystery worth digging at.
+- Board lifecycle commands and their real shapes: awaitingReview resolves
+  via `/review <slug> reject <why>` then `/cancel <slug> <why>` (bare
+  /cancel is an illegal transition); FAILED records are invisible to every
+  command except `/dismiss <issue> <why>`, which exists precisely for
+  looked-at failures and refuses an empty reason.

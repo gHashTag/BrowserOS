@@ -110,3 +110,17 @@ Before you commit any `warn`, `error` or refusal string, answer in one line:
 usually that", write what you actually measured instead, and add the
 measurement if it is missing. A wrong diagnosis is worse than none: it sends
 the reader somewhere real and wrong, and it survives because it is plausible.
+
+## Third sweep (2026-08-22, the first day tokens were real)
+
+| The message said | The code actually knew | Cost |
+|---|---|---|
+| chat-probe: `key: MISSING` | the probe never read the env var at all (only a JSON key of the same name in config files); the running app held the key in its cache | release probing was impossible on the reference machine |
+| "orphaned keychain calls never return" (my own report) | no settlement was ever measured; once keychain.read.settled existed, every orphan settled with OSStatus 0 in 9.8-215.6s | a night of "securityd is broken" when it is merely slow |
+| the $10/day budget "gate" | it gated only NEW dispatches; the review sweep's send-back restarted workers past it | $7.60 of the first real-money day burned through an ungated path |
+| "Cannot move ... from cancelled to failed" x4 | the finish handler asked for a transition the state table has never allowed, on every worker that outlived its cancel | steady refusal noise beside every operator cancel |
+
+The repeated shape: a guard, gate or probe that exists SOMEWHERE is quoted
+as if it covered every path. The gate is real; the coverage is the claim
+nobody measured. When citing a protection, name the exact call sites it
+stands on - and grep for the paths it does not.
