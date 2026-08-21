@@ -42,6 +42,13 @@ enum QueenReconciliation {
         /// remote. Nothing is lost; the record is stale, not wrong about the
         /// work.
         case branchOnlyOnRemote
+        /// The record is ARCHIVED and its branch or commit has since been
+        /// cleaned. Measured 2026-08-21: a 211-branch debris sweep deleted
+        /// provably-landed branches, and the next reconcile pass raised
+        /// twelve urgent disagreements about records the archive sweep had
+        /// already stamped - reading normal lifecycle (settle, archive,
+        /// clean the branch) as loss.
+        case archivedRecordDrift
         /// A commit is named and the object is not in the repository.
         case commitMissing
         /// Files are claimed with no commit named. Historical rather than
@@ -59,7 +66,8 @@ enum QueenReconciliation {
         var isUrgent: Bool {
             switch self {
             case .agrees, .countWithoutCommit,
-                 .landedElsewhere, .heldBySibling, .branchOnlyOnRemote:
+                 .landedElsewhere, .heldBySibling, .branchOnlyOnRemote,
+                 .archivedRecordDrift:
                 return false
             case .unrecordedWork, .branchMissing, .commitMissing: return true
             }
@@ -102,6 +110,11 @@ enum QueenReconciliation {
         /// know it, and the per-record view that lacked it printed "nobody is
         /// looking at it" about a branch sitting in the review queue.
         var siblingExpectsWork: Bool = false
+        /// The archive sweep has stamped this record (archivedAt != nil).
+        /// Set by the CALLER. An archived record whose branch has since been
+        /// cleaned is lifecycle, not loss - without this bit, a debris sweep
+        /// turns every old record into an urgent disagreement.
+        var recordArchived: Bool = false
     }
 
     /// States in which a commit on the branch is unremarkable.
@@ -122,9 +135,10 @@ enum QueenReconciliation {
         // disagreement there is: the record points at something and the
         // something is not there.
         if let sha = committedSHA, !sha.isEmpty, !facts.commitExists {
-            return .commitMissing
+            return facts.recordArchived ? .archivedRecordDrift : .commitMissing
         }
         if let files = committedFiles, files > 0, !facts.branchExists {
+            if facts.recordArchived { return .archivedRecordDrift }
             return facts.branchOnRemote ? .branchOnlyOnRemote : .branchMissing
         }
         // Work on the branch of a task nobody thinks did any. Before calling
@@ -186,7 +200,8 @@ enum QueenReconciliation {
         switch finding {
         case .agrees, .countWithoutCommit:
             return .none
-        case .landedElsewhere, .heldBySibling, .branchOnlyOnRemote:
+        case .landedElsewhere, .heldBySibling, .branchOnlyOnRemote,
+             .archivedRecordDrift:
             // Stale records over work that is safe. Sending them to review
             // would double-claim a boundary a sibling may hold, and clearing
             // a count that HAS something behind it (on the remote, or in
@@ -244,6 +259,9 @@ enum QueenReconciliation {
         case .branchOnlyOnRemote:
             return "\(issue): the branch is absent locally but alive on origin with "
                 + "the claimed work - nothing is lost; fetch it or release the claim"
+        case .archivedRecordDrift:
+            return "\(issue): the record is archived and its branch or commit has "
+                + "since been cleaned - lifecycle, not loss"
         case .commitMissing:
             return "\(issue): the commit named in the record is not in the repository"
         case .countWithoutCommit:

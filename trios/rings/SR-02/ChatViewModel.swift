@@ -8748,6 +8748,10 @@ final class ChatViewModel: ObservableObject {
                         || (other.virtualBranch != nil
                             && other.virtualBranch == task.virtualBranch))
             }
+            // An archived record whose branch was cleaned afterwards is
+            // lifecycle, not loss - the debris sweep of 2026-08-21 turned
+            // twelve old records into urgent disagreements without this bit.
+            facts.recordArchived = task.archivedAt != nil
             let finding = QueenReconciliation.check(
                 state: task.state,
                 committedFiles: task.committedFiles,

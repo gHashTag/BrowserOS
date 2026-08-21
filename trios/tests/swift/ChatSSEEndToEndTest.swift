@@ -8496,12 +8496,14 @@ struct ChatSSEEndToEndTests {
         typealias R = QueenReconciliation
         func facts(branch: Bool = true, commits: Int = 0, commit: Bool = true,
                    unlanded: Int = 1, landedByPatch: Bool = false,
-                   remote: Bool = false, sibling: Bool = false) -> R.RepositoryFacts
+                   remote: Bool = false, sibling: Bool = false,
+                   archived: Bool = false) -> R.RepositoryFacts
         {
             R.RepositoryFacts(
                 branchExists: branch, branchCommits: commits, commitExists: commit,
                 unlandedFiles: unlanded, allCommitsLandedByPatch: landedByPatch,
-                branchOnRemote: remote, siblingExpectsWork: sibling
+                branchOnRemote: remote, siblingExpectsWork: sibling,
+                recordArchived: archived
             )
         }
 
@@ -8631,6 +8633,34 @@ struct ChatSSEEndToEndTests {
             landedLine.contains("identical patches")
                 && !landedLine.contains("nobody is looking at it"),
             "the stale-record line no longer claims nobody is looking: \(landedLine)"
+        )
+
+        // The 2026-08-21 debris sweep deleted provably-landed branches, and
+        // the next reconcile pass raised twelve urgent disagreements about
+        // records the archive sweep had already stamped. An archived record
+        // whose branch or commit was cleaned afterwards is lifecycle.
+        check(
+            R.check(state: .cancelled, committedFiles: 1, committedSHA: nil,
+                    facts: facts(branch: false, archived: true))
+                == .archivedRecordDrift,
+            "an archived record's cleaned branch is lifecycle, not loss"
+        )
+        check(
+            R.check(state: .accepted, committedFiles: 1, committedSHA: "dead",
+                    facts: facts(commit: false, archived: true))
+                == .archivedRecordDrift,
+            "and so is its cleaned commit"
+        )
+        check(
+            !R.Finding.archivedRecordDrift.isUrgent
+                && R.correction(for: .archivedRecordDrift) == .none,
+            "archived drift raises no alarm and proposes no repair"
+        )
+        check(
+            R.check(state: .accepted, committedFiles: 1, committedSHA: nil,
+                    facts: facts(branch: false, archived: false))
+                == .branchMissing,
+            "an UNarchived record's missing branch still alarms - the gate is the stamp, not time"
         )
     }
 
