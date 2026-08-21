@@ -52,7 +52,10 @@ actor ReplayTransport: ChatTransportProtocol {
         // actually wrote, so the commit path - baseline diff, owned-path filter,
         // branch update - is exercised too rather than always seeing an empty
         // working tree and reporting "changed no files" as a pass.
-        Self.applyEffects(Self.parseEffects(contents))
+        Self.applyEffects(
+            Self.parseEffects(contents),
+            root: effectRoot ?? ProjectPaths.root
+        )
 
         let delay = interEventDelay
         return AsyncStream { continuation in
@@ -101,13 +104,29 @@ actor ReplayTransport: ChatTransportProtocol {
             }
     }
 
-    /// Writes the declared files, refusing anything outside the project.
+    /// Where declared effects are written. A worker stands in its own checkout,
+    /// and the Queen diffs THAT checkout to decide what to commit.
+    ///
+    /// Defaulting to `ProjectPaths.root` meant the cassette wrote
+    /// `docs/replay.md` into the main tree while the worktree stayed clean, so
+    /// the commit path this fixture exists to exercise reported "the worker
+    /// changed no files" and the assertion had never once passed -
+    /// `queen.branch.committed` appears zero times in every log on this
+    /// machine. The effect must land where the bee's own `filesystem_write`
+    /// would have landed.
+    private var effectRoot: String?
+
+    func useEffectRoot(_ path: String) {
+        effectRoot = path
+    }
+
+    /// Writes the declared files, refusing anything outside `root`.
     ///
     /// A cassette is checked-in data, and data that can write anywhere on the
     /// disk is a scripting language nobody audited. Paths are resolved against
-    /// the project root and rejected if they escape it.
-    static func applyEffects(_ effects: [Effect]) {
-        let root = URL(fileURLWithPath: ProjectPaths.root).standardizedFileURL
+    /// the given root and rejected if they escape it.
+    static func applyEffects(_ effects: [Effect], root rootPath: String) {
+        let root = URL(fileURLWithPath: rootPath).standardizedFileURL
         for effect in effects {
             let target = URL(fileURLWithPath: effect.relativePath, relativeTo: root)
                 .standardizedFileURL

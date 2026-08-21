@@ -739,6 +739,13 @@ keychain-doors:
 # the recipe silently does the wrong thing ($E2E_DIR became 2E_DIR in
 # #1237).  This check walks every recipe line and flags a lone $ that is
 # neither $ nor a Make variable in the allowlist below.
+#
+# The allowlist has to carry variables Make provides and variables the caller
+# passes on the command line, not only the ones defined above it.  `$(HOME)` in
+# t27-rings and `$(FORCE)` in relaunch are both correct, and their absence here
+# made this gate fail on the real Makefile - which failed check-selftest's
+# clean-fixture half, which failed `make check` outright.  A gate that is red on
+# the tree it guards teaches everyone to run something other than `make check`.
 MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP DEV_BIN RELEASE_BIN DEV_PROC \
 	TEST_APP TEST_PROC TEST_BIN TEST_LOG \
 	RELEASE_PROC WARNING_CEILING XCTEST_ERROR_CEILING CASSETTE_DIR \
@@ -749,7 +756,8 @@ MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP DEV_BIN RELEASE_BIN DEV_PROC \
 	SECOND_TURN QUEEN_COMMAND MUTANTS MUTANTS_LOGIC MUTANTS_GUARD MAKE_DOLLAR_VARS HARNESS_LOCK GUARDS \
 	TYPE_STATE VARIANT_FENCE_SRC VARIANT_FENCE_DIR \
 	VENDOR_SRC VENDOR_BEGIN VENDOR_END VENDOR_ANCHOR VENDOR_HALVES \
-	SOURCES_MANIFEST SOURCES_APP_ONLY SOURCES_TEST_ONLY
+	SOURCES_MANIFEST SOURCES_APP_ONLY SOURCES_TEST_ONLY \
+	HOME FORCE
 
 .PHONY: make-dollars
 # The decision core must answer the same in Swift, in generated Rust, and in
@@ -1528,7 +1536,16 @@ cassettes: test-app
 		rm -f "$(ROOT)/docs/replay.md"; \
 		git -C "$(ROOT)" branch --list '$(CASSETTE_BRANCHES)' --format='%(refname:short)' \
 			| xargs -r -n1 git -C "$(ROOT)" branch -D >/dev/null 2>&1 || true; \
-		open --env TRIOS_E2E_DELEGATE="gHashTag/trios\#1086|queen-swift|Cassette $$cassette|docs" \
+		: "NOT trios\#1086. Make strips a backslash-hash in a VARIABLE \
+		   ASSIGNMENT (see ISSUE below, which is correct) and does NOT strip \
+		   it in a RECIPE, where a plain # needs no escape at all inside \
+		   double quotes. So this line shipped a literal backslash into the \
+		   app: IssueReference took the repo as 'trios\', every GitHub URL \
+		   became /repos/gHashTag/trios%5C/issues/1086, the issue body could \
+		   not be read, the worker got no boundary, and every file it wrote \
+		   was dropped as outside-boundary. That is the whole cassette \
+		   failure, and it read as 'the worker changed no files'."; \
+		open --env TRIOS_E2E_DELEGATE="gHashTag/trios#1086|queen-swift|Cassette $$cassette|docs" \
 		     --env TRIOS_REPLAY_CASSETTE="$(CASSETTE_DIR)/$$cassette" \
 		     --env TRIOS_E2E_SECOND_TURN="$$second" \
 		     --env TRIOS_E2E_DISABLE_KEYCHAIN="1" "$(TEST_APP)"; \

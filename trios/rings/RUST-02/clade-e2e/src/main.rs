@@ -252,6 +252,10 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
         sources: &[
             "tests/swift/queen_delegation_test.swift",
             "rings/SR-00/QueenDelegation.swift",
+            // DelegatedTask.failureKind is a QueenFailureKind, which lives
+            // here. Without it the whole suite failed to COMPILE, and a suite
+            // that does not compile is a suite that does not run.
+            "rings/SR-00/QueenRetryPolicy.swift",
             "rings/SR-00/QueenCriterionVerdict.swift",
             "rings/SR-00/ModelPricing.swift",
             "rings/SR-00/QueenSalience.swift",
@@ -463,6 +467,12 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
             "rings/SR-00/DevSecretStore.swift",
             "BR-OUTPUT/ProjectPaths.swift",
             "rings/SR-00/BuildVariantPolicy.swift",
+            // KeychainSecrets journals its stalls through the bus, so every
+            // suite that compiles KeychainSecrets needs the bus itself. Not
+            // the stub: that one stands in for ProjectPaths, which these
+            // suites already compile for real.
+            "rings/SR-01/TriosLogBus.swift",
+            "rings/SR-01/TriosOTLPExporter.swift",
         ],
     },
     SwiftLogicSuite {
@@ -479,6 +489,12 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
             "rings/SR-00/DevSecretStore.swift",
             "BR-OUTPUT/ProjectPaths.swift",
             "rings/SR-00/BuildVariantPolicy.swift",
+            // KeychainSecrets journals its stalls through the bus, so every
+            // suite that compiles KeychainSecrets needs the bus itself. Not
+            // the stub: that one stands in for ProjectPaths, which these
+            // suites already compile for real.
+            "rings/SR-01/TriosLogBus.swift",
+            "rings/SR-01/TriosOTLPExporter.swift",
         ],
     },
     SwiftLogicSuite {
@@ -514,6 +530,12 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
             "rings/SR-00/DevSecretStore.swift",
             "BR-OUTPUT/ProjectPaths.swift",
             "rings/SR-00/BuildVariantPolicy.swift",
+            // KeychainSecrets journals its stalls through the bus, so every
+            // suite that compiles KeychainSecrets needs the bus itself. Not
+            // the stub: that one stands in for ProjectPaths, which these
+            // suites already compile for real.
+            "rings/SR-01/TriosLogBus.swift",
+            "rings/SR-01/TriosOTLPExporter.swift",
         ],
     },
     SwiftLogicSuite {
@@ -528,6 +550,12 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
             "rings/SR-00/DevSecretStore.swift",
             "BR-OUTPUT/ProjectPaths.swift",
             "rings/SR-00/BuildVariantPolicy.swift",
+            // KeychainSecrets journals its stalls through the bus, so every
+            // suite that compiles KeychainSecrets needs the bus itself. Not
+            // the stub: that one stands in for ProjectPaths, which these
+            // suites already compile for real.
+            "rings/SR-01/TriosLogBus.swift",
+            "rings/SR-01/TriosOTLPExporter.swift",
         ],
     },
     SwiftLogicSuite {

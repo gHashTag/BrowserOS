@@ -196,6 +196,15 @@ final class QueenWorkerRunner: ObservableObject {
         } else {
             transport = makeTransport()
         }
+        // TESTING INSTRUMENT, same shape as the branch above. A replay's
+        // declared effects have to land in the worker's own checkout, because
+        // that is the tree the Queen diffs when she decides what to commit.
+        // Written to ProjectPaths.root they were invisible to her, and the
+        // cassette's whole point - exercising baseline diff, owned-path filter
+        // and branch update - was never reached.
+        if let replay = transport as? ReplayTransport {
+            await replay.useEffectRoot(Self.workerWorkingDirectory(for: task))
+        }
         let parser = UIMessageStreamParser()
         // #1246: While the stream runs nothing else is written, so a working
         // turn is indistinguishable from a hung one. This heartbeat fires every
