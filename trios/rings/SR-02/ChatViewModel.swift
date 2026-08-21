@@ -266,11 +266,28 @@ final class ChatViewModel: ObservableObject {
     /// retries them without spending a resume attempt (#1219).
     private var connectivityFailedTasks: Set<UUID> = []
 
-    /// The boundary-scoped fingerprint of the task's own files at the moment
-    /// verdicts were recorded, keyed by task ID. Snapshotted when the Queen
-    /// or a reviewer records a verdict, so acceptance can compare the
-    /// boundary the verdicts were carved against with the boundary's current
-    /// state (#1131).
+    /// What became of the attempt to bind a task's verdicts to the state of
+    /// its boundary at the moment they were recorded (#1131).
+    private enum VerdictStateBinding: Equatable {
+        /// The boundary fingerprint was computed and recorded at verdict
+        /// time. This is the recording — the write the acceptance gate
+        /// compares against the boundary's current state, and the write
+        /// whose removal must break the gate rather than blind it (#1131
+        /// criterion 4).
+        case bound(String)
+        /// The seal ran, but git could not produce the tree: the verdicts
+        /// carry no binding, and the acceptance gate refuses on them by
+        /// name rather than guessing freshness. This is a *named, separate*
+        /// case from both `.bound` and from a task the seal never touched —
+        /// the field existed and the tool failed, which is a different fact
+        /// from "these verdicts predate the field" (#1131 criterion 3).
+        case unavailable
+    }
+
+    /// The binding state of each task's verdicts, keyed by task ID (#1131).
+    /// Snapshotted when the Queen or a reviewer records a verdict, so
+    /// acceptance can compare the boundary the verdicts were carved against
+    /// with the boundary's current state.
     ///
     /// Only the task's `ownedPaths` are hashed, so the Queen's state writes
     /// (`.trinity/state/*`) cannot age a verdict — they are outside the lane
@@ -278,15 +295,35 @@ final class ChatViewModel: ObservableObject {
     ///
     /// This mirrors `DelegatedTask.treeStateFingerprint` but is set from the
     /// view model because the registry's `recordVerdict` does not take a
-    /// fingerprint argument. At acceptance time, this takes precedence over
-    /// the task's own field — if neither is set, `isStale` returns false and
-    /// the verdicts stand, which is what "missing ≠ stale" means (#1131).
+    /// fingerprint argument. When this dictionary holds no entry, acceptance
+    /// falls back to the task's own field; when neither exists, the verdicts
+    /// are the pre-field case and stand as recorded — missing ≠ stale
+    /// (#1131 criterion 3).
     ///
     /// Written only through `sealVerdictsWithBoundaryState`, which clears any
     /// earlier binding first and asserts the write landed — removing that
     /// write fires `queen.assertion.fingerprint_not_recorded` in the journal
-    /// (#1131 criterion 4).
-    private var verdictTreeStates: [UUID: String] = [:]
+    /// AND closes the acceptance gate with a named refusal (#1131 criterion
+    /// 4).
+    private var verdictTreeStates: [UUID: VerdictStateBinding] = [:]
+    /// Task IDs whose verdicts were recorded through the sealing path with a
+    /// non-empty boundary (#1131 criterion 4).
+    ///
+    /// The marker is what keeps two silences apart. A task with no binding
+    /// can mean "the verdicts predate the fingerprint" — a legitimate case
+    /// whose verdicts stand (#1131 criterion 3) — or "the recording was
+    /// removed or bypassed" — the original defect, where the mechanism
+    /// exists, the wiring is gone, and the gate passes on a check that
+    /// cannot fire. At seal time the expectation is set *before* anything
+    /// can fail, so a task that sealed and carries no binding is refused by
+    /// name at acceptance, while a task that never sealed (an older build,
+    /// or a path that records without sealing) keeps its pre-field standing.
+    ///
+    /// Removing the binding write in `sealVerdictsWithBoundaryState` leaves
+    /// the marker intact — that asymmetry is deliberate, and it is the whole
+    /// of the criterion 4 tripwire: take out the recording and the gate
+    /// breaks loudly instead of quietly forgetting why it was checking.
+    private var verdictSealExpectations: Set<UUID> = []
     /// Observer concerns already reported, keyed by task, so a warning fires
     /// once rather than on every streamed delta.
     private var announcedConcerns: [UUID: Set<String>] = [:]
@@ -6620,16 +6657,47 @@ final class ChatViewModel: ObservableObject {
             // already-done task is not stuck forever (#1180). An unmet
             // criterion keeps the old refusal below.
             if failedCondition == "no committed files" {
-                let verdictTreeState = verdictTreeStates[task.id] ?? task.treeStateFingerprint
+                // The binding is read before this branch can accept (#1131):
+                // verdicts the gate cannot vouch for are refused by name —
+                // never silently passed as fresh, never silently wiped.
+                let branchReadiness = verdictBindingReadiness(for: task)
+                let verdictTreeState: String?
+                switch branchReadiness {
+                case .ready(let fingerprint):
+                    verdictTreeState = fingerprint
+                case .refuse(let bindingReason):
+                    verdictTreeState = nil
+                    TriosLogBus.shared.warn(
+                        .queen, "queen.auto_accept.binding_refused",
+                        "Auto-accept skipped: the verdicts carry no state binding the gate can vouch for",
+                        ["issue": task.issue.slug, "reason": bindingReason]
+                    )
+                }
                 let currentBoundaryState = await QueenBranchCommitter.fingerprintBoundary(
                     ownedPaths: task.ownedPaths
                 )
                 let currentTreeState = currentBoundaryState ?? ""
-                if acceptanceBlockReasonDistinguishingEmptyAnswers(
+                // `.ready` gates the acceptance itself: a refusal from the
+                // binding read must not fall through to a nil-fingerprint
+                // acceptance, because that is the pre-field path and it
+                // passes.
+                if case .ready = branchReadiness,
+                   acceptanceBlockReasonDistinguishingEmptyAnswers(
                     for: task,
                     verdictTreeState: verdictTreeState,
                     currentTreeState: currentTreeState
-                ) == nil {
+                   ) == nil {
+                    // The pre-field case is named where it is relied on
+                    // (#1131 criterion 3): verdicts that predate the
+                    // fingerprint stand, and the journal says so rather than
+                    // letting this acceptance read as verified fresh.
+                    if let preField = preFieldVerdictsNotice(for: task) {
+                        TriosLogBus.shared.info(
+                            .queen, "queen.auto_accept.verdicts_predate_fingerprint",
+                            "Auto-accept rests on pre-field verdicts — they stand as recorded, named separately",
+                            ["issue": task.issue.slug, "note": preField]
+                        )
+                    }
                     // The interface divergence watchdog (#1128) runs here
                     // too: "the work was already done by an earlier pass"
                     // is still an acceptance, and an acceptance of a lane
@@ -6700,7 +6768,34 @@ final class ChatViewModel: ObservableObject {
         // check the Queen rubber-stamps her own workers regardless of what the
         // contract says, which makes criteria decoration rather than a gate
         // (#1133).
-        let verdictTreeState = verdictTreeStates[task.id] ?? task.treeStateFingerprint
+        //
+        // The verdict binding is read before anything else about this
+        // acceptance is decided (#1131 criteria 3 and 4): a task whose
+        // verdicts carry no binding the gate can vouch for is refused by
+        // name — never silently passed as fresh, never silently wiped.
+        let verdictTreeState: String?
+        switch verdictBindingReadiness(for: task) {
+        case .ready(let fingerprint):
+            verdictTreeState = fingerprint
+        case .refuse(let bindingReason):
+            TriosLogBus.shared.warn(
+                .queen, "queen.auto_accept.binding_refused",
+                "Auto-accept skipped: the verdicts carry no state binding the gate can vouch for",
+                ["issue": task.issue.slug, "reason": bindingReason]
+            )
+            return
+        }
+        // The pre-field case is named where it is relied on (#1131
+        // criterion 3): verdicts that predate the fingerprint stand, and the
+        // journal says so rather than letting this acceptance read as
+        // verified fresh.
+        if let preField = preFieldVerdictsNotice(for: task) {
+            TriosLogBus.shared.info(
+                .queen, "queen.auto_accept.verdicts_predate_fingerprint",
+                "Auto-accept rests on pre-field verdicts — they stand as recorded, named separately",
+                ["issue": task.issue.slug, "note": preField]
+            )
+        }
         let currentBoundaryState = await QueenBranchCommitter.fingerprintBoundary(
             ownedPaths: task.ownedPaths
         )
@@ -8232,8 +8327,17 @@ final class ChatViewModel: ObservableObject {
         }
         let lines = registry.tasks.map { task in
             let marker = task.state.needsQueenAttention ? "!" : " "
+            // The pre-field case, named on the standing board (#1131
+            // criterion 3): a task whose verdicts were recorded before the
+            // fingerprint existed is not silent here either. The reviewer
+            // scanning the hive sees which verdicts predate the binding —
+            // the same distinction the acceptance notice makes, on the
+            // surface the Queen actually looks at between reviews.
+            let preFieldTag = preFieldVerdictsNotice(for: task) != nil
+                ? "  [reviewed before state fingerprints — verdicts stand]"
+                : ""
             return "\(marker) \(task.issue.slug)  \(task.state.rawValue)  \(task.worker)  "
-                + "\(task.virtualBranch ?? "-")  -  \(task.title)"
+                + "\(task.virtualBranch ?? "-")  -  \(task.title)\(preFieldTag)"
         }
         let waiting = registry.reviewQueue.count
         await postQueenNotice(
@@ -8467,7 +8571,47 @@ final class ChatViewModel: ObservableObject {
             // writes cannot age a verdict (#1131). Without both fingerprints,
             // staleness is invisible: a verdict checked against yesterday's
             // code silently passes because nothing compares the two.
-            let verdictTreeState = verdictTreeStates[task.id] ?? task.treeStateFingerprint
+            //
+            // The binding is read before the criteria are judged (#1131
+            // criteria 3 and 4). A task whose verdicts carry no binding the
+            // gate can vouch for is refused by name — a different refusal
+            // from a criterion verdict, with its own words, exactly like the
+            // structural failure below. And the pre-field case, when it is
+            // what this acceptance rests on, is named in the evidence the
+            // reviewer reads.
+            let verdictTreeState: String?
+            switch verdictBindingReadiness(for: task) {
+            case .ready(let fingerprint):
+                verdictTreeState = fingerprint
+            case .refuse(let bindingReason):
+                TriosLogBus.shared.warn(
+                    .queen, "queen.accept.binding_refused",
+                    "Acceptance refused: the verdicts carry no state binding the gate can vouch for",
+                    [
+                        "issue": issue.slug,
+                        "reason": bindingReason,
+                        "criteria": String(task.acceptanceCriteria.count),
+                        "verdicts": String(task.criterionVerdicts.count)
+                    ]
+                )
+                await postQueenNotice(
+                    SystemNoticeClassifier.warningMarker
+                        + "Not accepting \(issue.slug): \(bindingReason)"
+                )
+                return
+            }
+            // Named where it is relied on (#1131 criterion 3): verdicts that
+            // predate the fingerprint stand, and the reviewer sees that this
+            // acceptance rests on them — not on a freshness the gate just
+            // verified.
+            let preFieldNote = preFieldVerdictsNotice(for: task)
+            if let preFieldNote {
+                TriosLogBus.shared.info(
+                    .queen, "queen.accept.verdicts_predate_fingerprint",
+                    "Acceptance rests on pre-field verdicts — they stand as recorded, named separately",
+                    ["issue": issue.slug, "note": preFieldNote]
+                )
+            }
             let currentBoundaryState = await QueenBranchCommitter.fingerprintBoundary(
                 ownedPaths: task.ownedPaths
             )
@@ -8584,13 +8728,20 @@ final class ChatViewModel: ObservableObject {
             // The table, not a sentence saying it went well. A reviewer reading
             // this later should see what was checked, not that someone was
             // satisfied.
-            let evidence = task.acceptanceCriteria.isEmpty
+            var evidence = task.acceptanceCriteria.isEmpty
                 ? ""
                 : "\n\n" + QueenAcceptancePolicy.table(
                     criteria: task.acceptanceCriteria, recorded: task.criterionVerdicts,
                     verdictTreeState: verdictTreeState,
                     currentTreeState: currentTreeState
                 )
+            // The pre-field case rides in the evidence, not in a separate
+            // message (#1131 criterion 3): the reviewer reads one artifact
+            // and sees both what was checked and what the check could not
+            // vouch for. The verdicts stand — named, not silently.
+            if let preFieldNote {
+                evidence += "\n\n" + preFieldNote
+            }
             await postQueenNotice(
                 SystemNoticeClassifier.successMarker
                     + "Accepted \(issue.slug) from \(task.worker).\(evidence)\nIts work is on "
@@ -9034,23 +9185,39 @@ final class ChatViewModel: ObservableObject {
     /// the verdicts share one instant. Only the task's `ownedPaths` are
     /// hashed, so the Queen's own state writes cannot age a verdict.
     ///
+    /// Three outcomes, each named:
+    ///
+    /// - The binding is recorded (`.bound`) — the load-bearing write. Remove
+    ///   it and the acceptance gate refuses every task that sealed, by name
+    ///   (#1131 criterion 4): the seal-expectation marker set below survives
+    ///   the removal, so a sealed task with no binding is not mistaken for a
+    ///   pre-field task.
+    /// - Git could not produce the tree (`.unavailable`) — the binding stays
+    ///   missing, `queen.review.fingerprint_unavailable` fires, and
+    ///   acceptance refuses on these verdicts by name. Not the pre-field
+    ///   case: the field existed and the tool failed.
+    /// - The task never sealed (no entry, no marker) — the pre-field case:
+    ///   verdicts recorded before the field existed stand as recorded,
+    ///   neither confirmed as current nor invalidated (#1131 criterion 3),
+    ///   and any acceptance resting on them says so by name.
+    ///
     /// A re-seal starts from nothing: the binding from an earlier recording
     /// is cleared first, so verdicts recorded now are never silently
-    /// presented as checked against an older tree. If the fingerprint then
-    /// cannot be computed (git refused to stage or write the tree), the
-    /// binding stays missing — which reads as "missing, not stale" at
-    /// acceptance (#1131 criterion 3), never as a freshness it did not earn.
-    ///
-    /// The closing assertion is #1131 criterion 4: if the write below is
-    /// removed or bypassed, `queen.assertion.fingerprint_not_recorded` fires
-    /// in the journal — verdicts recorded without a state binding make the
-    /// staleness check blind, and the blindness is named rather than passed
-    /// silently. That is the sense in which "the check breaks if you remove
-    /// the fingerprint recording."
+    /// presented as checked against an older tree.
     private func sealVerdictsWithBoundaryState(_ task: DelegatedTask) async {
         // An empty boundary has nothing to fingerprint. nil is "missing,"
         // not "stale" — the verdicts stand as they were (#1131 criterion 3).
         guard !task.ownedPaths.isEmpty else { return }
+        // The expectation is set before anything below can fail, and by a
+        // statement of its own (#1131 criterion 4). From here on, this
+        // task's verdicts were recorded by a build that seals, and the
+        // acceptance gate is entitled to find a binding — or refuse on its
+        // absence by name. The marker and the binding write are separate
+        // statements so that removing the *recording* leaves the marker
+        // behind: without that asymmetry, "the write was removed" and "the
+        // verdicts predate the field" would be the same silence, and
+        // criterion 3 forbids treating the second as broken.
+        verdictSealExpectations.insert(task.id)
         // Clear the earlier binding before computing the new one: verdicts
         // recorded now must not inherit the tree an earlier recording was
         // sealed against — especially not through a failed computation.
@@ -9061,8 +9228,10 @@ final class ChatViewModel: ObservableObject {
         guard let snapshot else {
             // A distinct, named case (#1131): git could not produce the
             // tree. This is not the removed-write regression below — the
-            // write ran and had nothing to write. The binding stays
-            // missing, which acceptance reads as "missing ≠ stale".
+            // write ran and had nothing to write. The binding is marked
+            // unavailable so acceptance refuses on these verdicts by name
+            // rather than reading them as pre-field.
+            verdictTreeStates[task.id] = .unavailable
             TriosLogBus.shared.warn(
                 .queen, "queen.review.fingerprint_unavailable",
                 "Boundary fingerprint could not be computed; verdicts are recorded without a state binding",
@@ -9073,13 +9242,15 @@ final class ChatViewModel: ObservableObject {
             )
             return
         }
-        verdictTreeStates[task.id] = snapshot
+        verdictTreeStates[task.id] = .bound(snapshot)
         // Regression guard (#1131 criterion 4): a snapshot existed, yet the
         // binding is missing — the write above was removed or bypassed.
         // Without the binding, `isStale` answers false for every verdict
         // and the gate can never block on moved code, which is exactly the
         // original defect: the mechanism written, the wiring gone, every
-        // acceptance passing on a check that cannot fire.
+        // acceptance passing on a check that cannot fire. The journal fires
+        // here, and the gate itself refuses at acceptance — the check
+        // breaks, it does not go quiet.
         if verdictTreeStates[task.id] == nil {
             TriosLogBus.shared.warn(
                 .queen, "queen.assertion.fingerprint_not_recorded",
@@ -9089,7 +9260,122 @@ final class ChatViewModel: ObservableObject {
                     "owned_paths": task.ownedPaths.joined(separator: ", ")
                 ]
             )
+            // Debug builds stop here outright (#1131 criterion 4): this block
+            // is reached only when a fingerprint existed to write and the
+            // write is gone. A crash in dev is the tripwire doing its job —
+            // release keeps the graceful path (the journal event above plus
+            // the gate's named refusal at acceptance), but a developer who
+            // removes the recording hears it from the first sealed verdict,
+            // not from a review. Asserts are compiled out at -O, so the
+            // shipped app never crashes on this.
+            assert(
+                verdictTreeStates[task.id] != nil,
+                "#1131 criterion 4: verdicts were sealed but no state fingerprint "
+                    + "was bound — the recording in sealVerdictsWithBoundaryState "
+                    + "was removed or bypassed and the staleness check is blind."
+            )
         }
+    }
+
+    /// What the acceptance gate may rely on for a task's verdicts (#1131).
+    private enum VerdictBindingReadiness {
+        /// Proceed. The fingerprint is non-nil when the verdicts are bound
+        /// to a recorded state; nil in the pre-field case — verdicts
+        /// recorded before the field existed, which stand as recorded
+        /// (missing ≠ stale, criterion 3) and are named separately wherever
+        /// an acceptance rests on them.
+        case ready(String?)
+        /// The gate must refuse, and the reason names which failure this is.
+        /// Never the pre-field case: that one does not refuse.
+        case refuse(String)
+    }
+
+    /// Reads a task's verdict binding and classifies it for the acceptance
+    /// gate (#1131 criteria 3 and 4).
+    ///
+    /// Four outcomes, each named:
+    ///
+    /// 1. `.bound(fingerprint)` — recorded at verdict time; the gate
+    ///    compares it with the boundary's current state (criterion 2).
+    /// 2. `.unavailable` — the seal ran and git could not produce the tree.
+    ///    The verdicts carry no binding the gate can vouch for: refuse,
+    ///    named. Not the pre-field case — the field existed and the tool
+    ///    failed, which is a different fact from "the verdicts predate the
+    ///    field".
+    /// 3. No binding, but the seal was expected — the recording write was
+    ///    removed or bypassed. This is the criterion 4 tripwire: the gate
+    ///    closes with a name instead of passing on a check that cannot
+    ///    fire. Distinguished from the pre-field case by the expectation
+    ///    marker, which the seal sets before any failure can occur.
+    /// 4. No binding and no seal ever ran — the pre-field case: verdicts
+    ///    recorded before the field existed (an older build, or a path that
+    ///    records without sealing). They stand as they were, neither
+    ///    confirmed as current nor invalidated, and any acceptance resting
+    ///    on them says so by name (criterion 3). The gate does not block.
+    ///
+    /// In-memory, so a restart moves every task to outcome 4 — the honest
+    /// reading of "no binding in this process". Persisting the binding on
+    /// the task needs a registry mutator, which lives outside this file.
+    private func verdictBindingReadiness(for task: DelegatedTask) -> VerdictBindingReadiness {
+        // A task with no recorded verdicts has nothing to bind: the gate
+        // speaks about unchecked criteria, not about bindings.
+        guard !task.criterionVerdicts.isEmpty else { return .ready(nil) }
+        // An empty boundary has nothing to fingerprint; verdicts on such a
+        // task were judged on the contract alone, as they always were.
+        guard !task.ownedPaths.isEmpty else { return .ready(nil) }
+        switch verdictTreeStates[task.id] {
+        case .bound(let fingerprint):
+            return .ready(fingerprint)
+        case .unavailable:
+            return .refuse(
+                "the boundary fingerprint could not be computed when these "
+                    + "verdicts were recorded (queen.review.fingerprint_unavailable), "
+                    + "so their freshness cannot be checked. Re-record the verdicts "
+                    + "once git can read the tree. This is not the pre-field case: "
+                    + "the seal ran and the tool failed."
+            )
+        case nil:
+            if verdictSealExpectations.contains(task.id) {
+                return .refuse(
+                    "the verdicts were recorded but no state fingerprint was "
+                        + "bound — the recording in sealVerdictsWithBoundaryState "
+                        + "was removed or bypassed (#1131 criterion 4). The "
+                        + "staleness check is blind, so nothing can be accepted on "
+                        + "these verdicts. This is not the pre-field case: the seal "
+                        + "ran and had a boundary to fingerprint."
+                )
+            }
+            // Pre-field (nil fingerprint) or a binding persisted on the task
+            // by a future registry that writes it. Either way the verdicts
+            // stand, and the caller names the pre-field case where it
+            // applies.
+            return .ready(task.treeStateFingerprint)
+        }
+    }
+
+    /// The acceptance-surface name for the pre-field case (#1131 criterion 3):
+    /// a line for the reviewer when an acceptance rests on verdicts that
+    /// predate the fingerprint.
+    ///
+    /// Naming it is the criterion. The verdicts stand either way — what must
+    /// not happen is that they stand silently, indistinguishable from
+    /// verdicts the gate just verified as current, or that their standing is
+    /// mistaken for the tool failures the gate refuses on. Separate case,
+    /// separate words.
+    private func preFieldVerdictsNotice(for task: DelegatedTask) -> String? {
+        guard !task.criterionVerdicts.isEmpty else { return nil }
+        // An empty boundary is not the pre-field case — nothing was ever
+        // meant to be fingerprinted.
+        guard !task.ownedPaths.isEmpty else { return nil }
+        guard verdictTreeStates[task.id] == nil,
+              !verdictSealExpectations.contains(task.id),
+              task.treeStateFingerprint == nil
+        else { return nil }
+        return "\(task.criterionVerdicts.count) verdict(s) predate the state "
+            + "fingerprint: they stand as recorded, neither confirmed as "
+            + "current nor invalidated. This is the pre-field case from "
+            + "#1131 — missing is not stale — not a freshness this "
+            + "acceptance earned."
     }
 
     /// Records what was found when one acceptance criterion was checked.
@@ -9162,8 +9448,17 @@ final class ChatViewModel: ObservableObject {
         // the mirror of the gate in autoAcceptIfUnambiguous: that gate stops a
         // premature decision; this one undoes one the evidence has overtaken.
         if updated.state == .accepted, !updated.acceptanceCriteria.isEmpty {
-            let reopenVerdictTreeState = verdictTreeStates[updated.id]
-                ?? updated.treeStateFingerprint
+            // The reopen check reads the binding the way the gate does:
+            // `.bound` carries the fingerprint; anything else falls back to
+            // the task's own field (nil in practice — the field has no
+            // writer yet), which the policy reads as missing ≠ stale.
+            let reopenVerdictTreeState: String?
+            switch verdictTreeStates[updated.id] {
+            case .bound(let fingerprint):
+                reopenVerdictTreeState = fingerprint
+            case .unavailable, nil:
+                reopenVerdictTreeState = updated.treeStateFingerprint
+            }
             let reopenBoundaryState = await QueenBranchCommitter.fingerprintBoundary(
                 ownedPaths: updated.ownedPaths
             )
