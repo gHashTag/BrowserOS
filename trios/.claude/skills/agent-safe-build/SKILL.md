@@ -727,3 +727,13 @@ with a recorded commit.
 **Rule:** when a symptom is environmental - credentials, signing, paths - check
 whether it is variant-specific before generalising. The variants differ exactly
 in the places environmental faults live, which is why they were separated.
+
+## Added 2026-08-21, night cycle
+
+Do not edit a source file while your own `make check` is compiling: the
+build fails with "input file ... was modified during the build", the gate
+reads red, and the red is yours in the dumbest possible way. Sequence the
+cycle as observe -> edit -> gate, never edit-during-gate. If the gate is
+already running and an edit cannot wait, kill the gate first and rerun it
+clean afterwards - a gate result from a tree that changed mid-run proves
+nothing either way.
