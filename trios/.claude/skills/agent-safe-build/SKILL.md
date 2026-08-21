@@ -743,5 +743,6 @@ nothing either way.
 `make check` run from the wrong directory (agent-server/, any subdir) fails
 instantly with "No rule to make target" - and in a background task that
 tail-reads as a completed gate. It happened twice in one night. Anchor
-every gate invocation: `make check`,
-and treat any gate that finished in under a minute as not having run.
+every gate invocation with an explicit cd to the trios checkout on the
+same line (`cd /path/to/trios && make check`), and treat any gate that
+finished in under a minute as not having run.
