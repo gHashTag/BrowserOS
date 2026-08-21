@@ -31,6 +31,24 @@ enum KeychainSecrets {
     // a 60-second cooldown so blocked calls don't pile up.
     private static let readLock = NSLock()
     private static var readInFlight: Bool = false
+    /// Ties each in-flight read to the flag it raised. The timeout path and
+    /// the orphaned block BOTH clear `readInFlight`; without the generation a
+    /// stalled read that settles late clears the flag a newer reader armed,
+    /// breaking single-flight and letting two SecItemCopyMatching calls run
+    /// at once.
+    private static var readGeneration: UInt64 = 0
+    /// The deadline the current slot holder was given, so a waiter can decide
+    /// how long the slot is worth waiting for. Meaningful only while
+    /// `readInFlight` is raised.
+    private static var readHolderDeadline: TimeInterval = 2.0
+
+    /// A flag the caller raises AFTER handing it to the background block, so
+    /// the block knows its settlement went unobserved and is worth logging.
+    /// A reference type on purpose - a captured local would be a value the
+    /// sendable closure never sees change. All access under `readLock`.
+    private final class GaveUpFlag: @unchecked Sendable {
+        var raised = false
+    }
     /// Cooldowns, keyed by what actually stalled.
     ///
     /// This was one global date, so a single slow item disabled the Keychain
@@ -52,9 +70,13 @@ enum KeychainSecrets {
     // At most one background write is allowed at a time, globally; a write
     // that does not answer within the timeout arms a 60-second cooldown so
     // blocked calls don't pile up.
+    //
+    // Keyed per item like the read cooldown: one stalled write used to refuse
+    // every write for a minute - the same "one slow item blinds the process"
+    // shape the read side already had removed.
     private static let writeLock = NSLock()
     private static var writeInFlight: Bool = false
-    private static var writeUnavailableUntil: Date?
+    private static var writeUnavailableUntil: [String: Date] = [:]
 
     /// True while the app is still coming up. While raised, every keychain
     /// operation returns immediately without touching the Security framework:
@@ -129,12 +151,20 @@ enum KeychainSecrets {
                 throw KeychainSecretsError.itemNotFound(service: service, account: account)
             }
             readLock.lock()
-            if readInFlight {
+            // Re-check the cooldown, not just the slot: measured twice on
+            // 2026-08-21, a waiter that passed the check before the holder
+            // stalled acquired the freed slot ~20ms after the cooldown armed
+            // for exactly this key, and dove into a fresh full-length stall
+            // on the same item.
+            if readInFlight || cooledDown("\(service)/\(account)") {
                 readLock.unlock()
                 throw KeychainSecretsError.itemNotFound(service: service, account: account)
             }
         }
         readInFlight = true
+        readGeneration += 1
+        readHolderDeadline = deadline
+        let generation = readGeneration
         readLock.unlock()
 
         var query: [String: Any] = [
@@ -155,6 +185,10 @@ enum KeychainSecrets {
         let semaphore = DispatchSemaphore(value: 0)
         var result: AnyObject?
         var status: OSStatus = errSecSuccess
+        // Raised by the timeout path under readLock, read by the background
+        // block once the call settles: when raised, the block reports the
+        // settlement the caller could not wait for.
+        let callerGaveUp = GaveUpFlag()
 
         // Measured: how long until the block even STARTS. A saturated global
         // queue looks exactly like a slow Keychain from the caller's side, and
@@ -172,9 +206,31 @@ enum KeychainSecrets {
                 )
             }
             status = SecItemCopyMatching(query as CFDictionary, &result)
+            let elapsed = Date().timeIntervalSince(dispatchedAt)
             KeychainSecrets.readLock.lock()
-            KeychainSecrets.readInFlight = false
+            // Only the generation that armed the flag may clear it; a late
+            // settlement must not release a slot a newer reader now holds.
+            if KeychainSecrets.readGeneration == generation {
+                KeychainSecrets.readInFlight = false
+            }
+            let orphaned = callerGaveUp.raised
             KeychainSecrets.readLock.unlock()
+            if orphaned {
+                // The missing measurement of 2026-08-21: twelve stalls, and
+                // whether any of those calls EVER returned - and with what -
+                // was unknowable, because the orphan discarded its status.
+                TriosLogBus.shared.info(
+                    .security, "keychain.read.settled",
+                    "\(service) / \(account) settled after "
+                        + String(format: "%.1f", elapsed)
+                        + "s with OSStatus \(status), after its caller had given up",
+                    [
+                        "service": service, "account": account,
+                        "status": String(status),
+                        "elapsed": String(format: "%.1f", elapsed),
+                    ]
+                )
+            }
             semaphore.signal()
         }
 
@@ -209,22 +265,30 @@ enum KeychainSecrets {
         // "there is no key". One stuck read at launch, and the app never
         // touched the Keychain again.
         //
-        // The flag exists to stop callers piling up, not to latch. Worst case
-        // the orphaned read finishes later and clears an already-clear flag.
+        // The flag exists to stop callers piling up, not to latch. The
+        // generation check keeps the orphan's own late clear from releasing
+        // a slot a newer reader holds.
         readLock.lock()
         readUnavailableUntil["\(service)/\(account)"] = Date().addingTimeInterval(60)
-        readInFlight = false
+        // Generation-guarded for the same reason as the block's clear: if the
+        // orphan settled in the gap after our wait timed out, a newer reader
+        // may already hold the slot this path would otherwise release.
+        if readGeneration == generation {
+            readInFlight = false
+        }
+        callerGaveUp.raised = true
         readLock.unlock()
-        // Name the read that stalled. The cooldown it arms makes every other
-        // keychain read answer "nothing there" for a minute, so the caller that
-        // caused it is the only thing worth knowing - and until now the stall
-        // was silent, which is why four fixes went in before this one.
+        // Name the read that stalled, with the numbers this call measured:
+        // the message used to hardcode "2s" while callers pass their own
+        // deadline (8s in ModelConfigurationStore), and claimed "every
+        // keychain read is refused" a day after the cooldown went per-item.
         TriosLogBus.shared.warn(
             .security,
             "keychain.read.stalled",
-            "\(service) / \(account) did not answer in 2s "
-                + "(interaction \(allowsInteraction ? "allowed" : "skipped")); "
-                + "every keychain read is refused for 60s",
+            "\(service) / \(account) did not answer in "
+                + String(format: "%.0f", deadline)
+                + "s (interaction \(allowsInteraction ? "allowed" : "skipped")); "
+                + "reads of this item are refused for 60s",
             ["service": service, "account": account]
         )
         throw KeychainSecretsError.itemNotFound(service: service, account: account)
@@ -274,8 +338,16 @@ enum KeychainSecrets {
     /// contested race - and reported the loss as "no entries listed", which the
     /// Queen read as "there is no key" and refused to dispatch. The whole swarm
     /// idled on half a second of arithmetic.
-    private static func waitForReadSlot(deadline: TimeInterval = 2.6) -> Bool {
-        let limit = Date().addingTimeInterval(deadline)
+    private static func waitForReadSlot(deadline: TimeInterval? = nil) -> Bool {
+        // The wait must outlast the CURRENT holder's deadline, whatever it
+        // is. The fixed 2.6s answered 2s holders and then silently lost every
+        // race again when ModelConfigurationStore began passing deadline: 8.0
+        // - the exact defect the comment above records being fixed once.
+        readLock.lock()
+        let holder = readHolderDeadline
+        readLock.unlock()
+        let bound = deadline ?? max(2.6, holder + 0.6)
+        let limit = Date().addingTimeInterval(bound)
         while Date() < limit {
             readLock.lock()
             let busy = readInFlight
@@ -330,12 +402,21 @@ enum KeychainSecrets {
                 return []
             }
             readLock.lock()
-            if readInFlight {
+            // Same re-check as readData: the slot freeing and the cooldown
+            // arming are one event when the holder stalls, and a waiter that
+            // only re-checks the slot walks into a fresh stall on the same
+            // service.
+            if readInFlight || cooledDown("list/\(service)") {
                 readLock.unlock()
+                lastEnumerationOutcome = "refused: the slot freed into a cooldown "
+                    + "armed by the stalled holder"
                 return []
             }
         }
         readInFlight = true
+        readGeneration += 1
+        readHolderDeadline = deadline
+        let generation = readGeneration
         readLock.unlock()
 
         // Attributes only, and never a dialog.
@@ -362,6 +443,7 @@ enum KeychainSecrets {
         let semaphore = DispatchSemaphore(value: 0)
         var result: CFTypeRef?
         var status: OSStatus = errSecSuccess
+        let callerGaveUp = GaveUpFlag()
 
         // Measured: how long until the block even STARTS. A saturated global
         // queue looks exactly like a slow Keychain from the caller's side, and
@@ -379,9 +461,26 @@ enum KeychainSecrets {
                 )
             }
             status = SecItemCopyMatching(query as CFDictionary, &result)
+            let elapsed = Date().timeIntervalSince(dispatchedAt)
             KeychainSecrets.readLock.lock()
-            KeychainSecrets.readInFlight = false
+            if KeychainSecrets.readGeneration == generation {
+                KeychainSecrets.readInFlight = false
+            }
+            let orphaned = callerGaveUp.raised
             KeychainSecrets.readLock.unlock()
+            if orphaned {
+                TriosLogBus.shared.info(
+                    .security, "keychain.read.settled",
+                    "listing \(service) settled after "
+                        + String(format: "%.1f", elapsed)
+                        + "s with OSStatus \(status), after its caller had given up",
+                    [
+                        "service": service,
+                        "status": String(status),
+                        "elapsed": String(format: "%.1f", elapsed),
+                    ]
+                )
+            }
             semaphore.signal()
         }
 
@@ -400,14 +499,21 @@ enum KeychainSecrets {
 
         readLock.lock()
         readUnavailableUntil["list/\(service)"] = Date().addingTimeInterval(60)
-        readInFlight = false
+        if readGeneration == generation {
+            readInFlight = false
+        }
+        callerGaveUp.raised = true
         readLock.unlock()
         lastEnumerationOutcome = "timed out; cooldown armed for 60s on this service"
+        // The message carries the deadline this call was given (the "2s" it
+        // used to print was false for every 8-second enumeration measured on
+        // 2026-08-21) and the per-service scope the cooldown actually has.
         TriosLogBus.shared.warn(
             .security,
             "keychain.enumeration.stalled",
-            "listing \(service) did not answer in 2s; every keychain read is "
-                + "refused for 60s",
+            "listing \(service) did not answer in "
+                + String(format: "%.0f", deadline)
+                + "s; listings of this service are refused for 60s",
             ["service": service]
         )
         return []
@@ -432,15 +538,16 @@ enum KeychainSecrets {
             throw KeychainSecretsError.osStatus(OSStatus(-4093))
         }
 
-        // After a timeout, refuse all writes globally for 60 seconds.
+        // After a timeout, refuse writes of THIS item for 60 seconds.
         // At most one write in flight at a time.
         // -4093 == errSecTimeout (not bridged to Swift).
         writeLock.lock()
-        if let until = writeUnavailableUntil,
-           Date() < until
-        {
-            writeLock.unlock()
-            throw KeychainSecretsError.osStatus(OSStatus(-4093))
+        if let until = writeUnavailableUntil["\(service)/\(account)"] {
+            if Date() < until {
+                writeLock.unlock()
+                throw KeychainSecretsError.osStatus(OSStatus(-4093))
+            }
+            writeUnavailableUntil["\(service)/\(account)"] = nil
         }
         if writeInFlight {
             writeLock.unlock()
@@ -496,10 +603,10 @@ enum KeychainSecrets {
         }
 
         // Timed out: the background write is still in flight. Arm the cooldown
-        // so repeated callers don't pile up blocked writes, and report failure
-        // rather than hanging the main thread.
+        // for this item so repeated callers don't pile up blocked writes, and
+        // report failure rather than hanging the main thread.
         writeLock.lock()
-        writeUnavailableUntil = Date().addingTimeInterval(60)
+        writeUnavailableUntil["\(service)/\(account)"] = Date().addingTimeInterval(60)
         writeLock.unlock()
         throw KeychainSecretsError.osStatus(OSStatus(-4093))
     }
