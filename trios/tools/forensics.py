@@ -52,6 +52,8 @@ SIGNALS = [
     "conversation.persist.reencrypted",
     "conversation.persist.recovered",
     "conversation.persist.reclaimed",
+    "conversation.persist.rejoined",
+    "conversation.persist.preserved_then_written",
     "keychain.enumeration.stalled",
     "keychain.read.stalled",
     "keychain.read.settled",
