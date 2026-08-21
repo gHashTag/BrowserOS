@@ -35,6 +35,21 @@ enum QueenMergeGate {
         case refuse(reason: String)
     }
 
+    /// Checks whose red is administrative, not the bee's code.
+    ///
+    /// Measured 2026-08-21: every queen/* pull request fails the `cla` bot
+    /// (it does not know the Queen as a signatory), so `gate_red` fired on
+    /// #74/#75 dozens of times a day, each wake re-briefing a bee about a red
+    /// no code change can turn green. A red made only of these checks is the
+    /// operator's to resolve, not a worker's.
+    static let administrativeChecks: Set<String> = ["cla"]
+
+    /// True when every failing check is administrative - nothing for a bee.
+    static func administrativeOnly(_ failingChecks: [String]) -> Bool {
+        !failingChecks.isEmpty
+            && failingChecks.allSatisfy { administrativeChecks.contains($0.lowercased()) }
+    }
+
     /// The gate. Pure, so every branch below is reachable in a test.
     ///
     /// `checksConfigured` matters more than it looks: a repository with no CI

@@ -10283,6 +10283,21 @@ final class ChatViewModel: ObservableObject {
                     )
                     return
                 case .wakeWorker(let why):
+                    // A red made only of administrative checks is the
+                    // operator's, not a worker's: every queen/* pull request
+                    // fails the `cla` bot, so this path woke bees dozens of
+                    // times a day about a red no code change can turn green.
+                    // Name the checks and stand down.
+                    if QueenMergeGate.administrativeOnly(failingChecks) {
+                        TriosLogBus.shared.info(
+                            .queen, "queen.pr.gate_administrative",
+                            "#\(number) is red only on administrative check(s) "
+                                + "(\(failingChecks.joined(separator: ", "))); "
+                                + "nothing a worker can fix - waiting on the operator",
+                            ["issue": task.issue.slug, "pr": "\(number)"]
+                        )
+                        return
+                    }
                     // Red means the bee goes back to work, not that the Queen
                     // fixes it. The instruction names the failing checks,
                     // because a wake-up that says only "it is red" gives the
@@ -10301,7 +10316,13 @@ final class ChatViewModel: ObservableObject {
                             prNumber: number, reason: why, failingChecks: failingChecks
                         )
                     )
-                    registry.transition(taskID: task.id, to: .rejected)
+                    // NOT a transition to .rejected: pull requests are polled
+                    // for ACCEPTED tasks, and .accepted allows only .merged
+                    // (QueenDelegation transition table) - so the attempt was
+                    // refused on every single execution, logging "Cannot
+                    // move ... from accepted to rejected" beside each wake.
+                    // The correction in the worker chat is the wake; the
+                    // record stays accepted until the forge says merged.
                     return
                 case .merge:
                     break

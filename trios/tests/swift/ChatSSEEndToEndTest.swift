@@ -9510,6 +9510,23 @@ struct ChatSSEEndToEndTests {
             fail("a failed check must wake the worker")
             return
         }
+
+        // A red made only of administrative checks is the operator's, not a
+        // worker's: every queen/* pull request fails the `cla` bot, and the
+        // wake path re-briefed bees dozens of times a day about a red no
+        // code change can turn green.
+        check(
+            G.administrativeOnly(["cla"]) && G.administrativeOnly(["CLA"]),
+            "a cla-only red is administrative, case-insensitively"
+        )
+        check(
+            !G.administrativeOnly(["cla", "check"]),
+            "one real failing check beside cla still wakes the worker"
+        )
+        check(
+            !G.administrativeOnly([]),
+            "no failing checks is not administrative - an empty list must not stand down a wake"
+        )
         guard case .wakeWorker(let errorReason) = G.decision(
             rollup: .error, mergeable: true, isDraft: false, checksConfigured: true
         ) else {
