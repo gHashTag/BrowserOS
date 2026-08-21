@@ -11187,6 +11187,16 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func runQueenSkill(command: String, arguments: [String]) async {
+        // #1131 self-test, intercepted here because the command table lives
+        // in QueenCommandParser.swift (outside this file's lane). The parser
+        // hands any unknown `/name` through as .runSkill, so this is the one
+        // in-lane surface a runnable proof can hang from. It drives the real
+        // verdict-recording and acceptance paths below and journals named
+        // results — see runFingerprintProbe.
+        if command == "/fingerprint-probe" {
+            await runFingerprintProbe()
+            return
+        }
         let store = skillStore
         guard let skill = store.skill(named: command) else {
             await postQueenNotice(
@@ -11208,6 +11218,191 @@ final class ChatViewModel: ObservableObject {
         )
         let output = await store.run(command, arguments: arguments)
         await postQueenNotice(SystemNoticeClassifier.infoMarker + "`\(command)` said:\n\(output)")
+    }
+
+    /// The #1131 self-test: proves the staleness rule by running it, not by
+    /// describing it (#1131 criteria 1, 2 and 4).
+    ///
+    /// Drives exactly the paths /review uses — nothing is stubbed:
+    ///
+    /// 1. A synthetic task is opened as a pure registry record (no branch, no
+    ///    worker, issue #9131 does not exist on the forge) with a probe-private
+    ///    boundary `docs/fingerprint-probe`, so no other writer can age the
+    ///    verdict between the arms.
+    /// 2. Verdicts are recorded through `recordCriterionVerdict` — the same
+    ///    entry point /verify uses — and the seal runs at that moment
+    ///    (criterion 1). The readiness read then names what was bound.
+    /// 3. Arm A — code unchanged since review: the current boundary
+    ///    fingerprint equals the sealed one and the acceptance contract
+    ///    returns nil, the acceptance proceeds (criterion 2, passes side).
+    /// 4. Arm B — code changed inside the boundary: the acceptance contract
+    ///    blocks with "checked against different code" (criterion 2, blocks
+    ///    side; the same distinction #1126 exists to keep).
+    /// 5. The verdict is journalled as queen.selftest.1131.passed/.failed
+    ///    with the issue slug in the line, so a runner can wait on it.
+    ///
+    /// Criterion 4 is this probe's own tripwire: remove the binding write in
+    /// `sealVerdictsWithBoundaryState` and arm A cannot produce a fingerprint
+    /// — the readiness read refuses by name and this probe fails, which is
+    /// "the check breaks when the recording is removed", runnable.
+    ///
+    /// The probe settles its own task (awaitingReview → rejected → cancelled)
+    /// and deletes its scratch file, so a run leaves no live state behind.
+    /// Reruns after an interrupted probe fail with the registry's own "already
+    /// delegated" refusal rather than colliding with themselves.
+    private func runFingerprintProbe() async {
+        let issue = IssueReference(owner: "gHashTag", repo: "trios", number: 9131)
+        let criteria = ["the probe criterion one", "the probe criterion two"]
+        var failed: [String] = []
+        let probeDir = ProjectPaths.root + "/docs/fingerprint-probe"
+        let scratch = probeDir + "/scratch.md"
+
+        func journal(_ event: String, _ message: String, _ fields: [String: String] = [:]) {
+            TriosLogBus.shared.info(
+                .queen, event, message,
+                fields.merging(["issue": issue.slug]) { current, _ in current }
+            )
+        }
+        func verdict(_ passed: Bool, _ note: String) async {
+            if passed {
+                journal(
+                    "queen.selftest.1131.passed",
+                    "fingerprint probe passed: \(note)",
+                    ["failed": failed.joined(separator: " | ")]
+                )
+            } else {
+                journal(
+                    "queen.selftest.1131.failed",
+                    "fingerprint probe failed: \(note)",
+                    ["failed": failed.joined(separator: " | ")]
+                )
+            }
+            await postQueenNotice(
+                (passed ? SystemNoticeClassifier.successMarker : SystemNoticeClassifier.warningMarker)
+                    + "Fingerprint probe (#1131): \(note)"
+            )
+        }
+
+        // Real boundary content from the start, so both arms exercise the
+        // real hashing path rather than git's empty-tree constant.
+        do {
+            try FileManager.default.createDirectory(
+                atPath: probeDir, withIntermediateDirectories: true
+            )
+            try "probe v1\n".write(toFile: scratch, atomically: true, encoding: .utf8)
+        } catch {
+            await verdict(false, "could not create the probe boundary: \(error.localizedDescription)")
+            return
+        }
+        defer { try? FileManager.default.removeItem(atPath: probeDir) }
+
+        guard let task = delegationRegistry.delegate(
+            issue: issue,
+            title: "fingerprint probe (synthetic, settles itself)",
+            worker: "queen-swift",
+            conversationId: ChatConversation.trinityQueenId,
+            ownedPaths: ["docs/fingerprint-probe"],
+            acceptanceCriteria: criteria
+        ) else {
+            await verdict(
+                false,
+                "could not open the synthetic task — "
+                    + (delegationRegistry.lastError ?? "delegate returned nil")
+            )
+            return
+        }
+        // The legal path to the state /review guards on: queued → running →
+        // awaitingReview. Record-level only; nothing is dispatched.
+        _ = delegationRegistry.transition(taskID: task.id, to: .running)
+        _ = delegationRegistry.transition(taskID: task.id, to: .awaitingReview)
+        defer {
+            // Settle the synthetic task so no live state survives the probe:
+            // awaitingReview → rejected → cancelled. A cancelled record is
+            // terminal for the chooser and is archived by the ordinary sweep.
+            _ = delegationRegistry.transition(taskID: task.id, to: .rejected)
+            _ = delegationRegistry.transition(taskID: task.id, to: .cancelled)
+        }
+
+        // --- Criterion 1: verdicts through the real recording path; the seal
+        // runs at that moment and the readiness read names what was bound.
+        await recordCriterionVerdict(
+            issue: issue, criterion: criteria[0], verdict: QueenCriterionVerdict.met
+        )
+        await recordCriterionVerdict(
+            issue: issue, criterion: criteria[1], verdict: QueenCriterionVerdict.met
+        )
+        guard let sealed = delegationRegistry.task(forIssue: issue) else {
+            await verdict(false, "the synthetic task vanished under the probe")
+            return
+        }
+        let sealedFingerprint: String?
+        switch verdictBindingReadiness(for: sealed) {
+        case .ready(let fingerprint):
+            sealedFingerprint = fingerprint
+        case .refuse(let bindingReason):
+            sealedFingerprint = nil
+            failed.append("criterion 1 — the binding refused: \(bindingReason)")
+        }
+        if let sealedFingerprint {
+            journal(
+                "queen.selftest.1131.sealed",
+                "verdicts recorded and a state fingerprint was bound at that moment",
+                ["fingerprint": String(sealedFingerprint.prefix(12))]
+            )
+        }
+
+        // --- Arm A: code unchanged since review → acceptance passes.
+        let unchanged = await QueenBranchCommitter.fingerprintBoundary(
+            ownedPaths: sealed.ownedPaths
+        )
+        let reasonA = acceptanceBlockReasonDistinguishingEmptyAnswers(
+            for: sealed,
+            verdictTreeState: sealedFingerprint,
+            currentTreeState: unchanged ?? ""
+        )
+        if reasonA == nil, sealedFingerprint != nil {
+            journal(
+                "queen.selftest.1131.arm_a_passes",
+                "code unchanged since review — the acceptance contract returned nil and acceptance proceeds",
+                ["sealed": sealedFingerprint.map { String($0.prefix(12)) } ?? "-", "current": unchanged.map { String($0.prefix(12)) } ?? "-"]
+            )
+        } else {
+            failed.append(
+                "arm A — acceptance did not pass on unchanged code: \(reasonA ?? "no binding")"
+            )
+        }
+
+        // --- Arm B: code changed inside the boundary → blocked as stale.
+        do {
+            try "probe v2 — the code moved\n".write(
+                toFile: scratch, atomically: true, encoding: .utf8
+            )
+        } catch {
+            failed.append("arm B — could not change the boundary: \(error.localizedDescription)")
+            await verdict(false, "arm B could not run")
+            return
+        }
+        let moved = await QueenBranchCommitter.fingerprintBoundary(
+            ownedPaths: sealed.ownedPaths
+        )
+        let reasonB = acceptanceBlockReasonDistinguishingEmptyAnswers(
+            for: sealed,
+            verdictTreeState: sealedFingerprint,
+            currentTreeState: moved ?? ""
+        )
+        if let reasonB, reasonB.contains("checked against different code") {
+            journal(
+                "queen.selftest.1131.arm_b_blocks",
+                "code changed since review — the acceptance contract blocked it as stale",
+                ["sealed": sealedFingerprint.map { String($0.prefix(12)) } ?? "-", "moved": moved.map { String($0.prefix(12)) } ?? "-"]
+            )
+        } else {
+            failed.append(
+                "arm B — a changed boundary did not block as stale: \(reasonB ?? "nil reason")"
+            )
+        }
+
+        await verdict(failed.isEmpty, failed.isEmpty ? "both arms held" : failed.joined(separator: " || "))
     }
 
     /// Stops a worker and says so.
