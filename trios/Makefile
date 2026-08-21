@@ -77,6 +77,7 @@ help:
 	@echo "  make signals    - REPORT: named signal counts since the last server.launch"
 	@echo "  make board      - REPORT: delegation registry bucketed by state"
 	@echo "  make binary-drift - REPORT: one-line binary-vs-commit verdict per variant"
+	@echo "  make spend      - REPORT: per-day tasks, tool calls, tokens and estimable dollars"
 	@echo "  make xctest     - count the XCTest compile errors against XCTEST_ERROR_CEILING"
 	@echo "  make sources-drift - fail if build.sh and the root Package.swift disagree"
 	@echo "                    on which Swift files make up the app (part of make check)"
@@ -1767,6 +1768,14 @@ board:
 .PHONY: binary-drift
 binary-drift:
 	@python3 "$(ROOT)/tools/forensics.py" drift
+
+# Aggregate spend from the delegation registry: per-day tasks, tool calls and
+# tokens, dollars only where a ModelPricing prefix matches recorded usage.
+# Today it truthfully reports zero tokens - the agent-server does not emit a
+# usage SSE event yet (see .trinity/specs/usage-sse-emission.md).
+.PHONY: spend
+spend:
+	@python3 "$(ROOT)/tools/forensics.py" spend --variant "$(LOG_VARIANT)"
 
 doctor:
 	@echo "release app : $$([ -f '$(RELEASE_BIN)' ] && stat -f '%Sm' '$(RELEASE_BIN)' || echo 'absent')"

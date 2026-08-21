@@ -197,6 +197,85 @@ def cmd_board(variant):
             (t.get("title", "") or "")[:56], age, paths))
 
 
+# Prices in micro-USD per million tokens, longest-prefix matched.
+# DUPLICATED from rings/SR-00/ModelPricing.swift, which is the SSOT - update
+# both together. Deliberately NOT ModelCostService.swift: the two tables
+# disagree (glm-5 $0.60/$2.20 here vs $1.00/$2.00 there) and ModelPricing is
+# the one DelegatedTask.estimatedCostUSD bills with. An unknown model prints
+# "no price", never a guessed number.
+MODEL_PRICES = {
+    "glm-5": (600000, 2200000),
+    "glm-4": (600000, 2200000),
+    "claude-opus": (15000000, 75000000),
+    "claude-sonnet": (3000000, 15000000),
+    "claude-haiku": (800000, 4000000),
+    "gpt-5": (1250000, 10000000),
+    "gpt-4": (2500000, 10000000),
+    "deepseek": (280000, 420000),
+}
+FREE_PROVIDERS = {"ollama", "lmstudio", "llamacpp"}
+
+
+def price_for(model, provider):
+    if provider in FREE_PROVIDERS:
+        return (0, 0)
+    if not model:
+        return None
+    best = None
+    for prefix, p in MODEL_PRICES.items():
+        if model.startswith(prefix) and (best is None or len(prefix) > best[0]):
+            best = (len(prefix), p)
+    return best[1] if best else None
+
+
+def cmd_spend(variant):
+    tasks = delegation(variant)
+    if not tasks:
+        print("no delegation registry for variant %s" % variant)
+        return
+    days = {}
+    total_in = total_out = total_calls = total_turns = 0
+    cost_micro = 0
+    costed = uncosted = zero_usage = 0
+    for t in tasks:
+        day = (t.get("updatedAt") or "")[:10] or "undated"
+        d = days.setdefault(day, {"tasks": 0, "calls": 0, "in": 0, "out": 0})
+        d["tasks"] += 1
+        d["calls"] += t.get("toolCalls") or 0
+        ti, to = t.get("inputTokens") or 0, t.get("outputTokens") or 0
+        d["in"] += ti
+        d["out"] += to
+        total_in += ti
+        total_out += to
+        total_calls += t.get("toolCalls") or 0
+        total_turns += t.get("completedTurns") or 0
+        if ti == 0 and to == 0:
+            zero_usage += 1
+            continue
+        p = price_for(t.get("model"), t.get("provider"))
+        if p is None:
+            uncosted += 1
+        else:
+            costed += 1
+            cost_micro += (ti * p[0] + to * p[1]) // 1_000_000
+    print("== spend, %s registry (pruned history: settled tasks past 50 are "
+          "gone, so this is not all-time) ==" % variant)
+    for day in sorted(days):
+        d = days[day]
+        print("%s  %3d task(s)  %5d tool call(s)  %8d in / %8d out tokens"
+              % (day, d["tasks"], d["calls"], d["in"], d["out"]))
+    print("totals: %d task(s), %d tool call(s), %d turn(s), %d in / %d out tokens"
+          % (len(tasks), total_calls, total_turns, total_in, total_out))
+    if costed:
+        print("estimated: $%.4f across %d priced task(s); %d task(s) had usage "
+              "but no known price" % (cost_micro / 1e6, costed, uncosted))
+    if zero_usage:
+        print("NOTE: %d of %d task(s) recorded ZERO tokens - the agent-server "
+              "does not emit a usage SSE event yet, so token spend is "
+              "structurally unmeasured (tool calls above are real)." % (
+                  zero_usage, len(tasks)))
+
+
 def cmd_forensics(variant):
     print("== binary vs commits ==")
     cmd_drift()
@@ -235,6 +314,8 @@ def main():
         cmd_signals(variant)
     elif cmd == "board":
         cmd_board(variant)
+    elif cmd == "spend":
+        cmd_spend(variant)
     else:
         cmd_forensics(variant)
 
