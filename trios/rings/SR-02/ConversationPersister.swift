@@ -29,6 +29,45 @@ actor ConversationPersister: ChatPersisterProtocol {
         // appends here would save a short new history over a long unreadable
         // one - turning "we cannot read this today" into "this is gone".
         if unreadableConversations.contains(conversationId) {
+            // The flag records that a load ONCE failed; measure the slot now.
+            // A deferred load during the launch gate marks the conversation
+            // unreadable, and on 2026-08-21 the flag then outlived the gate:
+            // the Queen's slot held fresh ciphertext her quarantine (July
+            // bytes) could not vouch for, so every save was refused - eight
+            // refusals in ninety seconds, each a dropped line, over a slot
+            // that had been readable again since second five.
+            //
+            // If the slot decrypts today, nothing is being destroyed - but
+            // the caller may have built its history on the [] that deferred
+            // load returned, so writing its short history over the readable
+            // slot would be the truncation this guard exists to prevent.
+            // Fold the disk history in front instead, dedupe by id, and
+            // write the union.
+            if let stored = defaults.data(forKey: key),
+               let plaintext = try? ConversationEncryption.shared.decrypt(stored),
+               let onDisk = try? JSONDecoder().decode([ChatMessage].self, from: plaintext) {
+                unreadableConversations.remove(conversationId)
+                let diskIds = Set(onDisk.map(\.id))
+                let merged = onDisk + messages.filter { !diskIds.contains($0.id) }
+                TriosLogBus.shared.info(
+                    .chat,
+                    "conversation.persist.rejoined",
+                    "Conversation \(conversationId) is readable again; \(onDisk.count) "
+                        + "stored message(s) folded in front of the "
+                        + "\(merged.count - onDisk.count) new one(s) this save carried",
+                    ["conversation": conversationId.uuidString]
+                )
+                do {
+                    let encoder = JSONEncoder()
+                    encoder.outputFormatting = .prettyPrinted
+                    let data = try encoder.encode(merged)
+                    let ciphertext = try ConversationEncryption.shared.encrypt(data)
+                    defaults.set(ciphertext, forKey: key)
+                } catch {
+                    NSLog("[ConversationPersister] Failed to persist rejoined conversation \(conversationId): \(error)")
+                }
+                return
+            }
             // The guard protects the BYTES, and it had been reading as though
             // it protected the SLOT. Once `load` has copied the ciphertext
             // aside under a key nothing else writes, the original survives a
@@ -44,29 +83,56 @@ actor ConversationPersister: ChatPersisterProtocol {
             // UI for the same reason, and both looked like she had nothing to
             // say.
             //
-            // So the refusal now asks the only question that matters: are the
+            // So the write asks the only question that matters: are the
             // bytes actually somewhere else? Byte-for-byte against what is in
             // the slot right now, because "a quarantine key exists" is a weaker
             // claim than "this is the thing it holds".
-            guard quarantineHolds(conversationId) else {
-                TriosLogBus.shared.warn(
+            if quarantineHolds(conversationId) {
+                unreadableConversations.remove(conversationId)
+                TriosLogBus.shared.info(
                     .chat,
-                    "conversation.persist.write_refused",
-                    "Refused to write over conversation \(conversationId): its stored bytes "
-                        + "cannot be decrypted and are not safely copied aside, so "
-                        + "overwriting them would destroy them",
+                    "conversation.persist.reclaimed",
+                    "Conversation \(conversationId) was unreadable; its bytes are preserved "
+                        + "under the quarantine key, so the conversation can be written again",
                     ["conversation": conversationId.uuidString]
                 )
-                return
+            } else if let stored = defaults.data(forKey: key), !stored.isEmpty {
+                // Unpreserved bytes used to make this path REFUSE, and a
+                // refusal during a key outage is a dropped line: eight in
+                // ninety seconds on 2026-08-21, and a measured outage earlier
+                // that day ran sixteen minutes. Preserve first, then write -
+                // the primary quarantine key is taken (that is how we got
+                // here), so the bytes go to the first free spare slot and
+                // recovery folds them back when they decrypt again.
+                if let spare = spareQuarantineKey(for: conversationId) {
+                    defaults.set(stored, forKey: spare)
+                    unreadableConversations.remove(conversationId)
+                    TriosLogBus.shared.warn(
+                        .chat,
+                        "conversation.persist.preserved_then_written",
+                        "Conversation \(conversationId): its \(stored.count) unreadable "
+                            + "bytes are copied to a spare quarantine slot, so this "
+                            + "save proceeds instead of dropping the line",
+                        ["conversation": conversationId.uuidString, "bytes": String(stored.count)]
+                    )
+                } else {
+                    // Nine slots of preserved history and a tenth arriving:
+                    // this is no longer an outage, it is a loop, and the only
+                    // safe answer left is the old refusal.
+                    TriosLogBus.shared.warn(
+                        .chat,
+                        "conversation.persist.write_refused",
+                        "Refused to write over conversation \(conversationId): its stored "
+                            + "bytes cannot be decrypted and every spare quarantine slot "
+                            + "already holds an earlier generation",
+                        ["conversation": conversationId.uuidString]
+                    )
+                    return
+                }
+            } else {
+                // An empty slot has nothing to destroy.
+                unreadableConversations.remove(conversationId)
             }
-            unreadableConversations.remove(conversationId)
-            TriosLogBus.shared.info(
-                .chat,
-                "conversation.persist.reclaimed",
-                "Conversation \(conversationId) was unreadable; its bytes are preserved "
-                    + "under the quarantine key, so the conversation can be written again",
-                ["conversation": conversationId.uuidString]
-            )
         }
         do {
             let encoder = JSONEncoder()
@@ -144,6 +210,11 @@ actor ConversationPersister: ChatPersisterProtocol {
         // The normal path when the key is available.
         do {
             let plaintext = try ConversationEncryption.shared.decrypt(stored)
+            // A successful read IS the measurement that the slot is readable:
+            // clear the unreadable flag here, where the condition is proven,
+            // not only in save. The flag latching past the launch gate is how
+            // eight Queen saves were refused over a readable slot.
+            unreadableConversations.remove(conversationId)
             return (try? JSONDecoder().decode([ChatMessage].self, from: plaintext)) ?? []
         } catch TriOSEncryptionError.keyUnavailableLocked {
             // The key was refused THIS MINUTE; nothing was measured about the
@@ -223,6 +294,26 @@ actor ConversationPersister: ChatPersisterProtocol {
         "trios.conversation.recovered." + id.uuidString
     }
 
+    /// The first free spare quarantine slot for a later generation of
+    /// unreadable bytes. The primary key is written once; a second outage can
+    /// strand a second generation, and refusing the write because the primary
+    /// slot is taken is how lines got dropped. Suffixes 2-9 bound the family:
+    /// ten stranded generations is a loop, not an outage.
+    private func spareQuarantineKey(for id: UUID) -> String? {
+        for n in 2...9 {
+            let candidate = unreadableKey(for: id) + ".\(n)"
+            if defaults.data(forKey: candidate) == nil {
+                return candidate
+            }
+        }
+        return nil
+    }
+
+    /// Every key a quarantined generation may sit under, oldest first.
+    private func quarantineCandidateKeys(for id: UUID) -> [String] {
+        [unreadableKey(for: id)] + (2...9).map { unreadableKey(for: id) + ".\($0)" }
+    }
+
     /// Folds a quarantined ciphertext back into its conversation when both
     /// sides are readable right now.
     ///
@@ -238,15 +329,24 @@ actor ConversationPersister: ChatPersisterProtocol {
     /// slot that is unreadable and different from the quarantine is left
     /// alone: nothing has preserved it, so nothing may write over it.
     private func recoverQuarantineIfPossible(_ id: UUID) {
-        let qKey = unreadableKey(for: id)
-        guard let preserved = defaults.data(forKey: qKey), !preserved.isEmpty else { return }
-        guard let plaintext = try? ConversationEncryption.shared.decrypt(preserved),
-              let recovered = try? JSONDecoder().decode([ChatMessage].self, from: plaintext),
-              !recovered.isEmpty
-        else { return }
+        // Every generation that decrypts today, oldest slot first. A save
+        // during a key outage may have stranded more than one blob (the
+        // primary plus spares), and folding back only the first would leave
+        // the rest warehoused forever.
+        var decryptable: [(key: String, bytes: Data, messages: [ChatMessage])] = []
+        for qKey in quarantineCandidateKeys(for: id) {
+            guard let preserved = defaults.data(forKey: qKey), !preserved.isEmpty,
+                  let plaintext = try? ConversationEncryption.shared.decrypt(preserved),
+                  let msgs = try? JSONDecoder().decode([ChatMessage].self, from: plaintext),
+                  !msgs.isEmpty
+            else { continue }
+            decryptable.append((qKey, preserved, msgs))
+        }
+        guard !decryptable.isEmpty else { return }
 
         var current: [ChatMessage] = []
-        if let stored = defaults.data(forKey: keyPrefix + id.uuidString), stored != preserved {
+        if let stored = defaults.data(forKey: keyPrefix + id.uuidString),
+           !decryptable.contains(where: { $0.bytes == stored }) {
             if stored.starts(with: Data(plaintextMarker.utf8)),
                let msgs = try? JSONDecoder().decode(
                    [ChatMessage].self,
@@ -261,24 +361,40 @@ actor ConversationPersister: ChatPersisterProtocol {
             }
         }
 
-        let recoveredIds = Set(recovered.map(\.id))
-        let merged = recovered + current.filter { !recoveredIds.contains($0.id) }
+        var merged: [ChatMessage] = []
+        var seen: Set<UUID> = []
+        for entry in decryptable {
+            for message in entry.messages where !seen.contains(message.id) {
+                seen.insert(message.id)
+                merged.append(message)
+            }
+        }
+        let recoveredCount = merged.count
+        for message in current where !seen.contains(message.id) {
+            seen.insert(message.id)
+            merged.append(message)
+        }
         guard let encoded = try? JSONEncoder().encode(merged),
               let ciphertext = try? ConversationEncryption.shared.encrypt(encoded)
         else { return }
         defaults.set(ciphertext, forKey: keyPrefix + id.uuidString)
-        defaults.set(preserved, forKey: recoveredKey(for: id))
-        defaults.removeObject(forKey: qKey)
+        for entry in decryptable {
+            let suffix = String(entry.key.dropFirst(unreadableKey(for: id).count))
+            defaults.set(entry.bytes, forKey: recoveredKey(for: id) + suffix)
+            defaults.removeObject(forKey: entry.key)
+        }
         unreadableConversations.remove(id)
         TriosLogBus.shared.info(
             .chat,
             "conversation.persist.recovered",
-            "Conversation \(id): \(recovered.count) quarantined message(s) decrypted "
-                + "again and were folded in front of \(current.count) current one(s); "
-                + "the original blob is kept under the recovered key",
+            "Conversation \(id): \(recoveredCount) message(s) from "
+                + "\(decryptable.count) quarantined generation(s) decrypted again and "
+                + "were folded in front of \(current.count) current one(s); the "
+                + "original blobs are kept under the recovered keys",
             [
                 "conversation": id.uuidString,
-                "recovered": String(recovered.count),
+                "recovered": String(recoveredCount),
+                "generations": String(decryptable.count),
                 "current": String(current.count),
             ]
         )

@@ -9028,9 +9028,13 @@ struct ChatSSEEndToEndTests {
             "the reclaimed conversation reads back what was written to it"
         )
 
-        // The permission is the quarantine copy, not the flag. A slot whose
-        // bytes nobody has preserved is still refused - otherwise this fix
-        // would have replaced a brick with a shredder.
+        // The permission used to be the quarantine copy, and a slot whose
+        // bytes nobody had preserved was refused - which during a key outage
+        // meant every line was dropped (eight in ninety seconds on
+        // 2026-08-21, over an outage measured at sixteen minutes earlier
+        // that day). The write now preserves FIRST: bytes the primary
+        // quarantine cannot vouch for move to a spare slot, and the save
+        // proceeds. Nothing is destroyed and nothing is dropped.
         let unpreserved = UUID()
         let unpreservedKey = "trios.conversation." + unpreserved.uuidString
         let otherCiphertext = Data((0..<512).map { UInt8(($0 &* 7) % 251) })
@@ -9041,12 +9045,19 @@ struct ChatSSEEndToEndTests {
         // what is in the slot is no longer what was copied aside.
         defaults.set(Data([0x00]), forKey: "trios.conversation.unreadable." + unpreserved.uuidString)
         await strictPersister.save(
-            messages: [ChatMessage(role: .user, content: "should not land")],
+            messages: [ChatMessage(role: .user, content: "lands after preserving")],
             conversationId: unpreserved
         )
         check(
-            defaults.data(forKey: unpreservedKey) == otherCiphertext,
-            "bytes that are NOT held byte-for-byte under the quarantine key are still refused"
+            defaults.data(
+                forKey: "trios.conversation.unreadable." + unpreserved.uuidString + ".2"
+            ) == otherCiphertext,
+            "bytes the primary quarantine cannot vouch for move to a spare slot before the write"
+        )
+        let landed = await strictPersister.load(conversationId: unpreserved)
+        check(
+            landed.map(\.content) == ["lands after preserving"],
+            "and the save itself lands instead of dropping the line"
         )
 
         // A conversation that is merely empty must still be writable, or the
@@ -9175,6 +9186,65 @@ struct ChatSSEEndToEndTests {
         check(
             reread2.map(\.content) == ["was resting in plaintext"],
             "the healed slot decrypts back to the same messages"
+        )
+
+        // The unreadable flag is a memory of a failed load, not a verdict on
+        // the slot. Measured 2026-08-21: a deferred load during the launch
+        // gate marked the Queen's chat unreadable, the flag outlived the
+        // gate, and eight saves were refused over a slot that had been
+        // readable again since second five. If the slot decrypts by save
+        // time, the save folds the disk history in front of the incoming
+        // messages instead of refusing.
+        let rejoin = UUID()
+        let rejoinSlot = "trios.conversation." + rejoin.uuidString
+        defaults.set(Data((0..<128).map { UInt8(($0 &* 3) % 251) }), forKey: rejoinSlot)
+        _ = await persister.load(conversationId: rejoin)
+        let diskMessages = [ChatMessage(role: .user, content: "history that came back")]
+        guard let diskPlain = try? JSONEncoder().encode(diskMessages),
+              let diskCipher = try? ConversationEncryption.shared.encrypt(diskPlain)
+        else {
+            fail("could not build the readable-again slot")
+            return
+        }
+        defaults.set(diskCipher, forKey: rejoinSlot)
+        await persister.save(
+            messages: [ChatMessage(role: .user, content: "written past the stale flag")],
+            conversationId: rejoin
+        )
+        let rejoined = await persister.load(conversationId: rejoin)
+        check(
+            rejoined.map(\.content)
+                == ["history that came back", "written past the stale flag"],
+            "a stale unreadable flag folds the readable slot in front instead of refusing the save"
+        )
+
+        // A save during an outage can strand more than one generation - the
+        // primary quarantine plus spares. Recovery folds every generation
+        // that decrypts, oldest slot first, and keeps each blob under its
+        // own recovered key.
+        let multi = UUID()
+        guard let genOnePlain = try? JSONEncoder().encode(
+                  [ChatMessage(role: .user, content: "generation one")]),
+              let genTwoPlain = try? JSONEncoder().encode(
+                  [ChatMessage(role: .user, content: "generation two")]),
+              let genOneCipher = try? ConversationEncryption.shared.encrypt(genOnePlain),
+              let genTwoCipher = try? ConversationEncryption.shared.encrypt(genTwoPlain)
+        else {
+            fail("could not build the two stranded generations")
+            return
+        }
+        defaults.set(genOneCipher, forKey: "trios.conversation.unreadable." + multi.uuidString)
+        defaults.set(genTwoCipher, forKey: "trios.conversation.unreadable." + multi.uuidString + ".2")
+        let folded = await persister.load(conversationId: multi)
+        check(
+            folded.map(\.content) == ["generation one", "generation two"],
+            "both stranded generations fold back, oldest slot first"
+        )
+        check(
+            defaults.data(
+                forKey: "trios.conversation.recovered." + multi.uuidString + ".2"
+            ) == genTwoCipher,
+            "each generation's original bytes survive under its own recovered key"
         )
     }
 
