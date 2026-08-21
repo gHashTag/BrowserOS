@@ -155,6 +155,16 @@ enum QueenReconciliation {
             if facts.siblingExpectsWork {
                 return .heldBySibling(commits: facts.branchCommits)
             }
+            // Parked commits on an ARCHIVED record are a decision, not a
+            // loss: the archive stamp lands after a cancel or dismissal
+            // whose reason records the disposition (measured 2026-08-21:
+            // #1131's preserved branches raised urgent unrecordedWork the
+            // pass after their record was cancelled with a written reason).
+            // An UNarchived record's parked commits still alarm - nobody
+            // has decided about those.
+            if facts.recordArchived {
+                return .archivedRecordDrift
+            }
             return .unrecordedWork(commits: facts.branchCommits)
         }
         if let files = committedFiles, files > 0,

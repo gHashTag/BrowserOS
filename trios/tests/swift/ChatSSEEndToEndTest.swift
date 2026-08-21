@@ -8678,6 +8678,22 @@ struct ChatSSEEndToEndTests {
                 == .branchMissing,
             "an UNarchived record's missing branch still alarms - the gate is the stamp, not time"
         )
+        // Parked commits on an archived record are a written-down decision
+        // (the cancel/dismiss reason), not a loss - this is #1131's preserved
+        // branches raising urgent noise the pass after their record was
+        // cancelled with a reason.
+        check(
+            R.check(state: .cancelled, committedFiles: nil, committedSHA: nil,
+                    facts: facts(commits: 3, unlanded: 1, archived: true))
+                == .archivedRecordDrift,
+            "parked commits on an archived record read as lifecycle, not unaccounted work"
+        )
+        check(
+            R.check(state: .cancelled, committedFiles: nil, committedSHA: nil,
+                    facts: facts(commits: 3, unlanded: 1, archived: false))
+                == .unrecordedWork(commits: 3),
+            "and on an UNarchived one they still alarm - nobody decided about those"
+        )
     }
 
     // MARK: - Scenario: a count with no commit behind it is not evidence
