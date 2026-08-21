@@ -245,6 +245,16 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// not "was it stuck" but "how many times, and did it ever get anywhere".
     var resumeAttempts: Int?
 
+    /// When the archive sweep first acknowledged this task as settled.
+    ///
+    /// Optional so stores written before the field existed still decode - and
+    /// nil is the condition the sweep gates on. Without it, archiving was a
+    /// log line with no state behind it: every 30-minute wake replayed the
+    /// entire settled set, and two issues with 15 retry records between them
+    /// were "archived" ~1,830 times across 61 measured passes while nothing
+    /// ever moved.
+    var archivedAt: Date?
+
     /// When the runner last saw a byte of this worker's stream.
     ///
     /// Written by the layer that knows. Liveness used to be inferred by asking

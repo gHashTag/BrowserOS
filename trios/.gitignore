@@ -49,6 +49,14 @@ trios_dev_app
 trios-dev.app/
 Frameworks-dev/
 
+# The test variant's trio, same story: the cassette harness rebuilds these
+# on every `make cassettes` (build.sh:86-87,646), and they were never added
+# here when the dev trio was - which is why 96 MB of build products polluted
+# git status for weeks and every whole-tree snapshot paid for them.
+trios_test_app
+trios-test.app/
+Frameworks-test/
+
 # Archived prototypes (kept locally, not part of build)
 .archive/
 

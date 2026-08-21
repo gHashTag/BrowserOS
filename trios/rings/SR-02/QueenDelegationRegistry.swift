@@ -99,9 +99,19 @@ final class QueenDelegationRegistry: ObservableObject {
     /// through `archived` for as long as `pruneArchive` has not trimmed them.
     @discardableResult
     func archiveTerminalTasks() -> [DelegatedTask] {
-        let toArchive = tasks.filter { $0.isSettled }
+        // Only tasks the sweep has not acknowledged yet. Archival used to be
+        // a log line with no state behind it, so every 30-minute wake
+        // replayed the whole settled set - measured 2026-08-21: 61 passes,
+        // ~30 identical lines each, with one issue's 8 retry records reading
+        // as one issue archived 8 times, forever. The stamp is the state;
+        // the log line is now the event it always claimed to be.
+        let toArchive = tasks.filter { $0.isSettled && $0.archivedAt == nil }
         guard !toArchive.isEmpty else { return [] }
+        let now = Date()
         for task in toArchive {
+            if let index = tasks.firstIndex(where: { $0.id == task.id }) {
+                tasks[index].archivedAt = now
+            }
             TriosLogBus.shared.info(
                 .queen,
                 "queen.archive",
@@ -112,6 +122,7 @@ final class QueenDelegationRegistry: ObservableObject {
                 ]
             )
         }
+        persist()
         return toArchive.sorted { $0.updatedAt > $1.updatedAt }
     }
 
