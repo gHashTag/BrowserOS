@@ -647,6 +647,8 @@ enum QueenBranchCommitter {
             }
             var branchExists = false
             var branchCommits = 0
+            var branchOnRemote = false
+            var allLandedByPatch = false
             if let branch, !branch.isEmpty {
                 branchExists = git(["rev-parse", "--verify", branch]).ok
                 if branchExists {
@@ -654,6 +656,29 @@ enum QueenBranchCommitter {
                     branchCommits = ok
                         ? Int(out.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
                         : 0
+                    // `git cherry base branch` marks each branch commit `-`
+                    // when an equivalent patch is already in base's history,
+                    // `+` when it is not. All `-` means the work arrived under
+                    // other SHAs - the blob comparison below cannot see that,
+                    // and without this line #1128-r5 was reported as
+                    // unaccounted work while being HEAD's own 845d27b23
+                    // patch-for-patch.
+                    if branchCommits > 0 {
+                        let (cherryOK, cherry) = git(["cherry", baseRef, branch])
+                        if cherryOK {
+                            let marks = cherry.split(separator: "\n")
+                                .map { $0.trimmingCharacters(in: .whitespaces) }
+                                .filter { !$0.isEmpty }
+                            allLandedByPatch = !marks.isEmpty
+                                && marks.allSatisfy { $0.hasPrefix("-") }
+                        }
+                    }
+                } else {
+                    // Absent locally is not gone: a claim over a branch that
+                    // origin still holds is stale, not baseless.
+                    branchOnRemote = git([
+                        "rev-parse", "--verify", "refs/remotes/origin/\(branch)",
+                    ]).ok
                 }
             }
             var commitExists = false
@@ -687,7 +712,9 @@ enum QueenBranchCommitter {
                 branchExists: branchExists,
                 branchCommits: branchCommits,
                 commitExists: commitExists,
-                unlandedFiles: unlanded
+                unlandedFiles: unlanded,
+                allCommitsLandedByPatch: allLandedByPatch,
+                branchOnRemote: branchOnRemote
             )
         }.value
     }

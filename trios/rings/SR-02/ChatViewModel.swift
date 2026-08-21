@@ -8657,11 +8657,23 @@ final class ChatViewModel: ObservableObject {
         var urgentLines: [String] = []
 
         for task in tasks {
-            let facts = await QueenBranchCommitter.repositoryFacts(
+            var facts = await QueenBranchCommitter.repositoryFacts(
                 branch: task.virtualBranch,
                 commitSHA: task.committedSHA,
                 baseRef: base
             )
+            // Git cannot know the registry. Whether a SIBLING record on the
+            // same issue or branch expects work is what separates "nobody is
+            // looking at it" from "it is in the review queue under another
+            // record" - the per-record view without this printed the former
+            // about the latter, twice, on 2026-08-21.
+            facts.siblingExpectsWork = tasks.contains { other in
+                other.id != task.id
+                    && QueenReconciliation.statesThatExpectWork.contains(other.state)
+                    && (other.issue.slug == task.issue.slug
+                        || (other.virtualBranch != nil
+                            && other.virtualBranch == task.virtualBranch))
+            }
             let finding = QueenReconciliation.check(
                 state: task.state,
                 committedFiles: task.committedFiles,

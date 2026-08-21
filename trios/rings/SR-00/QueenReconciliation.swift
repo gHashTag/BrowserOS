@@ -22,8 +22,26 @@ enum QueenReconciliation {
         /// the worker's own commits. The commonest case, and the one that loses
         /// real work: #1282 was `failed` beside a 288-line commit.
         case unrecordedWork(commits: Int)
+        /// The branch's commits are all in HEAD as identical patches under
+        /// different SHAs. Measured 2026-08-21 on #1128-r5: its single commit
+        /// was HEAD's 845d27b23 patch-for-patch, and the blob comparison still
+        /// read "unlanded" because the file kept evolving afterwards - so the
+        /// pass said "nobody is looking at it" about work that was home.
+        case landedElsewhere(commits: Int)
+        /// The branch carries commits, and a SIBLING record on the same issue
+        /// or branch sits in a state that expects work. Measured 2026-08-21 on
+        /// #1132-r2: the same branch name was in the review queue under
+        /// another record, and the per-record view printed "nobody is looking
+        /// at it" about a branch that was literally awaiting review.
+        case heldBySibling(commits: Int)
         /// Files are claimed and the branch that would hold them is gone.
         case branchMissing
+        /// Files are claimed, the local branch is gone, and origin still has
+        /// it with the work. Measured 2026-08-21 on #1280: "the branch that
+        /// would hold them is gone" was written about a branch alive on the
+        /// remote. Nothing is lost; the record is stale, not wrong about the
+        /// work.
+        case branchOnlyOnRemote
         /// A commit is named and the object is not in the repository.
         case commitMissing
         /// Files are claimed with no commit named. Historical rather than
@@ -33,9 +51,16 @@ enum QueenReconciliation {
 
         /// Whether this needs a person now, as opposed to being an artefact of
         /// records written before the field existed.
+        ///
+        /// The three stale-record cases are deliberately not urgent: the work
+        /// they describe is home, in the review queue, or on the remote, so
+        /// raising them beside genuine losses is the noise that buried the
+        /// real four among the measured eight.
         var isUrgent: Bool {
             switch self {
-            case .agrees, .countWithoutCommit: return false
+            case .agrees, .countWithoutCommit,
+                 .landedElsewhere, .heldBySibling, .branchOnlyOnRemote:
+                return false
             case .unrecordedWork, .branchMissing, .commitMissing: return true
             }
         }
@@ -65,6 +90,18 @@ enum QueenReconciliation {
         /// written to avoid, so the count of what is actually missing decides,
         /// not the count of commits.
         var unlandedFiles: Int = 0
+        /// Every commit unique to the branch exists in the base's history as
+        /// an equivalent patch under a different SHA (`git cherry` reports
+        /// all of them with `-`). Distinguishes "stranded" from "arrived by
+        /// another road", which the blob comparison alone cannot.
+        var allCommitsLandedByPatch: Bool = false
+        /// The branch is absent locally but present under `origin/`.
+        var branchOnRemote: Bool = false
+        /// Another record on the same issue or branch is in a state that
+        /// expects work. Set by the CALLER from the registry - git cannot
+        /// know it, and the per-record view that lacked it printed "nobody is
+        /// looking at it" about a branch sitting in the review queue.
+        var siblingExpectsWork: Bool = false
     }
 
     /// States in which a commit on the branch is unremarkable.
@@ -88,13 +125,22 @@ enum QueenReconciliation {
             return .commitMissing
         }
         if let files = committedFiles, files > 0, !facts.branchExists {
-            return .branchMissing
+            return facts.branchOnRemote ? .branchOnlyOnRemote : .branchMissing
         }
-        // Work on the branch of a task nobody thinks did any.
+        // Work on the branch of a task nobody thinks did any. Before calling
+        // it unaccounted, ask the two questions that made half the measured
+        // eight false: did the patches land under other SHAs, and does a
+        // sibling record already hold this work in an expect-work state?
         if facts.branchExists,
            facts.branchCommits > 0,
            facts.unlandedFiles > 0,
            !statesThatExpectWork.contains(state) {
+            if facts.allCommitsLandedByPatch {
+                return .landedElsewhere(commits: facts.branchCommits)
+            }
+            if facts.siblingExpectsWork {
+                return .heldBySibling(commits: facts.branchCommits)
+            }
             return .unrecordedWork(commits: facts.branchCommits)
         }
         if let files = committedFiles, files > 0,
@@ -140,6 +186,12 @@ enum QueenReconciliation {
         switch finding {
         case .agrees, .countWithoutCommit:
             return .none
+        case .landedElsewhere, .heldBySibling, .branchOnlyOnRemote:
+            // Stale records over work that is safe. Sending them to review
+            // would double-claim a boundary a sibling may hold, and clearing
+            // a count that HAS something behind it (on the remote, or in
+            // HEAD) would erase a true statement. Reporting is the repair.
+            return .none
         case .unrecordedWork(let commits):
             return .sendToReview(
                 reason: "\(commits) commit(s) on the branch that HEAD does not hold; "
@@ -179,9 +231,19 @@ enum QueenReconciliation {
         case .unrecordedWork(let commits):
             return "\(issue): \(commits) commit(s) on its branch that the record does "
                 + "not account for - the work exists and nobody is looking at it"
+        case .landedElsewhere(let commits):
+            return "\(issue): its \(commits) commit(s) are in HEAD as identical patches "
+                + "under different SHAs - the work is home and only the record is stale"
+        case .heldBySibling(let commits):
+            return "\(issue): \(commits) commit(s) on its branch, and a sibling record "
+                + "on the same issue or branch expects work - it IS being looked at; "
+                + "this record is the stale one"
         case .branchMissing:
             return "\(issue): files are claimed and the branch that would hold them "
                 + "is gone"
+        case .branchOnlyOnRemote:
+            return "\(issue): the branch is absent locally but alive on origin with "
+                + "the claimed work - nothing is lost; fetch it or release the claim"
         case .commitMissing:
             return "\(issue): the commit named in the record is not in the repository"
         case .countWithoutCommit:
@@ -197,8 +259,14 @@ enum QueenReconciliation {
         let urgent = findings.filter(\.isUrgent).count
         let historical = findings.filter { $0 == .countWithoutCommit }.count
         let agreeing = findings.filter { $0 == .agrees }.count
-        return "\(findings.count) task(s) checked: \(agreeing) agree, \(urgent) disagree "
+        let stale = findings.count - urgent - historical - agreeing
+        var line = "\(findings.count) task(s) checked: \(agreeing) agree, \(urgent) disagree "
             + "in a way that needs looking at, \(historical) carry a count written "
             + "before commits were recorded"
+        if stale > 0 {
+            line += ", \(stale) are stale records over work that is home, "
+                + "in review, or on the remote"
+        }
+        return line
     }
 }

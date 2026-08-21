@@ -361,6 +361,7 @@ struct ChatSSEEndToEndTests {
         ("runABeeIsNotSentAtTheSameWallForever", { await runABeeIsNotSentAtTheSameWallForever() }),
         ("runAJudgedTaskDoesNotWaitForAHuman", { await runAJudgedTaskDoesNotWaitForAHuman() }),
         ("runUnreadableHistoryIsNotOverwritten", { await runUnreadableHistoryIsNotOverwritten() }),
+        ("runQuarantineRecoveryFoldsHistoryBack", { await runQuarantineRecoveryFoldsHistoryBack() }),
         ("runABeeStandsInTheProjectNotTheRepository", { await runABeeStandsInTheProjectNotTheRepository() }),
         ("runABoundaryPathIsAPathNotProse", { await runABoundaryPathIsAPathNotProse() }),
         ("runAnEnglishIssueIsStillDelegatable", { await runAnEnglishIssueIsStillDelegatable() }),
@@ -8494,11 +8495,13 @@ struct ChatSSEEndToEndTests {
 
         typealias R = QueenReconciliation
         func facts(branch: Bool = true, commits: Int = 0, commit: Bool = true,
-                   unlanded: Int = 1) -> R.RepositoryFacts
+                   unlanded: Int = 1, landedByPatch: Bool = false,
+                   remote: Bool = false, sibling: Bool = false) -> R.RepositoryFacts
         {
             R.RepositoryFacts(
                 branchExists: branch, branchCommits: commits, commitExists: commit,
-                unlandedFiles: unlanded
+                unlandedFiles: unlanded, allCommitsLandedByPatch: landedByPatch,
+                branchOnRemote: remote, siblingExpectsWork: sibling
             )
         }
 
@@ -8573,6 +8576,61 @@ struct ChatSSEEndToEndTests {
             sum.contains("4 task(s) checked") && sum.contains("2 agree")
                 && sum.contains("1 disagree"),
             "and the summary counts rather than judging: \(sum)"
+        )
+
+        // The three refinements of 2026-08-21, each one a measured false
+        // claim from the startup pass of eight: work that landed under other
+        // SHAs, work a sibling record holds in review, and a branch alive on
+        // origin that the message called gone.
+        check(
+            R.check(state: .failed, committedFiles: nil, committedSHA: nil,
+                    facts: facts(commits: 1, unlanded: 1, landedByPatch: true))
+                == .landedElsewhere(commits: 1),
+            "a commit that is in HEAD patch-for-patch is home, not unaccounted - this is #1128-r5"
+        )
+        check(
+            R.check(state: .failed, committedFiles: nil, committedSHA: nil,
+                    facts: facts(commits: 2, unlanded: 1, sibling: true))
+                == .heldBySibling(commits: 2),
+            "work a sibling record holds in review IS being looked at - this is #1132-r2"
+        )
+        check(
+            R.check(state: .accepted, committedFiles: 1, committedSHA: nil,
+                    facts: facts(branch: false, remote: true)) == .branchOnlyOnRemote,
+            "a branch alive on origin is stale locally, not gone - this is #1280"
+        )
+        check(
+            !R.Finding.landedElsewhere(commits: 1).isUrgent
+                && !R.Finding.heldBySibling(commits: 1).isUrgent
+                && !R.Finding.branchOnlyOnRemote.isUrgent,
+            "stale records over safe work must not read as emergencies"
+        )
+        check(
+            R.correction(for: .landedElsewhere(commits: 1)) == .none
+                && R.correction(for: .heldBySibling(commits: 1)) == .none
+                && R.correction(for: .branchOnlyOnRemote) == .none,
+            "and none of them proposes a repair that would double-claim or erase a true count"
+        )
+        check(
+            R.check(state: .failed, committedFiles: nil, committedSHA: nil,
+                    facts: facts(commits: 1, unlanded: 1, landedByPatch: true,
+                                 sibling: true))
+                == .landedElsewhere(commits: 1),
+            "landed-by-patch outranks the sibling: being home is the stronger fact"
+        )
+        let staleSum = R.summary(findings: [.agrees, .landedElsewhere(commits: 1),
+                                            .heldBySibling(commits: 2),
+                                            .branchOnlyOnRemote])
+        check(
+            staleSum.contains("3 are stale records"),
+            "the summary buckets stale records instead of hiding them: \(staleSum)"
+        )
+        let landedLine = R.describe(issue: "gHashTag/trios#1128",
+                                    finding: .landedElsewhere(commits: 1))
+        check(
+            landedLine.contains("identical patches")
+                && !landedLine.contains("nobody is looking at it"),
+            "the stale-record line no longer claims nobody is looking: \(landedLine)"
         )
     }
 
@@ -9004,6 +9062,119 @@ struct ChatSSEEndToEndTests {
         check(
             written != nil && !(written?.isEmpty ?? true),
             "a genuinely new conversation is still saved normally"
+        )
+    }
+
+    // MARK: - Scenario: a quarantined transcript folds back when the key answers
+
+    /// The quarantine copy preserved bytes and nothing ever read them back: a
+    /// recovered key had "something to decrypt" and no path that decrypts it.
+    /// Measured 2026-08-21 in the release log: the Queen's chat was reclaimed
+    /// and restarted from [] at 08:50:05Z while her prior transcript sat
+    /// byte-preserved under the quarantine key - a transient key refusal had
+    /// quarantined healthy ciphertext, and the app treated "unreadable that
+    /// minute" as "gone".
+    static func runQuarantineRecoveryFoldsHistoryBack() async {
+        print("\n# Scenario: a quarantined transcript folds back when the key answers")
+
+        let suite = "trios.test.recovery.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else {
+            fail("could not open a scratch defaults suite")
+            return
+        }
+        defer { UserDefaults.standard.removePersistentDomain(forName: suite) }
+
+        let id = UUID()
+        let slotKey = "trios.conversation." + id.uuidString
+        let quarantineKey = "trios.conversation.unreadable." + id.uuidString
+        let recoveredKey = "trios.conversation.recovered." + id.uuidString
+
+        // A transcript that was quarantined while its ciphertext was healthy:
+        // in this harness the key always answers, so encrypting here is the
+        // same state the release store reached once its key read recovered.
+        let shared = ChatMessage(role: .assistant, content: "kept in both eras")
+        let oldMessages = [
+            ChatMessage(role: .user, content: "old first"),
+            shared,
+        ]
+        guard let oldPlain = try? JSONEncoder().encode(oldMessages),
+              let oldCipher = try? ConversationEncryption.shared.encrypt(oldPlain)
+        else {
+            fail("could not build the quarantined ciphertext")
+            return
+        }
+        defaults.set(oldCipher, forKey: quarantineKey)
+
+        // The history rebuilt from [] after the refusal - it repeats one
+        // message the old transcript already holds, which must not double.
+        let persister = ConversationPersister(suiteName: suite)
+        await persister.save(
+            messages: [shared, ChatMessage(role: .user, content: "new after reset")],
+            conversationId: id
+        )
+
+        let merged = await persister.load(conversationId: id)
+        check(
+            merged.map(\.content) == ["old first", "kept in both eras", "new after reset"],
+            "the quarantined transcript folds in front of the rebuilt one, without doubling shared messages"
+        )
+        check(
+            defaults.data(forKey: quarantineKey) == nil,
+            "the quarantine key is retired so recovery cannot prepend twice"
+        )
+        check(
+            defaults.data(forKey: recoveredKey) == oldCipher,
+            "the original blob survives under the recovered key - recovery is never the second way to lose it"
+        )
+
+        let again = await persister.load(conversationId: id)
+        check(
+            again.map(\.content) == ["old first", "kept in both eras", "new after reset"],
+            "a second load reads the merged transcript, not a second merge"
+        )
+
+        // A current slot that is unreadable AND different from the quarantine
+        // has been preserved by nobody; recovery must not write over it.
+        let blocked = UUID()
+        let blockedSlot = "trios.conversation." + blocked.uuidString
+        guard let blockedCipher = try? ConversationEncryption.shared.encrypt(oldPlain) else {
+            fail("could not build the second quarantined ciphertext")
+            return
+        }
+        defaults.set(blockedCipher, forKey: "trios.conversation.unreadable." + blocked.uuidString)
+        let strangerBytes = Data((0..<64).map { UInt8(($0 &* 13) % 251) })
+        defaults.set(strangerBytes, forKey: blockedSlot)
+        _ = await persister.load(conversationId: blocked)
+        check(
+            defaults.data(forKey: blockedSlot) == strangerBytes,
+            "recovery leaves an unreadable, unpreserved slot exactly as it found it"
+        )
+
+        // A plaintext-fallback slot heals on read: the marker is the record
+        // that encryption was refused once, not a licence to rest unencrypted
+        // forever - twelve conversations were doing exactly that.
+        let resting = UUID()
+        let restingSlot = "trios.conversation." + resting.uuidString
+        let restingMessages = [ChatMessage(role: .user, content: "was resting in plaintext")]
+        guard let restingPlain = try? JSONEncoder().encode(restingMessages) else {
+            fail("could not encode the resting plaintext")
+            return
+        }
+        defaults.set(Data("TRIOS-PLAIN:".utf8) + restingPlain, forKey: restingSlot)
+        let healed = await persister.load(conversationId: resting)
+        check(
+            healed.map(\.content) == ["was resting in plaintext"],
+            "a marked plaintext slot still reads its messages"
+        )
+        let healedBytes = defaults.data(forKey: restingSlot)
+        check(
+            healedBytes != nil && !(healedBytes?.starts(with: Data("TRIOS-PLAIN:".utf8)) ?? true),
+            "and the slot is ciphertext again after the read"
+        )
+        let reread2 = await persister.load(conversationId: resting)
+        check(
+            reread2.map(\.content) == ["was resting in plaintext"],
+            "the healed slot decrypts back to the same messages"
         )
     }
 
