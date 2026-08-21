@@ -259,8 +259,35 @@ def cmd_spend(variant):
         else:
             costed += 1
             cost_micro += (ti * p[0] + to * p[1]) // 1_000_000
+    # Mirrors SwarmBudget.dailyLimitUSD default (rings/SR-00/ModelPricing.swift,
+    # micro-dollars, $10). The gate sums estimatedCostUSD over tasks whose
+    # updatedAt falls in the same LOCAL calendar day and refuses NEW dispatches
+    # past the cap - running bees are not killed.
+    DAILY_CAP_MICRO = 10_000_000
+    import datetime
+    today_local = datetime.date.today().isoformat()
+    today_micro = 0
+    for t in tasks:
+        upd = t.get("updatedAt") or ""
+        try:
+            dt = datetime.datetime.strptime(upd[:19], "%Y-%m-%dT%H:%M:%S")
+            local_day = (dt.replace(tzinfo=datetime.timezone.utc)
+                         .astimezone().date().isoformat())
+        except Exception:
+            continue
+        if local_day != today_local:
+            continue
+        p = price_for(t.get("model"), t.get("provider"))
+        if p is None:
+            continue
+        ti, to = t.get("inputTokens") or 0, t.get("outputTokens") or 0
+        today_micro += (ti * p[0] + to * p[1]) // 1_000_000
     print("== spend, %s registry (pruned history: settled tasks past 50 are "
           "gone, so this is not all-time) ==" % variant)
+    print("budget today (local day %s): $%.4f of $%.2f daily cap%s"
+          % (today_local, today_micro / 1e6, DAILY_CAP_MICRO / 1e6,
+             " - EXHAUSTED, new dispatches are refused"
+             if today_micro >= DAILY_CAP_MICRO else ""))
     for day in sorted(days):
         d = days[day]
         print("%s  %3d task(s)  %5d tool call(s)  %8d in / %8d out tokens"
