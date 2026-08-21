@@ -7375,6 +7375,24 @@ final class ChatViewModel: ObservableObject {
                 )
                 return
             }
+            // A restarted worker spends money exactly like a new one, and the
+            // budget gate lived only on NEW dispatches - measured 2026-08-21,
+            // the first day tokens were real: two automatic returns of #1131
+            // burned $7.60 of the $10 day through this path while
+            // delegateIssueToWorker would already have refused fresh work.
+            // The operator's own /review reject is deliberate and stays
+            // ungated; the sweep defers and the task keeps its review place.
+            let spentNow = registry.spentToday()
+            if case .exhausted = SwarmBudget.default.verdict(spentToday: spentNow) {
+                TriosLogBus.shared.info(
+                    .queen, "queen.review.send_back_deferred",
+                    "\(task.issue.slug) is ready to go back but the day's swarm "
+                        + "budget is spent (\(ModelPricing.format(spentNow))); it "
+                        + "waits in the review queue",
+                    ["issue": task.issue.slug, "spent": String(spentNow)]
+                )
+                return
+            }
             let note = QueenReviewDecision.sendBackNote(
                 unmet: unmet, attempt: (task.sendBacks ?? 0) + 1
             )
