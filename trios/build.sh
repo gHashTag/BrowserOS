@@ -341,6 +341,51 @@ else
     fi
 fi
 
+# --- QueenUILib toolchain-compatibility probe -------------------------------
+#
+# The sibling checkout is shared: another agent building trinity with full
+# Xcode leaves a QueenUILib.swiftmodule stamped with that SDK, and SwiftPM's
+# incremental build then treats it as up to date forever - `swift build`
+# above completes in a second without recompiling, and every trios compile
+# fails with "cannot load module 'QueenUILib' built with SDK 'macosx26.5'
+# when using SDK 'macosx15.2'". Measured twice on 2026-08-21/22, repaired by
+# hand identically both times; this probe is that repair, automated, and it
+# engages only on the exact error it exists for.
+if [ -z "$TRIOS_PRINT_FLAGS" ]; then
+    probe_src=$(mktemp /tmp/trios_queenuilib_probe.XXXXXX.swift)
+    probe_err=$(mktemp /tmp/trios_queenuilib_probe.XXXXXX.err)
+    echo "import QueenUILib" > "$probe_src"
+    if ! xcrun swiftc -typecheck "$probe_src" -I "$QUEEN_MODULE_DIR" 2>"$probe_err"; then
+        if grep -q "cannot load module 'QueenUILib' built with SDK" "$probe_err"; then
+            if [ -n "$TRIOS_VENDORED" ]; then
+                echo "[FAIL] The vendored QueenUILib interface was built with a"
+                echo "       different SDK than the current toolchain and cannot"
+                echo "       be rebuilt here. Run one normal (non-vendored) build"
+                echo "       to refresh the vendored halves."
+                rm -f "$probe_src" "$probe_err"
+                exit 1
+            fi
+            echo "[REPAIR] QueenUILib.swiftmodule was built with another SDK;"
+            echo "         rebuilding it with the current toolchain."
+            rm -rf "$QUEEN_BIN_DIR/Modules/QueenUILib.swiftmodule" \
+                   "$QUEEN_BIN_DIR/Modules/QueenUILib.swiftdoc" \
+                   "$QUEEN_BIN_DIR/Modules/QueenUILib.abi.json" \
+                   "$QUEEN_BIN_DIR/QueenUILib.build"
+            swift build --package-path "$QUEEN_PACKAGE_ROOT" --target QueenUILib
+            if ! xcrun swiftc -typecheck "$probe_src" -I "$QUEEN_MODULE_DIR" 2>"$probe_err"; then
+                echo "[FAIL] QueenUILib still does not load after a rebuild with"
+                echo "       the current toolchain:"
+                sed 's/^/       | /' "$probe_err" | head -4
+                rm -f "$probe_src" "$probe_err"
+                exit 1
+            fi
+        fi
+        # Any other probe failure is left for the real compile to report with
+        # full context - the probe only owns the SDK-mismatch signature.
+    fi
+    rm -f "$probe_src" "$probe_err"
+fi
+
 # SQLCipher is required for encrypted agent-memory I/O. Use pkg-config when
 # available; fall back to the standard Homebrew Cellar layout on Apple Silicon.
 SQLCIPHER_INCLUDE="${SQLCIPHER_INCLUDE:-$(pkg-config --variable=includedir sqlcipher 2>/dev/null)}"
