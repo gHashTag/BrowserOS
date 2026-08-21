@@ -72,6 +72,11 @@ help:
 	@echo "  make stop       - quit both apps"
 	@echo "  make promote    - check the gates, then build release"
 	@echo "  make doctor     - REPORT: the state of both variants (never fails)"
+	@echo "  make dashboard  - regenerate .trinity/dashboard/index.html from measured state"
+	@echo "  make forensics  - REPORT: binary drift + event histogram + board (VARIANT=release|dev|test)"
+	@echo "  make signals    - REPORT: named signal counts since the last server.launch"
+	@echo "  make board      - REPORT: delegation registry bucketed by state"
+	@echo "  make binary-drift - REPORT: one-line binary-vs-commit verdict per variant"
 	@echo "  make xctest     - count the XCTest compile errors against XCTEST_ERROR_CEILING"
 	@echo "  make sources-drift - fail if build.sh and the root Package.swift disagree"
 	@echo "                    on which Swift files make up the app (part of make check)"
@@ -752,6 +757,7 @@ MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP DEV_BIN RELEASE_BIN DEV_PROC \
 	WARN_VARIANT WARN_BUILD_DIR WARN_OFM WARN_LIST WARN_SEEN WARN_LOG WARN_LOG_DIR \
 	WARN_LOG_LAST WARN_BUILD_ID WARN_FULL_ROOT WARN_FULL_CACHE DEV_BUILD_LOCK \
 	CASSETTE_BRANCHES SWEEP_CANARY LOG KEYCHAIN_ALLOW_PATTERNS MAKE VARIANT \
+	LOG_VARIANT \
 	MSG ISSUE WORKER TASK PATHS CRITERIA SECOND REVIEW AUTONOMY CASSETTE \
 	SECOND_TURN QUEEN_COMMAND MUTANTS MUTANTS_LOGIC MUTANTS_GUARD MAKE_DOLLAR_VARS HARNESS_LOCK GUARDS \
 	TYPE_STATE VARIANT_FENCE_SRC VARIANT_FENCE_DIR \
@@ -1549,24 +1555,35 @@ cassettes: test-app
 		     --env TRIOS_REPLAY_CASSETTE="$(CASSETTE_DIR)/$$cassette" \
 		     --env TRIOS_E2E_SECOND_TURN="$$second" \
 		     --env TRIOS_E2E_DISABLE_KEYCHAIN="1" "$(TEST_APP)"; \
-		: "The wait is not a fixed 40-second cliff. The budget is 120 s \
-		   (3x the original) so a busy machine is not penalised, but the \
-		   loop breaks the moment trios-test exits — a crashed app should \
-		   not burn the full budget. Two failure modes that used to look \
-		   identical are now told apart: 'never started' (no trios-test \
-		   process was ever seen) vs 'ran but produced no marker'."; \
-		found=0; started=0; \
-		for i in $$(seq 1 60); do \
+		: "The wait measures PROGRESS, not wall time. A fixed cliff (40 s, \
+		   then 120 s) kept calling a loaded machine broken: with make check \
+		   and half a dozen agents sharing the CPU the replay finishes late, \
+		   the old loop timed out at 120 s, printed 'marker never appeared' \
+		   about a process that was alive and working, and then killed it. \
+		   Now log growth resets a 120 s idle clock; the suite fails only \
+		   when the log has grown NOTHING for 120 s, when trios-test exits \
+		   without the marker, or at a 600 s total backstop. Each failure \
+		   message states which of those was measured."; \
+		found=0; started=0; idle=0; total=0; lastn=$$before; alive=0; \
+		while :; do \
 			tail -n "+$$((before + 1))" "$(TEST_LOG)" 2>/dev/null | grep -q "$$marker" && { found=1; break; }; \
-			if pgrep -f "trios-test.app/Contents/MacOS" >/dev/null 2>&1; then started=1; \
-			elif [ $$started -eq 1 ]; then break; fi; \
-			sleep 2; \
+			curn=$$(wc -l < "$(TEST_LOG)" 2>/dev/null || echo 0); \
+			if [ "$$curn" -gt "$$lastn" ]; then lastn=$$curn; idle=0; else idle=$$((idle + 2)); fi; \
+			if pgrep -f "trios-test.app/Contents/MacOS" >/dev/null 2>&1; then started=1; alive=1; \
+			else alive=0; [ $$started -eq 1 ] && break; fi; \
+			[ $$idle -ge 120 ] && break; \
+			[ $$total -ge 600 ] && break; \
+			sleep 2; total=$$((total + 2)); \
 		done; \
 		if [ $$found -eq 1 ]; then echo "  ok   - $$label"; \
 		elif [ $$started -eq 0 ]; then \
-			echo "  FAIL - $$label (trios-test never started; no process was seen)"; fail=1; \
+			echo "  FAIL - $$label (trios-test never started; no process was seen in $${total}s)"; fail=1; \
+		elif [ $$alive -eq 1 ] && [ $$total -ge 600 ]; then \
+			echo "  FAIL - $$label (still alive with the log still growing at the 600s total budget; killed here, not proven broken)"; fail=1; \
+		elif [ $$alive -eq 1 ]; then \
+			echo "  FAIL - $$label (alive for $${total}s but the log grew nothing for 120s and $$marker never appeared)"; fail=1; \
 		else \
-			echo "  FAIL - $$label (trios-test ran but $$marker never appeared in the log)"; fail=1; \
+			echo "  FAIL - $$label (trios-test exited after $${total}s without emitting $$marker)"; fail=1; \
 		fi; \
 		pkill -f "trios-test.app/Contents/MacOS" 2>/dev/null || true; \
 		sleep 2; \
@@ -1696,6 +1713,54 @@ promote: check
 # anchors only on a slash, so a *worktree's* bundle matches the same pattern as
 # this checkout's. Such a process is counted as matched, and the line above
 # would attribute it here. That one is unmeasured, not solved.
+
+# REPORT, like doctor: every tile is an observation with its window printed on
+# it. The generator only reads state; it never decides whether the state is
+# good. Ceilings shown on the page are rendered from the same constants the
+# signals carry, not judged here.
+.PHONY: dashboard
+dashboard:
+	@python3 "$(ROOT)/tools/dashboard.py"
+
+# The trios-live-forensics skill's steps 1-3 as one runnable command instead
+# of three copy-paste blocks. REPORT-only, always exit 0. VARIANT picks the
+# log root (release -> .trinity, dev -> .trinity-dev, test -> .trinity-test),
+# which kills the wrong-root failure mode the skill documents: reading dev's
+# log and saying "the swarm is stopped" about release, eleven times.
+#
+# LOG_VARIANT, not VARIANT directly: chat-probe declares `VARIANT ?= dev`
+# further down, so "$(VARIANT)" here silently reported the dev log while the
+# command line asked nothing - measured on this target's first run, which
+# printed dev's board as if it were the release. Only an explicit
+# command-line VARIANT wins over the release default.
+ifeq ($(origin VARIANT),command line)
+LOG_VARIANT := $(VARIANT)
+else
+LOG_VARIANT := release
+endif
+.PHONY: forensics
+forensics:
+	@python3 "$(ROOT)/tools/forensics.py" forensics --variant "$(LOG_VARIANT)"
+
+# Counts of the named persistence/keychain/reconcile signals since the last
+# server.launch anchor in the variant's log. Counts only - the diagnosis
+# stays with the reader.
+.PHONY: signals
+signals:
+	@python3 "$(ROOT)/tools/forensics.py" signals --variant "$(LOG_VARIANT)"
+
+# The delegation registry bucketed by state, with the legend that keeps
+# "8 spoken for" from reading as "8 busy bees": only running has a worker.
+.PHONY: board
+board:
+	@python3 "$(ROOT)/tools/forensics.py" board --variant "$(LOG_VARIANT)"
+
+# One-line binary-vs-commit verdict per variant. Named to avoid colliding
+# with `make drift-guard`, which is a type-level interface check.
+.PHONY: binary-drift
+binary-drift:
+	@python3 "$(ROOT)/tools/forensics.py" drift
+
 doctor:
 	@echo "release app : $$([ -f '$(RELEASE_BIN)' ] && stat -f '%Sm' '$(RELEASE_BIN)' || echo 'absent')"
 	@echo "dev app     : $$([ -f '$(DEV_BIN)' ] && stat -f '%Sm' '$(DEV_BIN)' || echo 'absent')"
