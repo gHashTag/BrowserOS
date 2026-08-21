@@ -25,14 +25,38 @@ struct IssueReference: Codable, Equatable, Sendable {
             guard parts.count >= 4, parts[2] == "issues", let number = Int(parts[3]), number > 0 else {
                 return nil
             }
+            guard isNameable(parts[0]), isNameable(parts[1]) else { return nil }
             return IssueReference(owner: parts[0], repo: parts[1], number: number)
         }
 
         let hashSplit = trimmed.split(separator: "#")
         guard hashSplit.count == 2, let number = Int(hashSplit[1]), number > 0 else { return nil }
         let path = hashSplit[0].split(separator: "/").map(String.init)
-        guard path.count == 2, !path[0].isEmpty, !path[1].isEmpty else { return nil }
+        guard path.count == 2, isNameable(path[0]), isNameable(path[1]) else { return nil }
         return IssueReference(owner: path[0], repo: path[1], number: number)
+    }
+
+    /// Whether a string can be a GitHub owner or repository name at all.
+    ///
+    /// GitHub allows letters, digits, `.`, `_` and `-`, and nothing else. This
+    /// used to be `!isEmpty`, so anything at all became a repo name and the
+    /// impossibility surfaced three layers away as an HTTP status.
+    ///
+    /// The instance that cost the time: a Makefile RECIPE wrote
+    /// `gHashTag/trios\#1086` - correct in a variable assignment, where Make
+    /// strips the backslash, and wrong in a recipe, where it does not. The repo
+    /// parsed as `trios\`, every request went to
+    /// `/repos/gHashTag/trios%5C/issues/1086`, and what the operator saw was
+    /// "Unexpected GitHub response", then a 403 on the fallback, then a worker
+    /// with no boundary, then "the worker changed no files". Four symptoms,
+    /// none of them naming a backslash.
+    ///
+    /// Rejecting here is not stricter than GitHub; it is the same rule, stated
+    /// where it can still be attributed.
+    private static func isNameable(_ name: String) -> Bool {
+        !name.isEmpty && name.allSatisfy {
+            $0.isLetter || $0.isNumber || $0 == "." || $0 == "_" || $0 == "-"
+        }
     }
 }
 
@@ -436,6 +460,54 @@ enum QueenDelegationPolicy {
 
     static func canStartAnother(running: Int) -> Bool {
         running < maximumConcurrentWorkers
+    }
+
+    /// How the tick should report a candidate it passed over because its issue
+    /// is already spoken for.
+    ///
+    /// The filter that produces these is deliberately broad - queued, running,
+    /// awaitingReview, rejected, accepted and merged all mean "do not choose
+    /// this again" - and the journal line said "a worker already has it" for
+    /// every one of them. Only ``DelegatedTaskState/running`` has a worker.
+    /// ``DelegatedTaskState/queued`` says so in its own doc comment; accepted
+    /// and merged are finished; awaitingReview is waiting on the operator.
+    ///
+    /// Eight of these in one release tick therefore read as eight bees at work
+    /// on a board that was in fact settled and blocked - and "busy" and "stuck"
+    /// are the two readings that call for opposite actions. The filter was
+    /// never wrong; the only wrong thing was the word it used for itself, which
+    /// is why this returns the words rather than the decision.
+    struct SpokenForReport: Equatable, Sendable {
+        /// The bucket counted in the tick's closing summary.
+        let bucket: String
+        /// The sentence journalled against this candidate.
+        let detail: String
+    }
+
+    static func spokenForReport(states: [DelegatedTaskState]) -> SpokenForReport {
+        let names = Set(states.map(\.rawValue)).sorted().joined(separator: ", ")
+        guard !states.isEmpty else {
+            return SpokenForReport(
+                bucket: "spoken for, state unrecorded",
+                detail: "it is spoken for by a task with no recorded state"
+            )
+        }
+        if states.contains(.running) {
+            return SpokenForReport(
+                bucket: "a worker has it",
+                detail: "a worker already has it (\(names))"
+            )
+        }
+        if states.contains(where: { $0 == .queued || $0 == .rejected }) {
+            return SpokenForReport(
+                bucket: "queued for a worker",
+                detail: "it is \(names) - claimed, but no worker is attached yet"
+            )
+        }
+        return SpokenForReport(
+            bucket: "settled or waiting on you",
+            detail: "no worker has it - it is \(names), so it is finished or waiting on you"
+        )
     }
 
     /// Whether two boundaries can reach the same file.

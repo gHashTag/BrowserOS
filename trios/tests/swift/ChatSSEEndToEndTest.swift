@@ -8945,13 +8945,50 @@ struct ChatSSEEndToEndTests {
             "but its bytes are copied aside first, so a recovered key still has something to read"
         )
 
+        // Once the bytes are aside, the slot is writable again. Refusing
+        // forever preserves nothing the quarantine copy has not already
+        // preserved, and it bricks the conversation for the life of the
+        // install: the reserved Queen conversation is one of the sixteen, and
+        // she dropped every line of her own transcript for a month because of
+        // this branch - 92 refusals in one five-hour window.
         await persister.save(
             messages: [ChatMessage(role: .user, content: "a new first message")],
             conversationId: id
         )
+        let rewritten = defaults.data(forKey: key)
         check(
-            defaults.data(forKey: key) == ciphertext,
-            "and saving over it is refused - the original ciphertext is untouched"
+            rewritten != nil && rewritten != ciphertext,
+            "once the bytes are safely aside, the conversation can be written again"
+        )
+        check(
+            defaults.data(forKey: "trios.conversation.unreadable." + id.uuidString) == ciphertext,
+            "and the original ciphertext is still there, under the quarantine key"
+        )
+        let reread = await persister.load(conversationId: id)
+        check(
+            reread.map(\.content) == ["a new first message"],
+            "the reclaimed conversation reads back what was written to it"
+        )
+
+        // The permission is the quarantine copy, not the flag. A slot whose
+        // bytes nobody has preserved is still refused - otherwise this fix
+        // would have replaced a brick with a shredder.
+        let unpreserved = UUID()
+        let unpreservedKey = "trios.conversation." + unpreserved.uuidString
+        let otherCiphertext = Data((0..<512).map { UInt8(($0 &* 7) % 251) })
+        defaults.set(otherCiphertext, forKey: unpreservedKey)
+        let strictPersister = ConversationPersister(suiteName: suite)
+        _ = await strictPersister.load(conversationId: unpreserved)
+        // Simulate the quarantine copy going missing or drifting out of date:
+        // what is in the slot is no longer what was copied aside.
+        defaults.set(Data([0x00]), forKey: "trios.conversation.unreadable." + unpreserved.uuidString)
+        await strictPersister.save(
+            messages: [ChatMessage(role: .user, content: "should not land")],
+            conversationId: unpreserved
+        )
+        check(
+            defaults.data(forKey: unpreservedKey) == otherCiphertext,
+            "bytes that are NOT held byte-for-byte under the quarantine key are still refused"
         )
 
         // A conversation that is merely empty must still be writable, or the

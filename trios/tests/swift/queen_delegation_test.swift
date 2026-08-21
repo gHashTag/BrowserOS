@@ -47,10 +47,82 @@ enum QueenDelegationTests {
         forbiddenQueenToolCall()
         stateMachine()
         virtualBranchNaming()
+        spokenForIsNotTheSameAsWorkedOn()
 
         print("\n\(checks) checks, \(failures) failures")
         if failures > 0 { exit(1) }
         print("All QueenDelegation tests passed.")
+    }
+
+    /// The release tick printed "a worker already has it" eight times in one
+    /// pass. The registry it printed that from held no running task at all:
+    /// eleven accepted, three merged, five awaitingReview. Every one of those
+    /// eight lines was false, and together they described a busy swarm on a
+    /// board that was finished and blocked.
+    static func spokenForIsNotTheSameAsWorkedOn() {
+        scenario("only a running task has a worker, and the line says so")
+
+        let P = QueenDelegationPolicy.self
+
+        check(
+            P.spokenForReport(states: [.running]).bucket == "a worker has it",
+            "a running task is the one case that really has a worker"
+        )
+        check(
+            P.spokenForReport(states: [.running]).detail.contains("a worker already has it"),
+            "and it still says so"
+        )
+
+        // The defect, stated three ways.
+        for settled in [DelegatedTaskState.accepted, .merged, .awaitingReview] {
+            let report = P.spokenForReport(states: [settled])
+            check(
+                !report.detail.contains("a worker already has it"),
+                "\(settled.rawValue) does not claim a worker"
+            )
+            check(
+                report.detail.contains(settled.rawValue),
+                "\(settled.rawValue) names the state it is actually in"
+            )
+            check(
+                report.bucket == "settled or waiting on you",
+                "\(settled.rawValue) is counted apart from work in progress"
+            )
+        }
+
+        // `queued` documents itself as having no worker attached yet, so it is
+        // neither in progress nor settled.
+        check(
+            P.spokenForReport(states: [.queued]).bucket == "queued for a worker",
+            "queued is its own bucket - claimed, but nobody is on it"
+        )
+        check(
+            !P.spokenForReport(states: [.queued]).detail.contains("a worker already has it"),
+            "and queued does not claim a worker either"
+        )
+
+        // An issue can carry several tasks. One running worker outranks any
+        // number of finished ones: the board really is busy on that issue.
+        check(
+            P.spokenForReport(states: [.accepted, .running]).bucket == "a worker has it",
+            "one running task among settled ones still means a worker has it"
+        )
+        check(
+            P.spokenForReport(states: [.accepted, .running]).detail.contains("accepted"),
+            "and the other states are still named"
+        )
+
+        // Duplicated states must not read as more tasks than there are.
+        check(
+            P.spokenForReport(states: [.accepted, .accepted]).detail
+                == P.spokenForReport(states: [.accepted]).detail,
+            "a repeated state is named once, not counted twice"
+        )
+
+        check(
+            P.spokenForReport(states: []).bucket == "spoken for, state unrecorded",
+            "no recorded state is reported as exactly that, not as a worker"
+        )
     }
 
     static func issueParsing() {
@@ -76,6 +148,35 @@ enum QueenDelegationTests {
         check(IssueReference.parse("trios#12") == nil, "a missing owner is rejected")
         check(IssueReference.parse("gHashTag/trios#0") == nil, "issue zero is rejected")
         check(IssueReference.parse("gHashTag/trios#abc") == nil, "a non-numeric issue is rejected")
+
+        // A name GitHub cannot have is rejected here rather than four layers
+        // downstream as an HTTP status. `trios\` came from a Makefile recipe
+        // writing `\#`, which Make strips in an assignment and keeps in a
+        // recipe; it reached the app, went out as /repos/gHashTag/trios%5C/...,
+        // and was reported as "Unexpected GitHub response", a 403, a worker
+        // with no boundary, and finally "the worker changed no files".
+        check(
+            IssueReference.parse("gHashTag/trios\\#1086") == nil,
+            "a backslash in the repo name is rejected, not sent to GitHub"
+        )
+        check(
+            IssueReference.parse("gHash\\Tag/trios#1086") == nil,
+            "and in the owner name too"
+        )
+        check(
+            IssueReference.parse("https://github.com/gHashTag/trios%5C/issues/1086") == nil,
+            "the URL form cannot smuggle one in either"
+        )
+        check(
+            IssueReference.parse("gHashTag/trios with space#1086") == nil,
+            "a space is not a repository name"
+        )
+        // The legal punctuation must still parse, or this guard has broken
+        // every repository with a dot, an underscore or a dash in its name.
+        check(
+            IssueReference.parse("browseros-ai/Browser_OS.next#7")?.repo == "Browser_OS.next",
+            "dots, underscores and dashes are legal and still parse"
+        )
         check(
             IssueReference.parse("https://gitlab.com/a/b/issues/1") == nil,
             "a non-GitHub URL is rejected"

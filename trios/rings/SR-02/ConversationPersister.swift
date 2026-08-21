@@ -28,18 +28,45 @@ actor ConversationPersister: ChatPersisterProtocol {
         // page to write on. `load` returned `[]` for it, so anything that
         // appends here would save a short new history over a long unreadable
         // one - turning "we cannot read this today" into "this is gone".
-        //
-        // The quarantine copy would survive, but the primary record is what a
-        // recovery would look at first, so it is left alone.
         if unreadableConversations.contains(conversationId) {
-            TriosLogBus.shared.warn(
+            // The guard protects the BYTES, and it had been reading as though
+            // it protected the SLOT. Once `load` has copied the ciphertext
+            // aside under a key nothing else writes, the original survives a
+            // rewrite, and refusing anyway does not preserve anything - it
+            // bricks the conversation for the life of the install.
+            //
+            // Measured, not reasoned: the reserved Queen conversation
+            // E621E1F8-C36C-495A-93FC-0C247A3E6E5F is one of the sixteen. She
+            // has therefore been unable to write a single line of her own
+            // transcript since 27 July - 92 refusals in one five-hour window,
+            // each one a delegation note or a review verdict dropped in
+            // silence while the tick reported success. Her chat is empty in the
+            // UI for the same reason, and both looked like she had nothing to
+            // say.
+            //
+            // So the refusal now asks the only question that matters: are the
+            // bytes actually somewhere else? Byte-for-byte against what is in
+            // the slot right now, because "a quarantine key exists" is a weaker
+            // claim than "this is the thing it holds".
+            guard quarantineHolds(conversationId) else {
+                TriosLogBus.shared.warn(
+                    .chat,
+                    "conversation.persist.write_refused",
+                    "Refused to write over conversation \(conversationId): its stored bytes "
+                        + "cannot be decrypted and are not safely copied aside, so "
+                        + "overwriting them would destroy them",
+                    ["conversation": conversationId.uuidString]
+                )
+                return
+            }
+            unreadableConversations.remove(conversationId)
+            TriosLogBus.shared.info(
                 .chat,
-                "conversation.persist.write_refused",
-                "Refused to write over conversation \(conversationId): its stored bytes "
-                    + "cannot be decrypted and overwriting them would destroy them",
+                "conversation.persist.reclaimed",
+                "Conversation \(conversationId) was unreadable; its bytes are preserved "
+                    + "under the quarantine key, so the conversation can be written again",
                 ["conversation": conversationId.uuidString]
             )
-            return
         }
         do {
             let encoder = JSONEncoder()
@@ -136,6 +163,23 @@ actor ConversationPersister: ChatPersisterProtocol {
 
     private func unreadableKey(for id: UUID) -> String {
         "trios.conversation.unreadable." + id.uuidString
+    }
+
+    /// True when the bytes currently in the conversation's slot are already
+    /// held, byte for byte, under its quarantine key.
+    ///
+    /// Deliberately not "a quarantine copy exists": the copy is written once
+    /// and never updated, so a slot that has since changed is a slot whose
+    /// present contents nobody has preserved. Compare what would actually be
+    /// lost, not what was lost the first time.
+    private func quarantineHolds(_ id: UUID) -> Bool {
+        guard let preserved = defaults.data(forKey: unreadableKey(for: id)),
+              !preserved.isEmpty else { return false }
+        guard let stored = defaults.data(forKey: keyPrefix + id.uuidString) else {
+            // An empty slot has nothing to destroy.
+            return true
+        }
+        return preserved == stored
     }
 
     func saveSettings(_ settings: ConversationSettings, conversationId: UUID) async {

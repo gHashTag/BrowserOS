@@ -8110,7 +8110,10 @@ final class ChatViewModel: ObservableObject {
     /// the whole reason the fallback GET went out unauthenticated for as long
     /// as it did - not a decision, an ordering.
     private nonisolated(unsafe) static var ghTokenCache: String??
-    private static let ghTokenLock = NSLock()
+    // Same reason as the cache above: `cachedGhToken` is nonisolated, so a
+    // main-actor-isolated lock is unreachable from it. Five warnings, and an
+    // error in Swift 6.
+    private nonisolated static let ghTokenLock = NSLock()
 
     /// `gh auth token`, at most once per process, with a hard deadline.
     nonisolated static func cachedGhToken() -> String? {
@@ -8160,6 +8163,31 @@ final class ChatViewModel: ObservableObject {
         Self.githubTokenSource()
     }
 
+    /// Step 2 of ``githubTokenSource()``, extracted so that "no token here" is
+    /// `nil` rather than the end of the walk.
+    ///
+    /// The file is read only when it is readable by its owner alone: no group
+    /// read (0o040), no other read (0o004).
+    nonisolated private static func tokenFromConfigFile() -> String? {
+        let configPath = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".trios/config.json")
+        guard FileManager.default.fileExists(atPath: configPath.path) else { return nil }
+        do {
+            let attrs = try FileManager.default.attributesOfItem(atPath: configPath.path)
+            guard let permNumber = attrs[.posixPermissions] as? NSNumber else { return nil }
+            let perms = UInt16(permNumber.intValue)
+            guard perms & 0o044 == 0 else { return nil }
+            let data = try Data(contentsOf: configPath)
+            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let token = json["TRIOS_GITHUB_TOKEN"] as? String,
+                  !token.filter({ !$0.isWhitespace }).isEmpty
+            else { return nil }
+            return token
+        } catch {
+            return nil
+        }
+    }
+
     nonisolated static func githubTokenSource() -> String? {
         // 1. Keychain — same service/account as GitHubAPIClient.
         if let token = try? KeychainSecrets.read(
@@ -8186,29 +8214,24 @@ final class ChatViewModel: ObservableObject {
         }
 
         // 2. ~/.trios/config.json — owner-only readable.
-        let configPath = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".trios/config.json")
-        guard FileManager.default.fileExists(atPath: configPath.path) else { return nil }
-        do {
-            let attrs = try FileManager.default.attributesOfItem(atPath: configPath.path)
-            guard let permNumber = attrs[.posixPermissions] as? NSNumber else { return nil }
-            let perms = UInt16(permNumber.intValue)
-            // Owner-only: no group read (0o040), no other read (0o004).
-            guard perms & 0o044 == 0 else { return nil }
-            let data = try Data(contentsOf: configPath)
-            guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let token = json["TRIOS_GITHUB_TOKEN"] as? String,
-                  !token.filter({ !$0.isWhitespace }).isEmpty
-            else { return nil }
+        //
+        // A MISS HERE MUST FALL THROUGH. Every miss used to `return nil`, which
+        // made steps 3 and 4 unreachable - the compiler said "will never be
+        // executed" and the warning gate was red when this landed. On this
+        // machine that severed the chain at exactly the wrong link: the file
+        // exists, it is 0600, and it has no TRIOS_GITHUB_TOKEN, so the walk
+        // ended at step 2 and never reached the environment or `gh auth token`
+        // - and `gh` is the source that actually answers here. A list of four
+        // sources that stops at the second is a list of two.
+        if let token = tokenFromConfigFile() {
             TriosLogBus.shared.info(
                 .queen, "queen.choose",
                 "Timeline token sourced from config file",
                 [:]
             )
             return token
-        } catch {
-            return nil
         }
+
         // 3. GITHUB_TOKEN / GH_TOKEN. The standard names, and the ones every
         //    other tool on the machine already honours. She was the only thing
         //    here that did not look at them.
@@ -8956,11 +8979,18 @@ final class ChatViewModel: ObservableObject {
         let spokenFor: Set<DelegatedTaskState> = [
             .queued, .running, .awaitingReview, .rejected, .accepted, .merged
         ]
-        let liveIssueNumbers = Set(
-            delegationRegistry.tasks
-                .filter { spokenFor.contains($0.state) }
-                .map(\.issue.number)
-        )
+        // Keep the STATES, not just the numbers. The filter is right and the
+        // comment above defends it at length; what was wrong is the word it
+        // used for itself downstream, which said "a worker already has it"
+        // about every state in the set. Four of the six have no worker: an
+        // accepted task is finished, a merged one is landed, an awaitingReview
+        // one is waiting on the operator. Eight such lines in a tick read as
+        // eight bees at work while the board was in fact settled and stuck -
+        // and "busy" and "stuck" call for opposite actions.
+        let liveIssueStates: [Int: [DelegatedTaskState]] = Dictionary(
+            grouping: delegationRegistry.tasks.filter { spokenFor.contains($0.state) },
+            by: { $0.issue.number }
+        ).mapValues { $0.map(\.state) }
 
         var chosenScored: ScoredIssue!
         // Why each candidate was passed over. The summary at the end used to
@@ -9020,12 +9050,16 @@ final class ChatViewModel: ObservableObject {
                     continue
                 }
             }
-            if liveIssueNumbers.contains(candidate.number) {
-                skipReasons["already has a worker", default: 0] += 1
+            if let states = liveIssueStates[candidate.number] {
+                let report = QueenDelegationPolicy.spokenForReport(states: states)
+                skipReasons[report.bucket, default: 0] += 1
                 TriosLogBus.shared.info(
                     .queen, "queen.choose.already_running",
-                    "Skipping #\(candidate.number): a worker already has it",
-                    ["issue": "gHashTag/trios#\(candidate.number)"]
+                    "Skipping #\(candidate.number): \(report.detail)",
+                    [
+                        "issue": "gHashTag/trios#\(candidate.number)",
+                        "states": Set(states.map(\.rawValue)).sorted().joined(separator: ", "),
+                    ]
                 )
                 continue
             }
