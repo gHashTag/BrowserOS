@@ -61,7 +61,19 @@ struct ProbeConfig {
     /// Dev keeps secrets in files; release keeps them in the Keychain. The probe
     /// reads the dev files directly and falls back to ~/.trios/config.json,
     /// because shelling out to `security` would prompt for a password.
+    ///
+    /// The ENVIRONMENT comes first, mirroring the app's own credential chain
+    /// (Keychain -> config.json -> TRIOS_<PROVIDER>_API_KEY). Until 2026-08-21
+    /// the probe never read it at all, so `make chat-probe VARIANT=release`
+    /// could not succeed on a machine whose config.json holds the documented
+    /// zero-length values: the probe printed "key: MISSING" about a key the
+    /// running app was holding in its cache - a missing key measured nowhere.
     private static func readAPIKey(provider: String, isDev: Bool, home: String) -> String {
+        let envName = "TRIOS_\(provider.uppercased())_API_KEY"
+        if let env = ProcessInfo.processInfo.environment[envName] {
+            let trimmed = env.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
         if isDev {
             let directory = "\(home)/.trios-dev/secrets"
             let service = "com.browseros.trios.model-keys"
@@ -127,7 +139,32 @@ enum ChatProbe {
 
         print("\nPASS in \(elapsed) ms")
         print("reply: \(reply.prefix(300))")
+        if let usage = extractUsage(from: body) {
+            print("usage: \(usage.input) in / \(usage.output) out tokens (usage SSE frame received)")
+        } else {
+            print("usage: no usage frame in the stream (TRIOS_EMIT_USAGE off, or emission not active)")
+        }
         return 0
+    }
+
+    /// The `{"type":"usage"}` frame the server injects ahead of `finish` when
+    /// TRIOS_EMIT_USAGE=1. Reported so a probe run IS the wire proof for the
+    /// spend pipeline, instead of waiting for a delegated worker turn.
+    static func extractUsage(from body: String) -> (input: Int, output: Int)? {
+        for line in body.components(separatedBy: "\n") {
+            guard line.hasPrefix("data:") else { continue }
+            let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            guard let data = payload.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  json["type"] as? String == "usage",
+                  let usage = json["usage"] as? [String: Any] else {
+                continue
+            }
+            let input = usage["inputTokens"] as? Int ?? 0
+            let output = usage["outputTokens"] as? Int ?? 0
+            return (input, output)
+        }
+        return nil
     }
 
     /// The chat route is behind the local-auth gate, same as the app.

@@ -52,14 +52,14 @@ interface UsageTally {
  * finish part: the Swift transport stops reading at finish/abort/error, so a
  * frame appended at flush time is never parsed.
  *
- * Gated by TRIOS_EMIT_USAGE=1 (off by default): the running server cannot be
- * restarted while a worker is in flight, and a stream-shape change must be
- * proven against a live turn (make chat-probe, then a delegated worker
- * writing nonzero tokens into the registry) before it becomes the default.
- * See trios/.trinity/specs/usage-sse-emission.md.
+ * ON by default since 2026-08-21, when the flagged run proved the shape on
+ * the wire: `make chat-probe VARIANT=release` answered PASS through the
+ * transform and printed "usage: 18308 in / 45 out tokens (usage SSE frame
+ * received)". TRIOS_EMIT_USAGE=0 is the opt-out for bisecting a stream
+ * regression. See trios/.trinity/specs/usage-sse-emission.md.
  */
 function withUsageFrame(response: Response, tally: UsageTally): Response {
-  if (process.env.TRIOS_EMIT_USAGE !== '1' || !response.body) return response
+  if (process.env.TRIOS_EMIT_USAGE === '0' || !response.body) return response
   const decoder = new TextDecoder()
   const encoder = new TextEncoder()
   let buffer = ''
