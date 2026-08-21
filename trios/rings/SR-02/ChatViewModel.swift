@@ -5401,6 +5401,31 @@ final class ChatViewModel: ObservableObject {
                     + "be mistaken for done."
             }
         }
+        // A worker can finish AFTER its task was cancelled - measured four
+        // times on 2026-08-21, each an operator cancel racing the dying
+        // worker's finish handler, which then asked for cancelled -> failed
+        // and the registry refused with a "Cannot move" line plus an
+        // "Auto-accept skipped: state is cancelled" echo. The refusals were
+        // correct; asking was the defect. Measure the state first: a settled
+        // task takes no verdict from a worker that outlived it, and the
+        // housekeeping below still runs.
+        // By conversation, not by issue: an issue can hold several records
+        // (a cancelled one and the fresh delegation that replaced it), and
+        // task(forIssue:) would answer for the newest. The conversation is
+        // one-to-one with THIS record.
+        if registry.task(forConversation: task.conversationId)?.state == .cancelled {
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.worker.finished_after_cancel",
+                "Worker for \(task.issue.slug) finished after its task was "
+                    + "cancelled; nothing is recorded from this turn",
+                ["issue": task.issue.slug]
+            )
+            await sweepAwaitingReview(excluding: task.id, trigger: task.issue.slug)
+            await reapStalledWorkers()
+            await loadConversations()
+            return
+        }
         let moved = registry.transition(
             taskID: task.id, to: failure == nil ? .awaitingReview : .failed
         )

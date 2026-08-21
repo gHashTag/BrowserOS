@@ -30,6 +30,99 @@ export interface ChatServiceDeps {
   aiSdkDevtoolsEnabled?: boolean
 }
 
+/**
+ * Running token tally for one turn, fed by onStepFinish.
+ *
+ * Per-step usage is summed (StepResult.usage is per step, not cumulative);
+ * undefined token counts contribute nothing rather than NaN.
+ */
+interface UsageTally {
+  inputTokens: number
+  outputTokens: number
+}
+
+/**
+ * Injects a `{"type":"usage"}` SSE frame in front of the stream's `finish`
+ * part, so the trios Swift client can record what the turn cost.
+ *
+ * Measured 2026-08-21: the Swift parser (ChatEvents.swift, case "usage") and
+ * the whole registry spend pipeline behind it were fed zeros for every task -
+ * 49 of 49 tasks at 0/0 tokens beside 2,015 real tool calls - because nothing
+ * on this server ever emitted the event. The frame must arrive BEFORE the
+ * finish part: the Swift transport stops reading at finish/abort/error, so a
+ * frame appended at flush time is never parsed.
+ *
+ * Gated by TRIOS_EMIT_USAGE=1 (off by default): the running server cannot be
+ * restarted while a worker is in flight, and a stream-shape change must be
+ * proven against a live turn (make chat-probe, then a delegated worker
+ * writing nonzero tokens into the registry) before it becomes the default.
+ * See trios/.trinity/specs/usage-sse-emission.md.
+ */
+function withUsageFrame(response: Response, tally: UsageTally): Response {
+  if (process.env.TRIOS_EMIT_USAGE !== '1' || !response.body) return response
+  const decoder = new TextDecoder()
+  const encoder = new TextEncoder()
+  let buffer = ''
+  let injected = false
+
+  const usageFrame = () =>
+    `data: ${JSON.stringify({
+      type: 'usage',
+      usage: {
+        inputTokens: tally.inputTokens,
+        outputTokens: tally.outputTokens,
+      },
+    })}\n\n`
+
+  const isFinishLine = (line: string): boolean => {
+    // Exact type match via parse: a substring test would also hit
+    // "finish-step", whose type string begins with "finish".
+    if (!line.startsWith('data: ')) return false
+    try {
+      const part = JSON.parse(line.slice(6)) as { type?: string }
+      return part.type === 'finish'
+    } catch {
+      return false
+    }
+  }
+
+  const transform = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      buffer += decoder.decode(chunk, { stream: true })
+      let newlineIndex = buffer.indexOf('\n')
+      while (newlineIndex !== -1) {
+        const line = buffer.slice(0, newlineIndex + 1)
+        buffer = buffer.slice(newlineIndex + 1)
+        if (!injected && isFinishLine(line.trimEnd())) {
+          injected = true
+          controller.enqueue(encoder.encode(usageFrame()))
+        }
+        controller.enqueue(encoder.encode(line))
+        newlineIndex = buffer.indexOf('\n')
+      }
+    },
+    flush(controller) {
+      if (buffer.length > 0) controller.enqueue(encoder.encode(buffer))
+    },
+  })
+
+  return new Response(response.body.pipeThrough(transform), {
+    status: response.status,
+    statusText: response.statusText,
+    headers: response.headers,
+  })
+}
+
+/** onStepFinish accumulator feeding a UsageTally. */
+function accumulateUsage(tally: UsageTally) {
+  return (step: {
+    usage: { inputTokens: number | undefined; outputTokens: number | undefined }
+  }) => {
+    tally.inputTokens += step.usage.inputTokens ?? 0
+    tally.outputTokens += step.usage.outputTokens ?? 0
+  }
+}
+
 export class ChatService {
   constructor(private deps: ChatServiceDeps) {}
 
@@ -307,14 +400,19 @@ export class ChatService {
         conversationId: request.conversationId,
         count: request.toolApprovalResponses.length,
       })
-      return createAgentUIStreamResponse({
-        agent: session.agent.toolLoopAgent,
-        uiMessages: filterValidMessages(session.agent.messages),
-        abortSignal,
-        onFinish: async ({ messages }: { messages: UIMessage[] }) => {
-          session.agent.messages = filterValidMessages(messages)
-        },
-      })
+      const approvalTally: UsageTally = { inputTokens: 0, outputTokens: 0 }
+      return withUsageFrame(
+        await createAgentUIStreamResponse({
+          agent: session.agent.toolLoopAgent,
+          uiMessages: filterValidMessages(session.agent.messages),
+          abortSignal,
+          onStepFinish: accumulateUsage(approvalTally),
+          onFinish: async ({ messages }: { messages: UIMessage[] }) => {
+            session.agent.messages = filterValidMessages(messages)
+          },
+        }),
+        approvalTally,
+      )
     }
 
     const messageContext = request.isScheduledTask
@@ -360,36 +458,41 @@ export class ChatService {
           : msg,
     )
 
-    return createAgentUIStreamResponse({
-      agent: session.agent.toolLoopAgent,
-      uiMessages: promptUiMessages,
-      abortSignal,
-      onFinish: async ({ messages }: { messages: UIMessage[] }) => {
-        // The agent loop returns `messages` containing the prompt-
-        // wrapped user text. Restore the raw form before persisting
-        // so subsequent turns see the clean text and the client's
-        // local UIMessage matches what was originally typed.
-        const restored = messages.map((msg) =>
-          msg.id === wrappedUserMessageId && msg.role === 'user'
-            ? {
-                ...msg,
-                parts: [{ type: 'text' as const, text: request.message }],
-              }
-            : msg,
-        )
-        session.agent.messages = filterValidMessages(restored)
-        logger.info('Agent execution complete', {
-          conversationId: request.conversationId,
-          totalMessages: restored.length,
-        })
+    const turnTally: UsageTally = { inputTokens: 0, outputTokens: 0 }
+    return withUsageFrame(
+      await createAgentUIStreamResponse({
+        agent: session.agent.toolLoopAgent,
+        uiMessages: promptUiMessages,
+        abortSignal,
+        onStepFinish: accumulateUsage(turnTally),
+        onFinish: async ({ messages }: { messages: UIMessage[] }) => {
+          // The agent loop returns `messages` containing the prompt-
+          // wrapped user text. Restore the raw form before persisting
+          // so subsequent turns see the clean text and the client's
+          // local UIMessage matches what was originally typed.
+          const restored = messages.map((msg) =>
+            msg.id === wrappedUserMessageId && msg.role === 'user'
+              ? {
+                  ...msg,
+                  parts: [{ type: 'text' as const, text: request.message }],
+                }
+              : msg,
+          )
+          session.agent.messages = filterValidMessages(restored)
+          logger.info('Agent execution complete', {
+            conversationId: request.conversationId,
+            totalMessages: restored.length,
+          })
 
-        if (session?.hiddenPageId) {
-          const pageId = session.hiddenPageId
-          session.hiddenPageId = undefined
-          this.closeHiddenPage(pageId, request.conversationId)
-        }
-      },
-    })
+          if (session?.hiddenPageId) {
+            const pageId = session.hiddenPageId
+            session.hiddenPageId = undefined
+            this.closeHiddenPage(pageId, request.conversationId)
+          }
+        },
+      }),
+      turnTally,
+    )
   }
 
   async deleteSession(
@@ -504,8 +607,16 @@ export class ChatService {
    * Identity of the model a session runs on. Comparing this is what makes a
    * mid-conversation model switch take effect without a server restart.
    */
-  private buildModelKey(config: { provider?: string; model?: string; baseUrl?: string }): string {
-    return [config.provider ?? '', config.model ?? '', config.baseUrl ?? ''].join('|')
+  private buildModelKey(config: {
+    provider?: string
+    model?: string
+    baseUrl?: string
+  }): string {
+    return [
+      config.provider ?? '',
+      config.model ?? '',
+      config.baseUrl ?? '',
+    ].join('|')
   }
 
   private buildApprovalConfigKey(config?: {
