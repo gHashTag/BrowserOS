@@ -8,6 +8,26 @@ description: Read what the running TriOS app is actually doing before changing a
 Observation before edit. Four of the last rounds began by fixing something the
 running system was not doing.
 
+## 0. The one-command versions (added 2026-08-21)
+
+Steps 1-3 below are now runnable Makefile targets - use these first and fall
+back to the raw recipes only when a target is unavailable:
+
+```bash
+make forensics            # binary drift + histogram + board, release log
+make signals              # named signal counts since the last server.launch
+make board                # delegation registry bucketed by state, with ages
+make binary-drift         # one-line binary-vs-commit verdict per variant
+make dashboard            # regenerate .trinity/dashboard/index.html
+make forensics VARIANT=dev   # any of them against the dev or test roots
+```
+
+Trap these targets closed: `$(VARIANT)` defaults to `dev` further down the
+Makefile (chat-probe), so the report targets use their own `LOG_VARIANT` that
+defaults to RELEASE and honors only an explicit command-line `VARIANT=`. The
+first run of `make board` printed dev's registry as if it were the release -
+the exact wrong-root failure this skill exists to prevent.
+
 ## 1. Is the running app the code you are reading?
 
 ```bash

@@ -87,6 +87,22 @@ whether that thing is already safe by other means. Gate on **the condition it
 cares about**, measured now - not on a flag that records that the condition was
 once true.
 
+## Later instances (2026-08-21, second sweep)
+
+Four more, found by reading each hot signal against its emitter. The tells
+were the same ones listed above:
+
+| The message said | The code actually knew | Tell |
+|---|---|---|
+| cassette FAIL: "trios-test ran but the marker never appeared" | the marker had not appeared IN 120s; the process was alive and the log still growing when the harness killed it | a fixed deadline standing in for a measurement of progress; fixed by resetting an idle clock on log growth (Makefile `cassettes`) |
+| "Timed out: the background read is still in flight" (TriOSEncryption) | the read had COMPLETED in under a millisecond with a deliberate launch-gate refusal; the 60s stall cooldown was armed anyway and kept encryption refused for 55s after the gate lifted | a `try?` discarded the thrown reason; the timeout branch could not tell "hung" from "answered no" |
+| "every keychain read is refused for 60s" / "did not answer in 2s" | the cooldown had been per-item for a day, and the callers passed `deadline: 8.0` | the message never changed while the code did; constants in a message that the code takes as parameters |
+| "the work exists and nobody is looking at it" (reconcile) | only THIS record's state; a sibling record on the same branch sat in the review queue, and one branch's commits were in HEAD patch-for-patch under other SHAs | the emitting function never asked the registry about siblings or git about patch-ids - it named a conclusion two measurements away |
+
+The second one repeats the guard lesson exactly: the cooldown exists to stop
+callers piling up behind a HUNG securityd, and a fast refusal is not that
+condition. Gate on what was measured now.
+
 ## Writing a new message
 
 Before you commit any `warn`, `error` or refusal string, answer in one line:

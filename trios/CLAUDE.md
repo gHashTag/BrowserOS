@@ -64,23 +64,32 @@ When operating as the Trinity Agent (Queen), follow this 6-phase loop:
 1. `[AGENTS.md](AGENTS.md)` — entry point and constitutional stack.
 2. `[.trinity/SOUL.md](.trinity/SOUL.md)` — canonical law (TDD, language, validation, T27 canon files).
 3. `[.trinity/policy/coordination-law.md](.trinity/policy/coordination-law.md)` — shared-state mutation protocol (claims, queue, Akashic log).
-4. `[docs/T27-CONSTITUTION.md](docs/T27-CONSTITUTION.md)` — T27 law port (L1-L7, DOCS-TREE, SSOT-MATH/SWIFT).
+4. The L1-L7 law table at the bottom of this file. (`docs/T27-CONSTITUTION.md`
+   was listed here for months and does not exist in this tree; the table below
+   is the law that is actually present.)
 5. `[AGENTS.md](AGENTS.md)` — 27-agent alphabet and coordination rules.
 6. `[.claude/agents/t27-queen.md](.claude/agents/t27-queen.md)` — T27 Queen AEL v2.0 orchestration.
-7. `[.trinity/state/session_summary.md](.trinity/state/session_summary.md)` — what was built last.
-8. `[.trinity/experience.md](.trinity/experience.md)` — prior learnings and mistakes.
+7. `[.trinity/experience.md](.trinity/experience.md)` — prior learnings and mistakes.
+   (`.trinity/state/session_summary.md` was listed here and does not exist;
+   the experience files and `git log` are what record what was built last.)
 
 ---
 
 ## 2. Engineering workflow
 
-- **Build:** `./build.sh` (swiftc direct compilation, no SPM/Xcode)
+- **Build:** `DEVELOPER_DIR=/Library/Developer/CommandLineTools make` builds
+  the DEV app; `make release` is a deliberate act that replaces `trios.app`.
+  Make is the interface; `./build.sh` is its implementation detail and is not
+  invoked by hand.
+- **Gate:** `make check` at the START of a round and before landing anything.
 - **Run:** `open trios.app` (preferred — loads `Bundle.main` resources incl. the
-  menu-bar logo). `./trios_app` works but the bare binary may not resolve bundle assets.
-- **E2E:** `bash e2e/trios_e2e_flow.sh`
+  menu-bar logo). `make relaunch` refuses while a worker is running.
+- **E2E:** `make e2e`; `make verify` proves the chat answers after a change.
 - **Health:** `curl -s http://127.0.0.1:9105/health`
 - **Mesh ring:** `cargo test -p trios-mesh` (RUST-13, submodule from `gHashTag/tri-net`)
-- **Git:** branch `feat/zai-provider`, main branch is `dev`
+- **Git:** main branch is `dev`; work happens on feature branches (this file
+  once pinned `feat/zai-provider` here and went stale — read the branch from
+  `git status`, not from a document)
 - **T27 pipeline:** `/t27-phi-loop` or `/t27-tri-pipeline` for spec-first work on canon files
 
 > **INVARIANT — menu-bar logo:** the trios status-bar logo must never disappear.

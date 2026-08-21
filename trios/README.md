@@ -1,127 +1,86 @@
-# TriOS Hotkey System 🚀
+# TriOS — Trinity Queen Supervisor
 
-**Natural Language → Automation** — AI-powered hotkey system for macOS with community marketplace.
+A native macOS menu-bar app that runs an autonomous engineering supervisor:
+a **Queen** agent that decomposes work into GitHub issues, delegates them to
+worker agents ("bees") with strict file boundaries, reviews their diffs,
+accepts or sends back, and reports everything it does to an observable,
+replayable log — locally, with your own API keys, encrypted at rest.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Swift 5.9+](https://img.shields.io/badge/Swift-5.9+-orange.svg)](https://swift.org)
-[![Platform: macOS](https://img.shields.io/badge/Platform-mOS-blue.svg)](https://apple.com/macos)
+## What it does
 
-## 🎯 Features
+- **Delegation loop** — the Queen picks a candidate issue, opens a dedicated
+  chat for the worker, constrains it to a file boundary, watches the stream,
+  and judges the result. Settled work is accepted or sent back with a
+  correction; nothing merges itself past the operator's review ceiling.
+- **Multi-provider LLM routing** — per-model reliability scoring, latency-aware
+  ranking, circuit breakers with Retry-After, cross-provider failover,
+  context-length-aware trimming, pre-send output-budget routing, and
+  per-conversation budget pinning.
+- **Observability** — a LOGS workspace (Cmd+3) with structured search
+  (`level:` / `source:` / `event:`), saved searches, live tail, correlated
+  timeline across sources, noise profiles, and retention dashboards. OTLP
+  export for external collectors.
+- **Deterministic replay** — worker streams are recorded as SSE cassettes and
+  replayed in CI (`make cassettes`), so orchestration bugs reproduce instead
+  of flaking.
+- **Local-first privacy** — conversations are AES-256-GCM encrypted at rest
+  with keys in the macOS Keychain; SQLCipher for the memory store; API keys
+  never leave the machine.
 
-### Wave 1: Core Hotkeys
-- Visual hotkey bar with 6 chips
-- `⌘/` help overlay
-- 300ms visual feedback
-- Full keyboard navigation
+## Requirements
 
-### Wave 2: Power User + Accessibility + Analytics
-- **2A**: Custom shortcuts, search overlay (`⌘K`), macro recorder
-- **2B**: 3 contrast themes, font 10-24pt, VoiceOver, Switch Control, WCAG AAA
-- **2C**: Usage analytics, AI suggestions, context-aware hotkeys
+- macOS 14+, Apple Silicon or Intel
+- Xcode Command Line Tools (`xcode-select --install`)
+- A sibling `trinity` checkout (for QueenUILib) next to this repository —
+  see `docs/INSTALLATION_README.md`
 
-### Wave 3: AI Assistant
-- **Natural Language**: "Show me yesterday's messages" → auto-creates hotkey
-- **AI Macros**: "Open GitHub, find latest PR, copy link" → 3-step macro
-- **Voice Commands**: 8 built-in intents, 80-98% accuracy
+## Quick start (from source)
 
-### Wave 4: Open Intelligence
-- **Local LLM**: 7B model via Hugging Face (privacy-first)
-- **Community Marketplace**: Share/download macros
-- **Plugin API**: Extend with custom actions
-
-### Wave 5: Open Source
-- MIT License
-- Plugin templates
-- i18n (5 languages: en, ru, es, zh, fr)
-- Crowdsourced accessibility audit
-
-## 🚀 Quick Start
-
-```bash
-cd trios
-./build.sh
-open trios.app
-```
-
-## 📦 Installation
-
-### From Source
 ```bash
 git clone https://github.com/gHashTag/BrowserOS.git
 cd BrowserOS/trios
-./build.sh
+DEVELOPER_DIR=/Library/Developer/CommandLineTools make release
+open trios.app
 ```
 
-### Plugin Development
-See `PluginTemplate.swift` for examples.
+`make` alone builds the DEV variant (`trios-dev.app`) and never touches the
+release app. `make help` lists every target; `make check` runs the full gate
+suite (build, logic suites, cassettes, mutation checks) before you trust a
+change.
 
-## 🌍 Internationalization
+## First run: add a provider key
 
-Supported languages:
-- 🇬🇧 English (default)
-- 🇷🇺 Russian
-- 🇪🇸 Spanish
-- 🇨🇳 Chinese (Simplified)
-- 🇫🇷 French
+The app starts with no credentials. Open **Models & API keys** (the Models
+tab), add a key for your provider, and press **Test** — the tab shows the
+exact HTTP diagnosis per key. Keys are resolved from three sources in order:
 
-Add your language: Edit `i18nManager.swift`.
+1. macOS Keychain (service `com.browseros.trios.model-keys`) — what the UI
+   writes; the recommended place
+2. `~/.trios/config.json` — values must be non-empty; an empty string reads
+   as configured and supplies nothing
+3. `TRIOS_<PROVIDER>_API_KEY` environment variables
 
-## ♿ Accessibility
+## Known limits of a source build
 
-TriOS is WCAG 2.1 AAA compliant:
-- VoiceOver fully supported
-- Switch Control compatible
-- High contrast themes (3)
-- Font size 10-24pt
-- Keyboard-only navigation
+- The app is signed with a local development identity; Gatekeeper will not
+  accept a copy downloaded from elsewhere. Build from source on the machine
+  that runs it.
+- The default chat provider expects an endpoint you actually have; if you run
+  no local model server, configure a hosted provider first in the Models tab.
 
-Report accessibility issues via GitHub Issues with label `a11y`.
+## Development
 
-## 🤝 Contributing
+- `make check` — the gate; run it before and after a change
+- `make verify` — build, relaunch, and prove the chat answers end to end
+- `make dashboard` — regenerate the measured status page under
+  `.trinity/dashboard/`
+- `make doctor` — report the state of both app variants (never fails)
+- Repository law lives in `CLAUDE.md` and `AGENTS.md`: everything is written
+  in English, no code merges without an issue, generated artifacts are not
+  hand-edited.
 
-1. Fork the repo
-2. Create feature branch (`feature/your-feature`)
-3. Make changes
-4. Run tests (`./trios/build.sh` — builds the app, compiles the Swift package, and runs `swift test` when XCTest is available)
-5. Submit PR
+## License
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+MIT — see [LICENSE](LICENSE).
 
-## 📊 Stats
-
-- **Lines of Code**: ~77,000 (Swift + Rust + docs/scripts)
-- **Files**: ~492 tracked Swift/Rust/Markdown/Shell files
-- **Total Size**: ~6.2GB (full workspace tree, including build artifacts)
-- **Waves**: 7+ continuous hardening loops in progress
-- **Languages**: Swift, Rust, TypeScript, Shell, Markdown
-- **Plugins**: Template included
-
-## 🎓 Research
-
-TriOS implements findings from:
-- Norman's Design Principles
-- Nielsen's Heuristics
-- Fitts' Law
-- Apple Human Interface Guidelines
-- ACM CHI 2019 (productivity +37%)
-
-## 📄 License
-
-MIT License — see [LICENSE](LICENSE) for details.
-
-## 🙏 Acknowledgments
-
-- Trinity Project
-- BrowserOS Team
-- Open Source Community
-- Accessibility Advocates
-
-## 📬 Contact
-
-- **GitHub**: https://github.com/gHashTag/BrowserOS
-- **Issues**: https://github.com/gHashTag/BrowserOS/issues
-- **Discussions**: https://github.com/gHashTag/BrowserOS/discussions
-
----
-
-**Built with ❤️ by Trinity Project**
+φ² + 1/φ² = 3 · TRINITY
