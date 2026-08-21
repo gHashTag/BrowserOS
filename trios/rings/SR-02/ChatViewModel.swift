@@ -454,6 +454,9 @@ final class ChatViewModel: ObservableObject {
             await loadHistory()
             await todoPlanner.load(conversationId: conversationId)
             await loadConversations()
+            // The list pass above almost certainly ran inside the key-outage
+            // window; schedule the one that will not.
+            startHealSweepAfterKeyReturns()
             // E2E testing instrument: when TRIOS_E2E_DUMP_QUEEN_CHAT=1, write
             // the Queen conversation to a plaintext file inside the app's data
             // directory so a test harness can verify what the Queen said without
@@ -4567,6 +4570,52 @@ final class ChatViewModel: ObservableObject {
     /// successful read populates the in-process cache for the whole session;
     /// only the first read is the problem, and this is the fix for it.
     ///
+    /// One background attempt per minute to reach the conversation key, and a
+    /// single healing pass over every conversation the moment it answers.
+    ///
+    /// Healing is read-triggered: `ConversationPersister.load` re-encrypts a
+    /// plaintext-fallback slot and folds quarantined generations back - but
+    /// only when something reads. Measured across three launches on
+    /// 2026-08-21: every startup list pass lands INSIDE the key-outage
+    /// window (the launch gate plus one stall cooldown), and the passes stop
+    /// the moment loads start succeeding - so twelve resting-plaintext
+    /// conversations waited hours for a human to open the sidebar. This task
+    /// closes that gap: wait for the key, run one list pass (listing loads
+    /// every conversation), report, exit.
+    private var healSweepStarted = false
+
+    func startHealSweepAfterKeyReturns() {
+        guard !healSweepStarted else { return }
+        healSweepStarted = true
+        let persister = self.persister
+        Task.detached(priority: .utility) {
+            let deadline = Date().addingTimeInterval(30 * 60)
+            while Date() < deadline {
+                if Task.isCancelled { return }
+                if ConversationEncryption.shared.keyAnswers() {
+                    let summaries = await persister.listAllConversations()
+                    TriosLogBus.shared.info(
+                        .chat,
+                        "conversation.persist.heal_sweep",
+                        "The conversation key answers; one healing pass read "
+                            + "\(summaries.count) conversation(s), re-encrypting and "
+                            + "recovering whatever the reads found",
+                        ["conversations": String(summaries.count)]
+                    )
+                    return
+                }
+                try? await Task.sleep(nanoseconds: 60_000_000_000)
+            }
+            TriosLogBus.shared.warn(
+                .chat,
+                "conversation.persist.heal_sweep_gave_up",
+                "The conversation key did not answer within 30 minutes of launch; "
+                    + "healing will happen at the next successful read instead",
+                [:]
+            )
+        }
+    }
+
     /// Idempotent — `providerKeyWarmupStarted` ensures only one background
     /// task ever runs. Called from the bootstrap at launch (after the keychain
     /// gate lowers) and from the dispatch precheck (when it refuses because

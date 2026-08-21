@@ -37,6 +37,14 @@ final class ConversationEncryption {
         self.encryption = TriOSEncryption(legacyConversationKeyAt: appSupport)
     }
 
+    /// True when the symmetric key can be read right now. A probe, not a
+    /// mutation: sealing empty data exercises exactly the key path every
+    /// caller uses, so "answers" here means "a save this instant would
+    /// encrypt". Used by the heal sweep to wait out a launch-window outage.
+    func keyAnswers() -> Bool {
+        (try? encryption.encrypt(Data())) != nil
+    }
+
     /// Encrypts plaintext conversation data. Returns the combined sealed-box bytes.
     func encrypt(_ plaintext: Data) throws -> Data {
         do {
