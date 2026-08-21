@@ -7127,6 +7127,39 @@ final class ChatViewModel: ObservableObject {
             }
         }
 
+        // #1131 criterion 3: verdicts recorded before the fingerprint field
+        // existed carry no tree-state binding. Missing is not stale — the
+        // policy keeps the verdicts as they were, and the gate does not
+        // treat them as "checked against different code" — but the case is
+        // not allowed to pass in silence either. It is named here,
+        // separately from every blocking part above, so a task whose
+        // staleness cannot be judged is distinguishable from one whose code
+        // provably did not move.
+        //
+        // This is also the standing check for #1131 criterion 4: if the
+        // fingerprint recording in sealVerdictsWithBoundaryState is removed
+        // or bypassed, every reviewed task lands in this case and the
+        // warning fires on every acceptance — the degradation is loud, not
+        // a silent return to "nobody records the fingerprint".
+        let recordedCriteria = task.acceptanceCriteria.filter {
+            task.criterionVerdicts[$0] != nil
+        }
+        if verdictTreeStates[task.id] == nil,
+           task.treeStateFingerprint == nil,
+           !recordedCriteria.isEmpty {
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.acceptance.verdicts_without_fingerprint",
+                "recorded verdicts carry no tree-state binding — they predate "
+                    + "the field (#1131); the verdicts stand, neither confirmed "
+                    + "current nor marked stale",
+                [
+                    "taskId": task.id.uuidString,
+                    "criteria": recordedCriteria.joined(separator: ", "),
+                ]
+            )
+        }
+
         return parts.isEmpty ? nil : result
     }
 
