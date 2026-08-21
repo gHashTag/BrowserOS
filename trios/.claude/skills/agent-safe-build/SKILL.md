@@ -737,3 +737,11 @@ cycle as observe -> edit -> gate, never edit-during-gate. If the gate is
 already running and an edit cannot wait, kill the gate first and rerun it
 clean afterwards - a gate result from a tree that changed mid-run proves
 nothing either way.
+
+## Added 2026-08-22, harvest round
+
+`make check` run from the wrong directory (agent-server/, any subdir) fails
+instantly with "No rule to make target" - and in a background task that
+tail-reads as a completed gate. It happened twice in one night. Anchor
+every gate invocation: `make check`,
+and treat any gate that finished in under a minute as not having run.
