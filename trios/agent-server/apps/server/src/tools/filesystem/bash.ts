@@ -24,11 +24,11 @@ function getShellArgs(): [string, string] {
  * socket and live credentials it never needed. The allowlist keeps what a
  * build or git command actually uses and drops the rest.
  *
- * Off by default (TRIOS_BASH_ENV_ALLOWLIST=1 enables) because the running
- * server cannot be restarted while a worker is in flight, and an env change
- * this broad must be proven against a live worker turn before it is the
- * default. The flag is read per spawn, so flipping it needs a server restart
- * only to change the process env, not a code change.
+ * ON by default since 2026-08-21, when a full worker turn ran under the
+ * allowlist and its finishing git commit landed (queen.branch.committed at
+ * 17:56:19Z with TRIOS_BASH_ENV_ALLOWLIST=1 on the live server) - the ten
+ * variables are enough for real work. TRIOS_BASH_ENV_ALLOWLIST=0 is the
+ * opt-out for debugging a command that needs the full environment.
  */
 const ENV_ALLOWLIST = [
   'PATH',
@@ -44,7 +44,7 @@ const ENV_ALLOWLIST = [
 ] as const
 
 function spawnEnv(): Record<string, string | undefined> {
-  if (process.env.TRIOS_BASH_ENV_ALLOWLIST !== '1') {
+  if (process.env.TRIOS_BASH_ENV_ALLOWLIST === '0') {
     return { ...process.env }
   }
   const scrubbed: Record<string, string | undefined> = {}

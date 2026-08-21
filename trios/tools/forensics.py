@@ -271,9 +271,9 @@ def cmd_spend(variant):
         print("estimated: $%.4f across %d priced task(s); %d task(s) had usage "
               "but no known price" % (cost_micro / 1e6, costed, uncosted))
     if zero_usage:
-        print("NOTE: %d of %d task(s) recorded ZERO tokens - the agent-server "
-              "does not emit a usage SSE event yet, so token spend is "
-              "structurally unmeasured (tool calls above are real)." % (
+        print("NOTE: %d of %d task(s) recorded zero tokens - turns finished "
+              "before usage emission went live on 2026-08-21; new worker "
+              "turns record real numbers (tool calls are real either way)." % (
                   zero_usage, len(tasks)))
 
 
