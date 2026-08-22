@@ -9310,13 +9310,13 @@ final class ChatViewModel: ObservableObject {
     /// and the hourly background refresh in `configureWorkerRunner` (#1215).
     /// Does not choose, propose, or delegate — it only reads and stores.
     private func fetchAndStoreSubIssues() async -> (
-        subIssues: [(number: Int, title: String, body: String)],
+        subIssues: [(number: Int, title: String, body: String, createdAt: String)],
         networkOK: Bool,
         failureMessage: String
     ) {
         let storePath = "\(ProjectPaths.trinity)/state/queen_subissues.json"
         var seen = Set<Int>()
-        var subIssues: [(number: Int, title: String, body: String)] = []
+        var subIssues: [(number: Int, title: String, body: String, createdAt: String)] = []
 
         // Every configured epic, not one. The number used to be written into
         // the URL, which was fine while there was one epic and became a wall
@@ -9382,8 +9382,9 @@ final class ChatViewModel: ObservableObject {
                     guard let number = issue["number"] as? Int else { continue }
                     let title = issue["title"] as? String ?? ""
                     let body = issue["body"] as? String ?? ""
+                    let createdAt = issue["created_at"] as? String ?? ""
                     if seen.insert(number).inserted {
-                        subIssues.append((number, title, body))
+                        subIssues.append((number, title, body, createdAt))
                     }
                 }
 
@@ -9412,6 +9413,7 @@ final class ChatViewModel: ObservableObject {
                         "number": iss.number,
                         "title": iss.title,
                         "body": iss.body,
+                        "createdAt": iss.createdAt,
                         "state": "open",
                     ]
                 },
@@ -9975,6 +9977,10 @@ final class ChatViewModel: ObservableObject {
             let fileCount: Int
             let paths: [String]?
             let body: String
+            /// When the issue was filed, as GitHub reports it. Empty when the
+            /// store predates this field; the caller treats that as "unknown"
+            /// and does not use it as evidence either way.
+            let createdAt: String
         }
 
         var scored: [ScoredIssue] = []
@@ -10022,7 +10028,8 @@ final class ChatViewModel: ObservableObject {
                 title: issue.title,
                 fileCount: ChatViewModel.countBoundaryFiles(in: body),
                 paths: ChatViewModel.boundaryPaths(from: body),
-                body: body
+                body: body,
+                createdAt: issue.createdAt
             ))
         }
 
@@ -10179,7 +10186,8 @@ final class ChatViewModel: ObservableObject {
             }
             if let evidence = Self.looksAlreadyDone(
                 body: candidate.body,
-                paths: candidate.paths
+                paths: candidate.paths,
+                issueCreatedAt: candidate.createdAt
             ) {
                 skipReasons["looks already done", default: 0] += 1
                 TriosLogBus.shared.info(
@@ -10355,7 +10363,7 @@ final class ChatViewModel: ObservableObject {
     /// human-readable disclaimer describing their age, or nil when the store
     /// does not exist or is empty — in which case the caller refuses as
     /// before the fallback existed (#1214).
-    private static func loadSubIssueStore(at path: String) -> (issues: [(number: Int, title: String, body: String)], disclaimer: String)? {
+    private static func loadSubIssueStore(at path: String) -> (issues: [(number: Int, title: String, body: String, createdAt: String)], disclaimer: String)? {
         guard FileManager.default.fileExists(atPath: path),
               let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -10363,13 +10371,14 @@ final class ChatViewModel: ObservableObject {
             return nil
         }
 
-        var issues: [(number: Int, title: String, body: String)] = []
+        var issues: [(number: Int, title: String, body: String, createdAt: String)] = []
         for iss in issueArray {
             guard let number = iss["number"] as? Int else { continue }
             issues.append((
                 number: number,
                 title: iss["title"] as? String ?? "",
-                body: iss["body"] as? String ?? ""
+                body: iss["body"] as? String ?? "",
+                createdAt: iss["createdAt"] as? String ?? ""
             ))
         }
 
@@ -10586,7 +10595,44 @@ final class ChatViewModel: ObservableObject {
     /// tree? Returns evidence text when it does, nil when it does not (#1180).
     /// The cheapest honest signal: every file named in its boundary exists on
     /// disk, and the acceptance criteria name symbols that are present in them.
-    private static func looksAlreadyDone(body: String, paths: [String]?) -> String? {
+    /// Whether any boundary file has a commit newer than the issue.
+    ///
+    /// One `git log` per path, asked only when the identifier check has
+    /// already passed - so the common case never pays for it. A path git
+    /// cannot answer for counts as changed: refusing to dismiss work on a
+    /// failed measurement is the safe direction, because a false "already
+    /// done" loses the work entirely while a false "not done" costs one turn
+    /// in which the bee says it is done.
+    private static func boundaryChanged(paths: [String], since isoDate: String) -> Bool {
+        for path in paths {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            task.arguments = [
+                "-C", ProjectPaths.root,
+                "log", "--since=\(isoDate)", "--oneline", "--", path
+            ]
+            let pipe = Pipe()
+            task.standardOutput = pipe
+            task.standardError = Pipe()
+            do {
+                try task.run()
+            } catch {
+                return true
+            }
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            task.waitUntilExit()
+            let output = (String(data: data, encoding: .utf8) ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !output.isEmpty { return true }
+        }
+        return false
+    }
+
+    private static func looksAlreadyDone(
+        body: String,
+        paths: [String]?,
+        issueCreatedAt: String = ""
+    ) -> String? {
         guard let paths, !paths.isEmpty else { return nil }
 
         // Every boundary file must exist. Resolve against the project
@@ -10618,6 +10664,22 @@ final class ChatViewModel: ObservableObject {
         }
         let missing = symbols.filter { !fileContents.contains($0) }
         guard missing.isEmpty else { return nil }
+
+        // Presence is only evidence if it POSTDATES the issue. For a fix, the
+        // criteria name identifiers that exist precisely because the defect
+        // exists - `fetchPullRequest` is named by #1288 because that function
+        // loses the status - so their presence proves nothing and this
+        // heuristic dismissed the work before anyone could do it. Measured
+        // 2026-08-23: eight of seventeen candidates were skipped this way,
+        // including two issues filed that same hour.
+        //
+        // The question git can answer: has any boundary file changed since
+        // the issue was written? If none has, nothing done since then can be
+        // in them, whatever names they contain.
+        if !issueCreatedAt.isEmpty,
+           !boundaryChanged(paths: paths, since: issueCreatedAt) {
+            return nil
+        }
 
         return "boundary files present: \(paths.joined(separator: ", ")); named identifiers found: \(symbols.joined(separator: ", "))"
     }
