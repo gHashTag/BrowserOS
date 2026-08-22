@@ -616,7 +616,7 @@ final class ModelConfigurationStore: ObservableObject {
         // like a configured fallback. That is why the Keychain has been the
         // only working source and nobody knew.
         let name = Self.providerEnvironmentKey(provider)
-        switch Self.apiKeyFromConfigFile(for: provider) {
+        switch Self.apiKeyFromConfigFile(for: provider, home: environment["HOME"]) {
         case .none:
             parts.append("config file: no \(name) (or the file is unreadable)")
         case .some(let value) where value.isEmpty:
@@ -638,7 +638,7 @@ final class ModelConfigurationStore: ObservableObject {
         if let keychain = ModelCredentialStore.read(for: provider), !keychain.isEmpty {
             return keychain
         }
-        if let fileKey = Self.apiKeyFromConfigFile(for: provider), !fileKey.isEmpty {
+        if let fileKey = Self.apiKeyFromConfigFile(for: provider, home: environment["HOME"]), !fileKey.isEmpty {
             return fileKey
         }
         let envVar = Self.providerEnvironmentKey(provider)
@@ -1177,7 +1177,7 @@ final class ModelConfigurationStore: ObservableObject {
         // Read the cheap main-actor-bound values up front so the
         // keychain-backed read is the only credential access left
         // inside the detached task.
-        let configKey = Self.apiKeyFromConfigFile(for: provider)
+        let configKey = Self.apiKeyFromConfigFile(for: provider, home: environment["HOME"])
         let envVar = Self.providerEnvironmentKey(provider)
         let outcomes = await Task.detached {
             let resolvedKey: String = {
@@ -1846,13 +1846,30 @@ final class ModelConfigurationStore: ObservableObject {
         resolvedAPIKey(for: selectedProvider)
     }
 
-    private static func triosConfigURL() -> URL {
-        let home = ProcessInfo.processInfo.environment["HOME"] ?? "/Users/playra"
-        return URL(fileURLWithPath: home).appendingPathComponent(".trios/config.json")
+    /// The config file this store reads, resolved from the home the store was
+    /// GIVEN rather than the one the process happens to have.
+    ///
+    /// Both halves of that sentence were wrong until 2026-08-22. The store
+    /// took an `environment` at init and every caller could inject one, but
+    /// this path asked `ProcessInfo` directly - so the credential-diagnosis
+    /// test, which writes a config file with an empty value into a temporary
+    /// HOME and hands it to the store, was reading the operator's real
+    /// `~/.trios/config.json` instead. It passed on this machine only because
+    /// that real file happens to hold zero-length values, and failed in CI,
+    /// where no such file exists. A test that measures the machine it runs on
+    /// proves nothing about the code.
+    ///
+    /// The fallback was `/Users/playra` - one developer's home, compiled in.
+    private static func triosConfigURL(home: String?) -> URL {
+        let resolved = home ?? NSHomeDirectory()
+        return URL(fileURLWithPath: resolved).appendingPathComponent(".trios/config.json")
     }
 
-    private static func apiKeyFromConfigFile(for provider: ModelProvider) -> String? {
-        let url = triosConfigURL()
+    private static func apiKeyFromConfigFile(
+        for provider: ModelProvider,
+        home: String?
+    ) -> String? {
+        let url = triosConfigURL(home: home)
         guard let data = try? Data(contentsOf: url),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
             return nil

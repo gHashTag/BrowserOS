@@ -7850,8 +7850,19 @@ struct ChatSSEEndToEndTests {
             contentsOfFile: "\(ProjectPaths.root)/rings/SR-01/AgentServerLauncher.swift",
             encoding: .utf8
         )) ?? ""
+        // Asserted by ORDER, not by a literal. This check used to grep for the
+        // exact line `if await isHealthy(port: port) {`, and a refactor that
+        // strengthened the very behaviour it guards - the entry probe became a
+        // three-way `probeHealth` so a timeout stops meaning "down" - failed
+        // it. A test that breaks when the code improves is testing the
+        // spelling. What matters is that the port is asked before any process
+        // is built.
+        let probeAt = source.range(of: "switch await probeHealth(port: port)")
+            .map { source.distance(from: source.startIndex, to: $0.lowerBound) }
+        let spawnAt = source.range(of: "let process = Process()")
+            .map { source.distance(from: source.startIndex, to: $0.lowerBound) }
         check(
-            source.contains("if await isHealthy(port: port) {"),
+            probeAt != nil && spawnAt != nil && probeAt! < spawnAt!,
             "and it asks the port before spawning, so a second caller finds the first one's server"
         )
         // The output is kept. The first version sent it to /dev/null, the

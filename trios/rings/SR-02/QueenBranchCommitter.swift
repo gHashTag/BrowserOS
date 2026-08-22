@@ -793,16 +793,50 @@ enum QueenBranchCommitter {
                 ["diff", "--cached", "--name-only"],
                 workDir: worktreePath
             )
-            let stagedCount = diffOk
+            let stagedPaths = diffOk
                 ? diffOut.split(separator: "\n")
                     .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }.count
-                : 0
+                    .filter { !$0.isEmpty }
+                : []
+            let stagedCount = stagedPaths.count
 
             guard stagedCount > 0 else {
                 return Outcome(
                     committed: false,
                     summary: "The worker changed no files in the worktree."
+                )
+            }
+
+            // L3, measured at the one place a bee's work becomes a commit.
+            // Every gate downstream of here passed a Russian rewrite of an
+            // English document on 2026-08-22 (#1138): the reviewer judged a
+            // character count, which any language satisfies, and a pull
+            // request opened. Judging the language of the bytes about to be
+            // committed is the measurement none of those gates made. Files
+            // absent from HEAD are skipped - a new file has no previous
+            // language to depart from.
+            var judged: [(path: String, before: String, after: String)] = []
+            for path in stagedPaths {
+                let (hadBefore, before) = runGitInDir(
+                    ["show", "HEAD:\(path)"], workDir: worktreePath
+                )
+                guard hadBefore else { continue }
+                let (hasStaged, after) = runGitInDir(
+                    ["show", ":\(path)"], workDir: worktreePath
+                )
+                guard hasStaged else { continue }
+                judged.append((path, before, after))
+            }
+            if let refusal = QueenLanguagePolicy.rewriteRefusal(stagedFiles: judged) {
+                TriosLogBus.shared.warn(
+                    .queen, "queen.commit.refused_non_english_rewrite",
+                    "Refused a commit that translates an existing English file (#1138). "
+                        + refusal,
+                    ["worktree": worktreePath]
+                )
+                return Outcome(
+                    committed: false,
+                    summary: "Refused to commit. " + refusal
                 )
             }
 
