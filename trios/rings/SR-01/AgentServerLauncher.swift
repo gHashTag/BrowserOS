@@ -27,16 +27,47 @@ enum AgentServerLauncher {
         bunCandidates.first(where: existsAt)
     }
 
-    /// Whether a server is already answering on `port`.
-    static func isHealthy(port: String, timeout: TimeInterval = 2) async -> Bool {
-        guard let url = URL(string: "http://127.0.0.1:\(port)/health") else { return false }
+    /// What a health probe actually established. A Bool collapses three
+    /// different facts into one word, and each of the three calls for a
+    /// different response: an answer means leave the server alone, a refused
+    /// connection means nothing listens (restart now, no second opinion
+    /// needed), and a timeout means the port's state is UNKNOWN - the one
+    /// case where acting on a single probe once spawned a doomed replacement
+    /// into a port a busy-but-alive server still held.
+    enum HealthProbe: Equatable {
+        /// HTTP 200. `pid` is the serving process when the server is new
+        /// enough to report one, nil for servers that predate the field.
+        case answering(pid: Int32?)
+        /// The connection was refused: no process listens on the port.
+        case refused
+        /// Timed out or failed some other way: the port's state is unknown.
+        case silent
+    }
+
+    /// Asks `/health` and reports what was measured, not a summary of it.
+    static func probeHealth(port: String, timeout: TimeInterval = 2) async -> HealthProbe {
+        guard let url = URL(string: "http://127.0.0.1:\(port)/health") else { return .silent }
         var request = URLRequest(url: url)
         request.timeoutInterval = timeout
-        guard let (_, response) = try? await URLSession.shared.data(for: request),
-              let http = response as? HTTPURLResponse else {
-            return false
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                return .silent
+            }
+            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let pid = (body?["pid"] as? NSNumber)?.int32Value
+            return .answering(pid: pid)
+        } catch let error as URLError where error.code == .cannotConnectToHost {
+            return .refused
+        } catch {
+            return .silent
         }
-        return http.statusCode == 200
+    }
+
+    /// Whether a server is already answering on `port`.
+    static func isHealthy(port: String, timeout: TimeInterval = 2) async -> Bool {
+        if case .answering = await probeHealth(port: port, timeout: timeout) { return true }
+        return false
     }
 
     /// How often the supervisor re-asks. Sixty seconds: long enough that a
@@ -58,17 +89,106 @@ enum AgentServerLauncher {
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: watchInterval)
                 guard !Task.isCancelled else { break }
-                if await isHealthy(port: ProjectPaths.mcpPort) { continue }
-                TriosLogBus.shared.warn(
-                    .app, "server.watch.down",
-                    "The agent server stopped answering on \(ProjectPaths.mcpPort); restarting it",
-                    ["port": ProjectPaths.mcpPort]
-                )
+                let port = ProjectPaths.mcpPort
+                switch await probeHealth(port: port) {
+                case .answering:
+                    continue
+                case .refused:
+                    // Nothing listens. That is measured, not inferred - no
+                    // second opinion needed, and no 13-second confirmation
+                    // penalty for a server that is genuinely dead.
+                    TriosLogBus.shared.warn(
+                        .app, "server.watch.down",
+                        "The connection to \(port) was refused - nothing is listening; restarting the agent server",
+                        ["port": port]
+                    )
+                case .silent:
+                    // A timeout is "unknown", not "down". The night this
+                    // distinction was skipped, a busy-but-alive server missed
+                    // one probe, the watchdog spawned a replacement into the
+                    // taken port, the replacement died on the collision, and
+                    // the old server answered the launcher's wait loop -
+                    // which then reported the dead child as "started". Ask
+                    // again, with more patience, before declaring anything.
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    if case .answering = await probeHealth(port: port, timeout: 6) {
+                        TriosLogBus.shared.info(
+                            .app, "server.watch.slow_probe",
+                            "One health probe timed out on \(port) but the next answered - slow, not down",
+                            ["port": port]
+                        )
+                        continue
+                    }
+                    TriosLogBus.shared.warn(
+                        .app, "server.watch.down",
+                        "Two health probes in a row got no answer on \(port); restarting the agent server",
+                        ["port": port]
+                    )
+                }
                 let state = await startIfNeeded()
                 TriosLogBus.shared.info(
                     .app, "server.watch.restarted", "Agent server: \(state)", [:]
                 )
             }
+        }
+    }
+
+    /// What the launcher measured about a spawn it is waiting on. The facts
+    /// are independent - the child's fate, the port's answer, and WHOSE
+    /// answer it is - and collapsing them into one word is how a dead child
+    /// got reported as "started" while a pre-existing server answered the
+    /// probe.
+    enum SpawnVerdict: Equatable {
+        /// The port answers and the answer is attributed to the child (its
+        /// pid), or - for a server too old to report a pid - the child was
+        /// still alive after the answer arrived. The pid form is a
+        /// measurement; the legacy form is the best remaining inference and
+        /// says so in its log line.
+        case started
+        /// The child exited, yet the port answers: some other server holds the
+        /// port. The spawn lost a race, nothing was actually restarted.
+        case superseded(exitStatus: Int32)
+        /// The child exited and the port is silent: the spawn failed; the exit
+        /// status and the server log are the evidence.
+        case exited(exitStatus: Int32)
+        /// Nothing is decided yet: the port is silent while the child boots,
+        /// or a foreign pid answers while the child still lives (its bind
+        /// collision will resolve the race within seconds). Keep waiting.
+        case stillWaiting
+    }
+
+    /// Pure mapping from the measured facts to the verdict, separated from
+    /// the polling loop so a test can hold it still.
+    ///
+    /// `childAlive` must be measured AFTER the health probe answered: the
+    /// probe can block for seconds, and a child that died during it must not
+    /// be certified by its pre-probe pulse.
+    static func spawnVerdict(
+        childAlive: Bool,
+        exitStatus: Int32?,
+        health: HealthProbe,
+        childPID: Int32
+    ) -> SpawnVerdict {
+        guard childAlive else {
+            let status = exitStatus ?? -1
+            if case .answering = health {
+                return .superseded(exitStatus: status)
+            }
+            return .exited(exitStatus: status)
+        }
+        switch health {
+        case .answering(let pid?) where pid == childPID:
+            return .started
+        case .answering(nil):
+            // A server that predates the pid field: unattributable. The child
+            // outlived the answer, which is the strongest claim left.
+            return .started
+        case .answering:
+            // A foreign pid answers while the child lives: the child is about
+            // to lose its bind race. Let the collision resolve it.
+            return .stillWaiting
+        case .refused, .silent:
+            return .stillWaiting
         }
     }
 
@@ -78,8 +198,22 @@ enum AgentServerLauncher {
     @discardableResult
     static func startIfNeeded() async -> String {
         let port = ProjectPaths.mcpPort
-        if await isHealthy(port: port) {
+        switch await probeHealth(port: port) {
+        case .answering:
             return "already running on \(port)"
+        case .refused:
+            break
+        case .silent:
+            // The app-launch path arrives here directly, without the
+            // watchdog's confirmation dance - and the relaunch scenario (the
+            // previous app's server still busy on the port) re-creates the
+            // incident's trigger exactly. A refused connection above proves
+            // an empty port and spawns without penalty; a timeout proves
+            // nothing, so it gets the same second opinion.
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            if case .answering = await probeHealth(port: port, timeout: 6) {
+                return "already running on \(port) (answered the second probe)"
+            }
         }
         guard let bun = resolveBun() else {
             TriosLogBus.shared.error(
@@ -133,16 +267,57 @@ enum AgentServerLauncher {
             return "spawn failed"
         }
 
-        // Wait for it, but not forever. A server that has not answered in
-        // twenty seconds is a problem to report, not to keep waiting on.
+        // Wait for it, but not forever - and attribute the answer, not only
+        // hear it. The port answering proves only that SOMEBODY answers: the
+        // measured incident had the spawned bun die on "port already in use"
+        // at second four while the pre-existing server recovered and answered
+        // at second seventeen, and this loop reported "started". The server
+        // now puts its pid in /health, so the answer is attributed to the
+        // child by measurement; the child's liveness is read AFTER the probe
+        // returns, so a child that died during the probe's blocking window
+        // cannot be certified by its pre-probe pulse.
         for _ in 0..<20 {
             try? await Task.sleep(nanoseconds: 1_000_000_000)
-            if await isHealthy(port: port) {
+            let health = await probeHealth(port: port)
+            let alive = process.isRunning
+            switch spawnVerdict(
+                childAlive: alive,
+                exitStatus: alive ? nil : process.terminationStatus,
+                health: health,
+                childPID: process.processIdentifier
+            ) {
+            case .started:
+                let attribution: String
+                if case .answering(let pid?) = health, pid == process.processIdentifier {
+                    attribution = "the answer carries the spawned process's pid \(pid)"
+                } else {
+                    attribution = "the spawned process outlived the answer (a pre-pid server cannot be attributed)"
+                }
                 TriosLogBus.shared.info(
                     .app, "server.launch.ready",
-                    "Started the agent server on \(port)", ["port": port]
+                    "Started the agent server on \(port) - \(attribution)",
+                    ["port": port]
                 )
                 return "started on \(port)"
+            case .superseded(let status):
+                TriosLogBus.shared.warn(
+                    .app, "server.launch.superseded",
+                    "The spawned server exited (status \(status)) but \(port) answers - "
+                        + "an existing server holds the port; nothing was restarted. "
+                        + "Tail \(ProjectPaths.trinity)/logs/agent-server-\(port).log for its last words",
+                    ["port": port, "exit_status": String(status)]
+                )
+                return "an existing server answers on \(port); the spawn exited (status \(status))"
+            case .exited(let status):
+                TriosLogBus.shared.error(
+                    .app, "server.launch.exited",
+                    "The spawned server exited (status \(status)) and \(port) does not answer. "
+                        + "Tail \(ProjectPaths.trinity)/logs/agent-server-\(port).log for the reason",
+                    ["port": port, "exit_status": String(status)]
+                )
+                return "spawn exited (status \(status)), \(port) silent"
+            case .stillWaiting:
+                continue
             }
         }
         TriosLogBus.shared.warn(

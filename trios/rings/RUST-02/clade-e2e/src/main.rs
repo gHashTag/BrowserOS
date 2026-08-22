@@ -476,6 +476,21 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
         ],
     },
     SwiftLogicSuite {
+        label: "AgentServerLauncher",
+        bin: "/tmp/trios_agent_server_launcher_test",
+        sources: &[
+            "tests/swift/agent_server_launcher_test.swift",
+            "rings/SR-01/AgentServerLauncher.swift",
+            // The launcher logs through the bus and reads its paths from
+            // ProjectPaths, so the suite compiles both for real - the same
+            // set the Keychain suites use.
+            "BR-OUTPUT/ProjectPaths.swift",
+            "rings/SR-00/BuildVariantPolicy.swift",
+            "rings/SR-01/TriosLogBus.swift",
+            "rings/SR-01/TriosOTLPExporter.swift",
+        ],
+    },
+    SwiftLogicSuite {
         label: "SessionRecoveryResilience",
         bin: "/tmp/trios_session_recovery_resilience_test",
         sources: &[
