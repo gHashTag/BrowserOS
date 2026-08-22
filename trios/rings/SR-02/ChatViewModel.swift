@@ -537,6 +537,20 @@ final class ChatViewModel: ObservableObject {
                 || ProcessInfo.processInfo.environment["TRIOS_E2E_DRILL_1172"] == "1" {
                 runBoundaryParseDrill()
             }
+            // #1287 criteria 1-3 and 5, driven the #1172 way: a thrown
+            // error of each shape the fetch can produce - one carrying an
+            // HTTP status, one a transport failure - through the same
+            // emitter the poll's catch block calls, with the emitted record
+            // read back from the bus. Runs on its own in the test variant
+            // so every suite run — and every gate that runs the suite —
+            // re-executes the proof; the committed fact-record it compares
+            // against makes a stale or fabricated record detectable. The
+            // env var stays for asking the same question in another
+            // variant.
+            if ProjectPaths.variant == .test
+                || ProcessInfo.processInfo.environment["TRIOS_E2E_DRILL_1287"] == "1" {
+                runPollFailureDrill()
+            }
             // #1170 criterion 4, driven the #1132 way: when
             // TRIOS_E2E_DRILL_1170=1, run the /brief preview drill once at
             // startup. The sentinel guard proves itself on every honest run
@@ -11223,11 +11237,16 @@ final class ChatViewModel: ObservableObject {
                 // left nothing anyone could act on. Its sibling
                 // `queen.pr.failed` records the error and named a keychain
                 // race in seconds. One family, one habit now (#1287).
-                let reason = String(describing: error)
-                TriosLogBus.shared.warn(
-                    .queen, "queen.pr.poll_failed",
-                    "Could not read pull request #\(number) for \(task.issue.slug): \(reason)",
-                    ["issue": task.issue.slug, "pr": "\(number)", "error": reason]
+                //
+                // The emission goes through `emitPRPollFailed`, whose
+                // signature takes the caught error as a required argument -
+                // a call site that cannot state why does not compile, so the
+                // error cannot be dropped again (#1287 criterion 3) - and
+                // `pollFailureReason` names the failure's shape: an HTTP
+                // status when the error carries one, the transport error
+                // otherwise (#1287 criterion 2).
+                Self.emitPRPollFailed(
+                    issue: task.issue.slug, pr: number, error: error
                 )
                 continue
             }
@@ -13047,5 +13066,291 @@ extension ChatViewModel {
         }
 
         return results
+    }
+}
+
+// MARK: - Poll-failure criteria (#1287)
+
+extension ChatViewModel {
+    /// Whether the poll-failure drill has run in this process (#1287).
+    private static var pollFailureDrillExecuted = false
+
+    /// Names why a pull-request poll failed, by the error's own shape
+    /// (#1287 criterion 2): an HTTP status when the error carries one, the
+    /// transport error otherwise - never the event's name again, which the
+    /// old message restated while saying nothing actionable.
+    ///
+    /// `GitHubAPIError.createPRFailed` is the shape this client's error
+    /// family carries a status in; `URLError` is what URLSession throws when
+    /// the forge cannot be reached at all. The transport arm prints the
+    /// domain code, not `localizedDescription`, deliberately: the localized
+    /// string follows the machine's locale and would make the committed
+    /// drill record below unrunnable anywhere but this Mac.
+    ///
+    /// `DecodingError` deserves its own arm because it is the shape a real
+    /// HTTP failure on the poll arrives as: `fetchPullRequest` discards the
+    /// response (`let (data, _)`, GitHubAPIClient.swift:391), so a 404/403/
+    /// 5xx body fails to decode and the status is gone before this catch
+    /// ever sees an error. The message names that shape and states where
+    /// the status went - honestly, not as if a status had been named. No
+    /// status can be named for the poll until the client carries one
+    /// outside this file's boundary (#1287, second pass).
+    static func pollFailureReason(_ error: Error) -> String {
+        if case let GitHubAPIError.createPRFailed(statusCode, message) = error {
+            return "HTTP \(statusCode): \(message)"
+        }
+        if let transport = error as? URLError {
+            return "transport URLError \(transport.code.rawValue)"
+        }
+        if error is DecodingError {
+            return "response did not decode as a pull request (its HTTP "
+                + "status was discarded by the fetch - "
+                + "GitHubAPIClient.fetchPullRequest)"
+        }
+        return String(describing: error)
+    }
+
+    /// The only emitter of `queen.pr.poll_failed` (#1287).
+    ///
+    /// `error` is a required argument - not a comment, not an optional -
+    /// so a call site that cannot state why the poll failed does not
+    /// compile (criterion 3). The record it emits is read back by the drill
+    /// below, which fails the suite when the attribute comes out missing or
+    /// empty (criterion 5).
+    static func emitPRPollFailed(issue: String, pr: Int, error: Error) {
+        let reason = pollFailureReason(error)
+        TriosLogBus.shared.warn(
+            .queen, "queen.pr.poll_failed",
+            "Could not read pull request #\(pr) for \(issue): \(reason)",
+            ["issue": issue, "pr": "\(pr)", "error": reason]
+        )
+    }
+
+    /// The committed fact-record of the poll-failure drill (#1287).
+    ///
+    /// Same contract as `characterCountDrillRecord` (#1151) and
+    /// `boundaryParseDrillRecord` (#1172): the live drill compares its
+    /// facts against this record on every run in the test variant, so the
+    /// record is an executable expectation, not a pasted log - drop the
+    /// `error` attribute from the emitter and `http_error_attribute` /
+    /// `transport_error_attribute` / `decode_error_attribute` read
+    /// "no record", the comparison trips, `assertionFailure` fires and the
+    /// suite goes red; edit the record to say something the code no longer
+    /// produces and the same comparison
+    /// catches the fabrication. `record_matches_committed` is not a key
+    /// here on purpose: it is measured against the facts that precede it,
+    /// so it cannot be part of what it compares.
+    ///
+    /// The `decode_*` facts are the shape a real poll failure arrives in:
+    /// they pin the honest message for an HTTP failure whose status the
+    /// fetch discarded, so the record states the limit rather than
+    /// pretending a status was named (#1287 second pass).
+    ///
+    /// Stamped from the passing run at 2026-08-22T18:12:00.669Z journal
+    /// time (UTC; the local clock read 2026-08-23 00:12), plain
+    /// `bash tests/swift/run_chat_sse_e2e.sh` (test variant, no env var) -
+    /// the drill records of that run sit at that timestamp in
+    /// .trinity-test/logs/trios-app.jsonl.
+    static let pollFailureDrillRecord: [String: String] = [
+        "http_record_landed": "queen.pr.poll_failed",
+        "http_error_attribute": "HTTP 502: drill: upstream said no",
+        "http_message_names_status":
+            "Could not read pull request #4242 for gHashTag/trios#1287: "
+            + "HTTP 502: drill: upstream said no",
+        "transport_error_attribute": "transport URLError -1009",
+        "transport_message_no_status":
+            "Could not read pull request #4242 for gHashTag/trios#1287: "
+            + "transport URLError -1009",
+        "decode_error_attribute":
+            "response did not decode as a pull request (its HTTP "
+            + "status was discarded by the fetch - "
+            + "GitHubAPIClient.fetchPullRequest)",
+        "decode_message_names_shape":
+            "Could not read pull request #4242 for gHashTag/trios#1287: "
+            + "response did not decode as a pull request (its HTTP "
+            + "status was discarded by the fetch - "
+            + "GitHubAPIClient.fetchPullRequest)",
+        "message_not_event_name": "names the failure shape",
+    ]
+
+    /// #1287 criteria 1-3 and 5, driven: a thrown error of each shape the
+    /// fetch can produce, through the same emitter the poll's catch block
+    /// calls, with the emitted record read back from the bus. No network is
+    /// involved - the errors are constructed, because the question is what
+    /// the emitter does with a thrown error, not whether GitHub is up.
+    ///
+    /// 1. Criteria 1 and 3 - a thrown error carrying an HTTP status goes
+    ///    through the required `error` argument, and the record read back
+    ///    from the ring buffer carries a non-empty `error` attribute.
+    /// 2. Criterion 2 - the message names the HTTP status for the
+    ///    status-bearing error, the transport error (no status) for
+    ///    `URLError`, and the undecodable response for `DecodingError`.
+    ///    That last shape is what a real 404/403/5xx on the poll arrives
+    ///    as - `fetchPullRequest` discards the response
+    ///    (`GitHubAPIClient.swift`, `let (data, _)`), so no status can be
+    ///    named for the poll until the client carries one outside this
+    ///    file's boundary; the message says where the status went instead
+    ///    of hiding behind an opaque dump. The status arm drives the
+    ///    emitter's contract for any status-bearing error - the shape the
+    ///    sibling `queen.pr.failed` family and a fixed client produce -
+    ///    not a shape today's poll fetch can throw.
+    /// 3. Criterion 5 - every fact is compared against the committed
+    ///    record; dropping the `error` attribute from the emitter makes the
+    ///    read-back facts differ and the suite red.
+    ///
+    /// Runs on the bus only - no files, no registry, no network - so it is
+    /// safe in every variant; it is gated to the test variant anyway (see
+    /// the call site) so a production journal never carries drill records.
+    /// Verdicts: queen.drill.poll_failure.* in
+    /// .trinity-test/logs/trios-app.jsonl.
+    private func runPollFailureDrill() {
+        // Once per process: the suite builds many ChatViewModels; the
+        // drill is a question about code, not about this instance.
+        guard !ChatViewModel.pollFailureDrillExecuted else { return }
+        ChatViewModel.pollFailureDrillExecuted = true
+
+        let issue = "gHashTag/trios#1287"
+        let pr = 4242
+        var facts: [String: String] = [:]
+        var passed = true
+
+        func expect(_ name: String, _ condition: Bool, _ detail: String) {
+            facts[name] = condition ? detail : "FAIL: " + detail
+            if !condition { passed = false }
+        }
+
+        // Records appended to the bus after a mark, so the drill can tell
+        // "this call emitted" from "some earlier run did".
+        func records(since mark: Int) -> [TriosLogRecord] {
+            let all = TriosLogBus.shared.recent()
+            guard mark >= 0, all.count >= mark else { return all }
+            return Array(all[mark...])
+        }
+
+        // ── 1. A thrown error that carries an HTTP status ───────────
+        let httpMark = TriosLogBus.shared.recent().count
+        ChatViewModel.emitPRPollFailed(
+            issue: issue, pr: pr,
+            error: GitHubAPIError.createPRFailed(
+                statusCode: 502, message: "drill: upstream said no"
+            )
+        )
+        let httpRecords = records(since: httpMark)
+        let httpRecord = httpRecords.first { $0.event == "queen.pr.poll_failed" }
+        expect(
+            "http_record_landed",
+            httpRecord != nil,
+            httpRecord?.event ?? "no record"
+        )
+        expect(
+            "http_error_attribute",
+            !(httpRecord?.attributes["error"] ?? "").isEmpty,
+            httpRecord?.attributes["error"] ?? "no record"
+        )
+        expect(
+            "http_message_names_status",
+            httpRecord?.message.contains("HTTP 502") == true,
+            httpRecord?.message ?? "no record"
+        )
+
+        // ── 2. A thrown transport error, which carries no status ────
+        let transportMark = TriosLogBus.shared.recent().count
+        ChatViewModel.emitPRPollFailed(
+            issue: issue, pr: pr,
+            error: URLError(.notConnectedToInternet)
+        )
+        let transportRecord = records(since: transportMark)
+            .first { $0.event == "queen.pr.poll_failed" }
+        expect(
+            "transport_error_attribute",
+            !(transportRecord?.attributes["error"] ?? "").isEmpty,
+            transportRecord?.attributes["error"] ?? "no record"
+        )
+        expect(
+            "transport_message_no_status",
+            transportRecord?.message.contains("HTTP") != true
+                && transportRecord?.message.contains("transport") == true,
+            transportRecord?.message ?? "no record"
+        )
+
+        // ── 3. The shape a real HTTP failure actually arrives as ─────
+        // fetchPullRequest discards the HTTP response, so a real
+        // 404/403/5xx fails to decode and lands here with the status
+        // already gone. The message must name that shape and say where
+        // the status went - not dump an opaque DecodingError, and not
+        // pretend a status was named (#1287 second pass).
+        let decodeMark = TriosLogBus.shared.recent().count
+        ChatViewModel.emitPRPollFailed(
+            issue: issue, pr: pr,
+            error: DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: [],
+                    debugDescription: "drill: the forge answered, but not with a pull request"
+                )
+            )
+        )
+        let decodeRecord = records(since: decodeMark)
+            .first { $0.event == "queen.pr.poll_failed" }
+        let decodeAttribute = decodeRecord?.attributes["error"] ?? ""
+        expect(
+            "decode_error_attribute",
+            decodeAttribute.contains("did not decode")
+                && decodeAttribute.contains("discarded by the fetch"),
+            decodeAttribute.isEmpty ? "no record" : decodeAttribute
+        )
+        expect(
+            "decode_message_names_shape",
+            decodeRecord?.message.contains("did not decode") == true,
+            decodeRecord?.message ?? "no record"
+        )
+
+        // ── 4. The message names the failure, not the event ─────────
+        expect(
+            "message_not_event_name",
+            httpRecord?.message != "Could not read a pull request",
+            httpRecord?.message == "Could not read a pull request"
+                ? "restates the event" : "names the failure shape"
+        )
+
+        // The committed record this file carries must match what the run
+        // just measured (#1151 pass 3: a journal outside the reviewed
+        // files proves nothing to a reviewer; this comparison is what
+        // makes the record an artifact). Evaluated before this fact is
+        // inserted, so the record cannot contain its own verdict.
+        expect(
+            "record_matches_committed",
+            facts == ChatViewModel.pollFailureDrillRecord,
+            facts.map { "\($0.key)=\($0.value)" }.sorted()
+                .joined(separator: "; ")
+        )
+
+        if passed {
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.drill.poll_failure.passed",
+                "A thrown error reaches queen.pr.poll_failed as a non-empty "
+                    + "error attribute - the HTTP status named when the "
+                    + "error carries one, the transport error otherwise, "
+                    + "and an undecodable response named as what it is with "
+                    + "its discarded status stated (#1287)",
+                facts
+            )
+        } else {
+            TriosLogBus.shared.error(
+                .queen,
+                "queen.drill.poll_failure.failed",
+                "The poll-failure drill failed - the emitted record does "
+                    + "not carry the caught error the record says it does "
+                    + "(#1287)",
+                facts
+            )
+            // A failed drill must fail the suite, not merely log (#1151
+            // pass 3); assertionFailure is compiled out in release builds.
+            assertionFailure(
+                "poll-failure drill failed (#1287): "
+                    + facts.map { "\($0.key)=\($0.value)" }.sorted()
+                        .joined(separator: "; ")
+            )
+        }
     }
 }
