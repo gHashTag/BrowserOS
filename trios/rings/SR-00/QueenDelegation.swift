@@ -638,7 +638,17 @@ enum QueenDelegationPolicy {
         guard task.virtualBranch != nil else {
             return "the task has no branch, so there is nothing to propose."
         }
-        if let files = task.committedFiles, files == 0 {
+        // `committedFiles` counts the LAST turn, and a second turn that
+        // changes nothing is not an empty branch. Measured 2026-08-23 on
+        // #1287: the bee did the work in its first turn, the second turn
+        // committed nothing because there was nothing left to do, and this
+        // guard refused a pull request for a branch carrying two real
+        // commits - "the worker committed nothing" said about work that was
+        // sitting in git. A named commit is the branch's evidence and it
+        // outranks a per-turn counter; only a task with neither has nothing
+        // to propose.
+        if let files = task.committedFiles, files == 0,
+           (task.committedSHA ?? "").isEmpty {
             return "the worker committed nothing, so the pull request would be empty."
         }
         switch task.state {
