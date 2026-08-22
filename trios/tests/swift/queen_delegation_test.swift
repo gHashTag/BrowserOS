@@ -49,10 +49,62 @@ enum QueenDelegationTests {
         virtualBranchNaming()
         spokenForIsNotTheSameAsWorkedOn()
         budgetKnobParsing()
+        pullRequestGuardReadsTheBranch()
 
         print("\n\(checks) checks, \(failures) failures")
         if failures > 0 { exit(1) }
         print("All QueenDelegation tests passed.")
+    }
+
+    /// A second turn that changes nothing is not an empty branch.
+    ///
+    /// Measured 2026-08-23 on #1287: the bee did the work in its first turn,
+    /// the second turn committed nothing because nothing was left to do, and
+    /// the guard refused a pull request for a branch carrying two real
+    /// commits - "the worker committed nothing" said about work sitting in
+    /// git.
+    static func pullRequestGuardReadsTheBranch() {
+        scenario("a zero file count with a named commit is a branch, not an empty one")
+
+        func task(files: Int?, sha: String?) -> DelegatedTask {
+            var t = DelegatedTask(
+                conversationId: UUID(),
+                issue: IssueReference(owner: "gHashTag", repo: "trios", number: 1287),
+                title: "poll",
+                worker: "queen-swift",
+                ownedPaths: ["rings/SR-02/ChatViewModel.swift"]
+            )
+            t.state = .awaitingReview
+            t.virtualBranch = "queen/1287"
+            t.committedFiles = files
+            t.committedSHA = sha
+            return t
+        }
+
+        check(
+            QueenDelegationPolicy.pullRequestBlockReason(
+                for: task(files: 0, sha: "5120d52d92f7")
+            ) == nil,
+            "zero files but a named commit proposes fine - the branch is the evidence"
+        )
+        check(
+            QueenDelegationPolicy.pullRequestBlockReason(
+                for: task(files: 0, sha: nil)
+            )?.contains("committed nothing") == true,
+            "zero files AND no commit is genuinely nothing to propose"
+        )
+        check(
+            QueenDelegationPolicy.pullRequestBlockReason(
+                for: task(files: 0, sha: "")
+            )?.contains("committed nothing") == true,
+            "an empty SHA is absent, not present - the distinction this repository keeps re-learning"
+        )
+        check(
+            QueenDelegationPolicy.pullRequestBlockReason(
+                for: task(files: 3, sha: "5120d52d92f7")
+            ) == nil,
+            "the ordinary case still passes"
+        )
     }
 
     /// The daily cap is the operator's budget decision, delivered through a

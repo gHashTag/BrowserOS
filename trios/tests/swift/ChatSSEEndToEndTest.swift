@@ -8916,10 +8916,21 @@ struct ChatSSEEndToEndTests {
             fail("an epic must produce a timeline URL")
             return
         }
+        // Asserted by parts rather than by one whole string. The literal
+        // included `per_page=100` and nothing else, so adding the page
+        // parameter - the fix for an epic whose newest work fell off the end
+        // of page one - failed a check whose subject is the epic NUMBER
+        // reaching the path. Pin what the check is named for, and let the
+        // query grow.
         check(
-            url.absoluteString
-                == "https://api.github.com/repos/gHashTag/trios/issues/1279/timeline?per_page=100",
+            url.absoluteString.hasPrefix(
+                "https://api.github.com/repos/gHashTag/trios/issues/1279/timeline?"
+            ),
             "the URL is built from the number rather than written out"
+        )
+        check(
+            url.absoluteString.contains("per_page=100"),
+            "and it asks for the API's maximum page size, so the walk is as short as it can be"
         )
         check(
             E.timelineURL(epic: 1090)?.absoluteString.contains("/issues/1090/") == true,
