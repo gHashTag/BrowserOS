@@ -169,9 +169,23 @@ export async function createHttpServer(config: HttpServerConfig) {
     '.trinity',
     'state',
   )
+  // Scoped by port because three variant servers (9105/9205/9305) run at
+  // once and issueInitialTokens revokes every family in its store. On a
+  // shared file that revocation crossed lanes: the release and dev apps
+  // each killed the other's token family every access-token TTL, and both
+  // logged "Token refresh failed; bootstrapping a new local-auth family"
+  // every ~14 minutes, all night. One file per port keeps the single-tenant
+  // contract inside the lane it was designed for.
   const localAuthService = new LocalAuthService({
-    dbPath: join(triosStateDir, 'local-auth.sqlite'),
+    dbPath: join(triosStateDir, `local-auth-${port}.sqlite`),
   })
+  // The route-audit trail has the same cross-lane problem: all three servers
+  // appended to one JSONL, so a reader counting outcomes was reading three
+  // servers as one. Same treatment, honoring an explicit override.
+  process.env.LOCAL_AUTH_AUDIT_PATH ??= join(
+    triosStateDir,
+    `local-auth-audit-${port}.jsonl`,
+  )
 
   const clawRoutes = new Hono<Env>()
     .use('/*', requireTrustedAppOrigin())

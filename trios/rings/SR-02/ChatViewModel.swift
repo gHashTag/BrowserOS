@@ -407,9 +407,12 @@ final class ChatViewModel: ObservableObject {
         self.persister = persister
         self.stateMachine = stateMachine
 
-        // Ensure an A2A registry client exists. In the normal app launch path no
-        // caller injects one, so create the embedded trios-agent client here with
-        // the BrowserOS loopback endpoint and local-auth provider.
+        // Ensure an A2A registry client exists. CompositionRoot injects one in
+        // the normal app launch path (sharing its LocalAuthProvider, so the
+        // process holds ONE token family); this fallback builds an embedded
+        // client for tests and previews that construct the view model directly.
+        // A second live provider would fight the first over the server's
+        // single-tenant auth: every bootstrap revokes all other families.
         // AGENT-V-WAIVER: QueenBackgroundService startup wiring (Agent V conditional waiver, 2026-07-27).
         let effectiveA2AClient: A2ARegistryClient
         if let client = a2aClient {

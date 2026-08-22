@@ -196,3 +196,23 @@ registry: 22 of 40 failures in one night were the rebuild loop, not the code.
 - Dev-lane token counts stay zero until the 9205 server process restarts
   into the emission-default code - a zero there is a stale server, not a
   broken pipeline.
+
+## Added 2026-08-22, the local-auth annihilation night
+
+- **Local auth is single-tenant per server: every `GET /auth/local-token`
+  revokes ALL other families in that server's store.** Probing it "to get a
+  token for the admin API" kills the running app's live family and forces
+  its next refresh into a 401 bootstrap. For forensics, read the store
+  directly instead: `.trinity/state/local-auth-<port>.sqlite`
+  (`local_auth_families`, `local_auth_family_audit`) - port-scoped since
+  2026-08-22; the unscoped `local-auth.sqlite` beside them is the shared
+  file three servers fought over, kept as evidence.
+- The signature of two tenants on one single-tenant store:
+  `localauth.refresh.fallback_bootstrap` in TWO logs at the access-TTL
+  period (~14 min), offset by roughly half a period. One tenant looks like
+  a server that forgets; two tenants are an oscillator.
+- `server.watch.restarted` saying "started on <port>" is the watchdog's
+  claim, not a measurement: its child can die on port-in-use seconds later
+  while the old server answers. Verify with `lsof -iTCP:<port>` +
+  `/health`, and read the tail of `agent-server-<port>.log` for
+  `[FATAL]` before believing any restart line.
