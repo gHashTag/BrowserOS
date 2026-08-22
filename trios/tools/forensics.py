@@ -259,11 +259,37 @@ def cmd_spend(variant):
         else:
             costed += 1
             cost_micro += (ti * p[0] + to * p[1]) // 1_000_000
-    # Mirrors SwarmBudget.dailyLimitUSD default (rings/SR-00/ModelPricing.swift,
-    # micro-dollars, $10). The gate sums estimatedCostUSD over tasks whose
-    # updatedAt falls in the same LOCAL calendar day and refuses NEW dispatches
-    # past the cap - running bees are not killed.
+    # Mirrors SwarmBudget.current (rings/SR-00/ModelPricing.swift): the
+    # TRIOS_SWARM_DAILY_CAP_USD env var, then the per-variant knob file
+    # state/swarm_budget.json ({"dailyCapUSD": 30}), then the $10 default.
+    # Same strictness: non-positive or over $1M/day reads as no knob. The gate
+    # sums estimatedCostUSD over tasks whose updatedAt falls in the same LOCAL
+    # calendar day and refuses NEW dispatches past the cap - running bees are
+    # not killed.
     DAILY_CAP_MICRO = 10_000_000
+    def _knob_dollars(raw):
+        try:
+            d = float(raw)
+        except (TypeError, ValueError):
+            return None
+        return d if 0 < d <= 1_000_000 else None
+    _env_cap = _knob_dollars(os.environ.get("TRIOS_SWARM_DAILY_CAP_USD"))
+    if _env_cap is not None:
+        DAILY_CAP_MICRO = int(_env_cap * 1_000_000)
+    else:
+        _knob_path = os.path.join(
+            LOG_ROOTS.get(variant, ".trinity"), "state", "swarm_budget.json"
+        )
+        try:
+            with open(_knob_path) as kf:
+                _file_cap = _knob_dollars(json.load(kf).get("dailyCapUSD"))
+            if _file_cap is not None:
+                DAILY_CAP_MICRO = int(_file_cap * 1_000_000)
+        except FileNotFoundError:
+            pass
+        except Exception as knob_err:
+            print("NOTE: budget knob %s unreadable (%s); using the $10 default"
+                  % (_knob_path, knob_err))
     import datetime
     today_local = datetime.date.today().isoformat()
     today_micro = 0

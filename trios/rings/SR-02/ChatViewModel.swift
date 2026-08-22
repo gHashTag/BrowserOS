@@ -4065,7 +4065,7 @@ final class ChatViewModel: ObservableObject {
         // running would leave the repository half-edited; declining to open a
         // new one is a decision that can be taken safely at any moment.
         let spent = registry.spentToday()
-        if case .exhausted(let overBy) = SwarmBudget.default.verdict(spentToday: spent) {
+        if case .exhausted(let overBy) = SwarmBudget.current.verdict(spentToday: spent) {
             await postQueenNotice(
                 SystemNoticeClassifier.warningMarker
                     + "I am not opening new work today. The swarm has spent about "
@@ -7388,7 +7388,7 @@ final class ChatViewModel: ObservableObject {
             // The operator's own /review reject is deliberate and stays
             // ungated; the sweep defers and the task keeps its review place.
             let spentNow = registry.spentToday()
-            if case .exhausted = SwarmBudget.default.verdict(spentToday: spentNow) {
+            if case .exhausted = SwarmBudget.current.verdict(spentToday: spentNow) {
                 TriosLogBus.shared.info(
                     .queen, "queen.review.send_back_deferred",
                     "\(task.issue.slug) is ready to go back but the day's swarm "

@@ -259,6 +259,10 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
             "rings/SR-00/QueenCriterionVerdict.swift",
             "rings/SR-00/ModelPricing.swift",
             "rings/SR-00/QueenSalience.swift",
+            // SwarmBudget.current resolves the operator's knob file under
+            // ProjectPaths.trinity, so the suite compiles the path SSOT too.
+            "BR-OUTPUT/ProjectPaths.swift",
+            "rings/SR-00/BuildVariantPolicy.swift",
         ],
     },
     SwiftLogicSuite {

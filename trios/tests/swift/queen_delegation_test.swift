@@ -48,10 +48,55 @@ enum QueenDelegationTests {
         stateMachine()
         virtualBranchNaming()
         spokenForIsNotTheSameAsWorkedOn()
+        budgetKnobParsing()
 
         print("\n\(checks) checks, \(failures) failures")
         if failures > 0 { exit(1) }
         print("All QueenDelegation tests passed.")
+    }
+
+    /// The daily cap is the operator's budget decision, delivered through a
+    /// knob file. A corrupt or absurd knob must fall back to the default
+    /// rather than silently disabling the ceiling - the knob raises the cap,
+    /// it must never be able to remove it by accident.
+    static func budgetKnobParsing() {
+        scenario("the operator's budget knob parses strictly or not at all")
+
+        check(
+            SwarmBudget.parsed(knobJSON: Data(#"{"dailyCapUSD": 30}"#.utf8))
+                == SwarmBudget(dailyLimitUSD: 30_000_000),
+            "an integer dollar knob becomes exact micro-dollars"
+        )
+        check(
+            SwarmBudget.parsed(knobJSON: Data(#"{"dailyCapUSD": 12.5}"#.utf8))
+                == SwarmBudget(dailyLimitUSD: 12_500_000),
+            "a fractional dollar knob keeps its cents"
+        )
+        check(
+            SwarmBudget.parsed(knobJSON: Data(#"{"dailyCapUSD": "25"}"#.utf8))
+                == SwarmBudget(dailyLimitUSD: 25_000_000),
+            "a quoted number still parses - operators edit JSON by hand"
+        )
+        check(
+            SwarmBudget.parsed(knobJSON: Data(#"{"dailyCapUSD": 0}"#.utf8)) == nil,
+            "zero is refused: a knob cannot switch the ceiling off"
+        )
+        check(
+            SwarmBudget.parsed(knobJSON: Data(#"{"dailyCapUSD": -5}"#.utf8)) == nil,
+            "a negative cap is refused"
+        )
+        check(
+            SwarmBudget.parsed(knobJSON: Data(#"{"dailyCapUSD": 2000000}"#.utf8)) == nil,
+            "an absurd cap (over $1M/day) is refused as a typo, not obeyed"
+        )
+        check(
+            SwarmBudget.parsed(knobJSON: Data("not json".utf8)) == nil,
+            "garbage falls back to nil so the caller keeps the default"
+        )
+        check(
+            SwarmBudget.parsed(knobJSON: Data(#"{"daily_cap": 30}"#.utf8)) == nil,
+            "a wrong key name is not guessed at"
+        )
     }
 
     /// The release tick printed "a worker already has it" eight times in one

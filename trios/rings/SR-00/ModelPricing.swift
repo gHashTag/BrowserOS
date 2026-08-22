@@ -100,6 +100,50 @@ struct SwarmBudget: Equatable, Sendable {
 
     static let `default` = SwarmBudget(dailyLimitUSD: 10_000_000)
 
+    /// The operator's knob, resolved fresh on every ask so a raised cap takes
+    /// effect without a relaunch. Order: the `TRIOS_SWARM_DAILY_CAP_USD`
+    /// environment variable (harness and probes), then the per-variant knob
+    /// file `<trinity>/state/swarm_budget.json` (`{"dailyCapUSD": 30}`), then
+    /// the $10 default. The knob exists because the operator said "we have
+    /// tokens" on the first day both lanes hit the ceiling - the cap is their
+    /// budget decision, not the code's.
+    static var current: SwarmBudget {
+        if let raw = ProcessInfo.processInfo.environment["TRIOS_SWARM_DAILY_CAP_USD"],
+           let fromEnv = parsed(dollarsText: raw) {
+            return fromEnv
+        }
+        let knobPath = "\(ProjectPaths.trinity)/state/swarm_budget.json"
+        if let data = FileManager.default.contents(atPath: knobPath),
+           let fromKnob = parsed(knobJSON: data) {
+            return fromKnob
+        }
+        return .default
+    }
+
+    /// Pure parse of the knob file body. Accepts `{"dailyCapUSD": 30}` with an
+    /// integer or fractional value. Returns nil - never a guess - for
+    /// anything unparsable, non-positive, or absurd (over $1M/day), so a
+    /// corrupt knob falls back to the default instead of disabling the cap.
+    static func parsed(knobJSON data: Data) -> SwarmBudget? {
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let value = object["dailyCapUSD"] else { return nil }
+        if let n = value as? NSNumber { return parsed(dollars: n.doubleValue) }
+        if let s = value as? String { return parsed(dollarsText: s) }
+        return nil
+    }
+
+    static func parsed(dollarsText: String) -> SwarmBudget? {
+        guard let dollars = Double(dollarsText.trimmingCharacters(in: .whitespaces)) else {
+            return nil
+        }
+        return parsed(dollars: dollars)
+    }
+
+    static func parsed(dollars: Double) -> SwarmBudget? {
+        guard dollars.isFinite, dollars > 0, dollars <= 1_000_000 else { return nil }
+        return SwarmBudget(dailyLimitUSD: Int(dollars * 1_000_000))
+    }
+
     enum Verdict: Equatable {
         case fine(remaining: Int)
         case nearingLimit(remaining: Int)
