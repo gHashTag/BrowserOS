@@ -142,30 +142,42 @@ enum QueenReviewDecision {
 
         let unmet = verdicts.map(effectiveVerdict).filter { !$0.met }.map(\.criterion)
 
-        // Regression guard (#1286 criterion 4): a criterion marked
-        // deliberately unmet that was judged unmet resolves to *met* above, so
-        // it can never legitimately appear in the return list. The only way it
-        // lands there is the inversion not having been applied to it - the
-        // marker parsing removed or bypassed at the call above, while the
-        // marker test itself still answers true. That is the parked-forever
-        // signature this issue exists to remove: the marked criterion reads as
-        // ordinary again and the task sticks on its own success. Re-derived
-        // from the raw verdicts, deliberately, so it does not compare a copy
-        // against itself: the check must observe what the mapping did, not
-        // what it was about to do. Delete `isDeliberatelyUnmet` entirely and
-        // this guard stops compiling - the removal is loud either way.
-        let parkedOnItsOwnPass = verdicts.filter {
+        // Regression guard (#1286 criterion 4), driven from the failing side:
+        // a criterion marked deliberately unmet that was judged unmet resolves
+        // to *met* above, so it can never legitimately appear in the return
+        // list. The only way it lands there is the inversion not having run
+        // for it - the marker parsing removed or bypassed at the call above,
+        // while `isDeliberatelyUnmet` still answers true. That is the
+        // parked-forever signature this issue exists to remove, and it must
+        // not be worked through quietly: burning both returns on a criterion
+        // nobody can satisfy, then escalating with "the conversation has not
+        // moved", points the human at the bee when the defect is in the
+        // parsing. So the decision escalates immediately with the regression
+        // named. Re-derived from the raw verdicts, deliberately, so the check
+        // observes what the mapping did rather than comparing a copy against
+        // itself; delete `isDeliberatelyUnmet` entirely and the file stops
+        // compiling instead - the removal is loud either way.
+        let markerIgnored = verdicts.filter {
             isDeliberatelyUnmet($0.criterion) && !$0.met && unmet.contains($0.criterion)
         }
-        if !parkedOnItsOwnPass.isEmpty {
+        if !markerIgnored.isEmpty {
             TriosLogBus.shared.warn(
                 .queen,
                 "queen.assertion.negative_marker_ignored",
                 "A criterion marked deliberately unmet was judged unmet and still "
-                    + "landed in the send-back list - the marker's verdict inversion "
-                    + "did not run for it, so the negative test reads as ordinary and "
-                    + "the task parks on its own success again (#1286)",
-                ["criteria": parkedOnItsOwnPass.count.description]
+                    + "counted as a failure - the marker's verdict inversion did not "
+                    + "run for it, so the negative test reads as ordinary and parks "
+                    + "on its own success again (#1286)",
+                ["criteria": markerIgnored.count.description]
+            )
+            return .escalate(
+                reason: "\(markerIgnored.count) criterion(s) are marked deliberately "
+                    + "unmet and were judged unmet - which is the outcome they exist "
+                    + "to produce - yet they are still counted as failures. The "
+                    + "marker's verdict inversion did not run for them, so this "
+                    + "negative test reads as an ordinary failure and will park in "
+                    + "review forever. That is a regression in the marker parsing "
+                    + "(#1286), not something the worker can fix by trying again."
             )
         }
 
