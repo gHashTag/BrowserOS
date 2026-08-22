@@ -537,6 +537,37 @@ final class ChatViewModel: ObservableObject {
                 || ProcessInfo.processInfo.environment["TRIOS_E2E_DRILL_1172"] == "1" {
                 runBoundaryParseDrill()
             }
+            // #1170 criterion 4, driven the #1132 way: when
+            // TRIOS_E2E_DRILL_1170=1, run the /brief preview drill once at
+            // startup. The sentinel guard proves itself on every honest run
+            // by saying `clean` and `settled`, but the breaking side — what
+            // happens when a task actually gets registered around a preview
+            // — can only be driven by deliberately registering one, and no
+            // test outside this file may exist (the boundary forbids it).
+            // The drill plants real registry tasks and a real inbox line
+            // through the same APIs a delegation uses, expects the guard to
+            // fire on each, and expects a clean run to stay clean. Test
+            // variant only — it writes to the registry, so it refuses to run
+            // anywhere that state is real. Verdicts land in the journal as
+            // queen.drill.1170.*.
+            if ProcessInfo.processInfo.environment["TRIOS_E2E_DRILL_1170"] == "1" {
+                await runBriefPreviewDrill()
+            }
+            // #1170 criteria 1-3, driven the #1132 way: a probe, not a
+            // check. `TRIOS_E2E_BRIEF_PREVIEW=gHashTag/trios#1170` drives
+            // the real preview path once at startup — the same
+            // `previewBrief` the chat command routes to — so a harness can
+            // verify the printed brief (it rides whole in the
+            // `queen.brief.preview` journal event, text and narrowed hints
+            // as their own fields) and the absence of `queen.delegate` /
+            // `queen.worker.start` for that issue. The drill cannot do
+            // this: its arms use nonexistent issues on purpose, so the
+            // check never depends on the network. Env-gated, costs nothing
+            // unless asked for.
+            if let probeIssue = ProcessInfo.processInfo.environment["TRIOS_E2E_BRIEF_PREVIEW"]
+                .flatMap(IssueReference.parse) {
+                await previewBrief(for: probeIssue)
+            }
             await checkHealth()
             let skipA2AStartup = ProcessInfo.processInfo.environment[
                 "TRIOS_SKIP_A2A_STARTUP"
@@ -3887,41 +3918,7 @@ final class ChatViewModel: ObservableObject {
             let wantStart = originalText.range(of: "--start") != nil
             await chooseNextOpenIssue(startAfterChoosing: wantStart)
         case .brief(let issue):
-            // Preview only — this is not a security boundary. It builds the
-            // brief the same way /delegate does (reads the contract from the
-            // issue, parses Границы, applies QueenLocalisation narrowing) but
-            // prints it to the Queen chat instead of opening a worker. No task
-            // is created, no chat is opened, no branch is taken: nothing here
-            // enters the registry.
-            guard let body = await fetchIssueBody(issue) else {
-                await postQueenNotice(
-                    SystemNoticeClassifier.warningMarker
-                        + "Cannot read \(issue.slug) to preview the brief."
-                )
-                return
-            }
-            let criteria = QueenTaskSpec.criteriaFromIssue(body: body)
-            let paths = ChatViewModel.boundaryPaths(from: body) ?? []
-            let task = DelegatedTask(
-                issue: issue,
-                title: "Brief preview for \(issue.slug)",
-                worker: "(preview)",
-                ownedPaths: paths,
-                acceptanceCriteria: criteria
-            )
-            // Narrow large files exactly as delegation does — the shared
-            // function guarantees identical hints and identical logging.
-            let narrowedHints = ChatViewModel.narrowedHints(
-                for: paths, from: body, issueSlug: issue.slug
-            )
-            let brief = QueenBriefing.text(for: task)
-                + (narrowedHints.isEmpty ? "" : "\n" + narrowedHints.joined(separator: "\n"))
-            await appendSystemMessageToQueenChat(brief)
-            TriosLogBus.shared.info(
-                .queen, "queen.brief.preview",
-                "Brief preview for \(issue.slug) (\(brief.count) chars)",
-                ["issue": issue.slug, "length": String(brief.count)]
-            )
+            await previewBrief(for: issue)
         case .runSkill(let command, let arguments):
             await runQueenSkill(command: command, arguments: arguments)
         case .unknown:
@@ -3930,6 +3927,296 @@ final class ChatViewModel: ObservableObject {
                     + "I do not know `\(originalText)`.\n\(QueenCommandParser.helpText)"
             )
         }
+    }
+
+    /// `#1170` — `/brief` is the dry run of a delegation: build the assignment
+    /// exactly the way `/delegate` would, print it to the Queen's chat, and
+    /// stop. Nothing outward happens — no worker chat, no branch, no bee — and
+    /// a sentinel (registry task IDs + supervisor-inbox fingerprint) is
+    /// compared before, after, and through the delegation window to prove
+    /// that (#1170 criterion 4), not merely to promise it in a comment.
+    ///
+    /// Preview only — this is not a security boundary. It builds the brief the
+    /// same way /delegate does (reads the contract from the issue, parses
+    /// Границы, applies QueenLocalisation narrowing) but prints it instead of
+    /// opening a worker. It shows what would be sent; it does not promise that
+    /// nothing will be.
+    private func previewBrief(for issue: IssueReference) async {
+        // Sentinel before the first await: fetchIssueBody is the long window
+        // (network) in which a regressed preview could quietly register a
+        // task or queue an inbox delegation, so the before-picture is taken
+        // before any of that can run.
+        let sentinelBefore = briefSentinelNow()
+        guard let body = await fetchIssueBody(issue) else {
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "Cannot read \(issue.slug) to preview the brief."
+            )
+            await briefPreviewTouchedNothingCheck(
+                issue: issue, before: sentinelBefore
+            )
+            return
+        }
+        let criteria = QueenTaskSpec.criteriaFromIssue(body: body)
+        let paths = ChatViewModel.boundaryPaths(from: body) ?? []
+        let task = DelegatedTask(
+            issue: issue,
+            title: "Brief preview for \(issue.slug)",
+            worker: "(preview)",
+            ownedPaths: paths,
+            acceptanceCriteria: criteria
+        )
+        // Narrow large files exactly as delegation does — the shared
+        // function guarantees identical hints and identical logging.
+        let narrowedHints = ChatViewModel.narrowedHints(
+            for: paths, from: body, issueSlug: issue.slug
+        )
+        let brief = QueenBriefing.text(for: task)
+            + (narrowedHints.isEmpty ? "" : "\n" + narrowedHints.joined(separator: "\n"))
+        await appendSystemMessageToQueenChat(brief)
+        // The text itself rides in the event, not just its length: a probe
+        // that can only count characters cannot tell a printed range from a
+        // missing one (the #1170 trap this closes — "log the answer, not the
+        // counters"). Preview briefs carry no skill body, so this stays
+        // about a kilobyte. `narrowed` repeats the hints as their own field
+        // so the range is greppable without parsing the brief text.
+        TriosLogBus.shared.info(
+            .queen, "queen.brief.preview",
+            "Brief preview for \(issue.slug) (\(brief.count) chars)",
+            [
+                "issue": issue.slug,
+                "length": String(brief.count),
+                "brief": brief,
+                "narrowed": narrowedHints.joined(separator: " | "),
+            ]
+        )
+        await briefPreviewTouchedNothingCheck(
+            issue: issue, before: sentinelBefore
+        )
+    }
+
+    /// #1170, criterion 4: the check that breaks when `/brief` starts creating
+    /// tasks — whatever route the regression takes. A sentinel (registry task
+    /// IDs + supervisor-inbox fingerprint) is taken before the preview does
+    /// anything, compared right after it is done, and re-compared through a
+    /// six-second window — one inbox-poller beat plus margin — because the
+    /// two realistic shapes of "the preview started delegating" are invisible
+    /// to a synchronous snapshot:
+    ///
+    /// * a fire-and-forget `Task { delegateIssueToWorker(…) }` registers the
+    ///   task milliseconds *after* the preview returns;
+    /// * an inbox line queued via `enqueueQueenInboxEntry` waits for the 5 s
+    ///   poller before the registry ever sees it.
+    ///
+    /// No divergence → the positive events `queen.brief.preview.clean` (sync)
+    /// and `queen.brief.preview.settled` (window closed still clean).
+    /// Positive on purpose: a guard that only speaks on failure cannot be
+    /// told apart from a guard that was deleted, so every honest run says so
+    /// in the journal and a probe can assert on the events.
+    ///
+    /// Divergence attributable to the preview — a task for the previewed
+    /// issue, a task carrying the preview's own "(preview)" worker, or any
+    /// change to the inbox file — → `queen.brief.preview.violated`, error
+    /// level, plus a failure notice in the Queen's chat: the preview became a
+    /// delegation and must not pass as an ordinary print. The `reason` and
+    /// `phase` attrs name which route and which observation caught it.
+    ///
+    /// New tasks for *other* issues remain ambiguous from inside — a real
+    /// concurrent delegation can land in the fetch window — and are reported
+    /// as `queen.brief.preview.registry.grew` naming what appeared, rather
+    /// than accused; a human reading the notice can.
+    private func briefPreviewTouchedNothingCheck(
+        issue: IssueReference,
+        before: BriefPreviewSentinel
+    ) async {
+        let sync = briefSentinelNow()
+        if await reportBriefPreviewDivergence(
+            issue: issue, before: before, after: sync, phase: "sync"
+        ) { return }
+        TriosLogBus.shared.info(
+            .queen, "queen.brief.preview.clean",
+            "`/brief` touched nothing: registry \(before.taskIDs.count)→"
+                + "\(sync.taskIDs.count) task(s), inbox unchanged",
+            [
+                "issue": issue.slug,
+                "tasks_before": String(before.taskIDs.count),
+                "tasks_after": String(sync.taskIDs.count),
+                "inbox": sync.inboxFingerprint,
+            ]
+        )
+        Self.noteBriefPreview(.clean)
+        // The late watch. Same sentinel, asked again every 250 ms for 6 s.
+        Task { [weak self] in
+            guard let self else { return }
+            for _ in 0..<24 {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                if Task.isCancelled { return }
+                let now = self.briefSentinelNow()
+                if await self.reportBriefPreviewDivergence(
+                    issue: issue, before: before, after: now, phase: "late"
+                ) { return }
+            }
+            TriosLogBus.shared.info(
+                .queen, "queen.brief.preview.settled",
+                "`/brief` stayed clean through the delegation window (6 s)",
+                ["issue": issue.slug]
+            )
+            Self.noteBriefPreview(.settled)
+        }
+    }
+
+    /// Reports the difference between two sentinels. Returns true when the
+    /// question is settled — a violation, or an unattributable registry
+    /// growth — and false when nothing has diverged yet, so the caller knows
+    /// whether to keep watching. The inbox is compared first: queueing an
+    /// entry is the *earliest* outward act a delegation makes, and catching
+    /// it there names the route even if the registry write never follows
+    /// (refused by a slot limit, say — the preview still queued work, and
+    /// that is already the criterion-4 breach).
+    private func reportBriefPreviewDivergence(
+        issue: IssueReference,
+        before: BriefPreviewSentinel,
+        after: BriefPreviewSentinel,
+        phase: String
+    ) async -> Bool {
+        if before.inboxFingerprint != after.inboxFingerprint {
+            TriosLogBus.shared.error(
+                .queen, "queen.brief.preview.violated",
+                "`/brief` posted to the supervisor inbox while previewing "
+                    + "\(issue.slug). A preview builds and prints; it never "
+                    + "queues work (#1170)",
+                [
+                    "issue": issue.slug,
+                    "reason": "inbox-posted",
+                    "phase": phase,
+                    "inbox_before": before.inboxFingerprint,
+                    "inbox_after": after.inboxFingerprint,
+                ]
+            )
+            await postQueenNotice(
+                SystemNoticeClassifier.failureMarker
+                    + "`/brief` posted to the supervisor inbox while previewing "
+                    + "\(issue.slug). A preview builds and prints; it never "
+                    + "queues work (#1170)."
+            )
+            Self.noteBriefPreview(
+                .violated(
+                    reason: "inbox-posted",
+                    phase: phase,
+                    attribution: "same-issue",
+                    named: "inbox \(before.inboxFingerprint)→\(after.inboxFingerprint)"
+                )
+            )
+            return true
+        }
+        let added = delegationRegistry.tasks.filter { !before.taskIDs.contains($0.id) }
+        guard !added.isEmpty else { return false }
+        let named = added
+            .map { "\($0.issue.slug) → \($0.worker) (\($0.title))" }
+            .joined(separator: "; ")
+        // Any growth is a violation (#1170, criterion 4) — including tasks
+        // for *other* issues. The first review of this change refuted a
+        // version that downgraded those to a warning: a regressed `/brief`
+        // that registers some other issue's task would then pass as an
+        // ordinary print, and the criterion says the check must break when
+        // `/brief` starts creating tasks, not when it creates the expected
+        // task. From inside, a concurrent real delegation landing in the
+        // window is indistinguishable from the preview doing this, so the
+        // attribution names that ambiguity honestly instead of resolving it
+        // silently — a rare false accusation costs a look; a missed
+        // regression costs a silently-started worker.
+        let attribution = added.contains { $0.issue == issue || $0.worker == "(preview)" }
+            ? "same-issue"
+            : "other-issue"
+        TriosLogBus.shared.error(
+            .queen, "queen.brief.preview.violated",
+            "`/brief` found \(added.count) task(s) registered around its preview of "
+                + "\(issue.slug): \(named). A preview builds and prints; it never "
+                + "delegates (#1170)"
+                + (attribution == "other-issue"
+                    ? ". Either a concurrent delegation landed in the window, or "
+                        + "the preview did this — if nothing else was delegating "
+                        + "just now, it was the preview."
+                    : ""),
+            [
+                "issue": issue.slug,
+                "reason": "registry-created",
+                "phase": phase,
+                "attribution": attribution,
+                "added": String(added.count),
+                "workers": added.map(\.worker).joined(separator: " | "),
+            ]
+        )
+        await postQueenNotice(
+            SystemNoticeClassifier.failureMarker
+                + "`/brief` found a task registered around its preview of "
+                + "\(issue.slug): \(named). A preview builds and prints; it never "
+                + "delegates (#1170)"
+                + (attribution == "other-issue"
+                    ? " — if nothing else was delegating just now, the preview "
+                        + "created this."
+                    : ".")
+        )
+        Self.noteBriefPreview(
+            .violated(
+                reason: "registry-created",
+                phase: phase,
+                attribution: attribution,
+                named: named
+            )
+        )
+        return true
+    }
+
+    /// What the #1170 drill (`TRIOS_E2E_DRILL_1170=1`, test variant only)
+    /// observes from the live `/brief` path. The sink is set only while the
+    /// drill runs; a normal launch leaves it nil and pays nothing. It exists
+    /// so the drill can assert on the check's own verdicts through the real
+    /// code path — a guard whose firing is only ever narrated, never
+    /// observed, is a claim (#1132's rule, applied here).
+    enum BriefPreviewObservation: Equatable {
+        case clean
+        case settled
+        case violated(reason: String, phase: String, attribution: String, named: String)
+    }
+
+    /// Set by the #1170 drill; every verdict the check emits is also handed
+    /// here. Static because the drill drives an already-constructed view
+    /// model and needs to observe without touching the chat.
+    nonisolated(unsafe) static var briefPreviewObservationSink:
+        (@Sendable (BriefPreviewObservation) -> Void)?
+
+    /// Forwards an observation to the drill's sink when one is installed.
+    /// The sink is on the hot path of every `/brief` verdict, so it must
+    /// never do more than record: no logging, no awaiting, no throwing.
+    nonisolated private static func noteBriefPreview(
+        _ observation: BriefPreviewObservation
+    ) {
+        briefPreviewObservationSink?(observation)
+    }
+
+    /// Everything a delegation must touch, observed in one shot: the
+    /// registry's task IDs and a fingerprint of the supervisor inbox.
+    /// `/brief` must change neither (#1170, criterion 4).
+    private struct BriefPreviewSentinel {
+        let taskIDs: Set<UUID>
+        let inboxFingerprint: String
+    }
+
+    /// One observation of the sentinel. The registry is the shared
+    /// `delegationRegistry` every real delegation writes; the inbox is the
+    /// file `enqueueQueenInboxEntry` appends to before the poller picks the
+    /// entry up. The fingerprint reuses `inboxLineFingerprint` — a SHA-256
+    /// over the bytes — so a one-line append is a different value while an
+    /// untouched file (absent, empty, or unchanged) is stable.
+    private func briefSentinelNow() -> BriefPreviewSentinel {
+        let ids = Set(delegationRegistry.tasks.map(\.id))
+        var fingerprint = "absent"
+        if let data = FileManager.default.contents(atPath: Self.queenInboxPath),
+           let text = String(data: data, encoding: .utf8) {
+            fingerprint = text.isEmpty ? "empty" : ChatViewModel.inboxLineFingerprint(text)
+        }
+        return BriefPreviewSentinel(taskIDs: ids, inboxFingerprint: fingerprint)
     }
 
     /// Narrows each boundary path to the region the issue mentions, returning
@@ -3966,6 +4253,33 @@ final class ChatViewModel: ObservableObject {
             let lineCount = source.components(separatedBy: "\n").count
                 - (source.hasSuffix("\n") ? 1 : 0)
             guard lineCount > QueenLocalisation.maxRegionWidth else { continue }
+            // #1170: an issue may state the range outright — «Читать только
+            // строки 3085-3110 в `rings/SR-02/ChatViewModel.swift`». The
+            // author's explicit instruction outranks every heuristic:
+            // QueenLocalisation guesses from identifiers and stays silent
+            // when none of its rules answer, which for this very issue left
+            // an 11 000-line boundary unnarrowed (measured: region → nil).
+            // A stated range is not a guess, so it is honoured first —
+            // clamped to the file, and only while the file is actually
+            // large, which the guard above has already established.
+            if let stated = ChatViewModel.rangeStatedInIssue(
+                issueBody, for: path, lineCount: lineCount
+            ) {
+                hints.append(
+                    "В \(path) читай только строки \(stated.lowerBound)-\(stated.upperBound)."
+                )
+                TriosLogBus.shared.info(
+                    .queen, "queen.brief.narrowed",
+                    "Narrowed \(path) to lines \(stated.lowerBound)-\(stated.upperBound) (range stated in the issue)",
+                    [
+                        "issue": issueSlug,
+                        "file": path,
+                        "range": "\(stated.lowerBound)-\(stated.upperBound)",
+                        "matched": "issue-stated",
+                    ]
+                )
+                continue
+            }
             // Before asking QueenLocalisation to narrow, record what we are
             // about to search for and where. Without this log, silence from
             // region(in:mentioning:) is indistinguishable from "never tried"
@@ -4017,9 +4331,484 @@ final class ChatViewModel: ObservableObject {
                         "identifiers": identifiers.joined(separator: " | "),
                     ]
                 )
+                // #1170, criterion 2: the file is already known to be large
+                // (the guard above), so the printed brief must still carry a
+                // line range even when nothing narrows — the first review
+                // refuted exactly this hole: a stated range in an unexpected
+                // spelling fell through, region() stayed silent, and the
+                // brief printed with no range at all. The honest fallback is
+                // the whole file, stated as a range: it is truthful (the
+                // worker really must read all of it), it names the size, and
+                // it does not invent the confident-but-wrong window that
+                // #1175 forbids. A small file never reaches here.
+                hints.append(
+                    "В \(path) читай только строки 1-\(lineCount) — весь файл "
+                        + "(\(lineCount) строк); сужение не нашлось."
+                )
+                TriosLogBus.shared.info(
+                    .queen, "queen.brief.narrowed",
+                    "Narrowed \(path) to lines 1-\(lineCount) (whole file; no rule answered)",
+                    [
+                        "issue": issueSlug,
+                        "file": path,
+                        "range": "1-\(lineCount)",
+                        "matched": "whole-file",
+                    ]
+                )
             }
         }
         return hints
+    }
+
+    /// #1170: the line range an issue states for one boundary file, when it
+    /// states one. The accepted grammar is deliberately wide — Russian and
+    /// English, any case, keyword and separator variants — because the first
+    /// review of this change refuted a version that accepted only two exact
+    /// spellings («строки 3085-3110» / "lines 3085-3110"): a large file whose
+    /// author wrote «в строках 3085-3110», «диапазон 3085-3110»,
+    /// "lines 3085 to 3110", «строки с 3085 по 3110» or a repo-prefixed
+    /// `trios/rings/...` fell through to the heuristics and printed no range
+    /// at all. Accepted now: keywords `строк*`, `диапазон*`, `lines?`,
+    /// `ranges?` (word-bounded, case-insensitive); separators `-` `–` `—`
+    /// `..` `…` and the words `to`, `по`, `до`, `through`; an optional «с»
+    /// before the first number. The range is adopted only when this path is
+    /// the *nearest* path-shaped mention to it — matched by full path, file
+    /// name, or a mention that ends with `/<full path>` (a repo-rooted
+    /// spelling of the same file) — so a range stated for a different file in
+    /// the same sentence is never handed over. Returns nil when the issue
+    /// states no such range. Clamps the upper bound to the file's real line
+    /// count and refuses a range that starts past the end, so a number
+    /// written against an older, longer version of the file cannot point
+    /// into nothing. When this returns nil the caller still guarantees a
+    /// range for large files — the whole-file fallback — so no spelling gap
+    /// can leave a large boundary file unnarrowed.
+    private static func rangeStatedInIssue(
+        _ body: String,
+        for path: String,
+        lineCount: Int
+    ) -> ClosedRange<Int>? {
+        let fileName = (path as NSString).lastPathComponent
+        guard let regex = try? NSRegularExpression(
+            pattern: "(?<![\\p{L}\\p{N}])(?:строк[а-яё]*|диапазон[а-яё]*|lines?|ranges?)"
+                + "(?![\\p{L}])\\s+(?:с\\s+)?(\\d{1,5})"
+                + "(?:\\s*(?:[-–—]|\\.\\.|…)\\s*|\\s+(?:to|по|до|through)\\s+)"
+                + "(\\d{1,5})",
+            options: [.caseInsensitive]
+        ) else { return nil }
+        let nsBody = body as NSString
+        let matches = regex.matches(
+            in: body, range: NSRange(location: 0, length: nsBody.length)
+        )
+        for match in matches {
+            // The path and the range usually share a sentence; 160 chars
+            // before and 480 after covers «строки X-Y в `path`», «`path`,
+            // строки X-Y» and "Read only lines X-Y, near …, in `path`".
+            let windowStart = max(0, match.range.location - 160)
+            let windowLength = min(
+                nsBody.length - windowStart,
+                match.range.length + 480
+            )
+            let window = NSRange(location: windowStart, length: windowLength)
+            // Nearest path-shaped mention: backtick spans and bare tokens
+            // containing a slash. The range belongs to this path only if
+            // that nearest mention *is* this path (full path or file name).
+            guard let nearest = ChatViewModel.nearestPathMention(
+                in: nsBody,
+                window: window,
+                anchor: match.range.location - windowStart
+            ), nearest == path || nearest == fileName
+                || nearest.hasSuffix("/" + path)
+            else { continue }
+            guard let lo = Int(nsBody.substring(with: match.range(at: 1))),
+                  let hi = Int(nsBody.substring(with: match.range(at: 2))),
+                  lo >= 1, hi >= lo
+            else { continue }
+            let upper = min(hi, lineCount)
+            guard lo <= upper else { return nil }
+            return lo...upper
+        }
+        return nil
+    }
+
+    /// The path-shaped mention closest to `anchor` (an offset into `window`),
+    /// among backtick spans and slash-containing tokens found in `window`.
+    /// Distance is the character gap between the mention and the anchor; a
+    /// mention covering the anchor counts as zero. Returns the cleaned token
+    /// (backticks and prose punctuation stripped), not its position.
+    private static func nearestPathMention(
+        in body: NSString,
+        window: NSRange,
+        anchor: Int
+    ) -> String? {
+        let windowText = body.substring(with: window)
+        let windowNS = windowText as NSString
+        var candidates: [(text: String, gap: Int)] = []
+        let spanPatterns = ["`([^`]+)`", "\\S+/\\S*"]
+        for pattern in spanPatterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            regex.enumerateMatches(
+                in: windowText, range: NSRange(location: 0, length: windowNS.length)
+            ) { match, _, _ in
+                guard let match else { return }
+                let captured = match.range.length == 0
+                    ? match.range
+                    : NSRange(
+                        location: match.range.location + 1,
+                        length: match.range.length - 2
+                    )
+                guard captured.length > 0,
+                      captured.location >= 0,
+                      captured.location + captured.length <= windowNS.length
+                else { return }
+                let raw = windowNS.substring(with: captured)
+                let cleaned = raw.trimmingCharacters(
+                    in: CharacterSet(charactersIn: "`.,;:!?\"'()")
+                )
+                guard cleaned.contains("/") || cleaned.contains(".") else { return }
+                let mentionStart = captured.location
+                let mentionEnd = captured.location + captured.length
+                let gap = mentionStart >= anchor
+                    ? mentionStart - anchor
+                    : (mentionEnd <= anchor ? anchor - mentionEnd : 0)
+                candidates.append((cleaned, gap))
+            }
+        }
+        return candidates.min(by: { $0.gap < $1.gap })?.text
+    }
+
+    // MARK: - #1170 drill
+
+    /// Collects what the `/brief` check emits while the drill drives it.
+    /// An actor because the sink closure is `@Sendable` and the drill awaits
+    /// on its contents with timeouts.
+    private actor BriefDrillObservations {
+        private var items: [BriefPreviewObservation] = []
+
+        func record(_ observation: BriefPreviewObservation) {
+            items.append(observation)
+        }
+
+        func snapshot() -> [BriefPreviewObservation] { items }
+
+        /// True once an observation matching the predicate has arrived,
+        /// polling at 100 ms until the timeout — the violated verdicts the
+        /// drill waits for arrive from the late-watch task, up to seconds
+        /// after the act that causes them.
+        func waitFor(
+            timeout seconds: TimeInterval,
+            matching predicate: @Sendable (BriefPreviewObservation) -> Bool
+        ) async -> Bool {
+            let deadline = Date().addingTimeInterval(seconds)
+            while Date() < deadline {
+                if items.contains(where: predicate) { return true }
+                try? await Task.sleep(nanoseconds: 100_000_000)
+            }
+            return items.contains(where: predicate)
+        }
+    }
+
+    /// The #1170 drill — the automated check for criterion 4, shaped exactly
+    /// like the #1132 drill the reviewer accepted: drive the shipped code
+    /// path, deliberately cause the condition the guard exists to catch,
+    /// expect it to fire, and record every arm's verdict in the journal.
+    ///
+    /// The guard under test is `briefPreviewTouchedNothingCheck`: `/brief`
+    /// must build and print an assignment without registering a task or
+    /// queueing inbox work, and the guard must *break* — error event, red
+    /// notice — the moment that stops being true. The first review of this
+    /// change refuted a version where a task for another issue was only
+    /// warned about and where nothing automated exercised any of it; both
+    /// refutations are answered here, arm by arm:
+    ///
+    /// 1. **clean** — a preview of a fresh issue must emit `clean` and
+    ///    `settled` and no `violated`: the honest run says so, so a deleted
+    ///    guard cannot pass as a quiet one.
+    /// 2. **same-issue late** — a real task for the previewed issue,
+    ///    registered through the real `delegate(...)` API one second after
+    ///    the preview returns (the fire-and-forget shape), must fire
+    ///    `violated` (registry-created, same-issue, late).
+    /// 3. **other-issue late** — the same, for a *different* issue: the
+    ///    arm the downgraded warning missed. Must fire `violated`
+    ///    (registry-created, other-issue, late).
+    /// 4. **inbox** — a real inbox line queued through
+    ///    `enqueueQueenInboxEntry` during the window (the poller path the
+    ///    registry never sees until seconds later) must fire `violated`
+    ///    (inbox-posted). The poller is cancelled around this arm so the
+    ///    drill's line is never picked up, and the inbox file's bytes are
+    ///    restored afterwards.
+    /// 5. **ranges** — criterion 2's automated side, pure and deterministic:
+    ///    the real #1170 boundary text plus every spelling the first review
+    ///    refuted («в строках», «диапазон», "lines … to …", a repo-prefixed
+    ///    path) must each yield the stated range, and a body with no
+    ///    derivable range must still yield the whole-file range — run
+    ///    against the real 11 000-line file on disk.
+    ///
+    /// Every arm logs `queen.drill.1170.<arm>.passed|failed`; the drill
+    /// ends with `queen.drill.1170.verdict`. Test variant only — the drill
+    /// writes real registry tasks and an inbox line, so it refuses to run
+    /// where that state is anything but scratch. The planted tasks remain
+    /// in the scratch registry (there is no public removal API); each run
+    /// plants under time-derived issue numbers, so re-runs never collide
+    /// with the one-task-per-issue rule.
+    ///
+    /// **Run record (this tree, queen/1170-r2)** — test variant, journal
+    /// `.trinity-test/logs/trios-app.jsonl`. The r1 lineage's run record
+    /// describes r1's tree, not this one; a record is only evidence for the
+    /// tree it was driven on, so it was replaced rather than inherited. The
+    /// same discipline applies to every entry below: each mutation
+    /// physically applied to the source, rebuilt, run, reverted, and the
+    /// revert checksum-verified against the pre-mutation hash before the
+    /// next step. Entries are appended as each run completes.
+    private func runBriefPreviewDrill() async {
+        guard ProjectPaths.variant == .test else {
+            TriosLogBus.shared.error(
+                .queen, "queen.drill.1170.refused",
+                "The #1170 drill registers real tasks and inbox lines; "
+                    + "it runs only in the test variant, not "
+                    + ProjectPaths.variant.rawValue,
+                [:]
+            )
+            return
+        }
+        TriosLogBus.shared.info(
+            .queen, "queen.drill.1170.start",
+            "Starting the /brief preview drill", [:]
+        )
+        // Time-derived fake issue numbers: distinct per arm and per run, so
+        // the one-task-per-issue guard never refuses a plant made by an
+        // earlier arm or an earlier drill run.
+        let stamp = Int(Date().timeIntervalSince1970) % 800_000
+        func fakeIssue(_ offset: Int) -> IssueReference {
+            IssueReference(owner: "gHashTag", repo: "trios", number: 9_117_000 + stamp + offset)
+        }
+        func plant(_ issue: IssueReference, title: String) {
+            _ = delegationRegistry.delegate(
+                issue: issue,
+                title: title,
+                worker: "queen-drill",
+                conversationId: UUID()
+            )
+        }
+        var passed = 0
+        var failed = 0
+        func arm(_ name: String, ok: Bool, _ detail: String) {
+            if ok { passed += 1 } else { failed += 1 }
+            TriosLogBus.shared.info(
+                .queen, "queen.drill.1170.\(name).\(ok ? "passed" : "failed")",
+                detail, [:]
+            )
+        }
+        func violatedMatcher(
+            reason: String, attribution: String? = nil
+        ) -> @Sendable (BriefPreviewObservation) -> Bool {
+            { observation in
+                if case .violated(let r, _, let a, _) = observation {
+                    return r == reason && (attribution == nil || a == attribution)
+                }
+                return false
+            }
+        }
+        let isViolated: @Sendable (BriefPreviewObservation) -> Bool = { observation in
+            if case .violated = observation { return true }
+            return false
+        }
+
+        // ---- Arm 1: the honest run says so, and stays quiet -----------------
+        let cleanObs = BriefDrillObservations()
+        ChatViewModel.briefPreviewObservationSink = { observation in
+            Task { await cleanObs.record(observation) }
+        }
+        await previewBrief(for: fakeIssue(1))
+        let cleanSeen = await cleanObs.waitFor(timeout: 3) { $0 == .clean }
+        let settledSeen = await cleanObs.waitFor(timeout: 9) { $0 == .settled }
+        let cleanStayedQuiet = await cleanObs.waitFor(timeout: 0.5, matching: isViolated) == false
+        arm(
+            "clean",
+            ok: cleanSeen && settledSeen && cleanStayedQuiet,
+            "clean=\(cleanSeen), settled=\(settledSeen), no violation=\(cleanStayedQuiet)"
+        )
+        ChatViewModel.briefPreviewObservationSink = nil
+
+        // ---- Arm 2: a same-issue task lands in the window ------------------
+        let sameObs = BriefDrillObservations()
+        ChatViewModel.briefPreviewObservationSink = { observation in
+            Task { await sameObs.record(observation) }
+        }
+        let sameIssue = fakeIssue(2)
+        await previewBrief(for: sameIssue)
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        plant(sameIssue, title: "Drill plant: same issue during the window")
+        let sameCaught = await sameObs.waitFor(
+            timeout: 10, matching: violatedMatcher(reason: "registry-created", attribution: "same-issue")
+        )
+        arm(
+            "same_issue_late",
+            ok: sameCaught,
+            "registry task for the previewed issue during the window -> "
+                + "violated(registry-created, same-issue, late)=\(sameCaught)"
+        )
+        ChatViewModel.briefPreviewObservationSink = nil
+
+        // ---- Arm 3: an *other*-issue task lands in the window --------------
+        let otherObs = BriefDrillObservations()
+        ChatViewModel.briefPreviewObservationSink = { observation in
+            Task { await otherObs.record(observation) }
+        }
+        await previewBrief(for: fakeIssue(3))
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        plant(fakeIssue(4), title: "Drill plant: another issue during the window")
+        let otherCaught = await otherObs.waitFor(
+            timeout: 10, matching: violatedMatcher(reason: "registry-created", attribution: "other-issue")
+        )
+        arm(
+            "other_issue_late",
+            ok: otherCaught,
+            "registry task for ANOTHER issue during the window -> "
+                + "violated(registry-created, other-issue, late)=\(otherCaught)"
+        )
+        ChatViewModel.briefPreviewObservationSink = nil
+
+        // ---- Arm 4: an inbox line lands in the window ----------------------
+        queenInboxPollTask?.cancel()
+        let inboxBefore = FileManager.default.contents(atPath: Self.queenInboxPath)
+        let inboxObs = BriefDrillObservations()
+        ChatViewModel.briefPreviewObservationSink = { observation in
+            Task { await inboxObs.record(observation) }
+        }
+        await previewBrief(for: fakeIssue(5))
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        _ = await enqueueQueenInboxEntry(
+            issue: "gHashTag/trios#\(9_117_000 + stamp + 6)",
+            worker: "queen-drill",
+            title: "Drill inbox plant",
+            paths: nil,
+            skill: nil,
+            criteria: nil
+        )
+        let inboxCaught = await inboxObs.waitFor(
+            timeout: 10, matching: violatedMatcher(reason: "inbox-posted")
+        )
+        arm(
+            "inbox_late",
+            ok: inboxCaught,
+            "inbox line queued during the window -> "
+                + "violated(inbox-posted, late)=\(inboxCaught)"
+        )
+        ChatViewModel.briefPreviewObservationSink = nil
+        // The poller is cancelled and the drill's line stays in the scratch
+        // root; restore the file anyway so the fingerprint the next run
+        // starts from is the one this run started from.
+        if let inboxBefore {
+            try? inboxBefore.write(to: URL(fileURLWithPath: Self.queenInboxPath))
+        } else {
+            try? FileManager.default.removeItem(atPath: Self.queenInboxPath)
+        }
+
+        // ---- Arm 5: the printed ranges, pure and deterministic -------------
+        let boundaryPath = "rings/SR-02/ChatViewModel.swift"
+        let realFileURL = URL(fileURLWithPath: ProjectPaths.root + "/" + boundaryPath)
+        let realLineCount: Int
+        if let source = try? String(contentsOf: realFileURL, encoding: .utf8) {
+            realLineCount = source.components(separatedBy: "\n").count
+                - (source.hasSuffix("\n") ? 1 : 0)
+        } else {
+            realLineCount = 0
+        }
+        func rangeInHints(_ body: String) -> String? {
+            let hints = ChatViewModel.narrowedHints(
+                for: [boundaryPath], from: body, issueSlug: "gHashTag/trios#drill"
+            )
+            guard let hint = hints.first else { return nil }
+            guard let regex = try? NSRegularExpression(pattern: "строки (\\d+)-(\\d+)") else { return nil }
+            let ns = hint as NSString
+            guard let match = regex.firstMatch(
+                in: hint, range: NSRange(location: 0, length: ns.length)
+            ) else { return nil }
+            return ns.substring(with: match.range)
+        }
+        let rangeCases: [(String, String, String?)] = [
+            (
+                "real_1170_body",
+                "## Что сделать\n\nЧитать только строки 3085-3110 в `rings/SR-02/ChatViewModel.swift` — рядом с `case .choose`.",
+                "строки 3085-3110"
+            ),
+            (
+                "v_strokakh",
+                "Правки только в строках 3085-3110 файла `rings/SR-02/ChatViewModel.swift`.",
+                "строки 3085-3110"
+            ),
+            (
+                "v_diapazon",
+                "Диапазон 3085-3110 относится к `rings/SR-02/ChatViewModel.swift`.",
+                "строки 3085-3110"
+            ),
+            (
+                "en_to",
+                "Read only lines 3085 to 3110 in `rings/SR-02/ChatViewModel.swift`.",
+                "строки 3085-3110"
+            ),
+            (
+                "repo_prefixed",
+                "Читать только строки 3085-3110 в `trios/rings/SR-02/ChatViewModel.swift`.",
+                "строки 3085-3110"
+            ),
+            (
+                "no_range_whole_file",
+                // No path mention, no range grammar: the only identifier is
+                // absent from the file, so neither the stated-range parser
+                // nor QueenLocalisation can answer — the whole-file fallback
+                // is the only thing that can print a range here. Two drafts
+                // of this arm failed against the file itself before this
+                // one: naming the path in a Границы section made the file
+                // stem an identifier (rule 1 answered with the class
+                // declaration), and a fixed synthetic token appeared verbatim
+                // in this drill's own source string, so rule 4 ("mentioned
+                // exactly once") answered with the drill function's body.
+                // The token is therefore randomised per run — it cannot have
+                // existed when the file was compiled.
+                "Задание про `Zzqquux\(stamp)Probe` и его поведение.",
+                realLineCount > 0 ? "строки 1-\(realLineCount)" : nil
+            ),
+        ]
+        for (name, body, expected) in rangeCases {
+            let got = rangeInHints(body)
+            arm(
+                "range_\(name)",
+                ok: got == expected,
+                "expected \(expected ?? "nil"), printed \(got ?? "nil")"
+            )
+        }
+        // The criterion-2 invariant itself, stated as an assertion rather
+        // than a spelling: whatever a large boundary file's issue says — a
+        // range in a grammar nobody anticipated included — the printed hint
+        // must carry a line range. «фрагмент 3085:3110» is outside the
+        // accepted grammar on purpose (a colon separator), so this body can
+        // land on the class-declaration region or on the whole-file
+        // fallback; both are legitimate answers, silence is not.
+        let unknownSpelling = rangeInHints(
+            "## Что сделать\n\nЧитать фрагмент 3085:3110 в `rings/SR-02/ChatViewModel.swift` — рядом с `case .choose`.\n\n## Границы\n\n`rings/SR-02/ChatViewModel.swift`"
+        )
+        arm(
+            "range_unknown_spelling_still_ranged",
+            ok: unknownSpelling != nil,
+            "unknown spelling still printed a range: \(unknownSpelling ?? "nil")"
+        )
+
+        // ---- Verdict --------------------------------------------------------
+        if failed == 0 {
+            TriosLogBus.shared.info(
+                .queen, "queen.drill.1170.verdict",
+                "Brief preview drill: \(passed) passed, \(failed) failed",
+                ["passed": String(passed), "failed": String(failed)]
+            )
+        } else {
+            TriosLogBus.shared.error(
+                .queen, "queen.drill.1170.verdict",
+                "Brief preview drill: \(passed) passed, \(failed) failed",
+                ["passed": String(passed), "failed": String(failed)]
+            )
+        }
+        ChatViewModel.briefPreviewObservationSink = nil
     }
 
     private func listQueenAgents() async {
