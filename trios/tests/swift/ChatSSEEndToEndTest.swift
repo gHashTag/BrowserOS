@@ -3298,6 +3298,31 @@ struct ChatSSEEndToEndTests {
         } else {
             fail("unchecked cannot be recorded by hand - it is the absence of an answer")
         }
+
+        // #1169: there was no way to ask the app anything without starting a
+        // bee. `/brief` is that way, and until now nothing here would notice
+        // if its parsing were removed - the command existed, and the check
+        // that breaks when it stops existing did not.
+        guard case .brief(let briefIssue) =
+            QueenCommandParser.parse("/brief gHashTag/trios#1165")
+        else {
+            fail("/brief did not parse into a brief")
+            return
+        }
+        check(
+            briefIssue.slug == "gHashTag/trios#1165",
+            "/brief carries the issue it was asked about (#1169)"
+        )
+        if case .unknown = QueenCommandParser.parse("/brief not-an-issue") {
+            check(true, "garbage after /brief is refused rather than answered with silence")
+        } else {
+            fail("garbage after /brief is refused rather than answered with silence")
+        }
+        if case .unknown = QueenCommandParser.parse("/brief") {
+            check(true, "and /brief with no argument is refused too - there is nothing to preview")
+        } else {
+            fail("and /brief with no argument is refused too - there is nothing to preview")
+        }
     }
 
     static func runDelegationAcceptsCriteria() async {
