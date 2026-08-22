@@ -768,7 +768,13 @@ enum QueenDelegationPolicy {
     /// `boundaryTouchedAt` nil means no owned file has changed since the
     /// turn began, so the drift clock runs from the turn start. The
     /// threshold is deliberately far above any legitimate thinking pause.
-    static let driftThreshold: TimeInterval = 75 * 60
+    ///
+    /// Calibrated UP from 75 minutes on 2026-08-22, the day it was born: a
+    /// legitimate #1170 turn streamed 73 minutes with its boundary untouched
+    /// and then committed real work in the final minutes - two minutes from
+    /// a false kill. The drifts this exists for ran 150+ minutes; 105 keeps
+    /// them dead and clears the measured legitimate shape with a margin.
+    static let driftThreshold: TimeInterval = 105 * 60
 
     static func isDrifting(
         _ task: DelegatedTask,

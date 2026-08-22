@@ -8706,8 +8706,8 @@ struct ChatSSEEndToEndTests {
         let t0 = Date(timeIntervalSince1970: 1_000_000)
         drifting.streamOpenedAt = t0
         drifting.streamOutcome = .open
-        drifting.lastStreamByteAt = t0.addingTimeInterval(76 * 60)
-        let now = t0.addingTimeInterval(76 * 60)
+        drifting.lastStreamByteAt = t0.addingTimeInterval(106 * 60)
+        let now = t0.addingTimeInterval(106 * 60)
         check(
             QueenDelegationPolicy.isDrifting(drifting, boundaryTouchedAt: nil, now: now),
             "a stream-alive worker past the threshold with an untouched boundary drifts"
@@ -8721,9 +8721,9 @@ struct ChatSSEEndToEndTests {
         check(
             !QueenDelegationPolicy.isDrifting(
                 drifting, boundaryTouchedAt: nil,
-                now: t0.addingTimeInterval(30 * 60)
+                now: t0.addingTimeInterval(80 * 60)
             ),
-            "a young turn is thinking, not drifting - the threshold protects it"
+            "a young turn is thinking, not drifting - a measured 73-minute legitimate turn sits under the threshold with margin"
         )
         var deadStream = drifting
         deadStream.streamOutcome = .cut
