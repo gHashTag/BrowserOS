@@ -323,9 +323,53 @@ else
         # printed is the path the real build compiles against; only the
         # side effect differs.
         if [ -z "$TRIOS_PRINT_FLAGS" ]; then
-            swift build --package-path "$QUEEN_PACKAGE_ROOT" --target QueenUILib
+            # The canonical package lives in a checkout another agent shares.
+            # Measured three times on 2026-08-22/23: its QueenUILib build
+            # directory was wiped mid-compile and swift build died on
+            # "unable to load output file map" - somebody else's build, hours
+            # apart, each time failing a gate that had nothing to do with it.
+            #
+            # The repair is NOT to clean their tree: their build may be in
+            # flight, and deleting its artifacts is a worse neighbour than
+            # waiting. This build has its own copy of both halves in
+            # Frameworks-dev/, which is exactly what TRIOS_VENDORED exists
+            # for, so on that one signature it uses them and says so. Any
+            # other build failure is still fatal here, where it can be read.
+            # Not `cmd | tee` in the condition: without pipefail a pipeline
+            # reports TEE's status, so a failed build would read as success.
+            # Redirect, then show the log, then test the build's own code.
+            queen_build_log="$(mktemp -d /tmp/trios_queen_build.XXXXXX)/log"
+            queen_build_ok=1
+            swift build --package-path "$QUEEN_PACKAGE_ROOT" \
+                --target QueenUILib > "$queen_build_log" 2>&1 || queen_build_ok=0
+            cat "$queen_build_log"
+            if [ "$queen_build_ok" -eq 0 ]; then
+                if grep -q "unable to load output file map" "$queen_build_log" \
+                   && [ -f "$STANDALONE_FRAMEWORKS/libQueenUILib.dylib" ] \
+                   && [ -f "$STANDALONE_FRAMEWORKS/Modules/QueenUILib.swiftmodule" ]; then
+                    echo "[NEIGHBOUR] The shared Queen checkout lost its build map"
+                    echo "            mid-compile - that is another agent's build,"
+                    echo "            not this one. Falling back to the vendored"
+                    echo "            halves in Frameworks-dev/ for this build."
+                    QUEEN_FELL_BACK_TO_VENDORED=1
+                fi
+                if [ -z "${QUEEN_FELL_BACK_TO_VENDORED:-}" ]; then
+                    # Any other failure is this build's business and stays
+                    # fatal. `set -e` used to do this; capturing the status to
+                    # inspect it took that away, so it is stated here.
+                    echo "[FAIL] QueenUILib did not build:"
+                    tail -6 "$queen_build_log" | sed 's/^/       | /'
+                    rm -rf "$(dirname "$queen_build_log")"
+                    exit 1
+                fi
+            fi
+            rm -rf "$(dirname "$queen_build_log")"
         fi
-        QUEEN_BIN_DIR="$(swift build --package-path "$QUEEN_PACKAGE_ROOT" --show-bin-path)"
+        if [ -n "${QUEEN_FELL_BACK_TO_VENDORED:-}" ]; then
+            QUEEN_BIN_DIR="$STANDALONE_FRAMEWORKS"
+        else
+            QUEEN_BIN_DIR="$(swift build --package-path "$QUEEN_PACKAGE_ROOT" --show-bin-path)"
+        fi
     fi
     QUEEN_DYLIB="$QUEEN_BIN_DIR/libQueenUILib.dylib"
     # SwiftPM writes the interfaces to a Modules/ subdirectory of the bin dir.
