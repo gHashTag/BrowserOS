@@ -494,6 +494,21 @@ final class QueenBackgroundService: ObservableObject {
     /// thinks deeply less frequently.
     private func startReportLoop() {
         reportLoopTask?.cancel()
+        // Housekeeping once at start, before the loop's first sleep.
+        //
+        // The sweep lives inside `walkRegistryAndReport`, which the loop
+        // reaches only after thirty minutes - so on a machine that is
+        // restarted more often than that, it never runs at all. Measured
+        // 2026-08-23: thirteen records were settled by hand, none of them
+        // received an archive stamp across four relaunches, and the
+        // reconciliation went on calling their parked commits work nobody is
+        // looking at. Every one of those relaunches was mine, which is
+        // exactly the point: housekeeping that depends on nobody touching
+        // the app is housekeeping that stops when the app is being worked on.
+        //
+        // Cheap and idempotent: the stamp is single-shot, so a start with
+        // nothing to archive returns immediately and logs nothing.
+        _ = QueenDelegationRegistry.shared.archiveTerminalTasks()
         reportLoopTask = Task { [weak self, interval = reportingIntervalSeconds] in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
