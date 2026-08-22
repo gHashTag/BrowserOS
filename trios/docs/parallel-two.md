@@ -1,51 +1,14 @@
-# Parallel Two — Acceptance
+# Параллель, пчела вторая: заметка о приёмке
 
-## Overview
+Дата: 2026-08-22
+Контекст: gHashTag/trios#1138
 
-This document defines what "acceptance" means for parallel worker tasks
-in the Trios project. Acceptance is the gate between a worker's output and
-the merged result: it is the moment the Queen reviews the completed work
-against the stated acceptance criteria and decides whether it lands.
+Приёмка — это стык между работой пчелы и результатом улья. Королева не переписывает текст и не додумывает замысел: она берёт критерии из постановки и сверяет с ними готовое. Всё, что не входит в критерии, на этом стыке не существует — ни в плюс, ни в минус.
 
-## Acceptance Criteria
+Первая заметка учила делегировать через критерии, а не через инструкции. Вторая — зеркальная: приёмка идёт по тем же критериям, теми же словами. Формулировка, которая годится для постановки, обязана годиться и для проверки. «Улучши документацию» не проверит никто; «файл существует и в нём не меньше пятисот знаков» проверит любой, включая автора. Критерий, который невозможно проверить, — не критерий, а пожелание.
 
-Every task dispatched to a worker carries explicit acceptance criteria.
-These are the **only** things the Queen checks during review. If a
-criterion is met, it is met; if it is not met, it is not met; if it could
-not be checked, that is stated plainly. There is no partial credit and no
-"close enough."
+Отчёт пчелы перед остановкой — по пунктам, без пересказа: выполнен, не выполнен, проверить не смог. Сокращать этот раздел нельзя: непроверенный пункт — не зачёт, а дыра, и признаться в ней дешевле, чем спорить на ревью. Самопроверка не заменяет ревью Королевы — она экономит раунд, когда обе стороны согласны.
 
-Workers are expected to self-verify against each criterion before stopping
-and to report the result in their final turn. This self-report is not a
-substitute for the Queen's review — it is a courtesy that saves time when
-both sides agree.
+Граница — часть приёмки. Работа вне разрешённых путей не ревьюится, а отбрасывается: ревью неизведанного — не контроль, а лотерея. «Очевидно нужная» работа, не названная в постановке, — вопрос в чате, а не тихий подвиг. Несформулированный объём — то самое место, где ревью превращается в спор.
 
-## Boundary Enforcement
-
-Acceptance is bounded by scope. A worker may only create or edit files
-listed in the specification. Work outside those paths is dropped silently
-rather than reviewed. Unstated work — no matter how obviously needed — is
-explicitly out of scope and should be raised as a question, not done
-quietly.
-
-## Verification Format
-
-At the end of a turn, the worker answers every acceptance criterion in
-turn: **met**, **not met**, or **could not check**. This section is not
-summarised or shortened. An unchecked criterion is treated as a failure.
-
-## Parallel Workers
-
-When multiple workers operate in parallel, each one owns its own file
-scope. They do not interfere with each other's paths. The Queen
-dispatches tasks, workers execute independently, and acceptance is
-evaluated per-task, not per-batch. This isolation is what makes parallel
-work safe: no worker can break another worker's acceptance by touching a
-file outside its own boundary.
-
-## Summary
-
-Acceptance is the contract between worker and Queen. It is defined by
-criteria, bounded by scope, verified by self-report, and enforced by the
-Queen's review. Everything else — process, style, approach — is the
-worker's to choose.
+В параллели каждая пчела владеет своими путями и отвечает за свои критерии отдельно. Приёмка идёт по задачам, а не по пачке: изоляция путей делает параллельность безопасной. Одна пчела не может сломать приёмку другой — ровно потому, что не может тронуть её файлы.
