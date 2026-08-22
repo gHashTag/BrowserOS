@@ -3848,47 +3848,146 @@ final class ChatViewModel: ObservableObject {
             let wantStart = originalText.range(of: "--start") != nil
             await chooseNextOpenIssue(startAfterChoosing: wantStart)
         case .brief(let issue):
-            // Preview only — this is not a security boundary. It builds the
-            // brief the same way /delegate does (reads the contract from the
-            // issue, parses Границы, applies QueenLocalisation narrowing) but
-            // prints it to the Queen chat instead of opening a worker. No task
-            // is created, no chat is opened, no branch is taken: nothing here
-            // enters the registry.
-            guard let body = await fetchIssueBody(issue) else {
-                await postQueenNotice(
-                    SystemNoticeClassifier.warningMarker
-                        + "Cannot read \(issue.slug) to preview the brief."
-                )
-                return
-            }
-            let criteria = QueenTaskSpec.criteriaFromIssue(body: body)
-            let paths = ChatViewModel.boundaryPaths(from: body) ?? []
-            let task = DelegatedTask(
-                issue: issue,
-                title: "Brief preview for \(issue.slug)",
-                worker: "(preview)",
-                ownedPaths: paths,
-                acceptanceCriteria: criteria
-            )
-            // Narrow large files exactly as delegation does — the shared
-            // function guarantees identical hints and identical logging.
-            let narrowedHints = ChatViewModel.narrowedHints(
-                for: paths, from: body, issueSlug: issue.slug
-            )
-            let brief = QueenBriefing.text(for: task)
-                + (narrowedHints.isEmpty ? "" : "\n" + narrowedHints.joined(separator: "\n"))
-            await appendSystemMessageToQueenChat(brief)
-            TriosLogBus.shared.info(
-                .queen, "queen.brief.preview",
-                "Brief preview for \(issue.slug) (\(brief.count) chars)",
-                ["issue": issue.slug, "length": String(brief.count)]
-            )
+            await previewBrief(for: issue)
         case .runSkill(let command, let arguments):
             await runQueenSkill(command: command, arguments: arguments)
         case .unknown:
             await appendSystemMessageToQueenChat(
                 SystemNoticeClassifier.warningMarker
                     + "I do not know `\(originalText)`.\n\(QueenCommandParser.helpText)"
+            )
+        }
+    }
+
+    /// `#1170` — `/brief` is the dry run of a delegation: build the assignment
+    /// exactly the way `/delegate` would, print it to the Queen's chat, and
+    /// stop. Nothing outward happens — no worker chat, no branch, no bee — and
+    /// the registry is compared before and after to prove that (#1170
+    /// criterion 4), not merely to promise it in a comment.
+    ///
+    /// Preview only — this is not a security boundary. It builds the brief the
+    /// same way /delegate does (reads the contract from the issue, parses
+    /// Границы, applies QueenLocalisation narrowing) but prints it instead of
+    /// opening a worker. It shows what would be sent; it does not promise that
+    /// nothing will be.
+    private func previewBrief(for issue: IssueReference) async {
+        // Snapshot before the first await: fetchIssueBody is the long window
+        // (network) in which a regressed preview could quietly register a
+        // task, so the before-picture is taken before any of that can run.
+        let taskIDsBefore = Set(delegationRegistry.tasks.map(\.id))
+        guard let body = await fetchIssueBody(issue) else {
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "Cannot read \(issue.slug) to preview the brief."
+            )
+            await briefPreviewTouchedNothingCheck(
+                issue: issue, taskIDsBefore: taskIDsBefore
+            )
+            return
+        }
+        let criteria = QueenTaskSpec.criteriaFromIssue(body: body)
+        let paths = ChatViewModel.boundaryPaths(from: body) ?? []
+        let task = DelegatedTask(
+            issue: issue,
+            title: "Brief preview for \(issue.slug)",
+            worker: "(preview)",
+            ownedPaths: paths,
+            acceptanceCriteria: criteria
+        )
+        // Narrow large files exactly as delegation does — the shared
+        // function guarantees identical hints and identical logging.
+        let narrowedHints = ChatViewModel.narrowedHints(
+            for: paths, from: body, issueSlug: issue.slug
+        )
+        let brief = QueenBriefing.text(for: task)
+            + (narrowedHints.isEmpty ? "" : "\n" + narrowedHints.joined(separator: "\n"))
+        await appendSystemMessageToQueenChat(brief)
+        // The text itself rides in the event, not just its length: a probe
+        // that can only count characters cannot tell a printed range from a
+        // missing one (the #1170 trap this closes — "log the answer, not the
+        // counters"). Preview briefs carry no skill body, so this stays
+        // about a kilobyte.
+        TriosLogBus.shared.info(
+            .queen, "queen.brief.preview",
+            "Brief preview for \(issue.slug) (\(brief.count) chars)",
+            ["issue": issue.slug, "length": String(brief.count), "brief": brief]
+        )
+        await briefPreviewTouchedNothingCheck(
+            issue: issue, taskIDsBefore: taskIDsBefore
+        )
+    }
+
+    /// #1170, criterion 4: the check that breaks when `/brief` starts creating
+    /// tasks. The registry's live task IDs are snapshotted before the preview
+    /// does anything and compared after it is done.
+    ///
+    /// No new task → the positive event `queen.brief.preview.clean` with both
+    /// counts. Positive on purpose: a guard that only speaks on failure cannot
+    /// be told apart from a guard that was deleted, so every honest run says
+    /// so in the journal and a probe can assert on the event.
+    ///
+    /// New task for the previewed issue (or carrying the preview's own
+    /// "(preview)" worker) → `queen.brief.preview.violated`, error level, plus
+    /// a failure notice in the Queen's chat: the preview became a delegation
+    /// and must not pass as an ordinary print.
+    ///
+    /// New tasks for *other* issues are ambiguous from inside — a real
+    /// concurrent delegation can land in the fetch window, and the guard
+    /// cannot tell it apart from a preview that triggered one. Those are
+    /// reported as `queen.brief.preview.registry.grew` naming what appeared,
+    /// rather than accused; a human reading the notice can.
+    private func briefPreviewTouchedNothingCheck(
+        issue: IssueReference,
+        taskIDsBefore: Set<UUID>
+    ) async {
+        let tasksAfter = delegationRegistry.tasks
+        let added = tasksAfter.filter { !taskIDsBefore.contains($0.id) }
+        if added.isEmpty {
+            TriosLogBus.shared.info(
+                .queen, "queen.brief.preview.clean",
+                "`/brief` left the registry untouched "
+                    + "(\(taskIDsBefore.count) task(s) before, \(tasksAfter.count) after)",
+                [
+                    "issue": issue.slug,
+                    "tasks_before": String(taskIDsBefore.count),
+                    "tasks_after": String(tasksAfter.count),
+                ]
+            )
+            return
+        }
+        let certain = added.filter { $0.issue == issue || $0.worker == "(preview)" }
+        let named = added
+            .map { "\($0.issue.slug) → \($0.worker) (\($0.title))" }
+            .joined(separator: "; ")
+        if !certain.isEmpty {
+            TriosLogBus.shared.error(
+                .queen, "queen.brief.preview.violated",
+                "`/brief` created task(s) during its own preview: \(named). "
+                    + "A preview builds and prints; it never delegates (#1170)",
+                [
+                    "issue": issue.slug,
+                    "added": String(added.count),
+                    "workers": added.map(\.worker).joined(separator: " | "),
+                ]
+            )
+            await postQueenNotice(
+                SystemNoticeClassifier.failureMarker
+                    + "`/brief` created a task during its own preview: \(named). "
+                    + "A preview builds and prints; it never delegates (#1170)."
+            )
+        } else {
+            TriosLogBus.shared.warn(
+                .queen, "queen.brief.preview.registry.grew",
+                "The registry grew while `/brief` previewed \(issue.slug): \(named). "
+                    + "Either a concurrent delegation landed in the fetch window, "
+                    + "or the preview did this.",
+                ["issue": issue.slug, "added": String(added.count)]
+            )
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "The registry grew while `/brief` previewed \(issue.slug): "
+                    + "\(named). If nothing else was delegating just now, "
+                    + "the preview created these (#1170)."
             )
         }
     }
@@ -3921,6 +4020,33 @@ final class ChatViewModel: ObservableObject {
             let lineCount = source.components(separatedBy: "\n").count
                 - (source.hasSuffix("\n") ? 1 : 0)
             guard lineCount > QueenLocalisation.maxRegionWidth else { continue }
+            // #1170: an issue may state the range outright — «Читать только
+            // строки 3085-3110 в `rings/SR-02/ChatViewModel.swift`». The
+            // author's explicit instruction outranks every heuristic:
+            // QueenLocalisation guesses from identifiers and stays silent
+            // when none of its rules answer, which for this very issue left
+            // an 11 000-line boundary unnarrowed (measured: region → nil).
+            // A stated range is not a guess, so it is honoured first —
+            // clamped to the file, and only while the file is actually
+            // large, which the guard above has already established.
+            if let stated = ChatViewModel.rangeStatedInIssue(
+                issueBody, for: path, lineCount: lineCount
+            ) {
+                hints.append(
+                    "В \(path) читай только строки \(stated.lowerBound)-\(stated.upperBound)."
+                )
+                TriosLogBus.shared.info(
+                    .queen, "queen.brief.narrowed",
+                    "Narrowed \(path) to lines \(stated.lowerBound)-\(stated.upperBound) (range stated in the issue)",
+                    [
+                        "issue": issueSlug,
+                        "file": path,
+                        "range": "\(stated.lowerBound)-\(stated.upperBound)",
+                        "matched": "issue-stated",
+                    ]
+                )
+                continue
+            }
             // Before asking QueenLocalisation to narrow, record what we are
             // about to search for and where. Without this log, silence from
             // region(in:mentioning:) is indistinguishable from "never tried"
@@ -3975,6 +4101,104 @@ final class ChatViewModel: ObservableObject {
             }
         }
         return hints
+    }
+
+    /// #1170: the line range an issue states for one boundary file, when it
+    /// states one. Two spellings matter — Russian «строки 3085-3110» and
+    /// English "lines 3085-3110" — and the range is adopted only when this
+    /// path (or its file name) is the *nearest* path-shaped mention to it, so
+    /// a range stated for a different file in the same sentence is never
+    /// handed over. Returns nil when the issue states no such range. Clamps
+    /// the upper bound to the file's real line count and refuses a range that
+    /// starts past the end, so a number written against an older, longer
+    /// version of the file cannot point into nothing.
+    private static func rangeStatedInIssue(
+        _ body: String,
+        for path: String,
+        lineCount: Int
+    ) -> ClosedRange<Int>? {
+        let fileName = (path as NSString).lastPathComponent
+        guard let regex = try? NSRegularExpression(
+            pattern: "(?:строки|Строки|lines?|Lines?)\\s+(\\d{1,5})\\s*[–—-]\\s*(\\d{1,5})"
+        ) else { return nil }
+        let nsBody = body as NSString
+        let matches = regex.matches(
+            in: body, range: NSRange(location: 0, length: nsBody.length)
+        )
+        for match in matches {
+            // The path and the range usually share a sentence; 160 chars
+            // before and 480 after covers «строки X-Y в `path`», «`path`,
+            // строки X-Y» and "Read only lines X-Y, near …, in `path`".
+            let windowStart = max(0, match.range.location - 160)
+            let windowLength = min(
+                nsBody.length - windowStart,
+                match.range.length + 480
+            )
+            let window = NSRange(location: windowStart, length: windowLength)
+            // Nearest path-shaped mention: backtick spans and bare tokens
+            // containing a slash. The range belongs to this path only if
+            // that nearest mention *is* this path (full path or file name).
+            guard let nearest = ChatViewModel.nearestPathMention(
+                in: nsBody,
+                window: window,
+                anchor: match.range.location - windowStart
+            ), nearest == path || nearest == fileName
+            else { continue }
+            guard let lo = Int(nsBody.substring(with: match.range(at: 1))),
+                  let hi = Int(nsBody.substring(with: match.range(at: 2))),
+                  lo >= 1, hi >= lo
+            else { continue }
+            let upper = min(hi, lineCount)
+            guard lo <= upper else { return nil }
+            return lo...upper
+        }
+        return nil
+    }
+
+    /// The path-shaped mention closest to `anchor` (an offset into `window`),
+    /// among backtick spans and slash-containing tokens found in `window`.
+    /// Distance is the character gap between the mention and the anchor; a
+    /// mention covering the anchor counts as zero. Returns the cleaned token
+    /// (backticks and prose punctuation stripped), not its position.
+    private static func nearestPathMention(
+        in body: NSString,
+        window: NSRange,
+        anchor: Int
+    ) -> String? {
+        let windowText = body.substring(with: window)
+        let windowNS = windowText as NSString
+        var candidates: [(text: String, gap: Int)] = []
+        let spanPatterns = ["`([^`]+)`", "\\S+/\\S*"]
+        for pattern in spanPatterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
+            regex.enumerateMatches(
+                in: windowText, range: NSRange(location: 0, length: windowNS.length)
+            ) { match, _, _ in
+                guard let match else { return }
+                let captured = match.range.length == 0
+                    ? match.range
+                    : NSRange(
+                        location: match.range.location + 1,
+                        length: match.range.length - 2
+                    )
+                guard captured.length > 0,
+                      captured.location >= 0,
+                      captured.location + captured.length <= windowNS.length
+                else { return }
+                let raw = windowNS.substring(with: captured)
+                let cleaned = raw.trimmingCharacters(
+                    in: CharacterSet(charactersIn: "`.,;:!?\"'()")
+                )
+                guard cleaned.contains("/") || cleaned.contains(".") else { return }
+                let mentionStart = captured.location
+                let mentionEnd = captured.location + captured.length
+                let gap = mentionStart >= anchor
+                    ? mentionStart - anchor
+                    : (mentionEnd <= anchor ? anchor - mentionEnd : 0)
+                candidates.append((cleaned, gap))
+            }
+        }
+        return candidates.min(by: { $0.gap < $1.gap })?.text
     }
 
     private func listQueenAgents() async {
