@@ -9299,38 +9299,55 @@ final class ChatViewModel: ObservableObject {
         // already done".
         var networkOK = false
         var failureMessage = ""
+        // Every page, not one. Timeline events come oldest-first, so a single
+        // page hides the NEWEST cross-references - the work just filed.
+        // Measured 2026-08-22: epic #1090 held 104 events, page one's highest
+        // issue was #1228, and #1277, #1286 and #1287 did not exist as far as
+        // choosing was concerned. The log said "Nothing to choose from 19
+        // candidates" for hours over a board that had newer work on it.
         for epic in QueenEpics.configured {
-            guard let url = QueenEpics.timelineURL(epic: epic) else { continue }
-            var timelineRequest = URLRequest(url: url)
-            timelineRequest.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-            if let token = githubTokenForTimeline() {
-                timelineRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            }
-
-            var timelineData = Data()
             var epicOK = false
-            do {
-                let (data, response) = try await URLSession.shared.data(for: timelineRequest)
-                timelineData = data
-                if let httpResp = response as? HTTPURLResponse,
-                   (200...299).contains(httpResp.statusCode) {
-                    epicOK = true
-                } else {
-                    let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-                    // Named, because "HTTP 404" without the epic is a message
-                    // that cannot be acted on when there is more than one.
-                    failureMessage = "#\(epic): HTTP \(code)"
+            var pagesRead = 0
+            for page in 1...QueenEpics.timelinePageLimit {
+                guard let url = QueenEpics.timelineURL(epic: epic, page: page) else { break }
+                var timelineRequest = URLRequest(url: url)
+                timelineRequest.setValue(
+                    "application/vnd.github+json", forHTTPHeaderField: "Accept"
+                )
+                if let token = githubTokenForTimeline() {
+                    timelineRequest.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
                 }
-            } catch {
-                failureMessage = "#\(epic): \(error.localizedDescription)"
-            }
 
-            // One reachable epic is enough to have read the board. Treating a
-            // single unreachable epic as total failure would let a typo in one
-            // number stop work that is sitting open in another.
-            if epicOK { networkOK = true } else { continue }
+                var timelineData = Data()
+                var pageOK = false
+                do {
+                    let (data, response) = try await URLSession.shared.data(for: timelineRequest)
+                    timelineData = data
+                    if let httpResp = response as? HTTPURLResponse,
+                       (200...299).contains(httpResp.statusCode) {
+                        pageOK = true
+                    } else {
+                        let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+                        // Named, because "HTTP 404" without the epic is a
+                        // message that cannot be acted on when there is more
+                        // than one. The page is named for the same reason: a
+                        // failure on page three is a different fact from a
+                        // failure on page one.
+                        failureMessage = "#\(epic) page \(page): HTTP \(code)"
+                    }
+                } catch {
+                    failureMessage = "#\(epic) page \(page): \(error.localizedDescription)"
+                }
 
-            if let events = try? JSONSerialization.jsonObject(with: timelineData) as? [[String: Any]] {
+                // A page that failed ends this epic's walk. Stopping keeps the
+                // set consistent: half a timeline read as a whole one is how a
+                // board looks finished.
+                guard pageOK else { break }
+                epicOK = true
+                pagesRead = page
+
+                let events = (try? JSONSerialization.jsonObject(with: timelineData))
+                    as? [[String: Any]] ?? []
                 for event in events {
                     guard event["event"] as? String == "cross-referenced" else { continue }
                     guard let source = event["source"] as? [String: Any],
@@ -9343,6 +9360,20 @@ final class ChatViewModel: ObservableObject {
                         subIssues.append((number, title, body))
                     }
                 }
+
+                if QueenEpics.isLastTimelinePage(eventCount: events.count) { break }
+            }
+
+            // One reachable epic is enough to have read the board. Treating a
+            // single unreachable epic as total failure would let a typo in one
+            // number stop work that is sitting open in another.
+            if epicOK {
+                networkOK = true
+                TriosLogBus.shared.info(
+                    .queen, "queen.epic.timeline_read",
+                    "Read #\(epic) over \(pagesRead) timeline page(s)",
+                    ["epic": String(epic), "pages": String(pagesRead)]
+                )
             }
         }
 
@@ -11173,9 +11204,18 @@ final class ChatViewModel: ObservableObject {
                 // A forge that cannot be reached says nothing about the work.
                 // Leaving the task where it is beats guessing in either
                 // direction; the next poll asks again.
+                //
+                // What it may not do is throw away WHY. This catch bound
+                // `error` and never used it, so five failures in one hour on
+                // the same pull request - readable by hand the whole time -
+                // left nothing anyone could act on. Its sibling
+                // `queen.pr.failed` records the error and named a keychain
+                // race in seconds. One family, one habit now (#1287).
+                let reason = String(describing: error)
                 TriosLogBus.shared.warn(
-                    .queen, "queen.pr.poll_failed", "Could not read a pull request",
-                    ["issue": task.issue.slug, "pr": "\(number)"]
+                    .queen, "queen.pr.poll_failed",
+                    "Could not read pull request #\(number) for \(task.issue.slug): \(reason)",
+                    ["issue": task.issue.slug, "pr": "\(number)", "error": reason]
                 )
                 continue
             }
@@ -12736,7 +12776,11 @@ extension ChatViewModel {
             )
 
             // ── 3. /brief's own static, hermetic root, over 300 lines ──
-            try writeFixture(lineCount: 301)
+            // The fixture is written for its side effect here; this arm reads
+            // the narrowing, not the text. Discarded explicitly because the
+            // warning ceiling is zero and an unused result is how a dropped
+            // return value hides.
+            _ = try writeFixture(lineCount: 301)
             let narrowingMark = TriosLogBus.shared.recent().count
             let narrowed = ChatViewModel.narrowedHints(
                 for: paths, from: proseBody,

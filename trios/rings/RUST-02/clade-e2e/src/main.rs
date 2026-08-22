@@ -480,6 +480,11 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
         ],
     },
     SwiftLogicSuite {
+        label: "QueenEpics",
+        bin: "/tmp/trios_queen_epics_test",
+        sources: &["tests/swift/queen_epics_test.swift", "rings/SR-00/QueenEpics.swift"],
+    },
+    SwiftLogicSuite {
         label: "QueenLanguagePolicy",
         bin: "/tmp/trios_queen_language_policy_test",
         sources: &[

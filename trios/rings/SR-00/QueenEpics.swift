@@ -43,13 +43,44 @@ enum QueenEpics {
         return epics.filter { seen.insert($0).inserted }
     }
 
-    /// The timeline URL for one epic.
+    /// Events per timeline page. GitHub's ceiling is 100, which is why one
+    /// page cannot be the whole answer for any epic that has lived a while.
+    static let timelinePageSize = 100
+
+    /// How many pages the reader will walk before giving up. Ten pages is a
+    /// thousand events - far past any epic here - and a bound rather than a
+    /// `while true` against a paginated API.
+    static let timelinePageLimit = 10
+
+    /// The timeline URL for one epic, one page at a time.
     ///
     /// Built rather than written out, so a new epic cannot arrive with a typo
     /// in the path - the failure mode of a hand-written URL is a 404 that reads
     /// like an empty epic.
-    static func timelineURL(epic: Int, repo: String = "gHashTag/trios") -> URL? {
-        URL(string: "https://api.github.com/repos/\(repo)/issues/\(epic)/timeline?per_page=100")
+    ///
+    /// The page parameter is the fix for a sharper failure, measured
+    /// 2026-08-22: this asked for page one and nothing asked for page two.
+    /// Timeline events come oldest-first, so the NEWEST cross-references are
+    /// the ones that fall off the end. Epic #1090 held 104 events; the highest
+    /// issue the Queen could see was #1228, and every issue opened after it -
+    /// #1277, #1286, #1287 - did not exist as far as choosing was concerned,
+    /// while she reported "Nothing to choose from 19 candidates" hour after
+    /// hour. An epic outgrows one page exactly once, and after that it never
+    /// shows its newest work again.
+    static func timelineURL(epic: Int, page: Int = 1, repo: String = "gHashTag/trios") -> URL? {
+        URL(
+            string: "https://api.github.com/repos/\(repo)/issues/\(epic)"
+                + "/timeline?per_page=\(timelinePageSize)&page=\(page)"
+        )
+    }
+
+    /// Whether a page that returned `count` events can be the last one.
+    ///
+    /// A short page ends the walk; a full page means there may be more. Kept
+    /// as a named function so the stopping rule is stated once and can be
+    /// tested without a network.
+    static func isLastTimelinePage(eventCount: Int) -> Bool {
+        eventCount < timelinePageSize
     }
 
     /// How the epics read on a log line or in a notice.
