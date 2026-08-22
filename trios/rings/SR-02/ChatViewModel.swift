@@ -5574,12 +5574,24 @@ final class ChatViewModel: ObservableObject {
                 }
             }
 
+            // Ask WHY only here, at the end, and off the main actor: the
+            // question costs a process spawn and the healthy path must never
+            // pay it. Twenty attempts across two warm-up cycles were spent
+            // against a dialog nobody could answer, and the journal never said
+            // so because nothing looked.
+            let promptWaiting = await Task.detached(priority: .utility) {
+                KeychainPromptDetector.promptIsWaiting()
+            }.value
             TriosLogBus.shared.warn(
                 .queen,
                 "queen.key.warmup",
-                "Provider key warm-up failed after \(maxAttempts) attempts; "
-                    + "the cache is still empty.",
-                ["provider": provider.rawValue]
+                KeychainPromptDetector.warmupFailureExplanation(
+                    attempts: maxAttempts, promptWaiting: promptWaiting
+                ),
+                [
+                    "provider": provider.rawValue,
+                    "prompt_waiting": promptWaiting ? "1" : "0"
+                ]
             )
             // #1225: Post once per session — the journal entry is invisible to
             // someone watching the Queen chat who sees tasks chosen and nothing

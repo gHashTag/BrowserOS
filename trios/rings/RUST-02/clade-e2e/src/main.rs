@@ -480,6 +480,14 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
         ],
     },
     SwiftLogicSuite {
+        label: "KeychainPromptDetector",
+        bin: "/tmp/trios_keychain_prompt_detector_test",
+        sources: &[
+            "tests/swift/keychain_prompt_detector_test.swift",
+            "rings/SR-00/KeychainPromptDetector.swift",
+        ],
+    },
+    SwiftLogicSuite {
         label: "QueenEpics",
         bin: "/tmp/trios_queen_epics_test",
         sources: &["tests/swift/queen_epics_test.swift", "rings/SR-00/QueenEpics.swift"],
