@@ -3848,41 +3848,7 @@ final class ChatViewModel: ObservableObject {
             let wantStart = originalText.range(of: "--start") != nil
             await chooseNextOpenIssue(startAfterChoosing: wantStart)
         case .brief(let issue):
-            // Preview only — this is not a security boundary. It builds the
-            // brief the same way /delegate does (reads the contract from the
-            // issue, parses Границы, applies QueenLocalisation narrowing) but
-            // prints it to the Queen chat instead of opening a worker. No task
-            // is created, no chat is opened, no branch is taken: nothing here
-            // enters the registry.
-            guard let body = await fetchIssueBody(issue) else {
-                await postQueenNotice(
-                    SystemNoticeClassifier.warningMarker
-                        + "Cannot read \(issue.slug) to preview the brief."
-                )
-                return
-            }
-            let criteria = QueenTaskSpec.criteriaFromIssue(body: body)
-            let paths = ChatViewModel.boundaryPaths(from: body) ?? []
-            let task = DelegatedTask(
-                issue: issue,
-                title: "Brief preview for \(issue.slug)",
-                worker: "(preview)",
-                ownedPaths: paths,
-                acceptanceCriteria: criteria
-            )
-            // Narrow large files exactly as delegation does — the shared
-            // function guarantees identical hints and identical logging.
-            let narrowedHints = ChatViewModel.narrowedHints(
-                for: paths, from: body, issueSlug: issue.slug
-            )
-            let brief = QueenBriefing.text(for: task)
-                + (narrowedHints.isEmpty ? "" : "\n" + narrowedHints.joined(separator: "\n"))
-            await appendSystemMessageToQueenChat(brief)
-            TriosLogBus.shared.info(
-                .queen, "queen.brief.preview",
-                "Brief preview for \(issue.slug) (\(brief.count) chars)",
-                ["issue": issue.slug, "length": String(brief.count)]
-            )
+            await previewBrief(for: issue)
         case .runSkill(let command, let arguments):
             await runQueenSkill(command: command, arguments: arguments)
         case .unknown:
@@ -3891,6 +3857,99 @@ final class ChatViewModel: ObservableObject {
                     + "I do not know `\(originalText)`.\n\(QueenCommandParser.helpText)"
             )
         }
+    }
+
+    /// `#1170` — `/brief` is the dry run of a delegation: build the assignment
+    /// exactly the way `/delegate` would, then print it and stop. Nothing
+    /// outward happens — no worker chat, no branch, no bee — and the registry
+    /// is read before and after to prove it. A preview that starts creating
+    /// tasks breaks (`queen.brief.preview.violated`) rather than passing.
+    ///
+    /// Caveat worth writing down: this is a preview, not a security boundary.
+    /// It shows what would be sent; it does not promise that nothing will be.
+    private func previewBrief(for issue: IssueReference) async {
+        // Preview only — this is not a security boundary. It builds the
+        // brief the same way /delegate does (reads the contract from the
+        // issue, parses Границы, applies QueenLocalisation narrowing) but
+        // prints it to the Queen chat instead of opening a worker. No task
+        // is created, no chat is opened, no branch is taken: nothing here
+        // enters the registry.
+        //
+        // #1170, criterion 4: the guard below is what keeps that paragraph
+        // true tomorrow as well as today. Without it, a registry call added
+        // to this handler would print a perfectly ordinary preview on top of
+        // a very real delegation, and nothing anywhere would say so.
+        let liveTaskExistedBefore = delegationRegistry.task(forIssue: issue) != nil
+        guard let body = await fetchIssueBody(issue) else {
+            await postQueenNotice(
+                SystemNoticeClassifier.warningMarker
+                    + "Cannot read \(issue.slug) to preview the brief."
+            )
+            await briefPreviewCreatedNothingCheck(
+                issue: issue, liveTaskExistedBefore: liveTaskExistedBefore
+            )
+            return
+        }
+        let criteria = QueenTaskSpec.criteriaFromIssue(body: body)
+        let paths = ChatViewModel.boundaryPaths(from: body) ?? []
+        let task = DelegatedTask(
+            issue: issue,
+            title: "Brief preview for \(issue.slug)",
+            worker: "(preview)",
+            ownedPaths: paths,
+            acceptanceCriteria: criteria
+        )
+        // Narrow large files exactly as delegation does — the shared
+        // function guarantees identical hints and identical logging.
+        let narrowedHints = ChatViewModel.narrowedHints(
+            for: paths, from: body, issueSlug: issue.slug
+        )
+        let brief = QueenBriefing.text(for: task)
+            + (narrowedHints.isEmpty ? "" : "\n" + narrowedHints.joined(separator: "\n"))
+        await appendSystemMessageToQueenChat(brief)
+        TriosLogBus.shared.info(
+            .queen, "queen.brief.preview",
+            "Brief preview for \(issue.slug) (\(brief.count) chars)",
+            ["issue": issue.slug, "length": String(brief.count)]
+        )
+        await briefPreviewCreatedNothingCheck(
+            issue: issue, liveTaskExistedBefore: liveTaskExistedBefore
+        )
+    }
+
+    /// #1170, criterion 4: `/brief` must not create a task, and this is the
+    /// check that breaks when it starts to. The registry is read before the
+    /// brief is built and again when the handler is done; a live task for the
+    /// previewed issue that was not there before means the preview quietly
+    /// became a delegation. That is reported as a failure — an error event and
+    /// a red notice in the Queen's chat — instead of the command passing as an
+    /// ordinary preview.
+    ///
+    /// The one benign way this can fire is a real `/delegate` for the same
+    /// issue landing while the preview was fetching the issue body; the notice
+    /// names what appeared rather than accusing, so that case reads as news,
+    /// not as a false alarm.
+    private func briefPreviewCreatedNothingCheck(
+        issue: IssueReference,
+        liveTaskExistedBefore: Bool
+    ) async {
+        guard !liveTaskExistedBefore,
+              let appeared = delegationRegistry.task(forIssue: issue)
+        else { return }
+        TriosLogBus.shared.error(
+            .queen, "queen.brief.preview.violated",
+            "`/brief` created a task for \(issue.slug) — a preview must not delegate (#1170)",
+            [
+                "issue": issue.slug,
+                "worker": appeared.worker,
+                "title": appeared.title,
+            ]
+        )
+        await postQueenNotice(
+            SystemNoticeClassifier.failureMarker
+                + "`/brief` created a task for \(issue.slug) (worker \(appeared.worker)). "
+                + "A preview builds and prints; it never delegates (#1170)."
+        )
     }
 
     /// Narrows each boundary path to the region the issue mentions, returning
