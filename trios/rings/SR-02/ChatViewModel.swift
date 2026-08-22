@@ -11482,12 +11482,22 @@ extension ChatViewModel {
     ///    sweep calls. The fossil must be replaced by a measured met:
     ///    2,225 against 300 (#1151 criteria 2 and 3).
     /// 4. The file is cut to 100 characters — below the threshold — and
-    ///    the same settlement must answer unmet. A check that cannot say
-    ///    no is not a check (#1151 criterion 4).
+    ///    the check must BREAK, not merely record a different word: the
+    ///    same comparison that returned met now returns false, the verdict
+    ///    flips to unmet in the same task's record, and the acceptance
+    ///    table — `QueenAcceptancePolicy.verdicts`, the gate the Queen's
+    ///    auto-accept actually consults — refuses to close the task. A
+    ///    check that cannot say no is not a check (#1151 criterion 4).
+    ///    The zero-byte file is driven too: "shorter than the threshold"
+    ///    includes empty, and the check must break on it the same way.
     ///
     /// Runs on a scratch root and a scratch registry (its own storePath),
     /// so no live state is touched: the drill may not leave tasks in the
     /// real registry or files in the real tree.
+    ///
+    /// Reproduce: TRIOS_E2E_DRILL_1151=1 bash tests/swift/run_chat_sse_e2e.sh,
+    /// then read queen.drill.character_count.* in
+    /// .trinity-test/logs/trios-app.jsonl.
     private func runCharacterCountDrill() {
         let criterion = "В нём не меньше трёхсот знаков."
         let root = NSTemporaryDirectory() + "trios-drill-1151-" + UUID().uuidString
@@ -11556,6 +11566,15 @@ extension ChatViewModel {
             expect("verdict_met", after == .met, after?.rawValue ?? "nil")
 
             // ── 4. Same task, same file, shortened below the threshold ─
+            // The state criteria 2 and 3 left: met, recorded, in the
+            // registry. Anything the flip below does not break against
+            // THIS state proves nothing — a check can only break a pass
+            // that exists (#1151 criterion 4).
+            let beforeShort = registry.task(forIssue: issue)?.criterionVerdicts[criterion]
+            expect(
+                "was_met_before_shortening", beforeShort == .met,
+                beforeShort?.rawValue ?? "nil"
+            )
             try String(repeating: "x", count: 100)
                 .write(toFile: file, atomically: true, encoding: .utf8)
             let shortResults = ChatViewModel.settleCharacterCountVerdicts(
@@ -11568,8 +11587,53 @@ extension ChatViewModel {
             )
             let shortResult = shortResults[criterion]
             expect("short_measured", shortResult?.measured == 100, String(shortResult?.measured ?? -1))
+            // The check itself breaks: the exact comparison the
+            // production settlement makes — `measured >= threshold` —
+            // returned true on the 2,225-byte file and must return false
+            // on the shortened one. Same criterion, same file, same
+            // comparison; only the file changed.
+            expect(
+                "check_breaks_on_short_file",
+                ((shortResult?.measured ?? -1) >= (shortResult?.threshold ?? 0)) == false,
+                "\(shortResult?.measured ?? -1) >= \(shortResult?.threshold ?? 0)"
+            )
             let afterShort = registry.task(forIssue: issue)?.criterionVerdicts[criterion]
             expect("short_file_unmet", afterShort == .unmet, afterShort?.rawValue ?? "nil")
+            // The break has teeth: the acceptance table the Queen's
+            // auto-accept consults — `QueenAcceptancePolicy.verdicts`,
+            // the same call `acceptanceBlockReasonDistinguishingEmptyAnswers`
+            // makes on the real gate — must hold an unmet row for this
+            // criterion, so the task cannot be closed on the shortened
+            // file. A verdict flip that nothing downstream reads is
+            // bookkeeping, not a check.
+            let liveVerdicts = registry.task(forIssue: issue)?.criterionVerdicts ?? [:]
+            let acceptanceTable = QueenAcceptancePolicy.verdicts(
+                criteria: [criterion], recorded: liveVerdicts
+            )
+            expect(
+                "acceptance_refuses_short_file",
+                acceptanceTable.contains { $0.criterion == criterion && $0.verdict == .unmet },
+                acceptanceTable.map { "\($0.verdict.symbol) \($0.criterion)" }
+                    .joined(separator: "; ")
+            )
+            // The extreme of "shorter than the threshold": an empty file.
+            // Zero characters is a real answer about the world, and the
+            // check must break on it exactly as on 100.
+            try "".write(toFile: file, atomically: true, encoding: .utf8)
+            let emptyResults = ChatViewModel.settleCharacterCountVerdicts(
+                registry: registry,
+                taskID: task.id,
+                issue: issue.slug,
+                criteria: [criterion],
+                ownedPaths: ["docs/par-c.md"],
+                projectRoot: root
+            )
+            let emptyResult = emptyResults[criterion]
+            expect(
+                "zero_bytes_unmet",
+                emptyResult?.verdict == .unmet && emptyResult?.measured == 0,
+                "measured \(emptyResult?.measured ?? -1), verdict \(emptyResult?.verdict.rawValue ?? "nil")"
+            )
         } catch {
             passed = false
             facts["threw"] = String(describing: error)
