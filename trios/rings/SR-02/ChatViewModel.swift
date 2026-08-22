@@ -3862,8 +3862,9 @@ final class ChatViewModel: ObservableObject {
     /// `#1170` — `/brief` is the dry run of a delegation: build the assignment
     /// exactly the way `/delegate` would, print it to the Queen's chat, and
     /// stop. Nothing outward happens — no worker chat, no branch, no bee — and
-    /// the registry is compared before and after to prove that (#1170
-    /// criterion 4), not merely to promise it in a comment.
+    /// a sentinel (registry task IDs + supervisor-inbox fingerprint) is
+    /// compared before, after, and through the delegation window to prove
+    /// that (#1170 criterion 4), not merely to promise it in a comment.
     ///
     /// Preview only — this is not a security boundary. It builds the brief the
     /// same way /delegate does (reads the contract from the issue, parses
@@ -3871,17 +3872,18 @@ final class ChatViewModel: ObservableObject {
     /// opening a worker. It shows what would be sent; it does not promise that
     /// nothing will be.
     private func previewBrief(for issue: IssueReference) async {
-        // Snapshot before the first await: fetchIssueBody is the long window
+        // Sentinel before the first await: fetchIssueBody is the long window
         // (network) in which a regressed preview could quietly register a
-        // task, so the before-picture is taken before any of that can run.
-        let taskIDsBefore = Set(delegationRegistry.tasks.map(\.id))
+        // task or queue an inbox delegation, so the before-picture is taken
+        // before any of that can run.
+        let sentinelBefore = briefSentinelNow()
         guard let body = await fetchIssueBody(issue) else {
             await postQueenNotice(
                 SystemNoticeClassifier.warningMarker
                     + "Cannot read \(issue.slug) to preview the brief."
             )
             await briefPreviewTouchedNothingCheck(
-                issue: issue, taskIDsBefore: taskIDsBefore
+                issue: issue, before: sentinelBefore
             )
             return
         }
@@ -3906,55 +3908,129 @@ final class ChatViewModel: ObservableObject {
         // that can only count characters cannot tell a printed range from a
         // missing one (the #1170 trap this closes — "log the answer, not the
         // counters"). Preview briefs carry no skill body, so this stays
-        // about a kilobyte.
+        // about a kilobyte. `narrowed` repeats the hints as their own field
+        // so the range is greppable without parsing the brief text.
         TriosLogBus.shared.info(
             .queen, "queen.brief.preview",
             "Brief preview for \(issue.slug) (\(brief.count) chars)",
-            ["issue": issue.slug, "length": String(brief.count), "brief": brief]
+            [
+                "issue": issue.slug,
+                "length": String(brief.count),
+                "brief": brief,
+                "narrowed": narrowedHints.joined(separator: " | "),
+            ]
         )
         await briefPreviewTouchedNothingCheck(
-            issue: issue, taskIDsBefore: taskIDsBefore
+            issue: issue, before: sentinelBefore
         )
     }
 
     /// #1170, criterion 4: the check that breaks when `/brief` starts creating
-    /// tasks. The registry's live task IDs are snapshotted before the preview
-    /// does anything and compared after it is done.
+    /// tasks — whatever route the regression takes. A sentinel (registry task
+    /// IDs + supervisor-inbox fingerprint) is taken before the preview does
+    /// anything, compared right after it is done, and re-compared through a
+    /// six-second window — one inbox-poller beat plus margin — because the
+    /// two realistic shapes of "the preview started delegating" are invisible
+    /// to a synchronous snapshot:
     ///
-    /// No new task → the positive event `queen.brief.preview.clean` with both
-    /// counts. Positive on purpose: a guard that only speaks on failure cannot
-    /// be told apart from a guard that was deleted, so every honest run says
-    /// so in the journal and a probe can assert on the event.
+    /// * a fire-and-forget `Task { delegateIssueToWorker(…) }` registers the
+    ///   task milliseconds *after* the preview returns;
+    /// * an inbox line queued via `enqueueQueenInboxEntry` waits for the 5 s
+    ///   poller before the registry ever sees it.
     ///
-    /// New task for the previewed issue (or carrying the preview's own
-    /// "(preview)" worker) → `queen.brief.preview.violated`, error level, plus
-    /// a failure notice in the Queen's chat: the preview became a delegation
-    /// and must not pass as an ordinary print.
+    /// No divergence → the positive events `queen.brief.preview.clean` (sync)
+    /// and `queen.brief.preview.settled` (window closed still clean).
+    /// Positive on purpose: a guard that only speaks on failure cannot be
+    /// told apart from a guard that was deleted, so every honest run says so
+    /// in the journal and a probe can assert on the events.
     ///
-    /// New tasks for *other* issues are ambiguous from inside — a real
-    /// concurrent delegation can land in the fetch window, and the guard
-    /// cannot tell it apart from a preview that triggered one. Those are
-    /// reported as `queen.brief.preview.registry.grew` naming what appeared,
-    /// rather than accused; a human reading the notice can.
+    /// Divergence attributable to the preview — a task for the previewed
+    /// issue, a task carrying the preview's own "(preview)" worker, or any
+    /// change to the inbox file — → `queen.brief.preview.violated`, error
+    /// level, plus a failure notice in the Queen's chat: the preview became a
+    /// delegation and must not pass as an ordinary print. The `reason` and
+    /// `phase` attrs name which route and which observation caught it.
+    ///
+    /// New tasks for *other* issues remain ambiguous from inside — a real
+    /// concurrent delegation can land in the fetch window — and are reported
+    /// as `queen.brief.preview.registry.grew` naming what appeared, rather
+    /// than accused; a human reading the notice can.
     private func briefPreviewTouchedNothingCheck(
         issue: IssueReference,
-        taskIDsBefore: Set<UUID>
+        before: BriefPreviewSentinel
     ) async {
-        let tasksAfter = delegationRegistry.tasks
-        let added = tasksAfter.filter { !taskIDsBefore.contains($0.id) }
-        if added.isEmpty {
+        let sync = briefSentinelNow()
+        if await reportBriefPreviewDivergence(
+            issue: issue, before: before, after: sync, phase: "sync"
+        ) { return }
+        TriosLogBus.shared.info(
+            .queen, "queen.brief.preview.clean",
+            "`/brief` touched nothing: registry \(before.taskIDs.count)→"
+                + "\(sync.taskIDs.count) task(s), inbox unchanged",
+            [
+                "issue": issue.slug,
+                "tasks_before": String(before.taskIDs.count),
+                "tasks_after": String(sync.taskIDs.count),
+                "inbox": sync.inboxFingerprint,
+            ]
+        )
+        // The late watch. Same sentinel, asked again every 250 ms for 6 s.
+        Task { [weak self] in
+            guard let self else { return }
+            for _ in 0..<24 {
+                try? await Task.sleep(nanoseconds: 250_000_000)
+                if Task.isCancelled { return }
+                let now = self.briefSentinelNow()
+                if await self.reportBriefPreviewDivergence(
+                    issue: issue, before: before, after: now, phase: "late"
+                ) { return }
+            }
             TriosLogBus.shared.info(
-                .queen, "queen.brief.preview.clean",
-                "`/brief` left the registry untouched "
-                    + "(\(taskIDsBefore.count) task(s) before, \(tasksAfter.count) after)",
+                .queen, "queen.brief.preview.settled",
+                "`/brief` stayed clean through the delegation window (6 s)",
+                ["issue": issue.slug]
+            )
+        }
+    }
+
+    /// Reports the difference between two sentinels. Returns true when the
+    /// question is settled — a violation, or an unattributable registry
+    /// growth — and false when nothing has diverged yet, so the caller knows
+    /// whether to keep watching. The inbox is compared first: queueing an
+    /// entry is the *earliest* outward act a delegation makes, and catching
+    /// it there names the route even if the registry write never follows
+    /// (refused by a slot limit, say — the preview still queued work, and
+    /// that is already the criterion-4 breach).
+    private func reportBriefPreviewDivergence(
+        issue: IssueReference,
+        before: BriefPreviewSentinel,
+        after: BriefPreviewSentinel,
+        phase: String
+    ) async -> Bool {
+        if before.inboxFingerprint != after.inboxFingerprint {
+            TriosLogBus.shared.error(
+                .queen, "queen.brief.preview.violated",
+                "`/brief` posted to the supervisor inbox while previewing "
+                    + "\(issue.slug). A preview builds and prints; it never "
+                    + "queues work (#1170)",
                 [
                     "issue": issue.slug,
-                    "tasks_before": String(taskIDsBefore.count),
-                    "tasks_after": String(tasksAfter.count),
+                    "reason": "inbox-posted",
+                    "phase": phase,
+                    "inbox_before": before.inboxFingerprint,
+                    "inbox_after": after.inboxFingerprint,
                 ]
             )
-            return
+            await postQueenNotice(
+                SystemNoticeClassifier.failureMarker
+                    + "`/brief` posted to the supervisor inbox while previewing "
+                    + "\(issue.slug). A preview builds and prints; it never "
+                    + "queues work (#1170)."
+            )
+            return true
         }
+        let added = delegationRegistry.tasks.filter { !before.taskIDs.contains($0.id) }
+        guard !added.isEmpty else { return false }
         let certain = added.filter { $0.issue == issue || $0.worker == "(preview)" }
         let named = added
             .map { "\($0.issue.slug) → \($0.worker) (\($0.title))" }
@@ -3966,6 +4042,8 @@ final class ChatViewModel: ObservableObject {
                     + "A preview builds and prints; it never delegates (#1170)",
                 [
                     "issue": issue.slug,
+                    "reason": "registry-created",
+                    "phase": phase,
                     "added": String(added.count),
                     "workers": added.map(\.worker).joined(separator: " | "),
                 ]
@@ -3981,7 +4059,7 @@ final class ChatViewModel: ObservableObject {
                 "The registry grew while `/brief` previewed \(issue.slug): \(named). "
                     + "Either a concurrent delegation landed in the fetch window, "
                     + "or the preview did this.",
-                ["issue": issue.slug, "added": String(added.count)]
+                ["issue": issue.slug, "added": String(added.count), "phase": phase]
             )
             await postQueenNotice(
                 SystemNoticeClassifier.warningMarker
@@ -3990,6 +4068,31 @@ final class ChatViewModel: ObservableObject {
                     + "the preview created these (#1170)."
             )
         }
+        return true
+    }
+
+    /// Everything a delegation must touch, observed in one shot: the
+    /// registry's task IDs and a fingerprint of the supervisor inbox.
+    /// `/brief` must change neither (#1170, criterion 4).
+    private struct BriefPreviewSentinel {
+        let taskIDs: Set<UUID>
+        let inboxFingerprint: String
+    }
+
+    /// One observation of the sentinel. The registry is the shared
+    /// `delegationRegistry` every real delegation writes; the inbox is the
+    /// file `enqueueQueenInboxEntry` appends to before the poller picks the
+    /// entry up. The fingerprint reuses `inboxLineFingerprint` — a SHA-256
+    /// over the bytes — so a one-line append is a different value while an
+    /// untouched file (absent, empty, or unchanged) is stable.
+    private func briefSentinelNow() -> BriefPreviewSentinel {
+        let ids = Set(delegationRegistry.tasks.map(\.id))
+        var fingerprint = "absent"
+        if let data = FileManager.default.contents(atPath: Self.queenInboxPath),
+           let text = String(data: data, encoding: .utf8) {
+            fingerprint = text.isEmpty ? "empty" : ChatViewModel.inboxLineFingerprint(text)
+        }
+        return BriefPreviewSentinel(taskIDs: ids, inboxFingerprint: fingerprint)
     }
 
     /// Narrows each boundary path to the region the issue mentions, returning
@@ -4119,7 +4222,7 @@ final class ChatViewModel: ObservableObject {
     ) -> ClosedRange<Int>? {
         let fileName = (path as NSString).lastPathComponent
         guard let regex = try? NSRegularExpression(
-            pattern: "(?:строки|Строки|lines?|Lines?)\\s+(\\d{1,5})\\s*[–—-]\\s*(\\d{1,5})"
+            pattern: "(?:[Сс]трок[а-яё]*|[Ll]ines?)\\s+(\\d{1,5})\\s*[–—-]\\s*(\\d{1,5})"
         ) else { return nil }
         let nsBody = body as NSString
         let matches = regex.matches(
