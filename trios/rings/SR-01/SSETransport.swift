@@ -57,9 +57,18 @@ actor SSETransport: ChatTransportProtocol {
         let request = await buildRequest(body: body, forceRefresh: false)
         do {
             return try await performMessageStream(request: request, body: body)
-        } catch TransportError.serverError(403, _, _, _) {
+        } catch TransportError.serverError(401, _, _, _),
+                TransportError.serverError(403, _, _, _) {
             // The local-auth token may be stale (e.g. BrowserOS restarted).
             // Refresh once and retry the same request.
+            //
+            // 401 joined 403 on 2026-08-22: the agent server answers 401
+            // "Local authorization expired" for a stale token, and this
+            // catch matched only 403 - so a lane whose server was restarted
+            // burned three worker dispatches as failures while the refresh
+            // machinery, built for exactly this, sat one status code away.
+            // Bootstrap is unauthenticated and idempotent, so the retry is
+            // one request and cannot loop.
             await LocalAuthMonitor.shared.record403Retry()
             guard localAuthProvider != nil else { throw TransportError.connectionFailed }
             let refreshedRequest = await buildRequest(body: body, forceRefresh: true)
