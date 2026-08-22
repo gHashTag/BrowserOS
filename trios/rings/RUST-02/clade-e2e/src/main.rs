@@ -480,6 +480,14 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
         ],
     },
     SwiftLogicSuite {
+        label: "QueenLanguagePolicy",
+        bin: "/tmp/trios_queen_language_policy_test",
+        sources: &[
+            "tests/swift/queen_language_policy_test.swift",
+            "rings/SR-00/QueenLanguagePolicy.swift",
+        ],
+    },
+    SwiftLogicSuite {
         label: "AgentServerLauncher",
         bin: "/tmp/trios_agent_server_launcher_test",
         sources: &[
