@@ -523,6 +523,20 @@ final class ChatViewModel: ObservableObject {
                 || ProcessInfo.processInfo.environment["TRIOS_E2E_DRILL_1151"] == "1" {
                 runCharacterCountDrill()
             }
+            // #1172 criteria 1-4, driven the same way: the live boundary
+            // line — a path followed by prose — through the same two
+            // statics the `/brief` case calls (`boundaryPaths`,
+            // `narrowedHints`), the no-path record read back from the bus,
+            // and the exactly-300 gate measured against its 301-line twin.
+            // Runs on its own in the test variant so every suite run — and
+            // every gate that runs the suite — re-executes the proof; the
+            // committed fact-record it compares against makes a stale or
+            // fabricated record detectable. The env var stays for asking
+            // the same question in another variant.
+            if ProjectPaths.variant == .test
+                || ProcessInfo.processInfo.environment["TRIOS_E2E_DRILL_1172"] == "1" {
+                runBoundaryParseDrill()
+            }
             await checkHealth()
             let skipA2AStartup = ProcessInfo.processInfo.environment[
                 "TRIOS_SKIP_A2A_STARTUP"
@@ -3922,12 +3936,18 @@ final class ChatViewModel: ObservableObject {
     /// one hint string per narrowed file. Shared by the `/brief` preview and
     /// real delegation so both produce identical hints and emit
     /// `queen.brief.narrowed` for every file that gets narrowed.
+    ///
+    /// `projectRoot` defaults to the live project root; the #1172 drill
+    /// passes a scratch root so its 300-line fixtures never touch the tree
+    /// — the same seam `settleCharacterCountVerdicts` opened for #1151.
     private static func narrowedHints(
         for paths: [String],
         from issueBody: String,
-        issueSlug: String
+        issueSlug: String,
+        projectRoot: String? = nil
     ) -> [String] {
         var hints: [String] = []
+        let root = projectRoot ?? ProjectPaths.root
         let identifiers = ChatViewModel.identifiers(from: issueBody)
         for path in paths {
             // The token may still carry a trailing backtick when the
@@ -3936,7 +3956,7 @@ final class ChatViewModel: ObservableObject {
             let path = path.trimmingCharacters(
                 in: CharacterSet(charactersIn: "`),;:!?")
             )
-            let fullPath = "\(ProjectPaths.root)/\(path)"
+            let fullPath = "\(root)/\(path)"
             guard FileManager.default.fileExists(atPath: fullPath),
                   let source = try? String(contentsOfFile: fullPath, encoding: .utf8)
             else { continue }
@@ -11742,6 +11762,298 @@ extension ChatViewModel {
             // production never crashes on it.
             assertionFailure(
                 "character-count drill failed (#1151): "
+                    + facts.map { "\($0.key)=\($0.value)" }.sorted()
+                        .joined(separator: "; ")
+            )
+        }
+    }
+}
+
+// MARK: - Boundary-parse criteria (#1172)
+
+extension ChatViewModel {
+    /// Whether the boundary-parse drill has run in this process (#1172).
+    private static var boundaryParseDrillExecuted = false
+
+    /// The committed fact-record of the boundary-parse drill (#1172).
+    ///
+    /// Same contract as `characterCountDrillRecord` (#1151): the live drill
+    /// compares its facts against this record on every run in the test
+    /// variant, so the record is an executable expectation, not a pasted
+    /// log — change the parsing, the threshold or the logging and the
+    /// comparison fails, `assertionFailure` trips and the suite goes red;
+    /// edit the record to say something the code no longer produces and the
+    /// same comparison catches the fabrication.
+    ///
+    /// Stamped from the passing run on 2026-08-22, plain
+    /// `bash tests/swift/run_chat_sse_e2e.sh` (test variant, no env var).
+    static let boundaryParseDrillRecord: [String: String] = [
+        "identifiers_count": "2",
+        "token_from_prose_line": "rings/SR-02/ChatViewModel.swift",
+        "token_is_not_the_whole_line": "differs",
+        "paths_from_prose_body": "rings/SR-02/ChatViewModel.swift",
+        "only_prose_body_paths": "0",
+        "whole_line_path_exists": "false",
+        "no_path_record_landed": "Only prose on this line, no path anywhere.",
+        "over_300_hints": "1",
+        "localising_record_lines": "301",
+        "narrowed_record_range": "150-152",
+        "narrowed_record_matched": "boundaryDrillFixture",
+        "file_ends_with_newline": "true",
+        "exactly_300_hints": "0",
+        "exactly_300_skips_localising": "no record",
+        "threshold": "300",
+        "gate_is_strictly_over": "300→0; 301→1",
+    ]
+
+    /// #1172 criteria 1–4, driven: replays the issue's own свидетельство
+    /// line — «`rings/SR-02/ChatViewModel.swift`, строки 4253-4440» —
+    /// through the same two statics the `/brief` case calls, on a scratch
+    /// root, and prints its verdicts to the journal, so "the prose is not
+    /// part of the path" is a run, not a claim.
+    ///
+    /// 1. Criterion 1 — the live line shape parses to the bare path
+    ///    (`boundaryPathToken` and the production `boundaryPaths` over a
+    ///    whole `## Границы` section), the file exists under the drill
+    ///    root, and `narrowedHints` — the same static the `/brief` preview
+    ///    and real delegation both call — answers one hint. The
+    ///    `queen.brief.narrowed` record it emits is read back from the bus
+    ///    with its file, range and matched identifier.
+    /// 2. Criterion 2 — a Границы line with no path yields no path AND a
+    ///    `queen.brief.no_path` record in the bus, read back from the ring
+    ///    buffer: a record, not silence.
+    /// 3. Criterion 3 — a file of exactly 300 lines, trailing newline
+    ///    present so the count correction is load-bearing, is not narrowed
+    ///    and never reaches the localising log, while the same file with
+    ///    one more filler line is narrowed: the gate is strictly `> 300`.
+    /// 4. Criterion 4 — every fact above is compared against the committed
+    ///    record. Taking the whole line again makes `paths_from_prose_body`
+    ///    and `narrowed_record_range` fail at once — the whole-line string
+    ///    is not a file, so narrowing is skipped silently — and the
+    ///    comparison trips. Proven from the failing side twice on
+    ///    2026-08-22: reverting `boundaryPaths` to append the whole line
+    ///    and flipping the gate to `>=` each turned the suite red on
+    ///    exactly these facts; both mutations restored byte-exact
+    ///    (sha-verified) and the run went green again.
+    ///
+    /// Runs on a scratch root, so no live state is touched: the drill may
+    /// not leave files in the real tree. Runs on its own in the test
+    /// variant (see the call site) — a plain
+    /// `bash tests/swift/run_chat_sse_e2e.sh` executes it; no env var
+    /// needed. Verdicts: queen.drill.boundary_parse.* in
+    /// .trinity-test/logs/trios-app.jsonl.
+    private func runBoundaryParseDrill() {
+        // Once per process: the suite builds many ChatViewModels; the
+        // drill is a question about code, not about this instance.
+        guard !ChatViewModel.boundaryParseDrillExecuted else { return }
+        ChatViewModel.boundaryParseDrillExecuted = true
+
+        let path = "rings/SR-02/ChatViewModel.swift"
+        // The exact shape from the issue's свидетельство: a backticked
+        // path, a comma outside the closing backtick, then prose.
+        let proseLine = "`\(path)`, строки 4253-4440"
+        let noPathLine = "Only prose on this line, no path anywhere."
+        let proseBody = "## Смысл\n\nDrill issue for the boundary parse.\n\n"
+            + "## Границы\n\n\(proseLine)\n\n\(noPathLine)\n\n"
+            + "## Готово, когда\n\n- `boundaryDrillFixture` is narrowed.\n"
+        let onlyProseBody = "## Границы\n\n\(noPathLine)\n"
+
+        let root = NSTemporaryDirectory() + "trios-drill-1172-" + UUID().uuidString
+        var facts: [String: String] = [:]
+        var passed = true
+
+        func expect(_ name: String, _ condition: Bool, _ detail: String) {
+            facts[name] = condition ? detail : "FAIL: " + detail
+            if !condition { passed = false }
+        }
+
+        // Records appended to the bus after a mark, so the drill can tell
+        // "this call emitted" from "some earlier run did".
+        func records(since mark: Int) -> [TriosLogRecord] {
+            let all = TriosLogBus.shared.recent()
+            guard mark >= 0, all.count >= mark else { return all }
+            return Array(all[mark...])
+        }
+
+        do {
+            // The fixture: a scratch stand-in for the boundary file, with
+            // one func the synthetic issue body names. Identical content in
+            // both lengths, so the ONLY difference the gate can react to is
+            // the line count. Filler lines carry no identifier the body
+            // yields, so nothing else can steer the localisation.
+            func writeFixture(lineCount: Int) throws -> String {
+                let dir = root + "/rings/SR-02"
+                try FileManager.default.createDirectory(
+                    atPath: dir, withIntermediateDirectories: true
+                )
+                var lines: [String] = ["// drill fixture for the boundary parse"]
+                while lines.count < 149 {
+                    lines.append("// filler \(lines.count + 1)")
+                }
+                lines.append("func boundaryDrillFixture() {")
+                lines.append("    let value = 1")
+                lines.append("}")
+                while lines.count < lineCount {
+                    lines.append("// filler \(lines.count + 1)")
+                }
+                let text = lines.joined(separator: "\n") + "\n"
+                try text.write(
+                    toFile: dir + "/ChatViewModel.swift",
+                    atomically: true,
+                    encoding: .utf8
+                )
+                return text
+            }
+
+            // ── 1. The line, as the live issue wrote it ────────────────
+            let token = ChatViewModel.boundaryPathToken(from: proseLine)
+            expect("token_from_prose_line", token == path, token ?? "nil")
+            expect(
+                "token_is_not_the_whole_line",
+                token != proseLine,
+                token == proseLine ? "same" : "differs"
+            )
+
+            // ── 2. The production parser over whole sections ───────────
+            let ringMark = TriosLogBus.shared.recent().count
+            let paths = ChatViewModel.boundaryPaths(from: proseBody) ?? []
+            expect(
+                "paths_from_prose_body",
+                paths == [path],
+                paths.joined(separator: " | ")
+            )
+            let onlyProsePaths = ChatViewModel.boundaryPaths(from: onlyProseBody) ?? []
+            expect(
+                "only_prose_body_paths",
+                onlyProsePaths.isEmpty,
+                String(onlyProsePaths.count)
+            )
+            // The whole line as a path matches nothing — this is the silent
+            // failure the свидетельство names, stated as a fact so the
+            // record shows WHY the old way could not narrow.
+            let wholeLinePath = root + "/" + proseLine
+            expect(
+                "whole_line_path_exists",
+                !FileManager.default.fileExists(atPath: wholeLinePath),
+                FileManager.default.fileExists(atPath: wholeLinePath) ? "true" : "false"
+            )
+            // Criterion 2: the no-path line left a record, not silence.
+            let noPathRecord = records(since: ringMark)
+                .first { $0.event == "queen.brief.no_path" }
+            expect(
+                "no_path_record_landed",
+                noPathRecord?.attributes["line"] == noPathLine,
+                noPathRecord?.attributes["line"] ?? "no record"
+            )
+
+            // ── 3. /brief's own static, hermetic root, over 300 lines ──
+            try writeFixture(lineCount: 301)
+            let narrowingMark = TriosLogBus.shared.recent().count
+            let narrowed = ChatViewModel.narrowedHints(
+                for: paths, from: proseBody,
+                issueSlug: "gHashTag/trios#1172", projectRoot: root
+            )
+            expect("over_300_hints", narrowed.count == 1, String(narrowed.count))
+            let narrowingRecords = records(since: narrowingMark)
+            let localising = narrowingRecords
+                .first { $0.event == "queen.brief.localising" }
+            expect(
+                "localising_record_lines",
+                localising?.attributes["lines"] == "301",
+                localising?.attributes["lines"] ?? "no record"
+            )
+            let narrowedRecord = narrowingRecords
+                .first { $0.event == "queen.brief.narrowed" }
+            expect(
+                "narrowed_record_range",
+                narrowedRecord?.attributes["range"] == "150-152",
+                narrowedRecord?.attributes["range"] ?? "no record"
+            )
+            expect(
+                "narrowed_record_matched",
+                narrowedRecord?.attributes["matched"] == "boundaryDrillFixture",
+                narrowedRecord?.attributes["matched"] ?? "no record"
+            )
+
+            // ── 4. Exactly 300: the off-by-one the contract names ──────
+            // Trailing newline present on purpose: without the count
+            // correction a 300-line file reports 301 and narrows, which is
+            // precisely the defect the issue filed.
+            let text300 = try writeFixture(lineCount: 300)
+            expect("file_ends_with_newline", text300.hasSuffix("\n"), "true")
+            let gateMark = TriosLogBus.shared.recent().count
+            let exactly300 = ChatViewModel.narrowedHints(
+                for: paths, from: proseBody,
+                issueSlug: "gHashTag/trios#1172", projectRoot: root
+            )
+            expect("exactly_300_hints", exactly300.isEmpty, String(exactly300.count))
+            let gateRecords = records(since: gateMark)
+            expect(
+                "exactly_300_skips_localising",
+                !gateRecords.contains {
+                    $0.event == "queen.brief.localising"
+                        || $0.event == "queen.brief.narrowed"
+                        || $0.event == "queen.brief.notNarrowed"
+                },
+                "no record"
+            )
+            expect(
+                "threshold",
+                QueenLocalisation.maxRegionWidth == 300,
+                String(QueenLocalisation.maxRegionWidth)
+            )
+            expect(
+                "gate_is_strictly_over",
+                exactly300.isEmpty && narrowed.count == 1,
+                "300→\(exactly300.count); 301→\(narrowed.count)"
+            )
+
+            // The identifiers the body yields — pinned so a stray new word
+            // in the fixture body cannot quietly change what is searched.
+            expect(
+                "identifiers_count",
+                ChatViewModel.identifiers(from: proseBody).count == 2,
+                String(ChatViewModel.identifiers(from: proseBody).count)
+            )
+
+            // The committed record this file carries must match what the
+            // run just measured (#1151 pass 3: a journal outside the
+            // reviewed files proves nothing to a reviewer; this comparison
+            // is what makes the record an artifact).
+            expect(
+                "record_matches_committed",
+                facts == ChatViewModel.boundaryParseDrillRecord,
+                facts.map { "\($0.key)=\($0.value)" }.sorted()
+                    .joined(separator: "; ")
+            )
+        } catch {
+            passed = false
+            facts["threw"] = String(describing: error)
+        }
+
+        if passed {
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.drill.boundary_parse.passed",
+                "A path followed by prose narrows to the named declaration, "
+                    + "a line without a path leaves a record, and a "
+                    + "300-line file is refused while its 301-line twin is "
+                    + "narrowed (#1172)",
+                facts
+            )
+            try? FileManager.default.removeItem(atPath: root)
+        } else {
+            TriosLogBus.shared.error(
+                .queen,
+                "queen.drill.boundary_parse.failed",
+                "The boundary-parse drill failed — the prose-after-path "
+                    + "replay did not come out as the record says (#1172)",
+                facts
+            )
+            // A failed drill must fail the suite, not merely log (#1151
+            // pass 3); assertionFailure is compiled out in release builds.
+            assertionFailure(
+                "boundary-parse drill failed (#1172): "
                     + facts.map { "\($0.key)=\($0.value)" }.sorted()
                         .joined(separator: "; ")
             )
