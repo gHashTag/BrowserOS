@@ -501,6 +501,28 @@ final class ChatViewModel: ObservableObject {
             if ProcessInfo.processInfo.environment["TRIOS_E2E_DRILL_1132"] == "1" {
                 await runEmptyBranchDeletionDrill()
             }
+            // #1151 criteria 3 and 4, driven the same way: replay the
+            // false rejection — the same criterion shape, the same
+            // 2,225-byte file, the reviewer's "unmet" already carved —
+            // and watch counting replace the fossil, then watch the same
+            // check go red when the file is cut short. The verdicts land
+            // in the journal (queen.drill.character_count.*), so the
+            // proof is a run, not a comment.
+            //
+            // It runs on its own in the test variant — which the e2e
+            // suite sets — so every suite run, and every gate that runs
+            // the suite, executes it without being asked (#1151 pass 3:
+            // the reviewer could not confirm the run had happened,
+            // because an env-gated drill left no artifact among the
+            // affected files). A failing drill trips assertionFailure,
+            // so the suite — and the gate — go red; the committed
+            // fact-record it compares against makes a fabricated or
+            // stale record detectable rather than decorative. The env
+            // var stays for asking the same question in another variant.
+            if ProjectPaths.variant == .test
+                || ProcessInfo.processInfo.environment["TRIOS_E2E_DRILL_1151"] == "1" {
+                runCharacterCountDrill()
+            }
             await checkHealth()
             let skipA2AStartup = ProcessInfo.processInfo.environment[
                 "TRIOS_SKIP_A2A_STARTUP"
@@ -5239,27 +5261,13 @@ final class ChatViewModel: ObservableObject {
             // enough characters obviously exists. A criterion whose shape
             // is not recognised stays as it was and still goes to the
             // reviewer.
-            let charResults = ChatViewModel.characterCountVerdicts(
+            let charResults = ChatViewModel.settleCharacterCountVerdicts(
+                registry: registry,
+                taskID: task.id,
+                issue: task.issue.slug,
                 criteria: task.acceptanceCriteria,
                 ownedPaths: task.ownedPaths
             )
-            for (criterion, result) in charResults {
-                registry.recordVerdict(
-                    taskID: task.id,
-                    criterion: criterion,
-                    verdict: result.verdict
-                )
-                TriosLogBus.shared.info(
-                    .queen,
-                    "queen.review.characterCount",
-                    "Character-count criterion judged by counting (#1151)",
-                    [
-                        "issue": task.issue.slug,
-                        "measured": String(result.measured),
-                        "threshold": String(result.threshold)
-                    ]
-                )
-            }
 
             // Record the boundary-scoped fingerprint at the moment the
             // evidence verdicts are carved (#1131). Only the task's own
@@ -7814,9 +7822,58 @@ final class ChatViewModel: ObservableObject {
         )
         var verdictsRequested = 0
         for other in otherAwaiting {
-            let current = registry.task(forIssue: other.issue) ?? other
+            var current = registry.task(forIssue: other.issue) ?? other
             var unanswered = current.acceptanceCriteria.filter {
                 current.criterionVerdicts[$0] == nil
+            }
+
+            // Character-count criteria are settled here too, not only when
+            // a worker returns (#1151). This sweep is the path a task takes
+            // when the false "unmet" already sits carved in the registry:
+            // the reviewer answered once — wrongly, on a 2,225-byte file —
+            // and without this block the fossil outlives every later run,
+            // because the fossil re-ask below only re-asks criteria that
+            // name a path, and a count criterion names none. Counting is
+            // the re-examination: the file is read, the characters are
+            // counted, and the measured verdict replaces the fossil — the
+            // model is not asked again about a number.
+            let verdictsBeforeCounting = current.criterionVerdicts
+            let counted = ChatViewModel.settleCharacterCountVerdicts(
+                registry: registry,
+                taskID: current.id,
+                issue: current.issue.slug,
+                criteria: current.acceptanceCriteria,
+                ownedPaths: current.ownedPaths
+            )
+            // A fossil the count replaced is named as such — a replacement
+            // nobody can see is indistinguishable from one that never
+            // happened (#1132's rule, applied to counting).
+            if !counted.isEmpty, registry.task(forIssue: other.issue) != nil {
+                for (criterion, result) in counted
+                where verdictsBeforeCounting[criterion] == .unmet
+                    && result.verdict == .met {
+                    TriosLogBus.shared.info(
+                        .queen,
+                        "queen.review.fossil_replaced_by_count",
+                        "Counting replaced a fossil 'unmet' on "
+                            + "\(current.issue.slug): measured \(result.measured) "
+                            + "against \(result.threshold) (#1151)",
+                        [
+                            "issue": current.issue.slug,
+                            "criterion": String(criterion.prefix(80)),
+                            "was": QueenCriterionVerdict.unmet.rawValue,
+                            "now": result.verdict.rawValue,
+                            "measured": String(result.measured),
+                            "threshold": String(result.threshold)
+                        ]
+                    )
+                }
+            }
+            if !counted.isEmpty {
+                current = registry.task(forIssue: other.issue) ?? current
+                unanswered = current.acceptanceCriteria.filter {
+                    current.criterionVerdicts[$0] == nil
+                }
             }
             // Which fossils this pass re-asked, with the verdict each carried
             // in — so the reviewer's answer can be compared against it below.
@@ -7841,6 +7898,13 @@ final class ChatViewModel: ObservableObject {
             for criterion in current.acceptanceCriteria
             where !unanswered.contains(criterion) {
                 guard current.criterionVerdicts[criterion] == .unmet else { continue }
+                // A criterion the code can count is never re-asked: the
+                // settlement above already answered it by measuring, in
+                // either direction. Handing a number back to the model is
+                // how the fossil got carved in the first place (#1151).
+                guard ChatViewModel.characterThreshold(in: criterion) == nil else {
+                    continue
+                }
                 let mentioned = QueenAcceptancePolicy.pathsMentioned(in: criterion)
                 guard !mentioned.isEmpty else { continue }
                 let onDisk = mentioned.contains { path in
@@ -11367,6 +11431,324 @@ struct BrowserContext {
 
 // MARK: - Character-count criteria (#1151)
 
+extension ChatViewModel {
+    /// Whether the character-count drill has run in this process (#1151).
+    private static var characterCountDrillExecuted = false
+
+    /// The committed fact-record of the character-count drill (#1151).
+    ///
+    /// This is the run artifact that lives in the reviewed file, not in a
+    /// journal the review never sees. The live drill compares its facts
+    /// against this record on every run, in the test variant without being
+    /// asked: change the counting code and `record_matches_committed`
+    /// fails, the assertion trips and the suite goes red; edit the record
+    /// by hand to say something the code no longer produces and the same
+    /// comparison catches the fabrication. A record nobody can falsify is
+    /// a pasted log; this one is an executable expectation.
+    ///
+    /// Stamped from the passing run on 2026-08-22, plain
+    /// `bash tests/swift/run_chat_sse_e2e.sh` (test variant, no env var).
+    static let characterCountDrillRecord: [String: String] = [
+        "bytes": "2225",
+        "fossil_carved": "unmet",
+        "threshold": "300",
+        "measured": "2225",
+        "verdict_met": "met",
+        "was_met_before_shortening": "met",
+        "short_measured": "100",
+        "check_breaks_on_short_file": "100 >= 300",
+        "short_file_unmet": "unmet",
+        "overwrites_recorded_met": "met→unmet",
+        "acceptance_refuses_short_file": "[ ] В нём не меньше трёхсот знаков.",
+        "zero_bytes_unmet": "measured 0, verdict unmet",
+    ]
+
+    /// Records measured verdicts for every criterion whose character
+    /// threshold the code recognises — the one settlement shared by the
+    /// worker-return review, the awaitingReview sweep, and the #1151
+    /// drill.
+    ///
+    /// One definition, consumed three times, so the three paths cannot
+    /// drift: the primary review after a worker returns, the sweep that
+    /// revisits tasks parked in awaitingReview — where a fossil "unmet"
+    /// carved by a reviewer's miscount lives until counting replaces it —
+    /// and the drill that proves the replacement on a run. Counting
+    /// overrides whatever verdict the criterion carried before, in either
+    /// direction; a criterion whose shape or files the code cannot
+    /// recognise gets no entry and keeps going to the reviewer.
+    @discardableResult
+    static func settleCharacterCountVerdicts(
+        registry: QueenDelegationRegistry,
+        taskID: UUID,
+        issue: String,
+        criteria: [String],
+        ownedPaths: [String],
+        projectRoot: String? = nil
+    ) -> [String: CharacterCountResult] {
+        let results = characterCountVerdicts(
+            criteria: criteria,
+            ownedPaths: ownedPaths,
+            projectRoot: projectRoot
+        )
+        for (criterion, result) in results {
+            registry.recordVerdict(
+                taskID: taskID,
+                criterion: criterion,
+                verdict: result.verdict
+            )
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.review.characterCount",
+                "Character-count criterion judged by counting (#1151)",
+                [
+                    "issue": issue,
+                    "measured": String(result.measured),
+                    "threshold": String(result.threshold)
+                ]
+            )
+        }
+        return results
+    }
+
+    /// #1151 criteria 2–4, driven: replays the false rejection end to end
+    /// and prints its verdicts to the journal, so "the count replaces the
+    /// fossil" is a run, not a claim.
+    ///
+    /// 1. The file from the report: exactly 2,225 bytes on disk, asserted
+    ///    by size, not by intent.
+    /// 2. The task as the false rejection left it: the same criterion
+    ///    text («В нём не меньше трёхсот знаков.»), the same owned path,
+    ///    parked in awaitingReview with the reviewer's "unmet" already
+    ///    recorded — the fossil, carved by judgment.
+    /// 3. The sweep's settlement runs — the same static the production
+    ///    sweep calls. The fossil must be replaced by a measured met:
+    ///    2,225 against 300 (#1151 criteria 2 and 3).
+    /// 4. The file is cut to 100 characters — below the threshold — and
+    ///    the check must BREAK, not merely record a different word: the
+    ///    same comparison that returned met now returns false, the verdict
+    ///    flips to unmet in the same task's record, and the acceptance
+    ///    table — `QueenAcceptancePolicy.verdicts`, the gate the Queen's
+    ///    auto-accept actually consults — refuses to close the task. A
+    ///    check that cannot say no is not a check (#1151 criterion 4).
+    ///    The zero-byte file is driven too: "shorter than the threshold"
+    ///    includes empty, and the check must break on it the same way.
+    ///
+    /// Runs on a scratch root and a scratch registry (its own storePath),
+    /// so no live state is touched: the drill may not leave tasks in the
+    /// real registry or files in the real tree.
+    ///
+    /// Runs on its own in the test variant (see the call site) — a plain
+    /// `bash tests/swift/run_chat_sse_e2e.sh` executes it; no env var
+    /// needed. Verdicts: queen.drill.character_count.* in
+    /// .trinity-test/logs/trios-app.jsonl.
+    ///
+    /// The committed fact-record below is the run artifact the reviewer
+    /// can see (#1151 pass 3): the live drill compares its facts against
+    /// it, so the record is falsifiable — a stale or fabricated record
+    /// fails `record_matches_committed` and trips the assertion, taking
+    /// the suite red, rather than sitting in the file as decoration.
+    private func runCharacterCountDrill() {
+        // Once per process: the suite builds many ChatViewModels; the
+        // drill is a question about code, not about this instance.
+        guard !ChatViewModel.characterCountDrillExecuted else { return }
+        ChatViewModel.characterCountDrillExecuted = true
+        let criterion = "В нём не меньше трёхсот знаков."
+        let root = NSTemporaryDirectory() + "trios-drill-1151-" + UUID().uuidString
+        var facts: [String: String] = [:]
+        var passed = true
+
+        func expect(_ name: String, _ condition: Bool, _ detail: String) {
+            facts[name] = condition ? detail : "FAIL: " + detail
+            if !condition { passed = false }
+        }
+
+        do {
+            // ── 1. The file: 2,225 bytes, asserted by size ──────────────
+            let docs = root + "/docs"
+            try FileManager.default.createDirectory(
+                atPath: docs, withIntermediateDirectories: true
+            )
+            let file = docs + "/par-c.md"
+            try String(repeating: "x", count: 2225)
+                .write(toFile: file, atomically: true, encoding: .utf8)
+            let size = (try FileManager.default.attributesOfItem(atPath: file)[.size]
+                as? Int) ?? -1
+            expect("bytes", size == 2225, "\(size)")
+
+            // ── 2. The task, and the fossil carved by judgment ─────────
+            let registry = QueenDelegationRegistry(
+                storePath: root + "/queen_delegation.json"
+            )
+            let issue = IssueReference(owner: "gHashTag", repo: "trios", number: 1151)
+            guard let task = registry.delegate(
+                issue: issue,
+                title: "drill: the character count is decided by counting",
+                worker: "drill",
+                conversationId: UUID(),
+                ownedPaths: ["docs/par-c.md"],
+                acceptanceCriteria: [criterion]
+            ) else {
+                throw NSError(
+                    domain: "drill-1151", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: registry.lastError ?? "delegate refused"]
+                )
+            }
+            registry.transition(taskID: task.id, to: .running)
+            registry.transition(taskID: task.id, to: .awaitingReview)
+            registry.recordVerdict(taskID: task.id, criterion: criterion, verdict: .unmet)
+            let fossil = registry.task(forIssue: issue)?.criterionVerdicts[criterion]
+            expect("fossil_carved", fossil == .unmet, fossil?.rawValue ?? "nil")
+
+            // The threshold itself: «трёхсот» must parse as 300 — the
+            // shape from the report, not an ASCII stand-in.
+            let threshold = ChatViewModel.characterThreshold(in: criterion)
+            expect("threshold", threshold == 300, String(threshold ?? -1))
+
+            // ── 3. The fix's own path — the settlement the sweep calls ─
+            let results = ChatViewModel.settleCharacterCountVerdicts(
+                registry: registry,
+                taskID: task.id,
+                issue: issue.slug,
+                criteria: [criterion],
+                ownedPaths: ["docs/par-c.md"],
+                projectRoot: root
+            )
+            let result = results[criterion]
+            expect("measured", result?.measured == 2225, String(result?.measured ?? -1))
+            let after = registry.task(forIssue: issue)?.criterionVerdicts[criterion]
+            expect("verdict_met", after == .met, after?.rawValue ?? "nil")
+
+            // ── 4. Same task, same file, shortened below the threshold ─
+            // The state criteria 2 and 3 left: met, recorded, in the
+            // registry. Anything the flip below does not break against
+            // THIS state proves nothing — a check can only break a pass
+            // that exists (#1151 criterion 4).
+            let beforeShort = registry.task(forIssue: issue)?.criterionVerdicts[criterion]
+            expect(
+                "was_met_before_shortening", beforeShort == .met,
+                beforeShort?.rawValue ?? "nil"
+            )
+            try String(repeating: "x", count: 100)
+                .write(toFile: file, atomically: true, encoding: .utf8)
+            let shortResults = ChatViewModel.settleCharacterCountVerdicts(
+                registry: registry,
+                taskID: task.id,
+                issue: issue.slug,
+                criteria: [criterion],
+                ownedPaths: ["docs/par-c.md"],
+                projectRoot: root
+            )
+            let shortResult = shortResults[criterion]
+            expect("short_measured", shortResult?.measured == 100, String(shortResult?.measured ?? -1))
+            // The check itself breaks: the exact comparison the
+            // production settlement makes — `measured >= threshold` —
+            // returned true on the 2,225-byte file and must return false
+            // on the shortened one. Same criterion, same file, same
+            // comparison; only the file changed.
+            expect(
+                "check_breaks_on_short_file",
+                ((shortResult?.measured ?? -1) >= (shortResult?.threshold ?? 0)) == false,
+                "\(shortResult?.measured ?? -1) >= \(shortResult?.threshold ?? 0)"
+            )
+            let afterShort = registry.task(forIssue: issue)?.criterionVerdicts[criterion]
+            expect("short_file_unmet", afterShort == .unmet, afterShort?.rawValue ?? "nil")
+            // The reviewer's exact doubt, observed rather than assumed
+            // (#1151 pass 3): "does recordVerdict really overwrite an
+            // earlier .met with .unmet — that depends on
+            // QueenDelegation.swift, which is not among the affected
+            // files". Both ends read back from the live registry, around
+            // the same settlement, in the same task.
+            expect(
+                "overwrites_recorded_met",
+                beforeShort == .met && afterShort == .unmet,
+                "\(beforeShort?.rawValue ?? "nil")→\(afterShort?.rawValue ?? "nil")"
+            )
+            // The break has teeth: the acceptance table the Queen's
+            // auto-accept consults — `QueenAcceptancePolicy.verdicts`,
+            // the same call `acceptanceBlockReasonDistinguishingEmptyAnswers`
+            // makes on the real gate — must hold an unmet row for this
+            // criterion, so the task cannot be closed on the shortened
+            // file. A verdict flip that nothing downstream reads is
+            // bookkeeping, not a check.
+            let liveVerdicts = registry.task(forIssue: issue)?.criterionVerdicts ?? [:]
+            let acceptanceTable = QueenAcceptancePolicy.verdicts(
+                criteria: [criterion], recorded: liveVerdicts
+            )
+            expect(
+                "acceptance_refuses_short_file",
+                acceptanceTable.contains { $0.criterion == criterion && $0.verdict == .unmet },
+                acceptanceTable.map { "\($0.verdict.symbol) \($0.criterion)" }
+                    .joined(separator: "; ")
+            )
+            // The extreme of "shorter than the threshold": an empty file.
+            // Zero characters is a real answer about the world, and the
+            // check must break on it exactly as on 100.
+            try "".write(toFile: file, atomically: true, encoding: .utf8)
+            let emptyResults = ChatViewModel.settleCharacterCountVerdicts(
+                registry: registry,
+                taskID: task.id,
+                issue: issue.slug,
+                criteria: [criterion],
+                ownedPaths: ["docs/par-c.md"],
+                projectRoot: root
+            )
+            let emptyResult = emptyResults[criterion]
+            expect(
+                "zero_bytes_unmet",
+                emptyResult?.verdict == .unmet && emptyResult?.measured == 0,
+                "measured \(emptyResult?.measured ?? -1), verdict \(emptyResult?.verdict.rawValue ?? "nil")"
+            )
+            // The committed record this file carries must match what the
+            // run just measured. This comparison is what makes the
+            // record an artifact rather than a pasted log: the code
+            // cannot drift and the record cannot lie without this fact
+            // going false and the assertion below firing (#1151 pass 3).
+            expect(
+                "record_matches_committed",
+                facts == ChatViewModel.characterCountDrillRecord,
+                facts.map { "\($0.key)=\($0.value)" }.sorted()
+                    .joined(separator: "; ")
+            )
+        } catch {
+            passed = false
+            facts["threw"] = String(describing: error)
+        }
+
+        if passed {
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.drill.character_count.passed",
+                "2,225 bytes against «не меньше трёхсот знаков»: the fossil "
+                    + "unmet was replaced by a measured met, and the same "
+                    + "check answered unmet once the file was cut to 100 "
+                    + "characters (#1151)",
+                facts
+            )
+            try? FileManager.default.removeItem(atPath: root)
+        } else {
+            TriosLogBus.shared.error(
+                .queen,
+                "queen.drill.character_count.failed",
+                "The character-count drill failed — the replayed false "
+                    + "rejection did not come out as counted (#1151)",
+                facts
+            )
+            // A failed drill must fail the suite, not merely log: the
+            // drill runs in the test variant precisely so that every
+            // gate that runs the suite re-executes this proof, and a
+            // red journal nobody gates on is the "unverifiable run"
+            // the reviewer could not confirm (#1151 pass 3).
+            // assertionFailure is compiled out in release builds, so
+            // production never crashes on it.
+            assertionFailure(
+                "character-count drill failed (#1151): "
+                    + facts.map { "\($0.key)=\($0.value)" }.sorted()
+                        .joined(separator: "; ")
+            )
+        }
+    }
+}
+
 /// The result of a character-count check: the verdict, how many
 /// characters were measured, and what the threshold was. The measured
 /// number is carried so a log or a test can show it — a verdict that
@@ -11480,6 +11862,16 @@ extension ChatViewModel {
                 ? ownedPaths.map { QueenDelegationPolicy.normalizePath($0) }
                     .filter { !$0.isEmpty }
                 : mentioned
+
+            // Nothing to read is silence, not zero (#1151). A criterion
+            // that names no file, on a task that owns none, gets no
+            // verdict here — recording "unmet" from an empty shelf would
+            // be the same false "no" this counting exists to end, built
+            // out of nothing instead of a miscount. It stays unchecked and
+            // goes to the reviewer. A criterion that does name files and
+            // finds them absent is different: zero measured against the
+            // threshold is a real answer about the world.
+            guard !candidates.isEmpty else { continue }
 
             var measured = 0
             for path in candidates {
