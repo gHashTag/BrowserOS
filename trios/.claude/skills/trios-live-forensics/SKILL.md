@@ -216,3 +216,32 @@ registry: 22 of 40 failures in one night were the rebuild loop, not the code.
   while the old server answers. Verify with `lsof -iTCP:<port>` +
   `/health`, and read the tail of `agent-server-<port>.log` for
   `[FATAL]` before believing any restart line.
+
+## Added 2026-08-23, the night the release lane stood still
+
+- **A keychain that times out on EVERY operation is a dialog, not a
+  keychain.** `pgrep -x SecurityAgent`: if it is running, macOS is asking
+  the user to approve access and a menu-bar app cannot answer. Every call
+  queues behind it and dies on its own deadline, reads and writes alike,
+  with `osStatus(-4093)`. The discriminators that named it in three
+  commands: the shell reads the same service's attributes in 24 ms
+  (`security find-generic-password -s <service>`, no `-w`, no prompt), the
+  OTHER variant's app reads the same service successfully in the same
+  minute, and the timing starts at a rebuild - a new ad-hoc signature no
+  longer matches the ACL on the items. Nothing but the operator's click
+  clears it; relaunching does not.
+- **`open --env` applies only at launch.** Killing and immediately opening
+  can hit an instance the watchdog already restarted, and the environment
+  silently does not arrive - the command channel then does nothing at all.
+  Kill, VERIFY dead with `pgrep`, then open.
+- **A refusal you cannot find is usually under a key you did not grep.**
+  `/accept` on a task with unmet criteria logs
+  `queen.accept.blocked | Acceptance blocked by the contract`; I called it
+  a silent refusal twice while filtering on `transition|pr.|command`. Dump
+  the whole window around the timestamp before calling anything silent.
+- **The shared `~/trinity` checkout breaks this build about once every two
+  hours** - another agent wipes QueenUILib's build directory mid-compile
+  and `swift build` dies on "unable to load output file map". `build.sh`
+  now falls back to the vendored halves on that one signature and says
+  `[NEIGHBOUR]`; before that fix the manual recovery was
+  `TRIOS_VENDORED=1 make check`.
