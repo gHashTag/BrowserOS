@@ -174,3 +174,25 @@ registry: 22 of 40 failures in one night were the rebuild loop, not the code.
   /cancel is an illegal transition); FAILED records are invisible to every
   command except `/dismiss <issue> <why>`, which exists precisely for
   looked-at failures and refuses an empty reason.
+
+## Added 2026-08-22, second consolidation (the board-lifecycle night)
+
+- **Verify verdicts by record id, not by state counters.** A two-step
+  reject-then-cancel on an issue with sibling records can cancel the wrong
+  one while the restarted bee flies; the counter still matches the
+  expectation. Measured: dev #1132-r3 finished twenty minutes after a
+  mistargeted cancel and reappeared in awaitingReview.
+- **A record-level dismissal teaches choose nothing.** Candidates come
+  from OPEN forge issues, so any lane with budget re-grinds a dismissed
+  issue (dev dispatched #1131 attempts 12 and 13 within the hour). The
+  durable stop for a measured dead end is closing the issue on the forge
+  with a verdict comment; verify the candidate count drops on the next
+  choose pass.
+- **The macosx26.5 stamps were our own bees.** The agent server launches
+  without DEVELOPER_DIR, worker shells resolve swiftc to full Xcode, and
+  bee builds stamp shared artifacts with Xcode's SDK. The scrubbed worker
+  env now defaults DEVELOPER_DIR to CLT; build.sh's typecheck probe
+  auto-repairs artifacts stamped before that landed.
+- Dev-lane token counts stay zero until the 9205 server process restarts
+  into the emission-default code - a zero there is a stale server, not a
+  broken pipeline.
