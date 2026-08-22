@@ -352,8 +352,15 @@ fi
 # hand identically both times; this probe is that repair, automated, and it
 # engages only on the exact error it exists for.
 if [ -z "$TRIOS_PRINT_FLAGS" ]; then
-    probe_src=$(mktemp /tmp/trios_queenuilib_probe.XXXXXX.swift)
-    probe_err=$(mktemp /tmp/trios_queenuilib_probe.XXXXXX.err)
+    # A directory, not two file templates. `mktemp` on macOS only substitutes
+    # X's at the END of a template, so `...XXXXXX.swift` created a file with
+    # that literal name - which works once and fails with "File exists" the
+    # moment two builds overlap. Measured 2026-08-22 when a vendored gate ran
+    # beside a release build. A probe that cannot run twice at once is a probe
+    # that fails whenever the machine is busy.
+    probe_dir=$(mktemp -d /tmp/trios_queenuilib_probe.XXXXXX)
+    probe_src="$probe_dir/probe.swift"
+    probe_err="$probe_dir/probe.err"
     echo "import QueenUILib" > "$probe_src"
     if ! xcrun swiftc -typecheck "$probe_src" -I "$QUEEN_MODULE_DIR" 2>"$probe_err"; then
         if grep -q "cannot load module 'QueenUILib' built with SDK" "$probe_err"; then
@@ -362,7 +369,7 @@ if [ -z "$TRIOS_PRINT_FLAGS" ]; then
                 echo "       different SDK than the current toolchain and cannot"
                 echo "       be rebuilt here. Run one normal (non-vendored) build"
                 echo "       to refresh the vendored halves."
-                rm -f "$probe_src" "$probe_err"
+                rm -rf "$probe_dir"
                 exit 1
             fi
             echo "[REPAIR] QueenUILib.swiftmodule was built with another SDK;"
@@ -376,14 +383,14 @@ if [ -z "$TRIOS_PRINT_FLAGS" ]; then
                 echo "[FAIL] QueenUILib still does not load after a rebuild with"
                 echo "       the current toolchain:"
                 sed 's/^/       | /' "$probe_err" | head -4
-                rm -f "$probe_src" "$probe_err"
+                rm -rf "$probe_dir"
                 exit 1
             fi
         fi
         # Any other probe failure is left for the real compile to report with
         # full context - the probe only owns the SDK-mismatch signature.
     fi
-    rm -f "$probe_src" "$probe_err"
+    rm -rf "$probe_dir"
 fi
 
 # SQLCipher is required for encrypted agent-memory I/O. Use pkg-config when

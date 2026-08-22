@@ -28,6 +28,15 @@ RELEASE_APP := $(ROOT)/trios.app
 # nothing else lives there.
 TEST_APP    := $(ROOT)/trios-test.app
 TEST_PROC   := trios-test\.app/Contents/MacOS/trios
+# The pattern the cassette recipe kills by. It carries THIS checkout's path
+# on purpose: the bare `trios-test.app/Contents/MacOS` matched a bee's harness
+# too, because a worktree is a full checkout that builds its own test bundle
+# at .worktrees/<variant>/queen-<n>/trios/trios-test.app. Measured on
+# 2026-08-22, when a gate run killed the dev bee's harness in another lane.
+# A harness that can reach outside its own tree is not isolated, whatever
+# variant it claims.
+TEST_PROC_HERE := $(TEST_APP)/Contents/MacOS
+DEV_PROC_HERE  := $(DEV_APP)/Contents/MacOS
 TEST_BIN    := $(TEST_APP)/Contents/MacOS/trios
 TEST_LOG    := $(ROOT)/.trinity-test/logs/trios-app.jsonl
 
@@ -607,6 +616,26 @@ warnings:
 	exit $$status
 
 release:
+	@: "The mid-flight check belongs HERE, not only in relaunch. Measured on"; \
+	: "2026-08-22: a release build ran while a worker was mid-flight, the"; \
+	: "build replaced the bundle under the running app, the app died at"; \
+	: "13:24:52 - and `make relaunch` then REFUSED, because the registry"; \
+	: "still showed a worker running. The guard meant to protect that bee"; \
+	: "held the app down after the build had already orphaned it: no"; \
+	: "menu-bar logo, no supervisor, and the bee orphaned anyway. Refusing"; \
+	: "before the build is the only order in which the guard protects"; \
+	: "anything."; \
+	running=$$(python3 -c "import json,sys; \
+	    d=json.load(open('$(ROOT)/.trinity/state/queen_delegation.json')); \
+	    t=d if isinstance(d,list) else d.get('tasks',d); \
+	    t=list(t.values()) if isinstance(t,dict) else t; \
+	    print(sum(1 for x in t if x.get('state')=='running'))" 2>/dev/null || echo 0); \
+	if [ "$$running" != "0" ] && [ -z "$(FORCE)" ]; then \
+		echo "[HOLD] $$running worker(s) are mid-flight; a release build replaces"; \
+		echo "       the bundle under the running app and kills it, orphaning them."; \
+		echo "       Wait, or override with: make release FORCE=1"; \
+		exit 1; \
+	fi
 	@echo "Building RELEASE. This replaces $(RELEASE_APP)."
 	@TRIOS_VARIANT=prod "$(ROOT)/build.sh" > /tmp/trios_build_release.log 2>&1; \
 	if grep -q "Build successful: $(ROOT)/trios_app" /tmp/trios_build_release.log; then \
@@ -753,7 +782,7 @@ keychain-doors:
 # clean-fixture half, which failed `make check` outright.  A gate that is red on
 # the tree it guards teaches everyone to run something other than `make check`.
 MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP DEV_BIN RELEASE_BIN DEV_PROC \
-	TEST_APP TEST_PROC TEST_BIN TEST_LOG \
+	TEST_APP TEST_PROC TEST_BIN TEST_LOG TEST_PROC_HERE DEV_PROC_HERE \
 	RELEASE_PROC WARNING_CEILING XCTEST_ERROR_CEILING CASSETTE_DIR \
 	WARN_VARIANT WARN_BUILD_DIR WARN_OFM WARN_LIST WARN_SEEN WARN_LOG WARN_LOG_DIR \
 	WARN_LOG_LAST WARN_BUILD_ID WARN_FULL_ROOT WARN_FULL_CACHE DEV_BUILD_LOCK \
@@ -1497,7 +1526,7 @@ test-app:
 	@echo "[OK] harness bundle built: $(TEST_APP)"
 
 cassettes: test-app
-	@pkill -f "trios-test.app/Contents/MacOS" 2>/dev/null || true
+	@pkill -f "$(TEST_PROC_HERE)" 2>/dev/null || true
 	@sleep 2
 	@: "A branch that looks like a delegation's real work, planted so the sweep \
 	    below has something it must NOT delete. Widening CASSETTE_BRANCHES back \
@@ -1577,7 +1606,7 @@ cassettes: test-app
 			curn=$$(wc -l < "$(TEST_LOG)" 2>/dev/null || echo 0); \
 			if [ "$$curn" -lt "$$base" ]; then base=0; lastn=0; fi; \
 			if [ "$$curn" -gt "$$lastn" ]; then lastn=$$curn; idle=0; else idle=$$((idle + 2)); fi; \
-			if pgrep -f "trios-test.app/Contents/MacOS" >/dev/null 2>&1; then started=1; alive=1; \
+			if pgrep -f "$(TEST_PROC_HERE)" >/dev/null 2>&1; then started=1; alive=1; \
 			else alive=0; [ $$started -eq 1 ] && break; fi; \
 			[ $$idle -ge 120 ] && break; \
 			[ $$total -ge 600 ] && break; \
@@ -1593,7 +1622,7 @@ cassettes: test-app
 		else \
 			echo "  FAIL - $$label (trios-test exited after $${total}s without emitting $$marker)"; fail=1; \
 		fi; \
-		pkill -f "trios-test.app/Contents/MacOS" 2>/dev/null || true; \
+		pkill -f "$(TEST_PROC_HERE)" 2>/dev/null || true; \
 		sleep 2; \
 	done; \
 	: "The LAST cassette's checkout is still standing here - the per-run"; \
@@ -1818,7 +1847,7 @@ chat-probe:
 # probed is not verified. This target is the whole loop, so neither step gets
 # skipped.
 restart:
-	@pkill -f "trios-dev.app/Contents/MacOS" 2>/dev/null || true
+	@pkill -f "$(DEV_PROC_HERE)" 2>/dev/null || true
 	@sleep 2
 	@open "$(DEV_APP)"
 	@echo "relaunched $(DEV_APP); waiting for the server"
@@ -1865,7 +1894,7 @@ delegate-probe:
 	@# When it is not running, launch it with the delegation env vars --
 	@# `open` goes through LaunchServices, which does not inherit the shell
 	@# environment, so --env is the only way the flags reach the app.
-	@if pgrep -f "trios-dev.app/Contents/MacOS" >/dev/null 2>&1; then \
+	@if pgrep -f "$(DEV_PROC_HERE)" >/dev/null 2>&1; then \
 		echo "[probe] trios-dev already running -- appending to inbox"; \
 		mkdir -p "$(ROOT)/.trinity-dev/state"; \
 		python3 -c 'import json,sys; print(json.dumps({"issue":sys.argv[1],"worker":sys.argv[2] or None,"title":sys.argv[3] or None,"paths":sys.argv[4].split() or None,"criteria":[c.strip() for c in sys.argv[5].split(";") if c.strip()] or None}))' \
