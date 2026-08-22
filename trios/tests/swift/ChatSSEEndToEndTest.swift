@@ -3399,6 +3399,45 @@ struct ChatSSEEndToEndTests {
     static func runGitHubEndpointPaths() async {
         print("\n# Scenario: the paths the Queen calls GitHub with")
 
+        // #1288: a decode failure used to throw away the one fact that
+        // explains it. `fetchPullRequest` read `let (data, _)` - the response,
+        // and with it the status, discarded at the moment it arrived - so a
+        // 404 for a deleted pull request and a 200 with an unreadable body
+        // reached the poller as the same silent decode error. The extraction
+        // is a pure function precisely so both directions can be driven here
+        // without a network.
+        let statusBearing = GitHubAPIClient.decodeFailure(
+            endpoint: "/repos/gHashTag/trios/pulls/4242",
+            response: HTTPURLResponse(
+                url: URL(string: "https://api.github.com/repos/gHashTag/trios/pulls/4242")!,
+                statusCode: 404, httpVersion: nil, headerFields: nil
+            )!
+        )
+        check(
+            String(describing: statusBearing).contains("404"),
+            "a decode failure that had a status reports it (#1288)"
+        )
+        check(
+            String(describing: statusBearing).contains("/pulls/4242"),
+            "and names the endpoint, so the reader knows which call it was"
+        )
+
+        let statusless = GitHubAPIClient.decodeFailure(
+            endpoint: "/repos/gHashTag/trios/pulls/4242",
+            response: URLResponse(
+                url: URL(string: "https://api.github.com/repos/gHashTag/trios/pulls/4242")!,
+                mimeType: nil, expectedContentLength: 0, textEncodingName: nil
+            )
+        )
+        check(
+            String(describing: statusless).contains("no HTTP status"),
+            "a response that carried no status says so rather than inventing a number"
+        )
+        check(
+            !String(describing: statusless).contains("0"),
+            "and does not fall back to zero, which a reader would take for an observation"
+        )
+
         // Every one of these is a bug that shipped and survived, because the
         // pull-request half of the client had never been called once. No test
         // looked at a finished URL, so nothing could have noticed.

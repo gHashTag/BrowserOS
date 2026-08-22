@@ -321,9 +321,6 @@ actor GitHubAPIClient {
         return Self.outcome(statusCode: http.statusCode, mergeable: mergeable, mergeState: mergeState)
     }
 
-    /// Fetches one pull request, which is the only endpoint that reports
-    /// `merged`. List endpoints omit it, and without it a closed pull request
-    /// cannot be told from a landed one.
     /// The combined state of a pull request's checks, and which ones failed.
     ///
     /// The REST combined-status endpoint covers commit statuses; check RUNS
@@ -386,10 +383,41 @@ actor GitHubAPIClient {
         return (.success, [])
     }
 
+    /// Fetches one pull request, which is the only endpoint that reports
+    /// `merged`. List endpoints omit it, and without it a closed pull request
+    /// cannot be told from a landed one.
+    ///
+    /// A decode failure here is how a real HTTP failure on the poll arrives:
+    /// a 404 or a rate-limited 403 answers with a body `GitHubPullRequest`
+    /// cannot decode, so the status is the one part of the answer that
+    /// explains the body. The response is kept rather than discarded
+    /// (`let (data, _)` was the defect), and the decode failure throws
+    /// `.decodeFailed` carrying the status observed for that response
+    /// (#1288).
     func fetchPullRequest(repo: String, number: Int) async throws -> GitHubPullRequest {
         let path = try GitHubEndpoint.repositoryPath(repo, "/pulls/\(number)")
-        let (data, _) = try await URLSession.shared.data(for: try request(path))
-        return try JSONDecoder().decode(GitHubPullRequest.self, from: data)
+        let (data, response) = try await URLSession.shared.data(for: try request(path))
+        do {
+            return try JSONDecoder().decode(GitHubPullRequest.self, from: data)
+        } catch {
+            throw Self.decodeFailure(endpoint: path, response: response)
+        }
+    }
+
+    /// The error a failed decode of a fetched pull request throws: the HTTP
+    /// status observed for that response, or its absence when the response
+    /// carried none — never a sentinel number standing in for either.
+    ///
+    /// Extracted as a pure function taking the response itself, so a suite
+    /// can drive both directions — an `HTTPURLResponse` with a status, and a
+    /// plain `URLResponse` without one — through the exact extraction the
+    /// network method performs, without a network call. The same pattern as
+    /// `outcome` and `mergePayload` (#1288).
+    static func decodeFailure(endpoint: String, response: URLResponse) -> GitHubAPIError {
+        GitHubAPIError.decodeFailed(
+            statusCode: (response as? HTTPURLResponse)?.statusCode,
+            endpoint: endpoint
+        )
     }
 
     func addComment(repo: String, issueNumber: Int, body: String) async throws -> GitHubComment {
@@ -473,11 +501,16 @@ actor GitHubAPIClient {
     }
 }
 
-enum GitHubAPIError: Error, LocalizedError {
+enum GitHubAPIError: Error, LocalizedError, CustomStringConvertible {
     case missingToken
     case badURL(endpoint: String)
     case badServerResponse(endpoint: String)
     case cannotParseResponse(endpoint: String)
+    /// A response that arrived and did not decode (#1288). `statusCode` is
+    /// the status observed for that response, or nil when the response
+    /// carried none — the absence is carried rather than turned into a
+    /// sentinel number a reader would mistake for an observation.
+    case decodeFailed(statusCode: Int?, endpoint: String)
     case createPRFailed(statusCode: Int, message: String)
 
     var errorDescription: String? {
@@ -490,8 +523,33 @@ enum GitHubAPIError: Error, LocalizedError {
             return "Unexpected GitHub response for endpoint \(endpoint)"
         case .cannotParseResponse(let endpoint):
             return "Could not parse GitHub response for endpoint \(endpoint)"
+        case .decodeFailed(let statusCode, let endpoint):
+            switch statusCode {
+            case .some(let code):
+                return "Could not decode GitHub response for endpoint \(endpoint) (HTTP \(code))"
+            case .none:
+                return "Could not decode GitHub response for endpoint \(endpoint) (no HTTP status)"
+            }
         case .createPRFailed(let statusCode, let message):
             return "GitHub createPR failed (\(statusCode)): \(message)"
+        }
+    }
+
+    /// What `String(describing:)` renders for this error. The poller's last
+    /// arm (`ChatViewModel.pollFailureReason`) renders exactly that, so a
+    /// status-bearing failure names its status there in the same
+    /// "HTTP <code>: <detail>" shape the `createPRFailed` arm names its own
+    /// — one format, not two (#1288).
+    var description: String {
+        switch self {
+        case .missingToken, .badURL, .badServerResponse, .cannotParseResponse:
+            return errorDescription ?? "GitHub API error"
+        case .decodeFailed(.some(let code), let endpoint):
+            return "HTTP \(code): response did not decode as a pull request for \(endpoint)"
+        case .decodeFailed(.none, let endpoint):
+            return "response did not decode as a pull request for \(endpoint) (no HTTP status)"
+        case .createPRFailed(let statusCode, let message):
+            return "HTTP \(statusCode): \(message)"
         }
     }
 }
