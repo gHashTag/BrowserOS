@@ -8099,6 +8099,65 @@ final class ChatViewModel: ObservableObject {
             )
         }
         registry.pruneArchive()
+
+        // Drifting: streaming and idle at once. The scan above deliberately
+        // skips every stream-alive worker - bytes are evidence of life - but
+        // measured 2026-08-22, a bee heartbeated for two and a half hours
+        // with its boundary file untouched since the fourth minute, at a
+        // cost invisible under an unmetered server. The boundary is the
+        // evidence of WORK, so a long turn that has not touched it drifts.
+        // The turn stops and the task goes to review, where its committed
+        // state is judged like any finished turn - not to failure: the
+        // stream WAS delivering, and earlier turns' commits may stand.
+        for task in registry.running {
+            let current = registry.task(forConversation: task.conversationId) ?? task
+            guard current.state == .running else { continue }
+            let touched = Self.boundaryLastTouched(task: current)
+            guard QueenDelegationPolicy.isDrifting(
+                current, boundaryTouchedAt: touched, now: now
+            ) else { continue }
+            let turnStart = current.streamOpenedAt ?? current.updatedAt
+            let streamedMinutes = Int(now.timeIntervalSince(turnStart) / 60)
+            workerRunner?.stop(conversationId: current.conversationId)
+            guard registry.transition(taskID: current.id, to: .awaitingReview) else { continue }
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.worker.drifting",
+                "Stopped \(current.issue.slug): the stream spoke for "
+                    + "\(streamedMinutes) minute(s) while the boundary went "
+                    + "untouched the whole drift window - streaming is not working",
+                ["issue": current.issue.slug, "streamed_minutes": "\(streamedMinutes)"]
+            )
+            await appendSystemMessageToQueenChat(
+                SystemNoticeClassifier.warningMarker
+                    + "I stopped \(current.worker) on \(current.issue.slug): "
+                    + "\(streamedMinutes) minutes of stream with no change to its "
+                    + "boundary files. The turn is in review; whatever earlier "
+                    + "turns committed still stands."
+            )
+        }
+    }
+
+    /// When any of the task's owned files in ITS OWN worktree last changed,
+    /// or nil when none exists or none can be measured. The caller treats
+    /// nil as "no work since the turn began", which is exactly what a
+    /// missing worktree or an untouched boundary both mean here.
+    nonisolated private static func boundaryLastTouched(task: DelegatedTask) -> Date? {
+        let worktree = QueenWorktree.path(
+            forIssue: task.issue.number,
+            projectRoot: ProjectPaths.root,
+            variant: ProjectPaths.variant.rawValue
+        )
+        let fm = FileManager.default
+        var newest: Date?
+        for owned in task.ownedPaths {
+            let path = worktree + "/trios/" + QueenDelegationPolicy.normalizePath(owned)
+            if let attrs = try? fm.attributesOfItem(atPath: path),
+               let mtime = attrs[.modificationDate] as? Date {
+                if newest == nil || mtime > newest! { newest = mtime }
+            }
+        }
+        return newest
     }
 
     /// A word from the Queen, which belongs in the Queen's chat.

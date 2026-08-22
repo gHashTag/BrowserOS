@@ -754,6 +754,35 @@ enum QueenDelegationPolicy {
         isStreamOpen(task) && !hasGoneSilent(task, now: now)
     }
 
+    /// Streaming and idle at once: bytes still flow, the boundary has not.
+    ///
+    /// The stream is the evidence of LIFE; the boundary is the evidence of
+    /// WORK. Measured 2026-08-22 on dev #1151: a worker heartbeated for two
+    /// and a half hours with its boundary file untouched since the fourth
+    /// minute - unreapable by every byte-based predicate above, at a cost
+    /// that was invisible under an unmetered server. A talkative worker must
+    /// not be immortal.
+    ///
+    /// Only meaningful while the stream IS alive: a dead stream belongs to
+    /// `hasGoneSilent`, and owning that case here too would reap it twice.
+    /// `boundaryTouchedAt` nil means no owned file has changed since the
+    /// turn began, so the drift clock runs from the turn start. The
+    /// threshold is deliberately far above any legitimate thinking pause.
+    static let driftThreshold: TimeInterval = 75 * 60
+
+    static func isDrifting(
+        _ task: DelegatedTask,
+        boundaryTouchedAt: Date?,
+        now: Date,
+        threshold: TimeInterval = driftThreshold
+    ) -> Bool {
+        guard isStreamAlive(task, now: now) else { return false }
+        let turnStart = task.streamOpenedAt ?? task.updatedAt
+        guard now.timeIntervalSince(turnStart) >= threshold else { return false }
+        let lastWork = boundaryTouchedAt ?? turnStart
+        return now.timeIntervalSince(lastWork) >= threshold
+    }
+
     /// A task the registry calls running for which no turn was ever opened.
     ///
     /// Caught immediately rather than after the stall threshold: a task that

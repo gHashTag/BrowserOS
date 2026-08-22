@@ -8694,6 +8694,43 @@ struct ChatSSEEndToEndTests {
                 == .unrecordedWork(commits: 3),
             "and on an UNarchived one they still alarm - nobody decided about those"
         )
+        // Streaming is not working: the drift predicate fires only past the
+        // threshold on a stream-alive worker whose boundary went untouched.
+        // Measured 2026-08-22: a bee heartbeated 2.5h with its boundary file
+        // unchanged since minute four - immortal to every byte predicate.
+        var drifting = DelegatedTask(
+            issue: IssueReference(owner: "gHashTag", repo: "trios", number: 9999),
+            title: "drift probe", worker: "queen-swift", state: .running,
+            ownedPaths: ["rings/SR-02/ChatViewModel.swift"]
+        )
+        let t0 = Date(timeIntervalSince1970: 1_000_000)
+        drifting.streamOpenedAt = t0
+        drifting.streamOutcome = .open
+        drifting.lastStreamByteAt = t0.addingTimeInterval(76 * 60)
+        let now = t0.addingTimeInterval(76 * 60)
+        check(
+            QueenDelegationPolicy.isDrifting(drifting, boundaryTouchedAt: nil, now: now),
+            "a stream-alive worker past the threshold with an untouched boundary drifts"
+        )
+        check(
+            !QueenDelegationPolicy.isDrifting(
+                drifting, boundaryTouchedAt: now.addingTimeInterval(-10 * 60), now: now
+            ),
+            "recent boundary work is the proof of life that matters - no drift"
+        )
+        check(
+            !QueenDelegationPolicy.isDrifting(
+                drifting, boundaryTouchedAt: nil,
+                now: t0.addingTimeInterval(30 * 60)
+            ),
+            "a young turn is thinking, not drifting - the threshold protects it"
+        )
+        var deadStream = drifting
+        deadStream.streamOutcome = .cut
+        check(
+            !QueenDelegationPolicy.isDrifting(deadStream, boundaryTouchedAt: nil, now: now),
+            "a dead stream belongs to hasGoneSilent, never to the drift scan"
+        )
     }
 
     // MARK: - Scenario: a count with no commit behind it is not evidence
