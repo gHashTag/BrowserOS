@@ -130,6 +130,105 @@ def iterations():
     return rows
 
 
+def lane_auth(log_path):
+    """Per-lane auth health: bootstrap-loop count in the last 6h and the last
+    occurrence, measured from that lane's own log."""
+    now = time.time()
+    cutoff = time.strftime(
+        "%Y-%m-%dT%H:%M:%S", time.gmtime(now - 6 * 3600)
+    )
+    count6h = 0
+    last_ts = None
+    last_any = None
+    if not os.path.exists(log_path):
+        return {"count6h": None, "last": None, "last_any": None}
+    for line in open(log_path, errors="replace"):
+        try:
+            d = json.loads(line)
+        except Exception:
+            continue
+        ts = d.get("ts", "")
+        if ts:
+            last_any = ts
+        if d.get("event") == "localauth.refresh.fallback_bootstrap":
+            last_ts = ts
+            if ts >= cutoff:
+                count6h += 1
+    return {"count6h": count6h, "last": last_ts, "last_any": last_any}
+
+
+def latest_gate():
+    """The newest e2e gate report: when it ran and whether it failed."""
+    e2e_dir = os.path.join(TRINITY, "e2e")
+    try:
+        reports = sorted(
+            f for f in os.listdir(e2e_dir) if f.startswith("report_prod_")
+        )
+    except Exception:
+        return {"when": None, "fails": None, "name": None}
+    if not reports:
+        return {"when": None, "fails": None, "name": None}
+    name = reports[-1]
+    path = os.path.join(e2e_dir, name)
+    fails = 0
+    for line in open(path, errors="replace"):
+        if "[FAIL]" in line:
+            fails += 1
+    when = time.strftime(
+        "%Y-%m-%d %H:%M %z", time.localtime(os.path.getmtime(path))
+    )
+    return {"when": when, "fails": fails, "name": name}
+
+
+def dev_lane():
+    """Is the dev app running, and can the RUNNING PROCESS contain HEAD?
+
+    The binary on disk is rebuilt by every `make check`; the running process
+    keeps whatever it was launched with. Comparing the disk binary to HEAD
+    once said "current" about a process four hours behind it - so the process
+    start time is what gets measured."""
+    out = sh(["pgrep", "-fl", "trios-dev.app/Contents/MacOS/trios"])
+    lines = [l for l in out.splitlines() if l.strip()]
+    if not lines:
+        return {"running": False, "stale": None}
+    pid = lines[0].split()[0]
+    stale = None
+    try:
+        lstart = sh(["ps", "-o", "lstart=", "-p", pid]).strip()
+        started = time.mktime(time.strptime(lstart, "%a %b %d %H:%M:%S %Y"))
+        head_time = int(sh(["git", "log", "-1", "--format=%ct"]) or 0)
+        stale = started < head_time
+    except Exception:
+        pass
+    return {"running": True, "stale": stale}
+
+
+def provider_keys():
+    """Value LENGTHS only, never values. Zero-length keys look configured and
+    supply nothing - the documented trap."""
+    path = os.path.expanduser("~/.trios/config.json")
+    try:
+        d = json.load(open(path))
+    except Exception:
+        return None
+    return {
+        k: (len(v) if isinstance(v, str) else -1)
+        for k, v in d.items()
+        if "KEY" in k.upper() or "TOKEN" in k.upper()
+    }
+
+
+def watchdog_vocabulary(hist_all):
+    """True once the running system has emitted the pid-attributed ready line,
+    i.e. the measured watchdog is live, not merely committed."""
+    if not os.path.exists(APP_LOG):
+        return False
+    for line in open(APP_LOG, errors="replace"):
+        if '"server.launch.ready"' in line and "pid" in line and "carries" in line:
+            return True
+    return False
+
+
 def esc(s):
     return html.escape(str(s), quote=True)
 
@@ -190,22 +289,197 @@ def render():
 
     iter_rows = []
     for it in reversed(iters[-12:]):
-        verdict = it.get("verdict", "?")
-        tone = {"green": "ok", "red": "bad"}.get(verdict, "warn")
+        # Two schemas have been appended over time: {n, verdict, summary} and
+        # {iteration, title, did[], failures_first[], next}. Render both.
+        n = it.get("n", it.get("iteration", "?"))
+        title = it.get("title", "")
+        body = it.get("summary", "")
+        if not body and it.get("did"):
+            body = " · ".join(it["did"][:3])
+        fails = it.get("failures_first") or []
+        verdict = it.get("verdict")
+        if verdict is None:
+            verdict = "logged" if not fails else "caveats"
+        tone = {"green": "ok", "red": "bad", "logged": "ok"}.get(verdict, "warn")
+        fail_html = (
+            '<br><span class="dim">unproven/open: %s</span>' % esc("; ".join(fails[:2]))
+            if fails
+            else ""
+        )
         iter_rows.append(
             '<div class="irow">%s<div><b>#%s %s</b> <span class="dim">%s</span>'
-            "<br><span>%s</span></div></div>"
+            "<br><span>%s</span>%s</div></div>"
             % (
                 chip(verdict, tone),
-                esc(it.get("n", "?")),
-                esc(it.get("title", "")),
+                esc(n),
+                esc(title),
                 esc(it.get("ts", "")),
-                esc(it.get("summary", "")),
+                esc(body),
+                fail_html,
             )
         )
 
+    # ---- Release readiness: each row is a measurement, not an opinion ----
+    gate = latest_gate()
+    rel_auth = lane_auth(APP_LOG)
+    dev_auth = lane_auth(
+        os.path.join(ROOT, ".trinity-dev", "logs", "trios-app.jsonl")
+    )
+    dev = dev_lane()
+    keys = provider_keys()
+    wd_live = watchdog_vocabulary(hist)
+
+    def row(status, name, evidence):
+        return {"status": status, "name": name, "evidence": evidence}
+
+    ready_rows = []
+    if gate["fails"] is None:
+        ready_rows.append(row("warn", "Quality gate (make check)", "no e2e report found"))
+    elif gate["fails"] == 0:
+        ready_rows.append(row("ok", "Quality gate (make check)",
+                              "last report %s: 0 FAIL (%s)" % (gate["when"], gate["name"])))
+    else:
+        ready_rows.append(row("bad", "Quality gate (make check)",
+                              "last report %s: %d FAIL" % (gate["when"], gate["fails"])))
+
+    for label, a in (("release lane", rel_auth), ("dev lane", dev_auth)):
+        if a["count6h"] is None:
+            ready_rows.append(row("warn", "Auth stability, %s" % label, "log unreadable"))
+            continue
+        # Recency is the criterion: one bootstrap per ~14 min is the
+        # annihilation signature, so a long quiet stretch IS the proof.
+        mins = None
+        if a["last"]:
+            try:
+                t = time.mktime(time.strptime(a["last"][:19], "%Y-%m-%dT%H:%M:%S"))
+                mins = int((time.time() - (t - time.timezone)) / 60)
+            except Exception:
+                pass
+        if a["last"] is None:
+            ready_rows.append(row("ok", "Auth stability, %s" % label, "no bootstrap-loop ever logged"))
+        elif mins is not None and mins < 30:
+            ready_rows.append(row("bad", "Auth stability, %s" % label,
+                                  "last bootstrap-loop %d min ago (%d in 6h) - one per ~14 min is the annihilation signature" % (mins, a["count6h"])))
+        elif mins is not None and mins < 120:
+            ready_rows.append(row("warn", "Auth stability, %s" % label,
+                                  "quiet for %d min (needs 120; %d in the 6h window are pre-fix history)" % (mins, a["count6h"])))
+        else:
+            ready_rows.append(row("ok", "Auth stability, %s" % label,
+                                  "quiet for %s - families rotate instead of re-creating"
+                                  % ("%dh%02dm" % (mins // 60, mins % 60) if mins is not None else "the whole log")))
+
+    # Hard zeros: an occurrence is a defect, full stop.
+    hard = [
+        ("conversation.persist.write_refused", "write refused"),
+        ("conversation.persist.decrypt_failed", "decrypt failed"),
+        ("queen.reconcile.disagrees", "reconcile disagrees"),
+    ]
+    hard_bad = [(lbl, sig.get(ev, 0)) for ev, lbl in hard if sig.get(ev, 0) > 0]
+    if hard_bad:
+        for lbl, n in hard_bad:
+            ready_rows.append(row("bad", "Hard zero: %s" % lbl,
+                                  "%d in window (%s), ceiling 0" % (n, window_note)))
+    else:
+        ready_rows.append(row("ok", "Hard zeros (write_refused, decrypt_failed, reconcile disagrees)",
+                              "all 0 in window (%s)" % window_note))
+
+    # Self-healing pairs: the symptom is tolerated iff its heal is measured.
+    fallbacks = hist.get("conversation.persist.encrypt_fallback", 0)
+    heals = (hist.get("conversation.persist.reencrypted", 0)
+             + hist.get("conversation.persist.recovered", 0))
+    if fallbacks == 0:
+        ready_rows.append(row("ok", "Encryption self-heal", "no plaintext fallbacks in window"))
+    elif heals > 0:
+        ready_rows.append(row("ok", "Encryption self-heal",
+                              "%d plaintext fallback(s) at launch-gate, heal machinery active (%d recovered/reencrypted); slots re-encrypt on next read" % (fallbacks, heals)))
+    else:
+        ready_rows.append(row("bad", "Encryption self-heal",
+                              "%d plaintext fallback(s) and NO heal events - plaintext is resting unhealed" % fallbacks))
+    stalls = (hist.get("keychain.read.stalled", 0)
+              + hist.get("keychain.enumeration.stalled", 0))
+    settles = hist.get("keychain.read.settled", 0) + hist.get("keychain.read.served_late", 0)
+    if stalls == 0:
+        ready_rows.append(row("ok", "Keychain slow-path", "no stalls in window"))
+    elif settles > 0:
+        ready_rows.append(row("ok", "Keychain slow-path",
+                              "%d stall(s), %d settle/served-late - slow, measured, served" % (stalls, settles)))
+    else:
+        ready_rows.append(row("bad", "Keychain slow-path",
+                              "%d stall(s) and no settlements - the unresolved mystery case" % stalls))
+
+    ready_rows.append(
+        row("ok" if wd_live else "warn", "Watchdog tells the truth",
+            "pid-attributed server.launch.ready seen in the running app's log"
+            if wd_live else "committed but the running app has not emitted it yet")
+    )
+
+    if dev["running"] and dev["stale"] is False:
+        ready_rows.append(row("ok", "Dev lane on current code",
+                              "dev app process started after HEAD landed"))
+    elif dev["running"]:
+        ready_rows.append(row("warn", "Dev lane on current code",
+                              "dev app running but the process started before HEAD landed - relaunch pending"))
+    else:
+        ready_rows.append(row("warn", "Dev lane on current code", "dev app not running"))
+
+    if keys is None:
+        ready_rows.append(row("warn", "Provider keys (operator)", "~/.trios/config.json unreadable"))
+    else:
+        empty = [k for k, l in keys.items() if l == 0]
+        if empty:
+            ready_rows.append(row("blocked", "Provider keys (operator)",
+                                  "%d key(s) present with ZERO-LENGTH values: %s - they look configured and supply nothing; only the operator fills them"
+                                  % (len(empty), ", ".join(sorted(empty)))))
+        else:
+            ready_rows.append(row("ok", "Provider keys (operator)", "no zero-length key values"))
+
+    ok_n = sum(1 for r in ready_rows if r["status"] == "ok")
+    bad_n = sum(1 for r in ready_rows if r["status"] == "bad")
+    blocked_n = sum(1 for r in ready_rows if r["status"] == "blocked")
+    if bad_n:
+        verdict_line = ("NOT READY - %d measured criterion(s) red, %d green"
+                        % (bad_n, ok_n))
+        verdict_tone = "bad"
+    elif blocked_n:
+        verdict_line = ("ENGINEERING READY - %d/%d green; %d item(s) wait on the operator, none on code"
+                        % (ok_n, len(ready_rows), blocked_n))
+        verdict_tone = "warn"
+    else:
+        verdict_line = "READY - all %d measured criteria green" % len(ready_rows)
+        verdict_tone = "ok"
+
+    tone_css = {"ok": "ok", "warn": "warn", "bad": "bad", "blocked": "warn"}
+    ready_html = "".join(
+        '<div class="rrow">%s<div><b>%s</b><br><span class="dim">%s</span></div></div>'
+        % (chip({"ok": "READY", "warn": "PENDING", "bad": "RED", "blocked": "OPERATOR"}[r["status"]],
+                tone_css[r["status"]]),
+           esc(r["name"]), esc(r["evidence"]))
+        for r in ready_rows
+    )
+
+    # ---- Plain-language "now" narrative, composed from measurements ----
+    story = []
+    if proc["running"]:
+        story.append("The release app is running (pid %s, since %s)."
+                     % (proc["pid"], (proc["started"] or "").strip()))
+    else:
+        story.append("The release app is NOT running - the menu-bar logo is gone until it restarts.")
+    story.append("The dev app is %s." % ("running" if dev["running"] else "not running"))
+    if rel_auth["count6h"] == 0 and dev_auth["count6h"] == 0:
+        story.append("Local-auth is quiet in both lanes: token families rotate instead of "
+                     "being re-created (the cross-lane annihilation fixed 2026-08-22 stays fixed).")
+    dispatches = hist.get("queen.delegate", 0)
+    if dispatches:
+        story.append("The Queen attempted %d delegation(s) in this window; refusals name their "
+                     "measured reason (budget, boundary, review state) in the log." % dispatches)
+    story.append("Iterations below are the Queen's own work journal, newest first.")
+    narrative = " ".join(story)
+
     generated = time.strftime("%Y-%m-%d %H:%M:%S %z")
     page = HTML_TEMPLATE
+    page = page.replace("@@VERDICT@@", chip(verdict_line, verdict_tone))
+    page = page.replace("@@READY@@", ready_html)
+    page = page.replace("@@STORY@@", esc(narrative))
     page = page.replace("@@GENERATED@@", esc(generated))
     page = page.replace("@@BRANCH@@", esc(g["branch"]))
     page = page.replace("@@HEAD@@", esc(g["head"]))
@@ -279,6 +553,12 @@ h2 { font-size: 12px; margin: 0 0 10px; color: var(--dim);
 .wrow:last-child { border-bottom: 0; }
 .irow { display: flex; gap: 10px; padding: 8px 0; border-bottom: 1px dashed var(--border); }
 .irow:last-child { border-bottom: 0; }
+.rrow { display: flex; gap: 10px; padding: 6px 0; align-items: flex-start;
+  border-bottom: 1px dashed var(--border); }
+.rrow:last-child { border-bottom: 0; }
+.rrow .chip { flex: 0 0 84px; text-align: center; }
+.vline { font-size: 14px; margin-bottom: 10px; }
+.vline .chip { font-size: 13px; padding: 4px 14px; }
 .kv { margin: 2px 0; } .kv b { color: var(--text); font-weight: 600; }
 footer { margin-top: 22px; color: var(--dim); text-align: center; }
 </style></head><body>
@@ -286,6 +566,15 @@ footer { margin-top: 22px; color: var(--dim); text-align: center; }
 <div class="meta">generated @@GENERATED@@ &middot; every number below is a
 measurement with a window, not a verdict &middot; auto-refreshes each 2 min</div>
 <div class="grid">
+  <div class="panel wide verdict">
+    <h2>Release readiness</h2>
+    <div class="vline">@@VERDICT@@</div>
+    @@READY@@
+  </div>
+  <div class="panel wide">
+    <h2>What is happening right now</h2>
+    <div>@@STORY@@</div>
+  </div>
   <div class="panel">
     <h2>Tree</h2>
     <div class="kv"><b>branch</b> @@BRANCH@@</div>

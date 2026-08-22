@@ -1,17 +1,27 @@
 // AGENT-V-WAIVER: T27-EPIC-001 BrowserClaw companion lifecycle recovery.
-// Follow-up: seal ServerManager after supervisor conformance tests land.
+// AGENT-V-WAIVER (2026-08-22): supervisor consolidation. This class used to be
+// a SECOND, independent spawner of the same agent server - its own launch
+// shape (env vars instead of the canonical CLI args), its own health rule
+// (cdpConnected==true, so a healthy browserless server read as DOWN and every
+// boot spawned three doomed children into the taken port), and NSLog-only
+// telemetry invisible to the log bus. Measured on 2026-08-22: it preempted the
+// watchdog's restart with zero bus events. It now delegates measurement and
+// spawning to AgentServerLauncher (single spawn path, pid-attributed answers)
+// and keeps only the menu-facing state plus the funnel.
 import Cocoa
 import Foundation
 
-/// Manages the BrowserOS MCP server (bun) and Tailscale funnel processes.
+/// Renders agent-server state for the menu and manages the Tailscale funnel.
+/// All health measurement and spawning is delegated to `AgentServerLauncher`,
+/// the single authority over the server process.
 @MainActor
 final class ServerManager {
-    private var serverTask: Process?
     private var funnelTask: Process?
-    private var serverLogHandle: FileHandle?
-    private var ownsServerProcess = false
     private var startupTask: Task<Void, Never>?
     private(set) var serverRunning = false
+    /// The pid `/health` attributed its answer to, when the server is new
+    /// enough to report one. Menu display only.
+    private(set) var servingPID: Int32?
     private(set) var funnelRunning = false
 
     var onStatusChange: (() -> Void)?
@@ -28,149 +38,57 @@ final class ServerManager {
 
     func toggleServer() {
         if serverRunning {
-            stopOwnedServer()
+            stopServer()
         } else {
             startIfNeeded()
         }
     }
 
     private func ensureServerRunning() async {
-        if await healthCheck() {
-            serverRunning = true
-            ownsServerProcess = false
-            onStatusChange?()
-            NSLog("[ServerManager] Adopted healthy companion on port \(ProjectPaths.mcpPort)")
-            return
-        }
+        // One spawn path for the whole app. The launcher measures (probe
+        // outcome, child fate, pid attribution) and reports on the log bus;
+        // this class only renders the outcome.
+        let state = await AgentServerLauncher.startIfNeeded()
+        NSLog("[ServerManager] Agent server: \(state)")
+        await refreshServerState()
+    }
 
-        for attempt in 1...3 {
-            do {
-                try launchServer()
-                if await waitUntilHealthy(timeoutSeconds: 15) {
-                    serverRunning = true
-                    onStatusChange?()
-                    NSLog("[ServerManager] Companion ready after attempt \(attempt)")
-                    return
-                }
-                stopOwnedProcess()
-            } catch {
-                NSLog("[ServerManager] Start attempt \(attempt) failed: \(error)")
-            }
-            if attempt < 3 {
-                try? await Task.sleep(nanoseconds: UInt64(1 << attempt) * 1_000_000_000)
-            }
+    /// Re-measures the port and updates the menu-facing state.
+    private func refreshServerState() async {
+        if case .answering(let pid) = await AgentServerLauncher.probeHealth(
+            port: ProjectPaths.mcpPort
+        ) {
+            serverRunning = true
+            servingPID = pid
+        } else {
+            serverRunning = false
+            servingPID = nil
         }
-        NSLog("[ServerManager] Companion startup halted after retry budget exhausted")
-        serverRunning = false
         onStatusChange?()
     }
 
-    private func waitUntilHealthy(timeoutSeconds: Int) async -> Bool {
-        let checks = timeoutSeconds * 2
-        for _ in 0..<checks {
-            if Task.isCancelled { return false }
-            if await healthCheck() { return true }
-            try? await Task.sleep(nanoseconds: 500_000_000)
-        }
-        return false
-    }
-
-    private func launchServer() throws {
-        let bunPath = resolveBunPath()
-        guard let bunPath else {
-            throw ServerManagerError.bunNotFound
-        }
-        let root = ProjectPaths.browserOSAgentRoot
-        let entrypoint = "\(root)/apps/server/src/index.ts"
-        guard FileManager.default.fileExists(atPath: entrypoint) else {
-            throw ServerManagerError.entrypointNotFound(entrypoint)
-        }
-
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: bunPath)
-        task.arguments = [entrypoint]
-        task.currentDirectoryURL = URL(fileURLWithPath: root)
-        var environment = ProcessInfo.processInfo.environment
-        environment["BROWSEROS_SKIP_OPENCLAW"] = "1"
-        environment["BROWSEROS_CDP_PORT"] = String(CompanionServerConfig.loadCDPPort())
-        environment["BROWSEROS_SERVER_PORT"] = ProjectPaths.mcpPort
-        environment["BROWSEROS_EXTENSION_PORT"] = "9300"
-        environment["BROWSEROS_RESOURCES_DIR"] = root
-        environment["BROWSEROS_EXECUTION_DIR"] = root
-        task.environment = environment
-
-        let logURL = URL(fileURLWithPath: ProjectPaths.trinity)
-            .appendingPathComponent("logs/browseros-companion.log")
-        try FileManager.default.createDirectory(
-            at: logURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        if !FileManager.default.fileExists(atPath: logURL.path) {
-            FileManager.default.createFile(atPath: logURL.path, contents: nil)
-        }
-        let handle = try FileHandle(forWritingTo: logURL)
-        try handle.seekToEnd()
-        task.standardOutput = handle
-        task.standardError = handle
-        task.terminationHandler = { [weak self] process in
-            Task { @MainActor in
-                guard let self, self.serverTask === process else { return }
-                self.serverTask = nil
-                self.serverLogHandle = nil
-                self.serverRunning = false
-                self.ownsServerProcess = false
-                self.onStatusChange?()
-                NSLog("[ServerManager] Companion exited with status \(process.terminationStatus)")
-            }
-        }
-        try task.run()
-        serverTask = task
-        serverLogHandle = handle
-        ownsServerProcess = true
-        NSLog("[ServerManager] Started companion pid=\(task.processIdentifier)")
-    }
-
-    private func healthCheck() async -> Bool {
-        guard let url = URL(string: ProjectPaths.browserOSHealthURL) else { return false }
-        var request = URLRequest(url: url)
-        request.timeoutInterval = 2
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse,
-                  (200...299).contains(http.statusCode),
-                  let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            else { return false }
-            return object["status"] as? String == "ok" && object["cdpConnected"] as? Bool == true
-        } catch {
-            return false
-        }
-    }
-
-    private func resolveBunPath() -> String? {
-        let environment = ProcessInfo.processInfo.environment
-        let candidates = [
-            environment["TRIOS_BUN_PATH"],
-            "/opt/homebrew/bin/bun",
-            "/usr/local/bin/bun"
-        ].compactMap { $0 }
-        return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
-    }
-
-    private func stopOwnedServer() {
+    /// Stops the server by its measured identity: `/health` names the serving
+    /// pid, and that pid gets SIGTERM. Note the app's own watchdog
+    /// (`AgentServerLauncher.superviseForever`) will restart the server within
+    /// its watch interval - a menu stop is a restart, not an off switch, for
+    /// as long as the app lives.
+    private func stopServer() {
         startupTask?.cancel()
         startupTask = nil
-        stopOwnedProcess()
-    }
-
-    private func stopOwnedProcess() {
-        if ownsServerProcess, let task = serverTask, task.isRunning {
-            task.terminate()
+        Task { [weak self] in
+            guard let self else { return }
+            if case .answering(let pid?) = await AgentServerLauncher.probeHealth(
+                port: ProjectPaths.mcpPort
+            ) {
+                kill(pid, SIGTERM)
+                NSLog("[ServerManager] Sent SIGTERM to the serving process pid=\(pid)")
+            } else {
+                NSLog(
+                    "[ServerManager] Stop requested but no attributable server answers on \(ProjectPaths.mcpPort)"
+                )
+            }
+            await self.refreshServerState()
         }
-        serverTask = nil
-        serverLogHandle = nil
-        ownsServerProcess = false
-        serverRunning = false
-        onStatusChange?()
     }
 
     // MARK: - Funnel
@@ -231,8 +149,14 @@ final class ServerManager {
 
     // MARK: - Cleanup
 
+    /// App-quit teardown. The server is deliberately left running: the old
+    /// code only ever killed a process it had spawned itself, and the
+    /// dominant reality (watchdog-spawned servers) was always left alive for
+    /// the next app instance to adopt. Killing an attributed pid here would
+    /// orphan the lane with no watchdog left to restart it.
     func terminateAll() {
-        stopOwnedServer()
+        startupTask?.cancel()
+        startupTask = nil
         funnelTask?.terminate()
         funnelTask = nil
         funnelRunning = false
@@ -245,19 +169,5 @@ final class ServerManager {
         alert.messageText = message
         alert.alertStyle = .warning
         alert.runModal()
-    }
-}
-
-private enum ServerManagerError: LocalizedError {
-    case bunNotFound
-    case entrypointNotFound(String)
-
-    var errorDescription: String? {
-        switch self {
-        case .bunNotFound:
-            return "bun was not found; set TRIOS_BUN_PATH"
-        case .entrypointNotFound(let path):
-            return "BrowserOS companion entrypoint not found at \(path)"
-        }
     }
 }
