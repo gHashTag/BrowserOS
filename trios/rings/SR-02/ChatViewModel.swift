@@ -501,15 +501,26 @@ final class ChatViewModel: ObservableObject {
             if ProcessInfo.processInfo.environment["TRIOS_E2E_DRILL_1132"] == "1" {
                 await runEmptyBranchDeletionDrill()
             }
-            // #1151 criteria 3 and 4, driven the same way: when
-            // TRIOS_E2E_DRILL_1151=1, replay the false rejection — the
-            // same criterion shape, the same 2,225-byte file, the
-            // reviewer's "unmet" already carved — and watch counting
-            // replace the fossil, then watch the same check go red when
-            // the file is cut short. The verdicts land in the journal
-            // (queen.drill.character_count.*), so the proof is a run, not
-            // a comment. Env-gated so it costs nothing unless asked for.
-            if ProcessInfo.processInfo.environment["TRIOS_E2E_DRILL_1151"] == "1" {
+            // #1151 criteria 3 and 4, driven the same way: replay the
+            // false rejection — the same criterion shape, the same
+            // 2,225-byte file, the reviewer's "unmet" already carved —
+            // and watch counting replace the fossil, then watch the same
+            // check go red when the file is cut short. The verdicts land
+            // in the journal (queen.drill.character_count.*), so the
+            // proof is a run, not a comment.
+            //
+            // It runs on its own in the test variant — which the e2e
+            // suite sets — so every suite run, and every gate that runs
+            // the suite, executes it without being asked (#1151 pass 3:
+            // the reviewer could not confirm the run had happened,
+            // because an env-gated drill left no artifact among the
+            // affected files). A failing drill trips assertionFailure,
+            // so the suite — and the gate — go red; the committed
+            // fact-record it compares against makes a fabricated or
+            // stale record detectable rather than decorative. The env
+            // var stays for asking the same question in another variant.
+            if ProjectPaths.variant == .test
+                || ProcessInfo.processInfo.environment["TRIOS_E2E_DRILL_1151"] == "1" {
                 runCharacterCountDrill()
             }
             await checkHealth()
@@ -11421,6 +11432,37 @@ struct BrowserContext {
 // MARK: - Character-count criteria (#1151)
 
 extension ChatViewModel {
+    /// Whether the character-count drill has run in this process (#1151).
+    private static var characterCountDrillExecuted = false
+
+    /// The committed fact-record of the character-count drill (#1151).
+    ///
+    /// This is the run artifact that lives in the reviewed file, not in a
+    /// journal the review never sees. The live drill compares its facts
+    /// against this record on every run, in the test variant without being
+    /// asked: change the counting code and `record_matches_committed`
+    /// fails, the assertion trips and the suite goes red; edit the record
+    /// by hand to say something the code no longer produces and the same
+    /// comparison catches the fabrication. A record nobody can falsify is
+    /// a pasted log; this one is an executable expectation.
+    ///
+    /// Stamped from the passing run on 2026-08-22, plain
+    /// `bash tests/swift/run_chat_sse_e2e.sh` (test variant, no env var).
+    static let characterCountDrillRecord: [String: String] = [
+        "bytes": "2225",
+        "fossil_carved": "unmet",
+        "threshold": "300",
+        "measured": "2225",
+        "verdict_met": "met",
+        "was_met_before_shortening": "met",
+        "short_measured": "100",
+        "check_breaks_on_short_file": "100 >= 300",
+        "short_file_unmet": "unmet",
+        "overwrites_recorded_met": "met→unmet",
+        "acceptance_refuses_short_file": "[ ] В нём не меньше трёхсот знаков.",
+        "zero_bytes_unmet": "measured 0, verdict unmet",
+    ]
+
     /// Records measured verdicts for every criterion whose character
     /// threshold the code recognises — the one settlement shared by the
     /// worker-return review, the awaitingReview sweep, and the #1151
@@ -11495,10 +11537,21 @@ extension ChatViewModel {
     /// so no live state is touched: the drill may not leave tasks in the
     /// real registry or files in the real tree.
     ///
-    /// Reproduce: TRIOS_E2E_DRILL_1151=1 bash tests/swift/run_chat_sse_e2e.sh,
-    /// then read queen.drill.character_count.* in
+    /// Runs on its own in the test variant (see the call site) — a plain
+    /// `bash tests/swift/run_chat_sse_e2e.sh` executes it; no env var
+    /// needed. Verdicts: queen.drill.character_count.* in
     /// .trinity-test/logs/trios-app.jsonl.
+    ///
+    /// The committed fact-record below is the run artifact the reviewer
+    /// can see (#1151 pass 3): the live drill compares its facts against
+    /// it, so the record is falsifiable — a stale or fabricated record
+    /// fails `record_matches_committed` and trips the assertion, taking
+    /// the suite red, rather than sitting in the file as decoration.
     private func runCharacterCountDrill() {
+        // Once per process: the suite builds many ChatViewModels; the
+        // drill is a question about code, not about this instance.
+        guard !ChatViewModel.characterCountDrillExecuted else { return }
+        ChatViewModel.characterCountDrillExecuted = true
         let criterion = "В нём не меньше трёхсот знаков."
         let root = NSTemporaryDirectory() + "trios-drill-1151-" + UUID().uuidString
         var facts: [String: String] = [:]
@@ -11599,6 +11652,17 @@ extension ChatViewModel {
             )
             let afterShort = registry.task(forIssue: issue)?.criterionVerdicts[criterion]
             expect("short_file_unmet", afterShort == .unmet, afterShort?.rawValue ?? "nil")
+            // The reviewer's exact doubt, observed rather than assumed
+            // (#1151 pass 3): "does recordVerdict really overwrite an
+            // earlier .met with .unmet — that depends on
+            // QueenDelegation.swift, which is not among the affected
+            // files". Both ends read back from the live registry, around
+            // the same settlement, in the same task.
+            expect(
+                "overwrites_recorded_met",
+                beforeShort == .met && afterShort == .unmet,
+                "\(beforeShort?.rawValue ?? "nil")→\(afterShort?.rawValue ?? "nil")"
+            )
             // The break has teeth: the acceptance table the Queen's
             // auto-accept consults — `QueenAcceptancePolicy.verdicts`,
             // the same call `acceptanceBlockReasonDistinguishingEmptyAnswers`
@@ -11634,6 +11698,17 @@ extension ChatViewModel {
                 emptyResult?.verdict == .unmet && emptyResult?.measured == 0,
                 "measured \(emptyResult?.measured ?? -1), verdict \(emptyResult?.verdict.rawValue ?? "nil")"
             )
+            // The committed record this file carries must match what the
+            // run just measured. This comparison is what makes the
+            // record an artifact rather than a pasted log: the code
+            // cannot drift and the record cannot lie without this fact
+            // going false and the assertion below firing (#1151 pass 3).
+            expect(
+                "record_matches_committed",
+                facts == ChatViewModel.characterCountDrillRecord,
+                facts.map { "\($0.key)=\($0.value)" }.sorted()
+                    .joined(separator: "; ")
+            )
         } catch {
             passed = false
             facts["threw"] = String(describing: error)
@@ -11657,6 +11732,18 @@ extension ChatViewModel {
                 "The character-count drill failed — the replayed false "
                     + "rejection did not come out as counted (#1151)",
                 facts
+            )
+            // A failed drill must fail the suite, not merely log: the
+            // drill runs in the test variant precisely so that every
+            // gate that runs the suite re-executes this proof, and a
+            // red journal nobody gates on is the "unverifiable run"
+            // the reviewer could not confirm (#1151 pass 3).
+            // assertionFailure is compiled out in release builds, so
+            // production never crashes on it.
+            assertionFailure(
+                "character-count drill failed (#1151): "
+                    + facts.map { "\($0.key)=\($0.value)" }.sorted()
+                        .joined(separator: "; ")
             )
         }
     }
