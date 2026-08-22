@@ -13164,10 +13164,17 @@ extension ChatViewModel {
         if let transport = error as? URLError {
             return "transport URLError \(transport.code.rawValue)"
         }
+        // A decode failure from the client now carries the status the
+        // response arrived with (#1288), so it renders itself and needs no
+        // arm here. The bare `DecodingError` arm stays for a decode that
+        // happens anywhere else - it still cannot name a status, and says so
+        // rather than implying one.
+        if case GitHubAPIError.decodeFailed = error {
+            return String(describing: error)
+        }
         if error is DecodingError {
-            return "response did not decode as a pull request (its HTTP "
-                + "status was discarded by the fetch - "
-                + "GitHubAPIClient.fetchPullRequest)"
+            return "response did not decode as a pull request (no HTTP status "
+                + "was observed for it)"
         }
         return String(describing: error)
     }
@@ -13223,15 +13230,21 @@ extension ChatViewModel {
         "transport_message_no_status":
             "Could not read pull request #4242 for gHashTag/trios#1287: "
             + "transport URLError -1009",
-        "decode_error_attribute":
-            "response did not decode as a pull request (its HTTP "
-            + "status was discarded by the fetch - "
-            + "GitHubAPIClient.fetchPullRequest)",
-        "decode_message_names_shape":
+        // #1288 rewrote these two and added the third. The recorded values
+        // are what the run must now produce: the status the response
+        // arrived with, named, where the old record said it had been
+        // discarded. A stale record here fails `record_matches_committed`
+        // rather than passing quietly, which is the point of committing it.
+        "decode_error_attribute_names_status":
+            "HTTP 404: response did not decode as a pull request "
+            + "for /repos/gHashTag/trios/pulls/4242",
+        "decode_message_names_status":
             "Could not read pull request #4242 for gHashTag/trios#1287: "
-            + "response did not decode as a pull request (its HTTP "
-            + "status was discarded by the fetch - "
-            + "GitHubAPIClient.fetchPullRequest)",
+            + "HTTP 404: response did not decode as a pull request "
+            + "for /repos/gHashTag/trios/pulls/4242",
+        "decode_without_status_says_so":
+            "response did not decode as a pull request "
+            + "for /repos/gHashTag/trios/pulls/4242 (no HTTP status)",
         "message_not_event_name": "names the failure shape",
     ]
 
@@ -13336,34 +13349,59 @@ extension ChatViewModel {
         )
 
         // ── 3. The shape a real HTTP failure actually arrives as ─────
-        // fetchPullRequest discards the HTTP response, so a real
-        // 404/403/5xx fails to decode and lands here with the status
-        // already gone. The message must name that shape and say where
-        // the status went - not dump an opaque DecodingError, and not
-        // pretend a status was named (#1287 second pass).
+        // A real 404/403/5xx answers with a body that is not a pull
+        // request, so it reaches the poller as a decode failure. It used to
+        // arrive with the status already gone - fetchPullRequest read
+        // `let (data, _)` and discarded the response - and the drill proved
+        // that by fabricating a bare DecodingError, which proved only what
+        // it had built. The client now carries the status (#1288), so this
+        // arm drives the client's OWN extraction: the error under test is
+        // the one production throws.
         let decodeMark = TriosLogBus.shared.recent().count
+        let observed = HTTPURLResponse(
+            url: URL(string: "https://api.github.com/repos/gHashTag/trios/pulls/\(pr)")
+                ?? URL(fileURLWithPath: "/dev/null"),
+            statusCode: 404, httpVersion: nil, headerFields: nil
+        )
         ChatViewModel.emitPRPollFailed(
             issue: issue, pr: pr,
-            error: DecodingError.dataCorrupted(
-                DecodingError.Context(
-                    codingPath: [],
-                    debugDescription: "drill: the forge answered, but not with a pull request"
+            error: observed.map {
+                GitHubAPIClient.decodeFailure(
+                    endpoint: "/repos/gHashTag/trios/pulls/\(pr)", response: $0
                 )
+            } ?? GitHubAPIError.decodeFailed(
+                statusCode: nil, endpoint: "/repos/gHashTag/trios/pulls/\(pr)"
             )
         )
         let decodeRecord = records(since: decodeMark)
             .first { $0.event == "queen.pr.poll_failed" }
         let decodeAttribute = decodeRecord?.attributes["error"] ?? ""
         expect(
-            "decode_error_attribute",
-            decodeAttribute.contains("did not decode")
-                && decodeAttribute.contains("discarded by the fetch"),
+            "decode_error_attribute_names_status",
+            decodeAttribute.contains("404")
+                && !decodeAttribute.contains("discarded by the fetch"),
             decodeAttribute.isEmpty ? "no record" : decodeAttribute
         )
         expect(
-            "decode_message_names_shape",
-            decodeRecord?.message.contains("did not decode") == true,
+            "decode_message_names_status",
+            decodeRecord?.message.contains("404") == true,
             decodeRecord?.message ?? "no record"
+        )
+        // The other direction, in the same run: a response that carried no
+        // status says so instead of inventing one.
+        let statuslessMark = TriosLogBus.shared.recent().count
+        ChatViewModel.emitPRPollFailed(
+            issue: issue, pr: pr,
+            error: GitHubAPIError.decodeFailed(
+                statusCode: nil, endpoint: "/repos/gHashTag/trios/pulls/\(pr)"
+            )
+        )
+        let statuslessAttribute = records(since: statuslessMark)
+            .first { $0.event == "queen.pr.poll_failed" }?.attributes["error"] ?? ""
+        expect(
+            "decode_without_status_says_so",
+            statuslessAttribute.contains("no HTTP status"),
+            statuslessAttribute.isEmpty ? "no record" : statuslessAttribute
         )
 
         // ── 4. The message names the failure, not the event ─────────
