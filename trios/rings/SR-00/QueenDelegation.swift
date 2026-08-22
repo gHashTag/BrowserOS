@@ -824,8 +824,24 @@ enum QueenDelegationPolicy {
         _ task: DelegatedTask,
         committedFiles: Int
     ) -> Bool {
-        guard task.state == .awaitingReview else { return false }
-        guard committedFiles > 0 else { return false }
+        autoAcceptDisqualification(task, committedFiles: committedFiles) == nil
+    }
+
+    /// The first condition that disqualifies auto-accept, or nil.
+    ///
+    /// The policy names its own refusal. The caller used to re-derive the
+    /// reason with a hand-maintained mirror of these guards, and the mirror
+    /// drifted: it never learned about the committedSHA guard, so every
+    /// count-without-commit refusal logged "Auto-accept skipped: unknown" -
+    /// a reason nobody measured, from the one function that had measured it.
+    static func autoAcceptDisqualification(
+        _ task: DelegatedTask,
+        committedFiles: Int
+    ) -> String? {
+        guard task.state == .awaitingReview else {
+            return "state is \(task.state.rawValue), not awaitingReview"
+        }
+        guard committedFiles > 0 else { return "no committed files" }
         // A count with no commit behind it is not evidence. It is true at the
         // instant it is measured and unverifiable ever after, which is how a
         // task came to be recorded `accepted` with `committedFiles: 1` and a
@@ -834,11 +850,17 @@ enum QueenDelegationPolicy {
         //
         // The Queen may close her own worker's work only when she can name the
         // commit it is in.
-        guard let sha = task.committedSHA, !sha.isEmpty else { return false }
-        guard !task.ownedPaths.isEmpty else { return false }
-        guard !isExpensive(task) else { return false }
-        guard !task.acceptanceCriteria.isEmpty else { return false }
-        return true
+        guard let sha = task.committedSHA, !sha.isEmpty else {
+            return "a file count with no commit named"
+        }
+        guard !task.ownedPaths.isEmpty else {
+            return "no boundary (ownedPaths is empty)"
+        }
+        guard !isExpensive(task) else { return "task is expensive" }
+        guard !task.acceptanceCriteria.isEmpty else {
+            return "no acceptance criteria (task has no contract)"
+        }
+        return nil
     }
 
     /// Tasks the Queen should look at first, loudest rather than oldest.

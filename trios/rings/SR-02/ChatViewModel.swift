@@ -7455,22 +7455,13 @@ final class ChatViewModel: ObservableObject {
             task,
             committedFiles: task.committedFiles ?? 0
         ) else {
-            // Name the first condition that failed, so the log says why
-            // the task was refused, not just that it was.
-            let failedCondition: String
-            if task.state != .awaitingReview {
-                failedCondition = "state is \(task.state.rawValue), not awaitingReview"
-            } else if (task.committedFiles ?? 0) == 0 {
-                failedCondition = "no committed files"
-            } else if task.ownedPaths.isEmpty {
-                failedCondition = "no boundary (ownedPaths is empty)"
-            } else if QueenDelegationPolicy.isExpensive(task) {
-                failedCondition = "task is expensive"
-            } else if task.acceptanceCriteria.isEmpty {
-                failedCondition = "no acceptance criteria (task has no contract)"
-            } else {
-                failedCondition = "unknown"
-            }
+            // The policy names its own refusal. This used to be a
+            // hand-maintained mirror of the policy's guards, and the mirror
+            // drifted - it never learned the committedSHA guard, so every
+            // count-without-commit refusal logged "unknown".
+            let failedCondition = QueenDelegationPolicy.autoAcceptDisqualification(
+                task, committedFiles: task.committedFiles ?? 0
+            ) ?? "unknown (the policy refused but names no condition - report this)" 
 
             // When the only failure is "no committed files" but every
             // criterion has a verdict and every verdict is met, the work
