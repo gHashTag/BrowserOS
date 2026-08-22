@@ -13086,12 +13086,26 @@ extension ChatViewModel {
     /// domain code, not `localizedDescription`, deliberately: the localized
     /// string follows the machine's locale and would make the committed
     /// drill record below unrunnable anywhere but this Mac.
+    ///
+    /// `DecodingError` deserves its own arm because it is the shape a real
+    /// HTTP failure on the poll arrives as: `fetchPullRequest` discards the
+    /// response (`let (data, _)`, GitHubAPIClient.swift:391), so a 404/403/
+    /// 5xx body fails to decode and the status is gone before this catch
+    /// ever sees an error. The message names that shape and states where
+    /// the status went - honestly, not as if a status had been named. No
+    /// status can be named for the poll until the client carries one
+    /// outside this file's boundary (#1287, second pass).
     static func pollFailureReason(_ error: Error) -> String {
         if case let GitHubAPIError.createPRFailed(statusCode, message) = error {
             return "HTTP \(statusCode): \(message)"
         }
         if let transport = error as? URLError {
             return "transport URLError \(transport.code.rawValue)"
+        }
+        if error is DecodingError {
+            return "response did not decode as a pull request (its HTTP "
+                + "status was discarded by the fetch - "
+                + "GitHubAPIClient.fetchPullRequest)"
         }
         return String(describing: error)
     }
@@ -13119,15 +13133,24 @@ extension ChatViewModel {
     /// facts against this record on every run in the test variant, so the
     /// record is an executable expectation, not a pasted log - drop the
     /// `error` attribute from the emitter and `http_error_attribute` /
-    /// `transport_error_attribute` read "no record", the comparison trips,
-    /// `assertionFailure` fires and the suite goes red; edit the record to
-    /// say something the code no longer produces and the same comparison
+    /// `transport_error_attribute` / `decode_error_attribute` read
+    /// "no record", the comparison trips, `assertionFailure` fires and the
+    /// suite goes red; edit the record to say something the code no longer
+    /// produces and the same comparison
     /// catches the fabrication. `record_matches_committed` is not a key
     /// here on purpose: it is measured against the facts that precede it,
     /// so it cannot be part of what it compares.
     ///
-    /// Stamped from the passing run on 2026-08-23, plain
-    /// `bash tests/swift/run_chat_sse_e2e.sh` (test variant, no env var).
+    /// The `decode_*` facts are the shape a real poll failure arrives in:
+    /// they pin the honest message for an HTTP failure whose status the
+    /// fetch discarded, so the record states the limit rather than
+    /// pretending a status was named (#1287 second pass).
+    ///
+    /// Stamped from the passing run at 2026-08-22T18:12:00.669Z journal
+    /// time (UTC; the local clock read 2026-08-23 00:12), plain
+    /// `bash tests/swift/run_chat_sse_e2e.sh` (test variant, no env var) -
+    /// the drill records of that run sit at that timestamp in
+    /// .trinity-test/logs/trios-app.jsonl.
     static let pollFailureDrillRecord: [String: String] = [
         "http_record_landed": "queen.pr.poll_failed",
         "http_error_attribute": "HTTP 502: drill: upstream said no",
@@ -13138,6 +13161,15 @@ extension ChatViewModel {
         "transport_message_no_status":
             "Could not read pull request #4242 for gHashTag/trios#1287: "
             + "transport URLError -1009",
+        "decode_error_attribute":
+            "response did not decode as a pull request (its HTTP "
+            + "status was discarded by the fetch - "
+            + "GitHubAPIClient.fetchPullRequest)",
+        "decode_message_names_shape":
+            "Could not read pull request #4242 for gHashTag/trios#1287: "
+            + "response did not decode as a pull request (its HTTP "
+            + "status was discarded by the fetch - "
+            + "GitHubAPIClient.fetchPullRequest)",
         "message_not_event_name": "names the failure shape",
     ]
 
@@ -13152,8 +13184,16 @@ extension ChatViewModel {
     ///    from the ring buffer carries a non-empty `error` attribute.
     /// 2. Criterion 2 - the message names the HTTP status for the
     ///    status-bearing error, the transport error (no status) for
-    ///    `URLError`, and does not merely restate the event name the way
-    ///    "Could not read a pull request" did.
+    ///    `URLError`, and the undecodable response for `DecodingError`.
+    ///    That last shape is what a real 404/403/5xx on the poll arrives
+    ///    as - `fetchPullRequest` discards the response
+    ///    (`GitHubAPIClient.swift`, `let (data, _)`), so no status can be
+    ///    named for the poll until the client carries one outside this
+    ///    file's boundary; the message says where the status went instead
+    ///    of hiding behind an opaque dump. The status arm drives the
+    ///    emitter's contract for any status-bearing error - the shape the
+    ///    sibling `queen.pr.failed` family and a fixed client produce -
+    ///    not a shape today's poll fetch can throw.
     /// 3. Criterion 5 - every fact is compared against the committed
     ///    record; dropping the `error` attribute from the emitter makes the
     ///    read-back facts differ and the suite red.
@@ -13233,7 +13273,38 @@ extension ChatViewModel {
             transportRecord?.message ?? "no record"
         )
 
-        // ── 3. The message names the failure, not the event ─────────
+        // ── 3. The shape a real HTTP failure actually arrives as ─────
+        // fetchPullRequest discards the HTTP response, so a real
+        // 404/403/5xx fails to decode and lands here with the status
+        // already gone. The message must name that shape and say where
+        // the status went - not dump an opaque DecodingError, and not
+        // pretend a status was named (#1287 second pass).
+        let decodeMark = TriosLogBus.shared.recent().count
+        ChatViewModel.emitPRPollFailed(
+            issue: issue, pr: pr,
+            error: DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: [],
+                    debugDescription: "drill: the forge answered, but not with a pull request"
+                )
+            )
+        )
+        let decodeRecord = records(since: decodeMark)
+            .first { $0.event == "queen.pr.poll_failed" }
+        let decodeAttribute = decodeRecord?.attributes["error"] ?? ""
+        expect(
+            "decode_error_attribute",
+            decodeAttribute.contains("did not decode")
+                && decodeAttribute.contains("discarded by the fetch"),
+            decodeAttribute.isEmpty ? "no record" : decodeAttribute
+        )
+        expect(
+            "decode_message_names_shape",
+            decodeRecord?.message.contains("did not decode") == true,
+            decodeRecord?.message ?? "no record"
+        )
+
+        // ── 4. The message names the failure, not the event ─────────
         expect(
             "message_not_event_name",
             httpRecord?.message != "Could not read a pull request",
@@ -13259,8 +13330,9 @@ extension ChatViewModel {
                 "queen.drill.poll_failure.passed",
                 "A thrown error reaches queen.pr.poll_failed as a non-empty "
                     + "error attribute - the HTTP status named when the "
-                    + "error carries one, the transport error otherwise "
-                    + "(#1287)",
+                    + "error carries one, the transport error otherwise, "
+                    + "and an undecodable response named as what it is with "
+                    + "its discarded status stated (#1287)",
                 facts
             )
         } else {
