@@ -34,6 +34,7 @@ enum QueenEvidencePolicyTests {
         theCreateCase()
         theUnmeasuredCase()
         theEmptyCases()
+        identifierExtraction()
 
         print("\n\(checks) checks, \(failures) failures")
         if failures > 0 { exit(1) }
@@ -109,6 +110,76 @@ enum QueenEvidencePolicyTests {
         check(
             QueenEvidencePolicy.presenceIsEvidence(symbols: ["x"], contentsWhenFiled: ""),
             "an empty file at filing time makes every present name new - the create case at its cleanest"
+        )
+    }
+
+    /// The other half of the same decision, and it had no check at all until
+    /// today: which names in an issue's criteria the Queen treats as
+    /// identifiers. It decides what she works on.
+    static func identifierExtraction() {
+        scenario("what counts as a name the criteria mention")
+
+        let found = Set(QueenEvidencePolicy.namedIdentifiers(
+            in: "The message names the shape via `fetchPullRequest`, and "
+                + "requestReviewerVerdicts must still answer."
+        ))
+        check(
+            found.contains("fetchPullRequest"),
+            "a backticked identifier is taken (#1178)"
+        )
+        check(
+            found.contains("requestReviewerVerdicts"),
+            "and a bare word with an interior capital is taken from prose (#1179)"
+        )
+
+        // The narrowing's contract: a path's stem IS what to search the file
+        // for, and #1172's drill pins the count it yields.
+        let forNarrowing = Set(QueenEvidencePolicy.namedIdentifiers(
+            in: "Boundary: `rings/SR-02/ChatViewModel.swift`."
+        ))
+        check(
+            forNarrowing.contains("ChatViewModel"),
+            "narrowing still mines a path's stem - that is what it searches the file for"
+        )
+
+        let paths = Set(QueenEvidencePolicy.evidenceIdentifiers(
+            in: "Boundary: `docs/par-a.md` and `rings/SR-02/ChatViewModel.swift`."
+        ))
+        check(
+            !paths.contains("docs/par-a.md"),
+            "a path is not an identifier - a slash disqualifies it"
+        )
+        check(
+            !paths.contains("rings/SR-02/ChatViewModel.swift"),
+            "and neither is a path with a file extension, however identifier-shaped its tail"
+        )
+        check(
+            !paths.contains("ChatViewModel"),
+            "but EVIDENCE may not: the stem is in that file by construction, so it would argue for itself"
+        )
+        check(
+            paths.isEmpty,
+            "so criteria naming only files yield nothing to argue with"
+        )
+
+        let noise = Set(QueenEvidencePolicy.evidenceIdentifiers(
+            in: "The worker must `return` a value and `guard` against nil; see ChatViewModel."
+        ))
+        check(
+            !noise.contains("return") && !noise.contains("guard"),
+            "Swift keywords are not evidence of anything"
+        )
+        check(
+            noise.contains("ChatViewModel"),
+            "while a real type name in the same sentence still counts"
+        )
+        check(
+            QueenEvidencePolicy.evidenceIdentifiers(in: "The file is short.").isEmpty,
+            "ordinary prose names nothing - the case where the heuristic must stay silent"
+        )
+        check(
+            QueenEvidencePolicy.evidenceIdentifiers(in: "`abcde`").isEmpty,
+            "five characters is under the floor, so a short word cannot carry a verdict"
         )
     }
 }

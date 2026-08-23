@@ -10538,57 +10538,10 @@ final class ChatViewModel: ObservableObject {
     /// Identifiers an issue body uses to name code: backtick-quoted spans
     /// and CamelCase words. Fed to `QueenLocalisation.region` so the worker
     /// is pointed at the declaration the issue talks about, not the whole file.
+    /// The identifiers an issue's criteria name, delegated to the policy that
+    /// can be tested without the view model (#1178, #1179).
     private static func identifiers(from body: String) -> [String] {
-        var found = Set<String>()
-
-        // Backtick-quoted spans: `QueenLocalisation`, `ChatViewModel.swift`, etc.
-        if let regex = try? NSRegularExpression(pattern: "`([^`]+)`") {
-            let nsBody = body as NSString
-            regex.enumerateMatches(
-                in: body,
-                range: NSRange(location: 0, length: nsBody.length)
-            ) { match, _, _ in
-                guard let match else { return }
-                let captured = nsBody.substring(with: match.range(at: 1))
-                if !captured.isEmpty { found.insert(captured) }
-            }
-        }
-
-        // Bare words from prose: requestReviewerVerdicts,
-        // ChatViewModel, QueenLocalisation, etc. Matches runs of
-        // Latin letters and digits that contain an uppercase letter
-        // which is not the first character (#1179).
-        if let regex = try? NSRegularExpression(
-            pattern: "\\b[a-zA-Z0-9]+[A-Z][a-zA-Z0-9]*\\b"
-        ) {
-            let nsBody = body as NSString
-            regex.enumerateMatches(
-                in: body,
-                range: NSRange(location: 0, length: nsBody.length)
-            ) { match, _, _ in
-                guard let match else { return }
-                let captured = nsBody.substring(with: match.range)
-                if !captured.isEmpty { found.insert(captured) }
-            }
-        }
-
-        // Filter to identifier-shaped tokens only: reject prose, keywords,
-        // paths, and file extensions (#1178).
-        let swiftKeywords: Set<String> = [
-            "return", "func", "let", "var", "guard", "where",
-            "case", "class", "struct", "enum", "self",
-            "true", "false", "nil", "async", "await", "throws",
-        ]
-        return found.filter { token in
-            // ≥6 chars, starts with a letter, only letters and digits
-            // (no spaces, slashes, dots / file extensions).
-            guard token.count >= 6,
-                  let first = token.first,
-                  first.isLetter,
-                  token.allSatisfy({ $0.isLetter || $0.isNumber })
-            else { return false }
-            return !swiftKeywords.contains(token)
-        }
+        QueenEvidencePolicy.namedIdentifiers(in: body)
     }
 
     /// Heuristic: does this issue's work look already done against the current
@@ -10659,7 +10612,9 @@ final class ChatViewModel: ObservableObject {
 
         // Extract acceptance criteria, then the code symbols they name.
         let criteria = QueenTaskSpec.criteriaFromIssue(body: body)
-        let symbols = identifiers(from: criteria.joined(separator: "\n"))
+        let symbols = QueenEvidencePolicy.evidenceIdentifiers(
+            in: criteria.joined(separator: "\n")
+        )
 
         // No named identifiers means no evidence: a behavioural task's
         // files exist from day one, so their mere presence is not a
