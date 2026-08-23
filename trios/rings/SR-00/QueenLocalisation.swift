@@ -768,6 +768,28 @@ enum QueenLocalisation {
     /// `handleWorkerFinished` and is not retargeted to manufacture a green.
     /// Name-preference removal re-proven the same day from a mutant copy:
     /// red on #1158 and #1117, silence both, the rest unchanged.
+    ///
+    /// **Second pass (#1173-r2, 2026-08-24): #1156 cannot give
+    /// `handleWorkerFinished` on this tree, and no code inside this
+    /// boundary can change that honestly.** The clue's referent moved out
+    /// from under the expectation. The seam that now owns the emission —
+    /// `settleCharacterCountVerdicts` (12433) — declares its own three
+    /// consumers in its doc: the worker-return review (`call at 6099`,
+    /// inside `handleWorkerFinished`), the awaitingReview sweep (call at
+    /// 8686, inside `sweepAwaitingReview`), and the #1151 drill (12561+).
+    /// The unique clue, the `queen.review.characterCount` emission, lives
+    /// in the seam, and rule 4 follows it there — exactly what its
+    /// contract says a quoted log line deserves. Forcing the 2026-08-19
+    /// answer would take one of three dishonesties: density of
+    /// `awaitingReview` (the defect this issue exists to remove — "плотнее
+    /// всего там, где их просто много"), anchoring on the caller (condemned
+    /// by the pre-fix #1158 measurement above, and ambiguous besides —
+    /// three callers), or moving the emission back inside
+    /// `ChatViewModel.swift` (outside this task's boundary). The
+    /// expectation stays as recorded, the fourth case stays red, and the
+    /// resolution — re-record the expectation to the seam, or restore the
+    /// emission to `handleWorkerFinished` in the boundary file — is a
+    /// decision for the Queen, not a change to smuggle into this file.
     static func measurementCases() -> [MeasurementCase] {
         [
             MeasurementCase(
