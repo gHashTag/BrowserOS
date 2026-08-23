@@ -124,3 +124,56 @@ The repeated shape: a guard, gate or probe that exists SOMEWHERE is quoted
 as if it covered every path. The gate is real; the coverage is the claim
 nobody measured. When citing a protection, name the exact call sites it
 stands on - and grep for the paths it does not.
+
+## Fourth sweep (2026-08-23): carrying a reason faithfully is not measuring it
+
+The 2026-08-21 round fixed `conversation.persist.encrypt_fallback` by making it
+print the thrown error instead of the word "Encryption", and left a comment
+saying so. That was a real improvement and it did not help, because the thrown
+error was itself the invention. `TriOSEncryptionError` had ONE case for a
+failed key read, and it read:
+
+> The encryption key is locked. Approve the Keychain prompt, or sign the app
+> with a stable identity so it stops asking.
+
+Five call sites threw it. What each had actually measured:
+
+| Site | Measured | "Locked"? |
+|---|---|---|
+| `readInFlight` guard | another read of this key is running | no - securityd never contacted |
+| 60s cool-down | our own cool-down is still armed | no - securityd never contacted |
+| 2s deadline | the Keychain has not answered YET | no - it is a deadline, not a verdict |
+| `interactionRequired` from the store | the Keychain said interaction is required | **yes** |
+| item exists, non-interactive read empty | a key is stored and unreadable without interaction | near |
+
+The release log for `2026-08-23T02:56` is the proof and the price. Cool-down
+armed 02:56:28. The Queen's own conversation written to disk as PLAINTEXT at
+02:56:38 on the strength of "the key is locked". The same two Keychain items
+settled with **OSStatus 0** at 02:57:01 and 02:57:06, after 40.7s and 37.7s.
+The key was never locked. It was slow, and two of the five refusals had not
+even asked.
+
+### The new tell
+
+**A faithful wrapper around an invented reason.** When a message is fixed by
+making it carry the underlying error verbatim, the fix has moved the problem
+one frame down the stack, not removed it. Ask the same question of the value
+being carried: which statement established THAT? If the carried thing is a
+single enum case thrown from more than one condition, the wrapper is now
+propagating the lie more precisely than before.
+
+Corollary, and the reason this one survived two sweeps: **an enum case thrown
+from N sites can only be honest if all N measured the same thing.** Count the
+throw sites before trusting any error's own description.
+
+### The repair, this time
+
+`TriOSKeyRefusal` - one case per measured condition, plus `keychainWasAsked`
+so a reader can tell "securityd refused" from "we never called it", plus a
+`tag` so refusals can be histogrammed rather than read. Only
+`interactionRequired` is permitted to say "locked"; `key_refusal_test`
+asserts the other four cannot, and asserts that the deadline reported is the
+constant the code actually waits (`TriOSKeyTiming`). `make refusals` breaks
+`encrypt_fallback` and `decrypt_deferred` down by tag, and counts lines from
+older binaries as **unattributed** rather than guessing what they meant -
+guessing is the defect.
