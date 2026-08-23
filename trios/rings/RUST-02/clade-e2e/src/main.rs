@@ -313,6 +313,14 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
         ],
     },
     SwiftLogicSuite {
+        label: "KeychainReadStacking",
+        bin: "/tmp/trios_keychain_read_stacking_test",
+        sources: &[
+            "tests/swift/keychain_read_stacking_test.swift",
+            "rings/SR-00/KeychainReadStacking.swift",
+        ],
+    },
+    SwiftLogicSuite {
         label: "KeyRefusal",
         bin: "/tmp/trios_key_refusal_test",
         sources: &[
@@ -479,6 +487,7 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
             "rings/SR-00/TriOSKeyRefusal.swift",
             "rings/SR-00/TriOSEncryption.swift",
             "rings/SR-00/KeychainSymmetricKeyStore.swift",
+            "rings/SR-00/KeychainReadStacking.swift",
             "rings/SR-00/KeychainSecrets.swift",
             "rings/SR-00/DevSecretStore.swift",
             "BR-OUTPUT/ProjectPaths.swift",
@@ -554,6 +563,7 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
             "rings/SR-00/TriOSKeyRefusal.swift",
             "rings/SR-00/TriOSEncryption.swift",
             "rings/SR-00/KeychainSymmetricKeyStore.swift",
+            "rings/SR-00/KeychainReadStacking.swift",
             "rings/SR-00/KeychainSecrets.swift",
             "rings/SR-00/DevSecretStore.swift",
             "BR-OUTPUT/ProjectPaths.swift",
@@ -596,6 +606,7 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
             "rings/SR-00/TriOSKeyRefusal.swift",
             "rings/SR-00/TriOSEncryption.swift",
             "rings/SR-00/KeychainSymmetricKeyStore.swift",
+            "rings/SR-00/KeychainReadStacking.swift",
             "rings/SR-00/KeychainSecrets.swift",
             "rings/SR-00/DevSecretStore.swift",
             "BR-OUTPUT/ProjectPaths.swift",
@@ -617,6 +628,7 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
             "rings/SR-00/TriOSKeyRefusal.swift",
             "rings/SR-00/TriOSEncryption.swift",
             "rings/SR-00/KeychainSymmetricKeyStore.swift",
+            "rings/SR-00/KeychainReadStacking.swift",
             "rings/SR-00/KeychainSecrets.swift",
             "rings/SR-00/DevSecretStore.swift",
             "BR-OUTPUT/ProjectPaths.swift",

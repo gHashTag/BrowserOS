@@ -122,17 +122,25 @@ enum KeychainSecrets {
     /// Lowered once by ``clearLaunchGate()`` after bootstrap completes.
     static var isLaunching: Bool = true
 
-    /// The oldest read for this item that has not settled, if any. Call with
-    /// `readLock` HELD.
-    private static func oldestOutstandingLocked(_ key: String) -> Date? {
-        guard let dates = outstandingReads[key], let oldest = dates.min() else { return nil }
-        if Date().timeIntervalSince(oldest) > outstandingReadPatience {
-            // Abandoned. Forget it so a fresh dispatch is allowed - without
-            // this the pile-up guard would become the latch it replaced.
+    /// The stacking decision for this item. Call with `readLock` HELD.
+    ///
+    /// The branch logic lives in `KeychainReadStacking` so it can be proved by
+    /// a suite instead of waited for: across five launches after this guard was
+    /// written, no read stayed unsettled long enough to trigger it, so the
+    /// running binary carried an unexercised branch. This wrapper does the
+    /// dictionary bookkeeping the decision cannot see.
+    private static func stackingDecisionLocked(_ key: String) -> KeychainReadStacking.Decision {
+        let oldest = outstandingReads[key]?.min()
+        let decision = KeychainReadStacking.decide(
+            oldestOutstanding: oldest,
+            now: Date(),
+            patience: outstandingReadPatience
+        )
+        if case .dispatchAbandoning = decision {
+            // Forget the abandoned read so it cannot refuse anyone again.
             outstandingReads[key] = nil
-            return nil
         }
-        return oldest
+        return decision
     }
 
     /// Records a dispatch. Call with `readLock` HELD.
@@ -241,8 +249,8 @@ enum KeychainSecrets {
         // timeout path (deliberately - see outstandingReads), so without this
         // check every cooldown expiry adds one more call to a queue that is
         // demonstrably blocked.
-        if let oldest = oldestOutstandingLocked("\(service)/\(account)") {
-            let age = Date().timeIntervalSince(oldest)
+        let stacking = stackingDecisionLocked("\(service)/\(account)")
+        if case let .refuseOutstanding(age) = stacking {
             readLock.unlock()
             TriosLogBus.shared.info(
                 .security, "keychain.read.not_restacked",
