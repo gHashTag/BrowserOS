@@ -26,6 +26,7 @@ RELEASE_APP := $(ROOT)/trios.app
 # harness now runs as its own variant: bundle com.browseros.trios.test, data
 # root .trinity-test, port 9305. It can be killed and wiped freely because
 # nothing else lives there.
+T27_ROOT    ?= $(HOME)/t27
 TEST_APP    := $(ROOT)/trios-test.app
 TEST_PROC   := trios-test\.app/Contents/MacOS/trios
 # The pattern the cassette recipe kills by. It carries THIS checkout's path
@@ -645,6 +646,45 @@ release:
 		grep -E "error:" /tmp/trios_build_release.log | head -10; exit 1; \
 	fi
 
+# --- Golden chain -------------------------------------------------------
+#
+# The spec and the hand-written code must agree, or the spec is decoration.
+# This regenerates the Queen's decision core from rings/T27-00/queen_core.t27,
+# builds the generated Rust and the hand-written Swift, runs both over the same
+# grid of inputs, and diffs. Any difference is the chain broken.
+#
+# t27c is built once into .trinity/t27c-build (never into the shared t27
+# checkout, which belongs to another agent).
+T27C := $(ROOT)/.trinity/t27c-build/release/t27c
+CHAIN_DIR := $(ROOT)/.trinity/goldenchain
+
+chain:
+	@test -x "$(T27C)" || { \
+		echo "[chain] building t27c (artifacts stay in .trinity/t27c-build)"; \
+		CARGO_TARGET_DIR="$(ROOT)/.trinity/t27c-build" cargo build --release \
+			--manifest-path "$(T27_ROOT)/bootstrap/Cargo.toml" > /tmp/t27c_build.log 2>&1 \
+			|| { echo "[FAIL] t27c did not build:"; tail -5 /tmp/t27c_build.log; exit 1; }; \
+	}
+	@mkdir -p "$(CHAIN_DIR)/twinsrc"
+	@"$(T27C)" gen-rust "$(ROOT)/rings/T27-00/queen_core.t27" > "$(CHAIN_DIR)/core.rs" \
+		|| { echo "[FAIL] the spec did not generate"; exit 1; }
+	@cd "$(CHAIN_DIR)" && rustc --edition 2021 -O main.rs -o ring 2>/dev/null \
+		|| { echo "[FAIL] the generated ring did not compile"; exit 1; }
+	@DEVELOPER_DIR=$(DEVELOPER_DIR) xcrun swiftc "$(CHAIN_DIR)/twinsrc/main.swift" \
+		"$(ROOT)/rings/SR-00/QueenRetryPolicy.swift" \
+		"$(ROOT)/rings/SR-00/QueenReviewDecision.swift" \
+		-o "$(CHAIN_DIR)/twin" 2>/dev/null \
+		|| { echo "[FAIL] the hand-written twin did not compile"; exit 1; }
+	@"$(CHAIN_DIR)/ring" > "$(CHAIN_DIR)/ring.out"
+	@"$(CHAIN_DIR)/twin" > "$(CHAIN_DIR)/twin.out"
+	@if diff -q "$(CHAIN_DIR)/ring.out" "$(CHAIN_DIR)/twin.out" > /dev/null; then \
+		echo "[OK] golden chain intact: $$(wc -l < "$(CHAIN_DIR)/ring.out" | tr -d ' ') verdicts, spec and code agree"; \
+	else \
+		echo "[FAIL] the spec and the hand-written code disagree:"; \
+		diff "$(CHAIN_DIR)/ring.out" "$(CHAIN_DIR)/twin.out" | head -10; \
+		exit 1; \
+	fi
+
 build: dev
 
 # --- Verifying ----------------------------------------------------------
@@ -783,6 +823,7 @@ keychain-doors:
 # the tree it guards teaches everyone to run something other than `make check`.
 MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP DEV_BIN RELEASE_BIN DEV_PROC \
 	TEST_APP TEST_PROC TEST_BIN TEST_LOG TEST_PROC_HERE DEV_PROC_HERE \
+	T27C T27_ROOT CHAIN_DIR DEVELOPER_DIR \
 	RELEASE_PROC WARNING_CEILING XCTEST_ERROR_CEILING CASSETTE_DIR \
 	WARN_VARIANT WARN_BUILD_DIR WARN_OFM WARN_LIST WARN_SEEN WARN_LOG WARN_LOG_DIR \
 	WARN_LOG_LAST WARN_BUILD_ID WARN_FULL_ROOT WARN_FULL_CACHE DEV_BUILD_LOCK \
@@ -807,17 +848,54 @@ MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP DEV_BIN RELEASE_BIN DEV_PROC \
 # Skipped rather than failed when the toolchain is absent - t27c lives in a
 # sibling repository and iverilog is a brew install. A machine without them
 # should not be told the ring is broken.
+#
+# That skip is also how this gate spent months asleep. It looked for t27c at
+# exactly one path, `~/t27/target/release/t27c`, which is a build product
+# inside the sibling repository - a directory this repository may not write
+# to, and which nobody here had any reason to populate. It has never existed
+# on this machine. So the gate printed [SKIP], exited 0, and `make check`
+# counted it as passed. Both rings were unchecked the whole time. (Measured
+# 2026-08-23: given a compiler, both pass - 14 rows and 21 constants in ring
+# 00, the full rule table in ring 01. Nothing was broken. Nothing was known
+# either, and a gate that cannot tell those apart is not a gate.)
+#
+# The compiler's SOURCES, however, are readable, and building them is
+# allowed as long as the build products land here rather than there. So the
+# three cases are now distinguished:
+#
+#   binary present            -> run
+#   sources present, no binary -> build it, then run
+#   no sources                -> skip, and say NOT MEASURED in those words
+#
+# A failed build is a failure, not a skip: if the compiler is here and will
+# not build, that is exactly the news this gate exists to carry.
 t27-rings:
-	@if [ ! -x "$(HOME)/t27/target/release/t27c" ]; then \
-		echo "[SKIP] t27-rings: no t27c at $(HOME)/t27/target/release/t27c"; \
+	@T27C_USE=""; \
+	if [ -x "$(T27C)" ]; then \
+		T27C_USE="$(T27C)"; \
+	elif [ -x "$(HOME)/t27/target/release/t27c" ]; then \
+		T27C_USE="$(HOME)/t27/target/release/t27c"; \
+	elif [ -f "$(T27_ROOT)/bootstrap/Cargo.toml" ]; then \
+		echo "[t27-rings] no t27c binary yet; building it from $(T27_ROOT)/bootstrap"; \
+		echo "            (products go to .trinity/t27c-build, never into that checkout)"; \
+		CARGO_TARGET_DIR="$(ROOT)/.trinity/t27c-build" cargo build --release \
+			--manifest-path "$(T27_ROOT)/bootstrap/Cargo.toml" > /tmp/t27c_build.log 2>&1 \
+			|| { echo "[FAIL] t27-rings: t27c did not build, so the rings could not be checked:"; \
+			     tail -5 /tmp/t27c_build.log; exit 1; }; \
+		T27C_USE="$(T27C)"; \
+	else \
+		echo "[SKIP] t27-rings: NOT MEASURED - no t27c binary and no sources at"; \
+		echo "       $(T27_ROOT)/bootstrap. The rings were not checked by this run."; \
 		exit 0; \
 	fi; \
-	bash "$(ROOT)/tests/t27/ring00_parity.sh" || exit 1; \
-	bash "$(ROOT)/tests/t27/ring01_rules.sh" || exit 1; \
+	echo "[t27-rings] using $$T27C_USE"; \
+	T27C="$$T27C_USE" bash "$(ROOT)/tests/t27/ring00_parity.sh" || exit 1; \
+	T27C="$$T27C_USE" bash "$(ROOT)/tests/t27/ring01_rules.sh" || exit 1; \
 	if command -v iverilog >/dev/null 2>&1; then \
-		bash "$(ROOT)/tests/t27/ring00_verilog.sh" || exit 1; \
+		T27C="$$T27C_USE" bash "$(ROOT)/tests/t27/ring00_verilog.sh" || exit 1; \
 	else \
-		echo "[SKIP] t27-rings: iverilog not installed, Verilog half not run"; \
+		echo "[SKIP] t27-rings: NOT MEASURED - iverilog is not installed, so the"; \
+		echo "       Verilog half of ring 00 was not simulated by this run."; \
 	fi
 
 # Relaunch the app without killing bees that are mid-flight.
@@ -1785,6 +1863,15 @@ forensics:
 .PHONY: signals
 signals:
 	@python3 "$(ROOT)/tools/forensics.py" signals --variant "$(LOG_VARIANT)"
+
+# Which of the five measured conditions refused the encryption key, per event.
+# `signals` says how often the key was unavailable; this says who refused, and
+# whether securityd was contacted at all. Two of the five refusals never reach
+# it, and reporting them as "the key is locked" is what wrote the Queen's own
+# transcript to plaintext on 2026-08-23.
+.PHONY: refusals
+refusals:
+	@python3 "$(ROOT)/tools/forensics.py" refusals --variant "$(LOG_VARIANT)"
 
 # The delegation registry bucketed by state, with the legend that keeps
 # "8 spoken for" from reading as "8 busy bees": only running has a worker.

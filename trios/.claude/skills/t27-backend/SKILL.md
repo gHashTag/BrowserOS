@@ -87,18 +87,85 @@ looks right and was never simulated is a claim, not a result.
 
 ## Compiler gaps that block generation TODAY
 
-Found by generating ring 00 and reading the output. None is a reason to write
-the ring in Rust by hand; each is a bug in the seed, which is the one place a
-bug is worth fixing.
+Re-measured 2026-08-23 against a t27c built from `t27/bootstrap` at that date.
+Read the measurement, not the old list: one entry below had already been fixed
+and was still being repeated here, and the entry that matters most was
+described far too mildly.
 
-1. **`;` comments inside an enum body become variants.** `pub const V = enum(i8) { ; note\n a = 0 }` emits `pub enum V { note_words..., a = 0 }`. Use `//` inside braces. Top-level `;` is fine.
-2. **`Enum.variant` emits as `Enum.variant` in Rust** — invalid; Rust needs `Enum::variant`. `RustCodegen::ExprFieldAccess` formats `{}.{}` unconditionally and does not know which identifiers name enums.
+Build the compiler without writing into the sibling checkout:
+
+```
+CARGO_TARGET_DIR=<trios>/.trinity/t27c-build cargo build --release \
+  --manifest-path ~/t27/bootstrap/Cargo.toml
+```
+
+`make t27-rings` and `make chain` now do this for you.
+
+### The one that blocks self-hosting: `switch` is not lowered to Rust
+
+A `switch` **as a function body** makes the whole body `unimplemented!()`. A
+`switch` **anywhere else in a body** is worse: it is deleted, everything after
+it in the function is deleted, and every remaining item in the file is
+dropped. Exit code 0. stderr empty. Measured on a three-function probe:
+
+```
+pub fn nested(x: i8) i8 {           pub fn nested(x: i8) -> i8 {
+    if (x > 0) {                        if (x > 0) {
+        switch (x) { ... }      ->      }
+    }                               }
+    return 0;
+}                                   // afterstmt and enumref: gone
+```
+
+Three functions in, one out, no diagnostic, and the result does not compile
+(`error[E0308]: mismatched types` — the surviving function lost its return).
+
+This single gap is the whole self-hosting story. A parser and three code
+generators are switch statements by nature, so they lower to nothing:
+
+| spec | lines | Rust lines | fns emitted |
+|------|------:|-----------:|------------:|
+| `compiler/parser/parser.t27` | 952 | 9 | 1, a stub |
+| `compiler/codegen/zig/codegen.t27` | 1199 | 28 | 0 |
+| `compiler/codegen/verilog/codegen.t27` | 866 | 34 | 0 |
+| `compiler/codegen/testgen.t27` | 761 | 22 | 0 |
+| `compiler/parser/lexer.t27` | 454 | 104 | 0 |
+| `compiler/ast.t27` (healthy, for contrast) | 450 | 355 | — |
+| `compiler/cli/gen.t27` (healthy) | 369 | 302 | 3 |
+
+So "the specs are broken" is not what is happening. **1159 of 1161 `.t27`
+files parse and generate**; the two that do not are a symlink loop at
+`bootstrap/bootstrap/specs/physics/formula_registry.t27` and an unbalanced
+brace at `specs/test_framework/verilog_bench_harness.t27:460`. The specs are
+fine. The Rust backend cannot lower the construct they are made of.
+
+Fixing `switch` in `gen-rust` is the single highest-value change available to
+this whole programme, and it lives in `t27/bootstrap` — report it there, do
+not work around it here.
+
+### Still open, but masked
+
+2. **`Enum.variant` emits as `Enum.variant`** — invalid; Rust needs `Enum::variant`. `RustCodegen::ExprFieldAccess` formats `{}.{}` unconditionally and does not know which identifiers name enums.
 3. **`.variant` shorthand emits as `variant::`** — broken in the same place.
-4. **`switch` as a function body emits an empty `match x { };`** — the arms are dropped by the Rust backend.
+
+Both are currently **unobservable** in any spec that uses `switch`, because
+the body is discarded before they can be reached. Do not report them as fixed
+if they stop appearing; re-measure them on a switch-free probe.
+
 5. **`pub module name;` was not parsed** from a file whose comments are `//` — `gen-verilog` named the module `unknown`. The Verilog backend otherwise produced a well-formed module with clk/rst_n/en/ready and parameters from the consts.
 
-Fix order: (2) and (3) unblock every ring; (4) is needed for anything with a
-decision table; (1) and (5) are papercuts with obvious workarounds.
+### Fixed since this list was written
+
+1. ~~`;` comments inside an enum body become variants.~~ Measured 2026-08-23:
+   a `//` comment inside an enum body is dropped correctly and the enum emits
+   clean. Kept here only so the next reader does not re-report it.
+
+### How trios' own rings stand
+
+All 70 `.t27` files in `rings/` generate, none fails, and 14 of 1286 emitted
+functions (1.1%) are `unimplemented!()` stubs — concentrated in seven mesh
+specs, worst `adaptive_retry.t27` (4 of 6) and `m3_multihop.t27` (4 of 10).
+`rings/T27-00/queen_core.t27` and `rings/T27-01/a2a.t27` have none.
 
 ## Existing modules to build on, not replace
 

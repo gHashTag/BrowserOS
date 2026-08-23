@@ -34,6 +34,24 @@ Cargo.lock
 # Test-harness state and the incremental e2e build directory
 .trinity-test/
 
+# The dev variant's Trinity state. Ignored here for the same reason
+# .trinity-test/ is: it is per-variant runtime, not source.
+.trinity-dev/
+
+# t27c's cargo target directory. The compiler's sources live in another
+# repository this one may not edit, so `make chain` builds it here instead -
+# 694 MB of Rust build products that must never reach .git/objects.
+.trinity/t27c-build/
+
+# Golden chain: the generated Rust, the two binaries and the two output
+# files are all rebuilt by `make chain` on every run. Committing the
+# generated core.rs would create exactly the second copy of the rule that
+# L0 exists to prevent. Only main.rs, twinsrc/ and README.md are source.
+.trinity/goldenchain/core.rs
+.trinity/goldenchain/ring
+.trinity/goldenchain/twin
+.trinity/goldenchain/*.out
+
 # Tooling
 lefthook.yml
 
