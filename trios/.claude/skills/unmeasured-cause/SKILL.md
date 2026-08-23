@@ -446,3 +446,42 @@ one and making the histogram unreadable.
 **Predict before you measure, in writing.** A number that improves after a
 change is not evidence. A number you said in advance would go to zero, and did,
 is.
+
+## Tenth sweep (2026-08-25): a clean verdict is not a correct document
+
+Nine cover letters carried 323 MHz and 41.2 GOPS, written 10-12 August, after
+the 8 August withdrawal. A mechanical pass stripped the figure and claim-guard
+went clean on all nine. Reading the diffs found what the verdict could not:
+
+```
+GF16 matmul closing at. Then I built ...        <- a sentence the deletion broke
+a GF16 codec meeting timing on Artix-7 ...      <- grammatical, still a timing claim
+```
+
+**The guard scores the claims it knows. It does not read the sentence.** Both
+defects were introduced by the fix and both passed the gate that was supposed to
+catch the class.
+
+And a synonym the rule never knew: `multiply-free datapaths` sat in a live cover
+letter and passed clean for two weeks. The rule matched `0 multipliers` and
+`no multipl...` and nothing else. Multiplier-freedom belongs to the network, not
+the format - that is the rule the corpus states - and 26 occurrences of the
+phrasing were invisible to it.
+
+**A rule is only as wide as its vocabulary, and nobody had listed the synonyms.**
+
+### One lock, two policies
+
+`/tmp/trios_harness.lock` was waited on by `cassettes` and refused instantly by
+`mutants`, which then exited 1 while printing "Nothing here is broken". Both
+statements true; together a gate that fails for a scheduling collision while
+announcing that it is not a failure. Four rounds of `make check` came back
+either fifty minutes late or instantly red, same cause, same lock, and which one
+arrived was luck.
+
+Exiting 0 would have been worse: `check` green without the mutation coverage
+having run is UNCHECKED reported as agreement. So `mutants` now waits.
+
+**When one resource has two policies, the caller cannot tell a defect from a
+schedule.** Give the resource one policy, or give the collision its own outcome -
+never let it borrow the failure's.
