@@ -110,6 +110,16 @@ enum QueenReviewVerdictRequest {
     /// carries the independence. The decision is here, the routing is
     /// there — a call site that ignores the returned provider quietly
     /// turns criterion 2 back into role separation for everyone.
+    ///
+    /// Standing fact while #1127 is open: the supervision path has not
+    /// adopted this yet. `sendOneShotReviewerRequest` still sends the
+    /// reviewer on the app's current configuration, which is normally the
+    /// worker's own, and the journal line therefore reports role
+    /// separation. The adoption is a one-site change in ChatViewModel —
+    /// read the worker's provider off the task record, call this function
+    /// with the usable providers, and build the reviewer's request on the
+    /// provider it returns — and it is outside this file's boundary. Said
+    /// here so nobody mistakes the decision's existence for its use.
     static func reviewerProvider(
         workerProvider: ModelProvider?,
         usableProviders: [ModelProvider]
@@ -161,7 +171,17 @@ enum QueenReviewVerdictRequest {
     /// so a `met` with nothing behind it is not an answer the format
     /// accepts. The parser stays tolerant — it reads the verdict keyword —
     /// but the request now demands the evidence on the line, which is what
-    /// the journal keeps for a later reader.
+    /// the journal keeps for a later reader. A reviewer that did not attempt
+    /// a refutation for a criterion is told to answer unmet or "could not
+    /// check", never met — `met` is reserved for the refutation that failed.
+    ///
+    /// The demand is written to survive anything appended after these
+    /// instructions: a later answer-format section that shows a bare `met`
+    /// as an example illustrates punctuation, not permission, and the
+    /// refutation sentence stays required on the same line. And `brief`
+    /// self-verifies both the marker and the demands before returning, so a
+    /// brief swapped for a worker's prompt trips two journal guards, not one
+    /// (#1127 criteria 1 & 4).
     ///
     /// The brief opens with `adversaryPromptMarker` so the caller can verify
     /// (`isAdversarialBrief`) that the prompt was not swapped for a worker's
@@ -182,8 +202,9 @@ enum QueenReviewVerdictRequest {
         var lines: [String] = [
             "[\(adversaryPromptMarker)]",
             "",
-            "You are an adversarial reviewer, not a helper. Your task is to find",
-            "why each criterion is NOT met — not to confirm that it is.",
+            "You are the opponent. Not a helper, not a neutral reviewer — an",
+            "adversarial reviewer. Your task: find why each criterion is",
+            "NOT met — not confirm that it is.",
             "",
             "For each criterion, try to break it. Look for gaps, missing cases,",
             "partial implementations, edges the code does not handle, and anything",
@@ -204,7 +225,17 @@ enum QueenReviewVerdictRequest {
             "When you mark a criterion met, the same line must name the refutation",
             "you attempted — what you tried to break it with, and why it did not",
             "break. A met that cannot show the refutation behind it is a nod, not a",
-            "verdict, and must not be written.",
+            "verdict, and must not be written. If you did not attempt a refutation",
+            "for a criterion, you may not mark it met: mark it unmet, or say you",
+            "could not check it.",
+            "",
+            "This demand travels with the answer, not with this section. Any part",
+            "of this request that appears after these instructions — an",
+            "answer-format section, an example line — shows at most the shape of",
+            "an answer line. If such an example writes a bare \"met\" with nothing",
+            "behind it, the example illustrates the punctuation, not permission:",
+            "the refutation sentence is still required on the same line, and a",
+            "bare \"met\" remains a format violation.",
             "",
             "Below are the acceptance criteria, the diff of what the worker changed,",
             "and the full contents of the files that were touched. For each criterion",
@@ -281,6 +312,31 @@ enum QueenReviewVerdictRequest {
                 "Reviewer brief does not carry the adversary marker — the "
                     + "adversarial prompt was removed or replaced with a "
                     + "worker's prompt (#1127)"
+            )
+        }
+
+        // The marker proves the brief carries the adversary's token; the
+        // needles below prove it carries the adversary's substance. A prompt
+        // with the marker but without the met-needs-refutation instruction
+        // is a worker's prompt with a sticker on it: the reviewer would be
+        // told to build, not to refute, and every met it returned would be
+        // a nod. Both guards fire on the same failure — a brief swapped for
+        // a worker's — so removing either one leaves the other audible
+        // (#1127 criteria 1 & 4).
+        let adversarialDemandNeedles = [
+            "Only mark a criterion as \"met\"",
+            "actively tried to refute",
+            "apply to this request",
+            "remains a format violation"
+        ]
+        if !adversarialDemandNeedles.allSatisfy(result.contains) {
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.assertion.adversarial_demand_missing",
+                "Reviewer brief carries the adversary marker but not the "
+                    + "adversarial demands — a met without a refutation "
+                    + "behind it would be accepted, which is the worker's "
+                    + "framing, not the opponent's (#1127)"
             )
         }
 
