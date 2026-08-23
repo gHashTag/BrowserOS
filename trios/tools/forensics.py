@@ -60,6 +60,7 @@ SIGNALS = [
     "keychain.read.served_late",
     "keychain.queue.starved",
     "encryption.key.answered_after_refusal",
+    "keychain.read.not_restacked",
 ]
 
 

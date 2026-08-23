@@ -31,6 +31,30 @@ enum KeychainSecrets {
     // a 60-second cooldown so blocked calls don't pile up.
     private static let readLock = NSLock()
     private static var readInFlight: Bool = false
+
+    /// Reads dispatched for an item that have NOT settled yet, oldest first.
+    ///
+    /// `readInFlight` is a boolean and cannot answer the question that decides
+    /// whether to dispatch again: is an earlier read still running, and how
+    /// old is it? The timeout path clears the boolean on purpose - a read
+    /// blocked forever would otherwise latch it and blind the app for the life
+    /// of the process, which is the 2026-08-21 defect. But clearing it means
+    /// every cooldown expiry dispatches ANOTHER read into the same blocked
+    /// queue.
+    ///
+    /// Measured 2026-08-23T07:10, release log: five reads of
+    /// com.browseros.trios.model-keys were dispatched roughly 69s apart - one
+    /// per cooldown expiry - and ALL FIVE settled at the same instant, +299.4s,
+    /// with elapsed 294.4 / 239.1 / 170.2 / 101.3 / 32.5. They were never slow
+    /// individually; they queued behind one block and returned together. The
+    /// cooldown's own comment says it stops callers piling up. It does not: it
+    /// paces the pile-up to one every sixty seconds.
+    private static var outstandingReads: [String: [Date]] = [:]
+
+    /// How long an unsettled read is still considered worth waiting for. Past
+    /// this it is treated as abandoned and a fresh dispatch is allowed, which
+    /// keeps the escape hatch the timeout path was written to provide.
+    static let outstandingReadPatience: TimeInterval = 600
     /// Ties each in-flight read to the flag it raised. The timeout path and
     /// the orphaned block BOTH clear `readInFlight`; without the generation a
     /// stalled read that settles late clears the flag a newer reader armed,
@@ -97,6 +121,32 @@ enum KeychainSecrets {
     /// reads throw the ordinary not-found result, writes report failure.
     /// Lowered once by ``clearLaunchGate()`` after bootstrap completes.
     static var isLaunching: Bool = true
+
+    /// The oldest read for this item that has not settled, if any. Call with
+    /// `readLock` HELD.
+    private static func oldestOutstandingLocked(_ key: String) -> Date? {
+        guard let dates = outstandingReads[key], let oldest = dates.min() else { return nil }
+        if Date().timeIntervalSince(oldest) > outstandingReadPatience {
+            // Abandoned. Forget it so a fresh dispatch is allowed - without
+            // this the pile-up guard would become the latch it replaced.
+            outstandingReads[key] = nil
+            return nil
+        }
+        return oldest
+    }
+
+    /// Records a dispatch. Call with `readLock` HELD.
+    private static func noteDispatchLocked(_ key: String, at when: Date) {
+        outstandingReads[key, default: []].append(when)
+    }
+
+    /// Records that a dispatch settled, however it settled. Call with
+    /// `readLock` HELD.
+    private static func noteSettledLocked(_ key: String, at when: Date) {
+        guard var dates = outstandingReads[key] else { return }
+        if let idx = dates.firstIndex(of: when) { dates.remove(at: idx) }
+        outstandingReads[key] = dates.isEmpty ? nil : dates
+    }
 
     /// Lower the launch gate. After this call keychain operations proceed
     /// normally.
@@ -186,10 +236,31 @@ enum KeychainSecrets {
                 throw KeychainSecretsError.itemNotFound(service: service, account: account)
             }
         }
+        // A read of THIS item that has not settled is not a reason to start
+        // another one. The boolean above was already cleared by that read's
+        // timeout path (deliberately - see outstandingReads), so without this
+        // check every cooldown expiry adds one more call to a queue that is
+        // demonstrably blocked.
+        if let oldest = oldestOutstandingLocked("\(service)/\(account)") {
+            let age = Date().timeIntervalSince(oldest)
+            readLock.unlock()
+            TriosLogBus.shared.info(
+                .security, "keychain.read.not_restacked",
+                "\(service) / \(account) already has a read that has not "
+                    + "settled after " + String(format: "%.1f", age)
+                    + "s; refusing rather than dispatching a second one into "
+                    + "the same queue",
+                ["service": service, "account": account,
+                 "outstanding_age": String(format: "%.1f", age)]
+            )
+            throw KeychainSecretsError.itemNotFound(service: service, account: account)
+        }
         readInFlight = true
         readGeneration += 1
         readHolderDeadline = deadline
         let generation = readGeneration
+        let dispatchStamp = Date()
+        noteDispatchLocked("\(service)/\(account)", at: dispatchStamp)
         readLock.unlock()
 
         var query: [String: Any] = [
@@ -233,6 +304,11 @@ enum KeychainSecrets {
             status = SecItemCopyMatching(query as CFDictionary, &result)
             let elapsed = Date().timeIntervalSince(dispatchedAt)
             KeychainSecrets.readLock.lock()
+            // Settled is settled, whatever the status: this dispatch is no
+            // longer outstanding and must stop blocking the next one. Cleared
+            // unconditionally, unlike the generation-guarded flag below, because
+            // it records THIS call rather than who holds the slot.
+            KeychainSecrets.noteSettledLocked("\(service)/\(account)", at: dispatchStamp)
             // Only the generation that armed the flag may clear it; a late
             // settlement must not release a slot a newer reader now holds.
             if KeychainSecrets.readGeneration == generation {
