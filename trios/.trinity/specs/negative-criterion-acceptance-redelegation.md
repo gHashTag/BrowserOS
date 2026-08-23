@@ -59,6 +59,21 @@ rings/SR-02/ChatViewModel.swift            the 15 call sites that wire the above
 > The check must break if the marker parsing is removed. Prove that by
 > removing it in a copy and showing the task sticks again.
 
+## It has already been re-delegated wrong once
+
+Task `67CFF1DF-0237-4E11-B4BF-50BA21DEF79E`, created 2026-08-23T08:06:15Z —
+after the cancellation above — carries `ownedPaths =
+["rings/SR-00/QueenReviewDecision.swift"]`. That is the same boundary, so it
+will reach the same wall: it can satisfy criterion 2 and nothing else, and it
+will sit in `awaitingReview` until someone widens the boundary or cancels it.
+
+It has one committed file at `3bbd1c567c` and one completed turn, so it is not
+idle — it is doing correct work against a contract it cannot finish.
+
+Whoever picks this up: widen the boundary as below rather than returning that
+task again. A send-back cannot fix a contract whose remaining criteria live in
+files the worker may not open.
+
 ## When to run this
 
 Not while `rings/SR-02/ChatViewModel.swift` is dirty or owned by another live
