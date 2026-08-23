@@ -7526,6 +7526,22 @@ final class ChatViewModel: ObservableObject {
             + "Anything else — prose, paragraphs, introductions, summaries — "
             + "will not be read. Only lines that contain the criterion text "
             + "and say \"met\" or \"not met\" are parsed."
+            // The verdict words belong ONLY in the verdict position. The
+            // parser scans the whole line and checks "unmet"/"not met"
+            // before "met", so a justification that quotes the domain's
+            // vocabulary — "unchecked/stale/unmet all give a reason" —
+            // flips a satisfied criterion to unmet. Measured 2026-08-23:
+            // the #1133 review's answer said "met" on all four criteria
+            // and two were recorded unmet because their reasoning
+            // contained the word "unmet" (queen.review.raw_response,
+            // 18:07:30Z). The demand below is the in-file half of that
+            // repair; the parser's precedence lives in rings/SR-00 and is
+            // outside this issue's boundary (#1133 pass 2).
+            + "\n"
+            + "In the sentence after the verdict, never write the words "
+            + "\"met\", \"unmet\" or \"not met\" — they are verdict tokens and "
+            + "the parser reads any of them anywhere in the line as the "
+            + "verdict. Say \"satisfied\" or \"violated\" instead."
 
         // Regression guard (#1183 criterion 3): removing the strict format
         // demand above lets the reviewer return the same unparseable prose
