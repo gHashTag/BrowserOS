@@ -1924,8 +1924,32 @@ signals:
 # Prints timings and byte counts only - never secret material.
 .PHONY: keychain-floor
 keychain-floor:
-	@bin=$$(mktemp -t trios_keychain_floor); 	 DEVELOPER_DIR=$(DEVELOPER_DIR) swiftc -O "$(ROOT)/tools/keychain_floor.swift" -o "$$bin" \
-	   || { echo "[FAIL] keychain_floor did not build"; exit 1; }; 	 "$$bin"; rm -f "$$bin"
+	@: "Stable path, stable signature. The first version built to mktemp and"; \
+	: "let swiftc ad-hoc sign the result, so every run was a DIFFERENT"; \
+	: "application to macOS. Keychain ACLs are bound to the application, so"; \
+	: "the login keychain asked for a password on EVERY run and 'Always"; \
+	: "Allow' could never stick - it whitelisted a throwaway binary that was"; \
+	: "deleted seconds later. The operator reported the dialog appearing"; \
+	: "every time, which is what sent me looking."; \
+	: "Signed with the same identity build.sh gives the app bundle, which is"; \
+	: "why the app itself stopped prompting in July. Answer 'Always Allow'"; \
+	: "once and this binary stays trusted."; \
+	mkdir -p "$(ROOT)/.trinity/build"; \
+	bin="$(ROOT)/.trinity/build/keychain_floor"; \
+	DEVELOPER_DIR=$(DEVELOPER_DIR) swiftc -O "$(ROOT)/tools/keychain_floor.swift" -o "$$bin" \
+	  || { echo "[FAIL] keychain_floor did not build"; exit 1; }; \
+	sign="$${TRIOS_SIGN_IDENTITY:-TriOS Development}"; \
+	if security find-identity -p codesigning 2>/dev/null | grep -q "$$sign"; then \
+		eval "$$(grep -E '^(KEYCHAIN_NAME|KEYCHAIN_PASSWORD)=' "$(ROOT)/scripts/create_dev_signing_identity.sh")"; \
+		security unlock-keychain -p "$$KEYCHAIN_PASSWORD" "$$KEYCHAIN_NAME" 2>/dev/null || true; \
+		codesign --force --sign "$$sign" "$$bin" 2>/dev/null \
+		  || echo "[WARN] could not sign $$bin; the keychain will keep prompting"; \
+	else \
+		echo "[WARN] no '$$sign' identity, so this binary is ad-hoc signed and the"; \
+		echo "[WARN] keychain will prompt on every run. Create one once with:"; \
+		echo "[WARN]   bash scripts/create_dev_signing_identity.sh"; \
+	fi; \
+	"$$bin"
 
 .PHONY: refusals
 refusals:
