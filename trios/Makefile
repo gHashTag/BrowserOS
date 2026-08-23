@@ -785,7 +785,17 @@ shake:
 #   rings/SR-00/KeychainSymmetricKeyStore.swift – symmetric-key storage
 #   rings/SR-00/ModelConfigurationStore.swift   – persists model secrets
 #   BR-OUTPUT/ProjectPaths.swift                – build-generated keychain identifiers
-KEYCHAIN_ALLOWLIST := rings/SR-00/KeychainSecrets.swift rings/SR-00/KeychainSymmetricKeyStore.swift rings/SR-00/ModelConfigurationStore.swift BR-OUTPUT/ProjectPaths.swift
+#   tools/keychain_floor.swift                  - measures what the API itself costs
+#
+# keychain_floor is on the list ON PURPOSE and is the one entry that is not app
+# code. Its whole job is to time SecItemCopyMatching against the real Keychain,
+# so routing it through KeychainSecrets would measure KeychainSecrets - the
+# deadlines, the cooldown, the single-flight - instead of the call underneath
+# them. That is exactly the confusion it exists to end: for weeks the stall was
+# attributed to the Keychain by code that could not see the two apart. It never
+# ships in the app: it is compiled to a temp path by `make keychain-floor` and
+# deleted after the run.
+KEYCHAIN_ALLOWLIST := rings/SR-00/KeychainSecrets.swift rings/SR-00/KeychainSymmetricKeyStore.swift rings/SR-00/ModelConfigurationStore.swift BR-OUTPUT/ProjectPaths.swift tools/keychain_floor.swift
 KEYCHAIN_ALLOW_PATTERNS := $(addprefix -e ,$(KEYCHAIN_ALLOWLIST))
 
 .PHONY: keychain-doors
@@ -874,6 +884,59 @@ MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP DEV_BIN RELEASE_BIN DEV_PROC \
 #
 # A failed build is a failure, not a skip: if the compiler is here and will
 # not build, that is exactly the news this gate exists to carry.
+# Every function a spec declares must survive into the generated code.
+#
+# t27c's parser silently discards any statement it cannot parse:
+# `Parser::parse_fn_body` does `Err(_) => self.recover_to_stmt_boundary()`, and
+# the recovery skips to the next `;` at brace depth 0. Exit code 0. Empty
+# stderr. Reported upstream as gHashTag/t27#2508, in a repository this one may
+# not edit.
+#
+# So every gate here that trusted the compiler's exit status was failing open.
+# `t27-rings` and `chain` compile and RUN what they generate, which catches a
+# broken function - but not a DELETED one, because code nobody calls cannot
+# fail. This target catches the deletion directly, by counting.
+#
+# Measured when it was written: `trust_manager.t27` declares 21 functions and
+# emits 12. Nine had been silently gone, in this repository, undetected by
+# anything, for as long as the spec has existed.
+#
+# `unimplemented!()` is counted too. It is the compiler's EMPTY-BODY fallback,
+# not a per-construct stub, so it means the body was emptied rather than that
+# a function was left deliberately unwritten.
+.PHONY: t27-lowering
+t27-lowering:
+	@if [ ! -x "$(T27C)" ]; then \
+		echo "[SKIP] t27-lowering: NOT MEASURED - no t27c at $(T27C)."; \
+		echo "       Run 'make t27-rings' once; it builds one."; \
+		exit 0; \
+	fi; \
+	bad=0; tot=0; \
+	for f in $$(find "$(ROOT)/rings" -name '*.t27' | sort); do \
+		tot=$$((tot + 1)); \
+		spec_fns=$$(grep -cE '^[[:space:]]*(pub )?fn ' "$$f"); \
+		out=$$("$(T27C)" gen-rust "$$f" 2>/dev/null) || { \
+			echo "  [FAIL] $$f: gen-rust exited nonzero"; bad=$$((bad + 1)); continue; }; \
+		emitted=$$(printf '%s' "$$out" | grep -c '^pub fn '); \
+		stubs=$$(printf '%s' "$$out" | grep -c 'unimplemented!'); \
+		if [ "$$spec_fns" != "$$emitted" ]; then \
+			echo "  [FAIL] $$(basename $$f): $$spec_fns functions declared, $$emitted emitted"; \
+			echo "         $$((spec_fns - emitted)) were dropped before any backend ran."; \
+			bad=$$((bad + 1)); \
+		elif [ "$$stubs" != "0" ]; then \
+			echo "  [FAIL] $$(basename $$f): $$stubs function body/bodies emptied (unimplemented!)"; \
+			bad=$$((bad + 1)); \
+		fi; \
+	done; \
+	if [ $$bad -eq 0 ]; then \
+		echo "[OK] every function survives lowering ($$tot specs)"; \
+	else \
+		echo "[FAIL] $$bad of $$tot specs lose code between spec and generated Rust."; \
+		echo "       This is gHashTag/t27#2508. Rewrite the spec into the subset the"; \
+		echo "       parser accepts: parenthesised conditions, explicit returns, no match."; \
+		exit 1; \
+	fi
+
 t27-rings:
 	@T27C_USE=""; \
 	if [ -x "$(T27C)" ]; then \
@@ -1519,7 +1582,7 @@ vendor-step:
 		exit 1; \
 	fi
 
-check: check-selftest keychain-doors type-floor t27-rings make-dollars empty-sources sources-drift sources-drift-selftest finish-mark-order guard-shapes variant-fence parse-tests run-completeness-selftest cassette-isolation vendor-step dev warnings test cassettes mutants-changed
+check: check-selftest keychain-doors type-floor t27-rings t27-lowering make-dollars empty-sources sources-drift sources-drift-selftest finish-mark-order guard-shapes variant-fence parse-tests run-completeness-selftest cassette-isolation vendor-step dev warnings test cassettes mutants-changed
 
 # Replay every cassette and assert the expected signal appears in the log.
 #

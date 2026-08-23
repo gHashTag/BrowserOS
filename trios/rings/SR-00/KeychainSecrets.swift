@@ -176,9 +176,61 @@ enum KeychainSecrets {
 
     /// Lower the launch gate. After this call keychain operations proceed
     /// normally.
+    /// How long the gate may stay up waiting for the warm-up. A warm-up that
+    /// hangs must not keep the gate raised for the life of the process - that
+    /// is the latch this file has now produced twice by other means.
+    static let warmupGateCeiling: TimeInterval = 90
+
+    /// Lower the launch gate once the store is warm, or after
+    /// `warmupGateCeiling`, whichever comes first.
+    ///
+    /// Ordering, not speed. The warm-up already paid the per-process cold cost
+    /// (measured 2026-08-23: 9 items in 35.3s), but it was started at the same
+    /// moment the gate dropped, so ordinary deadlined reads raced it and lost:
+    /// 6 stalls and plaintext writes before the warm-up finished at +40.2s, and
+    /// 0 after. Every one of those six spent a two-second deadline on an item
+    /// whose measured first touch is 1.7s to 120.9s, then armed sixty seconds
+    /// of refusals.
+    ///
+    /// Holding the gate until the warm-up finishes costs those callers a
+    /// refusal they were going to get anyway - and now it is
+    /// `launchGateClosed`, which names TriOS as the refuser, instead of a
+    /// stall blamed on the Keychain.
     static func clearLaunchGate() {
+        warmOwnedItemsOnce(thenLowerGate: true)
+        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + warmupGateCeiling) {
+            lowerGateOnce(reason: "ceiling")
+        }
+    }
+
+    private static let gateLock = NSLock()
+    private static var gateLowered = false
+
+    /// Idempotent: whichever of the warm-up and the ceiling arrives first wins,
+    /// and the loser must not re-announce a gate that is already down.
+    private static func lowerGateOnce(reason: String) {
+        gateLock.lock()
+        if gateLowered { gateLock.unlock(); return }
+        gateLowered = true
+        gateLock.unlock()
         isLaunching = false
-        warmOwnedItemsOnce()
+        // A DIFFERENT event name from main.swift's `keychain.launch_gate.cleared`,
+        // deliberately.
+        //
+        // main.swift logs that line immediately after calling clearLaunchGate(),
+        // which was true when the call lowered the gate synchronously. It no
+        // longer does: the gate now waits for the warm-up, so that line fires up
+        // to ~35s before the gate is actually down. main.swift is another
+        // agent's uncommitted work and is not edited here - reusing its event
+        // name would have buried a premature line under a correct one and made
+        // the histogram unreadable. This name says when the gate ACTUALLY
+        // lowered, and carries which of the two paths lowered it.
+        TriosLogBus.shared.info(
+            .security,
+            "keychain.launch_gate.lowered",
+            "launch gate lowered (\(reason)); keychain operations are now live",
+            ["reason": reason]
+        )
     }
 
     /// Services this app stores generic passwords under. Attribute queries
@@ -214,13 +266,18 @@ enum KeychainSecrets {
     ///
     /// Secret material is read and immediately dropped; only counts and
     /// durations are logged.
-    static func warmOwnedItemsOnce() {
+    static func warmOwnedItemsOnce(thenLowerGate: Bool = false) {
         warmLock.lock()
         if warmStarted { warmLock.unlock(); return }
         warmStarted = true
         warmLock.unlock()
 
-        if ProjectPaths.usesFileSecretStore { return }
+        if ProjectPaths.usesFileSecretStore {
+            // The dev file store has no cold cost to pay, so nothing should
+            // wait on it.
+            if thenLowerGate { lowerGateOnce(reason: "file secret store") }
+            return
+        }
 
         DispatchQueue.global(qos: .utility).async {
             let started = Date()
@@ -270,6 +327,7 @@ enum KeychainSecrets {
                 ["warmed": String(warmed), "failed": String(failed),
                  "seconds": String(format: "%.1f", seconds)]
             )
+            if thenLowerGate { lowerGateOnce(reason: "warm-up finished") }
         }
     }
 
