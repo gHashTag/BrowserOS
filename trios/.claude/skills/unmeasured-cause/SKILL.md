@@ -279,3 +279,32 @@ never fired, so the new guard never refused anything; the first read simply
 answered in 25.7s, before the cooldown could expire and trigger a restack. A
 favourable measurement after a change is not a measurement of the change.
 Proof requires the window where the guard actually acts.
+
+## Corollary (2026-08-23): an untriggerable branch has not been checked
+
+The restack guard from the sixth sweep fired **zero times in five launches**.
+Its condition - a read still unsettled when the cooldown expires - depends on
+securityd being slow that minute, which is not something a round can arrange.
+So the branch sat in the running release having never executed, and the only
+honest thing to say about it was "not disproven".
+
+Waiting for the right window is not a plan. Neither is calling it proven
+because nothing broke.
+
+**Extract the decision until it can be triggered on demand.** `decide(
+oldestOutstanding:now:patience:)` takes an injected clock, so every branch is
+reachable in a suite: nothing outstanding, a young read refused, an abandoned
+read that must NOT latch, the boundary at exactly patience, a backwards clock,
+and a replay of the five dispatches from the measured incident.
+
+Two things this does not buy, and the suite header says so rather than leaving
+it to be assumed: that the caller invokes the decision correctly, and that the
+log line reaches the journal. **A pure-logic suite proves the decision, not the
+wiring.** Keep the live proof owed, and say it is owed.
+
+The clamp in that decision is worth its own line. A dispatch stamped in the
+future - a clock that moved backwards - gives a negative age, which is smaller
+than any patience, so every caller would be refused until the clock caught up.
+That is the latch this guard replaced, arriving through arithmetic instead of
+logic. Guards acquire their old failure mode through the edge case nobody wrote
+a case for.
