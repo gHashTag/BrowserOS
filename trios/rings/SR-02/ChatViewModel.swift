@@ -8601,7 +8601,17 @@ final class ChatViewModel: ObservableObject {
         } else {
             type = "fix"
         }
-        let subject = task.title.replacingOccurrences(of: "\n", with: " ")
+        // Not `task.title` verbatim. That is the GitHub issue title, and
+        // issues filed before 2026-08-19 are in Russian, so this line
+        // generated Russian commit subjects that L3 forbids and that no later
+        // step could repair - the committer never amends, and the title is
+        // read from the registry rather than from GitHub. See
+        // QueenLanguagePolicy.commitSubject for the whole account.
+        let subject = QueenLanguagePolicy.commitSubject(
+            title: task.title,
+            ownedPaths: paths,
+            issueNumber: task.issue.number
+        )
         let head = note.map { "\(type)(trios): \($0) \(subject)" } ?? "\(type)(trios): \(subject)"
         return head + "\n\nCloses #\(task.issue.number)\n\nDelegated to \(task.worker) by the Trinity Queen."
     }

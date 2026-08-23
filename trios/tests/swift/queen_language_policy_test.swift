@@ -71,6 +71,7 @@ enum QueenLanguagePolicyTests {
         theSizeGate()
         ratioMath()
         theStagedSet()
+        theCommitSubject()
 
         print("\n\(checks) checks, \(failures) failures")
         if failures > 0 { exit(1) }
@@ -194,6 +195,98 @@ enum QueenLanguagePolicyTests {
         check(
             QueenLanguagePolicy.rewriteRefusal(stagedFiles: []) == nil,
             "an empty staged set is not a refusal"
+        )
+    }
+
+    static func theCommitSubject() {
+        scenario("a commit subject is English whatever language the issue is in")
+
+        let owned = ["rings/SR-00/QueenLocalisation.swift"]
+
+        check(
+            QueenLanguagePolicy.commitSubject(
+                title: "A negative test parks itself in the review queue forever",
+                ownedPaths: owned, issueNumber: 1286
+            ) == "A negative test parks itself in the review queue forever",
+            "an English title is the best description of the work and is kept"
+        )
+
+        // The measured case. #1173's commit subject was generated from this
+        // exact title and no later step could repair it.
+        check(
+            QueenLanguagePolicy.commitSubject(
+                // #1173's title, written as escapes so this file stays ASCII
+                // as L3 requires while still testing a non-ASCII title.
+                title: "\u{0421}\u{0443}\u{0436}\u{0435}\u{043D}\u{0438}\u{0435}"
+                    + " \u{043F}\u{043E}\u{043F}\u{0430}\u{0434}\u{0430}\u{0435}\u{0442}",
+                ownedPaths: owned, issueNumber: 1173
+            ) == "update rings/SR-00/QueenLocalisation.swift",
+            "a title in another script is replaced by what the commit touches"
+        )
+
+        check(
+            QueenLanguagePolicy.commitSubject(
+                title: "", ownedPaths: owned, issueNumber: 1173
+            ) == "update rings/SR-00/QueenLocalisation.swift",
+            "an empty title falls back rather than producing a bare type prefix"
+        )
+
+        check(
+            QueenLanguagePolicy.commitSubject(
+                title: "  fix the reaper\n", ownedPaths: owned, issueNumber: 7
+            ) == "fix the reaper",
+            "newlines and surrounding space are flattened out of the subject"
+        )
+
+        check(
+            QueenLanguagePolicy.commitSubject(
+                title: "Caf\u{00E9} ordering is wrong in the receipt view",
+                ownedPaths: owned, issueNumber: 9
+            ).hasPrefix("Caf"),
+            "one accented letter is under the threshold, so the title survives"
+        )
+
+        scenario("the fallback describes the boundary")
+
+        check(
+            QueenLanguagePolicy.describing(ownedPaths: [], issueNumber: 42)
+                == "resolve issue 42",
+            "with no boundary the issue number is the only true thing left"
+        )
+        check(
+            QueenLanguagePolicy.describing(
+                ownedPaths: ["rings/SR-00/A.swift", "rings/SR-00/B.swift"], issueNumber: 42
+            ) == "update 2 files under rings/SR-00",
+            "several files in one directory name that directory"
+        )
+        check(
+            QueenLanguagePolicy.describing(
+                ownedPaths: ["rings/SR-00/A.swift", "docs/b.md"], issueNumber: 42
+            ) == "update 2 files for issue 42",
+            "with no shared directory the count and the issue are what is left"
+        )
+
+        scenario("the common directory is compared by component, not by string")
+
+        check(
+            QueenLanguagePolicy.commonDirectory(
+                of: ["rings/SR-00/A.swift", "rings/SR-01/B.swift"]
+            ) == "rings",
+            "rings/SR-0 is a common string prefix and is not a directory"
+        )
+        check(
+            QueenLanguagePolicy.commonDirectory(of: ["a/b/c/d.swift", "a/b/e.swift"]) == "a/b",
+            "the deepest shared directory is taken, not the first"
+        )
+        check(
+            QueenLanguagePolicy.commonDirectory(of: ["a.swift", "b.swift"]) == nil,
+            "two files at the root share no directory"
+        )
+        check(
+            QueenLanguagePolicy.commonDirectory(
+                of: ["x/same/a.swift", "y/same/b.swift"]
+            ) == nil,
+            "a matching component after a mismatch is not spliced onto the prefix"
         )
     }
 }
