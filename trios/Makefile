@@ -1916,6 +1916,17 @@ signals:
 # whether securityd was contacted at all. Two of the five refusals never reach
 # it, and reporting them as "the key is locked" is what wrote the Queen's own
 # transcript to plaintext on 2026-08-23.
+# The floor cost of a cold Keychain data read on THIS machine, measured rather
+# than assumed. The caller deadline is 2s; measured 2026-08-23, first touch of
+# three items in one fresh process took 65.4s, 4.4s and 3.9s, and the same three
+# in the same process afterwards took 0.070s, 0.011s and 0.012s. A deadline an
+# order of magnitude below the floor is not a timeout, it is a guaranteed stall.
+# Prints timings and byte counts only - never secret material.
+.PHONY: keychain-floor
+keychain-floor:
+	@bin=$$(mktemp -t trios_keychain_floor); 	 DEVELOPER_DIR=$(DEVELOPER_DIR) swiftc -O "$(ROOT)/tools/keychain_floor.swift" -o "$$bin" \
+	   || { echo "[FAIL] keychain_floor did not build"; exit 1; }; 	 "$$bin"; rm -f "$$bin"
+
 .PHONY: refusals
 refusals:
 	@python3 "$(ROOT)/tools/forensics.py" refusals --variant "$(LOG_VARIANT)"
