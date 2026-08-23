@@ -357,3 +357,48 @@ decision and four checks, including the one that matters: a block that never
 started recorded nothing, so `nil` is not starvation. **Inventing a cause for a
 call that left no measurement is the whole defect, and a guard against it can
 commit it.**
+
+## Eighth sweep (2026-08-23): the deadline was below the floor, and nobody had measured the floor
+
+Every launch for weeks produced `keychain.read.stalled`. Seven rounds treated it
+as a symptom of contention, of a cooldown, of a pile-up, of a queue. It was none
+of those. `make keychain-floor` reads every generic-password item this app owns,
+twice, in one fresh process:
+
+```
+first touch  min=1.682s median=4.684s max=120.902s total=161.910s
+warm         min=0.002s median=0.002s max=0.006s   total=0.031s
+7 of 9 first touches exceeded the 2s caller deadline
+```
+
+Per item, per process, on FIRST touch: seconds to minutes. Warm: microseconds.
+The app pays ~162 seconds to warm its keychain on a cold start against a
+two-second deadline, then arms sixty seconds of refusals on each failure.
+
+**Nobody had measured the cost of the operation being timed.** Seven rounds
+tuned the machinery around a number - 2.0 - that had never been checked against
+the thing it bounds. A timeout below the floor is not a timeout; it is a
+scheduled failure with a plausible message attached.
+
+### The two probes that were wrong, and why
+
+Both mistakes were mine, in this round, an hour apart.
+
+**Probe one asked the wrong question.** `kSecReturnAttributes` with match-all
+returned in 0.2ms, 400 rounds, even during a launch - so I concluded the block
+was "entirely inside the trios process". Attributes answer from metadata and
+never consult the ACL. Only `kSecReturnData` does, and that is the call that
+stalls. **Reproducing the wrong operation quickly is worse than not
+reproducing it**, because it produces a confident wrong answer.
+
+**Probe two blamed the queue.** `elapsed` runs from dispatch, so I reasoned it
+must hide a GCD wait. Splitting the clocks and shipping it produced the live
+line that refuted me: `slot_wait=0.001s`, `query_time=83.370s`. The
+instrumentation was worth having and the hypothesis behind it was wrong.
+
+### The rule
+
+Before tuning any timeout, retry count or cooldown: **measure the operation's
+floor in the same conditions the caller sees.** If the floor is above the
+bound, nothing downstream of the bound is a defect worth fixing - they are all
+consequences.
