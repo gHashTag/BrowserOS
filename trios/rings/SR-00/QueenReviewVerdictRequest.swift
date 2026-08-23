@@ -346,7 +346,12 @@ enum QueenReviewVerdictRequest {
     /// Parses a reviewer's response into per-criterion verdicts.
     ///
     /// Only criteria that appear in the response with a recognisable verdict
-    /// (`.met` or `.unmet`) are returned. Absent criteria stay out of the
+    /// (`.met` or `.unmet`) are returned. On the criterion-label path — the
+    /// strict format the brief itself demands — a `met` with no words behind
+    /// the keyword is treated as absent: `met` is stamped only when the
+    /// refutation the brief demands is visible on the line (#1127
+    /// criterion 1). The numbered path is not gated; see the note at the
+    /// Strategy 2 call site for why. Absent criteria stay out of the
     /// dictionary and read as `unchecked` when the acceptance policy builds
     /// its table — the contract is that an answer the parser could not
     /// understand, or one that explicitly says "could not check", must not
@@ -417,9 +422,26 @@ enum QueenReviewVerdictRequest {
             )
             if !needle.isEmpty,
                let line = lines.first(where: {
-                   $0.localizedCaseInsensitiveContains(needle)
-               }) {
-                return verdictKeyword(in: line, stripping: echo)
+                    $0.localizedCaseInsensitiveContains(needle)
+                }) {
+                // The criterion-label path is the strict format the brief
+                // itself demands, so the brief's own rule is enforced here:
+                // a `met` on a criterion-labeled line must show the
+                // refutation behind it (#1127 criterion 1). A bare
+                // "criterion: met" — the shape a format example shows, but
+                // with no refutation attempted — reads as absent, which
+                // reads as unchecked: not a pass, and not a silent stamp.
+                // The numbered format (Strategy 1) is deliberately NOT
+                // gated: it is pinned lenient by #1117's captured fixture
+                // ("1. make check passes — met" must parse), and resolving
+                // that conflict is the issue owner's call, not a unilateral
+                // tightening here. Unmet is never gated — the criterion
+                // conditions only `met`.
+                return verdictKeyword(
+                    in: line,
+                    stripping: echo,
+                    metRequiresRefutationEvidence: true
+                )
             }
         }
         return nil
@@ -461,9 +483,17 @@ enum QueenReviewVerdictRequest {
     /// by a substring match on "met". Word boundaries guard against "metrics"
     /// and "parameter" — false friends that would turn a line about something
     /// else into a pass.
+    ///
+    /// `metRequiresRefutationEvidence` enforces #1127 criterion 1 at the one
+    /// valve this file owns: when set, a `.met` is returned only if words
+    /// follow the verdict keyword on the line — the refutation the brief
+    /// demands behind every met. A bare "criterion: met" stays absent, which
+    /// reads as unchecked: not a pass. `.unmet` is never gated — the
+    /// criterion conditions only `met`.
     private static func verdictKeyword(
         in line: String,
-        stripping echo: String = ""
+        stripping echo: String = "",
+        metRequiresRefutationEvidence: Bool = false
     ) -> QueenCriterionVerdict? {
         // Remove the echoed criterion text so keywords from the criterion's
         // own wording do not decide its verdict. A reviewer who writes
@@ -475,7 +505,13 @@ enum QueenReviewVerdictRequest {
         let lower = searchLine.lowercased()
 
         // Checkbox markers used elsewhere in the project.
-        if lower.contains("[x]") { return .met }
+        if lower.contains("[x]") {
+            if metRequiresRefutationEvidence,
+               !refutationEvidenceFollows(lower, keyword: "[x]") {
+                return nil
+            }
+            return .met
+        }
         if lower.contains("[ ]") { return .unmet }
         // "[?]" is treated the same as "could not check": the criterion stays
         // absent rather than being recorded as .unchecked.
@@ -484,9 +520,36 @@ enum QueenReviewVerdictRequest {
             return .unmet
         }
         if matchesWord(lower, "met") {
+            if metRequiresRefutationEvidence,
+               !refutationEvidenceFollows(lower, keyword: "met") {
+                return nil
+            }
             return .met
         }
         return nil
+    }
+
+    /// Whether words follow the verdict keyword on the line — the visible
+    /// trace of a refutation attempt (#1127 criterion 1).
+    ///
+    /// "met" with nothing behind it is a nod; the brief demands the
+    /// refutation sentence on the same line, and this is where that demand
+    /// is checked. Any run of four or more letters after the keyword counts:
+    /// the reviewer's own words, not a fixed vocabulary — the shape is
+    /// "verdict, then what I tried and why it held", and the check only asks
+    /// that the second half exists at all.
+    private static func refutationEvidenceFollows(
+        _ text: String,
+        keyword: String
+    ) -> Bool {
+        guard let range = text.range(of: keyword, options: .caseInsensitive)
+        else { return false }
+        let tail = String(text[range.upperBound...])
+        let words = tail
+            .split(whereSeparator: { !$0.isLetter })
+            .map { $0.lowercased() }
+            .filter { $0.count >= 4 && $0 != keyword.lowercased() }
+        return !words.isEmpty
     }
 
     /// Word-boundary match so "met" does not fire inside "metrics".
