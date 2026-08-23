@@ -46,6 +46,7 @@ enum KeychainReadStackingTests {
         theBoundaryBelongsToRefusal()
         aBackwardsClockDoesNotRefuseForever()
         theMeasuredPileUpIsRefused()
+        aStarvedSlotIsNotAKeychainStall()
 
         print("\n\(checks) checks, \(failures) failures")
         if failures > 0 { exit(1) }
@@ -145,5 +146,29 @@ enum KeychainReadStackingTests {
             if case .refuseOutstanding = d { refused += 1 }
         }
         check(refused == 4, "four of the five dispatches are refused, leaving one read")
+    }
+
+    /// The five slot waits that exceeded the whole deadline on 2026-08-23. Each
+    /// one armed sixty seconds of refusals over a query never made.
+    static func aStarvedSlotIsNotAKeychainStall() {
+        scenario("a call that never got a slot is not a Keychain stall")
+
+        check(
+            KeychainReadStacking.wasStarvedOut(slotWait: 7.05, deadline: 2) == true,
+            "the measured worst case, 7.05s against a 2s deadline, is starvation"
+        )
+        check(
+            KeychainReadStacking.wasStarvedOut(slotWait: 2.0, deadline: 2) == true,
+            "waiting the entire deadline for a slot is starvation, boundary included"
+        )
+        check(
+            KeychainReadStacking.wasStarvedOut(slotWait: 0.41, deadline: 2) == false,
+            "the median wait of 0.41s leaves time to ask; a stall there is the Keychain's"
+        )
+        check(
+            KeychainReadStacking.wasStarvedOut(slotWait: nil, deadline: 2) == false,
+            "a block that never started recorded nothing - naming a cause for it is "
+                + "the defect this module exists to avoid"
+        )
     }
 }

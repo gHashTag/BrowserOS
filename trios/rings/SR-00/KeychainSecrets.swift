@@ -414,7 +414,9 @@ enum KeychainSecrets {
         // deadline, the longest at 7.05s. Each of those armed sixty seconds of
         // refusals over a query that had not been made.
         let waitedForSlot = slotWait.seconds
-        let starvedOut = (waitedForSlot ?? 0) >= deadline
+        let starvedOut = KeychainReadStacking.wasStarvedOut(
+            slotWait: waitedForSlot, deadline: deadline
+        )
         if !starvedOut {
             readUnavailableUntil["\(service)/\(account)"] = Date().addingTimeInterval(60)
         }

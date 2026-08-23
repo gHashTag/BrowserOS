@@ -51,4 +51,23 @@ enum KeychainReadStacking {
         }
         return .refuseOutstanding(ageSeconds: settled)
     }
+
+    /// Whether a call that hit its deadline was starved of a GCD slot rather
+    /// than stalled by the Keychain.
+    ///
+    /// The caller's deadline is two seconds. Measured across 59 starvation
+    /// events on 2026-08-23: median slot wait 0.41s, max 7.05s, and five longer
+    /// than the whole deadline. For those five, SecItemCopyMatching was never
+    /// reached - so calling it "did not answer in 2s" blamed the Keychain for a
+    /// queue this process saturated, and armed sixty seconds of refusals over a
+    /// query that had not been made.
+    ///
+    /// - Parameter slotWait: how long the block waited to start, or nil if it
+    ///   never started at all. nil is NOT starvation: a block that never ran
+    ///   recorded nothing, and inventing a cause for it is the defect this
+    ///   whole module exists to avoid.
+    static func wasStarvedOut(slotWait: Double?, deadline: TimeInterval) -> Bool {
+        guard let waited = slotWait else { return false }
+        return waited >= deadline
+    }
 }
