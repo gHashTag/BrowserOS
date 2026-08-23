@@ -101,7 +101,62 @@ CARGO_TARGET_DIR=<trios>/.trinity/t27c-build cargo build --release \
 
 `make t27-rings` and `make chain` now do this for you.
 
-### The one that blocks self-hosting: `switch` is not lowered to Rust
+### CORRECTION, same day: it is the PARSER, and it is not only `switch`
+
+Everything below this heading down to the ratio table was written earlier on
+2026-08-23 and is wrong about the cause. It said `switch` is not lowered to
+Rust. `switch` is one symptom of a much larger defect, and the defect is not
+in a backend at all.
+
+`Parser::parse_fn_body` (`bootstrap/src/compiler.rs:1887`) is:
+
+```rust
+match self.parse_body_stmt() {
+    Ok(stmt) => decl.children.push(stmt),
+    Err(_) => { self.recover_to_stmt_boundary(); }   // the error is dropped
+}
+```
+
+`recover_to_stmt_boundary` then advances to the next `;` at brace depth 0, so
+a statement the parser cannot handle takes **everything up to the next
+top-level semicolon** with it. `parse_module_body` (`compiler.rs:1073`) has
+the identical shape at item level. The nodes are gone before any backend
+runs, so `gen`, `gen-c`, `gen-verilog` and `gen-rust` all lose the same code.
+`t27c parse` shows the statements simply absent.
+
+Measured triggers, each exiting 0 with empty stderr:
+
+- `if <cond> { }` with the condition NOT in parentheses - which is how every
+  Rust-flavoured spec in both trees writes it. `parse_if_stmt`
+  (`compiler.rs:2150`) opens with `self.expect(TokenKind::LParen)?`. Takes the
+  `if` and one following statement; recurses if that statement is another `if`.
+- `match` in any position; parentheses do not rescue it.
+- `let x: T = if …;` and `let x: T = match …;` - the first deletes the binding
+  silently, the second emits the literal text `let x: T = match;`.
+- An implicit tail return emits `expr;` **with a semicolon**, so the function
+  returns `()`. This is the whole idiomatic Rust-flavoured dialect, and it
+  means those functions do not compile even when nothing was deleted.
+- `while` without parenthesised condition, `let mut`, `[N][]const T{}`
+  literals, `fn` declared inside `struct`, and every item after the first
+  brace-style `module` block.
+
+`unimplemented!()` turns out to be the empty-body FALLBACK, not a
+construct-specific stub: it appears only when deletion leaves nothing behind.
+So counting stubs badly understates the damage - a function can lose half its
+body, emit no stub, and still compile.
+
+**Do not use the earlier "1.1% of functions are stubs" figure as a health
+measure.** Generation exiting 0 says nothing about whether the output is
+correct or even compiles.
+
+Reported upstream with minimal repros and source line numbers:
+https://github.com/gHashTag/t27/issues/2508
+
+The rest of this section is kept because its ratio table is still a useful
+map of WHERE the damage is concentrated, even though its stated cause is
+wrong.
+
+### Superseded: `switch` is not lowered to Rust
 
 A `switch` **as a function body** makes the whole body `unimplemented!()`. A
 `switch` **anywhere else in a body** is worse: it is deleted, everything after
