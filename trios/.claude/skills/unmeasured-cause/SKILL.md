@@ -308,3 +308,52 @@ than any patience, so every caller would be refused until the clock caught up.
 That is the latch this guard replaced, arriving through arithmetic instead of
 logic. Guards acquire their old failure mode through the edge case nobody wrote
 a case for.
+
+## Seventh sweep (2026-08-23): guard half a pile-up and you have not guarded it
+
+The restack guard from the sixth sweep covered reads. The same window shows it
+covered half the problem:
+
+```
++ 68.3s  keychain.enumeration.stalled   model-keys
++137.2s  keychain.enumeration.stalled   model-keys
++206.2s  keychain.enumeration.stalled   model-keys
++274.9s  keychain.enumeration.stalled   model-keys
++299.4s  keychain.read.settled  x5, elapsed 294.4 / 239.1 / 170.2 / 101.3 / 32.5
+```
+
+Spacing 68.9 / 69.0 / 68.7 - the same cooldown cadence, the same service,
+interleaved with the five reads. Listings and reads were **one** pile-up
+through two code paths, and `keychain.enumeration.stalled` had never been
+looked at by anyone.
+
+**When you find a defect in one path, grep for the shape, not the symbol.** The
+enumeration path was a near-copy of the read path: same cooldown, same
+generation guard, same clear-on-timeout. Nothing named `read` appears in it.
+
+### Where the block was, and how that was established without touching the code
+
+`keychain.queue.starved` fired **zero** times during the 286-second stall. That
+signal measures how long a dispatched block waits for a GCD slot, so its
+absence says scheduling was prompt and the wait was inside
+`SecItemCopyMatching`. **A signal that did not fire is evidence when you know
+what would have made it fire** - which is the opposite of the usual case in
+this file, where absence was mistaken for health.
+
+### The third finding: a stall that was not one
+
+Across 59 starvation events - median slot wait 0.41s, max **7.05s** - five
+waited longer than the caller's entire two-second deadline. For those five,
+`SecItemCopyMatching` was never reached, and the timeout path still reported
+"did not answer in 2s" and armed sixty seconds of refusals over a query nobody
+made. The process starved its own read and billed the Keychain for it.
+
+### And the discipline, applied to my own new code
+
+Two of the three new signals shipped with a decision suite and a wiring suite.
+The third, `starved_out`, shipped with neither in the same round - the exact
+position this file spends 300 lines arguing is worth nothing. It now has a pure
+decision and four checks, including the one that matters: a block that never
+started recorded nothing, so `nil` is not starvation. **Inventing a cause for a
+call that left no measurement is the whole defect, and a guard against it can
+commit it.**
