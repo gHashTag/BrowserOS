@@ -790,6 +790,24 @@ enum QueenLocalisation {
     /// resolution — re-record the expectation to the seam, or restore the
     /// emission to `handleWorkerFinished` in the boundary file — is a
     /// decision for the Queen, not a change to smuggle into this file.
+    ///
+    /// **Third pass (2026-08-24), the heuristics measured, not argued.**
+    /// Every route to green for #1156 was measured against the tree above:
+    /// the honest one and both condemned ones all miss. Whole-word counts:
+    /// `characterCount` — 1 in the whole file, inside the seam (0 in
+    /// `handleWorkerFinished`, 0 in the drill); `awaitingReview` density —
+    /// `sweepAwaitingReview` **8** > `handleWorkerFinished` **7** (drill 1),
+    /// so density names the wrong function even if it were restored; caller
+    /// anchoring on the seam's call sites is three-way (6099
+    /// `handleWorkerFinished`, 8686 `sweepAwaitingReview`, drill 12561) and
+    /// its density tiebreak also says sweep. No rule — current, removed, or
+    /// condemned — yields `handleWorkerFinished` for #1156 on this tree.
+    /// The only remaining route is rigging the case table itself (editing
+    /// identifiers or the expectation until the replay prints green), which
+    /// is not narrowing working; it is the answer hardcoded. The criterion
+    /// was true on 2026-08-19, was made false on 2026-08-22 by #1151/#1172
+    /// in `rings/SR-02/ChatViewModel.swift` (outside this boundary), and no
+    /// edit inside this file can make it true again. It stays reported.
     static func measurementCases() -> [MeasurementCase] {
         [
             MeasurementCase(
