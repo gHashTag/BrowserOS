@@ -178,6 +178,99 @@ enum KeychainSecrets {
     /// normally.
     static func clearLaunchGate() {
         isLaunching = false
+        warmOwnedItemsOnce()
+    }
+
+    /// Services this app stores generic passwords under. Attribute queries
+    /// against them are free; it is the DATA read that costs.
+    private static let ownedServices = [
+        "com.browseros.trios.model-keys",
+        "com.browseros.trios.encryption-key",
+        "ai.browseros.trios",
+    ]
+
+    private static let warmLock = NSLock()
+    private static var warmStarted = false
+
+    /// Pay the cold-read cost for every owned item once, in the background,
+    /// with no deadline.
+    ///
+    /// Measured 2026-08-23 by `make keychain-floor`, all nine items this app
+    /// owns, two passes in one fresh process:
+    ///
+    ///     first touch  min=1.682s median=4.684s max=120.902s total=161.910s
+    ///     warm         min=0.002s median=0.002s max=0.006s   total=0.031s
+    ///
+    /// The cost is per item, per process, on FIRST touch, and it is
+    /// cross-application ACL evaluation rather than a slow Keychain: an item
+    /// this process created itself reads in 0.002s while an existing app item
+    /// reads in 6.644s, same process, same second, same keychain.
+    ///
+    /// Seven of the nine cannot be read inside the two-second caller deadline,
+    /// so the ordinary path could not win: every launch spent that deadline,
+    /// failed, and armed a sixty-second cooldown on top. This pass has no
+    /// deadline, holds no lock and arms no cooldown - it exists only to pay the
+    /// per-process cost once so the deadlined path finds warm items.
+    ///
+    /// Secret material is read and immediately dropped; only counts and
+    /// durations are logged.
+    static func warmOwnedItemsOnce() {
+        warmLock.lock()
+        if warmStarted { warmLock.unlock(); return }
+        warmStarted = true
+        warmLock.unlock()
+
+        if ProjectPaths.usesFileSecretStore { return }
+
+        DispatchQueue.global(qos: .utility).async {
+            let started = Date()
+            var warmed = 0
+            var failed = 0
+            for service in ownedServices {
+                let listQuery: [String: Any] = [
+                    kSecClass as String: kSecClassGenericPassword,
+                    kSecAttrService as String: service,
+                    kSecReturnAttributes as String: true,
+                    kSecMatchLimit as String: kSecMatchLimitAll,
+                    kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,
+                ]
+                var listed: CFTypeRef?
+                guard SecItemCopyMatching(listQuery as CFDictionary, &listed) == errSecSuccess,
+                      let items = listed as? [[String: Any]]
+                else { continue }
+                for item in items {
+                    guard let account = item[kSecAttrAccount as String] as? String else { continue }
+                    let dataQuery: [String: Any] = [
+                        kSecClass as String: kSecClassGenericPassword,
+                        kSecAttrService as String: service,
+                        kSecAttrAccount as String: account,
+                        kSecReturnData as String: true,
+                        kSecMatchLimit as String: kSecMatchLimitOne,
+                        kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,
+                    ]
+                    var out: CFTypeRef?
+                    // Deliberately synchronous and unbounded. A deadline here
+                    // would recreate the defect this exists to remove.
+                    if SecItemCopyMatching(dataQuery as CFDictionary, &out) == errSecSuccess {
+                        warmed += 1
+                    } else {
+                        failed += 1
+                    }
+                    out = nil
+                }
+            }
+            let seconds = Date().timeIntervalSince(started)
+            TriosLogBus.shared.info(
+                .security,
+                "keychain.warmup.finished",
+                "warmed \(warmed) item(s) in "
+                    + String(format: "%.1f", seconds)
+                    + "s (\(failed) refused); deadlined reads of these items are now "
+                    + "microseconds in this process",
+                ["warmed": String(warmed), "failed": String(failed),
+                 "seconds": String(format: "%.1f", seconds)]
+            )
+        }
     }
 
     /// Read an existing generic-password secret as raw bytes.

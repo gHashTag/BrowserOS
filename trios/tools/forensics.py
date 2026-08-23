@@ -63,6 +63,7 @@ SIGNALS = [
     "keychain.read.not_restacked",
     "keychain.enumeration.not_restacked",
     "keychain.read.starved_out",
+    "keychain.warmup.finished",
 ]
 
 
