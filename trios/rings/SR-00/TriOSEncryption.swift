@@ -21,6 +21,19 @@ final class TriOSEncryption {
     private var readInFlight = false
     private var unavailableSince: Date?
 
+    // How long callers were refused before this key first answered.
+    //
+    // Measured 2026-08-23: the plaintext fallback is TRANSIENT, not resting.
+    // Two conversations were written unencrypted at 06:05:17 and 06:05:24;
+    // by the 06:05:58 heal pass the store held 55 slots and ZERO plaintext
+    // markers. So the exposure is a window at launch, and the question that
+    // decides how to close it is exactly one number: how long that window is.
+    // Nobody had measured it, so the retry length that would remove the
+    // plaintext write entirely could only be guessed. These two fields turn
+    // it into a logged fact.
+    private var firstRefusalAt: Date?
+    private var refusalsSinceLastAnswer = 0
+
     /// Creates an encryption helper with a fully specified key file URL.
     /// This path is used for direct file-based access and for migrating legacy
     /// keys into the Keychain.
@@ -112,6 +125,26 @@ final class TriOSEncryption {
         try rawKeyData().map { String(format: "%02x", $0) }.joined()
     }
 
+    /// Records that a caller was refused. Call with `lock` HELD.
+    ///
+    /// Only the FIRST refusal since the last answer starts the clock, because
+    /// the number worth knowing is how long the window lasted, not how long
+    /// the most recent caller waited.
+    private func noteRefusalLocked() {
+        if firstRefusalAt == nil { firstRefusalAt = Date() }
+        refusalsSinceLastAnswer += 1
+    }
+
+    /// Returns the refusal window that just closed, or nil if no caller was
+    /// refused since the last answer. Call with `lock` HELD.
+    private func consumeRefusalGapLocked() -> (seconds: Double, refusals: Int)? {
+        guard let since = firstRefusalAt else { return nil }
+        let gap = (Date().timeIntervalSince(since), refusalsSinceLastAnswer)
+        firstRefusalAt = nil
+        refusalsSinceLastAnswer = 0
+        return gap
+    }
+
     /// Loads an existing 256-bit key from the Keychain, migrating any legacy
     /// file-based key, or creates and persists a new one. The result is cached
     /// in memory so every call within a process returns the same key, avoiding
@@ -129,6 +162,7 @@ final class TriOSEncryption {
         // this guard every cache-miss call dispatches another read that
         // never returns, exhausting the GCD thread pool.
         if readInFlight {
+            noteRefusalLocked()
             lock.unlock()
             throw TriOSEncryptionError.keyUnavailable(.readAlreadyInFlight)
         }
@@ -145,6 +179,7 @@ final class TriOSEncryption {
             let elapsed = Date().timeIntervalSince(unavailableSince)
             if elapsed < TriOSKeyTiming.cooldownSeconds {
                 let remaining = Int((TriOSKeyTiming.cooldownSeconds - elapsed).rounded(.up))
+                noteRefusalLocked()
                 lock.unlock()
                 throw TriOSEncryptionError.keyUnavailable(
                     .cooldownArmed(secondsRemaining: remaining)
@@ -164,6 +199,7 @@ final class TriOSEncryption {
         let semaphore = DispatchSemaphore(value: 0)
         var result: SymmetricKey?
         var refusal: Error?
+        var answeredGap: (seconds: Double, refusals: Int)?
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
             guard let self else {
@@ -187,11 +223,30 @@ final class TriOSEncryption {
                     self.cachedKey = key
                 }
                 result = key
+                answeredGap = self.consumeRefusalGapLocked()
             } else {
                 refusal = thrown
             }
             self.readInFlight = false
             self.lock.unlock()
+            if let answeredGap {
+                TriosLogBus.shared.info(
+                    .security,
+                    "encryption.key.answered_after_refusal",
+                    String(
+                        format: "the %@ encryption key answered %.1fs after the first "
+                            + "caller was refused, having refused %d caller(s) in between",
+                        self.keyName ?? "file-based",
+                        answeredGap.seconds,
+                        answeredGap.refusals
+                    ),
+                    [
+                        "key": self.keyName ?? "file-based",
+                        "elapsed": String(format: "%.1f", answeredGap.seconds),
+                        "refusals": String(answeredGap.refusals),
+                    ]
+                )
+            }
             semaphore.signal()
         }
 
@@ -219,6 +274,7 @@ final class TriOSEncryption {
         // because it has no way to know that and has twice been wrong.
         lock.lock()
         unavailableSince = Date()
+        noteRefusalLocked()
         lock.unlock()
         throw TriOSEncryptionError.keyUnavailable(
             .readTimedOut(afterSeconds: TriOSKeyTiming.readDeadlineSeconds)

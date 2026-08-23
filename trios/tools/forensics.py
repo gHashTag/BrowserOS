@@ -59,6 +59,7 @@ SIGNALS = [
     "keychain.read.settled",
     "keychain.read.served_late",
     "keychain.queue.starved",
+    "encryption.key.answered_after_refusal",
 ]
 
 
@@ -230,6 +231,35 @@ def cmd_refusals(variant):
         print("\nkeychain actually asked:")
         for k, n in asked.most_common():
             print("%6d  %s" % (n, k))
+
+    # The refusal window: how long callers were turned away before the key
+    # answered. This is the number that decides whether a bounded retry could
+    # replace the plaintext fallback, and until 2026-08-23 nobody had it.
+    windows = []
+    for d in iter_log(variant):
+        if d.get("event") != "encryption.key.answered_after_refusal":
+            continue
+        ts = d.get("ts", "")
+        if anchor and ts and ts < anchor:
+            continue
+        attrs = d.get("attrs") or {}
+        try:
+            windows.append((float(attrs.get("elapsed", 0)),
+                            int(attrs.get("refusals", 0)),
+                            attrs.get("key", "?"), ts))
+        except (TypeError, ValueError):
+            continue
+    print("\nrefusal windows (first refusal -> key answered):")
+    if not windows:
+        print("       none recorded in this window - either no caller was refused,")
+        print("       or the running binary predates 2026-08-23.")
+    else:
+        for secs, n, key, ts in windows:
+            print("%8.1fs  %-12s %d caller(s) refused   %s" % (secs, key, n, ts))
+        longest = max(w[0] for w in windows)
+        print("  longest: %.1fs - a bounded retry shorter than this cannot "
+              "remove every plaintext write." % longest)
+
     print("\n-- REPORT: counts only. 'no' means TriOS refused the read itself and")
     print("   securityd was never contacted, so Keychain Access has nothing to show.")
 
