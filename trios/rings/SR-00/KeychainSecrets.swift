@@ -331,7 +331,19 @@ enum KeychainSecrets {
                     [:]
                 )
             }
+            // Two clocks, because one of them was being read as the other.
+            //
+            // `elapsed` runs from DISPATCH, so it is queue wait plus query. The
+            // settled line reported it as though securityd had taken that long,
+            // and "settled after 294.4s with OSStatus 0" reads as a Keychain
+            // that thinks for five minutes. It is not. Measured 2026-08-23 with
+            // an external probe issuing the identical query - attributes only,
+            // match-all, UI skipped - 400 rounds DURING a trios launch: median
+            // 0.2ms, max 17ms. The Keychain was never slow. The wait was in this
+            // process, and no line separated the two numbers.
+            let queryStart = Date()
             status = SecItemCopyMatching(query as CFDictionary, &result)
+            let queryTime = Date().timeIntervalSince(queryStart)
             let elapsed = Date().timeIntervalSince(dispatchedAt)
             KeychainSecrets.readLock.lock()
             // Settled is settled, whatever the status: this dispatch is no
@@ -361,11 +373,15 @@ enum KeychainSecrets {
                     .security, "keychain.read.settled",
                     "\(service) / \(account) settled after "
                         + String(format: "%.1f", elapsed)
-                        + "s with OSStatus \(status), after its caller had given up",
+                        + "s from dispatch, of which the query itself took "
+                        + String(format: "%.3f", queryTime)
+                        + "s, with OSStatus \(status), after its caller had given up",
                     [
                         "service": service, "account": account,
                         "status": String(status),
                         "elapsed": String(format: "%.1f", elapsed),
+                        "query_time": String(format: "%.3f", queryTime),
+                        "slot_wait": String(format: "%.3f", elapsed - queryTime),
                     ]
                 )
             }
@@ -665,7 +681,9 @@ enum KeychainSecrets {
                     [:]
                 )
             }
+            let queryStart = Date()
             status = SecItemCopyMatching(query as CFDictionary, &result)
+            let queryTime = Date().timeIntervalSince(queryStart)
             let elapsed = Date().timeIntervalSince(dispatchedAt)
             KeychainSecrets.readLock.lock()
             if KeychainSecrets.readGeneration == generation {
@@ -684,11 +702,15 @@ enum KeychainSecrets {
                     .security, "keychain.read.settled",
                     "listing \(service) settled after "
                         + String(format: "%.1f", elapsed)
-                        + "s with OSStatus \(status), after its caller had given up",
+                        + "s from dispatch, of which the query itself took "
+                        + String(format: "%.3f", queryTime)
+                        + "s, with OSStatus \(status), after its caller had given up",
                     [
                         "service": service,
                         "status": String(status),
                         "elapsed": String(format: "%.1f", elapsed),
+                        "query_time": String(format: "%.3f", queryTime),
+                        "slot_wait": String(format: "%.3f", elapsed - queryTime),
                     ]
                 )
             }
