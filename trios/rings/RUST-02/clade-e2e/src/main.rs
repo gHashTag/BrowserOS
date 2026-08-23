@@ -252,6 +252,9 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
         sources: &[
             "tests/swift/queen_delegation_test.swift",
             "rings/SR-00/QueenDelegation.swift",
+            // normalizePath forwards to QueenBoundaryPaths, which owns the
+            // rule outright rather than keeping a second copy of it.
+            "rings/SR-00/QueenBoundaryPaths.swift",
             // DelegatedTask.failureKind is a QueenFailureKind, which lives
             // here. Without it the whole suite failed to COMPILE, and a suite
             // that does not compile is a suite that does not run.
@@ -508,6 +511,14 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
         label: "QueenEpics",
         bin: "/tmp/trios_queen_epics_test",
         sources: &["tests/swift/queen_epics_test.swift", "rings/SR-00/QueenEpics.swift"],
+    },
+    SwiftLogicSuite {
+        label: "QueenBoundaryPaths",
+        bin: "/tmp/trios_queen_boundary_paths_test",
+        sources: &[
+            "tests/swift/queen_boundary_paths_test.swift",
+            "rings/SR-00/QueenBoundaryPaths.swift",
+        ],
     },
     SwiftLogicSuite {
         label: "QueenLanguagePolicy",

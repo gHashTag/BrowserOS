@@ -137,28 +137,29 @@ enum QueenObserver {
         observedWrites: [String] = []
     ) -> [String] {
         guard !ownedPaths.isEmpty else { return [] }
-        let owned = ownedPaths.map(QueenDelegationPolicy.normalizePath)
-        var strays: Set<String> = []
-
-        func consider(_ path: String) {
-            let relative = stripRootPrefix(path)
-            let normalized = QueenDelegationPolicy.normalizePath(relative)
-            // A write is inside when its own boundary contains it, which is not
-            // symmetric: owning `docs/live` does not license writing `docs`.
-            // pathsOverlap answers the symmetric question the ownership rule
-            // asks, so the containment test stays spelled out here.
-            let inside = owned.contains { normalized == $0 || normalized.hasPrefix("\($0)/") }
-            if !inside { strays.insert(normalized) }
-        }
-
+        var writes: [String] = []
         for message in transcript.messages {
             for call in message.toolCalls where isWriteTool(call.name) {
                 guard let path = extractPath(from: call.arguments) else { continue }
-                consider(path)
+                writes.append(path)
             }
         }
-        observedWrites.forEach(consider)
-        return strays.sorted()
+        writes.append(contentsOf: observedWrites)
+        return strays(among: writes, ownedPaths: ownedPaths)
+    }
+
+    /// The containment rule, with no transcript to build.
+    ///
+    /// The rule itself lives in `QueenBoundaryPaths` so a suite can reach it
+    /// by linking one file. Building a transcript here means linking
+    /// `ChatMessage` and most of the app after it, which is why this code had
+    /// no test until the defect it hid was found by hand.
+    static func strays(
+        among writes: [String],
+        ownedPaths: [String],
+        root: String = ProjectPaths.root
+    ) -> [String] {
+        QueenBoundaryPaths.strays(among: writes, ownedPaths: ownedPaths, root: root)
     }
 
     static func isWriteTool(_ name: String) -> Bool {
@@ -180,15 +181,16 @@ enum QueenObserver {
     /// leaving those alone means a real boundary violation stays visible:
     /// stripping only the exact root prefix never shortens a path past
     /// where the worker actually wrote.
+    /// Reduces a path a worker named to something comparable with `ownedPaths`.
+    ///
+    /// The rule and the account of what it used to get wrong live in
+    /// `QueenBoundaryPaths`, which links against Foundation alone so a suite
+    /// can reach it.
     static func stripRootPrefix(
         _ path: String,
         root: String = ProjectPaths.root
     ) -> String {
-        guard !root.isEmpty else { return path }
-        let prefix = root.hasSuffix("/") ? root : root + "/"
-        return path.hasPrefix(prefix)
-            ? String(path.dropFirst(prefix.count))
-            : path
+        QueenBoundaryPaths.projectRelative(path, root: root)
     }
 
     /// Pulls a path out of a tool's JSON arguments without decoding a schema

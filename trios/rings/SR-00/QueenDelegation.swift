@@ -603,11 +603,12 @@ enum QueenDelegationPolicy {
     /// at that moment, which is ordinary backpressure and not a failure.
     static let queuedDispatchGrace: TimeInterval = 600
 
+    /// Forwards to `QueenBoundaryPaths.normalize`, which owns this rule.
+    ///
+    /// It was written out here as well, and a rule transcribed twice is two
+    /// rules that agree until someone edits one.
     static func normalizePath(_ path: String) -> String {
-        var value = path.trimmingCharacters(in: .whitespacesAndNewlines)
-        while value.hasPrefix("./") { value.removeFirst(2) }
-        while value.hasPrefix("/") { value.removeFirst() }
-        return value
+        QueenBoundaryPaths.normalize(path)
     }
 
     /// Tokens one bee may spend before the Queen is told it is expensive.
