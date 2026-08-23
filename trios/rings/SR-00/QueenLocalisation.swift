@@ -206,6 +206,7 @@ enum QueenLocalisation {
         let chars = Array(source)
         var i = 0
         var blockDepth = 0
+        var inString = false
 
         while i < chars.count {
             let c = chars[i]
@@ -224,6 +225,26 @@ enum QueenLocalisation {
                     output.append(c == "\n" ? c : " ")
                     i += 1
                 }
+            } else if inString {
+                // String content passes through verbatim: a `/*` or a `//`
+                // inside a literal is text, not a comment opener (#1173).
+                // A drill string quoting `queen/*` opened a phantom block
+                // comment that blanked every line after it, so the literal
+                // view went blind exactly where rule 2 needed to see —
+                // `queen.review.verdicts` at the emission site was invisible,
+                // and rule 1's corroboration scores all read zero.
+                if c == "\\", let escaped = next {
+                    output.append(c)
+                    output.append(escaped == "\n" ? "\n" : escaped)
+                    i += 2
+                } else if c == "\"" {
+                    inString = false
+                    output.append(c)
+                    i += 1
+                } else {
+                    output.append(c)
+                    i += 1
+                }
             } else if c == "/", next == "/" {
                 while i < chars.count, chars[i] != "\n" {
                     output.append(" ")
@@ -233,6 +254,10 @@ enum QueenLocalisation {
                 blockDepth = 1
                 output.append(" "); output.append(" ")
                 i += 2
+            } else if c == "\"" {
+                inString = true
+                output.append(c)
+                i += 1
             } else {
                 output.append(c)
                 i += 1
@@ -714,6 +739,35 @@ enum QueenLocalisation {
     /// With the name preference (rule 1) removed, the replay goes red on
     /// #1158 and #1117 — nothing else can find a function the issue names —
     /// and the live замер falls to 2/4. Proven from both sides 2026-08-19.
+    ///
+    /// **Repeated 2026-08-24** on the boundary file as it stands (13 467
+    /// lines), after two things had moved since the recording — one of them
+    /// a regression this repetition caught:
+    ///
+    /// - da4f3e308 (2026-08-20) added a drill string quoting `queen/*`.
+    ///   `maskComments` did not track string literals, so that `/*` opened a
+    ///   phantom block comment and the literal view went blank from the
+    ///   drill line to the end of the file. Rule 2 could no longer see
+    ///   `queen.review.verdicts` at its emission site (#1165 silent); rule
+    ///   1's corroboration scores all read zero, so #1158 fell to an
+    ///   all-zero tie → silence, and its rule-4 fallback anchored the one
+    ///   surviving call site inside `handleWorkerFinished` (6010-6309) —
+    ///   the caller, not the callee. Fixed here: `maskComments` passes
+    ///   string content through verbatim, because a `/*` or a `//` inside a
+    ///   literal is text, not a comment opener.
+    /// - The #1156 clue moved house: `queen.review.characterCount` was
+    ///   emitted inside `handleWorkerFinished` at recording (5093 then);
+    ///   the #1151/#1172 work moved it into `settleCharacterCountVerdicts`
+    ///   (12454 now), and rule 4 follows the clue to where it lives.
+    ///
+    /// The repeat, same replay, run twice, identical both times: #1158 ✓
+    /// 8276-8485 (rule 1; corroboration 2 vs 0), #1165-clue ✓ 7555-7854
+    /// (rule 2), #1166 ✓ 9869-10168 (rule 3), #1117 ✓ 7479-7778 — **3 of
+    /// 4**, at the floor. #1156 is the fourth, honestly red: 12433-12462
+    /// follows the moved clue; the expectation above stays
+    /// `handleWorkerFinished` and is not retargeted to manufacture a green.
+    /// Name-preference removal re-proven the same day from a mutant copy:
+    /// red on #1158 and #1117, silence both, the rest unchanged.
     static func measurementCases() -> [MeasurementCase] {
         [
             MeasurementCase(
