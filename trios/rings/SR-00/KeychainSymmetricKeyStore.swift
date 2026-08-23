@@ -10,11 +10,23 @@ enum KeychainSymmetricKeyStoreError: LocalizedError {
     case keychainDeleteFailed(OSStatus)
     /// The key exists but reading it would require showing a password prompt.
     case interactionRequired
+    /// TriOS's own launch gate refused the read. The Keychain was never asked
+    /// for the secret.
+    ///
+    /// This used to be a bare `nil` return, indistinguishable from "the item is
+    /// not there". The caller then checked `exists()` - which DOES ask the
+    /// Keychain, and answers yes - and concluded "stored but unreadable". So a
+    /// gate TriOS closed itself was reported as a completed Keychain read that
+    /// returned nothing. Measured 2026-08-23T07:06: 55 such reports in one
+    /// launch window, none of which reached securityd.
+    case launchGateClosed
 
     var errorDescription: String? {
         switch self {
         case .interactionRequired:
             return "The encryption key exists but the Keychain needs your permission to read it."
+        case .launchGateClosed:
+            return "TriOS's launch gate refused this key read; the Keychain was not asked."
         case .invalidKeyLength(let length):
             return "Invalid symmetric key length: \(length) bytes (expected 32)"
         case .keychainReadFailed(let status):
@@ -85,8 +97,13 @@ enum KeychainSymmetricKeyStore {
             }
             return SymmetricKey(data: data)
         }
+        // Returning nil here made a closed gate look like a missing item, and
+        // the caller's next step - exists() - DOES reach the Keychain and says
+        // the item is there. Two facts from two different sources became one
+        // false sentence: "stored but unreadable". Throw instead, so the reason
+        // travels with the refusal.
         if KeychainSecrets.isLaunching {
-            return nil
+            throw KeychainSymmetricKeyStoreError.launchGateClosed
         }
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

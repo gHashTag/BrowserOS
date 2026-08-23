@@ -249,10 +249,28 @@ def cmd_refusals(variant):
                             attrs.get("key", "?"), ts))
         except (TypeError, ValueError):
             continue
+    total_refusals = sum(sum(c.values()) for c in per_event.values())
     print("\nrefusal windows (first refusal -> key answered):")
     if not windows:
-        print("       none recorded in this window - either no caller was refused,")
-        print("       or the running binary predates 2026-08-23.")
+        # "none recorded" used to be printed for two opposite situations, and
+        # the reassuring reading was the wrong one. A window is only logged
+        # when it CLOSES, so a key that never answers at all - the worst case -
+        # produced the same silence as a key that was never asked. Measured
+        # 2026-08-23T07:06: 221 refusals in one window, 55 of them completed
+        # reads answering "stored but unreadable", and zero closed windows.
+        if total_refusals:
+            print("       NONE CLOSED, but %d refusal(s) were recorded above." % total_refusals)
+            print("       A window is logged only when the key finally answers, so this")
+            print("       means no refused key has answered yet in this window - the")
+            print("       window is still OPEN. That is the bad case, not the quiet one.")
+            if per_event["conversation.persist.decrypt_deferred"].get("stored_but_unreadable"):
+                n = per_event["conversation.persist.decrypt_deferred"]["stored_but_unreadable"]
+                print("       %d of them are 'stored_but_unreadable': the Keychain was asked,"
+                      % n)
+                print("       the read COMPLETED, and it returned nothing. That is not slowness.")
+        else:
+            print("       none - no caller was refused in this window, or the running")
+            print("       binary predates 2026-08-23.")
     else:
         for secs, n, key, ts in windows:
             print("%8.1fs  %-12s %d caller(s) refused   %s" % (secs, key, n, ts))

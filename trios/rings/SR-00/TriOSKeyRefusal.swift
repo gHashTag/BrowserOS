@@ -36,13 +36,21 @@ enum TriOSKeyRefusal: Equatable, Sendable {
     /// A key item exists, but a non-interactive read returned nothing. Minting
     /// a replacement here would orphan every existing encrypted record.
     case storedButUnreadable
+    /// TriOS's own launch gate refused the read before the Keychain was asked.
+    ///
+    /// Added 2026-08-23 after this case spent a day disguised as
+    /// `storedButUnreadable`. The gate returned a bare nil, the caller then
+    /// asked `exists()` - which DOES reach the Keychain - and reported a
+    /// completed read that returned nothing. 55 such lines in one launch
+    /// window, none of which touched securityd.
+    case launchGateClosed
 
     /// True only when the Keychain itself was consulted. Two of these refusals
     /// never reach it, and a caller that reports "the Keychain refused" for
     /// them is naming a subsystem it did not call.
     var keychainWasAsked: Bool {
         switch self {
-        case .readAlreadyInFlight, .cooldownArmed:
+        case .readAlreadyInFlight, .cooldownArmed, .launchGateClosed:
             return false
         case .readTimedOut, .interactionRequired, .storedButUnreadable:
             return true
@@ -58,6 +66,7 @@ enum TriOSKeyRefusal: Equatable, Sendable {
         case .readTimedOut: return "read_timed_out"
         case .interactionRequired: return "interaction_required"
         case .storedButUnreadable: return "stored_but_unreadable"
+        case .launchGateClosed: return "launch_gate_closed"
         }
     }
 
@@ -85,6 +94,9 @@ enum TriOSKeyRefusal: Equatable, Sendable {
             return "an encryption key is stored but a non-interactive read "
                 + "returned nothing; TriOS will not mint a replacement, which "
                 + "would orphan every existing encrypted record"
+        case .launchGateClosed:
+            return "TriOS's launch gate is still closed, so the read was "
+                + "refused before it was made; the Keychain was not asked"
         }
     }
 }

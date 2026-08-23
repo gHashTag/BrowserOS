@@ -56,6 +56,7 @@ enum KeyRefusalTests {
         .readTimedOut(afterSeconds: 2.0),
         .interactionRequired,
         .storedButUnreadable,
+        .launchGateClosed,
     ]
 
     /// The guard this file exists for.
@@ -110,6 +111,13 @@ enum KeyRefusalTests {
         check(
             TriOSKeyRefusal.storedButUnreadable.keychainWasAsked,
             "storedButUnreadable read the item's attributes"
+        )
+        // The fifth case, added 2026-08-23. It spent a day disguised as
+        // storedButUnreadable, which claims the opposite of the truth: that
+        // the Keychain answered. It never heard the question.
+        check(
+            TriOSKeyRefusal.launchGateClosed.keychainWasAsked == false,
+            "launchGateClosed refused before the Keychain was asked"
         )
 
         for refusal in all where !refusal.keychainWasAsked {

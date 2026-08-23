@@ -299,6 +299,13 @@ final class TriOSEncryption {
                 ) {
                     return key
                 }
+            } catch KeychainSymmetricKeyStoreError.launchGateClosed {
+                // Stops here rather than falling through to exists(). Falling
+                // through is what produced "stored but unreadable" for a read
+                // that never happened: exists() asks the Keychain, this read
+                // did not, and the two answers were combined into one sentence
+                // that named the wrong refuser.
+                throw TriOSEncryptionError.keyUnavailable(.launchGateClosed)
             } catch KeychainSymmetricKeyStoreError.interactionRequired {
                 // The key is there, we simply may not read it right now.
                 // Falling through would mint a replacement and permanently
