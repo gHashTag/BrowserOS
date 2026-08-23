@@ -20,6 +20,26 @@ import Foundation
 /// after the autonomy preference, the worktree committer, and the skill match.
 /// The shape is always the same - a mechanism built, a rule to invoke it never
 /// written - and the symptom is always a queue that only a human drains.
+///
+/// Then a criterion arrived that no bee could ever satisfy (#1286). A negative
+/// test states, in the affirmative, the failure it exists to guard against -
+/// "the check breaks if you remove the marker parsing: the marked criterion is
+/// read as ordinary again and the task gets stuck again" - and against the
+/// delivered work that sentence is false *by design*, because the work exists
+/// to make the stuck state absent. An adversarial reviewer reads the sentence
+/// literally, finds the state it describes missing from the tree, and answers
+/// `unmet` - honestly, every time, forever. The bee is returned a criterion it
+/// cannot fix without undoing the feature, twice, and the task escalates to a
+/// person who has nothing to decide: the criterion did exactly its job, and
+/// only its reading was wrong. That is a negative test parking itself in the
+/// review queue forever, boundary held, waiting for a human to say what the
+/// contract already said.
+///
+/// A criterion carrying `negativeCriterionMarker` declares itself заведомо
+/// невыполнимый - knowingly unfulfillable - and this file is where that marker
+/// is parsed and honoured. It has to be here: verdicts arrive already judged,
+/// and the decision is the one place left that can know a verdict was meant
+/// upside down.
 enum QueenReviewDecision {
     enum Decision: Equatable {
         /// Every criterion met and there is a diff to show for it.
@@ -40,6 +60,38 @@ enum QueenReviewDecision {
     /// telling you about the criteria, not about itself.
     static let maximumSendBacks = 2
 
+    /// The marker that declares a criterion заведомо невыполнимый: a negative
+    /// test, judged the other way round.
+    ///
+    /// Written as a bracketed prefix on the criterion line, in the issue's own
+    /// words:
+    ///
+    ///     ## Acceptance criteria
+    ///     - [заведомо невыполнимый] the check breaks if the marker parsing is
+    ///       removed: the task gets stuck again
+    ///
+    /// It is parsed here and nowhere else, and it is never stripped. The
+    /// criterion keeps it verbatim from the issue text through the brief, the
+    /// reviewer's verdict request, the verdict table and this decision, so the
+    /// marking stays visible everywhere the parsed contract is quoted - and
+    /// stripping it would fork the criterion's identity, because verdicts are
+    /// keyed by the exact string. Case-insensitive, since the phrase is prose
+    /// and the issue may capitalise it.
+    static let negativeCriterionMarker = "[заведомо невыполнимый]"
+
+    /// Whether a criterion carries the negative marker (#1286).
+    ///
+    /// Prefix only, after trimming whitespace: a criterion that merely
+    /// *mentions* the phrase mid-sentence is ordinary prose about negativity,
+    /// not a declaration of it, and flipping such a criterion's verdict by
+    /// accident is exactly the silent inversion this marker exists to make
+    /// explicit.
+    static func isNegativeCriterion(_ criterion: String) -> Bool {
+        criterion.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .hasPrefix(negativeCriterionMarker)
+    }
+
     /// The decision, from the verdicts and nothing else.
     ///
     /// `committedFiles` matters independently of the verdicts because "every
@@ -47,6 +99,20 @@ enum QueenReviewDecision {
     /// reviewer had nothing in front of it and answered anyway. Accepting that
     /// would let a bee that did nothing be indistinguishable from one that
     /// succeeded, which is the failure this whole review path exists to catch.
+    ///
+    /// A criterion marked заведомо невыполнимый resolves the other way round
+    /// (#1286): the decision counts it fulfilled exactly when the reviewer
+    /// found it unmet - the honest, expected answer for a sentence describing
+    /// a state the delivered work exists to keep absent - and counts it
+    /// unfulfilled when the reviewer suddenly finds it met. A negative
+    /// criterion that comes back met means the guarded state showed up in the
+    /// work: the tested behaviour disappeared, and the negative check must
+    /// break loudly (a send-back naming it) rather than pass vacuously. Remove
+    /// this marker parsing and the marked criterion reads as ordinary again,
+    /// its perpetual `unmet` returns the task until the returns run out, and
+    /// the parking defect is back - which is criterion 4 of #1286, stated here
+    /// so the parsing cannot be deleted as decoration without the reason
+    /// going with it.
     static func decide(
         verdicts: [(criterion: String, met: Bool)],
         totalCriteria: Int,
@@ -65,7 +131,14 @@ enum QueenReviewDecision {
             )
         }
 
-        let unmet = verdicts.filter { !$0.met }.map(\.criterion)
+        let unmet = verdicts
+            .filter { verdict in
+                // #1286: a marked criterion is unfulfilled exactly when the
+                // reviewer found it met, and fulfilled when it was not. Every
+                // ordinary criterion is unchanged.
+                isNegativeCriterion(verdict.criterion) ? verdict.met : !verdict.met
+            }
+            .map(\.criterion)
         if unmet.isEmpty {
             guard (committedFiles ?? 0) > 0 else {
                 return .escalate(
@@ -92,6 +165,13 @@ enum QueenReviewDecision {
     /// The unmet criteria verbatim, because "it did not pass" is the one thing
     /// a worker cannot act on. The criteria are the contract it agreed to; the
     /// list of the ones it missed is the whole message.
+    ///
+    /// A marked criterion lands in that list only in the upside-down case - the
+    /// reviewer found it met (#1286). Quoted bare, it would tell the bee its
+    /// negative test failed when the reviewer said the opposite, so each marked
+    /// entry carries the one sentence that makes it readable: met is the wrong
+    /// answer for a заведомо невыполнимый criterion, and the thing to look at
+    /// is what changed under it, not more code.
     static func sendBackNote(unmet: [String], attempt: Int) -> String {
         var lines = [
             "Returning this for a \(ordinal(attempt)) pass. "
@@ -99,6 +179,15 @@ enum QueenReviewDecision {
         ]
         for (index, criterion) in unmet.enumerated() {
             lines.append("  \(index + 1). \(criterion)")
+            if isNegativeCriterion(criterion) {
+                lines.append(
+                    "     judged met - which is the wrong answer for a criterion marked "
+                        + "\(negativeCriterionMarker): the state it describes is the one "
+                        + "this work exists to prevent. A negative criterion that comes "
+                        + "back met means the guard no longer holds. Find what changed "
+                        + "under it; writing more code against it is not the fix."
+                )
+            }
         }
         lines.append(
             "Address these specifically. If one of them is wrong or impossible as "
