@@ -10595,38 +10595,52 @@ final class ChatViewModel: ObservableObject {
     /// tree? Returns evidence text when it does, nil when it does not (#1180).
     /// The cheapest honest signal: every file named in its boundary exists on
     /// disk, and the acceptance criteria name symbols that are present in them.
-    /// Whether any boundary file has a commit newer than the issue.
+    /// The boundary files' combined contents at the commit that was HEAD
+    /// when the issue was written, or nil when git cannot say.
     ///
-    /// One `git log` per path, asked only when the identifier check has
-    /// already passed - so the common case never pays for it. A path git
-    /// cannot answer for counts as changed: refusing to dismiss work on a
-    /// failed measurement is the safe direction, because a false "already
-    /// done" loses the work entirely while a false "not done" costs one turn
-    /// in which the bee says it is done.
-    private static func boundaryChanged(paths: [String], since isoDate: String) -> Bool {
+    /// nil is the honest answer for a file that did not exist yet or a
+    /// revision that will not resolve, and the policy turns nil into "this is
+    /// not evidence" - so an unmeasured question cannot dismiss work.
+    private static func boundaryContents(paths: [String], asOf isoDate: String) -> String? {
+        guard let rev = commitAsOf(isoDate) else { return nil }
+        var contents = ""
         for path in paths {
-            let task = Process()
-            task.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            task.arguments = [
-                "-C", ProjectPaths.root,
-                "log", "--since=\(isoDate)", "--oneline", "--", path
-            ]
-            let pipe = Pipe()
-            task.standardOutput = pipe
-            task.standardError = Pipe()
-            do {
-                try task.run()
-            } catch {
-                return true
-            }
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            task.waitUntilExit()
-            let output = (String(data: data, encoding: .utf8) ?? "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            if !output.isEmpty { return true }
+            guard let text = gitShow(rev: rev, path: path) else { return nil }
+            contents += "\n" + text
         }
-        return false
+        return contents
     }
+
+    private static func commitAsOf(_ isoDate: String) -> String? {
+        let out = runGit(["rev-list", "-1", "--before=\(isoDate)", "HEAD"])
+        let trimmed = (out ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// One file's contents at one commit, or nil when git cannot say.
+    private static func gitShow(rev: String, path: String) -> String? {
+        runGit(["show", "\(rev):\(path)"])
+    }
+
+    /// Runs git in the project root and returns stdout, or nil on failure.
+    private static func runGit(_ arguments: [String]) -> String? {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        task.arguments = ["-C", ProjectPaths.root] + arguments
+        let pipe = Pipe()
+        task.standardOutput = pipe
+        task.standardError = Pipe()
+        do {
+            try task.run()
+        } catch {
+            return nil
+        }
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+        guard task.terminationStatus == 0 else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
 
     private static func looksAlreadyDone(
         body: String,
@@ -10673,11 +10687,21 @@ final class ChatViewModel: ObservableObject {
         // 2026-08-23: eight of seventeen candidates were skipped this way,
         // including two issues filed that same hour.
         //
-        // The question git can answer: has any boundary file changed since
-        // the issue was written? If none has, nothing done since then can be
-        // in them, whatever names they contain.
+        // The question git can answer: were these names ALREADY there when
+        // the issue was written? If they were, their presence now says
+        // nothing about the issue - it says the defect had a name.
+        //
+        // The first version of this gate asked only whether the boundary had
+        // changed at all since the issue was filed, which is weaker: #1169
+        // passed it because its file changed for unrelated reasons while the
+        // criterion it was missing stayed missing. Asking about the
+        // identifiers themselves, at the commit that was HEAD when the issue
+        // was written, is the measurement that matches the claim.
         if !issueCreatedAt.isEmpty,
-           !boundaryChanged(paths: paths, since: issueCreatedAt) {
+           !QueenEvidencePolicy.presenceIsEvidence(
+               symbols: symbols,
+               contentsWhenFiled: boundaryContents(paths: paths, asOf: issueCreatedAt)
+           ) {
             return nil
         }
 

@@ -488,6 +488,14 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
         ],
     },
     SwiftLogicSuite {
+        label: "QueenEvidencePolicy",
+        bin: "/tmp/trios_queen_evidence_policy_test",
+        sources: &[
+            "tests/swift/queen_evidence_policy_test.swift",
+            "rings/SR-00/QueenEvidencePolicy.swift",
+        ],
+    },
+    SwiftLogicSuite {
         label: "QueenEpics",
         bin: "/tmp/trios_queen_epics_test",
         sources: &["tests/swift/queen_epics_test.swift", "rings/SR-00/QueenEpics.swift"],
