@@ -61,6 +61,11 @@ RELEASE_BIN := $(RELEASE_APP)/Contents/MacOS/trios
 # lock behind; the next run reads the PID, checks whether the owner is
 # still alive, and reclaims a dead owner's lock with a word about it.
 HARNESS_LOCK := /tmp/trios_harness.lock
+# How long `cassettes` waits for a lock another run holds before giving up.
+# Long enough for a full cassette suite (four replays, each with a 600s
+# backstop) to finish ahead of it, short enough that a wedged owner is not
+# waited on all afternoon.
+HARNESS_LOCK_WAIT := 1800
 
 .DEFAULT_GOAL := dev
 .PHONY: help dev release build keychain-doors make-dollars empty-sources watch-empties check test cassettes e2e shake run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard finish-mark-order guard-shapes parse-tests vendor-step warnings warning-gate
@@ -830,7 +835,7 @@ MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP DEV_BIN RELEASE_BIN DEV_PROC \
 	CASSETTE_BRANCHES SWEEP_CANARY LOG KEYCHAIN_ALLOW_PATTERNS MAKE VARIANT \
 	LOG_VARIANT \
 	MSG ISSUE WORKER TASK PATHS CRITERIA SECOND REVIEW AUTONOMY CASSETTE \
-	SECOND_TURN QUEEN_COMMAND MUTANTS MUTANTS_LOGIC MUTANTS_GUARD MAKE_DOLLAR_VARS HARNESS_LOCK GUARDS \
+	SECOND_TURN QUEEN_COMMAND MUTANTS MUTANTS_LOGIC MUTANTS_GUARD MAKE_DOLLAR_VARS HARNESS_LOCK HARNESS_LOCK_WAIT GUARDS \
 	TYPE_STATE VARIANT_FENCE_SRC VARIANT_FENCE_DIR \
 	VENDOR_SRC VENDOR_BEGIN VENDOR_END VENDOR_ANCHOR VENDOR_HALVES \
 	SOURCES_MANIFEST SOURCES_APP_ONLY SOURCES_TEST_ONLY \
@@ -1604,6 +1609,43 @@ test-app:
 	@echo "[OK] harness bundle built: $(TEST_APP)"
 
 cassettes: test-app
+	@: "Serialised against every other harness run in this checkout."; \
+	: "Several agents share this tree and each runs `make check`. Two"; \
+	: "cassette runs drive the SAME trios-test.app and each ends every"; \
+	: "cassette with pkill on that bundle path, so they terminate each"; \
+	: "other's replay. Measured 2026-08-23: a run died with"; \
+	: "'make: *** [cassettes] Terminated: 15' while a second run was 40"; \
+	: "seconds into its own cassettes step. Nothing was broken; the two"; \
+	: "runs were killing each other, and the signal reads like a crash."; \
+	: "Waits rather than refusing. Both runs are legitimate and neither"; \
+	: "agent knows about the other, so failing the second one turns a"; \
+	: "scheduling collision into a red gate somebody has to investigate."; \
+	waited=0; \
+	while :; do \
+		owner_pid=$$(cat "$(HARNESS_LOCK)/pid" 2>/dev/null || true); \
+		if mkdir "$(HARNESS_LOCK)" 2>/dev/null; then break; fi; \
+		if [ -n "$$owner_pid" ] && ! kill -0 $$owner_pid 2>/dev/null; then \
+			echo "[INFO] reclaiming harness lock from dead PID $$owner_pid"; \
+			rm -rf "$(HARNESS_LOCK)"; continue; \
+		fi; \
+		if [ $$waited -ge $(HARNESS_LOCK_WAIT) ]; then \
+			echo "[FAIL] another harness run has held $(HARNESS_LOCK) for $(HARNESS_LOCK_WAIT)s"; \
+			echo "       (owner PID $$owner_pid). Not waiting further."; \
+			exit 1; \
+		fi; \
+		if [ $$waited = 0 ]; then \
+			echo "[cassettes] another harness run holds the lock (PID $$owner_pid); waiting"; \
+		fi; \
+		sleep 5; waited=$$((waited + 5)); \
+	done; \
+	: "PPID, not $$$$. Every line of a make recipe is its own shell, so"; \
+	: "this shell's PID is dead a moment after it is written and the next"; \
+	: "run would reclaim the lock as abandoned while the target still"; \
+	: "holds it. PPID is make itself, which lives for the whole target -"; \
+	: "so a run killed mid-cassette still leaves a PID that is genuinely"; \
+	: "dead, and the reclaim above is honest rather than a formality."; \
+	echo $$PPID > "$(HARNESS_LOCK)/pid"; \
+	[ $$waited -gt 0 ] && echo "[cassettes] acquired the harness lock after $${waited}s" || true
 	@pkill -f "$(TEST_PROC_HERE)" 2>/dev/null || true
 	@sleep 2
 	@: "A branch that looks like a delegation's real work, planted so the sweep \
@@ -1736,6 +1778,11 @@ cassettes: test-app
 		esac; \
 	done; \
 	if [ $$present -eq 0 ]; then echo "  FAIL - no cassettes found in $(CASSETTE_DIR)"; fail=1; fi; \
+	: "Released here whether the suite passed or failed - the lock guards"; \
+	: "the harness, not the verdict. A run killed before this line leaves"; \
+	: "the directory behind with make's PID in it, and the next run"; \
+	: "reclaims it after finding that PID dead."; \
+	rm -rf "$(HARNESS_LOCK)" 2>/dev/null || true; \
 	if [ $$fail -eq 0 ]; then echo "[OK] cassette suite passed ($$present cassettes)"; else echo "[FAIL] cassette suite"; exit 1; fi
 
 # --- Running ------------------------------------------------------------
