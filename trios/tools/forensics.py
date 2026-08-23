@@ -61,6 +61,8 @@ SIGNALS = [
     "keychain.queue.starved",
     "encryption.key.answered_after_refusal",
     "keychain.read.not_restacked",
+    "keychain.enumeration.not_restacked",
+    "keychain.read.starved_out",
 ]
 
 

@@ -49,7 +49,12 @@ enum KeychainSecrets {
     /// individually; they queued behind one block and returned together. The
     /// cooldown's own comment says it stops callers piling up. It does not: it
     /// paces the pile-up to one every sixty seconds.
-    private static var outstandingReads: [String: [Date]] = [:]
+    /// Internal, not private, so a suite compiled into this module can seed a
+    /// dispatch of a chosen age and drive the refusal on demand. The branch it
+    /// guards has fired zero times in five real launches - it needs securityd to
+    /// be slow that minute - so without a seam the wiring could only ever be
+    /// described as "not disproven".
+    static var outstandingReads: [String: [Date]] = [:]
 
     /// How long an unsettled read is still considered worth waiting for. Past
     /// this it is treated as abandoned and a fresh dispatch is allowed, which
@@ -72,6 +77,19 @@ enum KeychainSecrets {
     /// sendable closure never sees change. All access under `readLock`.
     private final class GaveUpFlag: @unchecked Sendable {
         var raised = false
+    }
+
+    /// How long the dispatched block waited for a GCD slot before it could
+    /// start, or nil if it has not started yet.
+    ///
+    /// The caller's deadline is two seconds. Measured across 59 starvation
+    /// events on 2026-08-23: median 0.41s, max 7.05s, and five waits longer
+    /// than the whole deadline. For those five the caller had already given up
+    /// before SecItemCopyMatching was reached - so "did not answer in 2s"
+    /// blamed the Keychain for a queue this process saturated, and armed a
+    /// sixty-second cooldown over a call that never happened.
+    private final class SlotWait: @unchecked Sendable {
+        var seconds: Double?
     }
 
     /// Values from stalled calls that settled successfully AFTER their caller
@@ -129,7 +147,7 @@ enum KeychainSecrets {
     /// written, no read stayed unsettled long enough to trigger it, so the
     /// running binary carried an unexercised branch. This wrapper does the
     /// dictionary bookkeeping the decision cannot see.
-    private static func stackingDecisionLocked(_ key: String) -> KeychainReadStacking.Decision {
+    static func stackingDecisionLocked(_ key: String) -> KeychainReadStacking.Decision {
         let oldest = outstandingReads[key]?.min()
         let decision = KeychainReadStacking.decide(
             oldestOutstanding: oldest,
@@ -144,13 +162,13 @@ enum KeychainSecrets {
     }
 
     /// Records a dispatch. Call with `readLock` HELD.
-    private static func noteDispatchLocked(_ key: String, at when: Date) {
+    static func noteDispatchLocked(_ key: String, at when: Date) {
         outstandingReads[key, default: []].append(when)
     }
 
     /// Records that a dispatch settled, however it settled. Call with
     /// `readLock` HELD.
-    private static func noteSettledLocked(_ key: String, at when: Date) {
+    static func noteSettledLocked(_ key: String, at when: Date) {
         guard var dates = outstandingReads[key] else { return }
         if let idx = dates.firstIndex(of: when) { dates.remove(at: idx) }
         outstandingReads[key] = dates.isEmpty ? nil : dates
@@ -298,8 +316,12 @@ enum KeychainSecrets {
         // queue looks exactly like a slow Keychain from the caller's side, and
         // the same query from an idle process returns in milliseconds.
         let dispatchedAt = Date()
+        let slotWait = SlotWait()
         DispatchQueue.global(qos: .utility).async {
             let waited = Date().timeIntervalSince(dispatchedAt)
+            KeychainSecrets.readLock.lock()
+            slotWait.seconds = waited
+            KeychainSecrets.readLock.unlock()
             if waited > 0.2 {
                 TriosLogBus.shared.warn(
                     .security, "keychain.queue.starved",
@@ -385,7 +407,17 @@ enum KeychainSecrets {
         // generation check keeps the orphan's own late clear from releasing
         // a slot a newer reader holds.
         readLock.lock()
-        readUnavailableUntil["\(service)/\(account)"] = Date().addingTimeInterval(60)
+        // A call that never reached securityd is not a Keychain stall, and must
+        // not arm a cooldown as if it were. If the block spent the whole
+        // deadline waiting for a GCD slot, this process starved its own read.
+        // Measured 2026-08-23: five of 59 slot waits exceeded the two-second
+        // deadline, the longest at 7.05s. Each of those armed sixty seconds of
+        // refusals over a query that had not been made.
+        let waitedForSlot = slotWait.seconds
+        let starvedOut = (waitedForSlot ?? 0) >= deadline
+        if !starvedOut {
+            readUnavailableUntil["\(service)/\(account)"] = Date().addingTimeInterval(60)
+        }
         // Generation-guarded for the same reason as the block's clear: if the
         // orphan settled in the gap after our wait timed out, a newer reader
         // may already hold the slot this path would otherwise release.
@@ -394,6 +426,21 @@ enum KeychainSecrets {
         }
         callerGaveUp.raised = true
         readLock.unlock()
+        if starvedOut, let waited = waitedForSlot {
+            TriosLogBus.shared.warn(
+                .security,
+                "keychain.read.starved_out",
+                "\(service) / \(account) gave up after "
+                    + String(format: "%.0f", deadline)
+                    + "s, but its block waited " + String(format: "%.2f", waited)
+                    + "s for a queue slot - the Keychain was never asked, so no "
+                    + "cooldown is armed",
+                ["service": service, "account": account,
+                 "slot_wait": String(format: "%.2f", waited),
+                 "deadline": String(format: "%.0f", deadline)]
+            )
+            throw KeychainSecretsError.itemNotFound(service: service, account: account)
+        }
         // Name the read that stalled, with the numbers this call measured:
         // the message used to hardcode "2s" while callers pass their own
         // deadline (8s in ModelConfigurationStore), and claimed "every
@@ -544,10 +591,35 @@ enum KeychainSecrets {
                 return []
             }
         }
+        // The enumeration path carries the same defect the read path did, and
+        // the same window proves it: on 2026-08-23T07:10 four listings of
+        // com.browseros.trios.model-keys stalled at +68.3s, +137.2s, +206.2s
+        // and +274.9s - spacing 68.9 / 69.0 / 68.7, the cooldown plus overhead,
+        // interleaved with five reads of the SAME service on the same cadence.
+        // Reads and listings were one pile-up, and guarding only the reads
+        // would have left half of it dispatching.
+        let listStacking = stackingDecisionLocked("list/\(service)")
+        if case let .refuseOutstanding(age) = listStacking {
+            readLock.unlock()
+            lastEnumerationOutcome = "refused: a listing of this service dispatched "
+                + String(format: "%.1f", age)
+                + "s ago has not settled; not dispatching a second one"
+            TriosLogBus.shared.info(
+                .security, "keychain.enumeration.not_restacked",
+                "listing \(service) already has a call that has not settled after "
+                    + String(format: "%.1f", age)
+                    + "s; refusing rather than dispatching a second one into the "
+                    + "same queue",
+                ["service": service, "outstanding_age": String(format: "%.1f", age)]
+            )
+            return []
+        }
         readInFlight = true
         readGeneration += 1
         readHolderDeadline = deadline
         let generation = readGeneration
+        let listDispatchStamp = Date()
+        noteDispatchLocked("list/\(service)", at: listDispatchStamp)
         readLock.unlock()
 
         // Attributes only, and never a dialog.
@@ -597,6 +669,7 @@ enum KeychainSecrets {
             if KeychainSecrets.readGeneration == generation {
                 KeychainSecrets.readInFlight = false
             }
+            KeychainSecrets.noteSettledLocked("list/\(service)", at: listDispatchStamp)
             let orphaned = callerGaveUp.raised
             if orphaned, status == errSecSuccess,
                let items = result as? [[String: Any]] {

@@ -313,6 +313,20 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
         ],
     },
     SwiftLogicSuite {
+        label: "KeychainRestackWiring",
+        bin: "/tmp/trios_keychain_restack_wiring_test",
+        sources: &[
+            "tests/swift/keychain_restack_wiring_test.swift",
+            "rings/SR-00/KeychainReadStacking.swift",
+            "rings/SR-00/KeychainSecrets.swift",
+            "rings/SR-00/DevSecretStore.swift",
+            "BR-OUTPUT/ProjectPaths.swift",
+            "rings/SR-00/BuildVariantPolicy.swift",
+            "rings/SR-01/TriosLogBus.swift",
+            "rings/SR-01/TriosOTLPExporter.swift",
+        ],
+    },
+    SwiftLogicSuite {
         label: "KeychainReadStacking",
         bin: "/tmp/trios_keychain_read_stacking_test",
         sources: &[
