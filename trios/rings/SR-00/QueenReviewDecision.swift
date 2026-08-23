@@ -108,6 +108,51 @@ enum QueenReviewDecision {
         return deliberatelyUnfulfillableStems.contains { line.hasPrefix($0) }
     }
 
+    /// How a criterion counts, once the reviewer's verdict is in (#1286).
+    ///
+    /// THE definition of the inversion, and the only one: a criterion marked
+    /// заведомо невыполнимый counts as met exactly when the reviewer found it
+    /// unmet - the honest answer for a sentence describing a state the
+    /// delivered work exists to keep absent - and as unmet when the reviewer
+    /// suddenly found it met, which means the guarded state showed up in the
+    /// work and the negative check must break rather than pass vacuously. An
+    /// ordinary criterion counts exactly as the reviewer found it.
+    ///
+    /// Every consumer must call this rather than transcribe the ternary: one
+    /// rule written twice is two rules that agree until someone edits one.
+    /// `unmetCriteria` below consumes it, and the two consumers outside this
+    /// file are each one line against it -
+    ///
+    ///     // QueenAcceptancePolicy.verdicts (rings/SR-00/QueenCriterionVerdict.swift):
+    ///     countsAsMet(criterion: criterion, reviewerFoundMet: recorded == .met)
+    ///         ? .met : .unmet
+    ///
+    ///     // the verdict table ChatViewModel.actOnCompletedReview builds from
+    ///     // task.criterionVerdicts (rings/SR-02/ChatViewModel.swift):
+    ///     (criterion, countsAsMet(criterion: criterion, reviewerFoundMet: verdict == .met))
+    ///
+    /// Nothing outside this file calls it yet. As of this writing the
+    /// acceptance gate - `QueenAcceptancePolicy.verdicts`, reached from
+    /// `autoAcceptIfUnambiguous` and every `/accept` path - still reads a
+    /// marked criterion's honest `.unmet` as blocking, so a negative-control
+    /// task whose marked criterion resolved exactly as designed is refused
+    /// auto-accept and parks in `awaitingReview` holding its boundary: the
+    /// very defect #1286 was filed over, surviving one file down. That wiring
+    /// is this issue's remaining half and it lives beyond this file's
+    /// boundary; do not read this file alone and conclude the pipeline
+    /// honours the marker.
+    ///
+    /// Deliberately self-contained on `String`/`Bool` only: the golden chain
+    /// (`make chain`) compiles this file beside `QueenRetryPolicy.swift` and
+    /// nothing else, so a reference to `QueenCriterionVerdict` here would
+    /// break the twin's build. The Bool shape is what both consumers need.
+    static func countsAsMet(
+        criterion: String,
+        reviewerFoundMet: Bool
+    ) -> Bool {
+        isDeliberatelyUnfulfillable(criterion) ? !reviewerFoundMet : reviewerFoundMet
+    }
+
     /// The decision, from the verdicts and nothing else.
     ///
     /// `committedFiles` matters independently of the verdicts because "every
@@ -178,11 +223,13 @@ enum QueenReviewDecision {
     /// result, so a decision that demanded the criterion be met would demand
     /// the probe be disarmed, and #1153 measured what that does - two returns
     /// over the criterion the issue had ordered to stay unmet, then an
-    /// escalation, then hours of held boundary.
+    /// escalation, then hours of held boundary. `countsAsMet` above is the
+    /// definition this consumes; there is no second copy of the rule here.
     ///
     /// This honouring is load-bearing, not decorative (#1286 criterion 4).
-    /// Remove it - let `isDeliberatelyUnfulfillable` answer false, or delete
-    /// the branch that consults it - and a marked criterion reads as ordinary
+    /// Remove it - let `isDeliberatelyUnfulfillable` answer false, neuter
+    /// `countsAsMet` to return the reviewer's answer unchanged, or delete the
+    /// branch that consults it - and a marked criterion reads as ordinary
     /// again: its perpetual honest `unmet` lands in this list, the task is
     /// returned over a criterion no bee may satisfy, the returns run out, and
     /// the task parks in `awaitingReview` holding its files until a person
@@ -194,9 +241,7 @@ enum QueenReviewDecision {
     ) -> [String] {
         verdicts
             .filter { verdict in
-                isDeliberatelyUnfulfillable(verdict.criterion)
-                    ? verdict.met
-                    : !verdict.met
+                !countsAsMet(criterion: verdict.criterion, reviewerFoundMet: verdict.met)
             }
             .map(\.criterion)
     }
