@@ -228,3 +228,54 @@ asked for. Absence of signal read as absence of defect. It now prints
 `NONE CLOSED` beside the refusal count and names the open window as the bad
 case. **Any report that can print the same line for a healthy and a broken
 system is not a report.**
+
+## Sixth sweep (2026-08-23): the guard's own comment was the unmeasured cause
+
+`KeychainSecrets` arms a 60-second cooldown after a read times out, and says why:
+
+> The flag exists to stop callers piling up, not to latch.
+
+Measured against the release log at `2026-08-23T07:10`: it does not stop the
+pile-up. It paces it.
+
+```
++  5.0s  keychain.launch_gate.cleared
++ 13.1s  keychain.read.stalled        (model-keys)
++299.4s  keychain.read.settled  elapsed=294.4
++299.4s  keychain.read.settled  elapsed=239.1
++299.4s  keychain.read.settled  elapsed=170.2
++299.4s  keychain.read.settled  elapsed=101.3
++299.4s  keychain.read.settled  elapsed= 32.5
+```
+
+Five reads of one item, started ~69 seconds apart - one per cooldown expiry -
+all settling at the same instant. They were never slow individually; they
+queued behind one block and returned together. The timeout path clears
+`readInFlight` deliberately, because a read blocked forever would otherwise
+latch it and blind the app for the process's life. So the boolean is false
+while a read is still running, and each cooldown expiry adds another call to a
+queue already known to be blocked.
+
+### What this adds
+
+**Check a guard's stated purpose against the log, not against the code.** The
+comment is accurate about the mechanism and wrong about the outcome, which is
+why re-reading the code never caught it. Only the timeline did.
+
+**Two failure modes traded against each other usually means a missing third
+state.** Latching blinds the app; clearing stacks the queue. Recording the
+dispatch - who, when, settled or not - does neither, and neither option was
+available while the state was a `Bool`.
+
+**Offsets, not timestamps.** Five settles at `+299.4s` with descending elapsed
+values is a queue signature and nothing else looks like it. In absolute
+timestamps it reads as five ordinary lines.
+
+### And the discipline that applies to the fix
+
+The next launch window measured 16.3s instead of 290.5s - eighteen times
+shorter. **That is not proof the fix worked.** `keychain.read.not_restacked`
+never fired, so the new guard never refused anything; the first read simply
+answered in 25.7s, before the cooldown could expire and trigger a restack. A
+favourable measurement after a change is not a measurement of the change.
+Proof requires the window where the guard actually acts.
