@@ -10558,6 +10558,12 @@ final class ChatViewModel: ObservableObject {
         guard let rev = commitAsOf(isoDate) else { return nil }
         var contents = ""
         for path in paths {
+            // Absent is not unmeasured - this repository's oldest lesson.
+            // A boundary file that did not exist when the issue was filed
+            // contributes an EMPTY string, and every name found in it today
+            // is therefore new. Only a git call that fails for some other
+            // reason is unmeasured, and that is what nil means here.
+            if !fileExists(rev: rev, path: path) { continue }
             guard let text = gitShow(rev: rev, path: path) else { return nil }
             contents += "\n" + text
         }
@@ -10570,9 +10576,25 @@ final class ChatViewModel: ObservableObject {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    /// Whether a path existed at a commit, asked separately so its absence
+    /// is a measurement rather than a failure to measure.
+    private static func fileExists(rev: String, path: String) -> Bool {
+        runGit(["cat-file", "-e", "\(rev):./\(path)"]) != nil
+    }
+
     /// One file's contents at one commit, or nil when git cannot say.
+    ///
+    /// The `./` is load-bearing. In `rev:path` syntax git resolves a bare
+    /// path from the REPOSITORY root, and these paths are relative to the
+    /// project directory - which is a subdirectory of the repository here. So
+    /// every read returned nothing, every answer was "git could not say", and
+    /// the gate that turns an unanswered question into "not evidence" opened
+    /// for everything: the heuristic stopped skipping ANY issue, including
+    /// four whose work is done. Measured 2026-08-23, when #1173 was
+    /// dispatched onto finished work and the zero already-done skips I had
+    /// reported as discrimination turned out to be the gate failing open.
     private static func gitShow(rev: String, path: String) -> String? {
-        runGit(["show", "\(rev):\(path)"])
+        runGit(["show", "\(rev):./\(path)"])
     }
 
     /// Runs git in the project root and returns stdout, or nil on failure.
