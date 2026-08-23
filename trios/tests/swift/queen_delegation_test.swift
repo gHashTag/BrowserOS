@@ -470,6 +470,23 @@ enum QueenDelegationTests {
         check(QueenDelegationPolicy.canTransition(from: .awaitingReview, to: .rejected), "review rejects")
         check(QueenDelegationPolicy.canTransition(from: .rejected, to: .running), "rejected work is retried")
         check(QueenDelegationPolicy.canTransition(from: .failed, to: .running), "failed work is retried")
+        // A boundary must always be releasable. Review can only accept or
+        // reject, and the send-back ceiling forbids another rejection, so
+        // without this a task at the ceiling holds its files with no move
+        // left that frees them - measured on #1286, which sat in
+        // awaitingReview while `/cancel` logged
+        // "Cannot move gHashTag/trios#1286 from awaitingReview to cancelled".
+        check(
+            QueenDelegationPolicy.canTransition(from: .awaitingReview, to: .cancelled),
+            "a task at the send-back ceiling can still release its boundary"
+        )
+        check(
+            QueenDelegationPolicy.canTransition(from: .queued, to: .cancelled)
+                && QueenDelegationPolicy.canTransition(from: .running, to: .cancelled)
+                && QueenDelegationPolicy.canTransition(from: .rejected, to: .cancelled)
+                && QueenDelegationPolicy.canTransition(from: .failed, to: .cancelled),
+            "every non-terminal state can be cancelled, not only some of them"
+        )
 
         // The transition that would let unfinished work be declared done.
         check(

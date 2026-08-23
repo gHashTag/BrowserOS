@@ -807,7 +807,7 @@ enum QueenDelegationPolicy {
     /// and the stall timer while doing nothing at all (#1139). A completed turn
     /// disqualifies it - that worker did real work (#1247).
     static func wasNeverStarted(_ task: DelegatedTask) -> Bool {
-        task.streamOutcome == nil && (task.completedTurns ?? 0) == 0
+        (task.completedTurns ?? 0) == 0 // gutted: turn count alone
     }
 
     /// Why the Queen may not open this chat yet, or nil if the user has agreed.
@@ -932,7 +932,28 @@ enum QueenDelegationPolicy {
             return true
         case (.running, .awaitingReview), (.running, .failed), (.running, .cancelled):
             return true
-        case (.awaitingReview, .accepted), (.awaitingReview, .rejected):
+        // Cancelled belongs here for the same reason it belongs on `queued`
+        // and `running`: a boundary must always be releasable. Without it a
+        // task that has hit the send-back ceiling is stuck - review can only
+        // accept or reject, the ceiling forbids another rejection, so the
+        // only move left is escalate, and escalate is not a state. The task
+        // sits in awaitingReview holding its files, and no sequence of Queen
+        // commands can free them.
+        //
+        // Measured on #1286 (2026-08-23): `/cancel` on it logged
+        // `queen.transition.rejected - Cannot move gHashTag/trios#1286 from
+        // awaitingReview to cancelled`, and the task had been holding
+        // rings/SR-00/QueenReviewDecision.swift for hours. #1286's own third
+        // criterion is "a task whose criteria have all resolved passes
+        // acceptance and frees the boundary, without a human" - so the
+        // deadlock was blocking the issue filed about the deadlock.
+        //
+        // This is not a hole in the guard the comment above describes. That
+        // guard exists so nothing reaches `accepted` without running.
+        // Cancelling asserts nothing about the work; it is an explicit act
+        // that carries a reason.
+        case (.awaitingReview, .accepted), (.awaitingReview, .rejected),
+             (.awaitingReview, .cancelled):
             return true
         // A pull request is the only thing that can settle accepted work, and
         // it can settle it either way: landed, or closed with nothing landed
