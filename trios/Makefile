@@ -3010,26 +3010,34 @@ MUTANTS_LOGIC := \
 .PHONY: mutants-logic
 mutants-logic:
 	@backup=$$(mktemp -d); \
-	owner_pid=$$(cat "$(HARNESS_LOCK)/pid" 2>/dev/null || true); \
-	if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
+	: "ONE POLICY FOR ONE LOCK, 2026-08-25 (second pass). Six targets use"; \
+	: "this lock. cassettes waited; the other five refused instantly and"; \
+	: "exited 1 while printing Nothing here is broken - a gate that fails"; \
+	: "for a scheduling collision while announcing it is not a failure."; \
+	: "The first pass fixed ONE of the five, because I counted two users"; \
+	: "and never counted the rest. Waiting is right for all of them: the"; \
+	: "runs are legitimate, neither agent knows about the other, and these"; \
+	: "targets mutate real source files. Exiting 0 would be worse - check"; \
+	: "green without the coverage having run is UNCHECKED read as agreed."; \
+	waited=0; \
+	while :; do \
+		owner_pid=$$(cat "$(HARNESS_LOCK)/pid" 2>/dev/null || true); \
+		if mkdir "$(HARNESS_LOCK)" 2>/dev/null; then break; fi; \
 		if [ -n "$$owner_pid" ] && ! kill -0 $$owner_pid 2>/dev/null; then \
 			echo "[INFO] reclaiming harness lock from dead PID $$owner_pid"; \
-			rm -rf "$(HARNESS_LOCK)"; \
+			rm -rf "$(HARNESS_LOCK)"; continue; \
 		fi; \
-		if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
-			if [ -n "$$owner_pid" ]; then \
-				echo "[SKIP-COLLISION] another harness run holds $(HARNESS_LOCK) (PID $$owner_pid)."; \
-				echo "                 Nothing here is broken: several agents share this"; \
-				echo "                 checkout and this target mutates real source files, so"; \
-				echo "                 it refuses to run beside another one. Re-run when that"; \
-				echo "                 PID exits. If it is gone, the lock is stale: rm -rf $(HARNESS_LOCK)"; \
-			else \
-				echo "[SKIP-COLLISION] another harness run holds $(HARNESS_LOCK)."; \
-				echo "                 Nothing here is broken - see above; re-run when it exits."; \
-			fi; \
+		if [ $$waited -ge $(HARNESS_LOCK_WAIT) ]; then \
+			echo "[FAIL] another harness run has held $(HARNESS_LOCK) for $(HARNESS_LOCK_WAIT)s"; \
+			echo "       (owner PID $$owner_pid). Not waiting further."; \
 			rm -rf $$backup; exit 1; \
 		fi; \
-	fi; \
+		if [ $$waited = 0 ]; then \
+			echo "[harness] another run holds the lock (PID $$owner_pid); waiting"; \
+		fi; \
+		sleep 5; waited=$$((waited + 5)); \
+	done; \
+	[ $$waited -gt 0 ] && echo "[harness] acquired the lock after $${waited}s" || true; \
 	echo $$$$ > "$(HARNESS_LOCK)/pid"; \
 	trap 'for f in $$backup/*.bak; do [ -e "$$f" ] || continue; \
 	      target=$$(cat "$$f.path"); \
@@ -3971,26 +3979,34 @@ MUTANTS_GUARD := \
 .PHONY: mutants-guard
 mutants-guard:
 	@backup=$$(mktemp -d); \
-	owner_pid=$$(cat "$(HARNESS_LOCK)/pid" 2>/dev/null || true); \
-	if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
+	: "ONE POLICY FOR ONE LOCK, 2026-08-25 (second pass). Six targets use"; \
+	: "this lock. cassettes waited; the other five refused instantly and"; \
+	: "exited 1 while printing Nothing here is broken - a gate that fails"; \
+	: "for a scheduling collision while announcing it is not a failure."; \
+	: "The first pass fixed ONE of the five, because I counted two users"; \
+	: "and never counted the rest. Waiting is right for all of them: the"; \
+	: "runs are legitimate, neither agent knows about the other, and these"; \
+	: "targets mutate real source files. Exiting 0 would be worse - check"; \
+	: "green without the coverage having run is UNCHECKED read as agreed."; \
+	waited=0; \
+	while :; do \
+		owner_pid=$$(cat "$(HARNESS_LOCK)/pid" 2>/dev/null || true); \
+		if mkdir "$(HARNESS_LOCK)" 2>/dev/null; then break; fi; \
 		if [ -n "$$owner_pid" ] && ! kill -0 $$owner_pid 2>/dev/null; then \
 			echo "[INFO] reclaiming harness lock from dead PID $$owner_pid"; \
-			rm -rf "$(HARNESS_LOCK)"; \
+			rm -rf "$(HARNESS_LOCK)"; continue; \
 		fi; \
-		if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
-			if [ -n "$$owner_pid" ]; then \
-				echo "[SKIP-COLLISION] another harness run holds $(HARNESS_LOCK) (PID $$owner_pid)."; \
-				echo "                 Nothing here is broken: several agents share this"; \
-				echo "                 checkout and this target mutates real source files, so"; \
-				echo "                 it refuses to run beside another one. Re-run when that"; \
-				echo "                 PID exits. If it is gone, the lock is stale: rm -rf $(HARNESS_LOCK)"; \
-			else \
-				echo "[SKIP-COLLISION] another harness run holds $(HARNESS_LOCK)."; \
-				echo "                 Nothing here is broken - see above; re-run when it exits."; \
-			fi; \
+		if [ $$waited -ge $(HARNESS_LOCK_WAIT) ]; then \
+			echo "[FAIL] another harness run has held $(HARNESS_LOCK) for $(HARNESS_LOCK_WAIT)s"; \
+			echo "       (owner PID $$owner_pid). Not waiting further."; \
 			rm -rf $$backup; exit 1; \
 		fi; \
-	fi; \
+		if [ $$waited = 0 ]; then \
+			echo "[harness] another run holds the lock (PID $$owner_pid); waiting"; \
+		fi; \
+		sleep 5; waited=$$((waited + 5)); \
+	done; \
+	[ $$waited -gt 0 ] && echo "[harness] acquired the lock after $${waited}s" || true; \
 	echo $$$$ > "$(HARNESS_LOCK)/pid"; \
 	trap 'for f in $$backup/*.bak; do [ -e "$$f" ] || continue; \
 	      target=$$(cat "$$f.path"); \
@@ -4623,26 +4639,34 @@ mutants-guard:
 
 mutants-changed:
 	@backup=$$(mktemp -d); \
-	owner_pid=$$(cat "$(HARNESS_LOCK)/pid" 2>/dev/null || true); \
-	if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
+	: "ONE POLICY FOR ONE LOCK, 2026-08-25 (second pass). Six targets use"; \
+	: "this lock. cassettes waited; the other five refused instantly and"; \
+	: "exited 1 while printing Nothing here is broken - a gate that fails"; \
+	: "for a scheduling collision while announcing it is not a failure."; \
+	: "The first pass fixed ONE of the five, because I counted two users"; \
+	: "and never counted the rest. Waiting is right for all of them: the"; \
+	: "runs are legitimate, neither agent knows about the other, and these"; \
+	: "targets mutate real source files. Exiting 0 would be worse - check"; \
+	: "green without the coverage having run is UNCHECKED read as agreed."; \
+	waited=0; \
+	while :; do \
+		owner_pid=$$(cat "$(HARNESS_LOCK)/pid" 2>/dev/null || true); \
+		if mkdir "$(HARNESS_LOCK)" 2>/dev/null; then break; fi; \
 		if [ -n "$$owner_pid" ] && ! kill -0 $$owner_pid 2>/dev/null; then \
 			echo "[INFO] reclaiming harness lock from dead PID $$owner_pid"; \
-			rm -rf "$(HARNESS_LOCK)"; \
+			rm -rf "$(HARNESS_LOCK)"; continue; \
 		fi; \
-		if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
-			if [ -n "$$owner_pid" ]; then \
-				echo "[SKIP-COLLISION] another harness run holds $(HARNESS_LOCK) (PID $$owner_pid)."; \
-				echo "                 Nothing here is broken: several agents share this"; \
-				echo "                 checkout and this target mutates real source files, so"; \
-				echo "                 it refuses to run beside another one. Re-run when that"; \
-				echo "                 PID exits. If it is gone, the lock is stale: rm -rf $(HARNESS_LOCK)"; \
-			else \
-				echo "[SKIP-COLLISION] another harness run holds $(HARNESS_LOCK)."; \
-				echo "                 Nothing here is broken - see above; re-run when it exits."; \
-			fi; \
+		if [ $$waited -ge $(HARNESS_LOCK_WAIT) ]; then \
+			echo "[FAIL] another harness run has held $(HARNESS_LOCK) for $(HARNESS_LOCK_WAIT)s"; \
+			echo "       (owner PID $$owner_pid). Not waiting further."; \
 			rm -rf $$backup; exit 1; \
 		fi; \
-	fi; \
+		if [ $$waited = 0 ]; then \
+			echo "[harness] another run holds the lock (PID $$owner_pid); waiting"; \
+		fi; \
+		sleep 5; waited=$$((waited + 5)); \
+	done; \
+	[ $$waited -gt 0 ] && echo "[harness] acquired the lock after $${waited}s" || true; \
 	echo $$$$ > "$(HARNESS_LOCK)/pid"; \
 	trap 'for f in $$backup/*.bak; do [ -e "$$f" ] || continue; \
 	      target=$$(cat "$$f.path"); \
@@ -5082,26 +5106,34 @@ check-selftest:
 		[ $$fail -ne 0 ] && crc=1; \
 		exit $$crc; \
 	}; \
-	owner_pid=$$(cat "$(HARNESS_LOCK)/pid" 2>/dev/null || true); \
-	if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
+	: "ONE POLICY FOR ONE LOCK, 2026-08-25 (second pass). Six targets use"; \
+	: "this lock. cassettes waited; the other five refused instantly and"; \
+	: "exited 1 while printing Nothing here is broken - a gate that fails"; \
+	: "for a scheduling collision while announcing it is not a failure."; \
+	: "The first pass fixed ONE of the five, because I counted two users"; \
+	: "and never counted the rest. Waiting is right for all of them: the"; \
+	: "runs are legitimate, neither agent knows about the other, and these"; \
+	: "targets mutate real source files. Exiting 0 would be worse - check"; \
+	: "green without the coverage having run is UNCHECKED read as agreed."; \
+	waited=0; \
+	while :; do \
+		owner_pid=$$(cat "$(HARNESS_LOCK)/pid" 2>/dev/null || true); \
+		if mkdir "$(HARNESS_LOCK)" 2>/dev/null; then break; fi; \
 		if [ -n "$$owner_pid" ] && ! kill -0 $$owner_pid 2>/dev/null; then \
 			echo "[INFO] reclaiming harness lock from dead PID $$owner_pid"; \
-			rm -rf "$(HARNESS_LOCK)"; \
+			rm -rf "$(HARNESS_LOCK)"; continue; \
 		fi; \
-		if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
-			if [ -n "$$owner_pid" ]; then \
-				echo "[SKIP-COLLISION] another harness run holds $(HARNESS_LOCK) (PID $$owner_pid)."; \
-				echo "                 Nothing here is broken: several agents share this"; \
-				echo "                 checkout and this target mutates real source files, so"; \
-				echo "                 it refuses to run beside another one. Re-run when that"; \
-				echo "                 PID exits. If it is gone, the lock is stale: rm -rf $(HARNESS_LOCK)"; \
-			else \
-				echo "[SKIP-COLLISION] another harness run holds $(HARNESS_LOCK)."; \
-				echo "                 Nothing here is broken - see above; re-run when it exits."; \
-			fi; \
+		if [ $$waited -ge $(HARNESS_LOCK_WAIT) ]; then \
+			echo "[FAIL] another harness run has held $(HARNESS_LOCK) for $(HARNESS_LOCK_WAIT)s"; \
+			echo "       (owner PID $$owner_pid). Not waiting further."; \
 			rm -f "$$backup" "$$sf" "$$ba" "$$md_backup"; exit 1; \
 		fi; \
-	fi; \
+		if [ $$waited = 0 ]; then \
+			echo "[harness] another run holds the lock (PID $$owner_pid); waiting"; \
+		fi; \
+		sleep 5; waited=$$((waited + 5)); \
+	done; \
+	[ $$waited -gt 0 ] && echo "[harness] acquired the lock after $${waited}s" || true; \
 	echo $$$$ > "$(HARNESS_LOCK)/pid"; \
 	trap 'rc=$$?; cleanup $$rc' EXIT INT TERM; \
 	mutate_victim || exit 1; \
