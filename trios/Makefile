@@ -838,7 +838,7 @@ keychain-doors:
 # the tree it guards teaches everyone to run something other than `make check`.
 MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP DEV_BIN RELEASE_BIN DEV_PROC \
 	TEST_APP TEST_PROC TEST_BIN TEST_LOG TEST_PROC_HERE DEV_PROC_HERE \
-	T27C T27_ROOT CHAIN_DIR DEVELOPER_DIR \
+	T27C T27_ROOT CHAIN_DIR DEVELOPER_DIR T27_LOWERING_EXCEPT T27_NOCOMPILE_CEILING \
 	RELEASE_PROC WARNING_CEILING XCTEST_ERROR_CEILING CASSETTE_DIR \
 	WARN_VARIANT WARN_BUILD_DIR WARN_OFM WARN_LIST WARN_SEEN WARN_LOG WARN_LOG_DIR \
 	WARN_LOG_LAST WARN_BUILD_ID WARN_FULL_ROOT WARN_FULL_CACHE DEV_BUILD_LOCK \
@@ -884,6 +884,30 @@ MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP DEV_BIN RELEASE_BIN DEV_PROC \
 #
 # A failed build is a failure, not a skip: if the compiler is here and will
 # not build, that is exactly the news this gate exists to carry.
+# How many generated Rust files may still fail to compile. A ratchet, not a
+# target: it may fall, and raising it needs a reason in the commit message.
+#
+# Measured 2026-08-23: 20 of 70. Counting functions proved necessary and not
+# sufficient - four specs (lite_crypto, packet_queue, hardware_validation,
+# multipath_router) keep every function and lose whole `return` statements
+# inside them, so the count stays right while the code stops meaning anything.
+# rustc is the cheapest independent reader available, so it reads them.
+T27_NOCOMPILE_CEILING := 20
+
+# Declared backend limitations, in the form <spec>:<backend>:<shortfall>.
+#
+# A limitation that is DECLARED is reviewed; one that is silent is a defect.
+# The whole point of t27-lowering is to move drops from the second category
+# into the first, so the list must stay short and every entry must say why.
+#
+#   auto_config.t27:c:2 - create_default_config and create_backup both return
+#   [u32; MAX_PARAMS] by value. C cannot return an array by value, so the C
+#   backend omits them. Rust and Zig emit all 19. This is the only spec in the
+#   corpus with array-returning functions, and the right repair is a declared
+#   capability in the backend descriptor (architecture document, section 7.2),
+#   not a rewrite of the spec to suit one target.
+T27_LOWERING_EXCEPT := auto_config.t27:c:2
+
 # Every function a spec declares must survive into the generated code.
 #
 # t27c's parser silently discards any statement it cannot parse:
@@ -907,11 +931,18 @@ MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP DEV_BIN RELEASE_BIN DEV_PROC \
 .PHONY: t27-lowering
 t27-lowering:
 	@if [ ! -x "$(T27C)" ]; then \
-		echo "[SKIP] t27-lowering: NOT MEASURED - no t27c at $(T27C)."; \
-		echo "       Run 'make t27-rings' once; it builds one."; \
+		if [ -f "$(T27_ROOT)/bootstrap/Cargo.toml" ]; then \
+			echo "[FAIL] t27-lowering: no t27c binary, but its sources are at"; \
+			echo "       $(T27_ROOT)/bootstrap. Run 'make t27-rings' once - it builds one."; \
+			echo "       Skipping here would be the failing-open this target exists to stop."; \
+			exit 1; \
+		fi; \
+		echo "[SKIP] t27-lowering: NOT MEASURED - no t27c and no sources at"; \
+		echo "       $(T27_ROOT)/bootstrap. Nothing was checked by this run."; \
 		exit 0; \
 	fi; \
-	bad=0; tot=0; \
+	bad=0; tot=0; declared=0; nocompile=0; \
+	tmpd=$$(mktemp -d); trap 'rm -rf "$$tmpd"' EXIT; \
 	: "Worktrees excluded. A subagent left a checkout at"; \
 	: "rings/RUST-13/trios-mesh/.claude/worktrees/<name>/specs, and the"; \
 	: "first version of this gate scanned it - 138 specs instead of 70,"; \
@@ -925,19 +956,64 @@ t27-lowering:
 			echo "  [FAIL] $$f: gen-rust exited nonzero"; bad=$$((bad + 1)); continue; }; \
 		emitted=$$(printf '%s' "$$out" | grep -c '^pub fn '); \
 		stubs=$$(printf '%s' "$$out" | grep -c 'unimplemented!'); \
+		: "Every backend is counted, not only Rust. Each rule below was"; \
+		: "validated against all 70 specs before being trusted: Zig matches"; \
+		: "the spec exactly (0 of 70 disagreed), and C and Verilog are held"; \
+		: "to 'at least', because both emit extra functions - Verilog a"; \
+		: "wrapper, C the spec's test blocks - and a rule that pinned those"; \
+		: "counts would be pinning behaviour I do not understand."; \
+		: "The looser rule still caught a real one: auto_config declares 19"; \
+		: "functions, Rust and Zig emit 19, and C emits 17. create_backup"; \
+		: "and create_default_config reach two backends and not the third."; \
+		zig=$$("$(T27C)" gen "$$f" 2>/dev/null | grep -cE '^(pub )?fn '); \
+		cnt=$$("$(T27C)" gen-c "$$f" 2>/dev/null | grep -cE '^[a-zA-Z_].*\(.*\) *\{'); \
+		vlg=$$("$(T27C)" gen-verilog "$$f" 2>/dev/null | grep -cE '^[[:space:]]*function '); \
+		: "Counting is necessary and not sufficient. A body can lose a return"; \
+		: "statement without losing its function, and the count stays right"; \
+		: "while the code stops meaning anything. rustc is the cheapest"; \
+		: "independent reader we have, so the output is compiled too."; \
+		printf '%s' "$$out" > "$$tmpd/$$(basename $$f .t27).rs"; \
+		if ! rustc --edition 2021 --crate-type lib --emit=metadata \
+			--out-dir "$$tmpd" "$$tmpd/$$(basename $$f .t27).rs" 2>/dev/null; then \
+			nocompile=$$((nocompile + 1)); \
+		fi; \
 		if [ "$$spec_fns" != "$$emitted" ]; then \
-			echo "  [FAIL] $$(basename $$f): $$spec_fns functions declared, $$emitted emitted"; \
-			echo "         $$((spec_fns - emitted)) were dropped before any backend ran."; \
+			echo "  [FAIL] $$(basename $$f): rust emitted $$emitted of $$spec_fns declared"; \
+			echo "         $$((spec_fns - emitted)) dropped before any backend ran."; \
 			bad=$$((bad + 1)); \
 		elif [ "$$stubs" != "0" ]; then \
 			echo "  [FAIL] $$(basename $$f): $$stubs function body/bodies emptied (unimplemented!)"; \
 			bad=$$((bad + 1)); \
+		elif [ "$$spec_fns" != "$$zig" ]; then \
+			echo "  [FAIL] $$(basename $$f): zig emitted $$zig of $$spec_fns declared"; \
+			bad=$$((bad + 1)); \
+		elif [ "$$cnt" -lt "$$spec_fns" ]; then \
+			short=$$((spec_fns - cnt)); \
+			if echo " $(T27_LOWERING_EXCEPT) " | grep -q " $$(basename $$f):c:$$short "; then \
+				echo "  [declared] $$(basename $$f): c omits $$short of $$spec_fns - see T27_LOWERING_EXCEPT"; \
+				declared=$$((declared + 1)); \
+			else \
+				echo "  [FAIL] $$(basename $$f): c emitted $$cnt, fewer than the $$spec_fns declared"; \
+				echo "         Undeclared. If it is a real backend limitation, add"; \
+				echo "         $$(basename $$f):c:$$short to T27_LOWERING_EXCEPT with a reason."; \
+				bad=$$((bad + 1)); \
+			fi; \
+		elif [ "$$vlg" -lt "$$spec_fns" ]; then \
+			echo "  [FAIL] $$(basename $$f): verilog emitted $$vlg, fewer than the $$spec_fns declared"; \
+			bad=$$((bad + 1)); \
 		fi; \
 	done; \
+	if [ $$nocompile -gt $(T27_NOCOMPILE_CEILING) ]; then \
+		echo "[FAIL] $$nocompile of $$tot generated Rust files do not compile,"; \
+		echo "       above the recorded ceiling of $(T27_NOCOMPILE_CEILING). A count that"; \
+		echo "       only goes down is the point; raise the ceiling only with a reason."; \
+		bad=$$((bad + 1)); \
+	fi; \
 	if [ $$bad -eq 0 ]; then \
-		echo "[OK] every function survives lowering ($$tot specs)"; \
+		echo "[OK] every function survives lowering into all four backends ($$tot specs, $$declared declared limitation(s))"; \
+		echo "     $$nocompile of $$tot generated Rust files still do not compile (ceiling $(T27_NOCOMPILE_CEILING))"; \
 	else \
-		echo "[FAIL] $$bad of $$tot specs lose code between spec and generated Rust."; \
+		echo "[FAIL] $$bad of $$tot specs lose code between spec and generated code."; \
 		echo "       This is gHashTag/t27#2508. Rewrite the spec into the subset the"; \
 		echo "       parser accepts: parenthesised conditions, explicit returns, no match."; \
 		exit 1; \
@@ -1588,7 +1664,7 @@ vendor-step:
 		exit 1; \
 	fi
 
-check: check-selftest keychain-doors type-floor t27-rings t27-lowering make-dollars empty-sources sources-drift sources-drift-selftest finish-mark-order guard-shapes variant-fence parse-tests run-completeness-selftest cassette-isolation vendor-step dev warnings test cassettes mutants-changed
+check: check-selftest keychain-doors type-floor t27-rings t27-lowering chain make-dollars empty-sources sources-drift sources-drift-selftest finish-mark-order guard-shapes variant-fence parse-tests run-completeness-selftest cassette-isolation vendor-step dev warnings test cassettes mutants-changed
 
 # Replay every cassette and assert the expected signal appears in the log.
 #

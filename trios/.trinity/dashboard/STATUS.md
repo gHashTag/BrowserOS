@@ -50,8 +50,18 @@ curl -s 127.0.0.1:9105/health
 python3 -c "import json;from collections import Counter;print(Counter(t.get('state') for t in json.load(open('.trinity/state/queen_delegation.json')) if isinstance(t,dict)))"
 ```
 
-Mesh ring after today's repair: 91 functions declared, 91 emitted, 0 stubs,
-every artifact byte-identical to a fresh `gen-rust`.
+Mesh ring, the seven specs repaired today: 91 functions declared, 91 emitted,
+0 stubs, artifacts byte-identical to a fresh `gen-rust`.
+
+Corpus-wide, which is a different and worse number: 12 of 68 mesh artifacts
+are byte-identical to a fresh `gen-rust`; 56 differ, so most committed
+artifacts are stale relative to their spec.
+
+**50 of 70 generated Rust files compile; 20 do not.** Counting functions is
+necessary and not sufficient - four specs keep every function and lose whole
+`return` statements inside them, so the count stays right while the code stops
+meaning anything. `make t27-lowering` now compiles the output too, against a
+ceiling of 20 that may fall and must not rise.
 
 ## How to update this
 
