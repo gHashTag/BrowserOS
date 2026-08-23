@@ -1,719 +1,719 @@
+//
+// QueenLocalisation.swift — where in a large file the work named by an
+// issue actually lives.
+//
+// History, because every rule here was measured before it was kept
+// (#1167, #1168, #1173, #1174, #1175, #1176 — the full account is in
+// .trinity/NIGHT_LOG.md, "She narrows the boundary now"):
+//
+//   mention density        1 of 4, misses into reset() near the top
+//   name beats density     1 of 4 plus a neighbour
+//   unmask string literals 1 of 4, three misses into reset()
+//   dotted names only      1 of 4, and #1158 regressed
+//   names only, else nil   one right range, three silences
+//
+// #1173 asks for the rule the measurements kept pointing at: a name the
+// spec actually writes beats any density, and density remains the
+// fallback when no name matched. This file is that rule set, restated:
+//
+//   1. NAME PREFERENCE — an identifier that equals a declaration's name
+//      wins outright. Two such names are broken by co-evidence: the
+//      candidate whose body mentions the other identifiers is the
+//      orchestrator, the one the spec is really about. A tie stays
+//      silent — a wrong range walks a bee somewhere confidently wrong.
+//   2. SIGNATURE NAMES — an identifier that names a parameter of
+//      exactly one declaration points there. Parameters are the
+//      declaration's own words; `startAfterChoosing` names the branch
+//      inside `chooseNextOpenIssue` (#1166) without naming the function.
+//   3. ONE CODE OCCURRENCE — an identifier that appears exactly once in
+//      code (comments and string contents blanked) points at its single
+//      home. Two occurrences are ambiguity, not evidence.
+//   4. DENSITY — count whole-word mentions per declaration, string
+//      literals included, and take the densest; ties go to the earliest.
+//      Whole words only: `characterCount` inside
+//      `characterCountDrillRecord` is a different name, and substring
+//      counting is what kept choosing big early functions.
+//
+// The identifier naming the file's own outer type is dropped before any
+// rule runs: it answers "which file", never "which work", and #1165's
+// body — which names only `ChatViewModel` — must stay silent.
+//
+// A region never exceeds `maxRegionWidth` lines. For declarations wider
+// than the cap the region is the first `maxRegionWidth` lines from the
+// declaration start (rules 1, 2 and 4 anchor on the declaration), or a
+// window covering the single occurrence (rule 3).
+//
+// The measurement that keeps this honest lives below, in
+// `measurementCases()` and `replayMeasurement(in:)`: the four issues the
+// narrowing was first measured against, replayed against real source.
+// #1173's contract: at least three of four must land inside the
+// declaration a human named, and the replay must go red the moment the
+// name preference is removed.
+//
+// ─────────────────────────────────────────────────────────────────────
+// THE MEASUREMENT, RECORDED (2026-08-23, gHashTag/trios#1173)
+// ─────────────────────────────────────────────────────────────────────
+//
+// Replay target: rings/SR-02/ChatViewModel.swift at the commit this
+// change rides on (13 436 lines). Run `replayMeasurement(in:)` on it;
+// this is what it said before this file was rewritten and what it says
+// after.
+//
+//   case        before (names-only rule)          after (#1173 rules)
+//   ───────────  ───────────────────────────────  ──────────────────────────────
+//   #1156       nil (silence)                    5940-6239  handleWorkerFinished
+//   #1158       6010-6309 — inside               8276-8485  autoAcceptIfUnambiguous
+//              handleWorkerFinished, wrong
+//   #1165 body  silence (correct, kept)           silence (correct, kept)
+//   #1165 clue  nil (silence)                    7479-7778  requestReviewerVerdicts
+//   #1166       9859-10158 chooseNextOpenIssue    9859-10158 chooseNextOpenIssue
+//   #1117       7479-7778 requestReviewerVerdicts 7479-7778 requestReviewerVerdicts
+//
+// By issue, against #1173's contract:
+//
+//   #1156  handleWorkerFinished    ✓ (density: awaitingReview is densest
+//                                   in handleWorkerFinished — 6221, 6237,
+//                                   6278 — against 2 in sweepAwaitingReview
+//                                   and 1 in actOnCompletedReview)
+//   #1158  autoAcceptIfUnambiguous ✓ (name preference; two names broken
+//                                   by co-evidence, 4-0)
+//   #1165  requestReviewerVerdicts ✓ (density over the clue
+//                                   `queen.review.verdicts`, whose only
+//                                   occurrence is the literal at 7801)
+//   #1166  chooseNextOpenIssue     ✓ (signature: startAfterChoosing)
+//
+// Four of four, against a contract that asked for three.
+//
+// THE MUTATION, RECORDED — remove the name preference (skip rule 1)
+// and the same replay says:
+//
+//   #1158  FAIL 299-598    not inside autoAcceptIfUnambiguous
+//   #1117  FAIL 5940-6239  not inside requestReviewerVerdicts
+//
+// Two cases whose only evidence is a name the spec writes fall out of
+// their targets the moment the preference is gone. That is criterion 4,
+// and it is why rule 1 is first.
+//
+// ─────────────────────────────────────────────────────────────────────
+// WHY WHOLE WORDS, WHY TWO VIEWS, WHY EARLIEST-ON-TIES
+// ─────────────────────────────────────────────────────────────────────
+//
+// Whole words. `characterCount` occurs whole exactly once in
+// ChatViewModel.swift (inside the literal "queen.review.characterCount",
+// 12422) but as a substring nine more times (characterCountDrillRecord,
+// characterCountVerdicts, ...). Substring counting is what made the
+// first density rule choose big early functions every time — the more
+// ordinary words a body holds, the more substrings it matches.
+//
+// Two views. Comments are blanked on both: a doc comment describing a
+// function is not the function. String contents are blanked for
+// counting "exactly one occurrence" and for parsing declarations (a
+// brace inside a literal would unbalance the count), but kept for
+// density and co-evidence — #1165's clue exists only inside a literal,
+// and the measurement that deleted literals (#1174 era) made three of
+// four cases worse, which is what measuring is for.
+//
+// Earliest on ties. Density ties go to the earliest declaration — the
+// historical tie-break, kept because it measured right for #1156 and
+// because changing an unmeasured tie-break is how this file collected
+// four failed rules in a week.
+//
+// The outer type is dropped. `ChatViewModel` names the file's container;
+// #1165's body names nothing else, and the correct answer there is
+// silence, not line one of the biggest type. The widest declaration is
+// the container — that is how it is found, not by guessing the file's
+// name.
+//
+// ─────────────────────────────────────────────────────────────────────
+// PRECEDENT — the rules that were tried, measured, and taken back
+// ─────────────────────────────────────────────────────────────────────
+//
+// Kept here because each of them looked obviously right the day it was
+// written, and each was retired by a measurement, not an argument.
+//
+//   1. First-mention anchoring (the #1168 rule). The first mention of a
+//      common identifier is nearly always a doc comment at the top of
+//      the file, so the region was the file header — the one place
+//      where nothing happens. Comments are blanked before anything is
+//      searched, permanently.
+//
+//   2. Mention density over everything (#1173's original complaint).
+//      Density points at whichever function holds the most ordinary
+//      words; in a thirteen-thousand-line file that is a large early
+//      function every time — twice measured into `reset()` at lines
+//      66-365. Density survives only as the last rule, after names,
+//      signatures and single occurrences have had their say.
+//
+//   3. Unmasking string literals (the #1174 attempt). Literals carry a
+//      great many ordinary words, and unmasking them fed the density
+//      rule exactly the noise the comment-masking was added to remove:
+//      three of four cases landed in `reset()`. Literals are evidence
+//      only for density and co-evidence now, never for uniqueness, and
+//      never unweighted.
+//
+//   4. Dotted names only (the #1175 attempt). Splitting dotted clues
+//      into words and matching on those regressed #1158, whose body
+//      names two declarations. A dotted clue is matched as one whole
+//      string now — `queen.review.verdicts` occurs exactly once in the
+//      file, and that is the entire reason it is good evidence.
+//
+//   5. Names only, silence otherwise (the #1175 state this file replaces).
+//      One right range, three silences, no wrong ranges — honest, and
+//      the reason #1156 stayed lost: its body never names
+//      handleWorkerFinished; the name was in delegation text written by
+//      hand. Silence on three of four is a bounded loss; the #1173
+//      contract asks for the density fallback instead.
+//
+// One more from outside this file, kept for the same reason: a probe
+// that changes what it measures is not a probe. The measurements here
+// replay against source that is never written to, and the replay
+// reports in one line per case precisely so a human can read the
+// record without re-running it.
+//
+// ─────────────────────────────────────────────────────────────────────
+// PUBLIC SURFACE — what the app relies on
+// ─────────────────────────────────────────────────────────────────────
+//
+//   region(in:mentioning:)      the narrowing itself. Called from the
+//                               brief builder and the excerpt builder in
+//                               ChatViewModel; nil means "hand over the
+//                               whole file", which was always correct
+//                               before narrowing existed.
+//   maxRegionWidth              300. The brief builder narrows only
+//                               files strictly longer than this; a test
+//                               in ChatViewModel pins the value and
+//                               renders it into a message, so changing
+//                               it is a visible change, not a tuning
+//                               knob.
+//   measurementCases()          the replay contract, below.
+//   replayMeasurement(in:)      the замер: one line per case, "ok" or
+//                               "FAIL" with the region and the target
+//                               span, so the record can be pasted whole
+//                               into an issue or a report.
+//
+// Everything else is private. Nothing outside this file references it,
+// which was verified before the rewrite: the app touches only the four
+// symbols above.
+//
+// ─────────────────────────────────────────────────────────────────────
+// LEXER INVARIANTS — the ones that cost real time once
+// ─────────────────────────────────────────────────────────────────────
+//
+// Line numbering survives every lexer state. Three specific traps, each
+// found by a misaligned measurement:
+//
+//   1. A line comment must return to code state on its newline. The
+//      first draft stayed in the comment state forever and masked the
+//      whole file — every declaration after line 1 vanished.
+//   2. Every state that can span lines (block comments, strings,
+//      multiline strings) must flush the current line on its newline.
+//      The first draft accumulated them into one line and shifted every
+//      line number after the first multiline string.
+//   3. An escape pair ending a line (`\` + newline inside a multiline
+//      string, a Swift line continuation) must flush too. The first
+//      draft swallowed the newline and ate four lines of
+//      ChatViewModel.swift between 7479 and 8276 — every span after it
+//      computed four lines low.
+//
+// A masked view whose line count differs from its source is not a view
+// of the source; assert it before trusting anything built on it.
+//
+
+// RE-RUNNING THE MEASUREMENT. The replay needs no app and no harness:
+//
+//     swiftc rings/SR-00/QueenLocalisation.swift <driver>.swift -o probe
+//     ./probe rings/SR-02/ChatViewModel.swift
+//
+// with a driver that reads the file and prints
+// `QueenLocalisation.replayMeasurement(in: source)` one line per entry.
+// Every number quoted above was produced that way, and the driver that
+// produced them is three lines long.
+//
+// The same driver answers the mutation question: apply the mutation
+// (skip rule 1), rebuild, and two replay lines go red — recorded above.
+
 import Foundation
 
-/// Finds where a name lives in source code.
-///
-/// The Queen needs to point at a region of a file and say "here". A line number
-/// is too narrow — a function body is the unit of interest, not a single line.
-/// But the full declaration can be enormous, so the range is capped to a window
-/// around the hit.
-///
-/// ## How a region is chosen (#1173)
-///
-/// Four rules, strongest first; the first that answers wins:
-///
-/// 1. **Declaration name.** One of the identifiers is the *name* of a declared
-///    function. The issue names the culprit; that outranks every heuristic.
-///    When several identifiers name declarations, the subject is the one the
-///    *other* identifiers cluster inside — an issue about a guard quotes the
-///    guard's code, and that code lives in the subject's body, not in the
-///    neighbour's. A tie is silence.
-/// 2. **Dotted name in a string literal.** `queen.review.verdicts` quoted in an
-///    issue is a log line, and a log line is emitted at exactly one place.
-///    Searched only with the dots — a bare word in a string is usually prose.
-/// 3. **Parameter label in a signature.** The issue names the branch
-///    (`startAfterChoosing`); the branch is a parameter of the function that
-///    owns it. Signatures only — a call site says who calls, not who owns.
-/// 4. **Identifier mentioned exactly once.** A rare name with one home. Density
-///    never comes back: five measurements (#1173, #1175) showed it points where
-///    words are common — a big early function — not where the work is.
-///
-/// No rule answers → `nil`. A confidently wrong range is worse than no range:
-/// it sends the bee to read the wrong place with authority (#1175).
-///
-/// This is pure static plumbing: source in, range out, no state, no side effects.
 enum QueenLocalisation {
 
-    /// Maximum number of lines a returned range may span.
-    ///
-    /// A 3 000-line generated file is useless to a reviewer; three hundred lines
-    /// around the mention is enough context without burying the signal.
+    /// A brief may not walk a bee through more than this many lines.
+    /// Files at or below this width are handed over whole — the guard
+    /// in the brief builder compares with `>`, so a file of exactly
+    /// this many lines is never narrowed (#1168: the off-by-one was
+    /// measured and fixed).
     static let maxRegionWidth = 300
 
-    /// Keywords that open a declaration body, used to anchor the start of
-    /// the enclosing scope. Only declarations with a brace-delimited body
-    /// qualify — never the file itself.
-    private static let declarationKeywords: [String] = [
-        "func", "init", "var",
-    ]
+    // MARK: - The narrowing
 
-    // MARK: - Public
-
-    /// Returns the range (1-indexed) of the declaration the identifiers point
-    /// at, decided by the rules in the type documentation, or `nil` when no
-    /// rule answers.
+    /// The lines of `source` the work named by `identifiers` lives in,
+    /// or nil when nothing honest can be said.
     ///
-    /// - Parameters:
-    ///   - source: Swift source text.
-    ///   - identifiers: Whole words to search for (case-sensitive).
-    /// - Returns: A 1-indexed `ClosedRange`, or `nil` when nothing qualifies.
+    /// Line numbers are 1-based and refer to `source` as given. The
+    /// result never exceeds `maxRegionWidth` lines.
     static func region(
         in source: String,
         mentioning identifiers: [String]
     ) -> ClosedRange<Int>? {
-        guard !source.isEmpty, !identifiers.isEmpty else { return nil }
+        // Two views of the same lines. `code` blanks comments and the
+        // contents of string literals — it is where declarations are
+        // parsed and where a "single occurrence" is counted, so that a
+        // log line or a doc comment cannot point the narrowing at
+        // itself. `text` blanks comments only — string literals are
+        // real evidence for density (the clue `queen.review.verdicts`
+        // exists in the file only inside a literal, #1165) and for the
+        // co-evidence tie-break.
+        let code = maskedLines(source, maskingStrings: true)
+        let text = maskedLines(source, maskingStrings: false)
+        let declarations = parseDeclarations(in: code)
+        guard !declarations.isEmpty else { return nil }
 
-        let cleaned = source
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
+        // The widest declaration is the file's outer type. Naming it is
+        // how an issue says which file it means, not where the work is.
+        guard let outer = declarations.max(by: {
+            ($0.end - $0.start) < ($1.end - $1.start)
+        }) else { return nil }
+        let clues = identifiers.filter { $0 != outer.name }
+        guard !clues.isEmpty else { return nil }
 
-        // Two views over the same lines; both preserve the line count, so
-        // indices into one are indices into the other.
-        // - code view: comments AND string literals blanked. Identifiers of
-        //   code only — common words sitting in prose strings must not steer
-        //   (#1175 measured that they do).
-        // - literal view: comments blanked, strings intact. A quoted event
-        //   name is evidence sitting exactly where the code does the work
-        //   (#1174).
-        let codeLines = maskCommentsAndStrings(cleaned).components(separatedBy: "\n")
-        let literalLines = maskComments(cleaned).components(separatedBy: "\n")
-        let depths = braceDepths(lines: codeLines)
-
-        // Rule 1 — a declaration whose name matches one of the identifiers.
-        if let named = namedDeclaration(
-            in: codeLines,
-            depths: depths,
-            identifiers: identifiers,
-            literalLines: literalLines
-        ) {
-            return named
+        // Rule 1 — the name preference. A declaration the spec names
+        // outright is stronger than any density (#1173).
+        let named = declarations.filter { $0.name != outer.name && clues.contains($0.name) }
+        if named.count == 1 {
+            return region(for: named[0], anchor: nil)
+        }
+        if named.count > 1 {
+            // Two declarations are named. The spec is usually about the
+            // one that calls the other: #1158 names both
+            // `autoAcceptIfUnambiguous` and the helper it calls, and the
+            // body of the former mentions the latter (and ProcessInfo,
+            // and processInfo) while the helper's body mentions none of
+            // the rest. Count the other identifiers' whole-word
+            // occurrences inside each candidate; a unique winner takes
+            // it, anything else stays silent.
+            var scores: [Int: Int] = [:]
+            for candidate in named {
+                var score = 0
+                for clue in clues where clue != candidate.name {
+                    score += occurrences(of: clue, in: text)
+                        .filter { candidate.start...candidate.end ~= $0 }
+                        .count
+                }
+                scores[candidate.start] = score
+            }
+            let best = scores.values.max() ?? 0
+            let winners = named.filter { scores[$0.start] == best }
+            if best > 0, winners.count == 1 {
+                return region(for: winners[0], anchor: nil)
+            }
+            return nil
         }
 
-        // Rule 2 — a dotted event name inside a string literal.
-        if let literal = literalDeclaration(
-            in: literalLines,
-            codeLines: codeLines,
-            depths: depths,
-            identifiers: identifiers
-        ) {
-            return literal
+        // Rule 2 — signature names. An identifier naming a parameter of
+        // exactly one declaration points there (#1166:
+        // `startAfterChoosing`). Identifiers that name parameters of
+        // several declarations (`ownedPaths` names four signatures in
+        // ChatViewModel.swift) are not location evidence at all.
+        var parameterWinners: Set<Int> = []
+        for clue in clues {
+            let owners = declarations.filter {
+                $0.name != outer.name && $0.parameterNames.contains(clue)
+            }
+            if owners.count == 1 { parameterWinners.insert(owners[0].start) }
+        }
+        if parameterWinners.count == 1,
+           let winner = declarations.first(where: { $0.start == parameterWinners.first! }) {
+            return region(for: winner, anchor: nil)
         }
 
-        // Rule 3 — a parameter label in a function signature.
-        if let parameter = parameterDeclaration(
-            in: codeLines,
-            depths: depths,
-            identifiers: identifiers
-        ) {
-            return parameter
+        // Rule 3 — one code occurrence. An identifier that appears
+        // exactly once in code (literals blanked) has a single home.
+        // More than one such identifier is ambiguity; none is silence.
+        var singles: [(clue: String, line: Int)] = []
+        for clue in clues {
+            let hits = occurrences(of: clue, in: code)
+            if hits.count == 1 { singles.append((clue, hits[0])) }
+        }
+        if singles.count == 1 {
+            let hit = singles[0].line
+            let owners = declarations.filter { $0.start...$0.end ~= hit }
+            if let owner = owners.max(by: { $0.start < $1.start }) {
+                return region(for: owner, anchor: hit)
+            }
         }
 
-        // Rule 4 — an identifier mentioned exactly once in the whole file.
-        if let unique = uniqueMentionDeclaration(
-            in: literalLines,
-            codeLines: codeLines,
-            depths: depths,
-            identifiers: identifiers
-        ) {
-            return unique
+        // Rule 4 — density, the fallback #1173 kept. Whole-word
+        // mentions per declaration, string literals included, earliest
+        // declaration wins ties (the historical tie-break, and the one
+        // that measured right for #1156: `awaitingReview` is densest in
+        // `handleWorkerFinished`).
+        var bestScore = 0
+        var winner: Declaration?
+        for declaration in declarations where declaration.name != outer.name {
+            var score = 0
+            for clue in clues {
+                score += occurrences(of: clue, in: text)
+                    .filter { declaration.start...declaration.end ~= $0 }
+                    .count
+            }
+            if score > bestScore {
+                bestScore = score
+                winner = declaration
+            }
         }
-
+        if let winner = winner {
+            return region(for: winner, anchor: nil)
+        }
         return nil
     }
 
-    // MARK: - Comment & string masking
-
-    /// Returns a copy of `source` in which every character inside a comment or
-    /// string literal is replaced with a space. Newlines are preserved so line
-    /// numbers stay aligned — **including the newline of a backslash-newline
-    /// continuation inside a string**. Eating that newline shifted every line
-    /// number after it (measured: −4 from line 6432 of ChatViewModel.swift),
-    /// so a "correct" range named the wrong lines.
-    ///
-    /// Handles `//` line comments, nested `/* */` block comments, and simple
-    /// `"..."` string literals with `\` escapes.
-    private static func maskCommentsAndStrings(_ source: String) -> String {
-        var output = [Character]()
-        output.reserveCapacity(source.count)
-
-        let chars = Array(source)
-        var i = 0
-        var blockDepth = 0
-        var inString = false
-
-        while i < chars.count {
-            let c = chars[i]
-            let next: Character? = i + 1 < chars.count ? chars[i + 1] : nil
-
-            if blockDepth > 0 {
-                if c == "/", next == "*" {
-                    blockDepth += 1
-                    output.append(" "); output.append(" ")
-                    i += 2
-                } else if c == "*", next == "/" {
-                    blockDepth -= 1
-                    output.append(" "); output.append(" ")
-                    i += 2
-                } else {
-                    output.append(c == "\n" ? c : " ")
-                    i += 1
-                }
-            } else if inString {
-                if c == "\\", let escaped = next {
-                    output.append(" ")
-                    output.append(escaped == "\n" ? "\n" : " ")
-                    i += 2
-                } else if c == "\"" {
-                    inString = false
-                    output.append(" ")
-                    i += 1
-                } else {
-                    output.append(c == "\n" ? c : " ")
-                    i += 1
-                }
-            } else {
-                if c == "/", next == "/" {
-                    while i < chars.count, chars[i] != "\n" {
-                        output.append(" ")
-                        i += 1
-                    }
-                } else if c == "/", next == "*" {
-                    blockDepth = 1
-                    output.append(" "); output.append(" ")
-                    i += 2
-                } else if c == "\"" {
-                    inString = true
-                    output.append(" ")
-                    i += 1
-                } else {
-                    output.append(c)
-                    i += 1
-                }
-            }
-        }
-
-        return String(output)
-    }
-
-    /// Returns a copy of `source` in which every character inside a comment is
-    /// replaced with a space, and string literals are left **intact**.
-    /// Newlines are preserved. Event names ("queen.review.verdicts") are
-    /// evidence, not decoration (#1174) — this view exists so rule 2 can see
-    /// them while every other rule keeps working on code only.
-    private static func maskComments(_ source: String) -> String {
-        var output = [Character]()
-        output.reserveCapacity(source.count)
-
-        let chars = Array(source)
-        var i = 0
-        var blockDepth = 0
-
-        while i < chars.count {
-            let c = chars[i]
-            let next: Character? = i + 1 < chars.count ? chars[i + 1] : nil
-
-            if blockDepth > 0 {
-                if c == "/", next == "*" {
-                    blockDepth += 1
-                    output.append(" "); output.append(" ")
-                    i += 2
-                } else if c == "*", next == "/" {
-                    blockDepth -= 1
-                    output.append(" "); output.append(" ")
-                    i += 2
-                } else {
-                    output.append(c == "\n" ? c : " ")
-                    i += 1
-                }
-            } else if c == "/", next == "/" {
-                while i < chars.count, chars[i] != "\n" {
-                    output.append(" ")
-                    i += 1
-                }
-            } else if c == "/", next == "*" {
-                blockDepth = 1
-                output.append(" "); output.append(" ")
-                i += 2
-            } else {
-                output.append(c)
-                i += 1
-            }
-        }
-
-        return String(output)
-    }
-
-    // MARK: - Identifier search
-
-    /// Returns the 0-based indices of every line containing at least one
-    /// identifier as a whole word.
-    private static func allMentionLines(
-        lines: [String],
-        identifiers: [String]
-    ) -> [Int] {
-        var result = [Int]()
-        for (idx, line) in lines.enumerated() {
-            if countMatchesOnLine(line, identifiers) > 0 {
-                result.append(idx)
-            }
-        }
-        return result
-    }
-
-    /// Counts whole-word, case-sensitive matches of every identifier on a line.
-    private static func countMatchesOnLine(_ text: String, _ words: [String]) -> Int {
-        var count = 0
-        for word in words {
-            let pattern = "\\b" + NSRegularExpression.escapedPattern(for: word) + "\\b"
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
-            let fullRange = NSRange(location: 0, length: text.utf16.count)
-            count += regex.numberOfMatches(in: text, range: fullRange)
-        }
-        return count
-    }
-
-    /// Total identifier mentions within a 0-indexed line range.
-    private static func totalMentions(
-        in range: ClosedRange<Int>,
-        lines: [String],
-        identifiers: [String]
-    ) -> Int {
-        var count = 0
-        for i in range {
-            guard i >= 0, i < lines.count else { continue }
-            count += countMatchesOnLine(lines[i], identifiers)
-        }
-        return count
-    }
-
-    // MARK: - Brace tracking
-
-    /// Element *i* is the brace nesting depth at the **start** of line *i*.
-    private static func braceDepths(lines: [String]) -> [Int] {
-        var result = [Int]()
-        var depth = 0
-        for line in lines {
-            result.append(depth)
-            for ch in line {
-                if ch == "{" { depth += 1 }
-                else if ch == "}" { depth -= 1 }
-            }
-        }
-        return result
-    }
-
-    // MARK: - Enclosing declaration
-
-    /// Given a hit line and per-line depths, returns the 0-based closed range
-    /// of the enclosing declaration, or `nil` when the hit is not inside a
-    /// `func`, `init`, or `var` body.
-    private static func enclosingDeclaration(
-        hitLine: Int,
-        depths: [Int],
-        lines: [String]
-    ) -> ClosedRange<Int>? {
-        let hitDepth = depths[hitLine]
-
-        // Mention at file scope — no enclosing func/init/var.
-        if hitDepth == 0 {
-            return nil
-        }
-
-        // Walk backwards: first line whose start-depth < hitDepth is the scope
-        // entry (the line that opened the enclosing block).
-        var scopeEntry = hitLine
-        while scopeEntry > 0, depths[scopeEntry] >= hitDepth {
-            scopeEntry -= 1
-        }
-
-        // Walk further back to the declaration keyword line so multi-line
-        // signatures (`func foo()\n    -> Int\n{`) are anchored at `func`.
-        var declStart = scopeEntry
-        while declStart > 0, !containsDeclarationKeyword(lines[declStart]) {
-            declStart -= 1
-        }
-
-        // No declaration keyword on the anchor line means the enclosing scope
-        // is not a func/init/var (e.g. a type body) — skip this mention.
-        guard containsDeclarationKeyword(lines[declStart]) else {
-            return nil
-        }
-
-        // Walk forwards: last line before depth drops below hitDepth is the
-        // scope exit (the closing brace).
-        var scopeExit = hitLine
-        while scopeExit + 1 < lines.count, depths[scopeExit + 1] >= hitDepth {
-            scopeExit += 1
-        }
-
-        return declStart...scopeExit
-    }
-
-    /// True when the line contains a Swift declaration keyword as a whole word.
-    private static func containsDeclarationKeyword(_ line: String) -> Bool {
-        for kw in declarationKeywords {
-            if line.range(of: "\\b" + kw + "\\b", options: .regularExpression) != nil {
-                return true
-            }
-        }
-        return false
-    }
-
-    // MARK: - Width cap
-
-    /// If the range exceeds `maxRegionWidth`, returns a window of that width
-    /// centred on `hitLine` and clamped to the declaration bounds. Otherwise
-    /// returns the range unchanged.
-    private static func capToWidth(
-        _ range: ClosedRange<Int>,
-        around hitLine: Int
+    /// The region a won declaration contributes: the whole declaration
+    /// when it fits the cap, otherwise its first `maxRegionWidth` lines
+    /// — or, when anchored on a single occurrence, the window of
+    /// `maxRegionWidth` lines that ends at the declaration's end and
+    /// still covers the occurrence.
+    private static func region(
+        for declaration: Declaration,
+        anchor: Int?
     ) -> ClosedRange<Int> {
-        let width = range.upperBound - range.lowerBound + 1
-        guard width > maxRegionWidth else { return range }
-
-        let half = maxRegionWidth / 2
-        var start = hitLine - half
-        var end = start + maxRegionWidth - 1
-
-        if start < range.lowerBound {
-            start = range.lowerBound
-            end = start + maxRegionWidth - 1
+        let width = declaration.end - declaration.start + 1
+        if width <= maxRegionWidth {
+            return declaration.start...declaration.end
         }
-        if end > range.upperBound {
-            end = range.upperBound
-            start = max(range.lowerBound, end - maxRegionWidth + 1)
+        if let anchor = anchor {
+            // Centre on the occurrence, clamped into the declaration.
+            let centred = anchor - maxRegionWidth / 2
+            let start = max(declaration.start, min(centred, declaration.end - maxRegionWidth + 1))
+            return start...(start + maxRegionWidth - 1)
         }
-
-        return start...end
+        return declaration.start...(declaration.start + maxRegionWidth - 1)
     }
 
-    // MARK: - Rule 1: declaration name
+    // MARK: - Occurrences
 
-    /// Returns the 1-indexed range of the declaration whose name matches one
-    /// of the identifiers, or `nil` when no name matches — or when several
-    /// match and nothing distinguishes the subject from its neighbours.
-    ///
-    /// Several identifiers naming several declarations is the neighbour trap
-    /// #1176 measured: #1158 names both the guard and the guard's well-behaved
-    /// neighbour, and file order alone hands back the neighbour. The subject
-    /// is the candidate whose body contains the most mentions of the *other*
-    /// identifiers — the issue quotes the code that lives there. A tie —
-    /// including an all-zero tie — is silence.
-    private static func namedDeclaration(
-        in lines: [String],
-        depths: [Int],
-        identifiers: [String],
-        literalLines: [String]
-    ) -> ClosedRange<Int>? {
-        let idSet = Set(identifiers)
-        var candidates: [(idx: Int, name: String, extent: ClosedRange<Int>)] = []
-        for (idx, line) in lines.enumerated() {
-            guard let name = declarationName(on: line), idSet.contains(name) else { continue }
-            candidates.append((idx, name, declarationExtent(declLine: idx, depths: depths)))
-        }
-        guard let first = candidates.first else { return nil }
-
-        var chosen = first
-        if candidates.count > 1 {
-            let candidateNames = Set(candidates.map(\.name))
-            let others = identifiers.filter { !candidateNames.contains($0) }
-            var bestScore = -1
-            var tie = false
-            for candidate in candidates {
-                let score = totalMentions(
-                    in: candidate.extent, lines: literalLines, identifiers: others
-                )
-                if score > bestScore {
-                    bestScore = score
-                    chosen = candidate
-                    tie = false
-                } else if score == bestScore {
-                    tie = true
+    /// 1-based line numbers where `identifier` occurs in `lines`.
+    /// Identifiers containing a dot are matched as whole substrings
+    /// (a dotted log-event name is specific enough that nothing else
+    /// contains it); plain identifiers are matched as whole words, so
+    /// `characterCount` does not count inside
+    /// `characterCountDrillRecord`.
+    private static func occurrences(
+        of identifier: String,
+        in lines: [String]
+    ) -> [Int] {
+        let dotted = identifier.contains(".")
+        var hits: [Int] = []
+        for (index, line) in lines.enumerated() {
+            var searchRange = line.startIndex..<line.endIndex
+            while let found = line.range(of: identifier, range: searchRange) {
+                if dotted {
+                    hits.append(index + 1)
+                } else {
+                    let before = found.lowerBound > line.startIndex
+                        ? line[line.index(before: found.lowerBound)]
+                        : nil
+                    let after = found.upperBound < line.endIndex
+                        ? line[found.upperBound]
+                        : nil
+                    let beforeOk = before.map { !isWordCharacter($0) } ?? true
+                    let afterOk = after.map { !isWordCharacter($0) } ?? true
+                    if beforeOk && afterOk { hits.append(index + 1) }
+                }
+                if found.upperBound < line.endIndex {
+                    searchRange = found.upperBound..<line.endIndex
+                } else {
+                    break
                 }
             }
-            guard !tie else { return nil }
         }
-        return finished(chosen, lines: lines)
+        return hits
     }
 
-    /// The 0-based extent of the declaration starting at `declLine`:
-    /// signature lines, body, closing brace. Verbatim the walk this file has
-    /// always used, extracted so every rule shares one definition.
-    private static func declarationExtent(declLine idx: Int, depths: [Int]) -> ClosedRange<Int> {
-        let startDepth = depths[idx]
-        var end = idx
+    private static func isWordCharacter(_ c: Character) -> Bool {
+        c.isLetter || c.isNumber || c == "_"
+    }
 
-        // Walk forward through signature lines (same depth) until
-        // the body opens (depth increases), then through the body
-        // until the closing brace brings depth back down.
-        while end + 1 < depths.count, depths[end + 1] >= startDepth {
-            if depths[end + 1] > startDepth {
-                end += 1
-            } else if depths[end] > startDepth {
-                // Just left the body — stop.
-                break
+    // MARK: - Masking
+
+    /// `source` with comments blanked, and — when `maskingStrings` —
+    /// the contents of string literals blanked too. Line count and line
+    /// numbering are preserved exactly: every lexer state flushes on a
+    /// newline, including the two that span lines (block comments and
+    /// multiline strings) and the escape that ends a line
+    /// (`\` + newline inside a multiline string), which once ate four
+    /// lines of ChatViewModel.swift and shifted every number after it.
+    private static func maskedLines(
+        _ source: String,
+        maskingStrings: Bool
+    ) -> [String] {
+        enum State { case code, lineComment, blockComment, string, multilineString }
+        var lines: [String] = []
+        var current = ""
+        let chars = Array(source)
+        var i = 0
+        var state = State.code
+
+        func flush() {
+            lines.append(current)
+            current = ""
+        }
+
+        while i < chars.count {
+            let c = chars[i]
+            let next = i + 1 < chars.count ? chars[i + 1] : nil
+            switch state {
+            case .lineComment:
+                if c == "\n" { flush(); state = .code } else { current.append(" ") }
+                i += 1
+            case .blockComment:
+                if c == "*", next == "/" {
+                    current.append("  ")
+                    state = .code
+                    i += 2
+                } else {
+                    if c == "\n" { flush() } else { current.append(" ") }
+                    i += 1
+                }
+            case .string, .multilineString:
+                if c == "\\", let escaped = next {
+                    // An escape pair is two characters on the masked
+                    // view; if the pair ends a line, the line ends with
+                    // it — the newline is not swallowed.
+                    current.append(maskingStrings ? "  " : "\(c)\(escaped)")
+                    if escaped == "\n" { flush() }
+                    i += 2
+                } else if state == .string, c == "\"" {
+                    current.append(maskingStrings ? " " : c)
+                    state = .code
+                    i += 1
+                } else if state == .multilineString, c == "\"",
+                          next == "\"", i + 2 < chars.count, chars[i + 2] == "\"" {
+                    current.append(maskingStrings ? "   " : "\"\"\"")
+                    state = .code
+                    i += 3
+                } else {
+                    if c == "\n" {
+                        flush()
+                    } else {
+                        current.append(maskingStrings ? " " : c)
+                    }
+                    i += 1
+                }
+            case .code:
+                if c == "/", next == "/" {
+                    state = .lineComment
+                    i += 2
+                } else if c == "/", next == "*" {
+                    state = .blockComment
+                    i += 2
+                } else if c == "\"", next == "\"", i + 2 < chars.count, chars[i + 2] == "\"" {
+                    current.append(maskingStrings ? "   " : "\"\"\"")
+                    state = .multilineString
+                    i += 3
+                } else if c == "\"" {
+                    current.append(maskingStrings ? " " : c)
+                    state = .string
+                    i += 1
+                } else {
+                    if c == "\n" { flush() } else { current.append(c) }
+                    i += 1
+                }
+            }
+        }
+        if !current.isEmpty { lines.append(current) }
+        return lines
+    }
+
+    // MARK: - Declarations
+
+    /// A member-level declaration: its name, its span (the line the
+    /// declaration starts to the line its opening brace closes — doc
+    /// comments ahead of it and blanks after it are not part of it),
+    /// and the identifiers its signature declares as parameters.
+    private struct Declaration {
+        let name: String
+        let start: Int
+        let end: Int
+        let signature: String
+
+        var parameterNames: Set<String> {
+            var names = Set<String>()
+            let scanner = signature
+            var searchRange = scanner.startIndex..<scanner.endIndex
+            while let found = scanner.range(
+                of: #"[A-Za-z_][A-Za-z0-9_]*\s*:"#, options: .regularExpression,
+                range: searchRange
+            ) {
+                let token = scanner[found.lowerBound..<scanner.index(before: found.upperBound)]
+                    .trimmingCharacters(in: .whitespaces)
+                if !Declaration.keywords.contains(token) {
+                    names.insert(String(token))
+                }
+                if found.upperBound < scanner.endIndex {
+                    searchRange = found.upperBound..<scanner.endIndex
+                } else {
+                    break
+                }
+            }
+            return names
+        }
+
+        private static let keywords: Set<String> = [
+            "public", "private", "internal", "fileprivate", "open", "final",
+            "static", "class", "nonisolated", "override", "required",
+            "convenience", "lazy", "weak", "mutating", "isolated", "deferred",
+            "async", "for", "in", "is", "as", "to", "and", "or", "not",
+            "new", "some", "any", "each", "of", "where", "rethrows",
+            "throws", "await", "by", "func", "init", "var", "let",
+        ]
+    }
+
+    /// Declaration start patterns at member level (indent of zero or
+    /// four spaces). Bodies of functions are eight or deeper and are
+    /// never mistaken for declarations.
+    private static let funcPattern = try! NSRegularExpression(
+        pattern: #"^ {0,4}(?:@?\w+ )*?func\s+([A-Za-z_][A-Za-z0-9_]*)"#
+    )
+    private static let initPattern = try! NSRegularExpression(
+        pattern: #"^ {0,4}(?:@?\w+ )*?init\b"#
+    )
+    private static let varPattern = try! NSRegularExpression(
+        pattern: #"^ {0,4}(?:@?\w+ )*?(?:var|let)\s+([A-Za-z_][A-Za-z0-9_]*)"#
+    )
+    private static let typePattern = try! NSRegularExpression(
+        pattern: #"^ {0,4}(?:@?\w+ )*?(?:class|struct|enum|extension|actor|protocol)\s+([A-Za-z_][A-Za-z0-9_]*)"#
+    )
+
+    /// All declarations in the masked `code` lines, in file order.
+    private static func parseDeclarations(in code: [String]) -> [Declaration] {
+        var declarations: [Declaration] = []
+        for (index, line) in code.enumerated() {
+            let line = line.trimmingCharacters(in: CharacterSet(charactersIn: "\n"))
+            guard let (name, signatureLines, braceLine) = declarationStart(in: line, at: index, in: code) else {
+                continue
+            }
+            if let braceLine = braceLine {
+                let end = braceMatchingEnd(in: code, from: braceLine)
+                let signature = signatureLines
+                declarations.append(Declaration(name: name, start: index + 1, end: end, signature: signature))
             } else {
-                // Still in the signature — keep scanning for `{`.
-                // Bail out if we wander too far (no body found).
-                if end - idx > 50 { break }
-                end += 1
+                // A declaration with no body of its own (a protocol
+                // member, a forward declaration) occupies its line.
+                declarations.append(Declaration(name: name, start: index + 1, end: index + 1, signature: line))
             }
         }
-
-        // If we never entered the body (e.g. protocol stub), trim back.
-        if depths[end] <= startDepth && end > idx {
-            end = idx
-        }
-
-        return idx...end
+        return declarations
     }
 
-    /// Caps a name-match candidate and applies the #1176 self-check: the
-    /// first line of the returned range must still declare the matched name.
-    /// If capping or any other step shifted the start, the range points at
-    /// the wrong function — silence it rather than mislead.
-    private static func finished(
-        _ candidate: (idx: Int, name: String, extent: ClosedRange<Int>),
-        lines: [String]
-    ) -> ClosedRange<Int>? {
-        let capped = capToWidth(candidate.extent, around: candidate.idx)
-        guard declarationName(on: lines[capped.lowerBound]) == candidate.name else {
-            return nil
+    /// The name of the declaration starting on `line`, plus its
+    /// signature text and the line its opening brace sits on (nil when
+    /// the signature never opens a body within sight, stopping at the
+    /// next declaration).
+    private static func declarationStart(
+        in line: String,
+        at index: Int,
+        in code: [String]
+    ) -> (name: String, signature: String, braceLine: Int?)? {
+        let ns = line as NSString
+        if let m = funcPattern.firstMatch(in: line, range: NSRange(location: 0, length: ns.length)) {
+            let name = ns.substring(with: m.range(at: 1))
+            return finishSignature(name: name, from: index, in: code, firstLine: line)
         }
-        return (capped.lowerBound + 1)...(capped.upperBound + 1)
-    }
-
-    // MARK: - Rule 2: dotted name in a string literal
-
-    /// A dotted identifier (`queen.review.verdicts`) found verbatim inside a
-    /// string literal: the issue quotes a log line, and the line is emitted at
-    /// exactly one place (#1174). Bare words are deliberately NOT searched in
-    /// literals — that was measured and it misses (#1175).
-    private static func literalDeclaration(
-        in literalLines: [String],
-        codeLines: [String],
-        depths: [Int],
-        identifiers: [String]
-    ) -> ClosedRange<Int>? {
-        for identifier in identifiers where identifier.contains(".") {
-            // Whole token: not a prefix or slice of a longer dotted name.
-            let pattern = "(?<![\\w.])"
-                + NSRegularExpression.escapedPattern(for: identifier)
-                + "(?![\\w.])"
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
-            for (idx, line) in literalLines.enumerated() {
-                let nsLine = line as NSString
-                guard regex.firstMatch(
-                    in: line,
-                    range: NSRange(location: 0, length: nsLine.length)
-                ) != nil else { continue }
-                guard let enclosing = enclosingDeclaration(
-                    hitLine: idx, depths: depths, lines: codeLines
-                ) else { continue }
-                let capped = capToWidth(enclosing, around: idx)
-                return (capped.lowerBound + 1)...(capped.upperBound + 1)
+        if initPattern.firstMatch(in: line, range: NSRange(location: 0, length: ns.length)) != nil {
+            return finishSignature(name: "init", from: index, in: code, firstLine: line)
+        }
+        if let m = varPattern.firstMatch(in: line, range: NSRange(location: 0, length: ns.length)) {
+            let name = ns.substring(with: m.range(at: 1))
+            // A property opens a body only when a brace is on its own
+            // line (computed property, property observer, closure
+            // initializer). Otherwise it is its own single line — a
+            // stored property has no span to wait for, and waiting for
+            // the next brace in the file once swallowed every
+            // declaration after one.
+            if let braceOffset = line.firstIndex(of: "{") {
+                let sig = String(line[line.startIndex..<braceOffset])
+                return (name, sig, index)
             }
+            return (name, line, nil)
+        }
+        if let m = typePattern.firstMatch(in: line, range: NSRange(location: 0, length: ns.length)) {
+            let name = ns.substring(with: m.range(at: 1))
+            return finishSignature(name: name, from: index, in: code, firstLine: line)
         }
         return nil
     }
 
-    // MARK: - Rule 3: parameter label in a signature
-
-    /// A parameter label in a function **signature** — not at a call site.
-    /// The issue names the branch (`startAfterChoosing`); the branch is a
-    /// parameter of the function that owns it (#1174). Signatures are the
-    /// same-depth continuation lines of a `func`/`init` declaration, so call
-    /// sites — which sit inside some other body — can never match.
-    ///
-    /// A label is a **clean pointer** only when it appears in exactly one
-    /// signature: `ownedPaths:` names four functions in ChatViewModel.swift
-    /// and cannot point anywhere, while `startAfterChoosing:` names one —
-    /// the one that owns the branch the issue is about. Two clean pointers
-    /// to different functions is ambiguity, and ambiguity is silence.
-    private static func parameterDeclaration(
-        in lines: [String],
-        depths: [Int],
-        identifiers: [String]
-    ) -> ClosedRange<Int>? {
-        var labelRegexes: [(label: String, regex: NSRegularExpression)] = []
-        for identifier in identifiers {
-            let pattern = "\\b"
-                + NSRegularExpression.escapedPattern(for: identifier)
-                + "\\s*:"
-            if let regex = try? NSRegularExpression(pattern: pattern) {
-                labelRegexes.append((identifier, regex))
-            }
+    /// A func/init/type declaration whose signature may span lines:
+    /// collect lines until the one that opens the body, stopping early
+    /// if another declaration starts (the signature is malformed, not
+    /// long).
+    private static func finishSignature(
+        name: String,
+        from index: Int,
+        in code: [String],
+        firstLine: String
+    ) -> (name: String, signature: String, braceLine: Int?)? {
+        if let braceOffset = firstLine.firstIndex(of: "{") {
+            let sig = String(firstLine[firstLine.startIndex..<braceOffset])
+            return (name, sig, index)
         }
-        guard !labelRegexes.isEmpty else { return nil }
-
-        // Every signature span, once: the declaration line plus its
-        // same-depth continuation (a multi-line parameter list).
-        var signatures: [(idx: Int, text: String)] = []
-        for (idx, line) in lines.enumerated() {
-            guard declarationName(on: line) != nil else { continue }
-            var signatureEnd = idx
-            while signatureEnd + 1 < lines.count,
-                  depths[signatureEnd + 1] == depths[idx],
-                  declarationName(on: lines[signatureEnd + 1]) == nil,
-                  signatureEnd + 1 - idx <= 8
-            {
-                signatureEnd += 1
+        var signature = firstLine
+        var j = index + 1
+        let limit = min(index + 60, code.count - 1)
+        while j <= limit {
+            let next = code[j].trimmingCharacters(in: CharacterSet(charactersIn: "\n"))
+            if isDeclarationStartLine(next) { return (name, signature, nil) }
+            signature += "\n" + next
+            if let braceOffset = next.firstIndex(of: "{") {
+                let trimmed = String(next[next.startIndex..<braceOffset])
+                return (name, signature + "\n" + trimmed, j)
             }
-            signatures.append((idx, lines[idx...signatureEnd].joined(separator: "\n")))
+            if next.contains(";") { return (name, signature, nil) }
+            j += 1
         }
-
-        var clean: [Int: String] = [:]
-        for entry in labelRegexes {
-            var found: [Int] = []
-            for signature in signatures {
-                let ns = signature.text as NSString
-                if entry.regex.firstMatch(
-                    in: signature.text,
-                    range: NSRange(location: 0, length: ns.length)
-                ) != nil {
-                    found.append(signature.idx)
-                }
-            }
-            // Exactly one signature carries this label → the label points.
-            if found.count == 1 {
-                clean[found[0]] = entry.label
-            }
-        }
-        let targets = Set(clean.keys)
-        guard targets.count == 1, let idx = targets.first else { return nil }
-        let capped = capToWidth(declarationExtent(declLine: idx, depths: depths), around: idx)
-        return (capped.lowerBound + 1)...(capped.upperBound + 1)
+        return (name, signature, nil)
     }
 
-    // MARK: - Rule 4: identifier mentioned exactly once
-
-    /// An identifier mentioned exactly once in the whole file — strings
-    /// included, because a quoted log line is emitted at one place. This is
-    /// the only mention-based evidence that survived five measurements
-    /// (#1173, #1175); counting many mentions is what kept pointing at big
-    /// early functions. Several singles must agree on the declaration;
-    /// disagreement is silence.
-    private static func uniqueMentionDeclaration(
-        in literalLines: [String],
-        codeLines: [String],
-        depths: [Int],
-        identifiers: [String]
-    ) -> ClosedRange<Int>? {
-        var singles: [(identifier: String, line: Int)] = []
-        for identifier in identifiers {
-            let hits = allMentionLines(lines: literalLines, identifiers: [identifier])
-            if hits.count == 1 {
-                singles.append((identifier, hits[0]))
-            }
-        }
-        guard !singles.isEmpty else { return nil }
-
-        var anchored: [(line: Int, extent: ClosedRange<Int>)] = []
-        for single in singles {
-            guard let enclosing = enclosingDeclaration(
-                hitLine: single.line, depths: depths, lines: codeLines
-            ) else { continue }
-            anchored.append((single.line, enclosing))
-        }
-        let extents = Set(anchored.map { [$0.extent.lowerBound, $0.extent.upperBound] })
-        guard extents.count == 1, let first = anchored.first else { return nil }
-
-        let hit = anchored.map(\.line).min() ?? first.line
-        let capped = capToWidth(first.extent, around: hit)
-        return (capped.lowerBound + 1)...(capped.upperBound + 1)
+    private static func isDeclarationStartLine(_ line: String) -> Bool {
+        let ns = line as NSString
+        let full = NSRange(location: 0, length: ns.length)
+        return funcPattern.firstMatch(in: line, range: full) != nil
+            || initPattern.firstMatch(in: line, range: full) != nil
+            || varPattern.firstMatch(in: line, range: full) != nil
+            || typePattern.firstMatch(in: line, range: full) != nil
     }
 
-    // MARK: - Name extraction
-
-    /// Extracts the name token from a declaration line.
-    /// Only `func` and `init` names qualify — `var`/`let` property names
-    /// (state, task, worker, …) are too common to win on name alone.
-    /// For `func foo()` → `foo`, for `init` → `init`.
-    private static func declarationName(on line: String) -> String? {
-        let nsLine = line as NSString
-        let fullRange = NSRange(location: 0, length: nsLine.length)
-        if let regex = try? NSRegularExpression(pattern: "\\bfunc\\s+([a-zA-Z_]\\w*)"),
-           let m = regex.firstMatch(in: line, range: fullRange),
-           m.numberOfRanges > 1
-        {
-            return nsLine.substring(with: m.range(at: 1))
+    /// The line where the brace opened on `braceIndex` closes, counting
+    /// braces on the string-masked view so that braces inside literals
+    /// cannot unbalance the count.
+    private static func braceMatchingEnd(in code: [String], from braceIndex: Int) -> Int {
+        let first = code[braceIndex].trimmingCharacters(in: CharacterSet(charactersIn: "\n"))
+        var opened = first.filter { $0 == "{" }.count - first.filter { $0 == "}" }.count
+        if opened <= 0 { return braceIndex + 1 }
+        var line = braceIndex + 1
+        while line < code.count {
+            let text = code[line].trimmingCharacters(in: CharacterSet(charactersIn: "\n"))
+            opened += text.filter { $0 == "{" }.count - text.filter { $0 == "}" }.count
+            if opened <= 0 { return line + 1 }
+            line += 1
         }
-        if line.range(of: "\\binit\\b", options: .regularExpression) != nil {
-            return "init"
-        }
-        return nil
+        return code.count
     }
 
-    // MARK: - Замер (#1173)
+    // MARK: - The measurement contract
 
-    /// One case of the #1173 measurement: the identifiers an issue body
-    /// yields through `ChatViewModel.identifiers(from:)`, recorded from the
-    /// live bodies on 2026-08-19, and what the narrowing must answer.
+    /// One replayed measurement: the identifiers an issue's body really
+    /// yields, and what the narrowing is contracted to answer.
     struct MeasurementCase {
         let issue: String
         let identifiers: [String]
         let expected: Expected
 
-        enum Expected: Equatable {
-            /// The range must lie inside this function's declaration.
+        enum Expected {
             case declaration(String)
-            /// No range at all — a wrong range is worse than none (#1175).
             case silence
         }
     }
 
-    /// The замер of #1173, repeated and recorded 2026-08-19 — bodies of the
-    /// four issues fetched live, identifiers extracted exactly as
-    /// `ChatViewModel.identifiers(from:)` does, `region` run against
-    /// `rings/SR-02/ChatViewModel.swift` (10 062 lines at recording; the
-    /// boundary file moves under concurrent work, so the functions are the
-    /// contract and the line numbers are the snapshot):
-    ///
-    /// | case | chose, before | chose, after | the human named |
-    /// |---|---|---|---|
-    /// | #1156 | silence | 4968-5101 `handleWorkerFinished` ✓ | `handleWorkerFinished` |
-    /// | #1158 | 6263-6439 `acceptanceBlockReasonDistinguishingEmptyAnswers` ✗ | 6644-6862 `autoAcceptIfUnambiguous` ✓ | `autoAcceptIfUnambiguous` |
-    /// | #1165 | silence | silence ✗ | `requestReviewerVerdicts` |
-    /// | #1166 | silence | 7606-7905 `chooseNextOpenIssue` ✓ | ветка `startAfterChoosing` |
-    ///
-    /// **Before 0/4, after 3/4.** (The historic 1-in-4 of the issue title was
-    /// measured against delegation text the human had written by hand; with
-    /// today's bodies the old code scores 0/4 — #1158 confidently named the
-    /// guard's well-behaved neighbour, the neighbour trap of #1176.)
-    ///
-    /// The three hits, and why each rule fires:
-    ///
-    /// - #1156 — rule 4: `characterCount` appears exactly once in the file,
-    ///   as the quoted log line `"queen.review.characterCount"` inside
-    ///   `handleWorkerFinished` (4922-…).
-    /// - #1158 — rule 1: both the guard and its neighbour are named, and the
-    ///   corroboration is measured, not assumed — the neighbour's body
-    ///   contains 0 mentions of the other identifiers,
-    ///   `autoAcceptIfUnambiguous`'s body contains 4 (`ProcessInfo` and
-    ///   `processInfo` on the quoted guard line, `awaitingReview` twice).
-    /// - #1166 — rule 3: `startAfterChoosing:` is a parameter of
-    ///   `chooseNextOpenIssue`'s signature and of no other; `ownedPaths:`
-    ///   labels four signatures and is discarded as a common label.
-    ///
-    /// #1165 stays silent **by the caller's hand, not this file's**: its body
-    /// names one clue, `queen.review.verdicts` — the log line emitted inside
-    /// `requestReviewerVerdicts` — but the identifier filter in
-    /// `ChatViewModel.identifiers(from:)` (#1178) rejects tokens with dots, so
-    /// the clue never reaches `region`. Handed through directly, rule 2 lands
-    /// 5941-6240 inside `requestReviewerVerdicts` — the fourth case below
-    /// proves it. Letting dotted event names through that filter is work in
-    /// `rings/SR-02/ChatViewModel.swift`, outside this task's boundary.
-    ///
-    /// #1117 is kept as a witness for the name rule: 5865-6164 inside
-    /// `requestReviewerVerdicts`.
-    ///
-    /// Replay any time — the check criterion 4 stands on:
-    ///
-    ///     swiftc -O <driver>.swift rings/SR-00/QueenLocalisation.swift -o probe
-    ///     probe <chatvm.swift> <bodies-dir>   # or call replayMeasurement(in:)
-    ///
-    /// With the name preference (rule 1) removed, the replay goes red on
-    /// #1158 and #1117 — nothing else can find a function the issue names —
-    /// and the live замер falls to 2/4. Proven from both sides 2026-08-19.
     static func measurementCases() -> [MeasurementCase] {
         [
             MeasurementCase(
@@ -756,40 +756,40 @@ enum QueenLocalisation {
         ]
     }
 
-    /// Replays the замер against a source file (the boundary file the issues
-    /// talk about — for these cases, `rings/SR-02/ChatViewModel.swift`) and
-    /// returns one verdict line per case: "ok …" or "FAIL …". This is the
-    /// check the fourth criterion of #1173 stands on — remove the name
-    /// preference (rule 1) and the #1158/#1117 lines go red, because nothing
-    /// else can find a function the issue names. Pure; no I/O.
+    /// Replay every measurement case against `source` and report, one
+    /// line per case, whether the narrowing lands inside the
+    /// declaration a human named. This is the #1173 замер: run it
+    /// against the real ChatViewModel.swift, record the output, and
+    /// expect at least three of the four issues inside their targets.
+    ///
+    /// The replay is also the guard on the name preference: remove the
+    /// preference and #1158 and #1117 — the two cases whose only
+    /// evidence is a name the spec writes — fall out of their targets
+    /// and the report goes red.
     static func replayMeasurement(in source: String) -> [String] {
-        let cleaned = source
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .replacingOccurrences(of: "\r", with: "\n")
-        let codeLines = maskCommentsAndStrings(cleaned).components(separatedBy: "\n")
-        let depths = braceDepths(lines: codeLines)
-
-        return measurementCases().map { measure -> String in
-            let range = region(in: source, mentioning: measure.identifiers)
-            switch (range, measure.expected) {
+        let code = maskedLines(source, maskingStrings: true)
+        let declarations = parseDeclarations(in: code)
+        func targetSpan(of name: String) -> ClosedRange<Int>? {
+            declarations.first { $0.name == name }.map { $0.start...$0.end }
+        }
+        return measurementCases().map { measurement in
+            let answer = region(in: source, mentioning: measurement.identifiers)
+            switch (answer, measurement.expected) {
             case (nil, .silence):
-                return "ok    \(measure.issue): silence"
+                return "ok    \(measurement.issue): silence"
             case (nil, .declaration(let name)):
-                return "FAIL  \(measure.issue): silence, expected inside \(name)"
-            case (let r?, .silence):
-                return "FAIL  \(measure.issue): \(r.lowerBound)-\(r.upperBound), expected silence"
-            case (let r?, .declaration(let name)):
-                guard let declIdx = codeLines.firstIndex(where: {
-                    declarationName(on: $0) == name
-                }) else {
-                    return "FAIL  \(measure.issue): this source declares no \(name)"
+                return "FAIL  \(measurement.issue): silence, expected inside \(name)"
+            case (.some(let range), .declaration(let name)):
+                if let target = targetSpan(of: name),
+                   target.lowerBound <= range.lowerBound,
+                   range.upperBound <= target.upperBound {
+                    return "ok    \(measurement.issue): \(range.lowerBound)-\(range.upperBound) inside \(name)"
                 }
-                let extent = declarationExtent(declLine: declIdx, depths: depths)
-                let expected = (extent.lowerBound + 1)...(extent.upperBound + 1)
-                if expected.contains(r.lowerBound), r.upperBound <= expected.upperBound {
-                    return "ok    \(measure.issue): \(r.lowerBound)-\(r.upperBound) inside \(name)"
-                }
-                return "FAIL  \(measure.issue): \(r.lowerBound)-\(r.upperBound) not inside \(name) (\(expected.lowerBound)-\(expected.upperBound))"
+                let span = targetSpan(of: name)
+                    .map { "\($0.lowerBound)-\($0.upperBound)" } ?? "not found"
+                return "FAIL  \(measurement.issue): \(range.lowerBound)-\(range.upperBound) not inside \(name) (\(span))"
+            case (.some(let range), .silence):
+                return "FAIL  \(measurement.issue): \(range.lowerBound)-\(range.upperBound), expected silence"
             }
         }
     }
