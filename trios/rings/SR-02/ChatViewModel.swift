@@ -4864,10 +4864,14 @@ final class ChatViewModel: ObservableObject {
     ///    `recordVerdict` plus the boundary seal — the same
     ///    `autoAcceptIfUnambiguous` call must reach `.accepted` within this
     ///    run, not on some later sweep.
-    /// 3. **The reopen (#1133 criterion 2).** A verdict that arrives after
-    ///    the decision must revisit it: recording `unmet` on the accepted
-    ///    task moves it back to `.awaitingReview` through the same
-    ///    `recordCriterionVerdict` a hand `/verify` uses.
+    /// 3. **The reopen (#1133 criterion 2), at BOTH doors.** A verdict
+    ///    that arrives after the decision must revisit it, whichever door
+    ///    it came through: the hand `/verify` door and the reviewer's own
+    ///    recording door. The first pass covered only the hand door — the
+    ///    reviewer's verdicts (the ones the issue's log shows arriving
+    ///    after the decision) were recorded straight into the registry and
+    ///    ignored. Arm 4 drives the reviewer door; arm 3b then proves the
+    ///    reconsidered task is decided again rather than parked.
     ///
     /// The plant carries a pull-request number so the proposal step refuses
     /// before any push, and the task is retired to `.rejected` at the end so
@@ -4974,23 +4978,90 @@ final class ChatViewModel: ObservableObject {
             "every criterion met -> state " + (afterAccept?.rawValue ?? "nil")
         )
 
-        // ---- Arm 3: the reopen (#1133 criterion 2) -------------------------
+        // ---- Arm 3: the reopen, hand door (#1133 criterion 2) -------------
+        var afterReopen: DelegatedTaskState?
         if afterAccept == .accepted {
             await recordCriterionVerdict(
                 issue: issue, criterion: criteria[0], verdict: .unmet
             )
-            let afterReopen = state()
+            afterReopen = state()
             arm(
                 "reopened",
                 ok: afterReopen == .awaitingReview,
-                "late unmet verdict on an accepted task -> state "
+                "late unmet verdict on an accepted task, /verify door -> state "
                     + (afterReopen?.rawValue ?? "nil")
             )
         } else {
+            afterReopen = nil
             arm(
                 "reopened",
                 ok: false,
                 "not testable: arm 2 did not reach .accepted"
+            )
+        }
+
+        // ---- Arm 3b: the reconsidered task is decided again, not parked ----
+        // "Пересматривается" has to end in a decision. A reopen that parked
+        // the task forever would satisfy a state assertion and fail the
+        // criterion: record the corrective evidence the reviewer way, and
+        // the same acceptance path must close it again in this same run
+        // (#1133 criteria 2 and 3 together).
+        if afterReopen == .awaitingReview {
+            _ = delegationRegistry.recordVerdict(
+                taskID: planted.id, criterion: criteria[0], verdict: .met
+            )
+            if let current = delegationRegistry.tasks.first(where: { $0.id == planted.id }) {
+                await sealVerdictsWithBoundaryState(current)
+            }
+            await autoAcceptIfUnambiguous(taskID: planted.id)
+            let reAccepted = state()
+            arm(
+                "reaccepted_after_reopen",
+                ok: reAccepted == .accepted,
+                "corrective verdicts recorded after the reopen -> state "
+                    + (reAccepted?.rawValue ?? "nil")
+            )
+        } else {
+            arm(
+                "reaccepted_after_reopen",
+                ok: false,
+                "not testable: arm 3 did not reopen the task"
+            )
+        }
+
+        // ---- Arm 4: the reopen, reviewer door (#1133 criterion 2) ---------
+        // The exact scenario the issue names: the REVIEWER's verdicts
+        // arriving after the acceptance decision. The first pass covered
+        // only the hand /verify door; the reviewer's path recorded straight
+        // into the registry and ignored the decision it contradicted. This
+        // arm drives the reviewer door's own post-recording sequence —
+        // registry write, boundary seal, then the same reconsideration call
+        // `requestReviewerVerdicts` makes after its recording — with the
+        // verdict dict supplied directly, because the door's model call
+        // cannot run inside the harness.
+        let beforeReviewerDoor = state()
+        if beforeReviewerDoor == .accepted {
+            _ = delegationRegistry.recordVerdict(
+                taskID: planted.id, criterion: criteria[0], verdict: .unmet
+            )
+            if let current = delegationRegistry.tasks.first(where: { $0.id == planted.id }) {
+                await sealVerdictsWithBoundaryState(current)
+                await reopenIfLateVerdictsContradictAcceptance(
+                    current, door: "reviewer"
+                )
+            }
+            let afterReviewerDoor = state()
+            arm(
+                "reopened_reviewer_door",
+                ok: afterReviewerDoor == .awaitingReview,
+                "late unmet verdict on an accepted task, reviewer door -> state "
+                    + (afterReviewerDoor?.rawValue ?? "nil")
+            )
+        } else {
+            arm(
+                "reopened_reviewer_door",
+                ok: false,
+                "not testable: arm 3b did not reach .accepted"
             )
         }
 
@@ -7894,6 +7965,20 @@ final class ChatViewModel: ObservableObject {
         // in when the verdicts were derived.
         if recorded > 0 {
             await sealVerdictsWithBoundaryState(task)
+            // #1133 criterion 2, the reviewer's own door. The verdicts this
+            // request just recorded can be the ones that arrived after an
+            // acceptance decision — the exact ordering the issue names. Until
+            // this call existed, recording on this path was silent: the
+            // verdicts landed in the registry and nothing revisited the
+            // decision, because the reopen lived only on the hand /verify
+            // door. Re-read the task from the registry — `task` was captured
+            // before this request's verdicts were recorded, and the state to
+            // reconsider is the one the recording left behind.
+            if let now = registry.tasks.first(where: { $0.id == task.id }) {
+                await reopenIfLateVerdictsContradictAcceptance(
+                    now, door: "reviewer"
+                )
+            }
         }
 
         // Criteria the reviewer answered — whether from the retry or the
@@ -8546,8 +8631,10 @@ final class ChatViewModel: ObservableObject {
                     // The proof is the entry ticket (#1128 criterion 4):
                     // without the watchdog having passed above, this call
                     // does not compile.
-                    guard transitionToAccepted(
-                        taskID: task.id, in: registry, watchdogProof: watchdogProof
+                    guard await transitionToAccepted(
+                        taskID: task.id, in: registry, watchdogProof: watchdogProof,
+                        verdictTreeState: verdictTreeState,
+                        currentTreeState: currentTreeState
                     ) else {
                         TriosLogBus.shared.info(
                             .queen, "queen.auto_accept.transition_failed",
@@ -8651,8 +8738,10 @@ final class ChatViewModel: ObservableObject {
 
         // The proof is the entry ticket (#1128 criterion 4): without the
         // watchdog having passed above, this call does not compile.
-        guard transitionToAccepted(
-            taskID: task.id, in: registry, watchdogProof: watchdogProof
+        guard await transitionToAccepted(
+            taskID: task.id, in: registry, watchdogProof: watchdogProof,
+            verdictTreeState: verdictTreeState,
+            currentTreeState: currentTreeState
         ) else {
             TriosLogBus.shared.info(
                 .queen, "queen.auto_accept.transition_failed",
@@ -11066,12 +11155,49 @@ final class ChatViewModel: ObservableObject {
     /// compilation (criterion 4). Every acceptance in this file goes
     /// through here.
     @discardableResult
+    /// The one place a task becomes `.accepted` (#1133 criterion 1).
+    ///
+    /// Every caller above refuses an incomplete verdict basis with a richer
+    /// notice before reaching this; the check is repeated HERE so a caller
+    /// that forgets — or one added later — cannot decide on an unfinished
+    /// verdict request anyway. Acceptance IS this transition, so the rule
+    /// "no decision while the verdict request is unfinished" lives at the
+    /// decision point, not at each caller: an unfinished request means
+    /// criteria with no verdict, and `acceptanceBlockReasonDistinguishing-
+    /// EmptyAnswers` refuses those by construction. The verdict states are
+    /// parameters, not computed here, for the same reason the watchdog
+    /// proof is: the caller must have assembled them to call at all, and a
+    /// removed assembly breaks the compile rather than the runtime.
     private func transitionToAccepted(
         taskID: UUID,
         in registry: QueenDelegationRegistry,
-        watchdogProof: CombinedBuildProof
-    ) -> Bool {
-        registry.transition(taskID: taskID, to: .accepted)
+        watchdogProof: CombinedBuildProof,
+        verdictTreeState: String?,
+        currentTreeState: String
+    ) async -> Bool {
+        guard let task = registry.tasks.first(where: { $0.id == taskID }) else {
+            return false
+        }
+        if let reason = acceptanceBlockReasonDistinguishingEmptyAnswers(
+            for: task,
+            verdictTreeState: verdictTreeState,
+            currentTreeState: currentTreeState
+        ) {
+            // Error, not info: this firing means a caller reached the
+            // decision point with an incomplete verdict basis, and the
+            // journal must make that visible rather than absorb it.
+            TriosLogBus.shared.error(
+                .queen, "queen.accept.choke_point_blocked",
+                "Acceptance refused at the transition: \(reason)",
+                [
+                    "issue": task.issue.slug,
+                    "criteria": String(task.acceptanceCriteria.count),
+                    "verdicts": String(task.criterionVerdicts.count)
+                ]
+            )
+            return false
+        }
+        return registry.transition(taskID: taskID, to: .accepted)
     }
 
     /// Accepts or returns a worker's result.
@@ -11217,8 +11343,10 @@ final class ChatViewModel: ObservableObject {
             }
             // The proof is the entry ticket (#1128 criterion 4): without
             // the watchdog having passed above, this call does not compile.
-            guard transitionToAccepted(
-                taskID: task.id, in: registry, watchdogProof: watchdogProof
+            guard await transitionToAccepted(
+                taskID: task.id, in: registry, watchdogProof: watchdogProof,
+                verdictTreeState: verdictTreeState,
+                currentTreeState: currentTreeState
             ) else {
                 await postQueenNotice(SystemNoticeClassifier.failureMarker + (registry.lastError ?? "Could not accept \(issue.slug)."))
                 return
@@ -11850,42 +11978,66 @@ final class ChatViewModel: ObservableObject {
         )
 
         // If verdicts arrive after a decision, the decision is reconsidered,
-        // not ignored (#1133). A criterion that was unchecked when acceptance
-        // happened, or one whose verdict now contradicts the basis for it,
-        // reopens the task so the new evidence can change the outcome. This is
-        // the mirror of the gate in autoAcceptIfUnambiguous: that gate stops a
-        // premature decision; this one undoes one the evidence has overtaken.
-        if updated.state == .accepted, !updated.acceptanceCriteria.isEmpty {
-            let reopenVerdictTreeState = verdictTreeStates[updated.id]
-                ?? updated.treeStateFingerprint
-            let reopenBoundaryState = await QueenBranchCommitter.fingerprintBoundary(
-                ownedPaths: updated.ownedPaths
-            )
-            let reopenCurrentState = reopenBoundaryState ?? ""
-            if let reason = acceptanceBlockReasonDistinguishingEmptyAnswers(
-                for: updated,
-                verdictTreeState: reopenVerdictTreeState,
-                currentTreeState: reopenCurrentState
-            ) {
-                if registry.transition(taskID: updated.id, to: .awaitingReview) {
-                    TriosLogBus.shared.info(
-                        .queen, "queen.accept.reopened",
-                        "Reopened after a late verdict changed the outcome",
-                        [
-                            "issue": issue.slug,
-                            "reason": reason,
-                            "criterion": criterion,
-                            "verdict": verdict.rawValue
-                        ]
-                    )
-                    await postQueenNotice(
-                        SystemNoticeClassifier.warningMarker
-                            + "Reopened \(issue.slug). A verdict recorded after "
-                            + "acceptance changed the outcome: \(reason)"
-                    )
-                }
-            }
+        // not ignored (#1133). The hand `/verify` door and the reviewer's
+        // own recording door run the SAME reconsideration — extracted into
+        // `reopenIfLateVerdictsContradictAcceptance` so a verdict arriving
+        // late through either one revisits the acceptance it contradicts.
+        await reopenIfLateVerdictsContradictAcceptance(
+            updated, door: "/verify", criterion: criterion, verdict: verdict
+        )
+    }
+
+    /// #1133 criterion 2, one implementation for every door: reconsider an
+    /// acceptance that verdicts arriving after the decision contradict.
+    ///
+    /// The first pass put this logic only on the hand `/verify` path, and
+    /// the reviewer's own path — `requestReviewerVerdicts` — recorded its
+    /// verdicts straight into the registry with no reconsideration. That is
+    /// the exact scenario the issue names: the reviewer's verdicts arriving
+    /// after the acceptance decision, and nothing revisiting it. Both doors
+    /// now call this once their verdicts are recorded; a verdict that
+    /// contradicts the acceptance moves the task back to `.awaitingReview`
+    /// (the only legal reverse of an acceptance) so the decision is made
+    /// again on the new evidence. This is the mirror of the gate in
+    /// `transitionToAccepted`: that gate stops a premature decision; this
+    /// one undoes a decision the evidence has overtaken.
+    private func reopenIfLateVerdictsContradictAcceptance(
+        _ task: DelegatedTask,
+        door: String,
+        criterion: String? = nil,
+        verdict: QueenCriterionVerdict? = nil
+    ) async {
+        guard task.state == .accepted, !task.acceptanceCriteria.isEmpty else { return }
+        let reopenVerdictTreeState = verdictTreeStates[task.id]
+            ?? task.treeStateFingerprint
+        let reopenBoundaryState = await QueenBranchCommitter.fingerprintBoundary(
+            ownedPaths: task.ownedPaths
+        )
+        let reopenCurrentState = reopenBoundaryState ?? ""
+        guard let reason = acceptanceBlockReasonDistinguishingEmptyAnswers(
+            for: task,
+            verdictTreeState: reopenVerdictTreeState,
+            currentTreeState: reopenCurrentState
+        ) else { return }
+        guard delegationRegistry.transition(taskID: task.id, to: .awaitingReview) else {
+            return
         }
+        TriosLogBus.shared.info(
+            .queen, "queen.accept.reopened",
+            "Reopened after a late verdict changed the outcome",
+            [
+                "issue": task.issue.slug,
+                "door": door,
+                "reason": reason,
+                "criterion": criterion ?? "-",
+                "verdict": verdict?.rawValue ?? "-"
+            ]
+        )
+        await postQueenNotice(
+            SystemNoticeClassifier.warningMarker
+                + "Reopened \(task.issue.slug). A verdict recorded after "
+                + "acceptance changed the outcome (arrived via \(door)): \(reason)"
+        )
     }
 
     /// Records that the user agreed to a piece of work.
