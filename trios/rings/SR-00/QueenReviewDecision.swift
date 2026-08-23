@@ -113,6 +113,14 @@ enum QueenReviewDecision {
     /// the parking defect is back - which is criterion 4 of #1286, stated here
     /// so the parsing cannot be deleted as decoration without the reason
     /// going with it.
+    ///
+    /// Criterion 4 asks for more than a reason in a comment: it asks for a
+    /// check that *breaks* when the parsing is removed. `decide` therefore
+    /// self-verifies before returning - the same shape as the adversary-marker
+    /// guard in `QueenReviewVerdictRequest.buildBrief` (#1127), which is the
+    /// precedent this follows. The verification is driven: replacing
+    /// `isNegativeCriterion`'s body with `false` makes both disagreement cases
+    /// below fire, in both directions.
     static func decide(
         verdicts: [(criterion: String, met: Bool)],
         totalCriteria: Int,
@@ -131,14 +139,38 @@ enum QueenReviewDecision {
             )
         }
 
-        let unmet = verdicts
-            .filter { verdict in
-                // #1286: a marked criterion is unfulfilled exactly when the
-                // reviewer found it met, and fulfilled when it was not. Every
-                // ordinary criterion is unchanged.
-                isNegativeCriterion(verdict.criterion) ? verdict.met : !verdict.met
-            }
-            .map(\.criterion)
+        let unmet = unmetCriteria(verdicts)
+
+        // #1286 criterion 4: the check that breaks if the marker parsing is
+        // removed. A criterion carrying the marker is re-detected here
+        // independently and its treatment is compared against what the parse
+        // produced; on disagreement the decision refuses to be silent - it
+        // escalates naming the breakage, because a task parked over a
+        // criterion that is met by staying unmet must not look like ordinary
+        // business. See `markerParseDisagreement` for why the detection here
+        // is a copy rather than a call.
+        if let broken = markerParseDisagreement(verdicts: verdicts, unmet: unmet) {
+            TriosLogBus.shared.warn(
+                .queen,
+                "queen.assertion.negative_marker_parse_missing",
+                "A criterion carrying \(negativeCriterionMarker) was read as an "
+                    + "ordinary criterion - the marker parsing in QueenReviewDecision "
+                    + "is gone (#1286). Judged \(broken.met ? "met" : "unmet"), which "
+                    + "resolves \(broken.met ? "unfulfilled" : "fulfilled") only when "
+                    + "the marker is honoured. Criterion: "
+                    + String(broken.criterion.prefix(80)),
+                ["criterion": String(broken.criterion.prefix(120))]
+            )
+            return .escalate(
+                reason: "the criterion '"
+                    + String(broken.criterion.prefix(80))
+                    + "' carries \(negativeCriterionMarker) but was read as an ordinary "
+                    + "criterion: with the parsing intact it resolves the other way "
+                    + "round, so the parse is gone and the decision cannot be trusted "
+                    + "to keep this task out of the review queue on its own (#1286)"
+            )
+        }
+
         if unmet.isEmpty {
             guard (committedFiles ?? 0) > 0 else {
                 return .escalate(
@@ -158,6 +190,58 @@ enum QueenReviewDecision {
             )
         }
         return .sendBack(unmet: unmet)
+    }
+
+    /// The unmet criteria, with the negative marker honoured (#1286).
+    ///
+    /// A marked criterion is unfulfilled exactly when the reviewer found it
+    /// met; every ordinary criterion is unchanged. Extracted from `decide` so
+    /// the self-verification can compare the parse's output against an
+    /// independent expectation without re-running the whole decision.
+    static func unmetCriteria(
+        _ verdicts: [(criterion: String, met: Bool)]
+    ) -> [String] {
+        verdicts
+            .filter { verdict in
+                isNegativeCriterion(verdict.criterion) ? verdict.met : !verdict.met
+            }
+            .map(\.criterion)
+    }
+
+    /// The #1286 criterion 4 check: the first verdict whose treatment
+    /// disagrees with what its marker demands, or nil.
+    ///
+    /// This re-derives the marker detection locally - trim, lowercase,
+    /// prefix - instead of calling `isNegativeCriterion`, and the duplication
+    /// is the mechanism, not an oversight. A check that shared the production
+    /// parse would be removed with it: delete or break `isNegativeCriterion`
+    /// and the guard's own detection goes too, which is exactly the silent
+    /// death criterion 4 exists to prevent. The copies are meant to disagree
+    /// under mutation; unifying them would make the guard decorative. (The
+    /// mirrored-copy lesson cuts the other way only for copies that must
+    /// agree.)
+    ///
+    /// The expectation it asserts: a criterion carrying the marker is
+    /// unfulfilled exactly when it was judged met. Driven in both directions:
+    /// with `isNegativeCriterion` neutered to `false`, a marked criterion
+    /// judged unmet lands in `unmet` (read as ordinary - disagreement) and a
+    /// marked criterion judged met stays out of it (vacuous pass -
+    /// disagreement); with the parse intact, every case agrees and this
+    /// returns nil.
+    private static func markerParseDisagreement(
+        verdicts: [(criterion: String, met: Bool)],
+        unmet: [String]
+    ) -> (criterion: String, met: Bool)? {
+        for verdict in verdicts
+        where verdict.criterion
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .hasPrefix(negativeCriterionMarker) {
+            if verdict.met != unmet.contains(verdict.criterion) {
+                return verdict
+            }
+        }
+        return nil
     }
 
     /// What the returned worker is told.
