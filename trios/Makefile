@@ -2791,9 +2791,14 @@ mutants:
 		fi; \
 		if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
 			if [ -n "$$owner_pid" ]; then \
-				echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK), owner PID $$owner_pid)"; \
+				echo "[SKIP-COLLISION] another harness run holds $(HARNESS_LOCK) (PID $$owner_pid)."; \
+				echo "                 Nothing here is broken: several agents share this"; \
+				echo "                 checkout and this target mutates real source files, so"; \
+				echo "                 it refuses to run beside another one. Re-run when that"; \
+				echo "                 PID exits. If it is gone, the lock is stale: rm -rf $(HARNESS_LOCK)"; \
 			else \
-				echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK))"; \
+				echo "[SKIP-COLLISION] another harness run holds $(HARNESS_LOCK)."; \
+				echo "                 Nothing here is broken - see above; re-run when it exits."; \
 			fi; \
 			rm -rf $$backup; exit 1; \
 		fi; \
@@ -2897,9 +2902,14 @@ mutants-logic:
 		fi; \
 		if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
 			if [ -n "$$owner_pid" ]; then \
-				echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK), owner PID $$owner_pid)"; \
+				echo "[SKIP-COLLISION] another harness run holds $(HARNESS_LOCK) (PID $$owner_pid)."; \
+				echo "                 Nothing here is broken: several agents share this"; \
+				echo "                 checkout and this target mutates real source files, so"; \
+				echo "                 it refuses to run beside another one. Re-run when that"; \
+				echo "                 PID exits. If it is gone, the lock is stale: rm -rf $(HARNESS_LOCK)"; \
 			else \
-				echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK))"; \
+				echo "[SKIP-COLLISION] another harness run holds $(HARNESS_LOCK)."; \
+				echo "                 Nothing here is broken - see above; re-run when it exits."; \
 			fi; \
 			rm -rf $$backup; exit 1; \
 		fi; \
@@ -3853,9 +3863,14 @@ mutants-guard:
 		fi; \
 		if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
 			if [ -n "$$owner_pid" ]; then \
-				echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK), owner PID $$owner_pid)"; \
+				echo "[SKIP-COLLISION] another harness run holds $(HARNESS_LOCK) (PID $$owner_pid)."; \
+				echo "                 Nothing here is broken: several agents share this"; \
+				echo "                 checkout and this target mutates real source files, so"; \
+				echo "                 it refuses to run beside another one. Re-run when that"; \
+				echo "                 PID exits. If it is gone, the lock is stale: rm -rf $(HARNESS_LOCK)"; \
 			else \
-				echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK))"; \
+				echo "[SKIP-COLLISION] another harness run holds $(HARNESS_LOCK)."; \
+				echo "                 Nothing here is broken - see above; re-run when it exits."; \
 			fi; \
 			rm -rf $$backup; exit 1; \
 		fi; \
@@ -4500,9 +4515,14 @@ mutants-changed:
 		fi; \
 		if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
 			if [ -n "$$owner_pid" ]; then \
-				echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK), owner PID $$owner_pid)"; \
+				echo "[SKIP-COLLISION] another harness run holds $(HARNESS_LOCK) (PID $$owner_pid)."; \
+				echo "                 Nothing here is broken: several agents share this"; \
+				echo "                 checkout and this target mutates real source files, so"; \
+				echo "                 it refuses to run beside another one. Re-run when that"; \
+				echo "                 PID exits. If it is gone, the lock is stale: rm -rf $(HARNESS_LOCK)"; \
 			else \
-				echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK))"; \
+				echo "[SKIP-COLLISION] another harness run holds $(HARNESS_LOCK)."; \
+				echo "                 Nothing here is broken - see above; re-run when it exits."; \
 			fi; \
 			rm -rf $$backup; exit 1; \
 		fi; \
@@ -4954,9 +4974,14 @@ check-selftest:
 		fi; \
 		if ! mkdir "$(HARNESS_LOCK)" 2>/dev/null; then \
 			if [ -n "$$owner_pid" ]; then \
-				echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK), owner PID $$owner_pid)"; \
+				echo "[SKIP-COLLISION] another harness run holds $(HARNESS_LOCK) (PID $$owner_pid)."; \
+				echo "                 Nothing here is broken: several agents share this"; \
+				echo "                 checkout and this target mutates real source files, so"; \
+				echo "                 it refuses to run beside another one. Re-run when that"; \
+				echo "                 PID exits. If it is gone, the lock is stale: rm -rf $(HARNESS_LOCK)"; \
 			else \
-				echo "[FAIL] a harness run is already in progress ($(HARNESS_LOCK))"; \
+				echo "[SKIP-COLLISION] another harness run holds $(HARNESS_LOCK)."; \
+				echo "                 Nothing here is broken - see above; re-run when it exits."; \
 			fi; \
 			rm -f "$$backup" "$$sf" "$$ba" "$$md_backup"; exit 1; \
 		fi; \
