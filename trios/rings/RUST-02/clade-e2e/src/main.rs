@@ -1046,9 +1046,19 @@ const DEV_VARIANT_SUITES: &[&str] =
 
 fn run_swift_logic_suite(dir: &str, suite: &SwiftLogicSuite, report: &mut String) -> bool {
     let label = suite.label;
+
+    // Per-process output path. `suite.bin` is a fixed /tmp name, and several
+    // agents share this checkout: two `make check` runs compiled all 52 suites
+    // to the same 52 paths, so one run's swiftc wrote the file the other was
+    // about to exec. Measured 2026-08-23 - ChatAttachmentImporter reported
+    // "compile failed" in a concurrent run and compiled clean standalone
+    // seconds later, with nothing changed. The cassette step already carries a
+    // lock for the same reason (/tmp/trios_harness.lock); this step had none,
+    // and its collision reads as a code failure rather than a collision.
+    let bin = format!("{}.{}", suite.bin, std::process::id());
     let mut args: Vec<&str> = suite.sources.to_vec();
     args.push("-o");
-    args.push(suite.bin);
+    args.push(&bin);
 
     let compiled = Command::new("swiftc")
         .args(&args)
@@ -1057,12 +1067,12 @@ fn run_swift_logic_suite(dir: &str, suite: &SwiftLogicSuite, report: &mut String
         .stderr(Stdio::piped())
         .output();
 
-    let mut run = Command::new(suite.bin);
+    let mut run = Command::new(&bin);
     if DEV_VARIANT_SUITES.contains(&suite.label) {
         run.env("TRIOS_VARIANT", "dev");
     }
 
-    match compiled {
+    let verdict = match compiled {
         Ok(out) if out.status.success() => match run.output() {
             Ok(run) if run.status.success() => {
                 report.push_str(&format!("- [OK] Swift logic tests ({}): passed\n", label));
@@ -1099,7 +1109,13 @@ fn run_swift_logic_suite(dir: &str, suite: &SwiftLogicSuite, report: &mut String
             ));
             false
         }
-    }
+    };
+
+    // The per-process name makes runs safe from each other and would otherwise
+    // leave 52 binaries in /tmp per run instead of overwriting 52 fixed ones.
+    // Best effort: a failure to unlink is not a test result.
+    let _ = fs::remove_file(&bin);
+    verdict
 }
 
 fn resolve_variant(name: &str) -> Variant {
