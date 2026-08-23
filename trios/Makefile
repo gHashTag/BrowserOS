@@ -912,7 +912,13 @@ t27-lowering:
 		exit 0; \
 	fi; \
 	bad=0; tot=0; \
-	for f in $$(find "$(ROOT)/rings" -name '*.t27' | sort); do \
+	: "Worktrees excluded. A subagent left a checkout at"; \
+	: "rings/RUST-13/trios-mesh/.claude/worktrees/<name>/specs, and the"; \
+	: "first version of this gate scanned it - 138 specs instead of 70,"; \
+	: "reporting a defect that had already been fixed in the real tree."; \
+	: "A gate must measure the tree that ships, not a copy of it."; \
+	for f in $$(find "$(ROOT)/rings" -name '*.t27' \
+			-not -path '*/.worktrees/*' -not -path '*/.claude/*' | sort); do \
 		tot=$$((tot + 1)); \
 		spec_fns=$$(grep -cE '^[[:space:]]*(pub )?fn ' "$$f"); \
 		out=$$("$(T27C)" gen-rust "$$f" 2>/dev/null) || { \
