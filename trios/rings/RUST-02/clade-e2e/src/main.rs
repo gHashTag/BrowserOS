@@ -310,6 +310,14 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
         ],
     },
     SwiftLogicSuite {
+        label: "KeyRefusal",
+        bin: "/tmp/trios_key_refusal_test",
+        sources: &[
+            "tests/swift/key_refusal_test.swift",
+            "rings/SR-00/TriOSKeyRefusal.swift",
+        ],
+    },
+    SwiftLogicSuite {
         label: "ModelKeyRotation",
         bin: "/tmp/trios_model_key_rotation_test",
         sources: &[
@@ -465,6 +473,7 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
             "tests/swift/session_recovery_export_test.swift",
             "rings/SR-00/SessionRecoveryExport.swift",
             "rings/SR-01/SessionRecoveryPackageWriter.swift",
+            "rings/SR-00/TriOSKeyRefusal.swift",
             "rings/SR-00/TriOSEncryption.swift",
             "rings/SR-00/KeychainSymmetricKeyStore.swift",
             "rings/SR-00/KeychainSecrets.swift",
@@ -531,6 +540,7 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
             "rings/SR-00/SessionRecoveryExport.swift",
             "rings/SR-01/SessionRecoveryPackageReader.swift",
             "rings/SR-01/SessionRecoveryPackageWriter.swift",
+            "rings/SR-00/TriOSKeyRefusal.swift",
             "rings/SR-00/TriOSEncryption.swift",
             "rings/SR-00/KeychainSymmetricKeyStore.swift",
             "rings/SR-00/KeychainSecrets.swift",
@@ -572,6 +582,7 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
             "rings/SR-01/ChatAttachmentImporter.swift",
             "rings/SR-00/ChatComposerAttachment.swift",
             "rings/SR-00/SafeFilePath.swift",
+            "rings/SR-00/TriOSKeyRefusal.swift",
             "rings/SR-00/TriOSEncryption.swift",
             "rings/SR-00/KeychainSymmetricKeyStore.swift",
             "rings/SR-00/KeychainSecrets.swift",
@@ -592,6 +603,7 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
         sources: &[
             "tests/swift/chat_composer_attachment_test.swift",
             "rings/SR-00/ChatComposerAttachment.swift",
+            "rings/SR-00/TriOSKeyRefusal.swift",
             "rings/SR-00/TriOSEncryption.swift",
             "rings/SR-00/KeychainSymmetricKeyStore.swift",
             "rings/SR-00/KeychainSecrets.swift",

@@ -1,30 +1,6 @@
 import CryptoKit
 import Foundation
 
-/// Errors raised by TriOS at-rest encryption.
-enum TriOSEncryptionError: LocalizedError {
-    case keyGenerationFailure
-    case sealFailure
-    case openFailure
-    /// A key is stored but cannot be read without user approval. Never treat
-    /// this as "no key" - minting a replacement would orphan existing data.
-    case keyUnavailableLocked
-
-    var errorDescription: String? {
-        switch self {
-        case .keyUnavailableLocked:
-            return "The encryption key is locked. Approve the Keychain prompt, "
-                + "or sign the app with a stable identity so it stops asking."
-        case .keyGenerationFailure:
-            return "Failed to generate an encryption key"
-        case .sealFailure:
-            return "Failed to seal data"
-        case .openFailure:
-            return "Failed to open sealed data (wrong key or tampered ciphertext)"
-        }
-    }
-}
-
 /// Reusable AES-256-GCM encryption for runtime data stored on disk.
 ///
 /// Named keys are stored in the macOS Keychain as generic-password items under
@@ -154,17 +130,26 @@ final class TriOSEncryption {
         // never returns, exhausting the GCD thread pool.
         if readInFlight {
             lock.unlock()
-            throw TriOSEncryptionError.keyUnavailableLocked
+            throw TriOSEncryptionError.keyUnavailable(.readAlreadyInFlight)
         }
 
         // After a read has timed out the key is effectively unavailable.
         // Stop spawning new reads for a cool-down period so the pool can
         // drain instead of filling with blocked keychain work.
-        if let unavailableSince,
-           Date().timeIntervalSince(unavailableSince) < 60
-        {
-            lock.unlock()
-            throw TriOSEncryptionError.keyUnavailableLocked
+        //
+        // The cool-down is OUR refusal, not the Keychain's. Reporting it as a
+        // locked key is what put the Queen's transcript on disk in plaintext:
+        // the cool-down armed at 02:56:28 and the fallback fired at 02:56:38,
+        // while the same item settled successfully 33 seconds later.
+        if let unavailableSince {
+            let elapsed = Date().timeIntervalSince(unavailableSince)
+            if elapsed < TriOSKeyTiming.cooldownSeconds {
+                let remaining = Int((TriOSKeyTiming.cooldownSeconds - elapsed).rounded(.up))
+                lock.unlock()
+                throw TriOSEncryptionError.keyUnavailable(
+                    .cooldownArmed(secondsRemaining: remaining)
+                )
+            }
         }
 
         unavailableSince = nil
@@ -210,7 +195,7 @@ final class TriOSEncryption {
             semaphore.signal()
         }
 
-        if semaphore.wait(timeout: .now() + 2.0) == .success {
+        if semaphore.wait(timeout: .now() + TriOSKeyTiming.readDeadlineSeconds) == .success {
             if let key = result {
                 return key
             }
@@ -222,16 +207,22 @@ final class TriOSEncryption {
             // plaintext three times.  The cool-down exists to stop callers
             // piling up behind a hung securityd; a fast refusal is not that
             // condition, so the next caller may retry immediately.
-            throw refusal ?? TriOSEncryptionError.keyUnavailableLocked
+            throw refusal ?? TriOSEncryptionError.keyUnavailable(.storedButUnreadable)
         }
 
         // Timed out: the background read is still in flight (and may never
         // return).  Record the cool-down timestamp so repeated callers don't
         // pile up blocked reads.  Never mint a replacement key on this path.
+        //
+        // A deadline is not a verdict. This path says how long it waited and
+        // that the read is still running; it does NOT say the key is locked,
+        // because it has no way to know that and has twice been wrong.
         lock.lock()
         unavailableSince = Date()
         lock.unlock()
-        throw TriOSEncryptionError.keyUnavailableLocked
+        throw TriOSEncryptionError.keyUnavailable(
+            .readTimedOut(afterSeconds: TriOSKeyTiming.readDeadlineSeconds)
+        )
     }
 
     private func loadOrCreateSymmetricKey() throws -> SymmetricKey {
@@ -256,7 +247,10 @@ final class TriOSEncryption {
                 // The key is there, we simply may not read it right now.
                 // Falling through would mint a replacement and permanently
                 // orphan the existing encrypted database, so stop here instead.
-                throw TriOSEncryptionError.keyUnavailableLocked
+                //
+                // This is the ONE site entitled to say the key is locked: the
+                // Keychain was asked and answered that interaction is required.
+                throw TriOSEncryptionError.keyUnavailable(.interactionRequired)
             }
 
             if let migrated = try? KeychainSymmetricKeyStore.migrateLegacyKeyIfNeeded(
@@ -269,7 +263,7 @@ final class TriOSEncryption {
             // Only mint a new key when nothing is stored. `exists` reads
             // attributes only, so this check itself never prompts.
             guard !KeychainSymmetricKeyStore.exists(keyName: keyName) else {
-                throw TriOSEncryptionError.keyUnavailableLocked
+                throw TriOSEncryptionError.keyUnavailable(.storedButUnreadable)
             }
 
             let key = SymmetricKey(size: .bits256)

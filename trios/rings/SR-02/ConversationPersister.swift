@@ -152,12 +152,26 @@ actor ConversationPersister: ChatPersisterProtocol {
                 // "Encryption": all nine fallbacks measured on 2026-08-21
                 // were key reads refused during launch or a cool-down, and
                 // "Encryption failed" sent the reader to the cipher.
+                //
+                // 2026-08-23: carrying the reason faithfully was not enough,
+                // because the reason itself was invented. Every fallback in
+                // the release log said "The encryption key is locked. Approve
+                // the Keychain prompt" while the same Keychain items settled
+                // with OSStatus 0 seconds later. The refusal tag below is the
+                // measured condition, so a plaintext write can now be
+                // attributed to whoever actually refused - including us.
+                let refusal = (error as? TriOSEncryptionError)?.keyRefusal
+                var attrs = ["error": error.localizedDescription]
+                if let refusal {
+                    attrs["refusal"] = refusal.tag
+                    attrs["keychain_was_asked"] = refusal.keychainWasAsked ? "yes" : "no"
+                }
                 TriosLogBus.shared.warn(
                     .chat,
                     "conversation.persist.encrypt_fallback",
                     "Could not encrypt conversation \(conversationId) "
                         + "(\(error.localizedDescription)); stored as plaintext fallback",
-                    ["error": error.localizedDescription]
+                    attrs
                 )
             } else {
                 TriosLogBus.shared.error(
@@ -216,7 +230,7 @@ actor ConversationPersister: ChatPersisterProtocol {
             // eight Queen saves were refused over a readable slot.
             unreadableConversations.remove(conversationId)
             return (try? JSONDecoder().decode([ChatMessage].self, from: plaintext)) ?? []
-        } catch TriOSEncryptionError.keyUnavailableLocked {
+        } catch TriOSEncryptionError.keyUnavailable(let refusal) {
             // The key was refused THIS MINUTE; nothing was measured about the
             // ciphertext. Preserve the bytes (quarantine below is written
             // once) and say what actually happened - "could not decrypt"
@@ -226,13 +240,22 @@ actor ConversationPersister: ChatPersisterProtocol {
                 defaults.set(stored, forKey: quarantine)
             }
             unreadableConversations.insert(conversationId)
+            // "the encryption key is unavailable right now" was true and
+            // useless: it never said WHO refused. Two of the five refusals
+            // never reach the Keychain at all, so a reader chasing this line
+            // went to Keychain Access for a cool-down TriOS armed itself.
             TriosLogBus.shared.warn(
                 .chat,
                 "conversation.persist.decrypt_deferred",
-                "Conversation \(conversationId) is unread because the encryption key "
-                    + "is unavailable right now; its \(stored.count) bytes are preserved "
-                    + "and will fold back in when the key answers",
-                ["conversation": conversationId.uuidString, "bytes": String(stored.count)]
+                "Conversation \(conversationId) is unread because \(refusal.explanation); "
+                    + "its \(stored.count) bytes are preserved and will fold back in "
+                    + "when the key answers",
+                [
+                    "conversation": conversationId.uuidString,
+                    "bytes": String(stored.count),
+                    "refusal": refusal.tag,
+                    "keychain_was_asked": refusal.keychainWasAsked ? "yes" : "no",
+                ]
             )
             return []
         } catch {

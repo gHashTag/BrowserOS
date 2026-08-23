@@ -170,6 +170,70 @@ def cmd_signals(variant):
     print("-- REPORT: counts only; the diagnosis stays with the reader.")
 
 
+def cmd_refusals(variant):
+    """Who refused the encryption key, per event, since the last launch.
+
+    `signals` counts how often the key was unavailable. Until 2026-08-23 that
+    was the end of it: every refusal carried the same sentence, so a count of
+    ten told a reader nothing about whether to open Keychain Access or to look
+    at our own cool-down. The `refusal` attribute now records which of five
+    measured conditions it was, and `keychain_was_asked` says whether securityd
+    was contacted at all - two of the five never reach it.
+
+    A line with no `refusal` attribute was written by a binary older than that
+    change; it is counted separately rather than folded in, because guessing
+    which condition an old line meant is the defect this whole change is about.
+    """
+    path = log_path(variant)
+    if not path or not os.path.exists(path):
+        print("no log at %s - nothing measured" % (path or variant))
+        return
+    anchor = anchor_ts(variant)
+    print("window      : %s (%s log)" % (
+        ("since server.launch %s" % anchor) if anchor
+        else "WHOLE FILE - no server.launch line to anchor on", variant))
+
+    events = ["conversation.persist.encrypt_fallback",
+              "conversation.persist.decrypt_deferred"]
+    per_event = {ev: collections.Counter() for ev in events}
+    unattributed = collections.Counter()
+    asked = collections.Counter()
+
+    for d in iter_log(variant):
+        ev = d.get("event", "")
+        if ev not in per_event:
+            continue
+        ts = d.get("ts", "")
+        if anchor and ts and ts < anchor:
+            continue
+        attrs = d.get("attrs") or {}
+        tag = attrs.get("refusal")
+        if tag:
+            per_event[ev][tag] += 1
+            asked[attrs.get("keychain_was_asked", "unrecorded")] += 1
+        else:
+            unattributed[ev] += 1
+
+    for ev in events:
+        total = sum(per_event[ev].values()) + unattributed[ev]
+        print("\n%s  (%d)" % (ev, total))
+        if not total:
+            print("       none")
+            continue
+        for tag, n in per_event[ev].most_common():
+            print("%6d  %s" % (n, tag))
+        if unattributed[ev]:
+            print("%6d  (no refusal attribute - written by a binary predating "
+                  "2026-08-23)" % unattributed[ev])
+
+    if asked:
+        print("\nkeychain actually asked:")
+        for k, n in asked.most_common():
+            print("%6d  %s" % (n, k))
+    print("\n-- REPORT: counts only. 'no' means TriOS refused the read itself and")
+    print("   securityd was never contacted, so Keychain Access has nothing to show.")
+
+
 def cmd_board(variant):
     tasks = delegation(variant)
     if not tasks:
@@ -370,6 +434,8 @@ def main():
         cmd_board(variant)
     elif cmd == "spend":
         cmd_spend(variant)
+    elif cmd == "refusals":
+        cmd_refusals(variant)
     else:
         cmd_forensics(variant)
 
