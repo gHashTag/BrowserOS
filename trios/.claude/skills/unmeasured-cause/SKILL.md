@@ -177,3 +177,54 @@ constant the code actually waits (`TriOSKeyTiming`). `make refusals` breaks
 `encrypt_fallback` and `decrypt_deferred` down by tag, and counts lines from
 older binaries as **unattributed** rather than guessing what they meant -
 guessing is the defect.
+
+## Fifth sweep (2026-08-23, same day): the fix introduced the next instance
+
+Yesterday's repair gave `TriOSEncryptionError` five measured cases and an
+attribute, `keychainWasAsked`, so a reader could tell "securityd refused" from
+"we never called it". Within a day the release log showed 55 refusals tagged
+`stored_but_unreadable` with `keychain_was_asked: yes`, and every one of them
+was false.
+
+The path:
+
+```swift
+// KeychainSymmetricKeyStore.read
+if KeychainSecrets.isLaunching { return nil }   // gate closed, nobody asked
+
+// TriOSEncryption.loadOrCreateSymmetricKey
+if let key = try ...read(...) { return key }    // nil, falls through
+guard !KeychainSymmetricKeyStore.exists(...) else {   // exists() DOES ask
+    throw .keyUnavailable(.storedButUnreadable)       // "a read returned nothing"
+}
+```
+
+Two facts from two different sources, combined into one sentence that named
+the wrong refuser. `exists()` genuinely reached the Keychain and genuinely
+answered yes. `read()` never made a call. "Stored but unreadable" is true of
+neither: the item is stored, and its readability was never tested.
+
+### What this adds to the method
+
+**A bare `nil` return is a boolean standing in for an enum** - tell 4, and this
+project's oldest recurring bug (empty vs absent, now hit a fifth time). The
+gate had a reason and threw it away at the `return nil`; everything downstream
+was reconstruction.
+
+**Beware the caller that answers on behalf of a function that refused.** When a
+read fails and the next line consults a DIFFERENT source to explain it, the
+explanation belongs to that other source. Say which one answered.
+
+**Your own new attribute can lie.** `keychainWasAsked` was added precisely to
+prevent this class, and it reported `yes` for 55 calls that never happened,
+because it was derived from the refusal case rather than from the call. An
+attribute computed from a guess inherits the guess.
+
+### The tool had the same hole
+
+`make refusals` logged a window only when it CLOSED, so a key that never
+answers - the worst case - printed the same `none recorded` as a key nobody
+asked for. Absence of signal read as absence of defect. It now prints
+`NONE CLOSED` beside the refusal count and names the open window as the bad
+case. **Any report that can print the same line for a healthy and a broken
+system is not a report.**
