@@ -402,3 +402,47 @@ Before tuning any timeout, retry count or cooldown: **measure the operation's
 floor in the same conditions the caller sees.** If the floor is above the
 bound, nothing downstream of the bound is a defect worth fixing - they are all
 consequences.
+
+## Ninth sweep (2026-08-23): the fix was right and started at the wrong moment
+
+The warm-up from the eighth sweep paid the per-process cold cost correctly and
+changed almost nothing, because it was started at the same instant the launch
+gate dropped. Ordinary deadlined reads raced it and lost: 6 stalls and plaintext
+writes before it finished at +40.2s, 0 after.
+
+Holding the gate until the warm-up completes - with a 90s ceiling, because a
+warm-up that hangs must not become the latch this file has already produced
+twice by other means - gave the first launch window in the whole investigation
+with nothing in it:
+
+```
++  3.8s  keychain.launch_gate.cleared     <- main.swift, now premature
++ 23.9s  keychain.warmup.finished         warmed=9 failed=0 seconds=20.1
++ 23.9s  keychain.launch_gate.lowered     reason=warm-up finished
+
+stalls / plaintext before the gate lowered: 0   (was 6)
+```
+
+No `read.stalled`, no `enumeration.stalled`, no `encrypt_fallback`, no refusal
+window. **The prediction was written into the commit message before the test
+ran**, which is the only reason this counts for more than the "18x improvement"
+of the sixth sweep that could not be attributed to anything.
+
+### What this adds
+
+**A correct fix at the wrong moment measures as no fix.** The warm-up was right
+in every detail and worthless until it was ordered ahead of the callers it
+protects. Ask when a fix runs relative to the thing it fixes, not only whether
+it is correct.
+
+**When a caller's timing assumption is changed, its callers' log lines become
+lies.** `clearLaunchGate()` used to lower the gate synchronously, so
+main.swift's `keychain.launch_gate.cleared` immediately afterwards was true. It
+now fires ~20s early, visible in the trace above. That file belongs to another
+agent, so the new line took a DIFFERENT event name -
+`launch_gate.lowered` - rather than burying a premature line under a correct
+one and making the histogram unreadable.
+
+**Predict before you measure, in writing.** A number that improves after a
+change is not evidence. A number you said in advance would go to zero, and did,
+is.
