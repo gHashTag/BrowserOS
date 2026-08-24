@@ -1810,7 +1810,17 @@ cassettes: test-app
 	    to queen/* now fails the suite instead of quietly eating a branch."; \
 	git -C "$(ROOT)" branch --force $(SWEEP_CANARY) HEAD >/dev/null 2>&1
 	@fail=0; covered=""; \
-	( sleep $(CASSETTE_TOTAL_BUDGET) && kill -TERM $$$$ ) & wpid=$$!; \
+	( sleep $(CASSETTE_TOTAL_BUDGET) && { \
+		echo "[WATCHDOG] cassette budget spent - process tree before TERM:"; \
+		ps -o pid,ppid,etime,command -p $$$$ 2>/dev/null | tail -1; \
+		for c in $$(pgrep -P $$$$ 2>/dev/null); do \
+			ps -o pid,ppid,etime,command -p $$c 2>/dev/null | tail -1; \
+			for g in $$(pgrep -P $$c 2>/dev/null); do \
+				ps -o pid,ppid,etime,command -p $$g 2>/dev/null | tail -1; \
+			done; \
+		done; \
+		kill -TERM $$$$; \
+	} ) & wpid=$$!; \
 	trap 'kill $$wpid 2>/dev/null' EXIT; \
 	trap 'kill $$wpid 2>/dev/null; exit 124' TERM INT; \
 	for spec in \
