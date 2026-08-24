@@ -1778,6 +1778,11 @@ test-app:
 	@test -x "$(TEST_BIN)" || { echo "[FAIL] $(TEST_BIN) is missing after a build that claimed success"; exit 1; }
 	@echo "[OK] harness bundle built: $(TEST_APP)"
 
+# Wave 075 note: neither `SHELLFLAGS=-x` nor `.SHELLFLAGS=-x` traces this
+# Makefile's recipes (measured on both a simple target and cassettes - zero
+# trace lines either way). The working alternative for the next attempt is
+# a literal `set -x;` at the head of the recipe line itself - a bash
+# mechanism, independent of make's flag plumbing.
 cassettes: test-app
 	@: "Serialised against every other harness run in this checkout."; \
 	: "Several agents share this tree and each runs `make check`. Two"; \
