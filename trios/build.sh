@@ -796,6 +796,41 @@ if [ "$COMPILE_STATUS" -eq 0 ]; then
         done
     fi
     # --- END vendor-halves ---
+
+    # --- XCTest runtime family (wave 078) ---------------------------------
+    #
+    # libQueenUILib.dylib links the XCTest runtime because the shared
+    # module imports XCTest (one test-support source file). A GUI bundle
+    # without this family dies in dyld BEFORE main - measured 2026-08-24:
+    # the test bundle had been silently dead since the 6.3.3 module
+    # rebuild, and the cassette suite never noticed because its lock phase
+    # wedges before any launch. Copy the whole family in one sweep; every
+    # member is conditional so an older toolchain without a piece builds
+    # what it can rather than failing outright.
+    XCP="$(xcrun --show-sdk-platform-path 2>/dev || true)/Developer"
+    if [ -n "$XCP" ] && [ -d "$XCP" ]; then
+        for xctest_lib in \
+            "$XCP/usr/lib/libXCTestSwiftSupport.dylib" \
+            "$XCP/usr/lib/lib_TestingInterop.dylib"; do
+            if [ -f "$xctest_lib" ]; then
+                cp "$xctest_lib" "$STANDALONE_FRAMEWORKS/" \
+                    && chmod +w "$STANDALONE_FRAMEWORKS/$(basename "$xctest_lib")"
+            fi
+        done
+        for xctest_fw_dir in "$XCP/Library/Frameworks" "$XCP/Library/PrivateFrameworks"; do
+            for xctest_fw in \
+                XCTest XCUIAutomation Testing StoreKitTest \
+                _Testing_AppKit _Testing_CoreGraphics _Testing_CoreImage \
+                _Testing_Foundation _Testing_UIKit \
+                XCTestCore XCTestSupport; do
+                if [ -d "$xctest_fw_dir/$xctest_fw.framework" ]; then
+                    cp -R "$xctest_fw_dir/$xctest_fw.framework" \
+                        "$STANDALONE_FRAMEWORKS/" 2>/dev/null || true
+                fi
+            done
+        done
+    fi
+    # --- END XCTest runtime family ---
     rm -f "$STANDALONE_FRAMEWORKS/$SQLCIPHER_DYLIB_NAME"
     cp -L "$SQLCIPHER_DYLIB" "$STANDALONE_FRAMEWORKS/$SQLCIPHER_DYLIB_NAME"
     chmod +w "$STANDALONE_FRAMEWORKS/$SQLCIPHER_DYLIB_NAME"

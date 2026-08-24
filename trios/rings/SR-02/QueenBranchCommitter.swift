@@ -1301,7 +1301,29 @@ enum QueenBranchCommitter {
         }
         let data = output.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
-        guard process.terminationStatus == 0 else { return nil }
+        guard process.terminationStatus == 0 else {
+            // Measured 2026-08-24, across three waves: in a live GUI process
+            // the verdict seal failed silently because a git call here
+            // returned non-zero and nil swallowed the reason whole. A git
+            // failure must name itself - the verdict's freshness depends on
+            // this call, and its absence was indistinguishable from success.
+            let errBytes = (process.standardError as? Pipe)?
+                .fileHandleForReading.readDataToEndOfFile()
+            TriosLogBus.shared.warn(
+                .queen, "queen.git.failed",
+                "A git call failed; the reason travels with the event",
+                [
+                    "args": arguments.joined(separator: " "),
+                    "status": String(process.terminationStatus),
+                    "stderr": String(
+                        String(data: errBytes ?? Data(), encoding: .utf8)?
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                            .prefix(200) ?? ""
+                    )
+                ]
+            )
+            return nil
+        }
         return String(data: data, encoding: .utf8) ?? ""
     }
 
