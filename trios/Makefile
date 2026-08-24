@@ -77,6 +77,19 @@ HARNESS_LOCK_WAIT := 1800
 # instead of silent, and the lock's pid file points at the make parent,
 # which dies with the target, so the next waiter reclaims it honestly.
 CASSETTE_TOTAL_BUDGET := 1800
+# Recursion guard. 2026-08-24 measured a self-spawning cassettes<->check
+# recursion: a subshell inside the cassettes lock-line grew a bare `make
+# check`, which requires cassettes again, whose lock-line grows another
+# `make check` - three generations observed live, new generations still
+# spawning after one link was killed. Legitimate recursion here goes two,
+# at most three levels (dev -> warning-gate, release, mutants); anything
+# at four or deeper is the bomb, not a build, and dies by name instead of
+# eating the machine. If a legitimate path ever needs four levels, this
+# error will name it loudly - raise the number, do not remove the guard.
+ifeq ($(shell test $(MAKELEVEL) -lt 4; echo $$?),0)
+else
+$(error recursive make detected at MAKELEVEL=$(MAKELEVEL), target '$(MAKECMDGOALS)' - the 2026-08-24 cassettes/check self-spawn class; refusing)
+endif
 
 .DEFAULT_GOAL := dev
 .PHONY: help dev release build keychain-doors make-dollars empty-sources watch-empties check test cassettes e2e shake run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard finish-mark-order guard-shapes parse-tests vendor-step warnings warning-gate
