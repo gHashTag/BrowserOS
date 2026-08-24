@@ -1796,7 +1796,17 @@ cassettes: test-app
 	: "all and sat forever holding nothing, while every other agent"; \
 	: "queued behind it. Same budget, same form, started at entry to the"; \
 	: "lock phase, killed when the line completes normally below."; \
-	( sleep $(CASSETTE_TOTAL_BUDGET) && kill -TERM $$$$ ) & lwpid=$$!; \
+	( sleep $(CASSETTE_TOTAL_BUDGET) && { \
+		echo "[LOCK-WATCHDOG] lock-phase budget spent - tree before TERM:"; \
+		ps -o pid,ppid,etime,command -p $$$$ 2>/dev/null | tail -1; \
+		for c in $$(pgrep -P $$$$ 2>/dev/null); do \
+			ps -o pid,ppid,etime,command -p $$c 2>/dev/null | tail -1; \
+			for g in $$(pgrep -P $$c 2>/dev/null); do \
+				ps -o pid,ppid,etime,command -p $$g 2>/dev/null | tail -1; \
+			done; \
+		done; \
+		kill -TERM $$$$; \
+	} ) & lwpid=$$!; \
 	trap 'kill $$lwpid 2>/dev/null' EXIT; \
 	trap 'kill $$lwpid 2>/dev/null; exit 124' TERM INT; \
 	waited=0; \
