@@ -385,6 +385,24 @@ else
     fi
 fi
 
+# --- XCTest search path -------------------------------------------------------
+#
+# QueenUILib's sources include XCTest-using files (cerebellum_tests.swift,
+# since April), so its swiftmodule records XCTest as a required module and
+# every `import QueenUILib` drags that requirement into this app's compile.
+# The 2026-08-23 Xcode update moved XCTest out of the SDK into the platform's
+# Developer/Library/Frameworks, which bare swiftc does not search implicitly -
+# SwiftPM still does, which is why the queen package builds while this app's
+# compile dies with "missing required module 'XCTest'" (measured 2026-08-23,
+# after the 6.0.3 -> 6.3.3 toolchain update mid-day). The path comes from xcrun
+# rather than a literal, and every use is conditional so a toolchain without
+# the directory (or an older layout) is not handed a -F to nowhere. The lookup
+# itself must also be non-fatal: under DEVELOPER_DIR=CommandLineTools xcrun
+# exits 1 here, and with set -e that killed every CLT build silently at this
+# line (measured 2026-08-23: 3-line build logs, stderr swallowed by the
+# substitution). `|| true` implements the tolerance the comment above states.
+XCTEST_FRAMEWORKS_DIR="$(xcrun --show-sdk-platform-path 2>/dev/null || true)/Developer/Library/Frameworks"
+
 # --- QueenUILib toolchain-compatibility probe -------------------------------
 #
 # The sibling checkout is shared: another agent building trinity with full
@@ -406,24 +424,85 @@ if [ -z "$TRIOS_PRINT_FLAGS" ]; then
     probe_src="$probe_dir/probe.swift"
     probe_err="$probe_dir/probe.err"
     echo "import QueenUILib" > "$probe_src"
-    if ! xcrun swiftc -typecheck "$probe_src" -I "$QUEEN_MODULE_DIR" 2>"$probe_err"; then
-        if grep -q "cannot load module 'QueenUILib' built with SDK" "$probe_err"; then
+    # The same XCTest -F as the real compile: without it this probe would
+    # report a module it cannot load while the failure belongs to the search
+    # path, not the module - a probe that misattributes is worse than none.
+    if [ -d "$XCTEST_FRAMEWORKS_DIR" ]; then
+        probe_xctest_flags=(-F "$XCTEST_FRAMEWORKS_DIR")
+    else
+        probe_xctest_flags=()
+    fi
+    if ! xcrun swiftc -typecheck "$probe_src" -I "$QUEEN_MODULE_DIR" \
+        "${probe_xctest_flags[@]}" 2>"$probe_err"; then
+        # Two signatures, one repair. The SDK mismatch below is the original;
+        # the compiler-version one arrived 2026-08-23, when a neighbour's
+        # build of the shared checkout stamped the swiftmodule with Swift
+        # 6.0.3 hours after this tree's Xcode had moved to 6.3.3 - SwiftPM
+        # again treated their module as up to date, and every trios compile
+        # died with "module compiled with Swift 6.0.3 cannot be imported by
+        # the Swift 6.3.3 compiler". Same cause (a foreign-toolchain module
+        # SwiftPM will not age out), same cure (wipe and rebuild with the
+        # compiler this build actually uses). The third condition is the
+        # same disease with the module deleted rather than replaced: the
+        # existence checks above passed, SwiftPM still says "Build complete",
+        # and the file is gone - measured 2026-08-23, twice in one hour.
+        if grep -q "cannot load module 'QueenUILib' built with SDK" "$probe_err" \
+           || grep -Eq "module compiled with Swift [0-9][^ ]* cannot be imported" "$probe_err" \
+           || [ ! -f "$QUEEN_MODULE_DIR/QueenUILib.swiftmodule" ]; then
             if [ -n "$TRIOS_VENDORED" ]; then
                 echo "[FAIL] The vendored QueenUILib interface was built with a"
-                echo "       different SDK than the current toolchain and cannot"
-                echo "       be rebuilt here. Run one normal (non-vendored) build"
-                echo "       to refresh the vendored halves."
+                echo "       different SDK or compiler than the current toolchain"
+                echo "       and cannot be rebuilt here. Run one normal (non-vendored)"
+                echo "       build to refresh the vendored halves."
                 rm -rf "$probe_dir"
                 exit 1
             fi
-            echo "[REPAIR] QueenUILib.swiftmodule was built with another SDK;"
+            echo "[REPAIR] QueenUILib.swiftmodule was built with another SDK or"
+            echo "         compiler, or vanished under a neighbour's build;"
             echo "         rebuilding it with the current toolchain."
             rm -rf "$QUEEN_BIN_DIR/Modules/QueenUILib.swiftmodule" \
                    "$QUEEN_BIN_DIR/Modules/QueenUILib.swiftdoc" \
                    "$QUEEN_BIN_DIR/Modules/QueenUILib.abi.json" \
                    "$QUEEN_BIN_DIR/QueenUILib.build"
-            swift build --package-path "$QUEEN_PACKAGE_ROOT" --target QueenUILib
-            if ! xcrun swiftc -typecheck "$probe_src" -I "$QUEEN_MODULE_DIR" 2>"$probe_err"; then
+            # Shielded, not bare: the rebuild races the same neighbours the
+            # main build path above already handles - a concurrent agent can
+            # wipe QueenUILib.build between this wipe and this rebuild, and an
+            # unguarded failure would abort under `set -e` with a signature
+            # the main path treats as survivable. Captured to a log so the
+            # neighbour check below reads the build's own words.
+            repair_log="$(mktemp /tmp/trios_queen_repair.XXXXXX)"
+            repair_ok=1
+            swift build --package-path "$QUEEN_PACKAGE_ROOT" \
+                --target QueenUILib > "$repair_log" 2>&1 || repair_ok=0
+            cat "$repair_log"
+            if [ "$repair_ok" -eq 0 ]; then
+                # The vendored halves this build refreshed moments ago are a
+                # complete QueenUILib stamped by the CURRENT toolchain - the
+                # same escape the main path uses. Gated on the neighbour
+                # signature, not any failure: a real compile error in the
+                # queen sources must stay fatal rather than quietly compile
+                # this app against a stale vendored interface.
+                repair_neighbour=0
+                grep -q "unable to load output file map" "$repair_log" && repair_neighbour=1
+                if [ "$repair_neighbour" -eq 1 ] \
+                   && [ -f "$STANDALONE_FRAMEWORKS/libQueenUILib.dylib" ] \
+                   && [ -f "$STANDALONE_FRAMEWORKS/Modules/QueenUILib.swiftmodule" ]; then
+                    echo "[NEIGHBOUR] The repair rebuild lost the shared build map"
+                    echo "            mid-compile - falling back to the vendored"
+                    echo "            halves in Frameworks-dev/ for this build."
+                    QUEEN_BIN_DIR="$STANDALONE_FRAMEWORKS"
+                    QUEEN_MODULE_DIR="$STANDALONE_FRAMEWORKS/Modules"
+                else
+                    echo "[FAIL] The QueenUILib repair rebuild failed and no"
+                    echo "       vendored halves are available to fall back on."
+                    rm -f "$repair_log"
+                    rm -rf "$probe_dir"
+                    exit 1
+                fi
+            fi
+            rm -f "$repair_log"
+            if ! xcrun swiftc -typecheck "$probe_src" -I "$QUEEN_MODULE_DIR" \
+                "${probe_xctest_flags[@]}" 2>"$probe_err"; then
                 echo "[FAIL] QueenUILib still does not load after a rebuild with"
                 echo "       the current toolchain:"
                 sed 's/^/       | /' "$probe_err" | head -4
@@ -493,6 +572,9 @@ SWIFTC_MODULE_FLAGS=(
     -L "$QUEEN_BIN_DIR"
     -lQueenUILib
 )
+if [ -d "$XCTEST_FRAMEWORKS_DIR" ]; then
+    SWIFTC_MODULE_FLAGS+=(-F "$XCTEST_FRAMEWORKS_DIR")
+fi
 
 if [ -n "$TRIOS_PRINT_FLAGS" ]; then
     # One argument per line on the saved stdout. A path holding a newline would
@@ -886,7 +968,17 @@ EOF
         VENDOR_PROBE_DIR="$BUILD_DIR/vendor-probe"
         mkdir -p "$VENDOR_PROBE_DIR"
         printf 'import QueenUILib\n' > "$VENDOR_PROBE_DIR/probe.swift"
+        # The same XCTest -F as every other import of QueenUILib: the vendored
+        # swiftmodule requires XCTest (see the XCTest search path note above),
+        # so a probe without it reports the vendored interface as broken when
+        # only the search path is - measured 2026-08-23 on the test variant.
+        if [ -d "$XCTEST_FRAMEWORKS_DIR" ]; then
+            vendor_probe_xctest_flags=(-F "$XCTEST_FRAMEWORKS_DIR")
+        else
+            vendor_probe_xctest_flags=()
+        fi
         if swiftc -typecheck -I "$STANDALONE_FRAMEWORKS/Modules" \
+            "${vendor_probe_xctest_flags[@]}" \
             "$VENDOR_PROBE_DIR/probe.swift" > "$VENDOR_PROBE_DIR/probe.log" 2>&1; then
             echo "[OK] Vendored QueenUILib resolves from $STANDALONE_FRAMEWORKS/Modules (TRIOS_VENDORED=1 is buildable)"
         else

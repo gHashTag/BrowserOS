@@ -607,6 +607,32 @@ final class QueenDelegationRegistry: ObservableObject {
         persist()
     }
 
+    /// Binds verdicts to the boundary state they were judged against, on the
+    /// record rather than in memory.
+    ///
+    /// `ChatViewModel.sealVerdictsWithBoundaryState` already computed this
+    /// fingerprint and kept it in a dictionary keyed by task id. That
+    /// dictionary does not survive a relaunch, and this app is relaunched
+    /// constantly - after every release build, and by the watchdog whenever
+    /// the process dies. So the staleness guard (#1126, #1131) worked until
+    /// the next restart and then went blind, with nothing saying so.
+    ///
+    /// Measured 2026-08-23: `treeStateFingerprint` was set on 0 of 58 tasks in
+    /// the live registry, so no verdict in the store could ever be marked
+    /// stale. The mechanism was written, tested and wired; only the part that
+    /// outlives the process was missing.
+    ///
+    /// Returns false when the task is gone, so the caller can say so rather
+    /// than assume the write landed.
+    @discardableResult
+    func recordTreeStateFingerprint(taskID: UUID, fingerprint: String) -> Bool {
+        guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return false }
+        tasks[index].treeStateFingerprint = fingerprint
+        tasks[index].updatedAt = dateProvider()
+        persist()
+        return true
+    }
+
     // MARK: - Persistence
 
     /// Plain JSON on purpose: the swarm's state is operational metadata, not a

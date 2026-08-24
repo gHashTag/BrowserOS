@@ -1025,6 +1025,34 @@ struct ChatSSEEndToEndTests {
         check(opened.acceptanceCriteria == ["docs/probe.md exists"],
               "delegation with no criteria takes the contract the issue states")
 
+        // ── The wire proof of the boundary fingerprint (#1126, #1131) ──
+        //
+        // `sealVerdictsWithBoundaryState` used to compute the fingerprint and keep
+        // it only in a process-local dictionary, so the staleness guard went blind
+        // after every relaunch. Measured 2026-08-23: 0 of 58 tasks in the live
+        // store carried a `treeStateFingerprint`. The repair writes it onto the
+        // task record; this is its proof on the wire — a hand-recorded verdict
+        // goes through the full command path, the seal fires, and then the store
+        // FILE is decoded as a fresh reader would, with no shared state. A nil
+        // fingerprint there means the seal happened in memory only and the guard
+        // is blind again the moment this process exits.
+        await staffed.runQueenCommand("/verify gHashTag/trios#4243 docs/probe.md exists met")
+        // The store encodes dates as ISO8601 (see QueenDelegationRegistry.persist),
+        // so a fresh reader must decode them the same way or the read itself fails.
+        let wireDecoder = JSONDecoder()
+        wireDecoder.dateDecodingStrategy = .iso8601
+        if let wireData = FileManager.default.contents(atPath: regPath),
+           let wireTasks = try? wireDecoder.decode([DelegatedTask].self, from: wireData),
+           let wireTask = wireTasks.first(where: { $0.id == opened.id }) {
+            check(wireTask.treeStateFingerprint != nil,
+                  "a recorded verdict leaves the boundary fingerprint in the store file, not only in process memory")
+            check(wireTask.criterionVerdicts["docs/probe.md exists"] == .met,
+                  "and the verdict itself is on the wire beside it")
+        } else {
+            check(false,
+                  "the delegation store at \(regPath) could not be read back as tasks — the wire itself is broken")
+        }
+
         // The chat the Queen just opened - is it in the list the sidebar draws?
         await staffed.loadConversations()
         check(staffed.conversations.contains { $0.id == opened.conversationId },

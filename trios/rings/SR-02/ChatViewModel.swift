@@ -11585,6 +11585,22 @@ final class ChatViewModel: ObservableObject {
             return
         }
         verdictTreeStates[task.id] = snapshot
+        // And on the record, not only in this process. The dictionary above
+        // dies with the app, and this app is relaunched constantly — after
+        // every release build, and by the watchdog whenever the process goes.
+        // So the staleness guard held until the next restart and then went
+        // blind, with nothing saying so. Measured 2026-08-23:
+        // `treeStateFingerprint` was set on 0 of 58 tasks in the live
+        // registry, which is the same shape of defect this seal was written
+        // to prevent — the mechanism present, the part that outlives the
+        // moment missing.
+        if !delegationRegistry.recordTreeStateFingerprint(taskID: task.id, fingerprint: snapshot) {
+            TriosLogBus.shared.warn(
+                .queen, "queen.review.fingerprint_not_persisted",
+                "The boundary fingerprint was bound in memory but the task was not in the registry, so it will not survive a relaunch",
+                ["issue": task.issue.slug]
+            )
+        }
         // Regression guard (#1131 criterion 4): a snapshot existed, yet the
         // binding is missing — the write above was removed or bypassed.
         // Without the binding, `isStale` answers false for every verdict
