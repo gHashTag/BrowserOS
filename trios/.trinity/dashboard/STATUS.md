@@ -42,13 +42,28 @@ as gHashTag/t27#2508.
 ## Measured here
 
 ```
-make check                  -> REAL_EXIT=0
+make check                  -> partial 2026-08-24: every step through test-app
+                              green (dev, warnings 0/199, t27 gates, chain,
+                              vendor-step, test-app); cassettes+mutants did
+                              not finish a clean pass - five attempts each hit
+                              a named neighbour collision (see iteration 74).
+                              Do not read this line as REAL_EXIT=0 tonight.
 make t27-lowering           -> counts declared vs emitted functions, per spec
 make t27-rings              -> ring00_parity, ring01_rules, ring00_verilog
 make chain                  -> 80 verdicts, spec and hand-written Swift agree
 curl -s 127.0.0.1:9105/health
 python3 -c "import json;from collections import Counter;print(Counter(t.get('state') for t in json.load(open('.trinity/state/queen_delegation.json')) if isinstance(t,dict)))"
 ```
+
+The staleness guard, measured 2026-08-24: `treeStateFingerprint` is set on
+0 of 59 tasks in the live store, and 12 of 59 carry no acceptance criteria at
+all. The write path is repaired (registry `recordTreeStateFingerprint`,
+called at seal time) and proven on the wire in the e2e suite - a full
+`/verify` through the command path leaves the fingerprint in the store file,
+971 of 971 checks green twice. The live store still reads 0 because no seal
+has run in the app since the repair landed; the number should move the next
+time the Queen records a verdict, and if it does not, the repair is not
+wired and this file is wrong.
 
 Mesh ring, the seven specs repaired today: 91 functions declared, 91 emitted,
 0 stubs, artifacts byte-identical to a fresh `gen-rust`.

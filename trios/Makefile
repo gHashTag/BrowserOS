@@ -66,6 +66,17 @@ HARNESS_LOCK := /tmp/trios_harness.lock
 # backstop) to finish ahead of it, short enough that a wedged owner is not
 # waited on all afternoon.
 HARNESS_LOCK_WAIT := 1800
+# A hard total budget for the cassettes recipe itself, watchdog-enforced.
+# The per-cassette poll loop is bounded (600s each, idle 120s), so on paper
+# the whole target is bounded too - but 2026-08-24 measured a cassettes
+# recipe alive for TEN HOURS with a nested `make check` as its child,
+# outside every bound the poll loop owns. A wedged recipe does not just sit
+# there: every other agent then queues on the harness lock it holds, and
+# the whole machine's gates stack behind one hang. The watchdog kills the
+# recipe shell when the budget is spent; the failure is loud (Terminated)
+# instead of silent, and the lock's pid file points at the make parent,
+# which dies with the target, so the next waiter reclaims it honestly.
+CASSETTE_TOTAL_BUDGET := 1800
 
 .DEFAULT_GOAL := dev
 .PHONY: help dev release build keychain-doors make-dollars empty-sources watch-empties check test cassettes e2e shake run run-release stop clean promote doctor chat-probe verify restart xctest delegate-probe drift-guard finish-mark-order guard-shapes parse-tests vendor-step warnings warning-gate
@@ -843,6 +854,7 @@ MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP DEV_BIN RELEASE_BIN DEV_PROC \
 	WARN_VARIANT WARN_BUILD_DIR WARN_OFM WARN_LIST WARN_SEEN WARN_LOG WARN_LOG_DIR \
 	WARN_LOG_LAST WARN_BUILD_ID WARN_FULL_ROOT WARN_FULL_CACHE DEV_BUILD_LOCK \
 	CASSETTE_BRANCHES SWEEP_CANARY LOG KEYCHAIN_ALLOW_PATTERNS MAKE VARIANT \
+	CASSETTE_TOTAL_BUDGET \
 	LOG_VARIANT \
 	MSG ISSUE WORKER TASK PATHS CRITERIA SECOND REVIEW AUTONOMY CASSETTE \
 	SECOND_TURN QUEEN_COMMAND MUTANTS MUTANTS_LOGIC MUTANTS_GUARD MAKE_DOLLAR_VARS HARNESS_LOCK HARNESS_LOCK_WAIT GUARDS \
@@ -1798,6 +1810,9 @@ cassettes: test-app
 	    to queen/* now fails the suite instead of quietly eating a branch."; \
 	git -C "$(ROOT)" branch --force $(SWEEP_CANARY) HEAD >/dev/null 2>&1
 	@fail=0; covered=""; \
+	( sleep $(CASSETTE_TOTAL_BUDGET) && kill -TERM $$$$ ) & wpid=$$!; \
+	trap 'kill $$wpid 2>/dev/null' EXIT; \
+	trap 'kill $$wpid 2>/dev/null; exit 124' TERM INT; \
 	for spec in \
 		"worker-happy-path.sse:queen.branch.committed:commits the file its cassette declares" \
 		"worker-looping.sse:queen.observer.looping:notices a bee repeating one call" \
