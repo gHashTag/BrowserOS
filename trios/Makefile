@@ -1790,6 +1790,15 @@ cassettes: test-app
 	: "Waits rather than refusing. Both runs are legitimate and neither"; \
 	: "agent knows about the other, so failing the second one turns a"; \
 	: "scheduling collision into a red gate somebody has to investigate."; \
+	: "This line's own watchdog. The budget watchdog below lives in the"; \
+	: "replay line, which this line never reaches when it wedges -"; \
+	: "measured 2026-08-24: a wedged lock-line carried no sleep child at"; \
+	: "all and sat forever holding nothing, while every other agent"; \
+	: "queued behind it. Same budget, same form, started at entry to the"; \
+	: "lock phase, killed when the line completes normally below."; \
+	( sleep $(CASSETTE_TOTAL_BUDGET) && kill -TERM $$$$ ) & lwpid=$$!; \
+	trap 'kill $$lwpid 2>/dev/null' EXIT; \
+	trap 'kill $$lwpid 2>/dev/null; exit 124' TERM INT; \
 	waited=0; \
 	while :; do \
 		owner_pid=$$(cat "$(HARNESS_LOCK)/pid" 2>/dev/null || true); \
@@ -1814,8 +1823,9 @@ cassettes: test-app
 	: "holds it. PPID is make itself, which lives for the whole target -"; \
 	: "so a run killed mid-cassette still leaves a PID that is genuinely"; \
 	: "dead, and the reclaim above is honest rather than a formality."; \
-	echo $$PPID > "$(HARNESS_LOCK)/pid"; \
-	[ $$waited -gt 0 ] && echo "[cassettes] acquired the harness lock after $${waited}s" || true
+		echo $$PPID > "$(HARNESS_LOCK)/pid"; \
+		[ $$waited -gt 0 ] && echo "[cassettes] acquired the harness lock after $${waited}s" || true; \
+		kill $$lwpid 2>/dev/null || true
 	@pkill -f "$(TEST_PROC_HERE)" 2>/dev/null || true
 	@sleep 2
 	@: "A branch that looks like a delegation's real work, planted so the sweep \
