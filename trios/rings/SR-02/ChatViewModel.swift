@@ -11627,6 +11627,14 @@ final class ChatViewModel: ObservableObject {
     ) async {
         let registry = delegationRegistry
         guard let task = registry.task(forIssue: issue) else {
+            // Log twin (wave 080): a chat-only notice is silence to any
+            // headless run - the live /verify spent three waves looking
+            // "hung" while it refused here, instantly and invisibly.
+            TriosLogBus.shared.warn(
+                .queen, "queen.verdict.no_task",
+                "A verdict was refused because the registry holds no task for the issue",
+                ["issue": issue.slug, "criterion": criterion]
+            )
             await postQueenNotice(
                 SystemNoticeClassifier.warningMarker + "I have no task for \(issue.slug)."
             )
@@ -11636,7 +11644,12 @@ final class ChatViewModel: ObservableObject {
             // Refused rather than filed under a criterion that does not exist.
             // A verdict nobody can see is worse than no verdict, because the
             // table would then show unchecked while someone believes they
-            // answered it.
+            // answered it. Log twin for the same headless reason as above.
+            TriosLogBus.shared.warn(
+                .queen, "queen.verdict.unmatched_live",
+                "A verdict was refused because no criterion on the task matches",
+                ["issue": issue.slug, "criterion": criterion]
+            )
             await postQueenNotice(
                 SystemNoticeClassifier.warningMarker
                     + "No criterion on \(issue.slug) reads \"\(criterion)\". The ones that exist:\n"
