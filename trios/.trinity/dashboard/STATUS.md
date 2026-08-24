@@ -55,15 +55,15 @@ curl -s 127.0.0.1:9105/health
 python3 -c "import json;from collections import Counter;print(Counter(t.get('state') for t in json.load(open('.trinity/state/queen_delegation.json')) if isinstance(t,dict)))"
 ```
 
-The staleness guard, measured 2026-08-24: `treeStateFingerprint` is set on
-0 of 59 tasks in the live store, and 12 of 59 carry no acceptance criteria at
-all. The write path is repaired (registry `recordTreeStateFingerprint`,
-called at seal time) and proven on the wire in the e2e suite - a full
-`/verify` through the command path leaves the fingerprint in the store file,
-971 of 971 checks green twice. The live store still reads 0 because no seal
-has run in the app since the repair landed; the number should move the next
-time the Queen records a verdict, and if it does not, the repair is not
-wired and this file is wrong.
+The staleness guard, measured 2026-08-24: the release store still reads
+`treeStateFingerprint` on 0 of its tasks (the user's app predates the fix;
+rebuilding it needs the owner's word), and 12 tasks carry no acceptance
+criteria at all. The write path is now proven LIVE, not only in tests: a
+running test-variant app recorded verdict `make check passes: met` and
+fingerprint `9d26541f…` in its own store via one atomic command chain
+(approve -> delegate --criteria -> verify; wave 081). The e2e wire proof
+stands at 971/971 twice. The release number moves the first time the
+user's app is rebuilt and a verdict is sealed there.
 
 Mesh ring, the seven specs repaired today: 91 functions declared, 91 emitted,
 0 stubs, artifacts byte-identical to a fresh `gen-rust`.
