@@ -1689,6 +1689,17 @@ vendor-step:
 		exit 1; \
 	fi
 
+# Diagnostic aggregate (wave 088): the full check walk in one command,
+# under the lock-phase bypass. It exists because every step is green in
+# its own run but no single invocation has ever walked them all - the
+# lock anomaly (owner root-heals) makes plain `check` stop at cassettes.
+# TRIOS_SKIP_LOCK rides the whole child environment, so the cassettes
+# step inherits it without hand-typing. Never wire this into CI: the
+# prohibition travels with the name.
+check-bypass:
+	@echo "[check-bypass] diagnostic full walk: lock phase jumped (owner root-heals; never for CI)"
+	@TRIOS_SKIP_LOCK=1 $(MAKE) --no-print-directory check
+
 check: check-selftest keychain-doors type-floor t27-rings t27-lowering chain make-dollars empty-sources sources-drift sources-drift-selftest finish-mark-order guard-shapes variant-fence parse-tests run-completeness-selftest cassette-isolation vendor-step dev warnings test cassettes mutants-changed
 
 # Replay every cassette and assert the expected signal appears in the log.
