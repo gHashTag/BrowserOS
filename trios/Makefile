@@ -1815,6 +1815,15 @@ cassettes: test-app
 	trap 'kill $$lwpid 2>/dev/null' EXIT; \
 	trap 'kill $$lwpid 2>/dev/null; exit 124' TERM INT; \
 	waited=0; \
+	if [ -n "$${TRIOS_SKIP_LOCK:-}" ]; then \
+		: "Diagnostic bypass (wave 083): the lock phase is where the"; \
+		: "system-layer exec anomaly lives - measured waves 069-082,"; \
+		: "every run wedges here with the lock free. TRIOS_SKIP_LOCK"; \
+		: "jumps the acquire dance so replays can run while the owner"; \
+		: "root-diagnoses the interceptor. Never set in CI: two runs"; \
+		: "would drive the same test bundle into each other."; \
+		kill $$lwpid 2>/dev/null || true; \
+	else \
 	while :; do \
 		owner_pid=$$(cat "$(HARNESS_LOCK)/pid" 2>/dev/null || true); \
 		if mkdir "$(HARNESS_LOCK)" 2>/dev/null; then break; fi; \
@@ -1840,7 +1849,8 @@ cassettes: test-app
 	: "dead, and the reclaim above is honest rather than a formality."; \
 		echo $$PPID > "$(HARNESS_LOCK)/pid"; \
 		[ $$waited -gt 0 ] && echo "[cassettes] acquired the harness lock after $${waited}s" || true; \
-		kill $$lwpid 2>/dev/null || true
+		kill $$lwpid 2>/dev/null || true; \
+	fi
 	@pkill -f "$(TEST_PROC_HERE)" 2>/dev/null || true
 	@sleep 2
 	@: "A branch that looks like a delegation's real work, planted so the sweep \
