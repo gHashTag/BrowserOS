@@ -42,16 +42,17 @@ as gHashTag/t27#2508.
 ## Measured here
 
 ```
-make check                  -> partial, with the two long-stuck steps now
-                              GREEN under the diagnostic bypass (2026-08-27):
-                              cassettes 4/4 replays ok (wave 085) and
-                              mutants-changed caught every selected mutation
-                              (wave 086, EXIT=0) - both via `make
-                              cassettes-bypass` / TRIOS_SKIP_LOCK, which jumps
-                              the lock phase the system-layer anomaly lives
-                              in. The lock phase itself heals only with the
-                              owner's root fs_usage; the bypass is diagnostic
-                              and never wired into check.
+make check-bypass          -> EXIT=0, 25 [OK] (2026-08-27, wave 090/091):
+                              the FIRST full single-pass walk in the
+                              loop's history - cassettes 4/4 replays,
+                              mutants caught 2 of 2, dev 199/199
+                              warnings-zero - under the diagnostic lock
+                              bypass. Plain `make check` still stops at
+                              the lock phase while the system-layer
+                              anomaly lives (it swallowed the line 26
+                              minutes this run, then released): the
+                              owner's root fs_usage is the cure; the
+                              bypass is diagnostic and never for CI.
 make t27-lowering           -> counts declared vs emitted functions, per spec
 make t27-rings              -> ring00_parity, ring01_rules, ring00_verilog
 make chain                  -> 80 verdicts, spec and hand-written Swift agree
