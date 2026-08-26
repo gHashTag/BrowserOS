@@ -1815,7 +1815,9 @@ cassettes: test-app
 	trap 'kill $$lwpid 2>/dev/null' EXIT; \
 	trap 'kill $$lwpid 2>/dev/null; exit 124' TERM INT; \
 	waited=0; \
+	echo "[SKIP-LOCK probe] seen=$${TRIOS_SKIP_LOCK:-}"; \
 	if [ -n "$${TRIOS_SKIP_LOCK:-}" ]; then \
+		echo "[SKIP-LOCK ON] branch engaged, jumping the acquire dance"; \
 		: "Diagnostic bypass (wave 083): the lock phase is where the"; \
 		: "system-layer exec anomaly lives - measured waves 069-082,"; \
 		: "every run wedges here with the lock free. TRIOS_SKIP_LOCK"; \
