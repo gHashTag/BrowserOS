@@ -1001,6 +1001,7 @@ t27-lowering:
 		if ! rustc --edition 2021 --crate-type lib --emit=metadata \
 			--out-dir "$$tmpd" "$$tmpd/$$(basename $$f .t27).rs" 2>/dev/null; then \
 			nocompile=$$((nocompile + 1)); \
+			echo "  [nocompile] $$(basename $$f .t27)"; \
 		fi; \
 		if [ "$$spec_fns" != "$$emitted" ]; then \
 			echo "  [FAIL] $$(basename $$f): rust emitted $$emitted of $$spec_fns declared"; \
