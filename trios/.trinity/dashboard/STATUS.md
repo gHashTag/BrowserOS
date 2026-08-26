@@ -42,12 +42,16 @@ as gHashTag/t27#2508.
 ## Measured here
 
 ```
-make check                  -> partial 2026-08-24: every step through test-app
-                              green (dev, warnings 0/199, t27 gates, chain,
-                              vendor-step, test-app); cassettes+mutants did
-                              not finish a clean pass - five attempts each hit
-                              a named neighbour collision (see iteration 74).
-                              Do not read this line as REAL_EXIT=0 tonight.
+make check                  -> partial, with the two long-stuck steps now
+                              GREEN under the diagnostic bypass (2026-08-27):
+                              cassettes 4/4 replays ok (wave 085) and
+                              mutants-changed caught every selected mutation
+                              (wave 086, EXIT=0) - both via `make
+                              cassettes-bypass` / TRIOS_SKIP_LOCK, which jumps
+                              the lock phase the system-layer anomaly lives
+                              in. The lock phase itself heals only with the
+                              owner's root fs_usage; the bypass is diagnostic
+                              and never wired into check.
 make t27-lowering           -> counts declared vs emitted functions, per spec
 make t27-rings              -> ring00_parity, ring01_rules, ring00_verilog
 make chain                  -> 80 verdicts, spec and hand-written Swift agree

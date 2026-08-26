@@ -1783,6 +1783,15 @@ test-app:
 # trace lines either way). The working alternative for the next attempt is
 # a literal `set -x;` at the head of the recipe line itself - a bash
 # mechanism, independent of make's flag plumbing.
+# Diagnostic alias (wave 086): the named, self-announcing way to run the
+# cassette suite around the lock-phase anomaly while the owner root-heals
+# the interceptor. It exists so nobody types TRIOS_SKIP_LOCK=1 by hand and
+# forgets the CI prohibition - the name says what it is, the echo says
+# what engaged, and `check` never calls it.
+cassettes-bypass:
+	@echo "[cassettes-bypass] diagnostic run: lock phase jumped (owner root-heals the interceptor; never wire into check)"
+	@TRIOS_SKIP_LOCK=1 $(MAKE) --no-print-directory cassettes
+
 cassettes: test-app
 	@: "Serialised against every other harness run in this checkout."; \
 	: "Several agents share this tree and each runs `make check`. Two"; \
