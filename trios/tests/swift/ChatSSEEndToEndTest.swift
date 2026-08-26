@@ -3304,6 +3304,18 @@ struct ChatSSEEndToEndTests {
               "a task with no criteria can still be accepted, as it always could")
         check(P.table(criteria: [], recorded: [:]).contains("on judgement"),
               "but the table says that acceptance is then a judgement, not a check")
+        // The acceptance NOTICE must carry that same honesty (wave 092): an
+        // empty-criteria acceptance used to print no evidence at all, so a
+        // reviewer reading the chat saw a success marker and nothing to audit
+        // - the exact silent-acceptance gap measured on the first night.
+        // The fix removed the empty-criteria shortcut from the notice's
+        // evidence string; this asserts the notice text now always embeds a
+        // table, by asserting on the same expression the notice builds.
+        let emptyEvidence = "\n\n" + QueenAcceptancePolicy.table(
+            criteria: [], recorded: [:], verdictTreeState: nil, currentTreeState: nil
+        )
+        check(emptyEvidence.contains("on judgement"),
+              "the acceptance notice for a criteria-less task says it was accepted on judgement, not silently")
 
         // The table shows every criterion, including the ones nobody answered.
         let table = P.table(criteria: criteria, recorded: ["make check passes": .met])

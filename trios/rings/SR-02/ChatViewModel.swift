@@ -11059,14 +11059,16 @@ final class ChatViewModel: ObservableObject {
             let tail = note.isEmpty ? "" : "\n\(note)"
             // The table, not a sentence saying it went well. A reviewer reading
             // this later should see what was checked, not that someone was
-            // satisfied.
-            let evidence = task.acceptanceCriteria.isEmpty
-                ? ""
-                : "\n\n" + QueenAcceptancePolicy.table(
-                    criteria: task.acceptanceCriteria, recorded: task.criterionVerdicts,
-                    verdictTreeState: verdictTreeState,
-                    currentTreeState: currentTreeState
-                )
+            // satisfied. Empty criteria are no exception: the table's own
+            // words ("accepted on judgement") are the honest evidence, while
+            // an empty notice silently accepts work nobody can audit - the
+            // exact gap measured on the first night (12 of 59 tasks carried
+            // no criteria and their acceptances said nothing).
+            let evidence = "\n\n" + QueenAcceptancePolicy.table(
+                criteria: task.acceptanceCriteria, recorded: task.criterionVerdicts,
+                verdictTreeState: verdictTreeState,
+                currentTreeState: currentTreeState
+            )
             await postQueenNotice(
                 SystemNoticeClassifier.successMarker
                     + "Accepted \(issue.slug) from \(task.worker).\(evidence)\nIts work is on "
