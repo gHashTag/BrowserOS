@@ -8,14 +8,22 @@ Last measured: 2026-08-23.
 
 ## MVP, against section 23 of Queen_T27_MVP_Architecture.md
 
-**0 of 29 criteria done. 17 partial, 12 not started.**
-
-No adversarial challenge ran against any "done" claim, because no section
-produced one.
+**2 of 29 criteria done** (re-classified 2026-08-27, wave 107, by the
+loop's live evidence; was 0/17/12 on 2026-08-23). The two proven done,
+both Queen/Bees, by live measurement rather than claim:
+- "Every Bee task is bound to an issue and owned paths" - live
+  delegations with criterion+boundary, waves 081-103;
+- "Queen cannot accept required work without evidence" - the
+  acceptance gate proven live AND closed by three independent defense
+  layers (contract cache, terminality, judgement notice), waves 092-093.
+Method note: a desktop re-classification against wave evidence, not a
+per-criterion rerun; the remaining 27 keep their 17-partial/10-not
+standing. No adversarial challenge has yet run against a Playground
+or Language "done" claim - none exists to challenge.
 
 | Section | done | partial | not started | of |
 |---|---:|---:|---:|---:|
-| Queen and bees | 0 | 6 | 0 | 6 |
+| Queen and bees | 2 | 4 | 0 | 6 |
 | Verification | 0 | 4 | 2 | 6 |
 | Release and research | 0 | 4 | 1 | 5 |
 | Language and compiler | 0 | 2 | 4 | 6 |
