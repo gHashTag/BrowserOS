@@ -3006,6 +3006,7 @@ xctest:
 # is not a row.
 MUTANTS := \
 	rings/SR-02/QueenDelegationRegistry.swift@@            ownedPaths: ownedPaths,@@            ownedPaths: [],@@a delegated task is created without its owned-path boundary - the live-proven "bound to an issue and owned paths" MVP criterion attacked at its root \
+	rings/SR-02/ChatViewModel.swift@@            let evidence = "\n\n" + QueenAcceptancePolicy.table(@@            let evidence = ""; _ = QueenAcceptancePolicy.table(@@the acceptance notice carries no evidence table - the live-proven "cannot accept without evidence" MVP criterion attacked at its voice \
 	rings/SR-00/QueenObserver.swift@@lowered.contains("write") || lowered.contains("edit")@@lowered.contains("write")@@the boundary detector forgets edit-shaped tools \
 	rings/SR-02/QueenDelegationRegistry.swift@@if criteria.contains(criterion) {@@if true {@@a verdict is accepted for a criterion the task never had \
 	rings/SR-00/QueenDelegation.swift@@task.streamOutcome == .open@@false // gutted: no stream is ever open@@the reaper stops believing any stream is open and takes live workers mid-answer \
