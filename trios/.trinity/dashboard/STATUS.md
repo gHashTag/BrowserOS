@@ -42,7 +42,10 @@ as gHashTag/t27#2508.
 ## Measured here
 
 ```
-make check-bypass          -> EXIT=0, 25 [OK] (2026-08-27, wave 090/091):
+make check-bypass          -> EXIT=0 x2: waves 090/091 AND 103 (daytime,
+                              neighbour-edited tree; the anomaly swallowed
+                              the lock line ~35 min, then released - both
+                              walks self-completed at 25 [OK]):
                               the FIRST full single-pass walk in the
                               loop's history - cassettes 4/4 replays,
                               mutants caught 2 of 2, dev 199/199
