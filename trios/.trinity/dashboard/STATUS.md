@@ -76,9 +76,10 @@ user's app is rebuilt and a verdict is sealed there.
 Mesh ring, the seven specs repaired today: 91 functions declared, 91 emitted,
 0 stubs, artifacts byte-identical to a fresh `gen-rust`.
 
-Corpus-wide, which is a different and worse number: 12 of 68 mesh artifacts
-are byte-identical to a fresh `gen-rust`; 56 differ, so most committed
-artifacts are stale relative to their spec.
+Corpus-wide (re-measured live 2026-08-27, wave 106): 22 of 68 mesh
+artifacts are byte-identical to a fresh `gen-rust` (was 12 of 68 at the
+board's founding); 46 differ, so most committed artifacts are still stale
+relative to their spec - the regeneration decision is owner-gated.
 
 **57 of 70 generated Rust files compile; 13 do not** (re-measured live
 2026-08-27, wave 105; was 50/20 at the board's founding, 15/14/13 across
