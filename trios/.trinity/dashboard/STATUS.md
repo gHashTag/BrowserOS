@@ -80,11 +80,15 @@ Corpus-wide, which is a different and worse number: 12 of 68 mesh artifacts
 are byte-identical to a fresh `gen-rust`; 56 differ, so most committed
 artifacts are stale relative to their spec.
 
-**50 of 70 generated Rust files compile; 20 do not.** Counting functions is
-necessary and not sufficient - four specs keep every function and lose whole
-`return` statements inside them, so the count stays right while the code stops
-meaning anything. `make t27-lowering` now compiles the output too, against a
-ceiling of 20 that may fall and must not rise.
+**57 of 70 generated Rust files compile; 13 do not** (re-measured live
+2026-08-27, wave 105; was 50/20 at the board's founding, 15/14/13 across
+waves 096-098 - the two healed specs are api_documenter and
+bandwidth_allocator). Counting functions is necessary and not sufficient -
+four specs keep every function and lose whole `return` statements inside
+them, so the count stays right while the code stops meaning anything.
+`make t27-lowering` compiles the output too, against a ceiling of 20 that
+may fall and must not rise; the remaining 13 are classified and
+owner-gated (`tri spec-diag`, map in wave 098).
 
 ## How to update this
 
