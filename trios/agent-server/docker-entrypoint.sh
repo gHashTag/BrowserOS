@@ -51,5 +51,22 @@ fi
 git -C "$REPO_DIR" config user.name "${GIT_AUTHOR_NAME:-Trinity Bee}"
 git -C "$REPO_DIR" config user.email "${GIT_AUTHOR_EMAIL:-bee@trinity.local}"
 
+# Pushing needs a credential; cloning a public repository does not. Without
+# GITHUB_TOKEN a push fails with "could not read Username for
+# 'https://github.com': terminal prompts disabled" - which is the correct
+# failure, and is why prompts are disabled rather than left to hang forever
+# on a terminal nobody is watching.
+#
+# The helper reads the token from the environment at the moment git asks, so
+# it is never written into .git/config. Putting it in the remote URL would
+# persist it on the volume and leak it into every `git remote -v`.
+if [ -n "$GITHUB_TOKEN" ]; then
+  git -C "$REPO_DIR" config credential.helper \
+    '!f() { echo "username=x-access-token"; echo "password=$GITHUB_TOKEN"; }; f'
+  echo "[entrypoint] push credential configured from GITHUB_TOKEN"
+else
+  echo "[entrypoint] GITHUB_TOKEN unset; this checkout can read but not push"
+fi
+
 echo "[entrypoint] checkout ready: $(git -C "$REPO_DIR" rev-parse --short HEAD) on $TRIOS_REPO_REF"
 exec "$@"

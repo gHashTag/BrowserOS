@@ -1219,20 +1219,13 @@ enum QueenBranchCommitter {
     /// prefixed with `trios/`. Running the plumbing anywhere else made
     /// `git diff --name-only` and the caller's owned paths disagree, and the
     /// worker's file was filtered out of its own commit.
+    /// The repository root as the machine that runs git sees it.
+    ///
+    /// Asked of the executor rather than measured here, because when the
+    /// agent-server is remote the answer is a path in its container and this
+    /// machine cannot compute it.
     static func repositoryRoot(projectRoot: String = ProjectPaths.root) -> String {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = ["rev-parse", "--show-toplevel"]
-        process.currentDirectoryURL = URL(fileURLWithPath: projectRoot)
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        guard (try? process.run()) != nil else { return projectRoot }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        let output = String(data: data, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return output.isEmpty ? projectRoot : output
+        QueenGit.executor.repositoryRoot ?? projectRoot
     }
 
     /// Rewrites a project-relative path (`docs`) into a repository-relative one
@@ -1276,55 +1269,39 @@ enum QueenBranchCommitter {
         index: String,
         projectRoot: String = ProjectPaths.root
     ) -> String? {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = arguments
-        process.currentDirectoryURL = URL(fileURLWithPath: repositoryRoot(projectRoot: projectRoot))
-        var environment = ProcessInfo.processInfo.environment
-        environment["GIT_INDEX_FILE"] = index
         // Credentials are the dead end of an automated pipeline: git waits
         // for a username at a prompt nobody can see, and every step that
-        // follows the push never runs.  Forbid the prompt outright.
-        environment["GIT_TERMINAL_PROMPT"] = "0"
-        environment["GIT_ASKPASS"] = ""
-        environment["SSH_ASKPASS"] = ""
-        environment["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
-        process.environment = environment
-
-        let output = Pipe()
-        process.standardOutput = output
-        process.standardError = Pipe()
-        do {
-            try process.run()
-        } catch {
-            return nil
-        }
-        let data = output.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
+        // follows the push never runs. Forbid the prompt outright.
+        let environment = [
+            "GIT_INDEX_FILE": index,
+            "GIT_TERMINAL_PROMPT": "0",
+            "GIT_ASKPASS": "",
+            "SSH_ASKPASS": "",
+            "GIT_SSH_COMMAND": "ssh -o BatchMode=yes"
+        ]
+        let result = QueenGit.executor.run(
+            arguments: arguments,
+            workDir: repositoryRoot(projectRoot: projectRoot),
+            environment: environment
+        )
+        guard result.ok else {
             // Measured 2026-08-24, across three waves: in a live GUI process
             // the verdict seal failed silently because a git call here
             // returned non-zero and nil swallowed the reason whole. A git
             // failure must name itself - the verdict's freshness depends on
             // this call, and its absence was indistinguishable from success.
-            let errBytes = (process.standardError as? Pipe)?
-                .fileHandleForReading.readDataToEndOfFile()
             TriosLogBus.shared.warn(
                 .queen, "queen.git.failed",
                 "A git call failed; the reason travels with the event",
                 [
                     "args": arguments.joined(separator: " "),
-                    "status": String(process.terminationStatus),
-                    "stderr": String(
-                        String(data: errBytes ?? Data(), encoding: .utf8)?
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-                            .prefix(200) ?? ""
-                    )
+                    "remote": QueenGit.executor.isLocal ? "false" : "true",
+                    "stderr": String(result.output.prefix(200))
                 ]
             )
             return nil
         }
-        return String(data: data, encoding: .utf8) ?? ""
+        return result.output
     }
 
     /// Runs a git command in a specific directory without the `GIT_INDEX_FILE`
@@ -1341,31 +1318,10 @@ enum QueenBranchCommitter {
         _ arguments: [String],
         workDir: String
     ) -> (ok: Bool, output: String) {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = arguments
-        process.currentDirectoryURL = URL(fileURLWithPath: workDir)
-        process.environment = ProcessInfo.processInfo.environment
-
-        let stdout = Pipe()
-        let stderr = Pipe()
-        process.standardOutput = stdout
-        process.standardError = stderr
-        do {
-            try process.run()
-        } catch {
-            return (false, "")
-        }
-        let outData = stdout.fileHandleForReading.readDataToEndOfFile()
-        let errData = stderr.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        let outText = String(data: outData, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let errText = String(data: errData, encoding: .utf8)?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard process.terminationStatus == 0 else {
-            return (false, errText.isEmpty ? outText : errText)
-        }
-        return (true, outText)
+        QueenGit.executor.run(
+            arguments: arguments,
+            workDir: workDir,
+            environment: [:]
+        )
     }
 }

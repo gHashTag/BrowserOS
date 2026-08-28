@@ -134,7 +134,8 @@ final class QueenWorkerRunner: ObservableObject {
         // produces a task reported as "did nothing" rather than a visible
         // failure.
         if let refusal = QueenDelegationPolicy.splitExecutionRefusal(
-            serverIsRemote: ProjectPaths.agentServerIsRemote
+            serverIsRemote: ProjectPaths.agentServerIsRemote,
+            committerRunsLocally: QueenGit.runsLocally
         ) {
             var refused = QueenWorkerTranscript(seed: [])
             await finish(
