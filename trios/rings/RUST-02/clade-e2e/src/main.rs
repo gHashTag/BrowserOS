@@ -536,6 +536,15 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
         sources: &["tests/swift/queen_epics_test.swift", "rings/SR-00/QueenEpics.swift"],
     },
     SwiftLogicSuite {
+        label: "QueenT27Measurement",
+        bin: "/tmp/trios_queen_t27_measurement_test",
+        sources: &[
+            "tests/swift/queen_t27_measurement_test.swift",
+            "rings/SR-01/QueenT27Measurement.swift",
+            "rings/SR-00/QueenT27Acceptance.swift",
+        ],
+    },
+    SwiftLogicSuite {
         label: "QueenT27Acceptance",
         bin: "/tmp/trios_queen_t27_acceptance_test",
         sources: &[
