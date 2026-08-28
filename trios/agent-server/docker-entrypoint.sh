@@ -68,5 +68,19 @@ else
   echo "[entrypoint] GITHUB_TOKEN unset; this checkout can read but not push"
 fi
 
+# Hand the working tree to the account the agents' shells run as, so they can
+# edit and commit, while the server's own environment - and the credential in
+# it - stays root's and out of their reach. Without this the agents inherit a
+# root-owned checkout and every write fails.
+if [ -n "$TRIOS_TOOL_SHELL_USER" ] && id "$TRIOS_TOOL_SHELL_USER" >/dev/null 2>&1; then
+  chown -R "$TRIOS_TOOL_SHELL_USER" "$WORKSPACE_DIR"
+  # git refuses to operate in a tree owned by someone else; both accounts touch
+  # this one, so both are told it is expected.
+  git config --global --add safe.directory "$REPO_DIR"
+  su -s /bin/sh "$TRIOS_TOOL_SHELL_USER" -c \
+    "git config --global --add safe.directory '$REPO_DIR'" || true
+  echo "[entrypoint] workspace handed to $TRIOS_TOOL_SHELL_USER; server keeps its own environment"
+fi
+
 echo "[entrypoint] checkout ready: $(git -C "$REPO_DIR" rev-parse --short HEAD) on $TRIOS_REPO_REF"
 exec "$@"

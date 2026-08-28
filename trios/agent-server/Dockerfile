@@ -37,6 +37,20 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends git ca-certificates openssh-client \
  && rm -rf /var/lib/apt/lists/*
 
+# An unprivileged account for the agents' shell commands.
+#
+# The server keeps running as root, and the two being DIFFERENT is the whole
+# point. Measured 2026-08-28 on this deployment when everything shared uid 0:
+# `tr '\0' '\n' < /proc/1/environ` inside a tool command printed the server's
+# entire environment - GITHUB_TOKEN, DATABASE_URL, and the server's own
+# TRIOS_API_TOKEN. The environment allowlist in bash.ts was scrubbing the
+# child's copy while the original sat readable one directory away in /proc.
+#
+# Making them one non-root user instead would not have helped: /proc/1/environ
+# is readable by the process owner, so any shared uid re-opens it.
+RUN useradd --system --create-home --home-dir /home/bee --shell /usr/sbin/nologin bee
+ENV TRIOS_TOOL_SHELL_USER=bee
+
 # The whole install tree, not just /app/node_modules.
 #
 # bun does not hoist workspace links to the root: `@browseros/shared` is

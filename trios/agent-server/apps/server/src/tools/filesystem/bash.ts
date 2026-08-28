@@ -16,6 +16,32 @@ function getShellArgs(): [string, string] {
 }
 
 /**
+ * The full argv for a command, dropping privileges when asked to.
+ *
+ * The allowlist below keeps secrets out of the child's environment, and that
+ * is enough against accidental inheritance. It is not enough against a shell
+ * that goes looking: measured 2026-08-28 on the deployed container, which ran
+ * everything as root, `tr '\0' '\n' < /proc/1/environ` from inside a tool
+ * command printed the server's whole environment - GITHUB_TOKEN, DATABASE_URL
+ * and the server's own TRIOS_API_TOKEN among it. Same user, same namespace,
+ * so the scrubbed env was a formality.
+ *
+ * With TRIOS_TOOL_SHELL_USER set, commands run as that user instead, and the
+ * server's environment stops being readable because it belongs to somebody
+ * else. Unset - every existing local install - nothing changes at all, which
+ * is deliberate: `su` is not portable to macOS in this form and a developer's
+ * own machine has no second user to drop to.
+ */
+export function shellArgv(command: string): string[] {
+  const [shell, flag] = getShellArgs()
+  const user = process.env.TRIOS_TOOL_SHELL_USER
+  if (process.platform === 'win32' || !user) return [shell, flag, command]
+  // `-s` because the target account is deliberately shell-less in the image,
+  // and without it su refuses with "This account is currently not available".
+  return ['su', '-s', shell, user, '-c', command]
+}
+
+/**
  * Environment the spawned shell receives.
  *
  * Measured 2026-08-21 on the live release server (ps eww): the inherited
@@ -67,11 +93,10 @@ export function createBashTool(cwd: string) {
     }),
     execute: (params) =>
       executeWithMetrics(TOOL_NAME, async () => {
-        const [shell, flag] = getShellArgs()
         const timeoutMs = (params.timeout || DEFAULT_BASH_TIMEOUT) * 1000
         const resolvedCwd = resolve(cwd)
 
-        const proc = Bun.spawn([shell, flag, params.command], {
+        const proc = Bun.spawn(shellArgv(params.command), {
           cwd: resolvedCwd,
           stdout: 'pipe',
           stderr: 'pipe',
