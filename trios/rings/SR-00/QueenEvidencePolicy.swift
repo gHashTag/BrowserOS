@@ -133,4 +133,69 @@ enum QueenEvidencePolicy {
     static func evidenceIdentifiers(in body: String) -> [String] {
         namedIdentifiers(in: body, ignoringBacktickedSpans: true)
     }
+
+    /// The Swift keywords that introduce a declaration. A name is evidence
+    /// when the file DECLARES it; a name the file merely mentions is not.
+    private static let declarationKeywords = [
+        "func", "var", "let", "case", "enum", "struct", "class",
+        "protocol", "typealias", "actor", "extension",
+    ]
+
+    /// Whether `text` declares `identifier`, as opposed to naming it.
+    ///
+    /// The heuristic that decides whether an issue is already done used
+    /// `contents.contains(identifier)`, and substring containment is not
+    /// evidence of anything. Measured live on 2026-08-28: the Queen refused
+    /// all 13 candidates on every tick, and 4 of them - #1173, #1174, #1175
+    /// and #1176 - were refused as "looks already done" on the strength of
+    /// `handleWorkerFinished`, `chooseNextOpenIssue` and
+    /// `autoAcceptIfUnambiguous` appearing in
+    /// `rings/SR-00/QueenLocalisation.swift`.
+    ///
+    /// None of those three is declared in that file. They are declared in
+    /// `ChatViewModel.swift` and appear in the boundary file only inside its
+    /// own narrative header and its measurement table, which lists them as
+    /// the INPUTS the narrowing logic is tested against. So the heuristic
+    /// read a file's documentation of what it is tested on, concluded the
+    /// work was done, and starved the Queen of a third of her queue.
+    ///
+    /// Comment lines are excluded before the search, for the same reason the
+    /// keychain gate excludes them: a line that begins with `//` or `*` is
+    /// prose, and prose cannot declare a function.
+    static func declaresIdentifier(_ identifier: String, in text: String) -> Bool {
+        guard !identifier.isEmpty else { return false }
+        for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("//") || line.hasPrefix("*") || line.hasPrefix("/*") {
+                continue
+            }
+            for keyword in declarationKeywords where declares(identifier, keyword: keyword, on: line) {
+                return true
+            }
+        }
+        return false
+    }
+
+    /// One `<keyword> <identifier>` match on one line, with the boundary
+    /// checked on both sides so `func handleWorkerFinishedLater` does not
+    /// answer for `handleWorkerFinished`.
+    private static func declares(_ identifier: String, keyword: String, on line: String) -> Bool {
+        let needle = "\(keyword) \(identifier)"
+        guard let range = line.range(of: needle) else { return false }
+        if range.lowerBound != line.startIndex {
+            let before = line[line.index(before: range.lowerBound)]
+            guard !before.isLetter, !before.isNumber, before != "_" else { return false }
+        }
+        guard range.upperBound < line.endIndex else { return true }
+        let after = line[range.upperBound]
+        return !after.isLetter && !after.isNumber && after != "_"
+    }
+
+    /// The named identifiers a boundary does NOT declare.
+    ///
+    /// Empty means every name is declared somewhere in the boundary, which is
+    /// the only shape in which presence is evidence at all.
+    static func undeclaredIdentifiers(_ identifiers: [String], in text: String) -> [String] {
+        identifiers.filter { !declaresIdentifier($0, in: text) }
+    }
 }

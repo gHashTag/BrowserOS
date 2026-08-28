@@ -10663,7 +10663,19 @@ final class ChatViewModel: ObservableObject {
                 fileContents += "\n" + text
             }
         }
-        let missing = symbols.filter { !fileContents.contains($0) }
+        // DECLARED, not merely mentioned. This was `fileContents.contains`,
+        // and substring containment is not evidence of anything. Measured
+        // live on 2026-08-28: the Queen refused all 13 candidates on every
+        // tick, and four of them - #1173, #1174, #1175, #1176 - were refused
+        // as "looks already done" because `handleWorkerFinished`,
+        // `chooseNextOpenIssue` and `autoAcceptIfUnambiguous` appear in
+        // rings/SR-00/QueenLocalisation.swift. None of the three is declared
+        // there; they are declared in this file, and appear in that one only
+        // inside its narrative header and its measurement table, which lists
+        // them as the inputs the narrowing logic is tested against. The
+        // heuristic read a file's documentation of what it is tested on and
+        // concluded the work was finished.
+        let missing = QueenEvidencePolicy.undeclaredIdentifiers(symbols, in: fileContents)
         guard missing.isEmpty else { return nil }
 
         // Presence is only evidence if it POSTDATES the issue. For a fix, the

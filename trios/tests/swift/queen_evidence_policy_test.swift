@@ -30,6 +30,7 @@ enum QueenEvidencePolicyTests {
     static func scenario(_ name: String) { print("\n# Scenario: \(name)") }
 
     static func main() {
+        theDeclarationRule()
         theFixCase()
         theCreateCase()
         theUnmeasuredCase()
@@ -180,6 +181,92 @@ enum QueenEvidencePolicyTests {
         check(
             QueenEvidencePolicy.evidenceIdentifiers(in: "`abcde`").isEmpty,
             "five characters is under the floor, so a short word cannot carry a verdict"
+        )
+    }
+
+    static func theDeclarationRule() {
+        scenario("a name is evidence only where the file DECLARES it")
+
+        // The live case, 2026-08-28. QueenLocalisation.swift names these three
+        // in its own narrative header and measurement table - as the inputs
+        // the narrowing logic is tested against - and declares none of them.
+        let prose = """
+        /// | #1158 | 6263-6439 `acceptanceBlockReasonDistinguishingEmptyAnswers`
+        ///   `autoAcceptIfUnambiguous`'s body contains 4 identifiers
+        //  #1156 still yields handleWorkerFinished
+        let cases = ["autoAcceptIfUnambiguous", "chooseNextOpenIssue"]
+        """
+        check(
+            !QueenEvidencePolicy.declaresIdentifier("handleWorkerFinished", in: prose),
+            "a name in a comment is not a declaration"
+        )
+        check(
+            !QueenEvidencePolicy.declaresIdentifier("chooseNextOpenIssue", in: prose),
+            "a name inside a string literal array is not a declaration"
+        )
+        check(
+            QueenEvidencePolicy.undeclaredIdentifiers(
+                ["handleWorkerFinished", "chooseNextOpenIssue"], in: prose
+            ).count == 2,
+            "both names are reported undeclared, which is what unblocks the issue"
+        )
+
+        scenario("real declarations are still evidence")
+
+        for (kw, src) in [
+            ("func", "    private func handleWorkerFinished(_ t: Task) {"),
+            ("var", "    var chooseNextOpenIssue: Int = 0"),
+            ("let", "let autoAcceptIfUnambiguous = true"),
+            ("case", "        case requestReviewerVerdicts"),
+            ("struct", "struct SomeIdentifier {"),
+            ("enum", "enum AnotherIdentifier {"),
+        ] {
+            let name = src.split(separator: " ").last.map {
+                String($0).trimmingCharacters(in: CharacterSet(charactersIn: "({:=0 truefalse"))
+            } ?? ""
+            _ = name
+            check(
+                QueenEvidencePolicy.declaresIdentifier(
+                    kw == "func" ? "handleWorkerFinished"
+                        : kw == "var" ? "chooseNextOpenIssue"
+                        : kw == "let" ? "autoAcceptIfUnambiguous"
+                        : kw == "case" ? "requestReviewerVerdicts"
+                        : kw == "struct" ? "SomeIdentifier" : "AnotherIdentifier",
+                    in: src
+                ),
+                "\(kw) declares its name"
+            )
+        }
+
+        scenario("the boundary is checked on both sides")
+
+        check(
+            !QueenEvidencePolicy.declaresIdentifier(
+                "handleWorkerFinished", in: "func handleWorkerFinishedLater() {"
+            ),
+            "a longer name does not answer for a shorter one"
+        )
+        check(
+            !QueenEvidencePolicy.declaresIdentifier(
+                "handleWorkerFinished", in: "func prefixHandleWorkerFinished() {"
+            ),
+            "a name embedded after a prefix is not a declaration of it"
+        )
+        check(
+            QueenEvidencePolicy.declaresIdentifier("done", in: "let done: Bool"),
+            "a declaration followed by a colon still counts"
+        )
+        check(
+            QueenEvidencePolicy.declaresIdentifier("done", in: "let done"),
+            "a declaration at end of line still counts"
+        )
+        check(
+            !QueenEvidencePolicy.declaresIdentifier("", in: "func x() {}"),
+            "an empty identifier is never declared"
+        )
+        check(
+            QueenEvidencePolicy.undeclaredIdentifiers([], in: "anything").isEmpty,
+            "no identifiers means nothing undeclared"
         )
     }
 }
