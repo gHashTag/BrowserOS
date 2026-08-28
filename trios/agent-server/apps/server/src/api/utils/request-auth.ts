@@ -92,6 +92,26 @@ export function requireTrustedAppOrigin(): MiddlewareHandler {
       return next()
     }
 
+    // A configured token means authentication is required, from everywhere.
+    //
+    // The loopback rules below rest on "same machine implies same trust", which
+    // holds for a server the user started on their laptop and fails for a
+    // container: an agent's shell IS a loopback client. Measured 2026-08-28
+    // from inside the deployed container, with no credential at all -
+    //
+    //   bun -e 'fetch("http://127.0.0.1:8080/mcp", {method:"POST", ...})'
+    //
+    // returned the full tool list. Nothing was gained that day, because the
+    // caller already had those tools by other means; but every route added
+    // later would have inherited the same open door, including one added
+    // specifically to hold a credential the caller must not have.
+    //
+    // Whoever sets TRIOS_API_TOKEN has said the perimeter is not the machine.
+    // No token configured - every local install - and nothing below changes.
+    if (configuredToken()) {
+      return c.json({ error: 'Forbidden' }, 403)
+    }
+
     const origin = c.req.header('origin')
     if (origin) {
       if (!isTrustedAppOrigin(origin)) {

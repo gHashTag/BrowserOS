@@ -71,6 +71,28 @@ describe('request auth', () => {
     }
   })
 
+  // The loopback carve-out is what an agent's own shell is on the inside of.
+  // Measured from the deployed container with no credential: a fetch to
+  // 127.0.0.1:8080/mcp returned the full tool list.
+  it('refuses an unauthenticated caller once a token is configured', async () => {
+    process.env.TRIOS_API_TOKEN = 'test-token-value'
+    try {
+      const app = new Hono()
+        .use('/*', requireTrustedAppOrigin())
+        .get('/claw/status', (c) => c.json({ ok: true }))
+
+      const noCredentials = await app.request('http://localhost/claw/status')
+      expect(noCredentials.status).toBe(403)
+
+      const trustedOrigin = await app.request('http://localhost/claw/status', {
+        headers: { Origin: 'chrome-extension://browseros' },
+      })
+      expect(trustedOrigin.status).toBe(403)
+    } finally {
+      delete process.env.TRIOS_API_TOKEN
+    }
+  })
+
   it('refuses a wrong token, and a right token when none is configured', async () => {
     const app = new Hono()
       .use('/*', requireTrustedAppOrigin())
