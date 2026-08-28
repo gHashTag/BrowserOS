@@ -807,7 +807,7 @@ enum QueenDelegationPolicy {
     /// and the stall timer while doing nothing at all (#1139). A completed turn
     /// disqualifies it - that worker did real work (#1247).
     static func wasNeverStarted(_ task: DelegatedTask) -> Bool {
-        (task.completedTurns ?? 0) == 0 // gutted: turn count alone
+        task.streamOutcome == nil && (task.completedTurns ?? 0) == 0
     }
 
     /// Why the Queen may not open this chat yet, or nil if the user has agreed.
