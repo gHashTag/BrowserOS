@@ -41,7 +41,31 @@ the root. Copying `/app/node_modules` alone produced an image that built
 cleanly and died on its first import with *Cannot find module
 '@browseros/shared/constants/exit-codes'*.
 
-## The security hole this opened, and closed
+## Four holes, all opened by this migration, all measured
+
+Putting a loopback-assuming server on the internet broke every assumption its
+authorisation rested on. Each was found by measurement, and one only because a
+review refuted a claim of mine.
+
+| # | what was open | how it was proved | closed by |
+|---|---|---|---|
+| 1 | any `chrome-extension://` Origin admitted from anywhere | `curl -H 'Origin: chrome-extension://aaaa' .../mcp` returned 80 tools | trusted origins now also need a loopback socket; `TRIOS_API_TOKEN` |
+| 2 | `/proc/1/environ` readable by agent shells - container ran as root | `tr '\0' '\n' < /proc/1/environ` printed GITHUB_TOKEN, DATABASE_URL, TRIOS_API_TOKEN | shells dropped to `bee`; the server keeps root |
+| 3 | the six filesystem tools run in the **server** process, so the uid split never touched them | `filesystem_read /proc/self/environ` returned the server's environment; `/etc/shadow` too | `TRIOS_FS_ROOT` bounds all six, symlinks resolved |
+| 4 | an agent's shell is a loopback client, and loopback was trusted without a token | `bun -e 'fetch("http://127.0.0.1:8080/mcp", ...)'` returned the tool list with no credential | a configured token disables the origin and loopback fallbacks |
+
+**I reported the container sealed after #2 and was wrong.** #3 was still open,
+and it was an adversarial review of the design - not my own checking - that
+found it. The correction is recorded here rather than quietly fixed, because
+the shape of the mistake matters: confining the shell felt like confining the
+agent, and six tools that never used a shell were untouched.
+
+#4 gained an attacker nothing on the day it was measured, since the caller
+already held those tools. It is listed because the next route added would have
+inherited it, and the route under discussion was one meant to hold a
+credential that caller must not have.
+
+## The first hole, in full
 
 **Read this part even if you skip the rest.**
 
@@ -80,6 +104,32 @@ time.
 
 `TRIOS_API_TOKEN` was generated inside the command that set it, so its value
 never passed through this session. Read it from the Railway dashboard.
+
+## No push credential lives in the container, and that is the design
+
+A checkout the agents can write is a checkout whose `.git/config` and
+`.git/hooks` they control. Both `credential.helper` and a `pre-push` hook are
+shell commands, so any privileged git run inside that tree executes code of
+their choosing with that process's environment attached. Measured in the
+review: a planted helper captured root's whole environment; a planted
+`pre-push` hook did the same.
+
+So a token placed there to enable `git push` is a token they can take, and no
+arrangement inside the container changes that - not an environment allowlist,
+not a uid split, not a server-side route. The question is not where to hide it
+but what it is worth once taken.
+
+The answer is to not put one there. The agents commit; the Mac publishes. The
+Mac is already load-bearing for `swift build`, so this adds no machine to the
+trust chain. What is missing is the transfer that carries a branch out of the
+container, and until it exists
+`QueenDelegationPolicy.unpublishableWorkRefusal` refuses a remote delegation
+rather than letting work be committed into a container the next deploy wipes.
+
+If the Mac ever must leave the loop, the fallback is a deploy key or a
+fine-grained token scoped to **one repository**, `Contents: write`, no
+Workflows, pushing to a namespace a stolen credential can only cost. A classic
+`ghp_` token reaches every repository its owner can, and must never be here.
 
 ## The boundary that is not a refactor
 
@@ -179,6 +229,12 @@ and then read the remote's health as proof the spawn had worked.
   A dedicated Postgres service is the cleaner answer and costs money.
 - `railway.json` is deprecated in favour of `.railway/railway.ts` and keeps
   working until 2026-12-01. Not migrated.
+- `.railwayignore` did not exclude what it names. `browseros-server.log` grew
+  to 234 MB from local server runs and `railway up` timed out three times
+  against `backboard.railway.com` while `*.log` sat in that file. Deploying
+  from an rsync'd copy with the log excluded worked first try. The log is a
+  live file two processes hold open and the LOGS tab reads, so it was left
+  alone rather than truncated.
 - One log line is misleading and was left alone: `PgAgentStore pool connected`
   is emitted even when the connection is refused, because `pg`'s Pool is lazy.
   `/health` carries the truth now.
