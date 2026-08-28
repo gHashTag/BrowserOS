@@ -1816,7 +1816,13 @@ cassettes-bypass:
 	@TRIOS_SKIP_LOCK=1 $(MAKE) --no-print-directory cassettes
 
 cassettes: test-app
-	@: "Serialised against every other harness run in this checkout."; \
+	@echo "[$@] acquiring the harness lock ($(HARNESS_LOCK))"
+	@: "Announced BEFORE the lock, so silence is attributable. On"; \
+	: "2026-08-28 a gate ran 1h08m with its last log line being"; \
+	: "'harness bundle built', and only process forensics could tell"; \
+	: "whether this target had even started. One line of output turns"; \
+	: "an hour of silence into a named phase."; \
+	: "Serialised against every other harness run in this checkout."; \
 	: "Several agents share this tree and each runs `make check`. Two"; \
 	: "cassette runs drive the SAME trios-test.app and each ends every"; \
 	: "cassette with pkill on that bundle path, so they terminate each"; \
@@ -3071,6 +3077,7 @@ MUTANTS := \
 # verdict that a single flake cannot forge.
 .PHONY: mutants mutants-logic mutants-changed
 mutants:
+	@echo "[$@] acquiring the harness lock ($(HARNESS_LOCK))"
 	@backup=$$(mktemp -d); \
 	: "ONE POLICY FOR ONE LOCK, 2026-08-25. This target used to refuse the"; \
 	: "lock instantly and exit 1, while printing 'Nothing here is broken'."; \
@@ -3203,6 +3210,7 @@ MUTANTS_LOGIC := \
 
 .PHONY: mutants-logic
 mutants-logic:
+	@echo "[$@] acquiring the harness lock ($(HARNESS_LOCK))"
 	@backup=$$(mktemp -d); \
 	: "ONE POLICY FOR ONE LOCK, 2026-08-25 (second pass). Six targets use"; \
 	: "this lock. cassettes waited; the other five refused instantly and"; \
@@ -4181,6 +4189,7 @@ MUTANTS_GUARD := \
 
 .PHONY: mutants-guard
 mutants-guard:
+	@echo "[$@] acquiring the harness lock ($(HARNESS_LOCK))"
 	@backup=$$(mktemp -d); \
 	: "ONE POLICY FOR ONE LOCK, 2026-08-25 (second pass). Six targets use"; \
 	: "this lock. cassettes waited; the other five refused instantly and"; \
@@ -4850,6 +4859,7 @@ mutants-guard:
 # with a checksum verification on any exit path.
 
 mutants-changed:
+	@echo "[$@] acquiring the harness lock ($(HARNESS_LOCK))"
 	@backup=$$(mktemp -d); \
 	: "ONE POLICY FOR ONE LOCK, 2026-08-25 (second pass). Six targets use"; \
 	: "this lock. cassettes waited; the other five refused instantly and"; \
