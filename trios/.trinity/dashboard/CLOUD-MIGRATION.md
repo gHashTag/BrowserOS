@@ -20,6 +20,7 @@ $ curl -s https://trios-agent-server-production.up.railway.app/health
 | A2A registry, task queue, conversations | Railway Postgres, schema `trios` | `A2A registry PostgreSQL backend ready`; tables `agents`, `agent_matrix`, `agent_tasks`, `conversations`, `conversationMessages` |
 | the repository agents work in | container, `/workspace/BrowserOS` | `[entrypoint] checkout ready: dd58cf89 on feat/queen-supervisor` |
 | filesystem and shell tools | container, on that checkout | a branch, a file write and a commit (`1250e224`) executed there over the wire |
+| `git` for the commit path | container | the app's own `QueenGitExecutor`, run against the live service |
 
 Nothing on this laptop is required for any of the above. The container was
 redeployed four times during this work and came back each time on its own.
@@ -90,33 +91,65 @@ bigger container.
 So the honest architecture is not "everything in the cloud" but a split along
 a real line:
 
-- **cloud** - the server, the state, the checkout, the agents' edits;
-- **macOS** - compiling and verifying a macOS application.
+- **cloud** - the server, the state, the checkout, the agents' edits, and the
+  git that turns those edits into a branch;
+- **macOS** - compiling and verifying a macOS application, which is the client
+  checking the work rather than a backend doing it.
 
 A macOS CI runner is where that half belongs. It is a different cloud and a
 different piece of work, and this document does not start it.
 
-## Delegation is deliberately refused while the split is uneven
+## git runs where the files are
 
-A bee's files are written by the server's tools, in the container. Its commit
-is made by `QueenBranchCommitter`, which spawns `git` on this Mac. Point the
-app at the cloud and the committer reads an unchanged local checkout, finds
-nothing, and files the task as *the worker did nothing* - work reported as
-never having happened.
+The committer spawned `/usr/bin/git` directly, which is right exactly while
+the server writing a bee's files runs here too. With that server in a
+container the two parted company: the bee wrote there, the committer read
+here, found an unchanged tree, and would have filed the task as *the worker
+did nothing* - work reported as never having happened.
 
-`QueenDelegationPolicy.splitExecutionRefusal` refuses before spending a token,
-and names the failure rather than the condition. It is keyed on the **split**,
-not on being remote: move the committer into the container and the guard stops
-firing on its own, instead of having to be found and deleted.
+Location is a parameter now. `QueenGitExecutor` has a local implementation -
+the committer's own `Process` code, unchanged - and a remote one that runs git
+through the server's `filesystem_bash`, where the files already are. Four of
+the committer's five spawns route through it.
+
+Proven with the same binary, switched only by an environment variable:
+
+```
+local   isLocal=true   repositoryRoot=/Users/playra/BrowserOS
+remote  isLocal=false  repositoryRoot=/workspace/BrowserOS
+                       projectRoot=/workspace/BrowserOS/trios
+```
+
+`git log` and `rev-parse` answer from the container; an argument carrying a
+quote and a semicolon survives quoting as data; a failing command is reported
+as failed rather than as a broken transport.
+
+`QueenDelegationPolicy.splitExecutionRefusal` still exists and still refuses
+before spending a token, but it is keyed on the **split** rather than on being
+remote, and asks `QueenGit.runsLocally` rather than assuming. With git remote
+it no longer fires - it stopped by itself, instead of having to be found and
+deleted.
 
 What remains for delegation to run in the cloud end to end:
 
 | step | state |
 |---|---|
-| bee edits files | works in the container today |
-| `git` for branch/commit | 5 local `Process()` spawns across `QueenBranchCommitter` and `QueenProposalApplier` |
-| pushing a branch | needs a GitHub token as a Railway variable - the operator's act, like the DSN |
+| bee edits files | in the container |
+| `git` for branch and commit | in the container |
+| pushing a branch | **needs `GITHUB_TOKEN` as a Railway variable** - the operator's act, like the DSN |
 | `swift build` verification | cannot move; needs a macOS host |
+
+The push credential is already wired: the entrypoint installs a git helper
+that reads `GITHUB_TOKEN` from the environment at the moment git asks, so it
+is never written into `.git/config` and never appears in `git remote -v`.
+Unset, the boot log says so plainly:
+
+```
+[entrypoint] GITHUB_TOKEN unset; this checkout can read but not push
+```
+
+Cloning needs no credential - the repository is public - which is why reading
+works today and pushing does not.
 
 ## Pointing the app at the cloud
 
