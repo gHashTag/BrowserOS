@@ -52,9 +52,12 @@ export class A2aRegistryService {
   private heartbeatInterval: ReturnType<typeof setInterval> | null = null
   private pg: PgAgentStore | null = null
   private pgReady = false
+  private pgConfigured = false
+  private pgError: string | null = null
 
   constructor(pgDsn?: string) {
     if (pgDsn) {
+      this.pgConfigured = true
       this.pg = new PgAgentStore(pgDsn)
       this.initPg()
     }
@@ -66,14 +69,37 @@ export class A2aRegistryService {
       await this.pg!.connect()
       await this.pg!.ensureSchema()
       this.pgReady = true
+      this.pgError = null
       logger.info('A2A registry PostgreSQL backend ready')
     } catch (err) {
+      this.pgError = err instanceof Error ? err.message : String(err)
       logger.warn(
         'A2A PostgreSQL backend failed, falling back to memory-only',
-        {
-          error: err instanceof Error ? err.message : String(err),
-        },
+        { error: this.pgError },
       )
+    }
+  }
+
+  /// Whether agent registrations survive this process, and why not when they do not.
+  ///
+  /// The fallback to memory is deliberate — a registry that refuses to start
+  /// because a database is unreachable is worse than one that keeps working
+  /// locally. But it is also silent: a wrong DSN and no DSN at all produce the
+  /// same running server, and the only difference is one `warn` line emitted
+  /// once at startup. Anyone asking "is the state in the cloud yet?" then has
+  /// to read logs from minutes ago and infer. Reporting it here makes that a
+  /// question the server can answer about itself at any moment.
+  backendStatus(): {
+    durable: boolean
+    configured: boolean
+    error: string | null
+  } {
+    return {
+      durable: this.pgReady,
+      configured: this.pgConfigured,
+      // Distinguishes "configured and still connecting" from "configured and
+      // broken": both report durable=false, only the second carries a reason.
+      error: this.pgError,
     }
   }
 

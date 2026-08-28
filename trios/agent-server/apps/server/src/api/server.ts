@@ -260,7 +260,7 @@ export async function createHttpServer(config: HttpServerConfig) {
 
   const app = new Hono<Env>()
     .use('/*', trustedCorsMiddleware())
-    .route('/health', createHealthRoute({ browser }))
+    .route('/health', createHealthRoute({ browser, stateBackend: a2aService }))
     .use('/shutdown/*', requireTrustedAppOrigin())
     .route(
       '/shutdown',
