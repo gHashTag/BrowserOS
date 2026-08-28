@@ -293,12 +293,21 @@ enum QueenBranchCommitter {
             group.addTask(priority: .utility) {
                 let index = temporaryIndexPath()
                 defer { try? FileManager.default.removeItem(atPath: index) }
-                let output = runGit(
+                let result = runGitResult(
                     ["push", "--force-with-lease", "-u", "origin", "\(branch):\(branch)"],
                     index: index, projectRoot: projectRoot
                 )
-                guard output != nil else {
-                    return "git push failed for \(branch)"
+                guard result.ok else {
+                    // git's own words, not a paraphrase. `runGit` discards
+                    // them, so the caller's "git said: ..." message
+                    // (ChatViewModel) could only ever print this function's
+                    // own sentence back - git had said nothing. A push
+                    // rejected for a stale lease, a missing credential and an
+                    // unreachable host all read identically.
+                    let detail = result.output.isEmpty
+                        ? "git exited non-zero and said nothing"
+                        : result.output
+                    return "git push failed for \(branch): \(detail)"
                 }
                 return nil
             }
@@ -1264,14 +1273,17 @@ enum QueenBranchCommitter {
     }
 
     /// Returns nil on a non-zero exit so each step can refuse to continue.
-    private static func runGit(
+    /// Like `runGit`, but keeps git's message.
+    ///
+    /// `runGit` returns `String?` and answers failure with `nil`, which is
+    /// enough for callers that only branch on success. It is not enough for a
+    /// caller that reports the failure to a human: the reason is gone by the
+    /// time it returns.
+    static func runGitResult(
         _ arguments: [String],
         index: String,
         projectRoot: String = ProjectPaths.root
-    ) -> String? {
-        // Credentials are the dead end of an automated pipeline: git waits
-        // for a username at a prompt nobody can see, and every step that
-        // follows the push never runs. Forbid the prompt outright.
+    ) -> (ok: Bool, output: String) {
         let environment = [
             "GIT_INDEX_FILE": index,
             "GIT_TERMINAL_PROMPT": "0",
@@ -1284,12 +1296,7 @@ enum QueenBranchCommitter {
             workDir: repositoryRoot(projectRoot: projectRoot),
             environment: environment
         )
-        guard result.ok else {
-            // Measured 2026-08-24, across three waves: in a live GUI process
-            // the verdict seal failed silently because a git call here
-            // returned non-zero and nil swallowed the reason whole. A git
-            // failure must name itself - the verdict's freshness depends on
-            // this call, and its absence was indistinguishable from success.
+        if !result.ok {
             TriosLogBus.shared.warn(
                 .queen, "queen.git.failed",
                 "A git call failed; the reason travels with the event",
@@ -1299,9 +1306,17 @@ enum QueenBranchCommitter {
                     "stderr": String(result.output.prefix(200))
                 ]
             )
-            return nil
         }
-        return result.output
+        return result
+    }
+
+    private static func runGit(
+        _ arguments: [String],
+        index: String,
+        projectRoot: String = ProjectPaths.root
+    ) -> String? {
+        let result = runGitResult(arguments, index: index, projectRoot: projectRoot)
+        return result.ok ? result.output : nil
     }
 
     /// Runs a git command in a specific directory without the `GIT_INDEX_FILE`
