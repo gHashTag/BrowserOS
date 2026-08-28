@@ -536,6 +536,30 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
         sources: &["tests/swift/queen_epics_test.swift", "rings/SR-00/QueenEpics.swift"],
     },
     SwiftLogicSuite {
+        label: "QueenT27Acceptance",
+        bin: "/tmp/trios_queen_t27_acceptance_test",
+        sources: &[
+            "tests/swift/queen_t27_acceptance_test.swift",
+            "rings/SR-00/QueenT27Acceptance.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "QueenMissionContract",
+        bin: "/tmp/trios_queen_mission_contract_test",
+        sources: &[
+            "tests/swift/queen_mission_contract_test.swift",
+            "rings/SR-00/QueenMissionContract.swift",
+        ],
+    },
+    SwiftLogicSuite {
+        label: "QueenBeeResult",
+        bin: "/tmp/trios_queen_bee_result_test",
+        sources: &[
+            "tests/swift/queen_bee_result_test.swift",
+            "rings/SR-00/QueenBeeResult.swift",
+        ],
+    },
+    SwiftLogicSuite {
         label: "QueenBoundaryPaths",
         bin: "/tmp/trios_queen_boundary_paths_test",
         sources: &[
