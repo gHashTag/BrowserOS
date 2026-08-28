@@ -198,6 +198,54 @@ Fixing `switch` in `gen-rust` is the single highest-value change available to
 this whole programme, and it lives in `t27/bootstrap` — report it there, do
 not work around it here.
 
+### Backend gaps measured 2026-08-28, from repairing 20 non-compiling specs
+
+These are separate from the parser defect above and each was measured, not
+inferred.
+
+**`gen-rust` never emits `mut` on a function PARAMETER.** It emits it correctly
+on locals, and `collect_mutable_names` (compiler.rs:11267) already computes the
+exact set of names that need it, handling all three LHS shapes involved -
+`x = e`, `arr[i] = e`, `s.f = e`. The local path consults that set; `gen_fn`
+(compiler.rs:12668) formats the parameter list without ever asking. Eight
+errors across `cache_management` and `bandwidth_allocator` are this one
+omission; scratch copies with nothing added but the `mut` token compile clean.
+Do not work around it in specs - adding shadow locals would put dead bindings
+into the source of truth to hide a one-line fix.
+
+**No integer-width checking at all.** A probe declaring `fn a(x: u256) -> u256`
+generates `pub fn a(x: u256) -> u256` verbatim with exit 0 and empty stderr;
+rustc then fails with `cannot find type u256`. This is why `olsr_routing`
+passes t27c cleanly and explodes 26 errors later.
+
+**No lowering for integers wider than u128.** `olsr_routing`'s routing table
+is, by its own field masks, at least 4 x 56 = 224 bits. Rust's widest integer
+is 128. Twenty-one of its twenty-five errors cannot be closed by ANY spec edit
+- it needs a backend feature (lower a wide packed word to `[u64; N]` or a
+struct). Recorded, not worked around.
+
+**Rust keywords are not escaped.** `create_packet_color(type: u32, ...)` is
+legal t27; the backend must emit `r#type` and does not. Renaming the parameter
+would change a module's public interface to suit the tool.
+
+### `let mut` in a spec is a SPEC fault, not a backend one
+
+Correcting an earlier entry in this file, which listed `let mut` among the
+constructs the parser silently drops and so implied the backend was at fault.
+
+`mut` is not a t27 keyword. `grep '"mut" =>'` over the compiler's token table
+returns nothing, while `"var" => TokenKind::KwVar` is right there, and the
+compiler's own comment reads: "`let mut` has no spec-level source form yet (use
+`var` for a mutable local)". A spec containing `let mut` is Rust written into a
+`.t27` file. The repair is `var`, and it belongs to us.
+
+### How to measure whether generated Rust actually compiles
+
+Use a full `--crate-type lib` build. `--emit=metadata` does not run the MIR
+const-prop lint and hides every `arithmetic_overflow`: `olsr_routing` reports
+13 errors under metadata and 26 under a full build. `make t27-lowering` was
+using metadata until 2026-08-28 and is now on the full build.
+
 ### Still open, but masked
 
 2. **`Enum.variant` emits as `Enum.variant`** — invalid; Rust needs `Enum::variant`. `RustCodegen::ExprFieldAccess` formats `{}.{}` unconditionally and does not know which identifiers name enums.
