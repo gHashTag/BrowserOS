@@ -23,9 +23,16 @@ import Foundation
 /// 3. **Parameter label in a signature.** The issue names the branch
 ///    (`startAfterChoosing`); the branch is a parameter of the function that
 ///    owns it. Signatures only — a call site says who calls, not who owns.
-/// 4. **Identifier mentioned exactly once.** A rare name with one home. Density
-///    never comes back: five measurements (#1173, #1175) showed it points where
-///    words are common — a big early function — not where the work is.
+/// 4. **Identifier mentioned exactly once — in code, not in a string.** A
+///    rare name with one home. Density never comes back: five measurements
+///    (#1173, #1175) showed it points where words are common — a big early
+///    function — not where the work is. Strings are excluded for the same
+///    reason rule 2 searches them only with the dots: a bare word inside a
+///    string is prose or a quoted log line, and a log line is emission
+///    evidence — rule 2's, and only when dotted. Measured 2026-08-28:
+///    #1156's `characterCount` emission had moved into the #1151 drill
+///    seam, and counting strings handed that seam back as the answer,
+///    confidently wrong (#1175's rule: a wrong range is worse than none).
 ///
 /// No rule answers → `nil`. A confidently wrong range is worse than no range:
 /// it sends the bee to read the wrong place with authority (#1175).
@@ -107,10 +114,9 @@ enum QueenLocalisation {
             return parameter
         }
 
-        // Rule 4 — an identifier mentioned exactly once in the whole file.
+        // Rule 4 — an identifier mentioned exactly once in the file's code.
         if let unique = uniqueMentionDeclaration(
-            in: literalLines,
-            codeLines: codeLines,
+            in: codeLines,
             depths: depths,
             identifiers: identifiers
         ) {
@@ -199,6 +205,18 @@ enum QueenLocalisation {
     /// Newlines are preserved. Event names ("queen.review.verdicts") are
     /// evidence, not decoration (#1174) — this view exists so rule 2 can see
     /// them while every other rule keeps working on code only.
+    ///
+    /// String state is tracked with the same simple `"…"` machine
+    /// `maskCommentsAndStrings` uses, and for a measured reason (#1173,
+    /// 2026-08-28): the literal `"No empty queen/* branch exists…"` in
+    /// ChatViewModel.swift opened a block comment this masker never closed,
+    /// and the view went dark from that line to the end of the file — every
+    /// dotted clue after it unreadable (rule 2 found nothing), every
+    /// corroboration score zero (rule 1 tied and stayed silent). A `/*` or
+    /// `//` inside a string literal is data, not a comment. Triple-quoted
+    /// literals keep the view sane the same way they keep the code view sane:
+    /// an opening `"""` leaves the scanner inside a string until the closing
+    /// `"""`, so prose between them cannot open a comment either.
     private static func maskComments(_ source: String) -> String {
         var output = [Character]()
         output.reserveCapacity(source.count)
@@ -206,12 +224,28 @@ enum QueenLocalisation {
         let chars = Array(source)
         var i = 0
         var blockDepth = 0
+        var inString = false
 
         while i < chars.count {
             let c = chars[i]
             let next: Character? = i + 1 < chars.count ? chars[i + 1] : nil
 
-            if blockDepth > 0 {
+            if inString {
+                // Kept verbatim — this is the view whose whole job is to see
+                // string content. An escape never ends the string.
+                output.append(c)
+                if c == "\\", let escaped = next {
+                    output.append(escaped)
+                    i += 2
+                    continue
+                }
+                if c == "\"" { inString = false }
+                i += 1
+            } else if c == "\"" {
+                inString = true
+                output.append(c)
+                i += 1
+            } else if blockDepth > 0 {
                 if c == "/", next == "*" {
                     blockDepth += 1
                     output.append(" "); output.append(" ")
@@ -586,21 +620,21 @@ enum QueenLocalisation {
 
     // MARK: - Rule 4: identifier mentioned exactly once
 
-    /// An identifier mentioned exactly once in the whole file — strings
-    /// included, because a quoted log line is emitted at one place. This is
-    /// the only mention-based evidence that survived five measurements
-    /// (#1173, #1175); counting many mentions is what kept pointing at big
-    /// early functions. Several singles must agree on the declaration;
-    /// disagreement is silence.
+    /// An identifier mentioned exactly once in the file's **code** — the
+    /// literal view is not searched, because a quoted log line is emission
+    /// evidence (rule 2's, dotted only) and a bare word in a string is
+    /// usually prose. This is the only mention-based evidence that survived
+    /// five measurements (#1173, #1175); counting many mentions is what kept
+    /// pointing at big early functions. Several singles must agree on the
+    /// declaration; disagreement is silence.
     private static func uniqueMentionDeclaration(
-        in literalLines: [String],
-        codeLines: [String],
+        in codeLines: [String],
         depths: [Int],
         identifiers: [String]
     ) -> ClosedRange<Int>? {
         var singles: [(identifier: String, line: Int)] = []
         for identifier in identifiers {
-            let hits = allMentionLines(lines: literalLines, identifiers: [identifier])
+            let hits = allMentionLines(lines: codeLines, identifiers: [identifier])
             if hits.count == 1 {
                 singles.append((identifier, hits[0]))
             }
@@ -706,14 +740,61 @@ enum QueenLocalisation {
     /// #1117 is kept as a witness for the name rule: 5865-6164 inside
     /// `requestReviewerVerdicts`.
     ///
+    /// **Repeated and recorded 2026-08-28** against the live tree
+    /// (`ChatViewModel.swift`, 13 510 lines) — and the tree had regressed to
+    /// **1 of 4 live**, the issue title's own state, one hit in four:
+    ///
+    /// | case | chose, 2026-08-28 before | chose, after | the human named |
+    /// |---|---|---|---|
+    /// | #1156 | silence | silence ✗ | `handleWorkerFinished` |
+    /// | #1158 | silence | 8276-8485 `autoAcceptIfUnambiguous` ✓ | `autoAcceptIfUnambiguous` |
+    /// | #1165 (clue through) | silence | 7555-7854 `requestReviewerVerdicts` ✓ | `requestReviewerVerdicts` |
+    /// | #1166 | 9869-10168 `chooseNextOpenIssue` ✓ | 9869-10168 ✓ | ветка `startAfterChoosing` |
+    ///
+    /// Two defects, both measured before either was touched:
+    ///
+    /// 1. **The literal view was string-blind.** `maskComments` did not track
+    ///    string state, so the `queen/*` inside the literal `"No empty queen/*
+    ///    branch exists…"` (line 6891 of the boundary file) opened a block
+    ///    comment that never closed: every string literal after 6891 was
+    ///    blanked. Rule 2 could not see `queen.review.verdicts` at 7801;
+    ///    rule 1's corroboration could not see the quoted `ProcessInfo`
+    ///    guard at ~8285, so #1158's two candidates tied 0-0 and the rule
+    ///    stayed silent. Fixed by giving `maskComments` the same string
+    ///    machine the code view already had.
+    /// 2. **Rule 4 counted strings, and the emission had moved.** With the
+    ///    view repaired, `characterCount` — whose only whole-word mention is
+    ///    the quoted log line `"queen.review.characterCount"` — was single
+    ///    again, but #1151/#1172 (2026-08-22) had moved that emission out of
+    ///    `handleWorkerFinished` into `settleCharacterCountVerdicts`
+    ///    (12476): rule 4 named the drill, confidently wrong. Fixed by
+    ///    counting singles in code only — a bare word whose sole home is a
+    ///    string is rule 2's territory when dotted, prose otherwise.
+    ///
+    /// **#1156 stays a miss, and the miss is named, not papered over.**
+    /// Nothing in [ChatViewModel, awaitingReview, characterCount] names
+    /// `handleWorkerFinished` on today's tree: `characterCount`'s one home
+    /// is the drill's log line, and `awaitingReview` is now spread across
+    /// ~15 sites (the sweep at 8640 carries its own mentions of it). No
+    /// rule this file's doctrine allows — name, dotted literal, clean
+    /// label, single-in-code — reaches `handleWorkerFinished` from those
+    /// identifiers without rigging. Restoring the emission (or re-recording
+    /// the case) is a decision in `rings/SR-02/ChatViewModel.swift`, outside
+    /// this boundary; the expectation stays as recorded, so the day the
+    /// emission returns, this row goes green by itself.
+    ///
     /// Replay any time — the check criterion 4 stands on:
     ///
     ///     swiftc -O <driver>.swift rings/SR-00/QueenLocalisation.swift -o probe
-    ///     probe <chatvm.swift> <bodies-dir>   # or call replayMeasurement(in:)
+    ///     probe <chatvm.swift>              # or call replayMeasurement(in:)
+    ///     // last line: measurementVerdict(in:) — "measurement: 3/4 (misses: #1156)"
+    ///     // the bar is no fewer than three of the four
     ///
     /// With the name preference (rule 1) removed, the replay goes red on
     /// #1158 and #1117 — nothing else can find a function the issue names —
-    /// and the live замер falls to 2/4. Proven from both sides 2026-08-19.
+    /// and the live замер falls to 2/4. Proven from both sides 2026-08-19,
+    /// and re-proven from both sides 2026-08-28: 3/4 with the preference,
+    /// 2/4 (misses: #1156, #1158) with it removed, #1158 and #1117 silent.
     static func measurementCases() -> [MeasurementCase] {
         [
             MeasurementCase(
@@ -792,5 +873,30 @@ enum QueenLocalisation {
                 return "FAIL  \(measure.issue): \(r.lowerBound)-\(r.upperBound) not inside \(name) (\(expected.lowerBound)-\(expected.upperBound))"
             }
         }
+    }
+
+    /// The measurement's own bar (#1173 criterion 3): how many of the four
+    /// measured issues — #1156, #1158, #1165, #1166 — answer with every row
+    /// ok. The #1117 row is a witness for the name rule, not one of the four.
+    /// Printed by the replay so the check can go red by number rather than by
+    /// someone counting rows: "measurement: 3/4 (misses: #1156)", and the bar
+    /// is no fewer than three. An issue with no rows at all is a miss.
+    static func measurementVerdict(in source: String) -> String {
+        let measured = ["#1156", "#1158", "#1165", "#1166"]
+        let rows = replayMeasurement(in: source)
+        var misses: [String] = []
+        for issue in measured {
+            let own = rows.filter { row in
+                guard let hash = row.firstIndex(of: "#") else { return false }
+                let token = row[hash...].prefix(while: { $0 != " " && $0 != ":" })
+                return String(token) == issue
+            }
+            if own.isEmpty || own.contains(where: { !$0.hasPrefix("ok") }) {
+                misses.append(issue)
+            }
+        }
+        let hits = measured.count - misses.count
+        return "measurement: \(hits)/\(measured.count)"
+            + (misses.isEmpty ? "" : " (misses: \(misses.joined(separator: ", ")))")
     }
 }
