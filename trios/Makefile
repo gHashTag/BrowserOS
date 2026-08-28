@@ -998,12 +998,18 @@ t27-lowering:
 		zig=$$("$(T27C)" gen "$$f" 2>/dev/null | grep -cE '^(pub )?fn '); \
 		cnt=$$("$(T27C)" gen-c "$$f" 2>/dev/null | grep -cE '^[a-zA-Z_].*\(.*\) *\{'); \
 		vlg=$$("$(T27C)" gen-verilog "$$f" 2>/dev/null | grep -cE '^[[:space:]]*function '); \
+		: "Measured with a FULL --crate-type lib build, not --emit=metadata."; \
+		: "A metadata-only build does not run the MIR const-prop lint, so it"; \
+		: "hides every arithmetic_overflow: olsr_routing reports 13 errors"; \
+		: "under metadata and 26 under a full build. It does not change WHICH"; \
+		: "specs fail today - no spec fails on overflow alone - but a number"; \
+		: "taken from a metadata build can still fail cargo build."; \
 		: "Counting is necessary and not sufficient. A body can lose a return"; \
 		: "statement without losing its function, and the count stays right"; \
 		: "while the code stops meaning anything. rustc is the cheapest"; \
 		: "independent reader we have, so the output is compiled too."; \
 		printf '%s' "$$out" > "$$tmpd/$$(basename $$f .t27).rs"; \
-		if ! rustc --edition 2021 --crate-type lib --emit=metadata \
+		if ! rustc --edition 2021 --crate-type lib -A unused_parens \
 			--out-dir "$$tmpd" "$$tmpd/$$(basename $$f .t27).rs" 2>/dev/null; then \
 			nocompile=$$((nocompile + 1)); \
 			echo "  [nocompile] $$(basename $$f .t27)"; \

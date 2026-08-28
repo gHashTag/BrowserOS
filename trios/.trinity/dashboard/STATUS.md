@@ -90,8 +90,12 @@ board's founding); 46 differ, so most committed artifacts are still stale
 relative to their spec - the regeneration decision is owner-gated.
 
 **59 of 70 generated Rust files compile; 11 do not** (re-measured live
-2026-08-28 by two independent methods - `--emit=metadata` and a full
-`--crate-type lib` build - which agreed; was 50/20 at the board's founding and
+2026-08-28 with a full `--crate-type lib` build. `--emit=metadata`, which the
+gate used until today, does not run the MIR const-prop lint and hides every
+`arithmetic_overflow`: olsr_routing reports 13 errors under metadata and 26
+under a full build. It happens not to change WHICH specs fail today, because
+no spec fails on overflow alone - but the gate now uses the full build, since
+a number that agrees only by luck is not a measurement; was 50/20 at the board's founding and
 57/13 before this wave). The two that healed did so for different reasons: a
 wrong-arity call and a call to a name that exists nowhere were genuine spec
 faults, while eighteen artifacts were simply stale July output and needed only
