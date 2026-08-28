@@ -117,7 +117,7 @@ enum QueenEvidencePolicy {
             "true", "false", "nil", "async", "await", "throws",
         ]
         return found.filter { token in
-            // ≥6 chars, starts with a letter, only letters and digits
+            // At least 6 chars, starts with a letter, only letters and digits
             // (no spaces, slashes, dots / file extensions).
             guard token.count >= 6,
                   let first = token.first,
