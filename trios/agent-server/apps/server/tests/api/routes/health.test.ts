@@ -15,6 +15,9 @@ describe('createHealthRoute', () => {
 
     assert.strictEqual(response.status, 200)
     const body = await response.json()
-    assert.deepStrictEqual(body, { status: 'ok' })
+    // pid has been in this response since 66a2b0420, where it was added so a
+    // supervisor could attribute an answer to a specific process. This
+    // assertion was never updated and has been failing ever since.
+    assert.deepStrictEqual(body, { status: 'ok', pid: process.pid })
   })
 })

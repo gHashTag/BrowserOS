@@ -56,6 +56,8 @@ COPY packages/cdp-protocol packages/cdp-protocol
 # redeploy does not throw away an in-flight worktree.
 ENV WORKSPACE_DIR=/workspace
 RUN mkdir -p /workspace
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Bind wide, because the platform routes to this container from outside and a
 # server on loopback accepts nothing while looking perfectly healthy from
@@ -76,4 +78,5 @@ EXPOSE 8080
 # is not there. Not claiming to be a distribution build is the honest answer.
 
 # No --cdp-port on purpose. See the header.
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["bun", "apps/server/src/index.ts"]

@@ -106,7 +106,9 @@ describe('protected routes auth', () => {
     )
 
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ status: 'ok' })
+    // Stale since 66a2b0420 added pid. What this test is actually about is
+    // the 200, not the body shape.
+    expect(await res.json()).toMatchObject({ status: 'ok' })
   })
 
   it('POST /shutdown from a non-loopback socket with localhost Origin returns 403', async () => {
