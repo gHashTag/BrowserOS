@@ -89,15 +89,21 @@ artifacts are byte-identical to a fresh `gen-rust` (was 12 of 68 at the
 board's founding); 46 differ, so most committed artifacts are still stale
 relative to their spec - the regeneration decision is owner-gated.
 
-**57 of 70 generated Rust files compile; 13 do not** (re-measured live
-2026-08-27, wave 105; was 50/20 at the board's founding, 15/14/13 across
-waves 096-098 - the two healed specs are api_documenter and
-bandwidth_allocator). Counting functions is necessary and not sufficient -
-four specs keep every function and lose whole `return` statements inside
-them, so the count stays right while the code stops meaning anything.
-`make t27-lowering` compiles the output too, against a ceiling of 20 that
-may fall and must not rise; the remaining 13 are classified and
-owner-gated (`tri spec-diag`, map in wave 098).
+**59 of 70 generated Rust files compile; 11 do not** (re-measured live
+2026-08-28 by two independent methods - `--emit=metadata` and a full
+`--crate-type lib` build - which agreed; was 50/20 at the board's founding and
+57/13 before this wave). The two that healed did so for different reasons: a
+wrong-arity call and a call to a name that exists nowhere were genuine spec
+faults, while eighteen artifacts were simply stale July output and needed only
+regenerating - cache_management alone went 27 errors to 6 with no spec change.
+
+The remaining eleven are mostly NOT ours. The largest single cause is one
+backend defect: t27c's gen-rust never emits `mut` on a function parameter,
+although `collect_mutable_names` already computes the exact set and the local
+path already consults it. Eight errors are that omission. Renaming parameters
+or adding shadow locals would silence it while hiding a one-line fix from its
+author, so it was left and recorded. `T27_NOCOMPILE_CEILING` is lowered 20 ->
+11 to hold the ground.
 
 ## How to update this
 

@@ -912,12 +912,17 @@ MAKE_DOLLAR_VARS := ROOT DEV_APP RELEASE_APP DEV_BIN RELEASE_BIN DEV_PROC \
 # How many generated Rust files may still fail to compile. A ratchet, not a
 # target: it may fall, and raising it needs a reason in the commit message.
 #
-# Measured 2026-08-23: 20 of 70. Counting functions proved necessary and not
+# Measured 2026-08-23: 20 of 70. Lowered to 11 on 2026-08-28 after eight spec
+# faults were repaired and eighteen stale artifacts regenerated (tri-net
+# 2257dea): most of the remaining eleven are backend faults, chiefly gen-rust
+# never emitting `mut` on a function parameter, so this number will not fall
+# much further from the spec side.
+# Counting functions proved necessary and not
 # sufficient - four specs (lite_crypto, packet_queue, hardware_validation,
 # multipath_router) keep every function and lose whole `return` statements
 # inside them, so the count stays right while the code stops meaning anything.
 # rustc is the cheapest independent reader available, so it reads them.
-T27_NOCOMPILE_CEILING := 20
+T27_NOCOMPILE_CEILING := 11
 
 # Declared backend limitations, in the form <spec>:<backend>:<shortfall>.
 #
