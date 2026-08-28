@@ -127,6 +127,23 @@ final class QueenWorkerRunner: ObservableObject {
     // MARK: - Execution
 
     private func execute(task: DelegatedTask, brief: String) async {
+        // Refuse before spending anything if the tools and the commit would
+        // land in different filesystems. The reasoning is in
+        // `QueenDelegationPolicy.splitExecutionRefusal`; the short version is
+        // that a bee editing a container while the committer reads this Mac
+        // produces a task reported as "did nothing" rather than a visible
+        // failure.
+        if let refusal = QueenDelegationPolicy.splitExecutionRefusal(
+            serverIsRemote: ProjectPaths.agentServerIsRemote
+        ) {
+            var refused = QueenWorkerTranscript(seed: [])
+            await finish(
+                task: task, transcript: &refused,
+                failure: "Not starting this worker: \(refusal)"
+            )
+            return
+        }
+
         // The briefing IS the worker's first user turn. Persisting it as a
         // system note and sending nothing was the whole bug: the chat existed,
         // the instructions existed, and no request was ever made.

@@ -632,6 +632,37 @@ enum QueenDelegationPolicy {
     /// a pull request would publish something wrong: an empty branch, a second
     /// pull request for work that already has one, or a task nobody has
     /// finished reviewing.
+    /// Why a worker must not be started when its tools and its commit would
+    /// happen in different places.
+    ///
+    /// A bee's edits are made by the agent-server's filesystem tools, which run
+    /// wherever that server runs. Its commit is made by `QueenBranchCommitter`,
+    /// which spawns `git` on this machine. While both are here that is one
+    /// filesystem and the arrangement is invisible. Point the app at a server
+    /// in a container and it becomes two: the bee writes into the container,
+    /// the committer looks at the Mac's checkout, finds it unchanged, and
+    /// reports that the worker did nothing. The work is not lost loudly - it
+    /// is reported as never having happened, which is the same shape as the
+    /// worktree incident this class was written after.
+    ///
+    /// Refusing costs a delegation. Not refusing costs a delegation *and*
+    /// hides why, so this is the cheaper failure.
+    ///
+    /// The acceptance path additionally runs `swift build` on the combined
+    /// tree, and trios is an AppKit/SwiftUI application: that step cannot run
+    /// on Linux at all. So the fix is not "move the committer too" but a
+    /// deliberate split - git in the container, verification on a macOS host -
+    /// and until that exists this guard is what stands in its place.
+    static func splitExecutionRefusal(
+        serverIsRemote: Bool,
+        committerRunsLocally: Bool = true
+    ) -> String? {
+        guard serverIsRemote, committerRunsLocally else { return nil }
+        return "the agent server runs elsewhere, so a worker would edit files "
+            + "there while the commit is made from this machine. The two would "
+            + "not see each other and the work would be reported as never done."
+    }
+
     static func pullRequestBlockReason(for task: DelegatedTask) -> String? {
         if let existing = task.pullRequestNumber {
             return "#\(existing) is already open for this task."

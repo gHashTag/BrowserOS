@@ -50,10 +50,38 @@ enum QueenDelegationTests {
         spokenForIsNotTheSameAsWorkedOn()
         budgetKnobParsing()
         pullRequestGuardReadsTheBranch()
+        splitExecutionIsRefusedBeforeSpending()
 
         print("\n\(checks) checks, \(failures) failures")
         if failures > 0 { exit(1) }
         print("All QueenDelegation tests passed.")
+    }
+
+    /// A worker whose tools and whose commit live on different machines.
+    ///
+    /// The failure this guards is not a crash. The bee edits the container,
+    /// the committer reads this Mac, sees no change, and the task is filed as
+    /// "the worker did nothing" - work reported as never having happened.
+    static func splitExecutionIsRefusedBeforeSpending() {
+        scenario("split execution is refused before spending")
+
+        check(QueenDelegationPolicy.splitExecutionRefusal(
+            serverIsRemote: false) == nil,
+            "a local server and a local committer are one filesystem: allowed")
+
+        let refusal = QueenDelegationPolicy.splitExecutionRefusal(
+            serverIsRemote: true)
+        check(refusal != nil,
+              "a remote server with a local committer is refused")
+        check(refusal?.contains("would be reported as never done") == true,
+              "the refusal names the failure mode, not just the condition")
+
+        // The refusal is about the SPLIT, not about being remote. Move the
+        // committer too and there is nothing to refuse - this is what stops
+        // the guard from outliving the problem it was written for.
+        check(QueenDelegationPolicy.splitExecutionRefusal(
+            serverIsRemote: true, committerRunsLocally: false) == nil,
+            "a remote server with a remote committer is allowed again")
     }
 
     /// A second turn that changes nothing is not an empty branch.
