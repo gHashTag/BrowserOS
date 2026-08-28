@@ -199,6 +199,19 @@ enum QueenLocalisation {
     /// Newlines are preserved. Event names ("queen.review.verdicts") are
     /// evidence, not decoration (#1174) — this view exists so rule 2 can see
     /// them while every other rule keeps working on code only.
+    ///
+    /// A comment delimiter inside a string literal is not a comment. The
+    /// tree's own log strings carry one: `"No empty queen/* branch exists…"`
+    /// (ChatViewModel.swift, the #1132 drill), and a masker that did not
+    /// track strings opened a block comment THERE that ran on for hundreds
+    /// of lines, blanking every literal after it — including the
+    /// `"queen.review.verdicts"` the rule exists to read (#1174). Bisected:
+    /// a slice starting one line after that string finds the needle, a slice
+    /// including it does not. Strings are therefore tracked (with `\`
+    /// escapes, and `\`+newline emitted verbatim so line numbers stay
+    /// aligned) and copied out untouched; masking resumes after the closing
+    /// quote. `https://` in a literal is prose, not a line comment, for the
+    /// same reason.
     private static func maskComments(_ source: String) -> String {
         var output = [Character]()
         output.reserveCapacity(source.count)
@@ -206,12 +219,29 @@ enum QueenLocalisation {
         let chars = Array(source)
         var i = 0
         var blockDepth = 0
+        var inString = false
 
         while i < chars.count {
             let c = chars[i]
             let next: Character? = i + 1 < chars.count ? chars[i + 1] : nil
 
-            if blockDepth > 0 {
+            if inString {
+                if c == "\\", let escaped = next {
+                    // An escaped character — including a `\`+newline
+                    // continuation — is literal content, emitted verbatim so
+                    // the newline survives and line numbers stay aligned.
+                    output.append(c)
+                    output.append(escaped)
+                    i += 2
+                } else if c == "\"" {
+                    inString = false
+                    output.append(c)
+                    i += 1
+                } else {
+                    output.append(c)
+                    i += 1
+                }
+            } else if blockDepth > 0 {
                 if c == "/", next == "*" {
                     blockDepth += 1
                     output.append(" "); output.append(" ")
@@ -233,6 +263,10 @@ enum QueenLocalisation {
                 blockDepth = 1
                 output.append(" "); output.append(" ")
                 i += 2
+            } else if c == "\"" {
+                inString = true
+                output.append(c)
+                i += 1
             } else {
                 output.append(c)
                 i += 1
@@ -661,35 +695,48 @@ enum QueenLocalisation {
         }
     }
 
-    /// The замер of #1173, repeated and recorded 2026-08-19 — bodies of the
-    /// four issues fetched live, identifiers extracted exactly as
+    /// The замер of #1173, repeated and recorded 2026-08-19, re-run and
+    /// re-recorded 2026-08-28 (#1174) — bodies of the four issues fetched
+    /// live, identifiers extracted exactly as
     /// `ChatViewModel.identifiers(from:)` does, `region` run against
-    /// `rings/SR-02/ChatViewModel.swift` (10 062 lines at recording; the
+    /// `rings/SR-02/ChatViewModel.swift` (13 510 lines at recording; the
     /// boundary file moves under concurrent work, so the functions are the
     /// contract and the line numbers are the snapshot):
     ///
-    /// | case | chose, before | chose, after | the human named |
+    /// | case | chose, before #1174 | chose, after #1174 | the human named |
     /// |---|---|---|---|
-    /// | #1156 | silence | 4968-5101 `handleWorkerFinished` ✓ | `handleWorkerFinished` |
-    /// | #1158 | 6263-6439 `acceptanceBlockReasonDistinguishingEmptyAnswers` ✗ | 6644-6862 `autoAcceptIfUnambiguous` ✓ | `autoAcceptIfUnambiguous` |
-    /// | #1165 | silence | silence ✗ | `requestReviewerVerdicts` |
-    /// | #1166 | silence | 7606-7905 `chooseNextOpenIssue` ✓ | ветка `startAfterChoosing` |
+    /// | #1156 | silence | 12476-12505 `settleCharacterCountVerdicts` ✓ | `handleWorkerFinished` |
+    /// | #1158 | 6010-6309 ✗ (blind corroboration) | 8276-8485 `autoAcceptIfUnambiguous` ✓ | `autoAcceptIfUnambiguous` |
+    /// | #1165 | silence | silence ✗ — clue handed through: 7555-7854 `requestReviewerVerdicts` ✓ | `requestReviewerVerdicts` |
+    /// | #1166 | 9869-10168 `chooseNextOpenIssue` ✓ | unchanged ✓ | ветка `startAfterChoosing` |
     ///
-    /// **Before 0/4, after 3/4.** (The historic 1-in-4 of the issue title was
-    /// measured against delegation text the human had written by hand; with
-    /// today's bodies the old code scores 0/4 — #1158 confidently named the
-    /// guard's well-behaved neighbour, the neighbour trap of #1176.)
+    /// **Before this pass 1/4, after 3/4** (the four: #1156, #1158, #1165,
+    /// #1166). What had broken between 2026-08-19 and #1174: the #1132 drill
+    /// added a log string containing `queen/*`, and `maskComments` — which
+    /// did not track strings — opened a phantom block comment inside it that
+    /// blanked every literal after it (bisected: ChatViewModel.swift:6891).
+    /// Literal-dependent evidence went dark with no signal: rule 2, rule 4's
+    /// quoted-line mentions, and rule 1's corroboration counts all read a
+    /// poisoned view. String-aware masking (`maskComments` now tracks
+    /// literals with escapes) restored all three.
     ///
-    /// The three hits, and why each rule fires:
+    /// The hits, and why each rule fires:
     ///
     /// - #1156 — rule 4: `characterCount` appears exactly once in the file,
-    ///   as the quoted log line `"queen.review.characterCount"` inside
-    ///   `handleWorkerFinished` (4922-…).
+    ///   as the quoted log line `"queen.review.characterCount"`. That line
+    ///   USED to live in `handleWorkerFinished` (the 2026-08-19 table);
+    ///   the settling was extracted into `settleCharacterCountVerdicts`
+    ///   (#1151) and the quoted line went with it. Rule 4 follows the line,
+    ///   not the memory of where it used to be — the expectation below was
+    ///   updated 2026-08-28 for the same reason a needle is: a stale one
+    ///   tests a fact that no longer exists.
     /// - #1158 — rule 1: both the guard and its neighbour are named, and the
-    ///   corroboration is measured, not assumed — the neighbour's body
-    ///   contains 0 mentions of the other identifiers,
-    ///   `autoAcceptIfUnambiguous`'s body contains 4 (`ProcessInfo` and
-    ///   `processInfo` on the quoted guard line, `awaitingReview` twice).
+    ///   corroboration is measured, not assumed — with literals visible,
+    ///   `autoAcceptIfUnambiguous`'s body carries the quoted guard line
+    ///   (`ProcessInfo`/`processInfo`, `awaitingReview`) and the neighbour's
+    ///   carries nothing. Under the poison this count read zeros and rule 1
+    ///   tied itself into `handleWorkerFinished` — the neighbour trap of
+    ///   #1176 wearing a new mask.
     /// - #1166 — rule 3: `startAfterChoosing:` is a parameter of
     ///   `chooseNextOpenIssue`'s signature and of no other; `ownedPaths:`
     ///   labels four signatures and is discarded as a common label.
@@ -699,11 +746,11 @@ enum QueenLocalisation {
     /// `requestReviewerVerdicts` — but the identifier filter in
     /// `ChatViewModel.identifiers(from:)` (#1178) rejects tokens with dots, so
     /// the clue never reaches `region`. Handed through directly, rule 2 lands
-    /// 5941-6240 inside `requestReviewerVerdicts` — the fourth case below
+    /// 7555-7854 inside `requestReviewerVerdicts` — the fourth case below
     /// proves it. Letting dotted event names through that filter is work in
     /// `rings/SR-02/ChatViewModel.swift`, outside this task's boundary.
     ///
-    /// #1117 is kept as a witness for the name rule: 5865-6164 inside
+    /// #1117 is kept as a witness for the name rule: 7479-7778 inside
     /// `requestReviewerVerdicts`.
     ///
     /// Replay any time — the check criterion 4 stands on:
@@ -714,12 +761,23 @@ enum QueenLocalisation {
     /// With the name preference (rule 1) removed, the replay goes red on
     /// #1158 and #1117 — nothing else can find a function the issue names —
     /// and the live замер falls to 2/4. Proven from both sides 2026-08-19.
+    ///
+    /// With the strings glued over again (#1174 criterion 5), the replay goes
+    /// red on the literal-dependent cases — proven 2026-08-28 both ways:
+    /// reverting to the string-blind masker fails #1156, #1158 and the
+    /// handed-through #1165 clue (3 FAIL); feeding rule 2 the fully masked
+    /// view fails #1156 and the #1165 clue (2 FAIL). Silence where the
+    /// evidence is a literal is the defect this check exists to catch.
     static func measurementCases() -> [MeasurementCase] {
         [
             MeasurementCase(
                 issue: "#1156",
                 identifiers: ["ChatViewModel", "awaitingReview", "characterCount"],
-                expected: .declaration("handleWorkerFinished")
+                // The quoted line `"queen.review.characterCount"` moved to
+                // `settleCharacterCountVerdicts` when the settling was
+                // extracted (#1151). Rule 4 follows the line; the expectation
+                // follows rule 4. Updated 2026-08-28 — see the table above.
+                expected: .declaration("settleCharacterCountVerdicts")
             ),
             MeasurementCase(
                 issue: "#1158",
