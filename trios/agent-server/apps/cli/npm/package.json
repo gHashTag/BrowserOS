@@ -20,7 +20,7 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/browseros-ai/BrowserOS",
-    "directory": "packages/browseros-agent/apps/cli/npm"
+    "directory": "trios/agent-server/apps/cli/npm"
   },
   "homepage": "https://browseros.com",
   "bugs": "https://github.com/browseros-ai/BrowserOS/issues",

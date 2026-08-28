@@ -159,7 +159,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     }
   }
 
-  // The BrowserOS server package is nested under packages/browseros-agent;
+  // The BrowserOS server package is nested under trios/agent-server;
   // trios state lives in a sibling project root directory.
   const triosStateDir = join(
     executionDir,

@@ -48,9 +48,14 @@ trios/.trinity/queue/
 trios/.trinity/queen_state.json
 
 # BrowserOS runtime state
-packages/browseros-agent/.trinity/
-packages/browseros-agent/apps/server/.trinity/
-packages/browseros-agent/trios/
+# The agent runtime moved from packages/browseros-agent to trios/agent-server.
+# These three rules did not move with it, so the runtime's own state - a
+# SQLite auth database, its WAL and its shm - stopped being ignored and was
+# committed. That is why local-auth.sqlite-shm appeared as modified in every
+# git status. The files are untracked in the same commit that fixes this.
+trios/agent-server/.trinity/
+trios/agent-server/apps/server/.trinity/
+trios/agent-server/trios/
 
 # Agent caches and build products
 .agents/
