@@ -162,7 +162,42 @@ enum ProjectPaths {
         Bundle.main.infoDictionary?["TRIOS_MESH_PORT"] as? String ?? "9505"
     }
 
-    static var mcpBaseURL: String { "http://127.0.0.1:\(mcpPort)" }
+    /// Where the agent-server lives, which is not necessarily this machine.
+    ///
+    /// Loopback stays the default because the overwhelmingly common case is a
+    /// server the app launched itself, and a remote default would turn a
+    /// missing configuration into silent traffic to somewhere unintended.
+    ///
+    /// The override is read from the environment before Info.plist so a
+    /// deployment can be pointed somewhere new without rebuilding the bundle -
+    /// the bundle is signed, and re-signing to change a hostname is how a
+    /// working app gets broken while chasing a URL.
+    ///
+    /// Trailing slashes are stripped: every caller here appends `/health`,
+    /// `/mcp` or similar, and `https://host//health` is a 404 on some
+    /// gateways and a 200 on others, which is the worst kind of difference.
+    /// AGENT-V-WAIVER: cloud-migration endpoint override (2026-08-28).
+    static var mcpBaseURL: String {
+        let configured = ProcessInfo.processInfo.environment["TRIOS_AGENT_SERVER_URL"]
+            ?? Bundle.main.infoDictionary?["TRIOS_AGENT_SERVER_URL"] as? String
+        guard let configured, !configured.isEmpty else {
+            return "http://127.0.0.1:\(mcpPort)"
+        }
+        var trimmed = configured
+        while trimmed.hasSuffix("/") { trimmed.removeLast() }
+        return trimmed.isEmpty ? "http://127.0.0.1:\(mcpPort)" : trimmed
+    }
+
+    /// Whether the agent-server is somewhere this app cannot start or stop.
+    ///
+    /// The launcher spawns a local process and waits for a port; against a
+    /// remote server both halves are wrong, and the failure is quiet - it
+    /// would spawn a second server nobody talks to, then report the remote
+    /// one's health as proof the spawn worked.
+    static var agentServerIsRemote: Bool {
+        !mcpBaseURL.hasPrefix("http://127.0.0.1:")
+    }
+
     static var browserOSHealthURL: String { "\(mcpBaseURL)/health" }
     /// The A2A registry and BrowserOS MCP server share the same loopback port.
     /// `a2aPort` (9200) is not currently served, so the Agent status must probe

@@ -197,6 +197,14 @@ enum AgentServerLauncher {
     /// Returns what happened, so the caller can say it rather than guess.
     @discardableResult
     static func startIfNeeded() async -> String {
+        // A remote server is not this app's to start. Spawning a local one
+        // anyway would bind a port nothing talks to, and the next health probe
+        // - which asks the remote - would come back green and be read as proof
+        // the spawn worked. Two servers, one of them permanently idle, and a
+        // status line that cannot tell you which one answered.
+        if ProjectPaths.agentServerIsRemote {
+            return "remote server at \(ProjectPaths.mcpBaseURL); not starting a local one"
+        }
         let port = ProjectPaths.mcpPort
         switch await probeHealth(port: port) {
         case .answering:

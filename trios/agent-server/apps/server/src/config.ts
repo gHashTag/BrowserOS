@@ -19,6 +19,15 @@ const portSchema = z.number().int()
 export const ServerConfigSchema = z.object({
   cdpPort: portSchema.nullable(),
   serverPort: portSchema,
+  /// The interface to bind. Defaults to loopback because the common case is a
+  /// server talking to an app on the same machine, and binding wider by
+  /// default would expose it to the network without anyone asking.
+  ///
+  /// A container is the case where loopback is wrong: the platform routes to
+  /// the container from outside, so a server on 127.0.0.1 accepts nothing and
+  /// looks, from every health check, exactly like a server that failed to
+  /// start.
+  serverHost: z.string(),
   agentPort: portSchema,
   extensionPort: portSchema.nullable(),
   resourcesDir: z.string(),
@@ -256,9 +265,16 @@ function parseRuntimeEnv(): PartialConfig {
     cdpPort: process.env.BROWSEROS_CDP_PORT
       ? safeParseInt(process.env.BROWSEROS_CDP_PORT)
       : undefined,
+    // PORT is what every container platform injects, and it is assigned at
+    // deploy time rather than chosen. BROWSEROS_SERVER_PORT still wins so a
+    // local run is never surprised by a PORT left in the environment by
+    // something else.
     serverPort: process.env.BROWSEROS_SERVER_PORT
       ? safeParseInt(process.env.BROWSEROS_SERVER_PORT)
-      : undefined,
+      : process.env.PORT
+        ? safeParseInt(process.env.PORT)
+        : undefined,
+    serverHost: process.env.BROWSEROS_SERVER_HOST || undefined,
     extensionPort: process.env.BROWSEROS_EXTENSION_PORT
       ? safeParseInt(process.env.BROWSEROS_EXTENSION_PORT)
       : undefined,
@@ -300,6 +316,7 @@ function validateInlinedEnv(): ConfigResult<void> {
 function getDefaults(cwd: string): PartialConfig {
   return {
     cdpPort: null,
+    serverHost: '127.0.0.1',
     extensionPort: null,
     resourcesDir: cwd,
     executionDir: cwd,

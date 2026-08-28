@@ -83,12 +83,15 @@ export class Application {
     }
     await runPgMigrations()
 
-    if (!this.config.cdpPort) {
-      logger.error('CDP port is required (--cdp-port)')
-      process.exit(EXIT_CODES.GENERAL_ERROR)
-    }
-
-    const cdp = new CdpBackend({ port: this.config.cdpPort })
+    // The same asymmetry the comment below describes, one level up: this used
+    // to exit when no CDP port was *configured*, while tolerating a configured
+    // port with nothing behind it. A container has no browser at all, so the
+    // stricter of the two cases was the one that made the server unshippable.
+    //
+    // No port now means the same thing as an unreachable port, minus the
+    // retrying: serve everything that needs no browser, and let browser tools
+    // fail per-request.
+    const cdp = new CdpBackend({ port: this.config.cdpPort ?? 0 })
     // A browser that is not there yet is not a reason to refuse to start.
     //
     // This used to exit. The asymmetry was the problem: once running, the
@@ -102,32 +105,37 @@ export class Application {
     // in the background. Tools that need a browser fail per-request, which is
     // the same thing that happens when the browser goes away mid-session.
     let cdpConnected = false
-    try {
-      logger.debug(`Connecting to CDP on port ${this.config.cdpPort}`)
-      await cdp.connect()
-      cdpConnected = true
-      logger.info(`Connected to CDP on port ${this.config.cdpPort}`)
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      logger.warn(
-        `CDP is not reachable on port ${this.config.cdpPort}; starting without a browser and retrying in the background`,
-        { error: message },
+    if (this.config.cdpPort === null) {
+      logger.info(
+        'No CDP port configured; starting headless. Browser tools will fail per-request.',
       )
-      void (async () => {
-        while (!cdpConnected) {
-          await new Promise((resolve) => setTimeout(resolve, 10_000))
-          try {
-            await cdp.connect()
-            cdpConnected = true
-            logger.info(
-              `Connected to CDP on port ${this.config.cdpPort} after retrying`,
-            )
-          } catch {
-            // Still nothing. The next tick will try again.
+    } else
+      try {
+        logger.debug(`Connecting to CDP on port ${this.config.cdpPort}`)
+        await cdp.connect()
+        cdpConnected = true
+        logger.info(`Connected to CDP on port ${this.config.cdpPort}`)
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        logger.warn(
+          `CDP is not reachable on port ${this.config.cdpPort}; starting without a browser and retrying in the background`,
+          { error: message },
+        )
+        void (async () => {
+          while (!cdpConnected) {
+            await new Promise((resolve) => setTimeout(resolve, 10_000))
+            try {
+              await cdp.connect()
+              cdpConnected = true
+              logger.info(
+                `Connected to CDP on port ${this.config.cdpPort} after retrying`,
+              )
+            } catch {
+              // Still nothing. The next tick will try again.
+            }
           }
-        }
-      })()
-    }
+        })()
+      }
 
     const browser = new Browser(cdp)
 
@@ -136,7 +144,7 @@ export class Application {
     try {
       this.httpServer = await createHttpServer({
         port: this.config.serverPort,
-        host: '127.0.0.1',
+        host: this.config.serverHost,
         version: VERSION,
         browser,
         registry,
