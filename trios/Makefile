@@ -3106,7 +3106,16 @@ mutants:
 	[ $$waited -gt 0 ] && echo "[mutants] acquired the harness lock after $${waited}s" || true; \
 	echo $$$$ > "$(HARNESS_LOCK)/pid"; \
 	trap 'for f in $$backup/*.bak; do [ -e "$$f" ] || continue; \
-	      target=$$(cat "$$f.path"); \
+	      target=$$(head -1 "$$f.path"); \
+	      case "$$target" in \
+	        ""|*[!-A-Za-z0-9_/.]*) \
+	          echo "[FAIL] restore refused: $$f.path does not name a path." >&2; \
+	          echo "       Read as: [$$target]" >&2; \
+	          echo "       Writing there would leave the MUTATION in the real file" >&2; \
+	          echo "       and drop a copy under a junk name. The backup is kept at" >&2; \
+	          echo "       $$f - restore it by hand." >&2; \
+	          continue ;; \
+	      esac; \
 	      cp "$$f" "$(ROOT)/$$target"; \
 	      expected=$$(cat "$${f}.sha" 2>/dev/null); \
 	      if [ -n "$$expected" ]; then \
@@ -3225,7 +3234,16 @@ mutants-logic:
 	[ $$waited -gt 0 ] && echo "[harness] acquired the lock after $${waited}s" || true; \
 	echo $$$$ > "$(HARNESS_LOCK)/pid"; \
 	trap 'for f in $$backup/*.bak; do [ -e "$$f" ] || continue; \
-	      target=$$(cat "$$f.path"); \
+	      target=$$(head -1 "$$f.path"); \
+	      case "$$target" in \
+	        ""|*[!-A-Za-z0-9_/.]*) \
+	          echo "[FAIL] restore refused: $$f.path does not name a path." >&2; \
+	          echo "       Read as: [$$target]" >&2; \
+	          echo "       Writing there would leave the MUTATION in the real file" >&2; \
+	          echo "       and drop a copy under a junk name. The backup is kept at" >&2; \
+	          echo "       $$f - restore it by hand." >&2; \
+	          continue ;; \
+	      esac; \
 	      cp "$$f" "$(ROOT)/$$target"; \
 	      expected=$$(cat "$${f}.sha" 2>/dev/null); \
 	      if [ -n "$$expected" ]; then \
@@ -4194,7 +4212,16 @@ mutants-guard:
 	[ $$waited -gt 0 ] && echo "[harness] acquired the lock after $${waited}s" || true; \
 	echo $$$$ > "$(HARNESS_LOCK)/pid"; \
 	trap 'for f in $$backup/*.bak; do [ -e "$$f" ] || continue; \
-	      target=$$(cat "$$f.path"); \
+	      target=$$(head -1 "$$f.path"); \
+	      case "$$target" in \
+	        ""|*[!-A-Za-z0-9_/.]*) \
+	          echo "[FAIL] restore refused: $$f.path does not name a path." >&2; \
+	          echo "       Read as: [$$target]" >&2; \
+	          echo "       Writing there would leave the MUTATION in the real file" >&2; \
+	          echo "       and drop a copy under a junk name. The backup is kept at" >&2; \
+	          echo "       $$f - restore it by hand." >&2; \
+	          continue ;; \
+	      esac; \
 	      cp "$$f" "$(ROOT)/$$target"; \
 	      expected=$$(cat "$${f}.sha" 2>/dev/null); \
 	      if [ -n "$$expected" ]; then \
@@ -4854,7 +4881,16 @@ mutants-changed:
 	[ $$waited -gt 0 ] && echo "[harness] acquired the lock after $${waited}s" || true; \
 	echo $$$$ > "$(HARNESS_LOCK)/pid"; \
 	trap 'for f in $$backup/*.bak; do [ -e "$$f" ] || continue; \
-	      target=$$(cat "$$f.path"); \
+	      target=$$(head -1 "$$f.path"); \
+	      case "$$target" in \
+	        ""|*[!-A-Za-z0-9_/.]*) \
+	          echo "[FAIL] restore refused: $$f.path does not name a path." >&2; \
+	          echo "       Read as: [$$target]" >&2; \
+	          echo "       Writing there would leave the MUTATION in the real file" >&2; \
+	          echo "       and drop a copy under a junk name. The backup is kept at" >&2; \
+	          echo "       $$f - restore it by hand." >&2; \
+	          continue ;; \
+	      esac; \
 	      cp "$$f" "$(ROOT)/$$target"; \
 	      expected=$$(cat "$${f}.sha" 2>/dev/null); \
 	      if [ -n "$$expected" ]; then \
