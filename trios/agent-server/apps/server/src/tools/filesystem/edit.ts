@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { tool } from 'ai'
 import { z } from 'zod'
 import {
+  assertWithinRoot,
   detectLineEnding,
   executeWithMetrics,
   normalizeToLF,
@@ -86,6 +87,7 @@ export function createEditTool(cwd: string) {
     execute: (params) =>
       executeWithMetrics(TOOL_NAME, async () => {
         const resolved = resolve(cwd, params.path)
+        assertWithinRoot(resolved)
         const raw = await readFile(resolved, 'utf-8')
 
         const { content: noBom, hasBom } = stripBom(raw)

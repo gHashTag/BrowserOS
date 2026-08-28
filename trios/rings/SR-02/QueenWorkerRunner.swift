@@ -127,15 +127,15 @@ final class QueenWorkerRunner: ObservableObject {
     // MARK: - Execution
 
     private func execute(task: DelegatedTask, brief: String) async {
-        // Refuse before spending anything if the tools and the commit would
-        // land in different filesystems. The reasoning is in
-        // `QueenDelegationPolicy.splitExecutionRefusal`; the short version is
-        // that a bee editing a container while the committer reads this Mac
-        // produces a task reported as "did nothing" rather than a visible
-        // failure.
-        if let refusal = QueenDelegationPolicy.splitExecutionRefusal(
-            serverIsRemote: ProjectPaths.agentServerIsRemote,
-            committerRunsLocally: QueenGit.runsLocally
+        // Refuse before spending anything if the result could not leave the
+        // machine that produced it. The reasoning is in
+        // `QueenDelegationPolicy.unpublishableWorkRefusal`; the short version
+        // is that a worker against a containerised server commits inside that
+        // container, which holds no push credential by design, and the next
+        // deploy discards the work while the task reads as finished.
+        if let refusal = QueenDelegationPolicy.unpublishableWorkRefusal(
+            workHappensRemotely: ProjectPaths.agentServerIsRemote,
+            canPublish: QueenGit.canPublish
         ) {
             var refused = QueenWorkerTranscript(seed: [])
             await finish(

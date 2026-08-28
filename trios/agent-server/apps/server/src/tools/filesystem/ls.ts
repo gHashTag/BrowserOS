@@ -2,7 +2,12 @@ import { readdir, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { tool } from 'ai'
 import { z } from 'zod'
-import { DEFAULT_LS_LIMIT, executeWithMetrics, toModelOutput } from './utils'
+import {
+  assertWithinRoot,
+  DEFAULT_LS_LIMIT,
+  executeWithMetrics,
+  toModelOutput,
+} from './utils'
 
 const TOOL_NAME = 'filesystem_ls'
 
@@ -29,6 +34,7 @@ export function createLsTool(cwd: string) {
     execute: (params) =>
       executeWithMetrics(TOOL_NAME, async () => {
         const resolved = resolve(cwd, params.path || '.')
+        assertWithinRoot(resolved)
         const limit = params.limit || DEFAULT_LS_LIMIT
         const entries = await readdir(resolved, { withFileTypes: true })
 

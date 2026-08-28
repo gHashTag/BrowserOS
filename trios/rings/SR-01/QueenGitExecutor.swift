@@ -274,7 +274,16 @@ enum QueenGit {
         )
     }
 
-    /// Whether the commit path runs on this machine. Asked by the delegation
-    /// guard so "where git runs" has exactly one answer in the program.
+    /// Whether the commit path runs on this machine. One answer, one place.
     static var runsLocally: Bool { executor.isLocal }
+
+    /// Whether a branch made by the executor can reach the remote.
+    ///
+    /// Locally this is the machine's own git credentials, which are the
+    /// operator's and are assumed present - a failing push then says so with
+    /// git's own words. Remotely it is false and stays false until a branch can
+    /// be carried out of the container: no push credential is kept there,
+    /// because the agents own that checkout and therefore own the git
+    /// configuration and hooks any privileged git run would obey.
+    static var canPublish: Bool { executor.isLocal }
 }

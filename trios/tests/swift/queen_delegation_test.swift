@@ -50,38 +50,46 @@ enum QueenDelegationTests {
         spokenForIsNotTheSameAsWorkedOn()
         budgetKnobParsing()
         pullRequestGuardReadsTheBranch()
-        splitExecutionIsRefusedBeforeSpending()
+        unpublishableWorkIsRefusedBeforeSpending()
 
         print("\n\(checks) checks, \(failures) failures")
         if failures > 0 { exit(1) }
         print("All QueenDelegation tests passed.")
     }
 
-    /// A worker whose tools and whose commit live on different machines.
+    /// Work that could not leave the machine that did it.
     ///
-    /// The failure this guards is not a crash. The bee edits the container,
-    /// the committer reads this Mac, sees no change, and the task is filed as
-    /// "the worker did nothing" - work reported as never having happened.
-    static func splitExecutionIsRefusedBeforeSpending() {
-        scenario("split execution is refused before spending")
+    /// This scenario used to assert a guard keyed on `serverIsRemote &&
+    /// committerRunsLocally`. Both were derived from one value and were exact
+    /// negations, so the conjunction was `x && !x` and the guard could never
+    /// fire - the tests passed because they called the function directly with
+    /// hand-written arguments the program could never produce. That is the
+    /// failure mode this file exists to catch, so it is worth naming: a unit
+    /// test proves the function, never the wiring.
+    static func unpublishableWorkIsRefusedBeforeSpending() {
+        scenario("unpublishable work is refused before spending")
 
-        check(QueenDelegationPolicy.splitExecutionRefusal(
-            serverIsRemote: false) == nil,
-            "a local server and a local committer are one filesystem: allowed")
+        check(QueenDelegationPolicy.unpublishableWorkRefusal(
+            workHappensRemotely: false, canPublish: true) == nil,
+            "local work that can be pushed is allowed")
 
-        let refusal = QueenDelegationPolicy.splitExecutionRefusal(
-            serverIsRemote: true)
-        check(refusal != nil,
-              "a remote server with a local committer is refused")
-        check(refusal?.contains("would be reported as never done") == true,
-              "the refusal names the failure mode, not just the condition")
+        check(QueenDelegationPolicy.unpublishableWorkRefusal(
+            workHappensRemotely: false, canPublish: false) == nil,
+            "local work is allowed even when a push would fail: git says why, "
+                + "and the commit is still on this machine")
 
-        // The refusal is about the SPLIT, not about being remote. Move the
-        // committer too and there is nothing to refuse - this is what stops
-        // the guard from outliving the problem it was written for.
-        check(QueenDelegationPolicy.splitExecutionRefusal(
-            serverIsRemote: true, committerRunsLocally: false) == nil,
-            "a remote server with a remote committer is allowed again")
+        let refusal = QueenDelegationPolicy.unpublishableWorkRefusal(
+            workHappensRemotely: true, canPublish: false)
+        check(refusal != nil, "remote work with no way back is refused")
+        check(refusal?.contains("discarded by the next deploy") == true,
+              "the refusal names what is lost, not just the condition")
+
+        // The two arguments are independent facts, which the guard this
+        // replaced was not. When a branch can be carried out of the container
+        // this stops refusing on its own.
+        check(QueenDelegationPolicy.unpublishableWorkRefusal(
+            workHappensRemotely: true, canPublish: true) == nil,
+            "remote work that can be published is allowed")
     }
 
     /// A second turn that changes nothing is not an empty branch.

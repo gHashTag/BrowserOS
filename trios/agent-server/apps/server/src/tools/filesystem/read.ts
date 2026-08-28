@@ -3,6 +3,7 @@ import { extname, resolve } from 'node:path'
 import { tool } from 'ai'
 import { z } from 'zod'
 import {
+  assertWithinRoot,
   executeWithMetrics,
   type FilesystemToolResult,
   IMAGE_EXTENSIONS,
@@ -105,6 +106,7 @@ export function createReadTool(cwd: string) {
     execute: (params) =>
       executeWithMetrics(TOOL_NAME, async () => {
         const resolved = resolve(cwd, params.path)
+        assertWithinRoot(resolved)
         const ext = extname(resolved).toLowerCase()
 
         if (IMAGE_EXTENSIONS.has(ext)) {

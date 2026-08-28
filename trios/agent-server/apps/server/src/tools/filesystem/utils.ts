@@ -1,6 +1,7 @@
 import type { Dirent } from 'node:fs'
+import { realpathSync } from 'node:fs'
 import { readdir } from 'node:fs/promises'
-import { join, relative } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import { TOOL_LIMITS } from '@browseros/shared/constants/limits'
 import { logger } from '../../lib/logger'
 import { metrics } from '../../lib/metrics'
@@ -15,6 +16,69 @@ export const DEFAULT_BASH_TIMEOUT = 120
 export const MAX_GREP_FILE_SIZE = 2 * 1024 * 1024
 export const MAX_READ_LINES = TOOL_LIMITS.FILESYSTEM_READ_MAX_LINES
 export const MAX_READ_CHARS = TOOL_LIMITS.FILESYSTEM_READ_MAX_CHARS
+
+/**
+ * Refuses a path that leaves the tree these tools are allowed to touch.
+ *
+ * The shell tool can be dropped to an unprivileged account; these six cannot.
+ * They run inside the server process, so their reach is the server's reach.
+ * Measured 2026-08-28 on the deployed container, after the shell had already
+ * been confined: `filesystem_read({path: "/proc/self/environ"})` returned the
+ * server's environment - DATABASE_URL and TRIOS_API_TOKEN in it - and
+ * `/etc/shadow` came back in full. Confining the shell had moved the hole
+ * rather than closed it.
+ *
+ * Symlinks are why the check resolves rather than compares strings: a link
+ * created inside the workspace, which an agent may certainly create, otherwise
+ * points anywhere and passes a prefix test. For a path that does not exist yet
+ * - a file about to be written - the nearest existing ancestor is resolved
+ * instead, because that is the directory the write actually lands in.
+ *
+ * Unset TRIOS_FS_ROOT means no restriction, which is every local install: a
+ * developer's agent legitimately reads outside its worktree, and turning this
+ * on by default would break work that has nothing to do with a container.
+ */
+export function pathEscapesRoot(resolved: string): string | null {
+  const root = process.env.TRIOS_FS_ROOT
+  if (!root) return null
+
+  const realRoot = realOrNearest(resolve(root))
+  const realPath = realOrNearest(resolved)
+  if (realPath === realRoot || realPath.startsWith(realRoot + sep)) return null
+
+  // The message names the boundary rather than the file, so it reads as a
+  // rule rather than as "this particular file is missing".
+  return `Refused: ${resolved} is outside ${root}, which is the only tree these tools may touch.`
+}
+
+/**
+ * The same rule, as a refusal.
+ *
+ * Throws rather than returning, because `executeWithMetrics` already turns a
+ * rejection into `{ isError: true }` AND logs it - so a refused path is
+ * visible in the server's log instead of only in the model's transcript, and
+ * the call site stays one line with no branch of its own.
+ */
+export function assertWithinRoot(resolved: string): void {
+  const refusal = pathEscapesRoot(resolved)
+  if (refusal) throw new Error(refusal)
+}
+
+/// Resolves symlinks as far as the path exists, so a not-yet-created file is
+/// judged by the directory it would be created in.
+function realOrNearest(candidate: string): string {
+  let current = candidate
+  for (;;) {
+    try {
+      return realpathSync(current)
+    } catch {
+      const parent = dirname(current)
+      // Reached the filesystem root without finding anything that exists.
+      if (parent === current) return candidate
+      current = parent
+    }
+  }
+}
 
 export interface FilesystemToolResult {
   text: string

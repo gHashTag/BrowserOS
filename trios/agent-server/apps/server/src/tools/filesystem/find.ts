@@ -2,6 +2,7 @@ import { resolve } from 'node:path'
 import { tool } from 'ai'
 import { z } from 'zod'
 import {
+  assertWithinRoot,
   DEFAULT_FIND_LIMIT,
   executeWithMetrics,
   toModelOutput,
@@ -32,6 +33,7 @@ export function createFindTool(cwd: string) {
     execute: (params) =>
       executeWithMetrics(TOOL_NAME, async () => {
         const searchPath = resolve(cwd, params.path || '.')
+        assertWithinRoot(searchPath)
         const limit = params.limit || DEFAULT_FIND_LIMIT
 
         let effectivePattern = params.pattern

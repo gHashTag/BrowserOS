@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path'
 import { tool } from 'ai'
 import { z } from 'zod'
 import {
+  assertWithinRoot,
   DEFAULT_GREP_LIMIT,
   executeWithMetrics,
   GREP_MAX_LINE_LENGTH,
@@ -121,6 +122,7 @@ export function createGrepTool(cwd: string) {
       // biome-ignore lint/complexity/noExcessiveCognitiveComplexity: grep tool has many output mode and filtering branches
       executeWithMetrics(TOOL_NAME, async () => {
         const searchPath = resolve(cwd, params.path || '.')
+        assertWithinRoot(searchPath)
         const limit = params.limit || DEFAULT_GREP_LIMIT
         const context = params.context || 0
 
