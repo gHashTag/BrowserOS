@@ -773,15 +773,33 @@ enum QueenLocalisation {
     ///
     /// **#1156 stays a miss, and the miss is named, not papered over.**
     /// Nothing in [ChatViewModel, awaitingReview, characterCount] names
-    /// `handleWorkerFinished` on today's tree: `characterCount`'s one home
-    /// is the drill's log line, and `awaitingReview` is now spread across
-    /// ~15 sites (the sweep at 8640 carries its own mentions of it). No
-    /// rule this file's doctrine allows — name, dotted literal, clean
-    /// label, single-in-code — reaches `handleWorkerFinished` from those
-    /// identifiers without rigging. Restoring the emission (or re-recording
-    /// the case) is a decision in `rings/SR-02/ChatViewModel.swift`, outside
-    /// this boundary; the expectation stays as recorded, so the day the
-    /// emission returns, this row goes green by itself.
+    /// `handleWorkerFinished` on today's tree, and the impossibility is
+    /// measured, not asserted (2026-08-28, second pass, with this file's
+    /// own views and `\b` counting):
+    ///
+    /// - `characterCount` — **0 code mentions**; its only whole-word home is
+    ///   the drill's quoted log line (the #1151/#1172 seam). No rule this
+    ///   file has can see it: not a name, not dotted, not a label, and a
+    ///   single-in-code needs a code mention.
+    /// - `awaitingReview` — **13 code mentions across 12 declarations**;
+    ///   `handleWorkerFinished` holds exactly 1 (line 6278), the sweep
+    ///   exactly 1, `pollPullRequests` 2. Not a single, not a majority —
+    ///   and the condemned density argmax names `pollPullRequests`, so the
+    ///   criterion cannot be met even by the heuristic this file bans.
+    /// - `ChatViewModel` — 60 code mentions across 28 scopes. Noise.
+    /// - The live issue body (checked 2026-08-28 against GitHub, unchanged
+    ///   since 2026-08-03) names **no function at all** — the identifier set
+    ///   is confirmed correct and carries no function-level pointer.
+    ///
+    /// The tree itself says where #1156 lives now: its two code citations of
+    /// the issue (8642, 8792) sit inside `sweepAwaitingReview`, the sweep
+    /// built to close it — `handleWorkerFinished` no longer owns the
+    /// concern. The Aug-19 hit stood on the emission's location inside
+    /// `handleWorkerFinished`, and #1151/#1172 (2026-08-22) moved that
+    /// support out by landed work outside this boundary. Restoring the
+    /// emission (or re-recording the case) is a decision in
+    /// `rings/SR-02/ChatViewModel.swift`; the expectation stays as recorded,
+    /// so the day the emission returns, this row goes green by itself.
     ///
     /// Replay any time — the check criterion 4 stands on:
     ///
