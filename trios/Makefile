@@ -669,7 +669,27 @@ release:
 	@echo "Building RELEASE. This replaces $(RELEASE_APP)."
 	@TRIOS_VARIANT=prod "$(ROOT)/build.sh" > /tmp/trios_build_release.log 2>&1; \
 	if grep -q "Build successful: $(ROOT)/trios_app" /tmp/trios_build_release.log; then \
-		echo "[OK] release app built"; exit 0; \
+		: "Built is not launchable, and today they came apart. build.sh"; \
+		: "printed 'Build successful', make printed [OK], and the bundle"; \
+		: "died in dyld before main(): libQueenUILib.dylib links"; \
+		: "@rpath/libXCTestSwiftSupport.dylib, and no rpath in the bundle"; \
+		: "resolves it. The menu-bar logo - an invariant of this project -"; \
+		: "was gone for eleven minutes because the target that replaced the"; \
+		: "app reported success on an artifact that cannot start."; \
+		: "So ask dyld before believing the compiler. -1 means the process"; \
+		: "was killed by the timeout, which is what a healthy app does: it"; \
+		: "keeps running. A dyld failure exits in milliseconds."; \
+		probe=$$("$(RELEASE_APP)/Contents/MacOS/trios" 2>&1 & \
+			pid=$$!; ( sleep 4; kill -9 $$pid 2>/dev/null ) & \
+			wait $$pid 2>/dev/null; echo "exit:$$?"); \
+		if echo "$$probe" | grep -q "Library not loaded\|Symbol not found\|image not found" ; then \
+			echo "[FAIL] the release app was built but cannot launch:"; \
+			echo "$$probe" | grep -m3 -E "Library not loaded|Symbol not found|Referenced from" | sed 's/^/       /'; \
+			echo "       The bundle is in place and the running app is now this one."; \
+			echo "       Relaunching it will fail the same way."; \
+			exit 1; \
+		fi; \
+		echo "[OK] release app built and its libraries resolve"; exit 0; \
 	else \
 		echo "[FAIL] release app did not build:"; \
 		grep -E "error:" /tmp/trios_build_release.log | head -10; exit 1; \
