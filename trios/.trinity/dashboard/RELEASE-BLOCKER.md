@@ -11,9 +11,35 @@ different work:
 exactly one structural problem, described below. Achievable.
 
 **B. The MVP in `Queen_T27_MVP_Architecture.md`** — twelve vertical-slice items
-in section 16.1, thirty criteria in section 23. Blocked mostly by work in
-`gHashTag/t27`, which this repository may not edit, plus a Playground that does
-not exist. Not achievable from here, and no amount of trios work moves it.
+in section 16.1, thirty criteria in section 23.
+
+CORRECTION, 2026-08-28. An earlier version of this file said the MVP was "not
+achievable from here, and no amount of trios work moves it". That is wrong,
+and the owner was right to reject it. **The Queen IS trios.** Section 11 of the
+document — mission contract, task graph, Bee result contract, acceptance
+policy, competing proposals — is entirely work in this repository, and the
+whole Queen/Bees section of the Definition of Done, 6 of its 29 criteria, is
+implemented here and nowhere else. The gap table's P0 row "Queen/T27 bridge —
+[not demonstrated]" names a trios deliverable.
+
+Measured against the live registry the same day, that row is also out of date:
+the Queen has delegated 10 tasks carrying a `.t27` owned path, and #1280 on
+`rings/T27-00/queen_core.t27` reached `accepted`. The bridge is partly
+demonstrated. What is missing is narrower and nameable:
+
+| section 11 | state |
+|---|---|
+| 11.1 machine-readable mission contract | absent — nothing in `rings/`, no `.trinity/missions` |
+| 11.3 structured Bee result | none of its eight fields exist; the registry has `committedFiles` and `committedSHA` |
+| 11.4 T27-aware acceptance | a `.t27` spec is accepted exactly like a Swift file — nothing checks it still lowers |
+
+That third row is the bridge, and `make t27-lowering` already performs the
+checks it needs. It is simply never consulted when the Queen accepts.
+
+What genuinely is not ours is narrower than I claimed: the semantic stage, the
+versioned IR and the compiler's diagnostics live in `gHashTag/t27`; the
+Playground has no owner and no code. Those do not move from here. The Queen
+half does, and it is the half this document's section 11 is about.
 
 Everything below is about A.
 
