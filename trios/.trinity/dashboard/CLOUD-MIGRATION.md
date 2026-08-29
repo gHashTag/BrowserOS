@@ -765,3 +765,57 @@ shell comments and single-quoted spans are removed. Same shape as
 now been bitten by that twice in one day - once in a Makefile `:` note, once in
 a JavaScript template literal holding SQL. Proven both ways: clean on the tree,
 red when the offending line is put back, clean again when it is removed.
+
+---
+
+## The four cassette failures are one cause, and it is not in the cassettes
+
+With the backtick gone the suite runs, so its failures can be read for the first
+time since wave 069. All four are the same thing.
+
+The harness launches `trios-test.app` with `TRIOS_E2E_DELEGATE` and
+`TRIOS_REPLAY_CASSETTE` and waits for a marker. Measured directly, bypassing
+LaunchServices so `open --env` could not be blamed, and watched for 75s:
+
+```
+t+15s..t+75s   alive=0   lines=9   server.launch=0   queen.selftest=0
+
+events emitted, in full:
+  skills.loaded
+  queen.key.warmup
+  queen.delegate            <- gHashTag/trios#1151, to "drill"
+  queen.transition
+  conversation.persist.heal_sweep
+  queen.review.characterCount
+```
+
+Two things are absent and both matter. `queen.selftest.start` never fires -
+`runDelegationSelfTestIfRequested` logs it unconditionally once the spec parses,
+and logs `queen.selftest.failed` if it does not, so neither line means the
+function was never reached. And `server.launch` never fires either, which places
+the stall earlier still: in `main.swift` the self-test sits inside the same
+`Task` as `AgentServerLauncher.startIfNeeded()`, `server.launch` and
+`QueenBackgroundService.start()`, and none of them logged.
+
+Meanwhile a delegation DID happen - #1151, chosen by the app itself, worker
+"drill" - which is the ChatViewModel launch bootstrap on a different path. So the
+app is not crashing. It does its own autonomous round and exits before the Task
+carrying the self-test gets anywhere.
+
+**One cause, four symptoms.** No cassette is ever replayed, so no marker can
+ever appear, and each of the four reads as its own broken observer:
+
+```
+FAIL - commits the file its cassette declares
+FAIL - notices a bee repeating one call
+FAIL - notices a write outside the boundary
+FAIL - names a tool call the stream never answered
+```
+
+Nothing here says the observers are broken. It says they were never asked.
+
+**Not fixed, deliberately.** The fix belongs in `main.swift`, which carries
+another agent's uncommitted work. Editing it would land their half-finished
+change with mine. Their diff is unrelated (an answer-preview string in a probe
+verdict, #1162), so this is not their defect either - it is simply their file
+today.
