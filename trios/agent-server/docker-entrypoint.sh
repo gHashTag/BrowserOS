@@ -55,8 +55,14 @@ if [ -d "$REPO_DIR/.git" ]; then
   # still a checkout, and a server that will not start because GitHub was
   # briefly unreachable is worse than one working from a slightly old tree -
   # which is a state anyone can see and fix, unlike a container that exits.
-  $AS_USER "git -C '$REPO_DIR' fetch --depth 1 origin '$TRIOS_REPO_REF' \
-    && git -C '$REPO_DIR' checkout -f FETCH_HEAD" \
+  #
+  # NOT --depth 1, and NOT a detached FETCH_HEAD. The Queen's committer asks
+  # git for both: `baseBranch()` reads the current branch and returns nil on a
+  # detached head, which refuses every acceptance, and `merge-base` needs
+  # history that a depth of one does not have. The clone below is blobless
+  # rather than shallow for the same reason - agents need `log` and `blame`.
+  $AS_USER "git -C '$REPO_DIR' fetch origin '$TRIOS_REPO_REF' \
+    && git -C '$REPO_DIR' checkout -B '$TRIOS_REPO_REF' FETCH_HEAD" \
     || echo "[entrypoint] fetch failed; continuing on the existing checkout"
 else
   echo "[entrypoint] cloning $TRIOS_REPO_URL@$TRIOS_REPO_REF into $REPO_DIR"

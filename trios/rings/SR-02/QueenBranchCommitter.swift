@@ -1132,21 +1132,50 @@ enum QueenBranchCommitter {
                 )
             }
 
+            // Extraction runs on THIS machine, explicitly, because the build
+            // below does. Routing it through `runGit` sent it wherever the
+            // executor points: with a remote server the directory was created
+            // here, the tree was written into the container, and `swift build`
+            // then ran on an empty directory. It reported that the branches do
+            // not build - about work it had never seen - and
+            // `CombinedBuildProof` is the only door to `accepted`, so every
+            // acceptance was refused and every one of them blamed a bee.
+            let extractor = LocalGitExecutor()
+            let localRoot = extractor.repositoryRoot ?? projectRoot
+            let scratchEnv = ["GIT_INDEX_FILE": index]
+
+            // And the objects have to be here too. When the work was done in a
+            // container this tree may exist only there, and saying so is a
+            // different fact from "it does not build".
+            let present = extractor.run(
+                arguments: ["cat-file", "-e", "\(treeSha)^{tree}"],
+                workDir: localRoot, environment: scratchEnv
+            )
+            guard present.ok else {
+                return CombinedBuildResult(
+                    builds: false,
+                    summary: "The combined tree \(treeSha.prefix(8)) is not on this "
+                        + "machine, so it could not be built here. The work was done "
+                        + "elsewhere and has not been carried back yet.",
+                    combinedTreeSha: treeSha
+                )
+            }
+
             // Load the combined tree into the temp index and extract every
             // file into the temp directory. `checkout-index --prefix` writes
             // files at <prefix>/<repo-relative-path>, preserving the
             // directory structure that `swift build` expects. The prefix
             // must end with "/" and the directory must already exist.
-            guard runGit(["read-tree", treeSha],
-                         index: index, projectRoot: projectRoot) != nil else {
+            guard extractor.run(arguments: ["read-tree", treeSha],
+                                workDir: localRoot, environment: scratchEnv).ok else {
                 return CombinedBuildResult(
                     builds: false,
                     summary: "Could not read the combined tree into a scratch index.",
                     combinedTreeSha: treeSha
                 )
             }
-            guard runGit(["checkout-index", "--prefix=\(tempDir)", "-a"],
-                         index: index, projectRoot: projectRoot) != nil else {
+            guard extractor.run(arguments: ["checkout-index", "--prefix=\(tempDir)", "-a"],
+                                workDir: localRoot, environment: scratchEnv).ok else {
                 return CombinedBuildResult(
                     builds: false,
                     summary: "Could not extract the combined tree for building.",
