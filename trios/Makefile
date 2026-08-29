@@ -1036,6 +1036,16 @@ QUEEN_CORE_FLOOR := 13
 # Swift, so moving them across a module boundary needs hand-written public
 # initialisers - API design rather than a move. They compile standalone and are
 # checked by `queen-core`; they are not in the Linux module.
+# The selection loop's own decisions, a second module that imports the first.
+# QueenDelegation was one `ProjectPaths` reference away from portable - inside
+# ModelPricing, reading the budget knob - and that reference now lives beside
+# ProjectPaths in a ring the server does not compile.
+QUEEN_POLICY_LINUX_FILES := \
+	rings/SR-00/QueenDelegation.swift \
+	rings/SR-00/QueenSalience.swift \
+	rings/SR-00/QueenCriterionVerdict.swift \
+	rings/SR-00/ModelPricing.swift
+
 QUEEN_CORE_LINUX_FILES := \
 	rings/SR-00/QueenBeeResult.swift \
 	rings/SR-00/QueenBoundaryPaths.swift \
@@ -1065,6 +1075,14 @@ queen-core-sync:
 	@drift=""; \
 	for f in $(QUEEN_CORE_LINUX_FILES); do \
 		copy="agent-server/queen-core/Sources/QueenCore/$$(basename $$f)"; \
+		if [ ! -f "$$copy" ]; then \
+			drift="$$drift  MISSING  $$copy"$$'\n'; \
+		elif ! cmp -s "$$f" "$$copy"; then \
+			drift="$$drift  DIFFERS  $$(basename $$f)"$$'\n'; \
+		fi; \
+	done; \
+	for f in $(QUEEN_POLICY_LINUX_FILES); do \
+		copy="agent-server/queen-core/Sources/QueenPolicy/$$(basename $$f)"; \
 		if [ ! -f "$$copy" ]; then \
 			drift="$$drift  MISSING  $$copy"$$'\n'; \
 		elif ! cmp -s "$$f" "$$copy"; then \
