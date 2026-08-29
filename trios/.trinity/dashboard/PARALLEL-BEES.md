@@ -5,9 +5,22 @@ Re-run every command here before acting on it.
 
 ## The answer in one line
 
-**The container could run dozens. The Queen is running zero.** What binds is
-not hardware, not the cap, and not the cloud: it is three parked reviews
-holding path boundaries that nothing releases.
+**The container could run dozens. The Queen was running zero**, and not for any
+hardware reason: three parked reviews held path boundaries that nothing
+released. Both that and the publication gap are now fixed, and a bee's work has
+made the full trip container -> patch -> Mac -> GitHub.
+
+## Proven end to end, 2026-08-29
+
+```
+filesystem_write   -> /workspace/BrowserOS/trios/docs/cloud-bee-proof.md
+container commit   -> 9c4532e4  "a bee wrote this inside the container"
+carried out        -> git format-patch, no credential in the container
+replayed here      -> 24d6e97d6, file + message + author "Trinity Bee" intact
+pushed by the Mac  -> refs/heads/cloud-bee-proof-2026-08-29 on GitHub
+```
+
+The branch was then deleted from GitHub, this machine and the container.
 
 ## The container is nowhere near its limit
 
@@ -116,9 +129,12 @@ message names the timeout that fired rather than the one that was asked for.
 
 ## What must change, smallest first
 
-1. **Drain the three parked reviews.** Nothing else matters until this is done.
-   Either rule on #1286, #1127 and #1174, or add a review-age eviction so
-   `conflictingTasks` stops honouring a five-day-old boundary.
+1. ~~**Drain the three parked reviews.**~~ **Done.** `awaitingReview` boundaries
+   now age out after 48 hours (`QueenDelegationPolicy.reviewBoundaryHoldHours`).
+   A boundary exists so two bees never write the same file at once, and that
+   argument stops holding when the work is finished and only the verdict is
+   outstanding. Only `awaitingReview` ages: `queued` and `running` may be
+   writing this second, and `rejected` expects the same bee back on those files.
 2. **Wire key rotation onto the request path**, and stop charging a 429 to the
    issue. Concurrency is what makes 429s certain, so this must precede any
    raise of the cap.
@@ -131,12 +147,27 @@ message names the timeout that fired rather than the one that was asked for.
 5. Only then raise `maximumConcurrentWorkers`, and to a number the pids
    arithmetic supports: **19** if bees compile, more if they do not.
 
+## The last step, which is the operator's
+
+Everything is built and proven, but the running release app predates all of it
+and knows nothing of the boundary ageing or the patch transport. Putting the
+new binary in front of the Queen and pointing her at the cloud is a release,
+and a release is a deliberate act:
+
+```bash
+DEVELOPER_DIR=/Library/Developer/CommandLineTools make release
+open -a trios.app --env TRIOS_AGENT_SERVER_URL=https://trios-agent-server-production.up.railway.app
+```
+
+Reversible: relaunch without the variable and she is local again. Note what it
+means - her provider key then travels to the container in each request body.
+The uid split keeps agents from reading it, but it does leave this machine.
+
 ## What is not measured
 
-- No bee has actually run in the cloud. Every number above is either the
-  container under synthetic load or the Queen's own registry; a real
-  delegation end to end has not happened, because of the blockade in §2 and
-  because publishing a branch still needs the Mac.
+- Autonomous delegation into the cloud has not run. The loop is proven by
+  driving it directly; the Queen herself has not chosen an issue and sent a bee
+  to Railway, because that needs the release above.
 - Cost. Nothing here estimates what 19 concurrent bees spend, and the
   `SwarmBudget` is $10/day.
 - LLM provider concurrency limits per key, which item 2 makes decisive.
