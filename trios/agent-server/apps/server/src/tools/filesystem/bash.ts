@@ -80,6 +80,103 @@ function spawnEnv(): Record<string, string | undefined> {
   return scrubbed
 }
 
+/// How much output is kept in memory while a command runs, in characters.
+///
+/// `truncateTail` returns at most 2000 lines within 50 KB, so anything beyond
+/// this is read and thrown away. Sized generously against that - a hundredfold
+/// - so a long line or an unlucky chunk boundary cannot eat into what the
+/// caller would have seen.
+const TAIL_WINDOW_CHARS = 5 * 1024 * 1024
+
+/// The largest timeout a model may ask for, in seconds.
+///
+/// `timeout` is model-supplied and was unbounded. A command that asks for a day
+/// and hangs holds its slot for a day, and with the swarm bounded by
+/// concurrent sessions that is a slot no other bee gets.
+const MAX_BASH_TIMEOUT = 900
+
+/// The timeout that will actually be applied, and whether it was reduced.
+///
+/// Separated from the tool body so the rule can be tested without waiting out
+/// a real timer - proving the cap by letting a command run for fifteen minutes
+/// is not a test anyone will keep.
+export function effectiveTimeout(requested: number | undefined): {
+  seconds: number
+  capped: boolean
+} {
+  const asked = requested && requested > 0 ? requested : DEFAULT_BASH_TIMEOUT
+  return {
+    seconds: Math.min(asked, MAX_BASH_TIMEOUT),
+    capped: asked > MAX_BASH_TIMEOUT,
+  }
+}
+
+/// Reads a stream keeping only the tail the caller can actually use.
+///
+/// `new Response(stream).text()` materialises the whole output before anything
+/// is truncated. Measured 2026-08-29 on the deployed container: `cat` of a
+/// 257 MB log cost **889.8 MB of RSS** - 3.46x the file - to return 51,018
+/// characters, and stalled the event loop 428 ms while every other agent
+/// session waited behind it. One process serves every bee, so that is the
+/// swarm's memory ceiling being set by whoever runs the least careful command,
+/// and a cgroup OOM takes all of them together.
+///
+/// What is discarded is counted first, so the caller can say a tail is a tail
+/// rather than presenting it as the whole. Counted in characters, which is what
+/// the window actually bounds - the decoded string held in memory, not the
+/// bytes that arrived.
+async function readBoundedTail(
+  stream: ReadableStream<Uint8Array>,
+): Promise<{ text: string; droppedChars: number }> {
+  const reader = stream.getReader()
+  const decoder = new TextDecoder()
+  const held: string[] = []
+  let heldChars = 0
+  let droppedChars = 0
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    // `stream: true` so a multi-byte character split across two chunks is not
+    // decoded as two replacement characters.
+    const piece = decoder.decode(value, { stream: true })
+    if (!piece) continue
+    held.push(piece)
+    heldChars += piece.length
+    while (heldChars > TAIL_WINDOW_CHARS && held.length > 1) {
+      const shed = held.shift() as string
+      heldChars -= shed.length
+      droppedChars += shed.length
+    }
+  }
+  const tail = decoder.decode()
+  if (tail) held.push(tail)
+  return { text: held.join(''), droppedChars }
+}
+
+/// stdout and stderr as the caller sees them: one stream, stderr last.
+function combined(stdoutText: string, stderrText: string): string {
+  if (!stderrText) return stdoutText
+  return stdoutText ? `${stdoutText}\n${stderrText}` : stderrText
+}
+
+/// How the truncation is described, or nothing when there was none.
+///
+/// `totalLines` counts what reached this process, which after the bounded read
+/// above is no longer everything the command produced. Saying so keeps the
+/// count honest rather than quietly redefining "total" to mean "the part we
+/// kept".
+function truncationNote(
+  truncated: { truncated: boolean; keptLines: number; totalLines: number },
+  droppedChars: number,
+): string | null {
+  if (!truncated.truncated) return null
+  const head = `(Output truncated. Showing last ${truncated.keptLines} of ${truncated.totalLines} lines`
+  return droppedChars > 0
+    ? `${head} held; a further ${droppedChars} characters were discarded while the command ran)`
+    : `${head})`
+}
+
 export function createBashTool(cwd: string) {
   return tool({
     description:
@@ -93,7 +190,9 @@ export function createBashTool(cwd: string) {
     }),
     execute: (params) =>
       executeWithMetrics(TOOL_NAME, async () => {
-        const timeoutMs = (params.timeout || DEFAULT_BASH_TIMEOUT) * 1000
+        const requested = params.timeout || DEFAULT_BASH_TIMEOUT
+        const limit = effectiveTimeout(params.timeout)
+        const timeoutMs = limit.seconds * 1000
         const resolvedCwd = resolve(cwd)
 
         const proc = Bun.spawn(shellArgv(params.command), {
@@ -109,32 +208,32 @@ export function createBashTool(cwd: string) {
           proc.kill()
         }, timeoutMs)
 
-        const [stdoutText, stderrText] = await Promise.all([
-          new Response(proc.stdout).text(),
-          new Response(proc.stderr).text(),
+        const [out, err] = await Promise.all([
+          readBoundedTail(proc.stdout as ReadableStream<Uint8Array>),
+          readBoundedTail(proc.stderr as ReadableStream<Uint8Array>),
         ])
+        const stdoutText = out.text
+        const stderrText = err.text
+        const droppedChars = out.droppedChars + err.droppedChars
 
         const exitCode = await proc.exited
         clearTimeout(timer)
 
         if (timedOut) {
-          let output = stdoutText
-          if (stderrText) output += (output ? '\n' : '') + stderrText
-          const truncated = truncateTail(output)
+          const truncated = truncateTail(combined(stdoutText, stderrText))
           return {
-            text: `Command timed out after ${params.timeout || DEFAULT_BASH_TIMEOUT}s\n\n${truncated.content}`,
+            // The applied timeout, not the requested one. A model asking for
+            // 86400 and being cut at 900 must not be told it waited a day.
+            text: `Command timed out after ${limit.seconds}s${
+              limit.capped ? ` (requested ${requested}s, capped)` : ''
+            }\n\n${truncated.content}`,
             isError: true,
           }
         }
 
-        let output = stdoutText
-        if (stderrText) output += (output ? '\n' : '') + stderrText
-
-        const truncated = truncateTail(output)
-        let result = truncated.content
-        if (truncated.truncated) {
-          result = `(Output truncated. Showing last ${truncated.keptLines} of ${truncated.totalLines} lines)\n${result}`
-        }
+        const truncated = truncateTail(combined(stdoutText, stderrText))
+        const note = truncationNote(truncated, droppedChars)
+        let result = note ? `${note}\n${truncated.content}` : truncated.content
 
         if (exitCode !== 0) {
           result += `\n\n[Exit code: ${exitCode}]`
