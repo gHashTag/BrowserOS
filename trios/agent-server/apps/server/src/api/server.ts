@@ -39,6 +39,7 @@ import { createMonitoringRoutes } from './routes/monitoring'
 import { createOAuthRoutes } from './routes/oauth'
 import { createOpenClawRoutes } from './routes/openclaw'
 import { createProviderRoutes } from './routes/provider'
+import { createQueenRegistryRoute } from './routes/queen-registry'
 import { createRefinePromptRoutes } from './routes/refine-prompt'
 import { createShutdownRoute } from './routes/shutdown'
 import { createSkillsRoutes } from './routes/skills'
@@ -187,6 +188,16 @@ export async function createHttpServer(config: HttpServerConfig) {
     `local-auth-audit-${port}.jsonl`,
   )
 
+  // The Queen's registry carries every task title, branch and issue the swarm
+  // has touched. Mounted unguarded it answered 200 to anyone who asked - I
+  // measured it from the open internet minutes after adding it, which is the
+  // second time in this deployment that a route was written without the guard
+  // its neighbours all carry. The guard is not a detail of the route; it is
+  // the reason the route may exist at all.
+  const queenRegistryRoutes = new Hono<Env>()
+    .use('/*', requireTrustedAppOrigin())
+    .route('/', createQueenRegistryRoute())
+
   const clawRoutes = new Hono<Env>()
     .use('/*', requireTrustedAppOrigin())
     .route('/', createOpenClawRoutes())
@@ -261,6 +272,7 @@ export async function createHttpServer(config: HttpServerConfig) {
   const app = new Hono<Env>()
     .use('/*', trustedCorsMiddleware())
     .route('/health', createHealthRoute({ browser, stateBackend: a2aService }))
+    .route('/queen/registry', queenRegistryRoutes)
     .use('/shutdown/*', requireTrustedAppOrigin())
     .route(
       '/shutdown',

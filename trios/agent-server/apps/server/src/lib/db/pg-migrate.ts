@@ -53,6 +53,24 @@ CREATE INDEX IF NOT EXISTS idx_agent_tasks_lease_expires_at
   ON agent_tasks (lease_expires_at)
   WHERE lease_expires_at IS NOT NULL;
 
+-- A mirror of the Queen's delegation registry, not its source of truth.
+--
+-- The registry is a JSON file on the operator's Mac and stays that way: it is
+-- the record of every task the swarm has done, and moving it wholesale is a
+-- migration, not a mirror. What a cloud-resident tick needs first is to SEE
+-- it, and a write-through copy gives that without putting the record at risk -
+-- if this write fails the file is untouched and the Queen carries on.
+--
+-- One row, replaced whole. The registry is read and written as a unit by the
+-- app, and a schema that decomposed it here would be a second model of the
+-- same thing, free to disagree with the first.
+CREATE TABLE IF NOT EXISTS queen_registry (
+  variant text PRIMARY KEY,
+  tasks jsonb NOT NULL,
+  task_count int NOT NULL,
+  published_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS conversations (
   "rowId" text PRIMARY KEY,
   "profileId" text NOT NULL,

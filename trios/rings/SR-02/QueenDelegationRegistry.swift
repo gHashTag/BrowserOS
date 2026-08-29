@@ -694,8 +694,63 @@ final class QueenDelegationRegistry: ObservableObject {
             encoder.dateEncodingStrategy = .iso8601
             let data = try encoder.encode(tasks)
             try data.write(to: URL(fileURLWithPath: storePath), options: .atomic)
+            publishToCloud(data)
         } catch {
             lastError = "Could not save the delegation store: \(error.localizedDescription)"
         }
+    }
+
+    /// Mirrors the registry into the cloud, after the file is safely written.
+    ///
+    /// A mirror, not a move. The file stays the record: it is the account of
+    /// every task the swarm has done, and a failure here must cost nothing.
+    /// So it runs AFTER the atomic write, ignores its own result, and never
+    /// touches `lastError` - a supervisor that reported a save failure because
+    /// a network call missed would be lying about the thing that matters.
+    ///
+    /// The point of it is that a decision made in the container can be made on
+    /// real state. `queend` already computes the tick's choice correctly when
+    /// handed this registry by hand; this is what would hand it over without a
+    /// hand.
+    ///
+    /// Silent when the server is local, because then the container is not
+    /// where anything happens and the round trip buys nothing.
+    private func publishToCloud(_ data: Data) {
+        guard ProjectPaths.agentServerIsRemote,
+              let token = QueenGit.remoteToken,
+              let url = URL(string: "\(ProjectPaths.mcpBaseURL)/queen/registry")
+        else { return }
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.timeoutInterval = 15
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        // The tasks as written, wrapped only enough to say which variant they
+        // belong to - three of them run at once and one mirror per variant is
+        // the same rule the local-auth store had to learn.
+        guard let tasks = try? JSONSerialization.jsonObject(with: data),
+              let body = try? JSONSerialization.data(withJSONObject: [
+                  "variant": ProjectPaths.variant.rawValue,
+                  "tasks": tasks,
+              ])
+        else { return }
+        request.httpBody = body
+        URLSession.shared.dataTask(with: request) { _, response, error in
+            if let error {
+                TriosLogBus.shared.info(
+                    .queen, "queen.registry.mirror_failed",
+                    "The cloud copy of the registry was not updated; the file is written",
+                    ["error": error.localizedDescription]
+                )
+                return
+            }
+            if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                TriosLogBus.shared.info(
+                    .queen, "queen.registry.mirror_refused",
+                    "The server refused the registry mirror",
+                    ["status": String(http.statusCode)]
+                )
+            }
+        }.resume()
     }
 }
