@@ -19,6 +19,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Context, MiddlewareHandler } from 'hono'
 import type { Env } from '../types'
+import { presentsValidApiToken } from './request-auth'
 
 export const LOCAL_AUTH_HEADER = 'X-TriOS-Local-Auth'
 
@@ -62,7 +63,7 @@ async function logLocalAuthAudit(
   auditPath: string,
   routePath: string,
   socketAddress: string | undefined,
-  result: 'ok' | 'expired' | 'invalid' | 'unconfigured',
+  result: 'ok' | 'expired' | 'invalid' | 'unconfigured' | 'api-token',
 ): Promise<void> {
   try {
     await mkdir(dirname(auditPath), { recursive: true })
@@ -86,6 +87,29 @@ export function requireLocalAuth(
     const path = resolveAuditPath(auditPath)
     const routePath = c.req.path
     const socketAddress = getSocketAddress(c)
+
+    // A deployed server's credential also satisfies this gate.
+    //
+    // This middleware proves "you are on this machine": it hands a token to
+    // trusted origins over loopback and then checks it back. That argument is
+    // sound for a server the app started locally and empty for one in a
+    // container, where there is no local anything and the token can never be
+    // fetched.
+    //
+    // Measured on the first autonomous delegation into the cloud: the Queen
+    // chose an issue, cut the bee's worktree in the container, opened a turn -
+    // and /chat answered `403 Local authorization required`. Two attempts went
+    // that way and the issue was retired as exhausted, blaming the work.
+    //
+    // TRIOS_API_TOKEN is what a remote caller can actually hold, and setting it
+    // is already a statement that the perimeter is not the machine - the same
+    // statement that disables the origin and loopback fallbacks next door. It
+    // is checked first because when it is present the rest of this gate has
+    // nothing left to establish.
+    if (presentsValidApiToken(c.req.header('authorization'))) {
+      await logLocalAuthAudit(path, routePath, socketAddress, 'api-token')
+      return next()
+    }
 
     if (!validator) {
       await logLocalAuthAudit(path, routePath, socketAddress, 'unconfigured')

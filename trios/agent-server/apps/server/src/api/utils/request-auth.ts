@@ -46,7 +46,15 @@ function isLocalRequestOrFalse(c: Parameters<MiddlewareHandler>[0]): boolean {
   }
 }
 
-function presentsValidToken(authorization: string | undefined): boolean {
+/// Whether a caller presented the deployment's own credential.
+///
+/// Exported because the local-auth gate needs the same answer: a server
+/// reachable from more than one machine has one credential, not two, and
+/// asking the question in two places with two implementations is how they
+/// come to disagree.
+export function presentsValidApiToken(
+  authorization: string | undefined,
+): boolean {
   const expected = configuredToken()
   if (!expected || !authorization) return false
   const prefix = 'Bearer '
@@ -88,7 +96,7 @@ export function isTrustedAppOrigin(origin: string | undefined): boolean {
  */
 export function requireTrustedAppOrigin(): MiddlewareHandler {
   return async (c, next) => {
-    if (presentsValidToken(c.req.header('authorization'))) {
+    if (presentsValidApiToken(c.req.header('authorization'))) {
       return next()
     }
 

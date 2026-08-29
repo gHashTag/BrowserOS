@@ -87,6 +87,21 @@ actor SSETransport: ChatTransportProtocol {
         if let token = try? await localAuthProvider?.validToken(forcingRefresh: forceRefresh) {
             request.setValue(token, forHTTPHeaderField: LocalAuthProvider.headerName)
         }
+
+        // The credential a remote server asks for, which is not the local one.
+        //
+        // `localAuthProvider` speaks to a server on this machine. A deployed
+        // one authenticates by `Authorization: Bearer`, and without it every
+        // worker turn came back `403 Forbidden` from /chat - measured on the
+        // first autonomous delegation into the cloud, which reached the
+        // container, cut its worktree there, and then could not open a turn.
+        //
+        // Read from the environment for the same reason the server's own token
+        // is: the app bundle is signed, and a credential baked into it cannot
+        // be rotated without re-signing.
+        if let bearer = QueenGit.remoteToken, ProjectPaths.agentServerIsRemote {
+            request.setValue("Bearer \(bearer)", forHTTPHeaderField: "Authorization")
+        }
         return request
     }
 

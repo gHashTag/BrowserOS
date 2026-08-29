@@ -117,3 +117,54 @@ describe('request auth', () => {
     expect(unconfigured.status).toBe(403)
   })
 })
+
+describe('the deployment token satisfies the local-auth gate too', () => {
+  // Measured on the first autonomous delegation into the cloud: the Queen
+  // chose an issue, cut the bee's worktree in the container, opened a turn -
+  // and /chat answered 403 "Local authorization required". That gate proves
+  // "you are on this machine" by handing a token to trusted origins over
+  // loopback and checking it back, which a container caller can never do.
+  // Two attempts failed that way and the issue was retired as exhausted,
+  // blaming the work rather than the perimeter.
+  it('accepts a bearer token where local auth would otherwise refuse', async () => {
+    const { requireLocalAuth } = await import(
+      '../../src/api/utils/require-local-auth'
+    )
+    process.env.TRIOS_API_TOKEN = 'deployment-token-value'
+    try {
+      const app = new Hono()
+        // No validator at all: the strictest starting point, where the gate
+        // would answer 503 "not configured".
+        .use('/*', requireLocalAuth(undefined))
+        .get('/chat', (c) => c.json({ ok: true }))
+
+      const withToken = await app.request('http://localhost/chat', {
+        headers: { Authorization: 'Bearer deployment-token-value' },
+      })
+      expect(withToken.status).toBe(200)
+
+      const without = await app.request('http://localhost/chat')
+      expect(without.status).toBe(503)
+    } finally {
+      delete process.env.TRIOS_API_TOKEN
+    }
+  })
+
+  it('refuses a wrong bearer where local auth applies', async () => {
+    const { requireLocalAuth } = await import(
+      '../../src/api/utils/require-local-auth'
+    )
+    process.env.TRIOS_API_TOKEN = 'deployment-token-value'
+    try {
+      const app = new Hono()
+        .use('/*', requireLocalAuth(undefined))
+        .get('/chat', (c) => c.json({ ok: true }))
+      const res = await app.request('http://localhost/chat', {
+        headers: { Authorization: 'Bearer deployment-token-valuX' },
+      })
+      expect(res.status).toBe(503)
+    } finally {
+      delete process.env.TRIOS_API_TOKEN
+    }
+  })
+})
