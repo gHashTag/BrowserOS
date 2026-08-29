@@ -9,7 +9,7 @@ import Foundation
 /// Prices are list rates in USD and will drift. That is acceptable for the job
 /// they do - deciding whether a worker is worth cancelling - and every figure
 /// the UI prints from them is labelled an estimate rather than a bill.
-struct ModelPrice: Equatable, Sendable {
+public struct ModelPrice: Equatable, Sendable {
     /// Micro-dollars per million tokens. `0.60` per million is `600_000`.
     ///
     /// Integer minor units, because money is counted rather than measured.
@@ -17,25 +17,25 @@ struct ModelPrice: Equatable, Sendable {
     /// number is summed over every task in a day and then compared against a
     /// budget threshold - which is precisely the shape where the approximation
     /// stops being invisible. `spentToday` was a `reduce(0, +)` over `Double`.
-    let inputPerMillion: Int
-    let outputPerMillion: Int
+    public let inputPerMillion: Int
+    public let outputPerMillion: Int
 
     /// Cost in micro-dollars.
     ///
     /// The division comes last so the intermediate keeps full resolution: a
     /// thousand tokens at 600000 micro-dollars per million is 600 exactly,
     /// where dividing first would have given zero.
-    func cost(inputTokens: Int, outputTokens: Int) -> Int {
+    public func cost(inputTokens: Int, outputTokens: Int) -> Int {
         (inputTokens * inputPerMillion) / 1_000_000
             + (outputTokens * outputPerMillion) / 1_000_000
     }
 }
 
-enum ModelPricing {
+public enum ModelPricing {
     /// Matched by longest prefix, so `glm-5.2-air` inherits `glm-5` unless it
     /// has its own entry. Exact-match tables go stale the moment a provider
     /// ships a point release.
-    static let table: [String: ModelPrice] = [
+    public static let table: [String: ModelPrice] = [
         "glm-5": ModelPrice(inputPerMillion: 600000, outputPerMillion: 2200000),
         "glm-4": ModelPrice(inputPerMillion: 600000, outputPerMillion: 2200000),
         "claude-opus": ModelPrice(inputPerMillion: 15000000, outputPerMillion: 75000000),
@@ -48,9 +48,9 @@ enum ModelPricing {
 
     /// Models that run on the user's own machine cost nothing per token. Saying
     /// "$0.00" for them is correct, not a missing measurement.
-    static let freeProviders: Set<String> = ["ollama", "lmstudio", "llamacpp"]
+    public static let freeProviders: Set<String> = ["ollama", "lmstudio", "llamacpp"]
 
-    static func price(forModel model: String, provider: String) -> ModelPrice? {
+    public static func price(forModel model: String, provider: String) -> ModelPrice? {
         if freeProviders.contains(provider.lowercased()) {
             return ModelPrice(inputPerMillion: 0, outputPerMillion: 0)
         }
@@ -65,7 +65,7 @@ enum ModelPricing {
     /// `nil` when the model is not in the table. An unknown price must stay
     /// unknown: inventing an average is how a cheap run gets reported as
     /// expensive and a human cancels work that was fine.
-    static func estimatedCost(
+    public static func estimatedCost(
         inputTokens: Int,
         outputTokens: Int,
         model: String,
@@ -77,7 +77,7 @@ enum ModelPricing {
 
     /// Human-facing amount. Sub-cent spends read as "<$0.01" rather than
     /// "$0.00", which would look like nothing happened.
-    static func format(_ micros: Int) -> String {
+    public static func format(_ micros: Int) -> String {
         if micros <= 0 { return "$0.00" }
         // Under a cent reads as "<$0.01" rather than "$0.00", which would look
         // like nothing happened. 10_000 micro-dollars is one cent.
@@ -94,11 +94,11 @@ enum ModelPricing {
 /// token threshold is: killing a bee mid-edit leaves the repository in a state
 /// nobody chose. The Queen stops *starting* new work instead, which is a
 /// decision that can be taken safely at any moment.
-struct SwarmBudget: Equatable, Sendable {
+public struct SwarmBudget: Equatable, Sendable {
     /// Micro-dollars. Ten dollars is `10_000_000`.
-    var dailyLimitUSD: Int
+    public var dailyLimitUSD: Int
 
-    static let `default` = SwarmBudget(dailyLimitUSD: 10_000_000)
+    public static let `default` = SwarmBudget(dailyLimitUSD: 10_000_000)
 
     /// The operator's knob, resolved fresh on every ask so a raised cap takes
     /// effect without a relaunch. Order: the `TRIOS_SWARM_DAILY_CAP_USD`
@@ -117,7 +117,7 @@ struct SwarmBudget: Equatable, Sendable {
     /// The caller that knows where state lives passes it; the convenience that
     /// asks ProjectPaths lives beside ProjectPaths, in a file the server does
     /// not compile.
-    static func current(stateDirectory: String) -> SwarmBudget {
+    public static func current(stateDirectory: String) -> SwarmBudget {
         if let raw = ProcessInfo.processInfo.environment["TRIOS_SWARM_DAILY_CAP_USD"],
            let fromEnv = parsed(dollarsText: raw) {
             return fromEnv
@@ -134,7 +134,7 @@ struct SwarmBudget: Equatable, Sendable {
     /// integer or fractional value. Returns nil - never a guess - for
     /// anything unparsable, non-positive, or absurd (over $1M/day), so a
     /// corrupt knob falls back to the default instead of disabling the cap.
-    static func parsed(knobJSON data: Data) -> SwarmBudget? {
+    public static func parsed(knobJSON data: Data) -> SwarmBudget? {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let value = object["dailyCapUSD"] else { return nil }
         if let n = value as? NSNumber { return parsed(dollars: n.doubleValue) }
@@ -142,25 +142,25 @@ struct SwarmBudget: Equatable, Sendable {
         return nil
     }
 
-    static func parsed(dollarsText: String) -> SwarmBudget? {
+    public static func parsed(dollarsText: String) -> SwarmBudget? {
         guard let dollars = Double(dollarsText.trimmingCharacters(in: .whitespaces)) else {
             return nil
         }
         return parsed(dollars: dollars)
     }
 
-    static func parsed(dollars: Double) -> SwarmBudget? {
+    public static func parsed(dollars: Double) -> SwarmBudget? {
         guard dollars.isFinite, dollars > 0, dollars <= 1_000_000 else { return nil }
         return SwarmBudget(dailyLimitUSD: Int(dollars * 1_000_000))
     }
 
-    enum Verdict: Equatable {
+    public enum Verdict: Equatable {
         case fine(remaining: Int)
         case nearingLimit(remaining: Int)
         case exhausted(overBy: Int)
     }
 
-    func verdict(spentToday: Int) -> Verdict {
+    public func verdict(spentToday: Int) -> Verdict {
         let remaining = dailyLimitUSD - spentToday
         if remaining <= 0 { return .exhausted(overBy: -remaining) }
         // A fifth, expressed as a division rather than a multiplication by 0.2

@@ -11,13 +11,13 @@ import Foundation
 /// looked. The difference matters because "re-check this" and "check this for
 /// the first time" are different instructions, and a gate that cannot tell
 /// them apart wastes the reviewer's attention on the wrong one.
-enum QueenCriterionVerdict: String, Codable, Equatable, CaseIterable {
+public enum QueenCriterionVerdict: String, Codable, Equatable, CaseIterable {
     case met
     case unmet
     case unchecked
     case stale
 
-    var symbol: String {
+    public var symbol: String {
         switch self {
         case .met: return "[x]"
         case .unmet: return "[ ]"
@@ -29,7 +29,7 @@ enum QueenCriterionVerdict: String, Codable, Equatable, CaseIterable {
 
 /// Decides whether delegated work can be accepted, from the criteria and what
 /// is known about each.
-enum QueenAcceptancePolicy {
+public enum QueenAcceptancePolicy {
     /// The verdict for each criterion, in the order they were written.
     ///
     /// Missing entries read as `unchecked` rather than being dropped: a
@@ -49,7 +49,7 @@ enum QueenAcceptancePolicy {
     /// Both parameters default to `nil` so that callers written before state
     /// tracking continue to work: with neither state provided, the function
     /// behaves exactly as it did before and no verdict is marked stale.
-    static func verdicts(
+    public static func verdicts(
         criteria: [String],
         recorded: [String: QueenCriterionVerdict],
         verdictTreeState: String? = nil,
@@ -84,7 +84,7 @@ enum QueenAcceptancePolicy {
     /// verdict was carved against a tree that has since moved, which is what
     /// makes the binding load-bearing rather than decorative — remove the
     /// binding and the check breaks, which is what #1126 criterion 4 asks for.
-    static func isStale(
+    public static func isStale(
         verdictTreeState: String?,
         currentTreeState: String?
     ) -> Bool {
@@ -107,7 +107,7 @@ enum QueenAcceptancePolicy {
     /// blocked on exactly the questions a person still has to answer. The point
     /// is not to unblock the gate; it is to stop it blocking on things nobody
     /// needed to be asked.
-    static func mechanicalVerdicts(
+    public static func mechanicalVerdicts(
         criteria: [String],
         changedPaths: [String]
     ) -> [String: QueenCriterionVerdict] {
@@ -129,7 +129,7 @@ enum QueenAcceptancePolicy {
     /// Deliberately narrow. "it is short" names nothing checkable and must not
     /// be guessed at - a wrong verdict is worse than an absent one, because the
     /// absent one still stops the merge.
-    static func pathsMentioned(in criterion: String) -> [String] {
+    public static func pathsMentioned(in criterion: String) -> [String] {
         criterion
             .split(whereSeparator: { $0 == " " || $0 == "," || $0 == ";" })
             .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "`'\".:()")) }
@@ -148,7 +148,7 @@ enum QueenAcceptancePolicy {
     /// re-examine something they already looked at, the second asks them to
     /// look for the first time. Collapsing them would send the reviewer back to
     /// criteria they already settled while the ones nobody touched wait (#1126).
-    static func acceptanceBlockReason(
+    public static func acceptanceBlockReason(
         criteria: [String],
         recorded: [String: QueenCriterionVerdict],
         verdictTreeState: String? = nil,
@@ -188,7 +188,7 @@ enum QueenAcceptancePolicy {
     }
 
     /// The table a reviewer reads instead of the worker's summary.
-    static func table(
+    public static func table(
         criteria: [String],
         recorded: [String: QueenCriterionVerdict],
         verdictTreeState: String? = nil,

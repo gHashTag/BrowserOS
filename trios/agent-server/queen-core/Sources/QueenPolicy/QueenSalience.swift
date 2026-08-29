@@ -10,12 +10,12 @@ import Foundation
 /// The amygdala's job is not to decide; it is to make some signals louder than
 /// others before anything decides. That is all this does: it weights, and the
 /// ordering falls out.
-enum QueenSalience {
+public enum QueenSalience {
     /// One observable property of a task that might predict it needs the user.
     ///
     /// Named rather than inlined so the same list drives scoring, learning and
     /// explanation. Three copies of a feature list is two copies that go stale.
-    enum Feature: String, CaseIterable, Sendable {
+    public enum Feature: String, CaseIterable, Sendable {
         case failed
         case rejected
         case expensive
@@ -36,7 +36,7 @@ enum QueenSalience {
         /// swapped places depending on the order the features happened to be
         /// added. Three decimal digits is more resolution than
         /// `minimumObservations` can justify.
-        var prior: Int {
+        public var prior: Int {
             switch self {
             case .failed: return 40_000
             case .rejected: return 25_000
@@ -49,12 +49,12 @@ enum QueenSalience {
     /// Ceiling a learned weight can reach, so learned and prior weights stay on
     /// one scale and a probability does not silently outrank a considered
     /// judgement by an order of magnitude.
-    static let maximumWeight = 40_000
-    static let agePerHourWeight = 1_000
-    static let ageCeiling = 24
+    public static let maximumWeight = 40_000
+    public static let agePerHourWeight = 1_000
+    public static let ageCeiling = 24
 
     /// Which features a task currently carries.
-    static func features(of task: DelegatedTask, now: Date) -> [Feature] {
+    public static func features(of task: DelegatedTask, now: Date) -> [Feature] {
         var found: [Feature] = []
         if task.state == .failed { found.append(.failed) }
         if task.state == .rejected { found.append(.rejected) }
@@ -72,7 +72,7 @@ enum QueenSalience {
     /// `weightFor` is injected so scoring stays pure and testable: the learner
     /// is a live object with a file behind it, and a ranking that cannot be
     /// tested without one is a ranking nobody will test.
-    static func score(
+    public static func score(
         for task: DelegatedTask,
         now: Date,
         weightFor: (Feature) -> Int = { $0.prior }
@@ -91,7 +91,7 @@ enum QueenSalience {
     ///
     /// Ties break on age so the order is stable and a task cannot starve behind
     /// an equally salient neighbour.
-    static func reviewQueue(
+    public static func reviewQueue(
         _ tasks: [DelegatedTask],
         now: Date,
         weightFor: (Feature) -> Int = { $0.prior }
@@ -110,7 +110,7 @@ enum QueenSalience {
     ///
     /// A ranking nobody can explain is a ranking nobody trusts, and the first
     /// thing an untrusted ranking gets is ignored.
-    static func reason(for task: DelegatedTask, now: Date) -> String? {
+    public static func reason(for task: DelegatedTask, now: Date) -> String? {
         var causes: [String] = []
         if task.state == .failed { causes.append("it failed rather than finished") }
         if task.state == .rejected { causes.append("you already sent it back once") }

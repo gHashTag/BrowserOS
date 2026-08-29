@@ -6,18 +6,18 @@ import QueenCore
 /// Every worker chat answers to exactly one issue. That is the anchor which
 /// makes the swarm auditable: the chat is the conversation, the issue is the
 /// contract, and the two never drift apart.
-struct IssueReference: Codable, Equatable, Sendable {
-    let owner: String
-    let repo: String
-    let number: Int
+public struct IssueReference: Codable, Equatable, Sendable {
+    public let owner: String
+    public let repo: String
+    public let number: Int
 
-    var slug: String { "\(owner)/\(repo)#\(number)" }
-    var url: String { "https://github.com/\(owner)/\(repo)/issues/\(number)" }
+    public var slug: String { "\(owner)/\(repo)#\(number)" }
+    public var url: String { "https://github.com/\(owner)/\(repo)/issues/\(number)" }
 
     /// Parses `owner/repo#123` and full issue URLs. Returns nil rather than
     /// guessing, because a task bound to the wrong issue is worse than one that
     /// refuses to start.
-    static func parse(_ text: String) -> IssueReference? {
+    public static func parse(_ text: String) -> IssueReference? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
@@ -62,7 +62,7 @@ struct IssueReference: Codable, Equatable, Sendable {
 }
 
 /// Lifecycle of delegated work.
-enum DelegatedTaskState: String, Codable, Equatable, Sendable, CaseIterable {
+public enum DelegatedTaskState: String, Codable, Equatable, Sendable, CaseIterable {
     /// Created by the Queen, no worker attached yet.
     case queued
     /// A worker chat is open and running.
@@ -81,7 +81,7 @@ enum DelegatedTaskState: String, Codable, Equatable, Sendable, CaseIterable {
     /// forge rather than by anyone's judgement.
     case merged
 
-    var isTerminal: Bool {
+    public var isTerminal: Bool {
         switch self {
         case .accepted, .cancelled, .failed, .merged: return true
         case .queued, .running, .awaitingReview, .rejected: return false
@@ -92,7 +92,7 @@ enum DelegatedTaskState: String, Codable, Equatable, Sendable, CaseIterable {
     /// view. `failed` is terminal but deliberately not archivable: a failure
     /// nobody has looked at is still work, and filing it away silently is how
     /// it never gets looked at.
-    var isArchivable: Bool {
+    public var isArchivable: Bool {
         switch self {
         case .accepted, .cancelled, .merged: return true
         case .failed, .queued, .running, .awaitingReview, .rejected: return false
@@ -101,7 +101,7 @@ enum DelegatedTaskState: String, Codable, Equatable, Sendable, CaseIterable {
 
     /// Short label for a status pill. Full words read better than camelCase in
     /// a UI the user scans rather than reads.
-    var displayName: String {
+    public var displayName: String {
         switch self {
         case .queued: return "Queued"
         case .running: return "Working"
@@ -115,7 +115,7 @@ enum DelegatedTaskState: String, Codable, Equatable, Sendable, CaseIterable {
     }
 
     /// Work the Queen still has to act on.
-    var needsQueenAttention: Bool {
+    public var needsQueenAttention: Bool {
         switch self {
         case .awaitingReview, .failed, .rejected: return true
         case .queued, .running, .accepted, .cancelled, .merged: return false
@@ -129,7 +129,7 @@ enum DelegatedTaskState: String, Codable, Equatable, Sendable, CaseIterable {
 /// failure-detector literature is blunt about this shape: reliable detection
 /// comes from asking the layer that knows, not from sampling a timeout
 /// (Leners et al., Falcon, SOSP 2011). The runner is that layer here.
-enum WorkerStreamOutcome: String, Codable, Equatable, Sendable {
+public enum WorkerStreamOutcome: String, Codable, Equatable, Sendable {
     /// A turn is in flight. The runner opened it and has not finished it.
     case open
     /// The stream ended with a terminal event - the worker said its piece.
@@ -140,16 +140,16 @@ enum WorkerStreamOutcome: String, Codable, Equatable, Sendable {
 }
 
 /// One unit of delegated work: an issue, a worker, and its own chat.
-struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
-    let id: UUID
+public struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
+    public let id: UUID
     /// The child conversation this task owns. One task, one chat.
-    let conversationId: UUID
-    let issue: IssueReference
-    var title: String
-    var worker: String
-    var state: DelegatedTaskState
+    public let conversationId: UUID
+    public let issue: IssueReference
+    public var title: String
+    public var worker: String
+    public var state: DelegatedTaskState
     /// Files this worker is allowed to write. Empty means unrestricted.
-    var ownedPaths: [String]
+    public var ownedPaths: [String]
     /// GitButler virtual branch that isolates this task's edits.
     ///
     /// Virtual branches are why several workers can share one checkout: each
@@ -157,18 +157,18 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// directory, so there is no worktree to duplicate and no checkout to
     /// switch. Ownership separation is what keeps two bees off each other's
     /// files.
-    var virtualBranch: String?
-    var createdAt: Date
-    var updatedAt: Date
+    public var virtualBranch: String?
+    public var createdAt: Date
+    public var updatedAt: Date
     /// What this bee cost. Optional so delegation stores written before usage
     /// was tracked still decode.
-    var inputTokens: Int?
-    var outputTokens: Int?
+    public var inputTokens: Int?
+    public var outputTokens: Int?
     /// Tool calls made, which is the cheapest proxy for "did it actually work
     /// or just talk".
-    var toolCalls: Int?
+    public var toolCalls: Int?
     /// Files the worker committed to its branch, filled in at review time.
-    var committedFiles: Int?
+    public var committedFiles: Int?
     /// What the worker must make true, written by the Queen when she opens the
     /// task.
     ///
@@ -176,14 +176,14 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// than hidden: a task with no criteria cannot be judged complete, only
     /// abandoned, and saying so up front is the difference between a contract
     /// and a wish.
-    var acceptanceCriteria: [String]
+    public var acceptanceCriteria: [String]
 
     /// Corrections the Queen sent into this worker's chat while it ran.
     ///
     /// Kept so "she corrected this three times and it still went wrong" is
     /// answerable at review. A supervisor who steers invisibly leaves a
     /// transcript that reads as if the worker got there alone.
-    var interventions: [String]
+    public var interventions: [String]
 
     /// What was found when each criterion was checked, keyed by the criterion.
     ///
@@ -191,7 +191,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// silently reassign a verdict to a different requirement - a renumbering
     /// that moves a "met" onto something nobody looked at is the worst possible
     /// failure for this table.
-    var criterionVerdicts: [String: QueenCriterionVerdict]
+    public var criterionVerdicts: [String: QueenCriterionVerdict]
 
     /// The fingerprint of the code tree at the time verdicts were recorded.
     ///
@@ -206,7 +206,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// a verdict whose provenance cannot be verified cannot be trusted to be
     /// current, and saying so is what keeps the binding load-bearing rather
     /// than decorative.
-    var treeStateFingerprint: String?
+    public var treeStateFingerprint: String?
 
     /// The git write-tree hash captured when the worker started, persisted so
     /// `settleFailedWorkerEdits` can measure the worker's changes after a
@@ -214,7 +214,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     ///
     /// A write-tree object lives in `.git`, so the hash remains valid across
     /// process restarts. Optional so older stores without this key still decode.
-    var baselineTree: String?
+    public var baselineTree: String?
 
     /// The head commit SHA the Queen reviewed, captured when the pull request
     /// is first fetched for an accepted task. Sent as the `sha` parameter with
@@ -223,28 +223,28 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// code that would land (#1254). Nil means the SHA has not been captured
     /// yet, either because the PR has not been polled or because a 409 cleared
     /// it to force a fresh capture on the next review.
-    var reviewedHeadSHA: String?
+    public var reviewedHeadSHA: String?
 
     /// The pull request opened for this task's branch, once one exists.
     ///
     /// Nil means no pull request has been opened - not that one failed. The
     /// difference matters when deciding whether a task is waiting on a merge or
     /// waiting on somebody to open it.
-    var pullRequestNumber: Int?
+    public var pullRequestNumber: Int?
     /// How many turns this worker has completed. A turn that produced output is
     /// not an orphan even if its stream has gone silent between turns: the
     /// worker did real work, and reaping it as if it was never dispatched would
     /// throw that away (#1247). The stalled threshold still applies — a worker
     /// that completed a turn but then went quiet for the full stall interval is
     /// reaped like any other.
-    var completedTurns: Int?
+    public var completedTurns: Int?
 
     /// How many times the Queen has restarted this worker after it went silent.
     ///
     /// Optional so delegation stores written before resuming existed still
     /// decode. Counted rather than flagged, because the interesting question is
     /// not "was it stuck" but "how many times, and did it ever get anywhere".
-    var resumeAttempts: Int?
+    public var resumeAttempts: Int?
 
     /// When the archive sweep first acknowledged this task as settled.
     ///
@@ -254,7 +254,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// entire settled set, and two issues with 15 retry records between them
     /// were "archived" ~1,830 times across 61 measured passes while nothing
     /// ever moved.
-    var archivedAt: Date?
+    public var archivedAt: Date?
 
     /// When the runner last saw a byte of this worker's stream.
     ///
@@ -268,7 +268,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// can still ride along when some other mutation persists, and that copy
     /// means nothing after a restart - everything the store calls `running` at
     /// launch is reconciled as failed before anyone reads this.
-    var lastStreamByteAt: Date?
+    public var lastStreamByteAt: Date?
 
     /// How this worker's stream stands, as reported by the runner.
     ///
@@ -276,7 +276,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// The point of recording it is that "ended with a terminal event" and
     /// "cut mid-flight" are different facts, and neither is the same as "no
     /// stream object exists right now".
-    var streamOutcome: WorkerStreamOutcome?
+    public var streamOutcome: WorkerStreamOutcome?
 
     /// Why this task ended in `failed`, once it has.
     ///
@@ -289,7 +289,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     ///
     /// Optional because it is meaningless in every other state and because
     /// stores written before it existed must still decode.
-    var failureKind: QueenFailureKind?
+    public var failureKind: QueenFailureKind?
 
     /// How many times the Queen has returned this task to its worker.
     ///
@@ -299,7 +299,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     ///
     /// Optional so stores written before it existed still decode; absent reads
     /// as zero, which is correct - nothing could have returned them.
-    var sendBacks: Int?
+    public var sendBacks: Int?
 
     /// The commit the worker's files landed in, when any did.
     ///
@@ -309,7 +309,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     ///
     /// Optional because stores written before it existed must still decode, and
     /// because a task that committed nothing has nothing to name.
-    var committedSHA: String?
+    public var committedSHA: String?
 
     /// When the runner opened this worker's stream.
     ///
@@ -324,7 +324,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// Like `lastStreamByteAt`, nothing persists for it alone; and like it,
     /// a copy that survives a restart is meaningless, because everything the
     /// store calls running at launch is reconciled as failed first.
-    var streamOpenedAt: Date?
+    public var streamOpenedAt: Date?
 
     /// The private checkout this worker edits in, if it has one.
     ///
@@ -332,16 +332,16 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// before worktrees existed still decodes and still runs. See
     /// `QueenWorktree` for why sharing stopped being acceptable the day the
     /// Queen started picking up work on her own.
-    var worktreePath: String?
+    public var worktreePath: String?
 
     /// Which model did the work, so a cost estimate is possible after the fact.
-    var provider: String?
-    var model: String?
+    public var provider: String?
+    public var model: String?
 
     /// `nil` when the model is not in the price table. An unknown price must
     /// stay unknown rather than becoming an invented average.
     /// Micro-dollars; see ModelPricing.
-    var estimatedCostUSD: Int? {
+    public var estimatedCostUSD: Int? {
         guard let provider, let model else { return nil }
         return ModelPricing.estimatedCost(
             inputTokens: inputTokens ?? 0,
@@ -351,7 +351,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
         )
     }
 
-    var totalTokens: Int { (inputTokens ?? 0) + (outputTokens ?? 0) }
+    public var totalTokens: Int { (inputTokens ?? 0) + (outputTokens ?? 0) }
 
     /// Whether this task can leave the working view.
     ///
@@ -361,7 +361,7 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
     /// that merges, which is a fact. A task with no pull request settles on
     /// acceptance exactly as before - otherwise every task predating this would
     /// wait forever for a merge nobody is going to perform.
-    var isSettled: Bool {
+    public var isSettled: Bool {
         if state == .accepted, pullRequestNumber != nil { return false }
         return state.isArchivable
     }
@@ -436,14 +436,14 @@ struct DelegatedTask: Identifiable, Codable, Equatable, Sendable {
 /// a single point of failure; and parallel workers corrupt each other when they
 /// write the same files. So the Queen passes a *subset* of context, never the
 /// whole history, and ownership of hot files is exclusive.
-enum QueenDelegationPolicy {
+public enum QueenDelegationPolicy {
     /// The Queen never edits code. She may only open, brief, review, and close
     /// worker chats. Encoded so the rule is testable rather than aspirational.
-    static let queenForbiddenTools: Set<String> = [
+    public static let queenForbiddenTools: Set<String> = [
         "filesystem_write", "write_file", "write", "edit", "shell_execute", "bash", "run_command"
     ]
 
-    static func queenMayUse(tool: String) -> Bool {
+    public static func queenMayUse(tool: String) -> Bool {
         !queenForbiddenTools.contains(tool.lowercased())
     }
 
@@ -455,7 +455,7 @@ enum QueenDelegationPolicy {
     /// is entirely which conversation it arrived in, so the decision takes both
     /// and lives here rather than as a condition inline at the call site, where
     /// only a running app could tell whether it was right.
-    static func isForbiddenQueenToolCall(
+    public static func isForbiddenQueenToolCall(
         conversationId: UUID,
         queenConversationId: UUID,
         tool: String
@@ -467,9 +467,9 @@ enum QueenDelegationPolicy {
     ///
     /// Bounded because every running worker costs the Queen context on every
     /// review, and because merge conflicts scale with concurrency.
-    static let maximumConcurrentWorkers = 4
+    public static let maximumConcurrentWorkers = 4
 
-    static func canStartAnother(running: Int) -> Bool {
+    public static func canStartAnother(running: Int) -> Bool {
         running < maximumConcurrentWorkers
     }
 
@@ -488,14 +488,14 @@ enum QueenDelegationPolicy {
     /// are the two readings that call for opposite actions. The filter was
     /// never wrong; the only wrong thing was the word it used for itself, which
     /// is why this returns the words rather than the decision.
-    struct SpokenForReport: Equatable, Sendable {
+    public struct SpokenForReport: Equatable, Sendable {
         /// The bucket counted in the tick's closing summary.
-        let bucket: String
+        public let bucket: String
         /// The sentence journalled against this candidate.
-        let detail: String
+        public let detail: String
     }
 
-    static func spokenForReport(states: [DelegatedTaskState]) -> SpokenForReport {
+    public static func spokenForReport(states: [DelegatedTaskState]) -> SpokenForReport {
         let names = Set(states.map(\.rawValue)).sorted().joined(separator: ", ")
         guard !states.isEmpty else {
             return SpokenForReport(
@@ -530,7 +530,7 @@ enum QueenDelegationPolicy {
     ///
     /// This is the single notion of containment for the ownership rule and for
     /// judging writes. They had one each, and disagreed.
-    static func pathsOverlap(_ first: String, _ second: String) -> Bool {
+    public static func pathsOverlap(_ first: String, _ second: String) -> Bool {
         let a = normalizePath(first)
         let b = normalizePath(second)
         guard !a.isEmpty, !b.isEmpty else { return false }
@@ -569,7 +569,7 @@ enum QueenDelegationPolicy {
     /// forgotten task cannot freeze the swarm for a week. The task keeps its
     /// state and its verdict is still wanted; it just stops being a reason to
     /// refuse everyone else.
-    static let reviewBoundaryHoldHours: Double = 48
+    public static let reviewBoundaryHoldHours: Double = 48
 
     /// Whether this task's boundary should still exclude other work.
     ///
@@ -577,7 +577,7 @@ enum QueenDelegationPolicy {
     /// writing right now, and `rejected` means the same bee is expected back to
     /// try again on those very files - releasing either would be releasing a
     /// boundary that is actually in use.
-    static func stillHoldsBoundary(
+    public static func stillHoldsBoundary(
         _ task: DelegatedTask,
         now: Date = Date()
     ) -> Bool {
@@ -587,7 +587,7 @@ enum QueenDelegationPolicy {
         return held < reviewBoundaryHoldHours
     }
 
-    static func conflictingTasks(
+    public static func conflictingTasks(
         for paths: [String],
         among tasks: [DelegatedTask],
         now: Date = Date()
@@ -620,7 +620,7 @@ enum QueenDelegationPolicy {
     /// elapsed time alone: a stream that opened leaves `streamOutcome` set, and
     /// a turn that completed leaves `completedTurns`. Neither means the runner
     /// never took it.
-    static func staleQueuedReason(
+    public static func staleQueuedReason(
         state: DelegatedTaskState,
         createdAt: Date,
         streamOutcome: WorkerStreamOutcome?,
@@ -641,13 +641,13 @@ enum QueenDelegationPolicy {
     ///
     /// Ten minutes: two autonomy ticks. One tick could be a slot that was full
     /// at that moment, which is ordinary backpressure and not a failure.
-    static let queuedDispatchGrace: TimeInterval = 600
+    public static let queuedDispatchGrace: TimeInterval = 600
 
     /// Forwards to `QueenBoundaryPaths.normalize`, which owns this rule.
     ///
     /// It was written out here as well, and a rule transcribed twice is two
     /// rules that agree until someone edits one.
-    static func normalizePath(_ path: String) -> String {
+    public static func normalizePath(_ path: String) -> String {
         QueenBoundaryPaths.normalize(path)
     }
 
@@ -656,7 +656,7 @@ enum QueenDelegationPolicy {
     /// Not a hard cap: killing a worker mid-edit leaves the repository in a
     /// state nobody chose. Surfacing the number and letting the Queen cancel is
     /// the honest version of a budget when the work is not transactional.
-    static let workerTokenWarningThreshold = 200_000
+    public static let workerTokenWarningThreshold = 200_000
 
     /// A worker with no stream and no result has stopped, whatever the registry
     /// says. Distinguishing "slow" from "gone" is the point.
@@ -694,7 +694,7 @@ enum QueenDelegationPolicy {
     /// `canPublish` is a separate fact rather than another spelling of the
     /// first, which is the whole point: when the transfer lands it becomes
     /// true and this stops refusing, without anyone having to remember it.
-    static func unpublishableWorkRefusal(
+    public static func unpublishableWorkRefusal(
         workHappensRemotely: Bool,
         canPublish: Bool
     ) -> String? {
@@ -704,7 +704,7 @@ enum QueenDelegationPolicy {
             + "container and discarded by the next deploy."
     }
 
-    static func pullRequestBlockReason(for task: DelegatedTask) -> String? {
+    public static func pullRequestBlockReason(for task: DelegatedTask) -> String? {
         if let existing = task.pullRequestNumber {
             return "#\(existing) is already open for this task."
         }
@@ -739,7 +739,7 @@ enum QueenDelegationPolicy {
     }
 
     /// What a pull request's current shape means for the task waiting on it.
-    enum PullRequestOutcome: String, Equatable {
+    public enum PullRequestOutcome: String, Equatable {
         /// Merged. The work landed and the chat can close.
         case landed
         /// Closed with nothing merged. Back to the queue, not the archive.
@@ -759,14 +759,14 @@ enum QueenDelegationPolicy {
     /// The distinction is the point: "closed" is the same word for landed and
     /// abandoned work, and a poll that guessed would archive changes that never
     /// reached the branch.
-    static func outcome(merged: Bool, closedUnmerged: Bool) -> PullRequestOutcome {
+    public static func outcome(merged: Bool, closedUnmerged: Bool) -> PullRequestOutcome {
         if merged { return .landed }
         if closedUnmerged { return .abandoned }
         return .pending
     }
 
     /// The state a task should move to for an outcome, or nil to leave it alone.
-    static func nextState(for outcome: PullRequestOutcome) -> DelegatedTaskState? {
+    public static func nextState(for outcome: PullRequestOutcome) -> DelegatedTaskState? {
         switch outcome {
         case .landed: return .merged
         case .abandoned: return .awaitingReview
@@ -788,7 +788,7 @@ enum QueenDelegationPolicy {
     // transport, a clock, or an app.
 
     /// Whether a turn is in flight, according to the runner that owns it.
-    static func isStreamOpen(_ task: DelegatedTask) -> Bool {
+    public static func isStreamOpen(_ task: DelegatedTask) -> Bool {
         task.streamOutcome == .open
     }
 
@@ -798,7 +798,7 @@ enum QueenDelegationPolicy {
     /// the fallback: a restart bumps it, so a worker resumed after a dead turn
     /// measures its silence from the restart and not from bytes the previous
     /// turn happened to deliver.
-    static func lastEvidenceOfLife(_ task: DelegatedTask) -> Date {
+    public static func lastEvidenceOfLife(_ task: DelegatedTask) -> Date {
         max(task.lastStreamByteAt ?? .distantPast, task.updatedAt)
     }
 
@@ -807,7 +807,7 @@ enum QueenDelegationPolicy {
     /// Both halves are load-bearing. Without the second, a slow but live
     /// stream is reaped mid-answer; without the first, "not open" alone reaps
     /// every worker in the window between its last byte and its bookkeeping.
-    static func hasGoneSilent(
+    public static func hasGoneSilent(
         _ task: DelegatedTask,
         now: Date,
         threshold: TimeInterval = QueenDelegationPolicy.stallThreshold
@@ -833,7 +833,7 @@ enum QueenDelegationPolicy {
     /// it - cannot drift apart. Each of them independently believed an open
     /// stream was alive; a mute worker therefore had to survive three
     /// coincidences, and it survived all three (#1275).
-    static func isStreamAlive(_ task: DelegatedTask, now: Date) -> Bool {
+    public static func isStreamAlive(_ task: DelegatedTask, now: Date) -> Bool {
         isStreamOpen(task) && !hasGoneSilent(task, now: now)
     }
 
@@ -857,9 +857,9 @@ enum QueenDelegationPolicy {
     /// and then committed real work in the final minutes - two minutes from
     /// a false kill. The drifts this exists for ran 150+ minutes; 105 keeps
     /// them dead and clears the measured legitimate shape with a margin.
-    static let driftThreshold: TimeInterval = 105 * 60
+    public static let driftThreshold: TimeInterval = 105 * 60
 
-    static func isDrifting(
+    public static func isDrifting(
         _ task: DelegatedTask,
         boundaryTouchedAt: Date?,
         now: Date,
@@ -878,7 +878,7 @@ enum QueenDelegationPolicy {
     /// was never dispatched looks "working" to the sidebar, the slot counter
     /// and the stall timer while doing nothing at all (#1139). A completed turn
     /// disqualifies it - that worker did real work (#1247).
-    static func wasNeverStarted(_ task: DelegatedTask) -> Bool {
+    public static func wasNeverStarted(_ task: DelegatedTask) -> Bool {
         task.streamOutcome == nil && (task.completedTurns ?? 0) == 0
     }
 
@@ -890,15 +890,15 @@ enum QueenDelegationPolicy {
     ///
     /// Deliberately not a rate limit. Slowing down an agent that should not be
     /// acting at all just spreads the same decision over more hours.
-    static func approvalBlockReason(issue: IssueReference, approved: Set<String>) -> String? {
+    public static func approvalBlockReason(issue: IssueReference, approved: Set<String>) -> String? {
         guard !approved.contains(issue.slug) else { return nil }
         return "\(issue.slug) has not been approved. Propose it first and let the "
             + "user decide - `/approve \(issue.slug)` once they agree."
     }
 
-    static let maxResumeAttempts = 2
+    public static let maxResumeAttempts = 2
 
-    static let stallThreshold: TimeInterval = 60 * 60
+    public static let stallThreshold: TimeInterval = 60 * 60
 
     /// How long an open stream may deliver nothing at all before it is dead.
     ///
@@ -926,9 +926,9 @@ enum QueenDelegationPolicy {
     /// for these models is seconds, so any deadline derived from it would be
     /// far tighter; the binding constraint is the transport's patience, and a
     /// deadline below it would reap tasks the transport was about to rescue.
-    static let firstByteDeadline: TimeInterval = 600
+    public static let firstByteDeadline: TimeInterval = 600
 
-    static func isExpensive(_ task: DelegatedTask) -> Bool {
+    public static func isExpensive(_ task: DelegatedTask) -> Bool {
         task.totalTokens >= workerTokenWarningThreshold
     }
 
@@ -938,7 +938,7 @@ enum QueenDelegationPolicy {
     /// boundary, and cost nothing unusual. Anything ambiguous stays for a human,
     /// because an orchestrator that accepts its own workers' claims is an
     /// orchestrator with no reviewer.
-    static func qualifiesForAutoAccept(
+    public static func qualifiesForAutoAccept(
         _ task: DelegatedTask,
         committedFiles: Int
     ) -> Bool {
@@ -952,7 +952,7 @@ enum QueenDelegationPolicy {
     /// drifted: it never learned about the committedSHA guard, so every
     /// count-without-commit refusal logged "Auto-accept skipped: unknown" -
     /// a reason nobody measured, from the one function that had measured it.
-    static func autoAcceptDisqualification(
+    public static func autoAcceptDisqualification(
         _ task: DelegatedTask,
         committedFiles: Int
     ) -> String? {
@@ -992,13 +992,13 @@ enum QueenDelegationPolicy {
     /// the policy stays pure and usable from tests with no learner behind it.
     nonisolated(unsafe) static var learnedWeight: (QueenSalience.Feature) -> Int = { $0.prior }
 
-    static func reviewQueue(_ tasks: [DelegatedTask], now: Date = Date()) -> [DelegatedTask] {
+    public static func reviewQueue(_ tasks: [DelegatedTask], now: Date = Date()) -> [DelegatedTask] {
         QueenSalience.reviewQueue(tasks, now: now, weightFor: learnedWeight)
     }
 
     /// Legal state transitions. Anything else is a bug in the caller, and
     /// silently allowing it would let a task be "accepted" without ever running.
-    static func canTransition(from: DelegatedTaskState, to: DelegatedTaskState) -> Bool {
+    public static func canTransition(from: DelegatedTaskState, to: DelegatedTaskState) -> Bool {
         switch (from, to) {
         case (.queued, .running), (.queued, .cancelled):
             return true
@@ -1050,7 +1050,7 @@ enum QueenDelegationPolicy {
     /// `trios`, and appends the task's own title unchanged. The whole line is
     /// truncated to 72 characters on a word boundary so the subject stays within
     /// the conventional-commit limit.
-    static func conventionalPRTitle(for task: DelegatedTask) -> String {
+    public static func conventionalPRTitle(for task: DelegatedTask) -> String {
         let type: String
         if !task.ownedPaths.isEmpty, task.ownedPaths.allSatisfy({ path in
             let p = normalizePath(path)
@@ -1082,9 +1082,9 @@ enum QueenDelegationPolicy {
 /// Deterministic from the issue, so the same task always maps to the same
 /// branch: reconnecting after a restart finds its work rather than opening a
 /// second branch for the same issue.
-enum QueenBranchPolicy {
-    static let prefix = "queen"
-    static let maximumSlugLength = 40
+public enum QueenBranchPolicy {
+    public static let prefix = "queen"
+    public static let maximumSlugLength = 40
 
     /// The one statement of where a worker may write.
     ///
@@ -1092,7 +1092,7 @@ enum QueenBranchPolicy {
     /// the specification, "You may edit only these paths" in the standing
     /// orders. Nothing had gone wrong yet, which is the only interesting thing
     /// about it - the branch rule read the same way until the day it did not.
-    static func boundaryRule(ownedPaths: [String]) -> String {
+    public static func boundaryRule(ownedPaths: [String]) -> String {
         guard !ownedPaths.isEmpty else {
             return "No paths were assigned to you. Ask in this chat before "
                 + "editing anything, because everything here is shared until "
@@ -1111,7 +1111,7 @@ enum QueenBranchPolicy {
     /// ways, and the orders are the side an agent trusts, so the instruction
     /// most likely to be followed was the one that loses the Queen the
     /// per-criterion verdicts her acceptance check is built on.
-    static let reportRule =
+    public static let reportRule =
         "When you stop, answer every acceptance criterion in turn: met, not "
         + "met, or could not check. Do not summarise and do not shorten this "
         + "part - an unchecked criterion is not a pass, and saying so plainly "
@@ -1127,14 +1127,14 @@ enum QueenBranchPolicy {
     /// caused it, sitting in the place an agent trusts more. A test now catches
     /// that disagreement, but catching is not preventing: one source cannot
     /// disagree with itself.
-    static func ownershipRule(branch: String) -> String {
+    public static func ownershipRule(branch: String) -> String {
         "Every edit belongs to `\(branch)`, and the Queen attributes them to it "
             + "after your turn. Do not check that branch out, switch to it, "
             + "create it, or commit anything: the checkout is shared with the "
             + "user, with the build, and with every other worker."
     }
 
-    static func branchName(for issue: IssueReference, title: String) -> String {
+    public static func branchName(for issue: IssueReference, title: String) -> String {
         let slug = slugify(title)
         return slug.isEmpty
             ? "\(prefix)/\(issue.number)"
@@ -1143,7 +1143,7 @@ enum QueenBranchPolicy {
 
     /// Lowercase, ASCII, hyphen-separated. Git refs reject many characters and
     /// silently mangling them would break the task-to-branch mapping.
-    static func slugify(_ title: String) -> String {
+    public static func slugify(_ title: String) -> String {
         var words: [String] = []
         var current = ""
         for character in title.lowercased() {
@@ -1171,12 +1171,12 @@ enum QueenBranchPolicy {
 
     /// True when a branch name belongs to the Queen's swarm, so unrelated
     /// branches in the same repository are never touched.
-    static func isQueenBranch(_ name: String) -> Bool {
+    public static func isQueenBranch(_ name: String) -> Bool {
         name.hasPrefix("\(prefix)/")
     }
 
     /// Extracts the issue number a queen branch was created for.
-    static func issueNumber(fromBranch name: String) -> Int? {
+    public static func issueNumber(fromBranch name: String) -> Int? {
         guard isQueenBranch(name) else { return nil }
         let tail = name.dropFirst(prefix.count + 1)
         let digits = tail.prefix { $0.isNumber }
