@@ -979,6 +979,68 @@ T27_LOWERING_EXCEPT := auto_config.t27:c:2
 # not a per-construct stub, so it means the body was emptied rather than that
 # a function was left deliberately unwritten.
 .PHONY: t27-lowering
+.PHONY: queen-core
+# The Queen's policy that a Linux server could run today.
+#
+# "Move the business logic to the cloud" needs a number, and the number is not
+# what the imports say. All 25 rings/SR-00/Queen*.swift files import Foundation
+# and nothing else, which reads as 7,168 portable lines. Compiling them alone
+# says otherwise: 12 of the 25 reference types that live elsewhere, and the
+# dependency closure walks from policy through transport and auth into
+# KeychainSecrets.swift, which imports Security. Measured 2026-08-29: the
+# closure had reached 54 files and 14,085 lines without converging.
+#
+# What IS portable is the subset that compiles with nothing but Foundation:
+# 13 files, 3,778 lines, including the merge gate, the boundary rule, the
+# retry policy and the review decision.
+#
+# This target compiles exactly that subset. It is a RATCHET: the count may
+# grow as the chain is cut, never shrink. A file that quietly acquires an
+# app dependency drops out of the cloud-ready core, and that is the thing
+# worth being told about while it is one file rather than twelve.
+QUEEN_CORE_FILES := \
+	rings/SR-00/QueenBeeResult.swift \
+	rings/SR-00/QueenBoundaryPaths.swift \
+	rings/SR-00/QueenEpics.swift \
+	rings/SR-00/QueenEvidencePolicy.swift \
+	rings/SR-00/QueenLanguagePolicy.swift \
+	rings/SR-00/QueenLocalisation.swift \
+	rings/SR-00/QueenMergeGate.swift \
+	rings/SR-00/QueenMissionContract.swift \
+	rings/SR-00/QueenRetryPolicy.swift \
+	rings/SR-00/QueenReviewDecision.swift \
+	rings/SR-00/QueenSelfAudit.swift \
+	rings/SR-00/QueenSkillMatch.swift \
+	rings/SR-00/QueenT27Acceptance.swift
+QUEEN_CORE_FLOOR := 13
+
+queen-core:
+	@out=$$(mktemp -d); trap 'rm -rf "$$out"' EXIT; \
+	present=0; missing=""; \
+	for f in $(QUEEN_CORE_FILES); do \
+		if [ -f "$$f" ]; then present=$$((present+1)); else missing="$$missing $$f"; fi; \
+	done; \
+	if [ -n "$$missing" ]; then \
+		echo "[FAIL] queen-core: named file(s) absent:$$missing"; \
+		echo "       A file may be renamed, but this list is the record of what"; \
+		echo "       the cloud can run. Update it in the same commit."; \
+		exit 1; \
+	fi; \
+	if ! swiftc -parse-as-library -emit-module -module-name QueenCore \
+		-o "$$out/QueenCore.swiftmodule" $(QUEEN_CORE_FILES) 2>"$$out/err"; then \
+		echo "[FAIL] queen-core: the cloud-ready policy no longer compiles alone."; \
+		echo "       Something in it now needs the rest of the app. First error:"; \
+		grep -m 3 "error:" "$$out/err" | sed 's/^/       /'; \
+		exit 1; \
+	fi; \
+	lines=$$(cat $(QUEEN_CORE_FILES) | wc -l | tr -d " "); \
+	if [ "$$present" -lt "$(QUEEN_CORE_FLOOR)" ]; then \
+		echo "[FAIL] queen-core: $$present files, floor is $(QUEEN_CORE_FLOOR)."; \
+		exit 1; \
+	fi; \
+	echo "[OK] queen-core: $$present files, $$lines lines compile against Foundation"; \
+	echo "     alone - the part of the Queen a Linux server can run today."
+
 t27-lowering:
 	@if [ ! -x "$(T27C)" ]; then \
 		if [ -f "$(T27_ROOT)/bootstrap/Cargo.toml" ]; then \
