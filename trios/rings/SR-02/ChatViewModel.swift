@@ -10559,97 +10559,29 @@ final class ChatViewModel: ObservableObject {
     /// Extracts the file paths listed under `## Границы` in an issue body.
     /// Returns nil when the section is absent — the caller must refuse to
     /// delegate, because a task with no boundary cannot be auto-accepted.
-    private static func boundaryPaths(from body: String) -> [String]? {
-        let lines = body.split(separator: "\n", omittingEmptySubsequences: false)
-        var inBounds = false
-        var paths: [String] = []
-        var found = false
-
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("## ") {
-                if inBounds { break }
-                inBounds = ChatViewModel.isBoundaryHeading(trimmed)
-                if inBounds { found = true }
-                continue
-            }
-            guard inBounds else { continue }
-
-            if trimmed.isEmpty { continue }
-
-            // Extract only the path-shaped token — no spaces, containing "/"
-            // or ending in a file extension. A boundary line may carry prose
-            // after the path ("rings/SR-02/Foo.swift, see notes"), so taking
-            // the whole line yields a non-existent path and narrowing fails
-            // silently.
-            if let token = boundaryPathToken(from: trimmed) {
-                paths.append(token)
-            } else {
-                TriosLogBus.shared.info(
-                    .queen, "queen.brief.no_path",
-                    "Границы line yielded no path: \(trimmed)",
-                    ["line": trimmed]
-                )
-            }
-        }
-
-        return found ? paths : nil
-    }
-
-    /// Extracts the path-shaped token from a boundary line. The token has no
-    /// spaces, contains "/" or ends in a dotted file extension, and is stripped
-    /// of trailing prose punctuation (commas, semicolons, backticks, etc.).
-    /// Whether a heading opens the boundary section.
+    /// The paths an issue declares, delegated to the policy the container runs.
     ///
-    /// Two spellings, because the repository writes its documentation and code
-    /// in English while every issue written before that rule says `Границы`.
-    /// The heading is a parser token, not prose: recognising only one spelling
-    /// would have made every English issue undelegatable, and the failure would
-    /// have read as "no boundary section, so there is nothing to delegate" -
-    /// true of the parser, not of the issue.
-    static func isBoundaryHeading(_ trimmed: String) -> Bool {
-        trimmed.hasPrefix("## Границы") || trimmed.hasPrefix("## Boundary")
+    /// Forwarded rather than kept, because the tick has to answer the same
+    /// question and a second copy of a parser is a second parser.
+    ///
+    /// One thing was lost in the move and is worth naming: the old loop logged
+    /// `queen.brief.no_path` for a boundary line that yielded no path. A policy
+    /// the Linux binary compiles cannot reach the app's log bus, and passing a
+    /// logger into a pure parser to preserve one diagnostic would put a seam in
+    /// the rule for the sake of a line nobody has read since it was added.
+    private static func boundaryPaths(from body: String) -> [String]? {
+        QueenIssueBoundary.paths(from: body)
     }
 
+    /// Whether a heading opens the boundary section. The rule lives in
+    /// `QueenIssueBoundary`; this is the name the view model already calls.
+    static func isBoundaryHeading(_ trimmed: String) -> Bool {
+        QueenIssueBoundary.isBoundaryHeading(trimmed)
+    }
+
+    /// The path-shaped token on a boundary line. Same rule, same place.
     static func boundaryPathToken(from line: String) -> String? {
-        for raw in line.split(separator: " ", omittingEmptySubsequences: true) {
-            // Strip backticks and prose punctuation from both ends, in any
-            // order, until nothing more comes off.
-            //
-            // The two passes used to be sequential - backticks first, then
-            // trailing punctuation - and that order fails on the commonest
-            // shape of all: a path in backticks followed by a comma. The
-            // trailing character is the comma, so the backtick strip does not
-            // reach the backtick; the punctuation strip then removes the comma
-            // and leaves it exposed at the end, where nothing looks again.
-            //
-            // Five of the sixty-three boundary paths in the live registries
-            // carried a trailing backtick because of it, all of them
-            // `rings/SR-02/ChatViewModel.swift` + "`". A path like that matches
-            // nothing: `git add --` does not stage it, and the boundary filter
-            // drops the worker's real edits to that file as being outside its
-            // boundary. The bee is then recorded as having produced nothing,
-            // which is the commonest failure in the registry.
-            var cleaned = String(raw)
-            var changed = true
-            while changed, !cleaned.isEmpty {
-                changed = false
-                if let first = cleaned.first, "`\"'(".contains(first) {
-                    cleaned.removeFirst()
-                    changed = true
-                }
-                if let last = cleaned.last, "`\"'.,;:!?)".contains(last) {
-                    cleaned.removeLast()
-                    changed = true
-                }
-            }
-            guard !cleaned.isEmpty else { continue }
-            if cleaned.contains("/")
-                || cleaned.range(of: #"\.\w{1,10}$"#, options: .regularExpression) != nil {
-                return cleaned
-            }
-        }
-        return nil
+        QueenIssueBoundary.pathToken(from: line)
     }
 
     /// Identifiers an issue body uses to name code: backtick-quoted spans

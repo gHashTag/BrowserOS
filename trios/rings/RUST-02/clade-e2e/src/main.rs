@@ -260,6 +260,9 @@ const SWIFT_LOGIC_SUITES: &[SwiftLogicSuite] = &[
             // that does not compile is a suite that does not run.
             "rings/SR-00/QueenRetryPolicy.swift",
             "rings/SR-00/QueenCriterionVerdict.swift",
+            // The boundary parser moved out of the view model so the container
+            // could use it; it needs checks where it now lives.
+            "rings/SR-00/QueenIssueBoundary.swift",
             "rings/SR-00/ModelPricing.swift",
             "rings/SR-00/QueenSalience.swift",
             // SwarmBudget.current resolves the operator's knob file under

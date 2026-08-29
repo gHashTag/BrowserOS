@@ -412,3 +412,87 @@ The probe line never appears. So the recipe shell is not wedging in the
 acquire loop - it is not reaching its own first command. `TRIOS_SKIP_LOCK`
 cannot help, because the branch it controls is downstream of an echo that never
 runs. Any future work on this should start at exec, not at the lock.
+
+---
+
+## Dispatch: written, wired, and unreachable for two measured reasons
+
+The tick chose and stopped. This is the other half - worktree, briefing, agent
+turn - plus two defects the attempt to prove it uncovered.
+
+### The heartbeat, because my first TTL reasoning was wrong
+
+I set the lease TTL to three times the tick interval and renewed it only when a
+round ran, on the reasoning that "the TTL must outlive a round". That is sound
+only if renewal and work are the same event. They are not, and the deployment
+showed it within the hour:
+
+```
+14:36:18 Queen tick starting        holder="f2375165-...:1"
+14:36:18 Queen lease held elsewhere  holder="9680f61f-...:1"
+         self="f2375165-...:1" expiresAt="15:52:42"
+```
+
+A deploy replaced the container; the old holder died without releasing; its
+lease went on holding the hive for **ninety minutes** while the new one
+correctly stood down every round. Nothing was malfunctioning - the lease was
+faithfully describing a process that no longer existed.
+
+The TTL is a LIVENESS window, not a work window. A heartbeat now renews every
+60s against a 180s TTL, so a dead holder frees the hive in under three minutes
+and a round may take as long as it likes. Measured after the fix: **149s of
+remaining TTL** where there had been 5400.
+
+### The refusal that had never looked at the issue
+
+`queend`'s `choose` asked about a hardcoded `rings/SR-00` for every candidate,
+because the boundary parser lived in the app's view model and the container had
+no way to read one. Two unrelated numbers, on the live deployment:
+
+```
+#9999: its files are held by trios#1286, trios#1127, trios#1174
+#8888: its files are held by trios#1286, trios#1127, trios#1174
+```
+
+Identical reasons for issues with nothing in common, because the reasoning never
+looked at either. **An uninformed refusal reads in a log exactly like a careful
+one**, which is what made it worth fixing rather than tuning.
+
+`QueenIssueBoundary` (SR-00, and in QueenCore) now owns that rule for both the
+app and the container - the view model forwards to it. After the fix, same call:
+
+```
+#9999: no issue body was supplied, so its boundary is unknown
+#8888: no issue body was supplied, so its boundary is unknown
+```
+
+True: neither number exists. The reason now describes the candidate.
+
+Three answers are kept distinct on purpose, and are pinned by 8 new checks in
+the QueenDelegation suite (120 -> 128): paths, **nil** for no section at all,
+and **[]** for an empty one. An issue that has not said what it will touch has
+not said it touches nothing.
+
+### Why dispatch has not run, exactly
+
+Two stacked reasons, each measured, neither of them a coding gap:
+
+1. **Nothing to choose.** 0 open issues (confirmed twice: the issues endpoint
+   returns 10 items of which 0 are issues; the search API independently reports
+   0 issues / 10 PRs). And all 67 closed issues without a task: **zero** - every
+   closed issue already has one, so no real candidate can pass the first guard.
+2. **No provider credential.** The live `/chat`, asked directly:
+   `{"message":"z.ai provider requires apiKey"}`. The deployment's whole
+   variable list contains no provider key.
+
+So dispatch refuses at its first step, and that step is FIRST by design: the
+credential is checked before git is touched, because a worktree cut for a bee
+that cannot run is litter, and a refusal after side effects is one somebody must
+clean up before they can read it.
+
+The refusal names every variable that would fix it and says who may set it. Not
+me: entering an API key is not something I do, whoever asks.
+
+**Unproven, stated plainly:** no bee has been started by the container's own
+tick. The worktree step and the turn step have not executed. Everything before
+them has.

@@ -23,68 +23,119 @@ import {
   queenLeaseStatus,
   releaseQueenLease,
 } from '../services/queen-lease'
+import { runQueenTickOnce } from '../services/queen-tick'
 
 const LEASE_NAME = 'queen-tick'
 
 export function createQueenLeaseRoute() {
-  return new Hono()
-    .post('/', async (c) => {
-      const url = queenLeaseDatabaseUrl()
-      if (!url) return c.json({ error: 'No database configured' }, 503)
-      const body = await c.req.json().catch(() => null)
-      const holder = typeof body?.holder === 'string' ? body.holder : null
-      if (!holder) return c.json({ error: 'holder is required' }, 400)
-      // Bounded: a caller that asks for a day-long lease and then dies takes the
-      // hive down with it until someone edits a database by hand.
-      const ttl = Math.min(Math.max(Number(body?.ttlSeconds) || 300, 30), 3600)
-
-      const pool = new Pool({ connectionString: url })
-      try {
-        const grant = await acquireQueenLease(pool, LEASE_NAME, holder, ttl)
-        // 200 either way. Losing a lease is a normal outcome of a healthy round,
-        // not an error, and a caller that retries on 4xx would fight the winner.
-        return c.json(grant)
-      } finally {
-        await pool.end()
-      }
-    })
-    .delete('/', async (c) => {
-      const url = queenLeaseDatabaseUrl()
-      if (!url) return c.json({ error: 'No database configured' }, 503)
-      const holder = c.req.query('holder')
-      if (!holder) return c.json({ error: 'holder is required' }, 400)
-      const pool = new Pool({ connectionString: url })
-      try {
-        return c.json({
-          released: await releaseQueenLease(pool, LEASE_NAME, holder),
-        })
-      } finally {
-        await pool.end()
-      }
-    })
-    .get('/', async (c) => {
-      const url = queenLeaseDatabaseUrl()
-      if (!url) return c.json({ error: 'No database configured' }, 503)
-      const pool = new Pool({ connectionString: url })
-      try {
-        const status = await queenLeaseStatus(pool, LEASE_NAME)
-        const tick = await pool.query(
-          'SELECT holder, fence, decided_at, decision FROM queen_tick WHERE name = $1',
-          [LEASE_NAME],
+  return (
+    new Hono()
+      .post('/', async (c) => {
+        const url = queenLeaseDatabaseUrl()
+        if (!url) return c.json({ error: 'No database configured' }, 503)
+        const body = await c.req.json().catch(() => null)
+        const holder = typeof body?.holder === 'string' ? body.holder : null
+        if (!holder) return c.json({ error: 'holder is required' }, 400)
+        // Bounded: a caller that asks for a day-long lease and then dies takes the
+        // hive down with it until someone edits a database by hand.
+        const ttl = Math.min(
+          Math.max(Number(body?.ttlSeconds) || 300, 30),
+          3600,
         )
-        return c.json({
-          lease: status,
-          lastTick: tick.rowCount
-            ? {
-                holder: tick.rows[0].holder,
-                fence: Number(tick.rows[0].fence),
-                decidedAt: tick.rows[0].decided_at,
-                decision: tick.rows[0].decision,
-              }
-            : null,
-        })
-      } finally {
-        await pool.end()
-      }
-    })
+
+        const pool = new Pool({ connectionString: url })
+        try {
+          const grant = await acquireQueenLease(pool, LEASE_NAME, holder, ttl)
+          // 200 either way. Losing a lease is a normal outcome of a healthy round,
+          // not an error, and a caller that retries on 4xx would fight the winner.
+          return c.json(grant)
+        } finally {
+          await pool.end()
+        }
+      })
+      .delete('/', async (c) => {
+        const url = queenLeaseDatabaseUrl()
+        if (!url) return c.json({ error: 'No database configured' }, 503)
+        const holder = c.req.query('holder')
+        if (!holder) return c.json({ error: 'holder is required' }, 400)
+        const pool = new Pool({ connectionString: url })
+        try {
+          return c.json({
+            released: await releaseQueenLease(pool, LEASE_NAME, holder),
+          })
+        } finally {
+          await pool.end()
+        }
+      })
+      /**
+       * Run a round now.
+       *
+       * The loop already ticks on its own; this is for the two cases a timer
+       * cannot serve. An operator who has just fixed something should not have to
+       * wait out half an hour to learn whether it worked - and a supervisor that
+       * can only be observed on its own schedule is one nobody verifies.
+       *
+       * `candidates` overrides what GitHub would have offered. Diagnostic, behind
+       * the same token as everything else here, and echoed back in the response so
+       * a result obtained this way can never be mistaken for one the tick reached
+       * by itself.
+       */
+      .post('/tick', async (c) => {
+        const url = queenLeaseDatabaseUrl()
+        if (!url) return c.json({ error: 'No database configured' }, 503)
+        const body = await c.req.json().catch(() => null)
+        const override = Array.isArray(body?.candidates)
+          ? body.candidates.filter((n: unknown) => typeof n === 'number')
+          : undefined
+        const pool = new Pool({ connectionString: url })
+        try {
+          const result = await runQueenTickOnce(pool, override)
+          return c.json({ ...result, candidatesOverridden: override ?? null })
+        } catch (error) {
+          return c.json(
+            { error: error instanceof Error ? error.message : String(error) },
+            500,
+          )
+        } finally {
+          await pool.end()
+        }
+      })
+      .get('/', async (c) => {
+        const url = queenLeaseDatabaseUrl()
+        if (!url) return c.json({ error: 'No database configured' }, 503)
+        const pool = new Pool({ connectionString: url })
+        try {
+          const status = await queenLeaseStatus(pool, LEASE_NAME)
+          const tick = await pool.query(
+            'SELECT holder, fence, decided_at, decision FROM queen_tick WHERE name = $1',
+            [LEASE_NAME],
+          )
+          const dispatches = await pool.query(
+            `SELECT issue, branch, started, detail, conversation_id, dispatched_at
+             FROM queen_dispatch ORDER BY dispatched_at DESC LIMIT 10`,
+          )
+          return c.json({
+            lease: status,
+            dispatches: dispatches.rows.map((r) => ({
+              issue: r.issue,
+              branch: r.branch,
+              started: r.started,
+              detail: r.detail,
+              conversationId: r.conversation_id,
+              dispatchedAt: r.dispatched_at,
+            })),
+            lastTick: tick.rowCount
+              ? {
+                  holder: tick.rows[0].holder,
+                  fence: Number(tick.rows[0].fence),
+                  decidedAt: tick.rows[0].decided_at,
+                  decision: tick.rows[0].decision,
+                }
+              : null,
+          })
+        } finally {
+          await pool.end()
+        }
+      })
+  )
 }

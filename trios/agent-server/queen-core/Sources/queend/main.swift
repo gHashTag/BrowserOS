@@ -33,6 +33,11 @@ struct Question: Decodable {
     /// judges the same record rather than a summary of it.
     let candidates: [Int]?
     let tasks: [DelegatedTask]?
+    /// For `choose`: each candidate's issue BODY, keyed by issue number as a
+    /// string. The boundary is parsed here rather than by the caller, so the
+    /// container and the app read a boundary section by the same rule instead
+    /// of by two that agree until one is edited.
+    let candidateBodies: [String: String]?
 }
 
 struct Answer: Encodable {
@@ -140,13 +145,38 @@ case "choose":
                 + "(\(existing.state.rawValue))")
             continue
         }
-        // A candidate with no task of its own can still be held by another
-        // task's boundary, and that is the rule this whole exercise is about.
+
+        // What THIS issue says it will touch.
+        //
+        // The first version of this loop asked about a hardcoded `rings/SR-00`
+        // for every candidate, which made the answer independent of the
+        // candidate. Measured on the deployment with two unrelated numbers, it
+        // produced identical refusals naming identical holders - a reason that
+        // had never looked at either issue. An uninformed refusal reads in a log
+        // exactly like a careful one, which is what made it worth fixing rather
+        // than tuning.
+        //
+        // No body, or a body with no boundary section, is NOT an empty conflict
+        // set. It is an issue that has not said what it will touch, and
+        // starting a bee on it means finding out by collision.
+        guard let body = question.candidateBodies?[String(number)] else {
+            skipped.append("#\(number): no issue body was supplied, so its "
+                + "boundary is unknown")
+            continue
+        }
+        guard let owned = QueenIssueBoundary.paths(from: body), !owned.isEmpty else {
+            skipped.append("#\(number): declares no boundary section, so "
+                + "nothing can be reserved for it")
+            continue
+        }
+
         let holders = QueenDelegationPolicy.conflictingTasks(
-            for: ["rings/SR-00"], among: tasks, now: now
+            for: owned, among: tasks, now: now
         )
-        if !holders.isEmpty, pick == nil {
-            skipped.append("#\(number): its files are held by "
+        if !holders.isEmpty {
+            skipped.append("#\(number): "
+                + owned.joined(separator: ", ")
+                + " held by "
                 + holders.map(\.issue.slug).joined(separator: ", "))
             continue
         }

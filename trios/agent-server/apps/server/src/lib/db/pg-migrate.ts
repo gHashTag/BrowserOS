@@ -104,6 +104,15 @@ CREATE TABLE IF NOT EXISTS queen_lease (
   fence bigint NOT NULL DEFAULT 1
 );
 
+CREATE TABLE IF NOT EXISTS queen_dispatch (
+  issue int PRIMARY KEY,
+  branch text NOT NULL,
+  started boolean NOT NULL,
+  detail text NOT NULL,
+  conversation_id text,
+  dispatched_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS queen_tick (
   name text PRIMARY KEY,
   holder text NOT NULL,

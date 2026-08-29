@@ -1016,6 +1016,7 @@ T27_LOWERING_EXCEPT := auto_config.t27:c:2
 # app dependency drops out of the cloud-ready core, and that is the thing
 # worth being told about while it is one file rather than twelve.
 QUEEN_CORE_FILES := \
+	rings/SR-00/QueenIssueBoundary.swift \
 	rings/SR-00/QueenBeeResult.swift \
 	rings/SR-00/QueenBoundaryPaths.swift \
 	rings/SR-00/QueenEpics.swift \
@@ -1029,7 +1030,7 @@ QUEEN_CORE_FILES := \
 	rings/SR-00/QueenSelfAudit.swift \
 	rings/SR-00/QueenSkillMatch.swift \
 	rings/SR-00/QueenT27Acceptance.swift
-QUEEN_CORE_FLOOR := 13
+QUEEN_CORE_FLOOR := 14
 
 # The eleven that are ALSO a module, which is fewer than the thirteen that
 # compile alone. QueenSelfAudit and QueenT27Acceptance are CONSTRUCTED from
@@ -1048,6 +1049,7 @@ QUEEN_POLICY_LINUX_FILES := \
 	rings/SR-00/ModelPricing.swift
 
 QUEEN_CORE_LINUX_FILES := \
+	rings/SR-00/QueenIssueBoundary.swift \
 	rings/SR-00/QueenBeeResult.swift \
 	rings/SR-00/QueenBoundaryPaths.swift \
 	rings/SR-00/QueenEpics.swift \

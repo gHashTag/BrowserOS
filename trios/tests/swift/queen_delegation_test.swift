@@ -55,6 +55,39 @@ enum QueenDelegationTests {
         reviewBoundaryAgesOut()
         aRefusedTurnIsNotTheIssuesFault()
 
+        // ── QueenIssueBoundary: the rule the container now runs too ──
+        //
+        // It answered the same thing for every candidate before this file
+        // existed, because `choose` judged them all against a hardcoded
+        // `rings/SR-00`. These pin the three answers that must stay distinct:
+        // paths, no section at all, and an empty section.
+        check(QueenIssueBoundary.paths(from:
+                "## What\n\ndo it\n\n## Boundary\n\n`rings/SR-02/Foo.swift`\n")
+              == ["rings/SR-02/Foo.swift"],
+              "a boundary section yields its paths")
+        check(QueenIssueBoundary.paths(from: "## Границы\n\nrings/SR-00/Bar.swift")
+              == ["rings/SR-00/Bar.swift"],
+              "the Russian heading parses too - most issues predate the rule")
+        check(QueenIssueBoundary.paths(from: "## What\n\nno boundary here") == nil,
+              "no section is nil, not an empty conflict set")
+        check(QueenIssueBoundary.paths(from: "## Boundary\n\n") == [],
+              "an empty section is [] and still not nil")
+        check(QueenIssueBoundary.paths(from:
+                "## Boundary\n\na/b.swift\n\n## Notes\n\nc/d.swift")
+              == ["a/b.swift"],
+              "the section ends at the next heading")
+        // A path in backticks followed by a comma: the shape that put a
+        // trailing backtick on five of sixty-three live boundary paths, so the
+        // committer staged nothing and the bee read as having done nothing.
+        check(QueenIssueBoundary.pathToken(from: "`rings/SR-02/ChatViewModel.swift`,")
+              == "rings/SR-02/ChatViewModel.swift",
+              "a backticked path with a trailing comma comes out clean")
+        check(QueenIssueBoundary.pathToken(from: "rings/SR-00/A.swift see notes")
+              == "rings/SR-00/A.swift",
+              "prose after the path does not become the path")
+        check(QueenIssueBoundary.pathToken(from: "just some words") == nil,
+              "a line with no path-shaped token yields nil")
+
         print("\n\(checks) checks, \(failures) failures")
         if failures > 0 { exit(1) }
         print("All QueenDelegation tests passed.")
