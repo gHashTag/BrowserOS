@@ -52,6 +52,7 @@ enum QueenDelegationTests {
         pullRequestGuardReadsTheBranch()
         unpublishableWorkIsRefusedBeforeSpending()
         reviewBoundaryAgesOut()
+        aRefusedTurnIsNotTheIssuesFault()
 
         print("\n\(checks) checks, \(failures) failures")
         if failures > 0 { exit(1) }
@@ -73,6 +74,44 @@ enum QueenDelegationTests {
     /// 9 hours old, holding one path each. Thirteen ticks in the same session,
     /// every one reporting capacity free, 78 boundary_taken skips, and zero
     /// delegations.
+    /// A turn the server refused before a byte arrived.
+    ///
+    /// Measured 2026-08-29 on the first autonomous delegation into the cloud:
+    /// /chat answered 403, the runner recorded a terminal turn with zero output
+    /// tokens, zero tool calls and no commit, and this was classified
+    /// `unmeasured` - which counts against the issue. Two such refusals retired
+    /// #1111 as "attempts have already failed on their own merits". The
+    /// perimeter had failed; the work was never reached.
+    static func aRefusedTurnIsNotTheIssuesFault() {
+        scenario("a turn that produced nothing is not a failure on the merits")
+
+        check(QueenRetryPolicy.classify(
+            streamOutcome: "terminal", completedTurns: 1, toolCalls: 0,
+            committedFiles: nil, outputTokens: 0) == .interrupted,
+            "zero tokens, zero tools, no commit: the attempt never happened")
+
+        // A worker that SAID something and then failed is a real attempt.
+        check(QueenRetryPolicy.classify(
+            streamOutcome: "terminal", completedTurns: 1, toolCalls: 0,
+            committedFiles: nil, outputTokens: 400) == .unmeasured,
+            "a worker that spoke is measured as before")
+
+        // So is one that called a tool without speaking.
+        check(QueenRetryPolicy.classify(
+            streamOutcome: "terminal", completedTurns: 1, toolCalls: 3,
+            committedFiles: nil, outputTokens: 0) == .unmeasured,
+            "a worker that used a tool did something")
+
+        // nil is not zero: nobody counted, which is not nothing happened.
+        check(QueenRetryPolicy.classify(
+            streamOutcome: "terminal", completedTurns: 1, toolCalls: 0,
+            committedFiles: nil, outputTokens: nil) == .unmeasured,
+            "an uncounted turn stays unmeasured, not excused")
+
+        check(QueenFailureKind.interrupted.countsAgainstTheIssue == false,
+              "and interrupted is the kind that does not retire an issue")
+    }
+
     static func reviewBoundaryAgesOut() {
         scenario("a review boundary stops excluding everyone after two days")
 

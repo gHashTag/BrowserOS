@@ -82,13 +82,33 @@ enum QueenRetryPolicy {
     /// completed turns is the signature of a process that went away: a worker
     /// that finishes always closes its stream, and one that was killed never
     /// gets to.
+    /// `outputTokens` is how much the worker actually said. Zero of everything
+    /// is the signal that the attempt never got off the ground - the turn
+    /// ended, but nothing came back through it.
     static func classify(
         streamOutcome: String?,
         completedTurns: Int?,
         toolCalls: Int?,
-        committedFiles: Int?
+        committedFiles: Int?,
+        outputTokens: Int? = nil
     ) -> QueenFailureKind {
         if streamOutcome == "open" && (completedTurns ?? 0) == 0 {
+            return .interrupted
+        }
+        // A turn that ended having produced nothing at all did not fail on its
+        // merits either. Measured 2026-08-29 on the first autonomous
+        // delegation into the cloud: the server answered 403 before a byte
+        // arrived, the runner recorded a terminal turn with chars=0 and
+        // tools=0, this returned `unmeasured` - which counts against the issue
+        // - and two such refusals retired #1111 as "attempts have already
+        // failed on their own merits". The perimeter had failed; the work was
+        // never reached.
+        //
+        // Deliberately requires ALL THREE to be knowably zero. A worker that
+        // said nothing but called a tool did something, and `nil` here means
+        // nobody counted rather than nothing happened - the distinction this
+        // function was rewritten for once already.
+        if outputTokens == 0, (toolCalls ?? 0) == 0, (committedFiles ?? 0) == 0 {
             return .interrupted
         }
         // `nil` is not zero. Absent means the branch was never tallied; zero

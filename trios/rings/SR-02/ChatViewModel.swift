@@ -9822,7 +9822,69 @@ final class ChatViewModel: ObservableObject {
             "Capacity free — choosing and starting the next open sub-issue",
             ["running": String(delegationRegistry.running.count)]
         )
+        // Work already scoped comes before work not yet chosen.
+        //
+        // A task the Queen sent back is a branch, a boundary and a briefing
+        // that all still stand - the only thing it lacks is another turn. The
+        // mechanism for giving it one exists and is used by `/review reject`
+        // and by the automatic send-back, which transition and restart in one
+        // act. Nothing resumed a task found ALREADY in `rejected`, which is
+        // where one lands when the app stops between the two, and there it
+        // stayed: its issue is skipped as spoken for while its boundary is
+        // held against everyone else. The same shape as the queued deadlock
+        // `staleQueuedReason` describes, one state along.
+        //
+        // Before choosing, because a resumed task costs no new branch and no
+        // new brief, and leaving it stranded while opening fresh work is how
+        // the swarm ends up holding boundaries it is not using.
+        await resumeStrandedRejectedTasks()
         await chooseNextOpenIssue(startAfterChoosing: true, autonomous: true)
+    }
+
+    /// Gives another turn to every task sent back that nobody restarted.
+    ///
+    /// Bounded by the same capacity rule as a fresh delegation: a resume is a
+    /// worker like any other, and a rule that counted only new work would let
+    /// the swarm past its own limit by the back door.
+    private func resumeStrandedRejectedTasks() async {
+        let stranded = delegationRegistry.tasks.filter { $0.state == .rejected }
+        guard !stranded.isEmpty else { return }
+        for task in stranded {
+            guard QueenDelegationPolicy.canStartAnother(
+                running: delegationRegistry.running.count
+            ) else { return }
+            let reason = task.interventions.last
+                ?? "Sent back for another turn; the earlier attempt was not accepted."
+            // Not `sendTaskBackToWorker`: its first act is to transition INTO
+            // `rejected`, which a task already there cannot do, so it refused
+            // every one of these and said so only in the Queen's chat. It
+            // rejects and restarts as one act; this is the restart alone.
+            guard let runner = workerRunner,
+                  delegationRegistry.transition(taskID: task.id, to: .running)
+            else {
+                TriosLogBus.shared.warn(
+                    .queen, "queen.resume.refused",
+                    "Could not restart \(task.issue.slug)",
+                    [
+                        "issue": task.issue.slug,
+                        "reason": workerRunner == nil
+                            ? "no worker runner"
+                            : (delegationRegistry.lastError ?? "the transition was refused"),
+                    ]
+                )
+                continue
+            }
+            let rebrief = QueenBriefing.text(for: task)
+                + "\n\nThe Queen returned your previous attempt. Reason: \(reason)"
+            workerBaselineTrees[task.conversationId] =
+                await QueenBranchCommitter.snapshotWorkingTree()
+            runner.start(task: task, brief: rebrief)
+            TriosLogBus.shared.info(
+                .queen, "queen.resume.rejected",
+                "Resumed \(task.issue.slug), sent back and never restarted",
+                ["issue": task.issue.slug]
+            )
+        }
     }
 
     /// `autonomous` is the Queen acting on her own rather than on a command.

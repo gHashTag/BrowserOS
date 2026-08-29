@@ -268,7 +268,8 @@ final class QueenDelegationRegistry: ObservableObject {
             streamOutcome: task.streamOutcome?.rawValue,
             completedTurns: task.completedTurns,
             toolCalls: task.toolCalls,
-            committedFiles: task.committedFiles
+            committedFiles: task.committedFiles,
+            outputTokens: task.outputTokens
         )
         tasks[index].failureKind = kind
         persist()
