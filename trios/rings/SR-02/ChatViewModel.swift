@@ -8103,10 +8103,32 @@ final class ChatViewModel: ObservableObject {
             return false
         }
         let total = registry.recordSendBack(taskID: task.id)
-        let rebrief = QueenBriefing.text(for: task)
+        // Its own checkout, on the machine that will actually run it.
+        //
+        // Only the delegation path cut a worktree; every send-back assumed the
+        // one from the first attempt still stood. That holds while both
+        // attempts run here and fails against a containerised server, where the
+        // recorded path names a directory on this Mac - measured 2026-08-29,
+        // when two resumed bees did 418 and 131 tool calls in the SHARED
+        // checkout and committed nothing, because the committer looked for
+        // changes in trees that did not exist.
+        //
+        // Idempotent: `git worktree add -B` over an existing checkout reuses
+        // it, so a send-back on the machine that cut the tree costs nothing.
+        if let branch = task.virtualBranch,
+           let prepared = await prepareWorktree(for: task, branch: branch) {
+            registry.setWorktreePath(taskID: task.id, path: prepared.path)
+            if prepared.branch != branch {
+                registry.setVirtualBranch(taskID: task.id, branch: prepared.branch)
+            }
+        }
+        // Re-read: `task` was captured before the transitions and the worktree,
+        // and the runner reads worktreePath to decide where the bee works.
+        let fresh = registry.tasks.first(where: { $0.id == task.id }) ?? task
+        let rebrief = QueenBriefing.text(for: fresh)
             + "\n\nThe Queen returned your previous attempt. Reason: \(reason)"
-        workerBaselineTrees[task.conversationId] = await QueenBranchCommitter.snapshotWorkingTree()
-        runner.start(task: task, brief: rebrief)
+        workerBaselineTrees[fresh.conversationId] = await QueenBranchCommitter.snapshotWorkingTree()
+        runner.start(task: fresh, brief: rebrief)
         TriosLogBus.shared.info(
             .queen, "queen.review.sent_back",
             "Returned \(task.issue.slug) to \(task.worker) (return \(total) of "
