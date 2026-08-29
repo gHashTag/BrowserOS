@@ -253,23 +253,37 @@ transport and auth into `KeychainSecrets.swift`, which imports Security. The
 closure reached 54 files and 14,085 lines without converging. `make queen-core`
 compiles the thirteen that do stand alone, as a ratchet.
 
-**The SwiftPM split was attempted and reverted.** A `QueenCore` target
-containing those thirteen files **builds** - proven, 149 s, 16 compile steps.
-`TriOSKit` then does not: across a module boundary the types need `public` and
-the consumers need `import QueenCore`. Measured cost:
+**The SwiftPM split was attempted twice and reverted twice.** The second
+attempt got much further, and the wall it found is not where either plan said
+it would be.
 
-| | count |
-|---|---:|
-| top-level declarations needing `public` | 19 (0 already public) |
-| members needing `public` | ~132 |
-| files needing `import QueenCore` | 18 |
-| errors after a mechanical `public` pass | 133, all "parameter uses an internal type" |
+What was PROVEN to work:
 
-That last row is the tail: nested types must be opened too, and each one opens
-the next. It is a real refactor with a converging but long cascade, not a
-manifest edit, and it was reverted rather than half-landed - the tree is
-byte-identical and `make` is green.
+| step | result |
+|---|---|
+| `QueenCore` target holding eleven of the thirteen | **builds**, 187 s |
+| `TriOSKit` depending on it | **builds, zero errors** |
+| visibility pass | ~250 annotations, driven by the compiler as an oracle in both directions - adding `public` where it said "must be", stripping it where it said "non-local scope" |
+| `import QueenCore` | 9 files, added by the same loop |
+| `make sources-drift` | stayed green - the gate unions every `sources:` block, so naming files twice is not a divergence |
 
-The next session starts from a number instead of an estimate: ~150 visibility
-annotations and 18 imports, verifiable at each step with
-`swift build --target TriOSKit`.
+Two of the thirteen could not move: `QueenSelfAudit` and `QueenT27Acceptance`
+are **constructed** from outside, and a public struct's memberwise initializer
+stays internal in Swift. Moving them needs hand-written public initialisers -
+API design, not a move.
+
+**What actually stopped it: `build.sh`.** It compiles every source as ONE
+module with a single `swiftc` invocation, so `import QueenCore` fails there and
+the app cannot build at all - SwiftPM being happy is not the same as the app
+building. Landing the split means teaching `build.sh` to compile QueenCore
+first and pass `-I`, the way it already does for QueenUILib. That pattern
+exists in the same file and is woven through ~200 lines of vendoring and
+probing, in the script that is the list of record for `sources-drift`.
+
+Reverted rather than half-landed: the tree is byte-identical apart from two
+foreign edits that predate the session, `make` is green, `make queen-core` is
+green, `make sources-drift` agrees on 198 sources.
+
+The next session starts from a proven path and one named obstacle, instead of
+an estimate: the module boundary works, and `build.sh` is what has to learn
+about it.

@@ -991,8 +991,24 @@ T27_LOWERING_EXCEPT := auto_config.t27:c:2
 # closure had reached 54 files and 14,085 lines without converging.
 #
 # What IS portable is the subset that compiles with nothing but Foundation:
-# 13 files, 3,778 lines, including the merge gate, the boundary rule, the
-# retry policy and the review decision.
+# these thirteen, including the merge gate, the boundary rule, the retry policy
+# and the review decision.
+#
+# Making them a separate SwiftPM target was attempted on 2026-08-29 and got
+# further than expected before stopping at a real wall. What was proven:
+#   - a `QueenCore` target holding eleven of them BUILDS (187 s);
+#   - `TriOSKit` builds against it with zero errors, after ~250 visibility
+#     annotations driven by the compiler and `import QueenCore` in 9 files;
+#   - the two that had to stay - QueenSelfAudit and QueenT27Acceptance - are
+#     CONSTRUCTED from outside, and a public struct's memberwise initializer
+#     stays internal in Swift, so moving them needs hand-written public
+#     initialisers, which is API design rather than a move.
+# What stopped it: `build.sh` compiles every source as ONE module, so
+# `import QueenCore` fails there and the app cannot build. Landing the split
+# means teaching build.sh to compile QueenCore first and pass `-I`, the way it
+# already does for QueenUILib - woven through ~200 lines of vendoring and
+# probing, in the script that is the list of record for `sources-drift`.
+# It was reverted rather than half-landed.
 #
 # This target compiles exactly that subset. It is a RATCHET: the count may
 # grow as the chain is cut, never shrink. A file that quietly acquires an
