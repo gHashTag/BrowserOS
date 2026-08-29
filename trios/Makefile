@@ -649,7 +649,7 @@ release:
 	@: "The mid-flight check belongs HERE, not only in relaunch. Measured on"; \
 	: "2026-08-22: a release build ran while a worker was mid-flight, the"; \
 	: "build replaced the bundle under the running app, the app died at"; \
-	: "13:24:52 - and `make relaunch` then REFUSED, because the registry"; \
+	: "13:24:52 - and the relaunch target then REFUSED, because the registry"; \
 	: "still showed a worker running. The guard meant to protect that bee"; \
 	: "held the app down after the build had already orphaned it: no"; \
 	: "menu-bar logo, no supervisor, and the bee orphaned anyway. Refusing"; \
@@ -1331,6 +1331,49 @@ make-dollars:
 		echo "[OK] no single-dollar shell variables in recipes"; \
 	fi
 
+# --- Backticks in recipes ------------------------------------------------
+#
+# A backtick in a recipe is command substitution, including inside a `: "..."`
+# note that reads exactly like a comment.
+#
+# Measured 2026-08-29. The cassettes recipe carried this line:
+#
+#   : "Several agents share this tree and each runs `make check`. Two"; \
+#
+# bash ran `make check`. That target depends on cassettes, which ran the line
+# again - a recursion, and the reason `make cassettes` had wedged since wave
+# 069 with its own first echo never printing. The wedge was read as a
+# "system-layer exec anomaly" for fourteen waves and TRIOS_SKIP_LOCK was added
+# to work around it; the bypass sat downstream of the line that never ran.
+#
+# Proof it was that and not something near it: with the two backticked notes
+# rewritten, `[SKIP-LOCK probe] seen=` printed for the first time, no nested
+# make appeared, and the suite ran to a verdict in 180s.
+#
+# Single quotes are safe (no substitution) and a shell comment is safe, so both
+# are removed before looking. Everything else is a finding.
+.PHONY: recipe-backticks
+recipe-backticks:
+	@af=$$(mktemp /tmp/trios_rb.XXXXXX); \
+	printf '%s\n' \
+		'!/^\t/&&!/^#/&&/:/&&!/:=/{t=$$0;sub(/:.*/,"",t);gsub(/[ \t]+$$/,"",t);target=t}' \
+		'/^\t/{s=substr($$0,2);sub(/^[@+-]+/,"",s);sub(/^[ \t]+/,"",s);' \
+		'  if(s~/^#/)next;' \
+		'  while(match(s,/'"'"'[^'"'"']*'"'"'/))s=substr(s,1,RSTART-1) substr(s,RSTART+RLENGTH);' \
+		'  if(index(s,"`"))printf "  %s: line %d\n",target,NR}' \
+	> $$af; \
+	violations=$$(awk -f $$af "$(ROOT)/Makefile"); \
+	rm -f $$af; \
+	if [ -n "$$violations" ]; then \
+		echo "[FAIL] backticks in Makefile recipes - these RUN as commands:"; \
+		echo "$$violations"; \
+		echo "       Rewrite the prose. A note that names a make target with"; \
+		echo "       backticks executes that target."; \
+		exit 1; \
+	else \
+		echo "[OK] no command substitution hidden in recipe prose"; \
+	fi
+
 # --- Empty-source guard ------------------------------------------------
 #
 # Mid-run on #1238, rings/SR-00/QueenObserver.swift turned up at zero bytes
@@ -1885,7 +1928,7 @@ check-bypass:
 	@echo "[check-bypass] diagnostic full walk: lock phase jumped (owner root-heals; never for CI)"
 	@TRIOS_SKIP_LOCK=1 $(MAKE) --no-print-directory check
 
-check: check-selftest keychain-doors type-floor t27-rings t27-lowering chain make-dollars empty-sources sources-drift sources-drift-selftest finish-mark-order guard-shapes variant-fence parse-tests run-completeness-selftest cassette-isolation vendor-step dev warnings test cassettes mutants-changed
+check: check-selftest keychain-doors type-floor t27-rings t27-lowering chain make-dollars recipe-backticks empty-sources sources-drift sources-drift-selftest finish-mark-order guard-shapes variant-fence parse-tests run-completeness-selftest cassette-isolation vendor-step dev warnings test cassettes mutants-changed
 
 # Replay every cassette and assert the expected signal appears in the log.
 #
@@ -1996,7 +2039,7 @@ cassettes: test-app
 	: "whether this target had even started. One line of output turns"; \
 	: "an hour of silence into a named phase."; \
 	: "Serialised against every other harness run in this checkout."; \
-	: "Several agents share this tree and each runs `make check`. Two"; \
+	: "Several agents share this tree and each runs the check gate. Two"; \
 	: "cassette runs drive the SAME trios-test.app and each ends every"; \
 	: "cassette with pkill on that bundle path, so they terminate each"; \
 	: "other's replay. Measured 2026-08-23: a run died with"; \

@@ -690,3 +690,78 @@ key and a null value look identical from outside.
 
 Every anchor gets an assert. A patch that cannot fail is a patch that cannot be
 trusted to have happened.
+
+---
+
+## The "system-layer exec anomaly" was a backtick in a comment
+
+Fourteen waves of `make cassettes` wedging, a documented bypass that never
+worked, and a note in my own memory saying the fix "starts at exec, not the
+lock". All of it wrong, and the cause fits on one line:
+
+```make
+	: "Several agents share this tree and each runs `make check`. Two"; \
+```
+
+A `: "..."` line reads exactly like a comment. It is not. Backticks inside a
+double-quoted shell word are **command substitution**, so bash ran `make check`
+- a target that depends on `cassettes`, which ran the line again. A recursion,
+terminated only by whatever the lock did that day. When the lock was changed
+from fail-fast to *wait*, the terminator went with it and the recursion became a
+permanent hang.
+
+Everything that looked inexplicable follows:
+
+| symptom | why |
+|---|---|
+| the recipe's first `echo` never printed | the shell was still in the `:` line before it |
+| "wedges with the lock free" | it was never waiting on the lock |
+| `TRIOS_SKIP_LOCK` did nothing | the branch it controls is downstream of the line that never returns |
+| a wedged line "carrying no sleep child" | the child was a nested `make`, not the watchdog |
+
+Measured, three ways:
+
+```
+bash -c ': "each runs `echo COMMAND-SUBSTITUTION-RAN >&2`. Two"'
+  -> COMMAND-SUBSTITUTION-RAN
+
+pgrep during a wedged run:
+  20721 make cassettes
+  21179 make check          <- spawned by the "comment"
+  30195 make check
+```
+
+And with the two backticked notes rewritten, running to a file rather than a
+pipe so nothing could be blamed on buffering:
+
+```
+t+20s   [SKIP-LOCK probe] seen=        <- has never printed since wave 069
+t+180s  make: *** [cassettes] Error 1  <- a verdict, at last
+nested_make=0 throughout
+```
+
+### What the suite says now that it runs
+
+Four failures, **newly visible rather than newly caused** - nobody has seen this
+target's output in fourteen waves:
+
+```
+FAIL - commits the file its cassette declares
+       (alive 126s, log grew nothing for 120s, queen.branch.committed absent)
+FAIL - notices a bee repeating one call        (exited after 4s, no queen.observer.looping)
+FAIL - notices a write outside the boundary    (exited after 2s, no queen.observer.outOfBounds)
+FAIL - names a tool call the stream never answered
+ok   - the branch sweep spares work it did not create
+```
+
+Not fixed here. They are real findings and deserve their own attention rather
+than being folded into a migration commit.
+
+### The guard
+
+`make recipe-backticks` fails on any backtick surviving in a recipe line after
+shell comments and single-quoted spans are removed. Same shape as
+`make-dollars`, same reason: prose in a recipe is code, and this repository has
+now been bitten by that twice in one day - once in a Makefile `:` note, once in
+a JavaScript template literal holding SQL. Proven both ways: clean on the tree,
+red when the offending line is put back, clean again when it is removed.
