@@ -254,9 +254,36 @@ enum QueenGit {
     /// Read from the environment only. Writing it into a file or a plist would
     /// put a credential in the repository, and the app is signed - a value
     /// baked into the bundle cannot be rotated without re-signing.
+    /// The deployment's bearer token: environment first, then the Keychain.
+    ///
+    /// The environment alone was a dead end and it took a live measurement to
+    /// see it. A GUI app launched by `open` inherits no shell, and the watchdog
+    /// relaunches it with none either - so `TRIOS_API_TOKEN` was never going to
+    /// be set in the process that needs it, and every remote call the app could
+    /// have made was silently unauthenticated forever. The env path stays for
+    /// `make run` and for tests; the Keychain is where an operator can put it
+    /// once and have it survive a rebuild.
+    ///
+    /// `allowsInteraction: false`, and that is not a detail. A keychain read
+    /// that may raise a dialog is a read that can block a headless round until
+    /// somebody walks past the machine - this repository has lost a whole night
+    /// to exactly that. Absent is a fine answer here: the caller treats a
+    /// missing token as "cannot reach the supervisor", which is a refusal, not
+    /// a hang.
+    static let tokenService = "com.browseros.trios.agent-server"
+    static let tokenAccount = "trios-api-token"
+
     static var remoteToken: String? {
-        let token = ProcessInfo.processInfo.environment["TRIOS_API_TOKEN"]
-        return (token?.isEmpty ?? true) ? nil : token
+        if let token = ProcessInfo.processInfo.environment["TRIOS_API_TOKEN"],
+           !token.isEmpty {
+            return token
+        }
+        guard let stored = try? KeychainSecrets.read(
+            service: tokenService,
+            account: tokenAccount,
+            allowsInteraction: false
+        ), !stored.isEmpty else { return nil }
+        return stored
     }
 
     /// The project directory as the executing machine sees it.

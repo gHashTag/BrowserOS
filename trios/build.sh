@@ -942,6 +942,26 @@ if [ "$COMPILE_STATUS" -eq 0 ]; then
     MACOS_DIR="$APP_BUNDLE/Contents/MacOS"
     RESOURCES_DIR="$APP_BUNDLE/Contents/Resources"
     FRAMEWORKS_DIR="$APP_BUNDLE/Contents/Frameworks"
+    # The supervisor's address, baked in rather than expected in an environment.
+    #
+    # A GUI app launched by `open` inherits no shell, and the watchdog relaunches
+    # it with none either - so a setting that lives only in an environment
+    # variable is a setting the running app has never once seen. Measured: the
+    # lease gate read `.uncontested` on every round because the address it wanted
+    # could not reach the process that wanted it.
+    #
+    # Empty by default. An absent key means "this app knows of no other
+    # supervisor", which is the honest state for a machine that has not been
+    # told about one, and it is reported as that rather than as permission.
+    #
+    # Not a secret: it is a public hostname. The TOKEN that goes with it is a
+    # secret and lives in the Keychain, which is why it is not here.
+    LEASE_PLIST_ENTRY=""
+    if [ -n "${TRIOS_QUEEN_LEASE_URL:-}" ]; then
+      LEASE_PLIST_ENTRY="
+    <key>TRIOS_QUEEN_LEASE_URL</key><string>${TRIOS_QUEEN_LEASE_URL}</string>"
+    fi
+
     PLIST="$APP_BUNDLE/Contents/Info.plist"
     mkdir -p "$MACOS_DIR" "$RESOURCES_DIR" "$FRAMEWORKS_DIR"
     cat > "$PLIST" << EOF
@@ -961,7 +981,7 @@ if [ "$COMPILE_STATUS" -eq 0 ]; then
     <key>TRIOS_MCP_PORT</key><string>${VARIANT_MCP_PORT}</string>
     <key>TRIOS_A2A_PORT</key><string>${VARIANT_A2A_PORT}</string>
     <key>TRIOS_CANARY_MCP_PORT</key><string>9205</string>
-    <key>TRIOS_VARIANT</key><string>${VARIANT}</string>
+    <key>TRIOS_VARIANT</key><string>${VARIANT}</string>${LEASE_PLIST_ENTRY}
 </dict>
 </plist>
 EOF

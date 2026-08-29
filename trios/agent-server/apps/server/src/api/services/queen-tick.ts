@@ -181,6 +181,40 @@ export async function runQueenTickOnce(
   logLeaseOutcome(grant, holder)
   if (!grant.acquired) return { ran: false, reason: `held by ${grant.holder}` }
 
+  // Renew while the work runs. A round that outlives its TTL would finish as a
+  // private citizen: still delegating, while a second supervisor legitimately
+  // holds the lease and delegates too.
+  heartbeat = setInterval(() => {
+    acquireQueenLease(pool, LEASE_NAME, holder, LEASE_TTL_SECONDS).catch(
+      () => {},
+    )
+  }, HEARTBEAT_SECONDS * 1000)
+  try {
+    return await runRound(pool, holder, grant.fence, candidateOverride)
+  } finally {
+    if (heartbeat) clearInterval(heartbeat)
+    heartbeat = undefined
+    // Give it back even when the round threw. A round that fails still had its
+    // turn; holding the lease through the failure would make one bad minute
+    // cost the other supervisor its next three.
+    await releaseQueenLease(pool, LEASE_NAME, holder).catch(() => {})
+  }
+}
+
+/** The work of a round, with the lease already in hand. */
+async function runRound(
+  pool: Pool,
+  holder: string,
+  fence: number,
+  candidateOverride?: number[],
+): Promise<{
+  ran: boolean
+  reason?: string
+  choice?: QueendChoice
+  dispatch?: unknown
+}> {
+  const grant = { fence }
+
   const registry = await pool.query(
     'SELECT tasks FROM queen_registry WHERE variant = $1',
     [process.env.TRIOS_VARIANT || 'prod'],
@@ -331,22 +365,6 @@ export function startQueenTick(): void {
       })
     })
   }
-
-  // The heartbeat, which is what actually holds the lease.
-  //
-  // Separate from the round on purpose: a round that takes twenty minutes must
-  // not have to choose between finishing and keeping the hive, and a process
-  // that dies must not keep it for the length of a work interval. Renewal is
-  // one statement against a row this process already owns.
-  const beat = () => {
-    acquireQueenLease(
-      pool,
-      LEASE_NAME,
-      queenHolderName(),
-      LEASE_TTL_SECONDS,
-    ).catch(() => {})
-  }
-  heartbeat = setInterval(beat, HEARTBEAT_SECONDS * 1000)
 
   round()
   timer = setInterval(round, interval * 1000)

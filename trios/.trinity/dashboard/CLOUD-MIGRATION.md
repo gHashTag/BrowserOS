@@ -496,3 +496,69 @@ me: entering an API key is not something I do, whoever asks.
 **Unproven, stated plainly:** no bee has been started by the container's own
 tick. The worktree step and the turn step have not executed. Everything before
 them has.
+
+---
+
+## The monopoly, and the three secrets
+
+### A lease held forever is not exclusion
+
+The heartbeat fixed the dead-holder problem and created a worse one: a healthy
+container renewed the lease for the life of the process, so a second supervisor
+asking for it would be refused **every time it ever asked**. That is not
+exclusion, it is a monopoly - and it is the real reason the Mac's address could
+not be switched on. Configuring it would have configured the app to stand down
+permanently.
+
+A lease is for the duration of the WORK. Acquire at the start of a round,
+heartbeat through it, release at the end - including when the round throws,
+because a round that fails still had its turn. Between rounds the lease belongs
+to nobody.
+
+Proven on the live deployment, the full alternation:
+
+```
+1. a Mac-shaped contender takes the free lease   acquired=True
+2. the container's round while it is held         ran=False  held by mac-standin
+3. the Mac hands it back                          released=True
+4. the container's next round                     ran=True
+5. afterwards                                     FREE
+```
+
+Step 2 is the one that matters: the container did not queue, did not fail, did
+not force its way in. It said whose turn it was and skipped its own.
+
+### Where the token can live now
+
+`QueenGit.remoteToken` read only `TRIOS_API_TOKEN` from the environment, and a
+GUI app launched by `open` inherits no shell - the watchdog relaunches it with
+none either. So the variable was never going to be set in the process that
+needed it, and every remote call the app could have made was unauthenticated
+forever. It now falls back to the Keychain, with `allowsInteraction: false` so a
+missing ACL answers "absent" instead of blocking a headless round on a dialog
+nobody is there to click.
+
+`build.sh` can bake `TRIOS_QUEEN_LEASE_URL` into the bundle, the way the ports
+and the variant already travel. A public hostname, not a secret; the token that
+goes with it is a secret and is why it is not there.
+
+**Baked, then deliberately un-baked.** With the address set and no token, the
+lease gate correctly reads "a supervisor address is set but no token is" and
+refuses - so the app stood down on every autonomous round. That is a regression
+the operator did not ask for, and shipping it to satisfy a checklist would trade
+a race that cannot currently happen for a supervisor that certainly stops. The
+address goes in when the token does, in that order, with one command each.
+
+### The three secrets, and why none of them are mine to install
+
+The backend is in the cloud. What is not in the cloud is credential material,
+and that is an authorization boundary rather than a location problem:
+
+| secret | what it unblocks | who |
+|---|---|---|
+| a provider key on Railway | a bee can think at all | operator |
+| a push credential | work leaves the container without the Mac | operator |
+| `TRIOS_API_TOKEN` in the Mac Keychain | the Mac contends for the lease | operator |
+
+Each is one paste. None is a paste I make: entering an API key or token into a
+field is not something I do, whoever asks and however the value arrives.
