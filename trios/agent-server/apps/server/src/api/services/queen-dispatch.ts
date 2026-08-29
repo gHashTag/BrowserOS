@@ -27,6 +27,7 @@ import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import type { Pool } from 'pg'
 import { logger } from '../../lib/logger'
+import { shellArgv } from '../../tools/filesystem/bash'
 
 /**
  * Providers this deployment could use, in preference order, with the variable
@@ -64,6 +65,10 @@ const WORKER_PROVIDERS: Array<{
 export interface WorkerProvider {
   provider: string
   model: string
+  baseUrl?: string
+  /** This server's own token, when the turn is aimed back at this server. */
+  apiKey?: string
+  rehearsal?: boolean
 }
 
 /**
@@ -86,6 +91,22 @@ export function resolveWorkerProvider(): WorkerProvider | null {
       }
     }
   }
+  // No key anywhere. If this deployment has been told to rehearse, aim the
+  // turn at the recorded stream inside this process instead of refusing.
+  //
+  // Explicitly opt-in, and it must never be the silent fallback on a
+  // deployment that HAS a key: a hive that quietly rehearses instead of
+  // working is worse than one that stops, because it reports success.
+  if (process.env.TRIOS_QUEEN_REHEARSAL) {
+    const port = process.env.PORT || '8080'
+    return {
+      provider: 'openai-compatible',
+      model: override || 'rehearsal',
+      baseUrl: `http://127.0.0.1:${port}/queen/rehearsal`,
+      apiKey: process.env.TRIOS_API_TOKEN,
+      rehearsal: true,
+    }
+  }
   return null
 }
 
@@ -99,14 +120,35 @@ export function missingProviderRefusal(): string {
   )
 }
 
+/**
+ * Run a command as the bee, not as the server.
+ *
+ * The image splits the two uids deliberately and the entrypoint says so out
+ * loud: "git runs as bee; root does not enter the checkout". Running git as
+ * root against a bee-owned tree is not merely impolite, git refuses it -
+ * measured on the first dispatch that got past the credential check:
+ *
+ *   git fetch failed: fatal: detected dubious ownership in repository at
+ *   '/workspace/BrowserOS'
+ *
+ * The tempting fix is `safe.directory`, and it is the wrong one: it tells git
+ * to stop minding that a root process is operating on another user's tree,
+ * which is the thing the uid split exists to prevent. Dropping to bee - through
+ * the same helper every agent shell command already uses - keeps the split and
+ * makes git happy for the real reason.
+ */
 function run(
   command: string,
   args: string[],
   cwd: string,
   timeoutMs = 120_000,
 ): Promise<{ code: number; out: string }> {
+  const quoted = [command, ...args]
+    .map((a) => `'${a.replaceAll("'", `'\\''`)}'`)
+    .join(' ')
+  const argv = shellArgv(quoted)
   return new Promise((resolve) => {
-    const child = spawn(command, args, { cwd })
+    const child = spawn(argv[0], argv.slice(1), { cwd })
     let out = ''
     const done = setTimeout(() => child.kill('SIGKILL'), timeoutMs)
     child.stdout.on('data', (d) => {
@@ -229,7 +271,14 @@ async function startTurn(
         origin: 'sidepanel',
         provider: chosen.provider,
         model: chosen.model,
-        workingDirectory,
+        ...(chosen.baseUrl && { baseUrl: chosen.baseUrl }),
+        ...(chosen.apiKey && { apiKey: chosen.apiKey }),
+        // `userWorkingDir`, not `workingDirectory`. The schema names it the
+        // first way and ignores unknown keys, so the wrong name was accepted
+        // in silence and the bee would have run against the shared checkout
+        // instead of its own worktree - its edits and its branch in different
+        // trees, which is the failure the worktree exists to prevent.
+        userWorkingDir: workingDirectory,
       }),
     })
     if (!response.ok) {
@@ -390,7 +439,8 @@ export async function dispatchBee(
     chosen,
   )
   const detail = turn.ok
-    ? `${worktree.detail}; ${chosen.provider}/${chosen.model}`
+    ? `${worktree.detail}; ${chosen.provider}/${chosen.model}` +
+      (chosen.rehearsal ? ' (REHEARSAL - a recorded stream, not a model)' : '')
     : turn.detail
 
   await recordDispatch(

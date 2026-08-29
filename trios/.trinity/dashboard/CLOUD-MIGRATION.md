@@ -819,3 +819,96 @@ another agent's uncommitted work. Editing it would land their half-finished
 change with mine. Their diff is unrelated (an answer-preview string in a probe
 verdict, #1162), so this is not their defect either - it is simply their file
 today.
+
+---
+
+## A bee ran in the container, under the Queen, with no credential anywhere
+
+The dispatch chain had never once executed. It has now - three times, in
+parallel - and nothing secret was installed to do it.
+
+### How, without a key
+
+`openai-compatible` is the one provider whose factory requires a `baseUrl` and
+**no** `apiKey`. And this repository already proves worker behaviour by replaying
+a recorded stream instead of calling a model: that is what
+`TRIOS_REPLAY_CASSETTE` does on the Mac. Putting those two together, a route
+inside the container speaks OpenAI chat-completions and streams a scripted
+reply, and the worker provider points at it over loopback.
+
+Guarded like everything else. The in-container client presents **this server's
+own token** as its `apiKey`, which `openai-compatible` puts in the Authorization
+header - the same door, used by the process itself, not a new one.
+
+Off unless `TRIOS_QUEEN_REHEARSAL` is set, and never the silent fallback on a
+deployment that has a real key: a hive that quietly rehearses instead of working
+is worse than one that stops, because it reports success.
+
+### What ran
+
+```
+16:13:06  Queen dispatch        issue=1244 branch="queen-1244" started=true
+                                cut from feat/queen-supervisor
+16:16:32  Queen rehearsal turn  model="rehearsal"
+16:16:32  Queen worker turn finished  conversationId=f20e33b7-…  issue=1244
+```
+
+Lease taken, stalled dispatches reaped, board read from Postgres, 40 candidates
+fetched, `queend` chose #1244 by its own declared boundary, a worktree cut on
+its own branch, a turn opened, the stream consumed, the dispatch recorded
+finished.
+
+**Say plainly what this is not.** No bee thought. The reply is scripted; nothing
+read the issue or wrote code. What is proven is the plumbing - the part that had
+no evidence at all, only code review.
+
+### Two defects found by making it run
+
+**`userWorkingDir`, not `workingDirectory`.** The chat schema names it the first
+way and ignores unknown keys, so my wrong name was accepted in silence and every
+bee would have worked in the shared checkout while its branch lived in a
+worktree - edits and branch in different trees, the exact failure the worktree
+exists to prevent.
+
+**git ran as root.** The image splits uids deliberately and the entrypoint says
+"git runs as bee; root does not enter the checkout". Mine did:
+
+```
+git fetch failed: fatal: detected dubious ownership in repository at
+'/workspace/BrowserOS'
+```
+
+The tempting fix is `safe.directory`; it is the wrong one, because it tells git
+to stop minding exactly what the uid split exists to enforce. Dropping to bee
+through the same helper every agent shell command uses keeps the split and
+satisfies git for the real reason.
+
+### Parallel bees under the Queen, measured
+
+```
+#1240 -> started    (rings/SR-02/ChatViewModel.swift, free)
+#1216 -> started    (docs/queen-choice.md, free)
+#1176 -> REFUSED    rings/SR-00/QueenLocalisation.swift held by trios#1174
+#1286 -> REFUSED    a task already exists for it (cancelled)
+```
+
+Two started, two refused - for **different, issue-specific, correct** reasons.
+
+```
+/workspace/BrowserOS/.worktrees/queen-1216  [queen-1216]  owner bee
+/workspace/BrowserOS/.worktrees/queen-1240  [queen-1240]  owner bee
+/workspace/BrowserOS/.worktrees/queen-1244  [queen-1244]  owner bee
+```
+
+### The answer to "how many in parallel"
+
+Three numbers, and only the smallest one matters:
+
+| bound | value |
+|---|---|
+| container capacity | dozens - 96 concurrent calls with no degradation, 200/200 in 3.1s, 24 vCPU / 24 GB / 1000 pids at 5-10% under load |
+| the Queen's policy | **4** - `QueenDelegationPolicy.maximumConcurrentWorkers` |
+| what actually binds | **boundaries** - 16 of 40 open issues declare one, and #1174's parked review holds `rings/SR-00/QueenLocalisation.swift` against four of them at once |
+
+The hardware was never the limit. It is the boundary ledger, and a review nobody
+has given a verdict on.

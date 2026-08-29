@@ -41,6 +41,7 @@ import { createOpenClawRoutes } from './routes/openclaw'
 import { createProviderRoutes } from './routes/provider'
 import { createQueenLeaseRoute } from './routes/queen-lease'
 import { createQueenRegistryRoute } from './routes/queen-registry'
+import { createQueenRehearsalRoute } from './routes/queen-rehearsal'
 import { createRefinePromptRoutes } from './routes/refine-prompt'
 import { createShutdownRoute } from './routes/shutdown'
 import { createSkillsRoutes } from './routes/skills'
@@ -195,6 +196,15 @@ export async function createHttpServer(config: HttpServerConfig) {
   // second time in this deployment that a route was written without the guard
   // its neighbours all carry. The guard is not a detail of the route; it is
   // the reason the route may exist at all.
+  // Guarded like everything else here. The in-container client reaches it
+  // over loopback and the loopback carve-out is off whenever a token is set,
+  // so the rehearsal provider presents this server's own token as its apiKey -
+  // which is what `openai-compatible` puts in the Authorization header. No new
+  // way in; the same one, used by the process itself.
+  const queenRehearsalRoutes = new Hono<Env>()
+    .use('/*', requireTrustedAppOrigin())
+    .route('/', createQueenRehearsalRoute())
+
   const queenLeaseRoutes = new Hono<Env>()
     .use('/*', requireTrustedAppOrigin())
     .route('/', createQueenLeaseRoute())
@@ -279,6 +289,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     .route('/health', createHealthRoute({ browser, stateBackend: a2aService }))
     .route('/queen/registry', queenRegistryRoutes)
     .route('/queen/lease', queenLeaseRoutes)
+    .route('/queen/rehearsal', queenRehearsalRoutes)
     .use('/shutdown/*', requireTrustedAppOrigin())
     .route(
       '/shutdown',
