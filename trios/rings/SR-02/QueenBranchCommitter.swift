@@ -271,11 +271,34 @@ enum QueenBranchCommitter {
         // real push and merciless for one that has stalled.
         await withTaskGroup(of: String?.self) { group in
             group.addTask(priority: .utility) {
+                // When the work happened elsewhere, carry it here first. The
+                // container holds no push credential by design - a checkout its
+                // agents can write is one whose hooks and config they control -
+                // so the branch travels as a patch and this machine, which has
+                // the operator's own credentials, does the push.
+                if !QueenGit.canPublishDirectly {
+                    if let reason = QueenGit.importRemoteBranch(
+                        branch, base: baseBranch(projectRoot: projectRoot) ?? "HEAD"
+                    ) {
+                        return "could not bring \(branch) back from the agent "
+                            + "server: \(reason)"
+                    }
+                }
                 let index = temporaryIndexPath()
                 defer { try? FileManager.default.removeItem(atPath: index) }
-                let result = runGitResult(
-                    ["push", "--force-with-lease", "-u", "origin", "\(branch):\(branch)"],
-                    index: index, projectRoot: projectRoot
+                // Deliberately the LOCAL executor: the push happens here even
+                // when everything before it happened in a container.
+                let result = LocalGitExecutor().run(
+                    arguments: ["push", "--force-with-lease", "-u", "origin",
+                                "\(branch):\(branch)"],
+                    workDir: LocalGitExecutor().repositoryRoot ?? projectRoot,
+                    environment: [
+                        "GIT_INDEX_FILE": index,
+                        "GIT_TERMINAL_PROMPT": "0",
+                        "GIT_ASKPASS": "",
+                        "SSH_ASKPASS": "",
+                        "GIT_SSH_COMMAND": "ssh -o BatchMode=yes"
+                    ]
                 )
                 guard result.ok else {
                     // git's own words, not a paraphrase. `runGit` discards

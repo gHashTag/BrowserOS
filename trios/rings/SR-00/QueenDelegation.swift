@@ -548,14 +548,53 @@ enum QueenDelegationPolicy {
     /// `rings/SR-02/ChatViewModel.swift`, both are inside their boundary when
     /// they write that file, and nothing complains until the merge. Two bees
     /// running in parallel on `docs` and `docs/live` is how this surfaced.
+    /// How long a task awaiting a human verdict may hold its file boundary.
+    ///
+    /// A boundary exists so two bees never write the same file at once. That
+    /// argument holds while a task is being worked on and stops holding when
+    /// the work is finished and only the verdict is outstanding: nobody is
+    /// writing, and the only thing the boundary excludes is the next bee.
+    ///
+    /// Measured 2026-08-29 on the live registry. Three tasks sat in
+    /// `awaitingReview`, two of them **5 days 9 hours**, holding one path each.
+    /// In the same session the Queen ticked 13 times, every tick reporting
+    /// capacity free, skipped candidates 78 times with `boundary_taken`, and
+    /// delegated **nothing**. Mean live concurrency 0.00 against a cap of 4.
+    /// The review queue has no deadline because it waits on a person, so the
+    /// starvation had no end either.
+    ///
+    /// Two days is deliberately generous - long enough that an operator
+    /// reviewing the next morning is never overruled, short enough that a
+    /// forgotten task cannot freeze the swarm for a week. The task keeps its
+    /// state and its verdict is still wanted; it just stops being a reason to
+    /// refuse everyone else.
+    static let reviewBoundaryHoldHours: Double = 48
+
+    /// Whether this task's boundary should still exclude other work.
+    ///
+    /// Only `awaitingReview` ages out. `queued` and `running` mean a bee may be
+    /// writing right now, and `rejected` means the same bee is expected back to
+    /// try again on those very files - releasing either would be releasing a
+    /// boundary that is actually in use.
+    static func stillHoldsBoundary(
+        _ task: DelegatedTask,
+        now: Date = Date()
+    ) -> Bool {
+        guard !task.state.isTerminal else { return false }
+        guard task.state == .awaitingReview else { return true }
+        let held = now.timeIntervalSince(task.updatedAt) / 3600
+        return held < reviewBoundaryHoldHours
+    }
+
     static func conflictingTasks(
         for paths: [String],
-        among tasks: [DelegatedTask]
+        among tasks: [DelegatedTask],
+        now: Date = Date()
     ) -> [DelegatedTask] {
         let wanted = paths.map(normalizePath).filter { !$0.isEmpty }
         guard !wanted.isEmpty else { return [] }
         return tasks.filter { task in
-            guard !task.state.isTerminal else { return false }
+            guard stillHoldsBoundary(task, now: now) else { return false }
             return task.ownedPaths.contains { owned in
                 wanted.contains { pathsOverlap(owned, $0) }
             }

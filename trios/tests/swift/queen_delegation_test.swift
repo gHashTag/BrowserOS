@@ -51,6 +51,7 @@ enum QueenDelegationTests {
         budgetKnobParsing()
         pullRequestGuardReadsTheBranch()
         unpublishableWorkIsRefusedBeforeSpending()
+        reviewBoundaryAgesOut()
 
         print("\n\(checks) checks, \(failures) failures")
         if failures > 0 { exit(1) }
@@ -66,6 +67,54 @@ enum QueenDelegationTests {
     /// hand-written arguments the program could never produce. That is the
     /// failure mode this file exists to catch, so it is worth naming: a unit
     /// test proves the function, never the wiring.
+    /// A boundary held by a task nobody is working on.
+    ///
+    /// Measured 2026-08-29: three tasks in awaitingReview, two of them 5 days
+    /// 9 hours old, holding one path each. Thirteen ticks in the same session,
+    /// every one reporting capacity free, 78 boundary_taken skips, and zero
+    /// delegations.
+    static func reviewBoundaryAgesOut() {
+        scenario("a review boundary stops excluding everyone after two days")
+
+        let now = Date()
+        func aged(_ state: DelegatedTaskState, hours: Double) -> DelegatedTask {
+            DelegatedTask(
+                conversationId: UUID(),
+                issue: IssueReference(owner: "gHashTag", repo: "trios", number: 1),
+                title: "held",
+                worker: "queen-swift",
+                state: state,
+                ownedPaths: ["docs"],
+                createdAt: now.addingTimeInterval(-hours * 3600),
+                updatedAt: now.addingTimeInterval(-hours * 3600)
+            )
+        }
+
+        check(QueenDelegationPolicy.conflictingTasks(
+            for: ["docs"], among: [aged(.awaitingReview, hours: 2)], now: now
+        ).count == 1,
+        "a review from this morning still holds its boundary")
+
+        check(QueenDelegationPolicy.conflictingTasks(
+            for: ["docs"], among: [aged(.awaitingReview, hours: 129)], now: now
+        ).isEmpty,
+        "a review held 5 days stops excluding everyone else")
+
+        // Only awaitingReview ages out. A running bee may be writing right now,
+        // and a rejected one is expected back on those same files.
+        for state in [DelegatedTaskState.running, .queued, .rejected] {
+            check(QueenDelegationPolicy.conflictingTasks(
+                for: ["docs"], among: [aged(state, hours: 500)], now: now
+            ).count == 1,
+            "\(state) keeps its boundary however old it is")
+        }
+
+        check(QueenDelegationPolicy.conflictingTasks(
+            for: ["docs"], among: [aged(.accepted, hours: 1)], now: now
+        ).isEmpty,
+        "an accepted task holds nothing")
+    }
+
     static func unpublishableWorkIsRefusedBeforeSpending() {
         scenario("unpublishable work is refused before spending")
 

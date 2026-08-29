@@ -324,5 +324,109 @@ enum QueenGit {
     /// be carried out of the container: no push credential is kept there,
     /// because the agents own that checkout and therefore own the git
     /// configuration and hooks any privileged git run would obey.
-    static var canPublish: Bool { executor.isLocal }
+    /// Whether a branch produced by the executor can reach GitHub at all.
+    ///
+    /// True on both sides now, for different reasons: a local executor pushes
+    /// directly, and a remote one has its work carried back by
+    /// `importRemoteBranch` and pushed from here. It is kept as a question
+    /// rather than deleted because the answer is a property of the executor,
+    /// and an executor that can neither push nor be read back would be a real
+    /// case - one that should refuse a worker rather than lose its output.
+    static var canPublish: Bool { executor.isLocal || executor.repositoryRoot != nil }
+
+    /// Whether the branch is already on the machine that will push it.
+    static var canPublishDirectly: Bool { executor.isLocal }
+
+    /// The marker `filesystem_bash` prepends when it dropped output.
+    ///
+    /// A patch that was truncated is not a smaller patch, it is a corrupt one,
+    /// and `git am` would apply the surviving hunks and call it a success.
+    private static let truncationMarker = "characters were discarded while the command ran"
+
+    /// Carries a branch off the executing machine and onto this one.
+    ///
+    /// No credential travels and none is needed. A checkout the agents can
+    /// write is a checkout whose `.git/config` and `.git/hooks` they control,
+    /// so a push credential placed there is a credential they can take -
+    /// measured, in review: a planted `credential.helper` and a planted
+    /// `pre-push` hook each captured the privileged environment. The way out of
+    /// that is not to hide the secret better but to not have one there.
+    ///
+    /// `format-patch` renders the branch as text, which survives a transport
+    /// built for tool output, and `git am` replays it here with the author,
+    /// date and message intact. This machine already holds the operator's git
+    /// credentials, and has to be present anyway because `swift build` cannot
+    /// leave macOS.
+    ///
+    /// Returns nil on success, or the reason it could not.
+    static func importRemoteBranch(_ branch: String, base: String) -> String? {
+        guard !executor.isLocal else { return nil }
+        guard let remoteRoot = executor.repositoryRoot else {
+            return "the remote executor did not report a repository root"
+        }
+
+        let patch = executor.run(
+            arguments: ["format-patch", "\(base)..\(branch)", "--stdout"],
+            workDir: remoteRoot,
+            environment: [:]
+        )
+        guard patch.ok else {
+            return "could not read \(branch) from the agent server: \(patch.output)"
+        }
+        if patch.output.contains(truncationMarker) {
+            // Refusing beats applying the part that fitted. The alternative is
+            // a branch that looks pushed and is missing its middle.
+            return "the patch for \(branch) was larger than the tool transport "
+                + "and arrived truncated; it was not applied"
+        }
+        guard !patch.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return "the agent server reports no commits on \(branch) after \(base)"
+        }
+
+        let local = LocalGitExecutor()
+        guard let localRoot = local.repositoryRoot else {
+            return "this machine has no git repository to import into"
+        }
+        let file = NSTemporaryDirectory() + "queen-import-\(UUID().uuidString).patch"
+        defer { try? FileManager.default.removeItem(atPath: file) }
+        do {
+            try patch.output.write(toFile: file, atomically: true, encoding: .utf8)
+        } catch {
+            return "could not stage the patch here: \(error.localizedDescription)"
+        }
+
+        // Start the local branch at the same base the patch was cut against,
+        // so `am` replays onto identical ground. `-B` because a re-run must
+        // update the branch rather than refuse.
+        let cut = local.run(
+            arguments: ["branch", "-f", branch, base],
+            workDir: localRoot, environment: [:]
+        )
+        guard cut.ok else { return "could not create \(branch) here: \(cut.output)" }
+
+        // A scratch worktree, because `git am` needs a work tree and the
+        // operator's checkout is not ours to disturb - they may have files open
+        // in it. Applying with a temporary index instead would land the changes
+        // as one blob and lose the commit boundaries, which are the bee's
+        // account of what it did.
+        let scratch = NSTemporaryDirectory() + "queen-import-\(UUID().uuidString)"
+        defer { _ = local.run(arguments: ["worktree", "remove", "--force", scratch],
+                              workDir: localRoot, environment: [:]) }
+        let added = local.run(
+            arguments: ["worktree", "add", "--force", scratch, branch],
+            workDir: localRoot, environment: [:]
+        )
+        guard added.ok else { return "could not open a scratch checkout: \(added.output)" }
+
+        let applied = local.run(
+            arguments: ["am", "--3way", file],
+            workDir: scratch, environment: [:]
+        )
+        guard applied.ok else {
+            // Leave nothing half-applied behind for the next attempt to trip on.
+            _ = local.run(arguments: ["am", "--abort"], workDir: scratch, environment: [:])
+            return "could not replay \(branch) here: \(applied.output)"
+        }
+        return nil
+    }
 }
