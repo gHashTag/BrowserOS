@@ -562,3 +562,73 @@ and that is an authorization boundary rather than a location problem:
 
 Each is one paste. None is a paste I make: entering an API key or token into a
 field is not something I do, whoever asks and however the value arrives.
+
+---
+
+## The tick reached dispatch, and my "empty board" was the wrong repository
+
+### A correction
+
+I reported "0 open issues, confirmed twice, by two independent methods". Both
+methods were pointed at **`gHashTag/BrowserOS`** - the git remote of the
+monorepo. The Queen's issues live in **`gHashTag/trios`**, which every slug in
+her own registry says plainly: `gHashTag/trios#1286`. Two independent methods
+against the same wrong repository are not two confirmations; they are one
+mistake, checked twice.
+
+The right repository has **40 open issues**.
+
+What gave it away was `issue 1090 -> 404` from inside the container, on an epic
+that certainly exists. A 404 for something known to exist is worth more than a
+0 for something assumed absent.
+
+### The round, end to end
+
+```
+  #1244  branch=queen-1244  started=False   at 15:13:02
+    no provider credential in this deployment - set one of ZAI_API_KEY,
+    ANTHROPIC_API_KEY, OPENROUTER_API_KEY, MOONSHOT_API_KEY, OPENAI_API_KEY.
+    Only the operator can.
+```
+
+Everything before the credential ran: the lease was taken, the registry read,
+40 candidates fetched, and `queend` picked #1244 - *QueenTabView написан под
+удалённый API trinity* - because its declared boundary,
+`BR-OUTPUT/QueenTabView.swift`, is held by nobody. The choice was made by the
+Queen's own policy, compiled for Linux, against a boundary parsed by the rule
+the app uses.
+
+And the ordering claim is now measured rather than read:
+
+```
+/workspace/BrowserOS  338a8c6f [feat/queen-supervisor]
+branches: 0
+.worktrees: 0
+```
+
+A refusal that leaves no branch and no directory behind. The credential check
+runs before git is touched, so the round costs nothing when it cannot proceed.
+
+### The board the container decides against
+
+The registry mirror is written by the app and knows nothing about what the tick
+started. Without feeding its own dispatches back, a round would choose an issue,
+dispatch a bee, and thirty minutes later find the same issue unclaimed and
+dispatch another - forever, each new bee cutting a branch over the last one's.
+The symptom would be a swarm that looks busy beside a registry that never grows.
+
+In-flight dispatches are now shaped as running tasks and merged into the board,
+so BOTH guards apply: "a task already exists for it" and the boundary conflict
+check. That is why `queend` now returns `chosenPaths` and the dispatch row
+stores them - a task holding no paths holds nothing against anyone.
+
+### One line left
+
+The single remaining step for a bee to run in the cloud is a provider key on the
+deployment. The refusal names every variable that would do it. Not a paste I
+make.
+
+Noted in passing: the container's anonymous GitHub budget is 60/hour and a burst
+of diagnostic rounds spent 33 of them, with one round failing `GitHub returned
+403`. The normal path costs one request per round; the diagnostic override costs
+one per candidate.

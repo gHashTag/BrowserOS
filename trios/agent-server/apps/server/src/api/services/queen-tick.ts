@@ -39,10 +39,15 @@ import {
 
 const LEASE_NAME = 'queen-tick'
 const QUEEND = '/usr/local/bin/queend'
+/// A task shaped for the policy needs an id; a dispatch that never opened a
+/// conversation has none. All-zeroes is a UUID that decodes and can collide
+/// with nothing real.
+const ZERO_UUID = '00000000-0000-0000-0000-000000000000'
 
 interface QueendChoice {
   allowed: boolean
   chosen?: number | null
+  chosenPaths?: string[] | null
   refusal?: string | null
   skipped?: string[] | null
 }
@@ -246,11 +251,45 @@ async function runRound(
       open.map((i) => [String(i.number), i.body]),
     )
   }
+  // The board the container decides against is the app's mirror PLUS this
+  // container's own dispatches.
+  //
+  // The mirror is written by the app and knows nothing about what the tick
+  // started. Without this the round would choose an issue, dispatch a bee, and
+  // thirty minutes later find the same issue unclaimed and dispatch another -
+  // forever, with each new bee cutting a branch over the last one's. The
+  // symptom would have been a swarm that looks busy and a registry that never
+  // grows.
+  //
+  // Shaped as tasks rather than handled specially, so BOTH guards apply: the
+  // "a task already exists for it" check and the boundary conflict check. That
+  // is why the boundary is stored at dispatch - a task holding no paths holds
+  // nothing against anyone.
+  const inFlight = await pool.query(
+    `SELECT issue, branch, owned_paths, conversation_id, dispatched_at
+       FROM queen_dispatch
+      WHERE started = true
+        AND dispatched_at > now() - interval '24 hours'`,
+  )
+  const [owner, repoName] = repo.split('/')
+  const containerTasks = inFlight.rows.map((row) => ({
+    id: row.conversation_id ?? ZERO_UUID,
+    conversationId: row.conversation_id ?? ZERO_UUID,
+    issue: { owner, repo: repoName, number: row.issue },
+    title: `dispatched by the cloud tick`,
+    worker: 'cloud-tick',
+    state: 'running',
+    ownedPaths: row.owned_paths ?? [],
+    virtualBranch: row.branch,
+    createdAt: row.dispatched_at,
+    updatedAt: row.dispatched_at,
+  }))
+
   const choice = await askQueend({
     kind: 'choose',
     candidates,
     candidateBodies,
-    tasks: registry.rows[0].tasks,
+    tasks: [...registry.rows[0].tasks, ...containerTasks],
   })
 
   await recordTick(pool, holder, grant.fence, choice)
@@ -268,6 +307,7 @@ async function runRound(
       pool,
       choice.chosen,
       briefFor(choice.chosen, repo),
+      choice.chosenPaths ?? [],
     )
     return { ran: true, choice, dispatch }
   }

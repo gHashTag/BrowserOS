@@ -282,6 +282,7 @@ export async function dispatchBee(
   pool: Pool,
   issue: number,
   brief: string,
+  ownedPaths: string[],
 ): Promise<DispatchOutcome> {
   const branch = `queen-${issue}`
 
@@ -292,13 +293,20 @@ export async function dispatchBee(
       issue,
       detail,
     })
-    await recordDispatch(pool, issue, branch, false, detail)
+    await recordDispatch(pool, issue, branch, false, detail, ownedPaths)
     return { started: false, issue, branch, detail }
   }
 
   const worktree = await prepareWorktree(issue)
   if (!worktree.ok) {
-    await recordDispatch(pool, issue, branch, false, worktree.detail)
+    await recordDispatch(
+      pool,
+      issue,
+      branch,
+      false,
+      worktree.detail,
+      ownedPaths,
+    )
     return { started: false, issue, branch, detail: worktree.detail }
   }
 
@@ -315,7 +323,15 @@ export async function dispatchBee(
     ? `${worktree.detail}; ${chosen.provider}/${chosen.model}`
     : turn.detail
 
-  await recordDispatch(pool, issue, branch, turn.ok, detail, conversationId)
+  await recordDispatch(
+    pool,
+    issue,
+    branch,
+    turn.ok,
+    detail,
+    ownedPaths,
+    conversationId,
+  )
   logger.info('Queen dispatch', { issue, branch, started: turn.ok, detail })
   return { started: turn.ok, issue, branch, detail, conversationId }
 }
@@ -326,17 +342,27 @@ async function recordDispatch(
   branch: string,
   started: boolean,
   detail: string,
+  ownedPaths: string[],
   conversationId?: string,
 ): Promise<void> {
   await pool.query(
-    `INSERT INTO queen_dispatch (issue, branch, started, detail, conversation_id, dispatched_at)
-     VALUES ($1, $2, $3, $4, $5, now())
+    `INSERT INTO queen_dispatch
+       (issue, branch, started, detail, owned_paths, conversation_id, dispatched_at)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6, now())
      ON CONFLICT (issue) DO UPDATE
        SET branch = EXCLUDED.branch,
            started = EXCLUDED.started,
            detail = EXCLUDED.detail,
+           owned_paths = EXCLUDED.owned_paths,
            conversation_id = EXCLUDED.conversation_id,
            dispatched_at = EXCLUDED.dispatched_at`,
-    [issue, branch, started, detail, conversationId ?? null],
+    [
+      issue,
+      branch,
+      started,
+      detail,
+      JSON.stringify(ownedPaths),
+      conversationId ?? null,
+    ],
   )
 }

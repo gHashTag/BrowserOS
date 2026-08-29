@@ -110,6 +110,10 @@ CREATE TABLE IF NOT EXISTS queen_dispatch (
   started boolean NOT NULL,
   detail text NOT NULL,
   conversation_id text,
+  -- The boundary the bee was given. Without it the container's own in-flight
+  -- work cannot hold a path against the next round, and a task that holds
+  -- nothing is a task the boundary system cannot see.
+  owned_paths jsonb NOT NULL DEFAULT '[]'::jsonb,
   dispatched_at timestamptz NOT NULL DEFAULT now()
 );
 
@@ -120,6 +124,9 @@ CREATE TABLE IF NOT EXISTS queen_tick (
   decided_at timestamptz NOT NULL DEFAULT now(),
   decision jsonb NOT NULL
 );
+
+ALTER TABLE queen_dispatch
+  ADD COLUMN IF NOT EXISTS owned_paths jsonb NOT NULL DEFAULT '[]'::jsonb;
 
 CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation_order
   ON "conversationMessages" ("conversationId", "orderIndex");

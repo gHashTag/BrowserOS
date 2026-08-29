@@ -53,12 +53,21 @@ struct Answer: Encodable {
     /// nobody can audit - eight of them in one tick once read as a busy swarm
     /// when five tasks were escalated and holding their paths.
     let chosen: Int?
+    /// The chosen candidate's own declared boundary.
+    ///
+    /// Travels with the choice because the caller has to record it. The tick's
+    /// own dispatches are not in the registry mirror - the app writes that -
+    /// so the container must feed its in-flight work back into the next round
+    /// itself, and a task without its paths cannot hold a boundary against
+    /// anyone. Recomputing this in TypeScript would be a second parser, which
+    /// is the defect this whole file exists to avoid.
+    let chosenPaths: [String]?
     let skipped: [String]?
     let error: String?
 }
 
 func fail(_ message: String) -> Never {
-    let out = Answer(kind: "error", strays: nil, refusal: nil, allowed: nil, chosen: nil, skipped: nil, error: message)
+    let out = Answer(kind: "error", strays: nil, refusal: nil, allowed: nil, chosen: nil, chosenPaths: nil, skipped: nil, error: message)
     if let data = try? JSONEncoder().encode(out) {
         FileHandle.standardOutput.write(data)
     }
@@ -100,7 +109,7 @@ case "boundary":
     let strays = QueenBoundaryPaths.strays(
         among: writes, ownedPaths: owned, root: question.root ?? "/workspace/BrowserOS"
     )
-    emit(Answer(kind: "boundary", strays: strays, refusal: nil, allowed: strays.isEmpty, chosen: nil, skipped: nil, error: nil))
+    emit(Answer(kind: "boundary", strays: strays, refusal: nil, allowed: strays.isEmpty, chosen: nil, chosenPaths: nil, skipped: nil, error: nil))
 
 case "retry":
     // Whether an issue is worth another bee, and why not when it is not. The
@@ -114,9 +123,9 @@ case "retry":
     }
     switch QueenRetryPolicy.decision(priorAttempts: kinds) {
     case .escalate(let reason):
-        emit(Answer(kind: "retry", strays: nil, refusal: reason, allowed: false, chosen: nil, skipped: nil, error: nil))
+        emit(Answer(kind: "retry", strays: nil, refusal: reason, allowed: false, chosen: nil, chosenPaths: nil, skipped: nil, error: nil))
     default:
-        emit(Answer(kind: "retry", strays: nil, refusal: nil, allowed: true, chosen: nil, skipped: nil, error: nil))
+        emit(Answer(kind: "retry", strays: nil, refusal: nil, allowed: true, chosen: nil, chosenPaths: nil, skipped: nil, error: nil))
     }
 
 case "choose":
@@ -133,11 +142,12 @@ case "choose":
         emit(Answer(kind: "choose", strays: nil,
                     refusal: "\(running) workers already running "
                         + "(limit \(QueenDelegationPolicy.maximumConcurrentWorkers))",
-                    allowed: false, chosen: nil, skipped: nil, error: nil))
+                    allowed: false, chosen: nil, chosenPaths: nil, skipped: nil, error: nil))
         exit(0)
     }
     var skipped: [String] = []
     var pick: Int?
+    var pickPaths: [String] = []
     let now = Date()
     for number in candidates {
         if let existing = tasks.first(where: { $0.issue.number == number }) {
@@ -180,11 +190,18 @@ case "choose":
                 + holders.map(\.issue.slug).joined(separator: ", "))
             continue
         }
-        if pick == nil { pick = number } else { skipped.append("#\(number): not first") }
+        if pick == nil {
+            pick = number
+            pickPaths = owned
+        } else {
+            skipped.append("#\(number): not first")
+        }
     }
     emit(Answer(kind: "choose", strays: nil,
                 refusal: pick == nil ? "nothing to choose" : nil,
-                allowed: pick != nil, chosen: pick, skipped: skipped, error: nil))
+                allowed: pick != nil, chosen: pick,
+                chosenPaths: pick == nil ? nil : pickPaths,
+                skipped: skipped, error: nil))
 
 case "language":
     // L3: everything written here is English. Judged on the rewrite rather
@@ -198,7 +215,7 @@ case "language":
     let refusal = QueenLanguagePolicy.rewriteRefusal(
         path: path, before: before, after: after
     )
-    emit(Answer(kind: "language", strays: nil, refusal: refusal, allowed: refusal == nil, chosen: nil, skipped: nil, error: nil))
+    emit(Answer(kind: "language", strays: nil, refusal: refusal, allowed: refusal == nil, chosen: nil, chosenPaths: nil, skipped: nil, error: nil))
 
 default:
     fail("unknown question kind: \(question.kind)")
