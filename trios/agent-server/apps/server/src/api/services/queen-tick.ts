@@ -28,7 +28,7 @@
 import { spawn } from 'node:child_process'
 import { Pool } from 'pg'
 import { logger } from '../../lib/logger'
-import { dispatchBee } from './queen-dispatch'
+import { dispatchBee, reapStalledDispatches } from './queen-dispatch'
 import {
   acquireQueenLease,
   logLeaseOutcome,
@@ -251,6 +251,18 @@ async function runRound(
       open.map((i) => [String(i.number), i.body]),
     )
   }
+  // Reap before reading the board, not after.
+  //
+  // A dispatch that has stopped without saying so still holds its paths, so a
+  // board read before the sweep is a board with phantom work on it - and the
+  // round would skip a candidate on behalf of a bee that died in a redeploy an
+  // hour ago. Same ordering the app's own review scheduler uses, for the same
+  // reason: housekeeping first, then decide.
+  const reaped = await reapStalledDispatches(pool)
+  if (reaped.length > 0) {
+    logger.info('Queen tick reaped stalled dispatches', { issues: reaped })
+  }
+
   // The board the container decides against is the app's mirror PLUS this
   // container's own dispatches.
   //
@@ -269,6 +281,7 @@ async function runRound(
     `SELECT issue, branch, owned_paths, conversation_id, dispatched_at
        FROM queen_dispatch
       WHERE started = true
+        AND finished_at IS NULL
         AND dispatched_at > now() - interval '24 hours'`,
   )
   const [owner, repoName] = repo.split('/')

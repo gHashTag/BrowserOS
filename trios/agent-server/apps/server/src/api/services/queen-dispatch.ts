@@ -200,6 +200,8 @@ export async function prepareWorktree(
  * whole hive's half hour.
  */
 async function startTurn(
+  pool: Pool,
+  issue: number,
   conversationId: string,
   brief: string,
   workingDirectory: string,
@@ -237,7 +239,7 @@ async function startTurn(
         detail: `chat answered ${response.status}: ${body.slice(0, 200)}`,
       }
     }
-    void drain(response, conversationId)
+    void drain(pool, response, conversationId, issue)
     return { ok: true, detail: 'turn accepted' }
   } catch (error) {
     return {
@@ -247,24 +249,85 @@ async function startTurn(
   }
 }
 
+/**
+ * Read the stream to its end, and write down that it ended.
+ *
+ * The recording is the point, not the reading. A dispatch with no way to finish
+ * holds its boundary for ever, and every issue overlapping those paths is
+ * skipped for ever with it - which is exactly the defect this repository
+ * already carries in `awaitingReview`, where a state that is not terminal
+ * parked #1286 for five days and blocked everything it touched.
+ *
+ * A stream that ends badly still ends. The outcome is written on the error path
+ * too, because a bee whose connection dropped is a bee that is not working, and
+ * treating it as still running is how the boundary leaks.
+ */
 async function drain(
+  pool: Pool,
   response: Response,
   conversationId: string,
+  issue: number,
 ): Promise<void> {
+  let outcome = 'finished'
   try {
     const reader = response.body?.getReader()
-    if (!reader) return
-    while (true) {
-      const { done } = await reader.read()
-      if (done) break
+    if (!reader) {
+      outcome = 'no stream'
+    } else {
+      while (true) {
+        const { done } = await reader.read()
+        if (done) break
+      }
     }
-    logger.info('Queen worker turn finished', { conversationId })
+    logger.info('Queen worker turn finished', { conversationId, issue })
   } catch (error) {
-    logger.warn('Queen worker stream ended badly', {
-      conversationId,
-      error: error instanceof Error ? error.message : String(error),
-    })
+    outcome = `stream ended badly: ${
+      error instanceof Error ? error.message : String(error)
+    }`
+    logger.warn('Queen worker stream ended badly', { conversationId, issue })
   }
+  await finishDispatch(pool, issue, outcome).catch(() => {})
+}
+
+export async function finishDispatch(
+  pool: Pool,
+  issue: number,
+  outcome: string,
+): Promise<void> {
+  await pool.query(
+    `UPDATE queen_dispatch
+        SET finished_at = now(), outcome = $2
+      WHERE issue = $1 AND finished_at IS NULL`,
+    [issue, outcome.slice(0, 500)],
+  )
+}
+
+/**
+ * Release dispatches that have stopped without saying so.
+ *
+ * A container redeployed mid-turn takes its streams with it, and nothing is
+ * left to write the ending. Without a sweep those rows stay `started` and
+ * unfinished for ever, and the issue they name can never be chosen again - a
+ * permanent hole in the board, caused by a deploy.
+ *
+ * Returns what it reaped so the round can say so out loud. A reaper that works
+ * silently is indistinguishable from one that is not running.
+ */
+export async function reapStalledDispatches(
+  pool: Pool,
+  stallMinutes = 120,
+): Promise<number[]> {
+  const reaped = await pool.query(
+    `UPDATE queen_dispatch
+        SET finished_at = now(),
+            outcome = 'reaped: no completion within ' || $1 || ' minutes'
+      WHERE started = true
+        AND finished_at IS NULL
+        AND dispatched_at < now() - make_interval(mins => $1)
+      RETURNING issue`,
+    [stallMinutes],
+  )
+  return reaped.rows.map((r) => r.issue as number)
 }
 
 export interface DispatchOutcome {
@@ -318,7 +381,14 @@ export async function dispatchBee(
   const workingDirectory = `${worktree.path}/trios`
 
   const conversationId = randomUUID()
-  const turn = await startTurn(conversationId, brief, workingDirectory, chosen)
+  const turn = await startTurn(
+    pool,
+    issue,
+    conversationId,
+    brief,
+    workingDirectory,
+    chosen,
+  )
   const detail = turn.ok
     ? `${worktree.detail}; ${chosen.provider}/${chosen.model}`
     : turn.detail
@@ -346,16 +416,25 @@ async function recordDispatch(
   conversationId?: string,
 ): Promise<void> {
   await pool.query(
+    // A dispatch that never started is already over, so it is written with its
+    // ending. Leaving `finished_at` null for a refusal would put it on the board
+    // looking like work in progress - and "refused an hour ago" and "running for
+    // an hour" are the two states an operator most needs to tell apart.
     `INSERT INTO queen_dispatch
-       (issue, branch, started, detail, owned_paths, conversation_id, dispatched_at)
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6, now())
+       (issue, branch, started, detail, owned_paths, conversation_id,
+        dispatched_at, finished_at, outcome)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6, now(),
+             CASE WHEN $3 THEN NULL ELSE now() END,
+             CASE WHEN $3 THEN NULL ELSE $4 END)
      ON CONFLICT (issue) DO UPDATE
        SET branch = EXCLUDED.branch,
            started = EXCLUDED.started,
            detail = EXCLUDED.detail,
            owned_paths = EXCLUDED.owned_paths,
            conversation_id = EXCLUDED.conversation_id,
-           dispatched_at = EXCLUDED.dispatched_at`,
+           dispatched_at = EXCLUDED.dispatched_at,
+           finished_at = EXCLUDED.finished_at,
+           outcome = EXCLUDED.outcome`,
     [
       issue,
       branch,

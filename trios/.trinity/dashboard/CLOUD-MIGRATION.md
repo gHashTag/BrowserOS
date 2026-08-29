@@ -632,3 +632,61 @@ Noted in passing: the container's anonymous GitHub budget is 60/hour and a burst
 of diagnostic rounds spent 33 of them, with one round failing `GitHub returned
 403`. The normal path costs one request per round; the diagnostic override costs
 one per candidate.
+
+---
+
+## A dispatch that could not end, and two self-inflicted outages
+
+### The defect I reproduced in my own code
+
+`dispatchBee` recorded `started=true` and there it stopped. Nothing wrote an
+ending, so the row stayed in flight for ever - and the in-flight query fed it
+back into every future round as a running task holding
+`BR-OUTPUT/QueenTabView.swift`. That issue could never be chosen again.
+
+Which is precisely the defect this session named as **what actually binds the
+swarm**: `awaitingReview` is not terminal, so a parked task holds its boundary
+permanently and #1286 held one for five days. I read that, wrote it down, and
+then built the same thing again one layer down.
+
+Three fixes:
+
+- the stream's end writes the outcome, **including on the error path** - a bee
+  whose connection dropped is a bee that is not working, and calling it running
+  is how the boundary leaks;
+- a reaper releases dispatches with no completion after two hours, because a
+  container redeployed mid-turn takes its streams with it and leaves nobody to
+  write the ending. It runs **before** the board is read: a board read first is
+  a board with phantom work on it;
+- a refusal is recorded as already ended. "Refused an hour ago" and "running for
+  an hour" are the two states an operator most needs to tell apart.
+
+```
+#1244  started=False  ended=2026-08-29T15:43:46
+   no provider credential in this deployment - set one of ZAI_API_KEY, ...
+```
+
+### Two outages, both mine
+
+**A backtick in a comment.** The migration SQL is a JavaScript template literal.
+I wrote `` `awaitingReview` `` inside a SQL comment, which ended the literal:
+
+```
+ReferenceError: awaitingReview is not defined
+  at /app/apps/server/src/lib/db/pg-migrate.ts:133:1
+```
+
+The server 502'd on deploy. A note *about* a stuck boundary took the whole
+service down. The comment now says so, in the string, so the next person writing
+prose in there knows it is code.
+
+**A silent no-op, twice.** I patch files with Python `.replace()`. Twice I
+omitted the assertion, the anchor had been reformatted by biome, and the edit
+did nothing while the surrounding edits landed - producing, first, a `drain()`
+called with four arguments and defined with two, and second, a route that
+SELECTed `finished_at` and never put it in the response. The second cost two
+deploys of debugging a column that was correct the whole time, because a missing
+key and a null value look identical from outside.
+
+Every anchor gets an assert. A patch that cannot fail is a patch that cannot be
+trusted to have happened.

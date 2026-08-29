@@ -128,6 +128,20 @@ CREATE TABLE IF NOT EXISTS queen_tick (
 ALTER TABLE queen_dispatch
   ADD COLUMN IF NOT EXISTS owned_paths jsonb NOT NULL DEFAULT '[]'::jsonb;
 
+-- A dispatch that cannot END is a boundary nobody can ever release. That is
+-- the defect this repository already carries in awaitingReview: a state that
+-- is not terminal, held by a task nobody is looking at, blocking every issue
+-- that overlaps its paths. #1286 held one for five days.
+--
+-- No backticks in this string, ever. It is a JS template literal, so a
+-- backtick in a SQL COMMENT ends the literal. That is how a note about a stuck
+-- boundary became ReferenceError: awaitingReview is not defined and took the
+-- whole server to 502 on deploy. Prose punctuation in here is code.
+ALTER TABLE queen_dispatch
+  ADD COLUMN IF NOT EXISTS finished_at timestamptz;
+ALTER TABLE queen_dispatch
+  ADD COLUMN IF NOT EXISTS outcome text;
+
 CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation_order
   ON "conversationMessages" ("conversationId", "orderIndex");
 `

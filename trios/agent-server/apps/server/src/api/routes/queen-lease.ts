@@ -111,7 +111,8 @@ export function createQueenLeaseRoute() {
             [LEASE_NAME],
           )
           const dispatches = await pool.query(
-            `SELECT issue, branch, started, detail, conversation_id, dispatched_at
+            `SELECT issue, branch, started, detail, conversation_id,
+                  dispatched_at, finished_at, outcome
              FROM queen_dispatch ORDER BY dispatched_at DESC LIMIT 10`,
           )
           return c.json({
@@ -123,6 +124,12 @@ export function createQueenLeaseRoute() {
               detail: r.detail,
               conversationId: r.conversation_id,
               dispatchedAt: r.dispatched_at,
+              // Present even when null. "still running" and "this server does
+              // not record endings" look identical when the key is simply
+              // missing - which is exactly how a working column read as a
+              // broken one for two deploys.
+              finishedAt: r.finished_at,
+              outcome: r.outcome,
             })),
             lastTick: tick.rowCount
               ? {
