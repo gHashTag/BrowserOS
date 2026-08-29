@@ -115,17 +115,33 @@ struct RemoteGitExecutor: QueenGitExecutor {
         // Every argument is single-quoted with embedded quotes escaped, so a
         // commit message containing a quote, a newline or a `;` is data rather
         // than shell. The committer passes bee-authored text through here.
-        let command = ([
-            environment.map { "\(Self.shellQuote($0.key))=\(Self.shellQuote($0.value))" }
-                .sorted()
-                .joined(separator: " "),
-            "git"
-        ] + arguments.map(Self.shellQuote))
-            .filter { !$0.isEmpty }
+        let assignments = environment.keys.sorted()
+            .compactMap { key -> String? in
+                guard Self.isAssignableName(key), let value = environment[key]
+                else { return nil }
+                return "\(key)=\(Self.shellQuote(value))"
+            }
+        let command = (assignments + ["git"] + arguments.map(Self.shellQuote))
             .joined(separator: " ")
 
         let full = "cd \(Self.shellQuote(workDir)) && \(command)"
         return callBash(full)
+    }
+
+    /// Whether a name can prefix a command as a shell assignment.
+    ///
+    /// The NAME must not be quoted. `'GIT_ASKPASS'=''` is not an assignment to
+    /// a POSIX shell - it is a command whose name happens to contain `=`, and
+    /// `sh` says so: `GIT_ASKPASS=: not found`, exit 127. Measured against the
+    /// live container, where it failed every `git add -A` the Queen sent.
+    ///
+    /// Since the name cannot be quoted it has to be checked instead, or a key
+    /// carrying a space or a semicolon would be injected shell. Nothing in this
+    /// codebase passes an attacker-chosen key, and that is exactly the
+    /// assumption worth not depending on.
+    static func isAssignableName(_ name: String) -> Bool {
+        guard let first = name.first, first.isLetter || first == "_" else { return false }
+        return name.allSatisfy { $0.isLetter || $0.isNumber || $0 == "_" }
     }
 
     static func shellQuote(_ value: String) -> String {
