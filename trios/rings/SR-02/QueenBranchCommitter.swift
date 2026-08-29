@@ -176,12 +176,7 @@ enum QueenBranchCommitter {
     /// request belongs where its commits are; the issue stays as a link in the
     /// body.
     static func originRepository(projectRoot: String = ProjectPaths.root) -> String? {
-        let url = QueenStatusViewModel.runProcess(
-            "/usr/bin/git",
-            arguments: ["remote", "get-url", "origin"],
-            workDir: projectRoot,
-            timeout: 10
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        let url = QueenGit.output(["remote", "get-url", "origin"]).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !url.isEmpty else { return nil }
         // git@github.com:owner/name.git or https://github.com/owner/name.git
         guard let range = url.range(of: "github.com") else { return nil }
@@ -213,12 +208,7 @@ enum QueenBranchCommitter {
     /// nil as "do not open a PR": silently guessing the wrong base is worse
     /// than not opening one.
     static func baseBranch(projectRoot: String = ProjectPaths.root) -> String? {
-        let branch = QueenStatusViewModel.runProcess(
-            "/usr/bin/git",
-            arguments: ["rev-parse", "--abbrev-ref", "HEAD"],
-            workDir: projectRoot,
-            timeout: 10
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        let branch = QueenGit.output(["rev-parse", "--abbrev-ref", "HEAD"]).trimmingCharacters(in: .whitespacesAndNewlines)
 
         // `git rev-parse --abbrev-ref HEAD` prints the branch name (e.g.
         // `feat/queen-supervisor`) or the literal `HEAD` when detached.
@@ -245,22 +235,12 @@ enum QueenBranchCommitter {
         let beeRef = "refs/heads/\(beeBranch)"
 
         // Verify the branch exists and get its tip.
-        let tip = QueenStatusViewModel.runProcess(
-            "/usr/bin/git",
-            arguments: ["rev-parse", "--verify", beeRef],
-            workDir: root,
-            timeout: 10
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        let tip = QueenGit.output(["rev-parse", "--verify", beeRef], in: root).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !tip.isEmpty, !tip.contains("fatal:") else { return nil }
 
         // The merge-base of the bee's branch and HEAD is the commit the
         // branch was created from.
-        let base = QueenStatusViewModel.runProcess(
-            "/usr/bin/git",
-            arguments: ["merge-base", beeRef, "HEAD"],
-            workDir: root,
-            timeout: 10
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        let base = QueenGit.output(["merge-base", beeRef, "HEAD"], in: root).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !base.isEmpty, !base.contains("fatal:") else { return nil }
 
         // If the merge-base is the tip, the branch has no commits of its
@@ -567,7 +547,8 @@ enum QueenBranchCommitter {
             // Worktree directory: under the system temp, never under the
             // shared checkout or /Users/playra/trios-land.
             let safeName = beeBranch.replacingOccurrences(of: "/", with: "-")
-            let worktreePath = NSTemporaryDirectory()
+            // git cuts this checkout, so it lives where git runs.
+            let worktreePath = QueenGit.temporaryDirectory
                 + "queen-worktrees/\(safeName)"
 
             // Remove a stale worktree from a previous run if one exists.
@@ -734,20 +715,10 @@ enum QueenBranchCommitter {
         projectRoot: String = ProjectPaths.root
     ) -> [String] {
         branches.filter { branch in
-            let ahead = QueenStatusViewModel.runProcess(
-                "/usr/bin/git",
-                arguments: ["rev-list", "--count", "\(baseRef)..\(branch)"],
-                workDir: projectRoot, timeout: 15
-            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            let ahead = QueenGit.output(["rev-list", "--count", "\(baseRef)..\(branch)"]).trimmingCharacters(in: .whitespacesAndNewlines)
             guard let count = Int(ahead), count > 0 else { return false }
-            let mergeBase = QueenStatusViewModel.runProcess(
-                "/usr/bin/git", arguments: ["merge-base", branch, baseRef],
-                workDir: projectRoot, timeout: 15
-            ).trimmingCharacters(in: .whitespacesAndNewlines)
-            let baseSHA = QueenStatusViewModel.runProcess(
-                "/usr/bin/git", arguments: ["rev-parse", baseRef],
-                workDir: projectRoot, timeout: 15
-            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            let mergeBase = QueenGit.output(["merge-base", branch, baseRef]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let baseSHA = QueenGit.output(["rev-parse", baseRef]).trimmingCharacters(in: .whitespacesAndNewlines)
             return QueenWorktree.staleBranchReason(
                 branchExists: true, mergeBase: mergeBase, head: baseSHA
             ) == nil
@@ -1118,6 +1089,9 @@ enum QueenBranchCommitter {
             let index = temporaryIndexPath()
             defer { try? FileManager.default.removeItem(atPath: index) }
 
+            // Deliberately LOCAL, unlike the git scratch above: this tree is
+            // compiled by `swift build` on this machine, which is the one step
+            // that cannot move to a Linux container.
             let tempDir = NSTemporaryDirectory()
                 + "queen-combined-\(UUID().uuidString)/"
             let fm = FileManager.default
@@ -1219,8 +1193,13 @@ enum QueenBranchCommitter {
 
     // MARK: - Plumbing
 
+    /// Scratch for `GIT_INDEX_FILE`, on whichever machine runs git.
+    ///
+    /// This path is handed to git, so a macOS temp directory sent to a
+    /// container is a path git cannot create - and the resulting commit stages
+    /// nothing, which reads as a worker that did no work.
     private static func temporaryIndexPath() -> String {
-        NSTemporaryDirectory() + "queen-index-\(UUID().uuidString)"
+        QueenGit.temporaryDirectory + "queen-index-\(UUID().uuidString)"
     }
 
     /// The repository root, which is not necessarily the project directory:

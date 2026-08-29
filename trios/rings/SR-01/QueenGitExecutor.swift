@@ -265,6 +265,45 @@ enum QueenGit {
         return remoteRepositoryRoot + suffix
     }
 
+    /// Runs git where the repository is and returns what it said.
+    ///
+    /// Shaped like the `runProcess("/usr/bin/git", …)` calls it replaces, which
+    /// returned stdout and stderr merged and let callers judge by the text -
+    /// `line.hasPrefix("fatal")`, `output.isEmpty`. Those judgements still hold:
+    /// on failure this returns git's complaint, on success only stdout, so a
+    /// warning on stderr no longer contaminates a successful answer.
+    ///
+    /// `workDir` defaults to the project root **as the executing machine sees
+    /// it**. Every call site replaced here passed `ProjectPaths.root`, which is
+    /// this Mac - correct while git ran here and wrong the moment it did not.
+    static func output(_ arguments: [String], in workDir: String? = nil) -> String {
+        executor.run(
+            arguments: arguments,
+            workDir: workDir ?? projectRoot(),
+            environment: [:]
+        ).output
+    }
+
+    /// A directory for scratch files that git itself will read or write.
+    ///
+    /// It has to be on the machine that RUNS git, not the one that composed the
+    /// command. `NSTemporaryDirectory()` is `/var/folders/…` on macOS, and git
+    /// in a container told to put its index there fails outright - the
+    /// directory does not exist and git does not create parents for
+    /// `GIT_INDEX_FILE`. The failure surfaces as a commit that staged nothing,
+    /// which reads as a bee that did no work.
+    ///
+    /// Not for scratch the APP reads. A combined tree built for `swift build`
+    /// is compiled here, so it belongs in `NSTemporaryDirectory()` and stays
+    /// there deliberately.
+    ///
+    /// Remote scratch is not cleaned up: deleting it would need a shell this
+    /// type does not have, and the container's `/tmp` goes away with the
+    /// container. An index is kilobytes and the leak is bounded by a redeploy.
+    static var temporaryDirectory: String {
+        ProjectPaths.agentServerIsRemote ? "/tmp/" : NSTemporaryDirectory()
+    }
+
     static var executor: QueenGitExecutor {
         guard ProjectPaths.agentServerIsRemote else { return LocalGitExecutor() }
         return RemoteGitExecutor(

@@ -5239,26 +5239,11 @@ final class ChatViewModel: ObservableObject {
     /// the question the failure message could not answer.
     private func createVirtualBranch(named name: String) async -> String? {
         await Task.detached(priority: .utility) {
-            let existing = QueenStatusViewModel.runProcess(
-                "/usr/bin/git",
-                arguments: ["branch", "--list", name],
-                workDir: ProjectPaths.root,
-                timeout: 10
-            )
+            let existing = QueenGit.output(["branch", "--list", name])
             // Reconnecting to an existing task must not be treated as an error.
             if existing.contains(name) { return nil }
-            let attempt = QueenStatusViewModel.runProcess(
-                "/usr/bin/git",
-                arguments: ["branch", name, "HEAD"],
-                workDir: ProjectPaths.root,
-                timeout: 20
-            )
-            let created = QueenStatusViewModel.runProcess(
-                "/usr/bin/git",
-                arguments: ["branch", "--list", name],
-                workDir: ProjectPaths.root,
-                timeout: 10
-            )
+            let attempt = QueenGit.output(["branch", name, "HEAD"])
+            let created = QueenGit.output(["branch", "--list", name])
             if created.contains(name) { return nil }
             // git is usually loud about why, but a timeout or a killed process
             // leaves nothing to quote, and "" would read as success upstream.
@@ -5292,17 +5277,33 @@ final class ChatViewModel: ObservableObject {
     }
 
     private func prepareWorktree(for task: DelegatedTask, branch: String) async -> PreparedWorktree? {
-        let root = ProjectPaths.root
+        // The root the GIT runs in, which is not this machine when the agent
+        // server is remote. A worktree cut at a /Users/... path inside a
+        // container is created happily and is then unusable: the filesystem
+        // tools are bounded to TRIOS_FS_ROOT, so the bee sent to work there
+        // cannot read or write one file in it. Same derivation bug the project
+        // root had, one level out.
+        let root = QueenGit.projectRoot()
         let path = QueenWorktree.path(
             forIssue: task.issue.number,
             projectRoot: root,
             variant: ProjectPaths.variant.rawValue
         )
         return await Task.detached(priority: .utility) { () -> PreparedWorktree? in
+            // Through the executor, not /usr/bin/git, for the same reason the
+            // path above is derived: the worktree has to be cut on the machine
+            // whose filesystem the bee will then be pointed at. Cutting it here
+            // while the bee works there produces a task sent to a directory
+            // that does not exist, and the failure arrives as an agent that
+            // cannot read its own files rather than as a git error.
+            //
+            // The timeout argument is dropped: RemoteGitExecutor carries its
+            // own, and LocalGitExecutor waits for git the way this code always
+            // did before a timeout was added around it.
             func git(_ args: [String], timeout: TimeInterval = 25) -> String {
-                QueenStatusViewModel.runProcess(
-                    "/usr/bin/git", arguments: args, workDir: root, timeout: timeout
-                ).trimmingCharacters(in: .whitespacesAndNewlines)
+                QueenGit.executor.run(
+                    arguments: args, workDir: root, environment: [:]
+                ).output.trimmingCharacters(in: .whitespacesAndNewlines)
             }
 
             // A worktree left behind by a killed run is reusable only if it is
@@ -5395,15 +5396,8 @@ final class ChatViewModel: ObservableObject {
             return
         }
         await Task.detached(priority: .utility) {
-            _ = QueenStatusViewModel.runProcess(
-                "/usr/bin/git",
-                arguments: ["worktree", "remove", "--force", path],
-                workDir: root,
-                timeout: 60
-            )
-            _ = QueenStatusViewModel.runProcess(
-                "/usr/bin/git", arguments: ["worktree", "prune"], workDir: root, timeout: 30
-            )
+            _ = QueenGit.output(["worktree", "remove", "--force", path], in: root)
+            _ = QueenGit.output(["worktree", "prune"], in: root)
         }.value
         TriosLogBus.shared.info(
             .queen, "queen.worktree.released",
@@ -6363,12 +6357,7 @@ final class ChatViewModel: ObservableObject {
             // means the diff reflects only what this worker committed — never
             // what another bee wrote or cleaned in the shared tree (#1132).
             let branchRef = "refs/heads/\(branch)"
-            let branchTree = QueenStatusViewModel.runProcess(
-                "/usr/bin/git",
-                arguments: ["rev-parse", "\(branchRef)^{tree}"],
-                workDir: ProjectPaths.root,
-                timeout: 10
-            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            let branchTree = QueenGit.output(["rev-parse", "\(branchRef)^{tree}"]).trimmingCharacters(in: .whitespacesAndNewlines)
             guard !branchTree.isEmpty,
                   !branchTree.hasPrefix("fatal") else {
                 return "(Branch \(branch) could not be resolved — nothing to compare.)"
@@ -6378,18 +6367,8 @@ final class ChatViewModel: ObservableObject {
             // applies to decide there is nothing to open a pull request for.
             // Both git answers must resolve; a merge-base that fails falls
             // through to the diff rather than guessing emptiness.
-            let tip = QueenStatusViewModel.runProcess(
-                "/usr/bin/git",
-                arguments: ["rev-parse", "--verify", branchRef],
-                workDir: ProjectPaths.root,
-                timeout: 10
-            ).trimmingCharacters(in: .whitespacesAndNewlines)
-            let fork = QueenStatusViewModel.runProcess(
-                "/usr/bin/git",
-                arguments: ["merge-base", branchRef, "HEAD"],
-                workDir: ProjectPaths.root,
-                timeout: 10
-            ).trimmingCharacters(in: .whitespacesAndNewlines)
+            let tip = QueenGit.output(["rev-parse", "--verify", branchRef]).trimmingCharacters(in: .whitespacesAndNewlines)
+            let fork = QueenGit.output(["merge-base", branchRef, "HEAD"]).trimmingCharacters(in: .whitespacesAndNewlines)
             let branchCarriesNoCommits =
                 !tip.isEmpty && !tip.hasPrefix("fatal")
                 && !fork.isEmpty && !fork.hasPrefix("fatal")
@@ -6542,12 +6521,7 @@ final class ChatViewModel: ObservableObject {
                 QueenDelegationPolicy.normalizePath($0)
             })
         }
-        return QueenStatusViewModel.runProcess(
-            "/usr/bin/git",
-            arguments: args,
-            workDir: ProjectPaths.root,
-            timeout: 30
-        )
+        return QueenGit.output(args)
     }
 
     // MARK: - #1132 drill
@@ -6677,9 +6651,7 @@ final class ChatViewModel: ObservableObject {
             // it is spent in must agree (#1132).
             let repoRoot = QueenBranchCommitter.repositoryRoot()
             func git(_ args: [String], timeout: TimeInterval = 15) -> String {
-                QueenStatusViewModel.runProcess(
-                    "/usr/bin/git", arguments: args, workDir: repoRoot, timeout: timeout
-                ).trimmingCharacters(in: .whitespacesAndNewlines)
+                QueenGit.output(args, in: repoRoot).trimmingCharacters(in: .whitespacesAndNewlines)
             }
 
             // ── 1. The phantom reproduces ────────────────────────────────
@@ -7016,18 +6988,8 @@ final class ChatViewModel: ObservableObject {
             // `diffForReview` already promises.
             var branchTipSHA: String?
             if let branch {
-                let tip = QueenStatusViewModel.runProcess(
-                    "/usr/bin/git",
-                    arguments: ["rev-parse", "--verify", "refs/heads/\(branch)"],
-                    workDir: ProjectPaths.root,
-                    timeout: 10
-                ).trimmingCharacters(in: .whitespacesAndNewlines)
-                let fork = QueenStatusViewModel.runProcess(
-                    "/usr/bin/git",
-                    arguments: ["merge-base", "refs/heads/\(branch)", "HEAD"],
-                    workDir: ProjectPaths.root,
-                    timeout: 10
-                ).trimmingCharacters(in: .whitespacesAndNewlines)
+                let tip = QueenGit.output(["rev-parse", "--verify", "refs/heads/\(branch)"]).trimmingCharacters(in: .whitespacesAndNewlines)
+                let fork = QueenGit.output(["merge-base", "refs/heads/\(branch)", "HEAD"]).trimmingCharacters(in: .whitespacesAndNewlines)
                 let carriesWork =
                     !tip.isEmpty && !tip.hasPrefix("fatal")
                     && !fork.isEmpty && !fork.hasPrefix("fatal")
@@ -7050,12 +7012,7 @@ final class ChatViewModel: ObservableObject {
                     if let blobSHA = ChatViewModel.gitBlobSHA(
                         treeish: tip, path: path
                     ) {
-                        let fromBranch = QueenStatusViewModel.runProcess(
-                            "/usr/bin/git",
-                            arguments: ["cat-file", "blob", blobSHA],
-                            workDir: ProjectPaths.root,
-                            timeout: 10
-                        )
+                        let fromBranch = QueenGit.output(["cat-file", "blob", blobSHA])
                         if !fromBranch.trimmingCharacters(
                             in: .whitespacesAndNewlines
                         ).isEmpty {
@@ -7301,12 +7258,7 @@ final class ChatViewModel: ObservableObject {
         path: String
     ) -> String? {
         guard let treeish else { return nil }
-        let line = QueenStatusViewModel.runProcess(
-            "/usr/bin/git",
-            arguments: ["ls-tree", treeish, "--", path],
-            workDir: ProjectPaths.root,
-            timeout: 10
-        ).trimmingCharacters(in: .whitespacesAndNewlines)
+        let line = QueenGit.output(["ls-tree", treeish, "--", path]).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !line.isEmpty, !line.hasPrefix("fatal") else { return nil }
         // "100644 blob <sha>\t<path>"
         let fields = line.components(separatedBy: "\t").first?
@@ -9055,6 +9007,16 @@ final class ChatViewModel: ObservableObject {
     /// nil as "no work since the turn began", which is exactly what a
     /// missing worktree or an untouched boundary both mean here.
     nonisolated private static func boundaryLastTouched(task: DelegatedTask) -> Date? {
+        // Deliberately the LOCAL root, and only meaningful locally.
+        //
+        // This walks the worktree with FileManager to find when a boundary was
+        // last touched. Against a remote server the tree is in a container and
+        // FileManager cannot see it, so every answer would be "missing" - which
+        // this function's caller reads as "untouched". Reporting nil for
+        // "cannot tell" is the same value it already returns for "missing", and
+        // the guard above makes that an explicit decision rather than an
+        // accident of a path that does not exist here.
+        guard QueenGit.runsLocally else { return nil }
         let worktree = QueenWorktree.path(
             forIssue: task.issue.number,
             projectRoot: ProjectPaths.root,
