@@ -11,7 +11,15 @@ import Foundation
 /// looked. The difference matters because "re-check this" and "check this for
 /// the first time" are different instructions, and a gate that cannot tell
 /// them apart wastes the reviewer's attention on the wrong one.
-public enum QueenCriterionVerdict: String, Codable, Equatable, CaseIterable {
+// Sendable is explicit because this type became public.
+//
+// A non-public enum is implicitly Sendable; a public one is not, because the
+// compiler cannot see every module that will use it. Making this public for
+// the Linux QueenCore module therefore un-Sendable'd it, and the struct that
+// stores a dictionary of these inherited the warning. Nothing about the type
+// changed - four cases, no associated values - only what the compiler is
+// allowed to assume.
+public enum QueenCriterionVerdict: String, Codable, Equatable, CaseIterable, Sendable {
     case met
     case unmet
     case unchecked

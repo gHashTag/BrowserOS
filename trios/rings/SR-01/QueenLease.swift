@@ -27,8 +27,13 @@ public enum QueenLease {
         case heldBy(String)
         /// Exclusion could not be established. Also a refusal - see above.
         case unreachable(String)
-        /// No cloud server is configured, so this process is the only tick that
-        /// exists and contention is not a thing that can happen.
+        /// This app knows of no other supervisor to contend with.
+        ///
+        /// A claim about CONFIGURATION, not about the world. The container ticks
+        /// whether or not this app has its address, so an unconfigured Mac
+        /// standing beside a running cloud tick is two Queens - and this case is
+        /// what that looks like from here. It is reported rather than assumed
+        /// away for exactly that reason.
         case uncontested
 
         public var mayRun: Bool {
@@ -43,7 +48,8 @@ public enum QueenLease {
         public var reason: String {
             switch self {
             case .granted(let fence): return "lease held, term \(fence)"
-            case .uncontested: return "no cloud tick configured; running alone"
+            case .uncontested:
+                return "no supervisor address configured; nothing to contend with"
             case .heldBy(let who): return "another supervisor holds the lease (\(who))"
             case .unreachable(let why):
                 return "could not reach the lease, so standing down: \(why)"
@@ -61,6 +67,31 @@ public enum QueenLease {
         return "mac-\(host):\(ProcessInfo.processInfo.processIdentifier)"
     }
 
+    /// Where the lease lives.
+    ///
+    /// Resolved SEPARATELY from the agent server, and that separation is the
+    /// point. `agentServerIsRemote` answers "do my tools run in a container",
+    /// which is a different question from "is another supervisor awake" - a Mac
+    /// driving a local agent-server can still be racing a cloud tick, and gating
+    /// contention on the first question silently answers the second one wrong.
+    /// Measured on this machine the day the cloud tick went live: the app used
+    /// a loopback server, so the lease was skipped entirely, while the container
+    /// was taking terms of its own thirty minutes apart.
+    ///
+    /// Falls back to the agent server when THAT is remote, because then the two
+    /// questions do have the same answer and asking the operator to configure
+    /// the same host twice is how the two come to disagree.
+    static var endpoint: String? {
+        let configured = ProcessInfo.processInfo.environment["TRIOS_QUEEN_LEASE_URL"]
+            ?? Bundle.main.infoDictionary?["TRIOS_QUEEN_LEASE_URL"] as? String
+        if let configured, !configured.isEmpty {
+            var trimmed = configured
+            while trimmed.hasSuffix("/") { trimmed.removeLast() }
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        return ProjectPaths.agentServerIsRemote ? ProjectPaths.mcpBaseURL : nil
+    }
+
     /// Ask for the lease for `ttlSeconds`.
     ///
     /// The TTL must outlive a round. A round that takes longer than its lease
@@ -70,12 +101,15 @@ public enum QueenLease {
         ttlSeconds: Int = 300,
         session: URLSession = .shared
     ) async -> Outcome {
-        guard ProjectPaths.agentServerIsRemote else { return .uncontested }
+        guard let base = endpoint else { return .uncontested }
+        // A configured address with no token is NOT uncontested. Somebody said
+        // there is another supervisor at that address; being unable to talk to
+        // it is a refusal, not permission.
         guard let token = QueenGit.remoteToken else {
-            return .unreachable("no server token configured")
+            return .unreachable("a supervisor address is set but no token is")
         }
-        guard let url = URL(string: "\(ProjectPaths.mcpBaseURL)/queen/lease") else {
-            return .unreachable("bad server URL")
+        guard let url = URL(string: "\(base)/queen/lease") else {
+            return .unreachable("bad supervisor URL")
         }
 
         var request = URLRequest(url: url)
@@ -118,11 +152,11 @@ public enum QueenLease {
     /// which the container's tick stands down for no reason, and the whole point
     /// of two supervisors is that either may run whenever the other is not.
     public static func release(session: URLSession = .shared) async {
-        guard ProjectPaths.agentServerIsRemote,
+        guard let base = endpoint,
               let token = QueenGit.remoteToken,
               let encoded = holderName.addingPercentEncoding(
                 withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "\(ProjectPaths.mcpBaseURL)/queen/lease?holder=\(encoded)")
+              let url = URL(string: "\(base)/queen/lease?holder=\(encoded)")
         else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
