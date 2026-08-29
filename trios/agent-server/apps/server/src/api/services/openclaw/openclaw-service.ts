@@ -1768,3 +1768,22 @@ export function getOpenClawService(): OpenClawService {
   if (!service) service = new OpenClawService()
   return service
 }
+
+/**
+ * The service if one was started, and nothing if none was.
+ *
+ * `getOpenClawService` constructs on demand, which is right for a caller that
+ * needs one and wrong for a caller that is tearing down. Shutdown used it and
+ * therefore CREATED the runtime it meant to stop: on Linux the constructor
+ * throws `browseros-vm currently supports macOS only`, and because the throw
+ * happens before `.shutdown()` returns a promise, the `.catch()` beside it
+ * catches nothing. Measured on the deployed container - every shutdown ended
+ * in a stack trace, after a startup that had already logged "OpenClaw
+ * configuration failed, continuing without it" and carried on correctly.
+ *
+ * Stopping something that was never started is not an error to handle, it is
+ * a question to ask first.
+ */
+export function peekOpenClawService(): OpenClawService | null {
+  return service ?? null
+}

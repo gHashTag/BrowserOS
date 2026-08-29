@@ -14,7 +14,7 @@ import { EXIT_CODES } from '@browseros/shared/constants/exit-codes'
 import { createHttpServer } from './api/server'
 import {
   configureVmRuntime,
-  getOpenClawService,
+  peekOpenClawService,
 } from './api/services/openclaw/openclaw-service'
 import { CdpBackend } from './browser/backends/cdp'
 import { Browser } from './browser/browser'
@@ -38,7 +38,6 @@ import { runPgMigrations } from './lib/db/pg-migrate'
 import { identity } from './lib/identity'
 import { logger } from './lib/logger'
 import { metrics } from './lib/metrics'
-import { isPortInUseError } from './lib/port-binding'
 import { Sentry } from './lib/sentry'
 import { seedSoulTemplate } from './lib/soul'
 import { migrateBuiltinSkills } from './skills/migrate'
@@ -237,8 +236,10 @@ export class Application {
   async stop(reason?: string): Promise<void> {
     logger.info('Shutting down server...', { reason })
     stopSkillSync()
-    getOpenClawService()
-      .shutdown()
+    // Only what was actually started. `getOpenClawService` constructs on
+    // demand, so calling it here built the runtime it was meant to stop.
+    peekOpenClawService()
+      ?.shutdown()
       .catch(() => {})
     getHermesRuntime()
       ?.executeAction({ type: 'stop' })
@@ -346,28 +347,6 @@ export class Application {
         }`,
       )
     }
-  }
-
-  private handleStartupError(
-    serverName: string,
-    port: number,
-    error: unknown,
-  ): never {
-    const errorMsg = error instanceof Error ? error.message : String(error)
-    logger.error(`Failed to start ${serverName}`, { port, error: errorMsg })
-    console.error(
-      `[FATAL] Failed to start ${serverName} on port ${port}: ${errorMsg}`,
-    )
-
-    if (isPortInUseError(error)) {
-      console.error(
-        `[FATAL] Port ${port} is already in use. Chromium should try a different port.`,
-      )
-      process.exit(EXIT_CODES.PORT_CONFLICT)
-    }
-
-    Sentry.captureException(error)
-    process.exit(EXIT_CODES.GENERAL_ERROR)
   }
 
   private logStartupSummary(): void {
