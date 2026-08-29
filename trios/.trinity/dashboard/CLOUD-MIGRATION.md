@@ -238,3 +238,38 @@ and then read the remote's health as proof the spawn had worked.
 - One log line is misleading and was left alone: `PgAgentStore pool connected`
   is emitted even when the connection is refused, because `pg`'s Pool is lazy.
   `/health` carries the truth now.
+
+## What a headless Queen actually costs, measured 2026-08-29
+
+The plan said the target split was "3 import edits + 3 misfiled view files",
+on the strength of a build that compiled without SwiftUI. That build was on
+macOS, and compiling without SwiftUI is not compiling on Linux: Combine appears
+in 10 ring files, Security in 4, CryptoKit in 7, AppKit in 3, Cocoa in 2.
+
+**Portable today: 13 files, 3,778 lines.** All 25 `rings/SR-00/Queen*.swift`
+import Foundation and nothing else - 7,168 lines - but 12 of them reference
+types declared elsewhere, and the dependency closure walks from policy through
+transport and auth into `KeychainSecrets.swift`, which imports Security. The
+closure reached 54 files and 14,085 lines without converging. `make queen-core`
+compiles the thirteen that do stand alone, as a ratchet.
+
+**The SwiftPM split was attempted and reverted.** A `QueenCore` target
+containing those thirteen files **builds** - proven, 149 s, 16 compile steps.
+`TriOSKit` then does not: across a module boundary the types need `public` and
+the consumers need `import QueenCore`. Measured cost:
+
+| | count |
+|---|---:|
+| top-level declarations needing `public` | 19 (0 already public) |
+| members needing `public` | ~132 |
+| files needing `import QueenCore` | 18 |
+| errors after a mechanical `public` pass | 133, all "parameter uses an internal type" |
+
+That last row is the tail: nested types must be opened too, and each one opens
+the next. It is a real refactor with a converging but long cascade, not a
+manifest edit, and it was reverted rather than half-landed - the tree is
+byte-identical and `make` is green.
+
+The next session starts from a number instead of an estimate: ~150 visibility
+annotations and 18 imports, verifiable at each step with
+`swift build --target TriOSKit`.
