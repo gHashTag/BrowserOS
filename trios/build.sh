@@ -906,6 +906,38 @@ EOF
     # Copy to .app bundle
     cp "$OUTPUT" "$MACOS_DIR/trios"
     cp "$QUEEN_DYLIB" "$FRAMEWORKS_DIR/libQueenUILib.dylib"
+    chmod +w "$FRAMEWORKS_DIR/libQueenUILib.dylib"
+
+    # QueenUILib is built by the canonical package in the trinity checkout, and
+    # that package links XCTest. The dylib therefore carries
+    # @rpath/libXCTestSwiftSupport.dylib, which resolves while `swift build`
+    # supplies the test search paths and does NOT resolve inside an .app - so
+    # every release produced a bundle that died in dyld before main():
+    #
+    #   dyld: Library not loaded: @rpath/libXCTestSwiftSupport.dylib
+    #     Referenced from: .../Contents/Frameworks/libQueenUILib.dylib
+    #
+    # The launch check below caught it every time and the repair was done by
+    # hand every time - three times in one session. A build that cannot produce
+    # a launchable bundle on its own is not a build.
+    #
+    # Adding the rpaths is the local half of the fix. The dependency itself
+    # belongs to a package this repository does not own; removing it there is
+    # the other half and is not made here.
+    if otool -L "$FRAMEWORKS_DIR/libQueenUILib.dylib" 2>/dev/null \
+        | grep -q "libXCTestSwiftSupport.dylib"; then
+        for xctest_dir in \
+            "$(xcode-select -p 2>/dev/null)/Platforms/MacOSX.platform/Developer/usr/lib" \
+            "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr/lib" \
+            "/Applications/Xcode.app/Contents/SharedFrameworks"; do
+            [ -f "$xctest_dir/libXCTestSwiftSupport.dylib" ] || continue
+            # Already present is not an error: a rebuild over an existing
+            # bundle would otherwise fail on the second run.
+            install_name_tool -add_rpath "$xctest_dir" \
+                "$FRAMEWORKS_DIR/libQueenUILib.dylib" 2>/dev/null || true
+        done
+    fi
+
     rm -f "$FRAMEWORKS_DIR/$SQLCIPHER_DYLIB_NAME"
     cp -L "$SQLCIPHER_DYLIB" "$FRAMEWORKS_DIR/$SQLCIPHER_DYLIB_NAME"
     chmod +w "$FRAMEWORKS_DIR/$SQLCIPHER_DYLIB_NAME"
