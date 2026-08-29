@@ -27,6 +27,33 @@ COPY packages/build-tools/package.json packages/build-tools/
 
 RUN bun install --frozen-lockfile --production
 
+# Does the Queen's policy actually build on Linux?
+#
+# `make queen-core` on macOS proves these eleven files compile against
+# Foundation alone, and that is a weaker claim than it reads: Combine,
+# Security, CryptoKit and AppKit all import fine on a Mac and are absent on a
+# server, so a file that quietly acquired one would still pass that gate. This
+# stage compiles them with the Linux toolchain, so a regression fails the
+# deploy instead of failing a server nobody has written yet.
+#
+# The artifact is not shipped. It is the compile that is the evidence, and the
+# runtime image below carries no Swift.
+FROM swift:6.0-jammy AS queen-core
+WORKDIR /queen-core
+COPY queen-core/Package.swift ./
+COPY queen-core/Sources ./Sources
+RUN swift build -c release 2>&1 | tail -20
+# One file at a known path, because the layout of .build differs between
+# platforms and Swift versions and a COPY that guesses fails the deploy for a
+# reason that has nothing to do with the code it is meant to check.
+RUN find .build -name 'QueenCore.swiftmodule' -print -quit > /queen-core/built.txt \
+ && test -s /queen-core/built.txt \
+ && echo "QueenCore compiles on Linux: $(cat /queen-core/built.txt)" > /queen-core/PROOF
+# The binary itself, at a path that does not depend on the triple.
+RUN cp "$(swift build -c release --show-bin-path)/queend" /queen-core/queend \
+ && /queen-core/queend </dev/null 2>/dev/null; \
+    test -x /queen-core/queend
+
 FROM oven/bun:1.3.6 AS runtime
 WORKDIR /app
 
@@ -72,6 +99,16 @@ ENV WORKSPACE_DIR=/workspace
 RUN mkdir -p /workspace
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Forces the Swift stage to run: BuildKit builds only what the final image
+# depends on, so a stage nothing copies from is a stage that never compiles and
+# therefore never fails. The module itself is the evidence and it is tiny; the
+# Swift toolchain stays behind in that stage.
+COPY --from=queen-core /queen-core/PROOF /app/queen-core-linux.proof
+# The Queen's first decision-maker to run in the cloud rather than on a laptop.
+# Statically what it needs from Swift comes with it; the toolchain stays behind.
+COPY --from=queen-core /queen-core/queend /usr/local/bin/queend
+COPY --from=queen-core /usr/lib/swift/linux /usr/lib/swift/linux
 
 # Bind wide, because the platform routes to this container from outside and a
 # server on loopback accepts nothing while looking perfectly healthy from
