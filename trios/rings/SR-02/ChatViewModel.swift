@@ -9855,6 +9855,30 @@ final class ChatViewModel: ObservableObject {
             ) else { return }
             let reason = task.interventions.last
                 ?? "Sent back for another turn; the earlier attempt was not accepted."
+            // Its own checkout, or it shares one with every other bee.
+            //
+            // The delegation path cuts a worktree; the restart path assumed one
+            // already existed, which is true only when the first attempt ran on
+            // the same machine. Measured 2026-08-29: two tasks resumed against
+            // a containerised server did real work - 418 and 76 tool calls -
+            // in the SHARED /workspace/BrowserOS tree, because their recorded
+            // worktree paths belonged to a Mac. That is exactly the collision
+            // the boundary rule exists to make structural rather than hoped
+            // for.
+            //
+            // Idempotent: `git worktree add -B` over an existing checkout
+            // reuses it, so a resume on the machine that cut the tree costs
+            // nothing.
+            if let branch = task.virtualBranch,
+               let prepared = await prepareWorktree(for: task, branch: branch) {
+                delegationRegistry.setWorktreePath(taskID: task.id, path: prepared.path)
+                if prepared.branch != branch {
+                    delegationRegistry.setVirtualBranch(
+                        taskID: task.id, branch: prepared.branch
+                    )
+                }
+            }
+
             // Not `sendTaskBackToWorker`: its first act is to transition INTO
             // `rejected`, which a task already there cannot do, so it refused
             // every one of these and said so only in the Queen's chat. It
@@ -9874,11 +9898,17 @@ final class ChatViewModel: ObservableObject {
                 )
                 continue
             }
-            let rebrief = QueenBriefing.text(for: task)
+            // Re-read after the transition and the worktree: `task` is a
+            // value captured before both, and the runner reads worktreePath to
+            // decide where the bee works. Handing it the stale copy is how a
+            // bee gets sent to the tree it had before the resume.
+            guard let fresh = delegationRegistry.tasks.first(where: { $0.id == task.id })
+            else { continue }
+            let rebrief = QueenBriefing.text(for: fresh)
                 + "\n\nThe Queen returned your previous attempt. Reason: \(reason)"
-            workerBaselineTrees[task.conversationId] =
+            workerBaselineTrees[fresh.conversationId] =
                 await QueenBranchCommitter.snapshotWorkingTree()
-            runner.start(task: task, brief: rebrief)
+            runner.start(task: fresh, brief: rebrief)
             TriosLogBus.shared.info(
                 .queen, "queen.resume.rejected",
                 "Resumed \(task.issue.slug), sent back and never restarted",
