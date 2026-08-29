@@ -1030,6 +1030,60 @@ QUEEN_CORE_FILES := \
 	rings/SR-00/QueenT27Acceptance.swift
 QUEEN_CORE_FLOOR := 13
 
+# The eleven that are ALSO a module, which is fewer than the thirteen that
+# compile alone. QueenSelfAudit and QueenT27Acceptance are CONSTRUCTED from
+# outside, and a public struct's memberwise initializer stays internal in
+# Swift, so moving them across a module boundary needs hand-written public
+# initialisers - API design rather than a move. They compile standalone and are
+# checked by `queen-core`; they are not in the Linux module.
+QUEEN_CORE_LINUX_FILES := \
+	rings/SR-00/QueenBeeResult.swift \
+	rings/SR-00/QueenBoundaryPaths.swift \
+	rings/SR-00/QueenEpics.swift \
+	rings/SR-00/QueenEvidencePolicy.swift \
+	rings/SR-00/QueenLanguagePolicy.swift \
+	rings/SR-00/QueenLocalisation.swift \
+	rings/SR-00/QueenMergeGate.swift \
+	rings/SR-00/QueenMissionContract.swift \
+	rings/SR-00/QueenRetryPolicy.swift \
+	rings/SR-00/QueenReviewDecision.swift \
+	rings/SR-00/QueenSkillMatch.swift
+
+.PHONY: queen-core-sync
+# The eleven policy files exist twice, and this is what stops that being a bug.
+#
+# agent-server/queen-core/Sources/QueenCore holds a copy of rings/SR-00, because
+# the Docker build context is the agent-server directory and cannot reach up out
+# of it. A copy kept in step by hand is a copy that will eventually not be - the
+# same sentence build.sh uses about its own source list, and it was true there
+# too until sources-drift was written.
+#
+# Byte-for-byte, not "close enough": the copy is compiled by the Linux stage and
+# the original by the app, and a policy that differs between them is two
+# arbiters of the same rule.
+queen-core-sync:
+	@drift=""; \
+	for f in $(QUEEN_CORE_LINUX_FILES); do \
+		copy="agent-server/queen-core/Sources/QueenCore/$$(basename $$f)"; \
+		if [ ! -f "$$copy" ]; then \
+			drift="$$drift  MISSING  $$copy"$$'\n'; \
+		elif ! cmp -s "$$f" "$$copy"; then \
+			drift="$$drift  DIFFERS  $$(basename $$f)"$$'\n'; \
+		fi; \
+	done; \
+	extra=$$(ls agent-server/queen-core/Sources/QueenCore/*.swift 2>/dev/null | while read -r c; do \
+		b=$$(basename "$$c"); \
+		echo "$(QUEEN_CORE_LINUX_FILES)" | tr " " "\n" | grep -q "/$$b$$" || echo "  EXTRA    $$b"; \
+	done); \
+	if [ -n "$$drift" ] || [ -n "$$extra" ]; then \
+		echo "[FAIL] the Linux copy of the Queen's policy has drifted:"; \
+		printf '%s' "$$drift"; [ -n "$$extra" ] && printf '%s\n' "$$extra"; \
+		echo "       Copy rings/SR-00 over it in the same commit, or the app and"; \
+		echo "       the container stop agreeing about the same rule."; \
+		exit 1; \
+	fi; \
+	echo "[OK] queen-core-sync: the Linux copy is byte-identical to rings/SR-00"
+
 queen-core:
 	@out=$$(mktemp -d); trap 'rm -rf "$$out"' EXIT; \
 	present=0; missing=""; \
