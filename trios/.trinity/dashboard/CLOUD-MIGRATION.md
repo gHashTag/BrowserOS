@@ -287,3 +287,128 @@ green, `make sources-drift` agrees on 198 sources.
 The next session starts from a proven path and one named obstacle, instead of
 an estimate: the module boundary works, and `build.sh` is what has to learn
 about it.
+---
+
+## The tick moves: a lease, and a supervisor that wakes without a laptop
+
+2026-08-29. Everything a round needs had been in the container for days - the
+checkout, the tools, git, the registry, and the policy itself as a Linux
+binary. What stayed on the Mac was the thing that *wakes up*. The apparatus was
+cloud-resident and still could not start a round unless a laptop was open.
+
+The obstacle was never the timer. It was that switching one on would create a
+**second Queen**: a round reads the board, finds an issue unclaimed, and starts
+a bee. Two rounds reading the same board both find it unclaimed. The boundary
+system cannot arbitrate that - it is the thing being raced.
+
+### Exclusion, measured
+
+| | |
+|---|---|
+| where | `queen_lease` in Postgres, the one thing both sides can see |
+| acquire | ONE statement. `SELECT then UPDATE` has a window where both read "free" |
+| loser gets | zero rows, plus the incumbent's name - not an error, a normal outcome |
+| stale holder | fence token, incremented every term; a write from an ended term is refused by the database, not by the caller's goodwill |
+| release | expires the row, never deletes it - a reset counter lets term 5 outrank term 1 |
+
+Proven on the deployment, against the real database, through the real route:
+
+```
+  6 contenders, fired together, at a free lease
+    acquired=False holder=contender-4    fence=2
+    acquired=False holder=contender-4    fence=2
+    acquired=True  holder=contender-4    fence=2
+    acquired=False holder=contender-4    fence=2
+    acquired=False holder=contender-4    fence=2
+    acquired=False holder=contender-4    fence=2
+  VERDICT: exactly one Queen
+```
+
+The five losers all name the winner. That is the property that matters: a
+supervisor that cannot say who displaced it produces an operator who cannot
+tell a quiet hive from a broken one.
+
+### The round, running in the container
+
+```
+  lease  : held by 9680f61f-5649-41bf-ada3-484b53618805:1  fence=1
+  tick   : same holder, fence=1, at 2026-08-29T12:22:43
+  decided: allowed=False chosen=None refusal=nothing to choose
+```
+
+Nobody asked for that round. It fired on its own interval, took its own lease,
+read the registry out of Postgres, asked GitHub what was open, and handed the
+decision to `queend` - the same eleven Swift files the app uses, compiled for
+Linux.
+
+The refusal is correct and was checked rather than assumed, by two independent
+methods: the issues endpoint returned 10 items of which 0 were issues, and the
+search API independently reports **0 open issues, 10 open PRs**. There is
+genuinely nothing to delegate. A tick that had invented something to do would
+have been the more alarming result.
+
+### The Mac contends too
+
+Exclusion between cloud replicas is the easy half and not the half with two
+Queens in it. `QueenLease` (SR-01) takes the same lease over HTTP before the
+app's autonomous round runs, and covers the resume as well as the choice -
+a resumed task starts a worker exactly like a new one.
+
+When the lease cannot be reached, it **refuses**. A round not run costs half an
+hour. Two Queens running costs a board nobody can untangle, discovered later by
+whoever reads the merge conflict.
+
+### What is still on the Mac, named
+
+Dispatch. The tick chooses and records; starting the bee is still driven by the
+app. The container can cut a worktree and run a worker - that is proven - but
+the two halves are not yet joined. This is written into the source file itself
+rather than left for a reader to discover, because a loop that appears to run
+and quietly does half the job is the failure this record keeps documenting.
+
+### Three reds that were mine
+
+`make check` had not been run since the `queen-core` work landed, and all three
+failures came from it:
+
+1. `make-dollars` failed on the real Makefile - `$(QUEEN_CORE_FILES)`,
+   `$(QUEEN_CORE_FLOOR)` and the two `*_LINUX_FILES` lists were never added to
+   `MAKE_DOLLAR_VARS`.
+2. A Sendable warning: making `QueenCriterionVerdict` public for the module
+   un-Sendable'd it, because a public enum is not implicitly Sendable. Four
+   cases, no associated values - nothing about the type changed, only what the
+   compiler is allowed to assume.
+3. The `QueenDelegation` suite reported **compile failed** and had done since
+   the module split. `QueenDelegation.swift` now opens with `import QueenCore`,
+   and the e2e runner hands swiftc a list of files with no `-I`. The commit
+   that caused it claimed "120 delegation checks against the real module" - the
+   checks had stopped running. They run again now, and there are 120 of them.
+
+The runner detects the need from the sources rather than a per-suite table: a
+table entry is a second statement of a fact the file already makes, and the two
+go out of step the first time a suite gains the import.
+
+### The two targets that would not run, measured
+
+`make check` is green through `dev`, `warnings` (0 across 195 files) and `test`
+(the e2e report includes `[OK] Swift logic tests (QueenDelegation): passed`).
+`cassettes` and `mutants-changed` did not run.
+
+Not a new failure: the Makefile documents this wedge across waves 069-082, and
+`TRIOS_SKIP_LOCK` exists as its bypass. What is new is where it wedges. The
+recipe's FIRST statement is `echo "[SKIP-LOCK probe] seen=..."`, before any
+branch and before any lock call. With the lock directory confirmed absent and
+zero processes driving the test bundle:
+
+```
+  lock directory exists? NO
+  a real replay driving the bundle? 0 process(es)
+[OK] harness bundle built: .../trios-test.app
+[cassettes] acquiring the harness lock (/tmp/trios_harness.lock)
+   <nothing, for twenty minutes>
+```
+
+The probe line never appears. So the recipe shell is not wedging in the
+acquire loop - it is not reaching its own first command. `TRIOS_SKIP_LOCK`
+cannot help, because the branch it controls is downstream of an echo that never
+runs. Any future work on this should start at exec, not at the lock.

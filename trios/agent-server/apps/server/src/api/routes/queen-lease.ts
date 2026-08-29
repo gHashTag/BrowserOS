@@ -1,0 +1,90 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * The lease, offered to callers that cannot speak Postgres.
+ *
+ * The container's own tick takes the lease directly. This route exists for the
+ * OTHER contender: the Mac app, which has been running the supervision loop all
+ * along and has no database connection. Without a way for it to contend, the
+ * exclusion would only hold between cloud replicas - which is the easy half, and
+ * not the half that has two Queens in it.
+ *
+ * So the rule is: whoever runs a round takes the lease first, over whichever
+ * transport they have. One lease, one name, two kinds of client.
+ */
+
+import { Hono } from 'hono'
+import { Pool } from 'pg'
+import {
+  acquireQueenLease,
+  queenLeaseDatabaseUrl,
+  queenLeaseStatus,
+  releaseQueenLease,
+} from '../services/queen-lease'
+
+const LEASE_NAME = 'queen-tick'
+
+export function createQueenLeaseRoute() {
+  return new Hono()
+    .post('/', async (c) => {
+      const url = queenLeaseDatabaseUrl()
+      if (!url) return c.json({ error: 'No database configured' }, 503)
+      const body = await c.req.json().catch(() => null)
+      const holder = typeof body?.holder === 'string' ? body.holder : null
+      if (!holder) return c.json({ error: 'holder is required' }, 400)
+      // Bounded: a caller that asks for a day-long lease and then dies takes the
+      // hive down with it until someone edits a database by hand.
+      const ttl = Math.min(Math.max(Number(body?.ttlSeconds) || 300, 30), 3600)
+
+      const pool = new Pool({ connectionString: url })
+      try {
+        const grant = await acquireQueenLease(pool, LEASE_NAME, holder, ttl)
+        // 200 either way. Losing a lease is a normal outcome of a healthy round,
+        // not an error, and a caller that retries on 4xx would fight the winner.
+        return c.json(grant)
+      } finally {
+        await pool.end()
+      }
+    })
+    .delete('/', async (c) => {
+      const url = queenLeaseDatabaseUrl()
+      if (!url) return c.json({ error: 'No database configured' }, 503)
+      const holder = c.req.query('holder')
+      if (!holder) return c.json({ error: 'holder is required' }, 400)
+      const pool = new Pool({ connectionString: url })
+      try {
+        return c.json({
+          released: await releaseQueenLease(pool, LEASE_NAME, holder),
+        })
+      } finally {
+        await pool.end()
+      }
+    })
+    .get('/', async (c) => {
+      const url = queenLeaseDatabaseUrl()
+      if (!url) return c.json({ error: 'No database configured' }, 503)
+      const pool = new Pool({ connectionString: url })
+      try {
+        const status = await queenLeaseStatus(pool, LEASE_NAME)
+        const tick = await pool.query(
+          'SELECT holder, fence, decided_at, decision FROM queen_tick WHERE name = $1',
+          [LEASE_NAME],
+        )
+        return c.json({
+          lease: status,
+          lastTick: tick.rowCount
+            ? {
+                holder: tick.rows[0].holder,
+                fence: Number(tick.rows[0].fence),
+                decidedAt: tick.rows[0].decided_at,
+                decision: tick.rows[0].decision,
+              }
+            : null,
+        })
+      } finally {
+        await pool.end()
+      }
+    })
+}

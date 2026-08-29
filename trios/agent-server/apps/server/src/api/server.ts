@@ -39,6 +39,7 @@ import { createMonitoringRoutes } from './routes/monitoring'
 import { createOAuthRoutes } from './routes/oauth'
 import { createOpenClawRoutes } from './routes/openclaw'
 import { createProviderRoutes } from './routes/provider'
+import { createQueenLeaseRoute } from './routes/queen-lease'
 import { createQueenRegistryRoute } from './routes/queen-registry'
 import { createRefinePromptRoutes } from './routes/refine-prompt'
 import { createShutdownRoute } from './routes/shutdown'
@@ -194,6 +195,10 @@ export async function createHttpServer(config: HttpServerConfig) {
   // second time in this deployment that a route was written without the guard
   // its neighbours all carry. The guard is not a detail of the route; it is
   // the reason the route may exist at all.
+  const queenLeaseRoutes = new Hono<Env>()
+    .use('/*', requireTrustedAppOrigin())
+    .route('/', createQueenLeaseRoute())
+
   const queenRegistryRoutes = new Hono<Env>()
     .use('/*', requireTrustedAppOrigin())
     .route('/', createQueenRegistryRoute())
@@ -273,6 +278,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/*', trustedCorsMiddleware())
     .route('/health', createHealthRoute({ browser, stateBackend: a2aService }))
     .route('/queen/registry', queenRegistryRoutes)
+    .route('/queen/lease', queenLeaseRoutes)
     .use('/shutdown/*', requireTrustedAppOrigin())
     .route(
       '/shutdown',

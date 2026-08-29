@@ -16,6 +16,7 @@ import {
   configureVmRuntime,
   peekOpenClawService,
 } from './api/services/openclaw/openclaw-service'
+import { startQueenTick } from './api/services/queen-tick'
 import { CdpBackend } from './browser/backends/cdp'
 import { Browser } from './browser/browser'
 import type { ServerConfig } from './config'
@@ -81,6 +82,9 @@ export class Application {
       })
     }
     await runPgMigrations()
+    // After migrations: the tick's first act is a lease query against a table
+    // the migration above creates.
+    startQueenTick()
 
     // The same asymmetry the comment below describes, one level up: this used
     // to exit when no CDP port was *configured*, while tolerating a configured

@@ -93,6 +93,25 @@ CREATE TABLE IF NOT EXISTS "conversationMessages" (
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb
 );
 
+CREATE TABLE IF NOT EXISTS queen_lease (
+  name text PRIMARY KEY,
+  holder text NOT NULL,
+  acquired_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL,
+  -- Monotonic term counter. Never reset, not even on release: a stale writer
+  -- from term 5 must lose to term 6, and a counter that restarts at 1 makes it
+  -- win instead.
+  fence bigint NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS queen_tick (
+  name text PRIMARY KEY,
+  holder text NOT NULL,
+  fence bigint NOT NULL,
+  decided_at timestamptz NOT NULL DEFAULT now(),
+  decision jsonb NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation_order
   ON "conversationMessages" ("conversationId", "orderIndex");
 `

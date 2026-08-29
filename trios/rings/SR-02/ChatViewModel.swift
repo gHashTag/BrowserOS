@@ -9860,6 +9860,36 @@ final class ChatViewModel: ObservableObject {
         // Before choosing, because a resumed task costs no new branch and no
         // new brief, and leaving it stranded while opening fresh work is how
         // the swarm ends up holding boundaries it is not using.
+        //
+        // ── but first: am I the Queen this round? ──────────────────────────
+        //
+        // Until the backend moved to the cloud this app was the only thing that
+        // could reach this line, so the question did not exist. It does now: the
+        // container runs a tick of its own, and two ticks reading the same board
+        // both find the same issue unclaimed and both take it. The boundary
+        // system cannot save us from that - it is the thing being raced.
+        //
+        // Covers the resume as well as the choice, because a resumed task starts
+        // a worker exactly like a new one does, and gating only the second would
+        // exclude the cheaper half of the race.
+        //
+        // On a machine with no cloud server this returns `.uncontested` without
+        // touching the network: a local install has one supervisor and gains
+        // nothing from asking permission of itself.
+        let lease = await QueenLease.acquire(ttlSeconds: 600)
+        guard lease.mayRun else {
+            TriosLogBus.shared.info(
+                .queen, "queen.autonomy.deferred",
+                "Standing down this round: \(lease.reason)",
+                ["reason": lease.reason]
+            )
+            return
+        }
+        // Handing it back at the end of the round rather than letting it lapse:
+        // the other supervisor may run whenever this one is not, and ten minutes
+        // of an expired-but-unreleased lease is ten minutes of nobody watching.
+        defer { Task { await QueenLease.release() } }
+
         await resumeStrandedRejectedTasks()
         await chooseNextOpenIssue(startAfterChoosing: true, autonomous: true)
     }

@@ -1116,6 +1116,38 @@ fn run_swift_logic_suite(dir: &str, suite: &SwiftLogicSuite, report: &mut String
     // and its collision reads as a code failure rather than a collision.
     let bin = format!("{}.{}", suite.bin, std::process::id());
     let mut args: Vec<&str> = suite.sources.to_vec();
+
+    // A suite whose sources import QueenCore needs the module, not just the
+    // files.
+    //
+    // QueenDelegation.swift stopped being self-contained when the Queen's
+    // policy became its own module: it now opens with `import QueenCore`, and
+    // swiftc handed a list of .swift files has no idea where that module is.
+    // The suite compiled clean the day before and reported "compile failed"
+    // after, with nothing wrong in it - and "compile failed" is a report about
+    // the test, so the 120 checks it holds simply stopped running while the
+    // line above them still read like a suite.
+    //
+    // Detected from the sources rather than declared per suite. A table entry
+    // is a second statement of a fact the file already makes, and the two go
+    // out of step the first time a suite gains the import without anyone
+    // remembering the table. The module is built by `dev`, which runs before
+    // `test` in `make check`; when it is absent the flags are omitted and the
+    // suite fails exactly as it does today, saying so.
+    let module_dir = format!("{}/.trinity/build/QueenCore", dir);
+    let needs_module = suite.sources.iter().any(|src| {
+        std::fs::read_to_string(format!("{}/{}", dir, src))
+            .map(|text| text.contains("import QueenCore"))
+            .unwrap_or(false)
+    });
+    if needs_module && std::path::Path::new(&module_dir).is_dir() {
+        args.push("-I");
+        args.push(&module_dir);
+        args.push("-L");
+        args.push(&module_dir);
+        args.push("-lQueenCore");
+    }
+
     args.push("-o");
     args.push(&bin);
 
