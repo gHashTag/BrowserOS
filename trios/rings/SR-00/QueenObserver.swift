@@ -1,4 +1,5 @@
 import Foundation
+import QueenCore
 
 /// Watches a running worker and speaks up before it fails.
 ///

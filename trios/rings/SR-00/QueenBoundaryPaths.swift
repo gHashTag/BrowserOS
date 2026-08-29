@@ -26,14 +26,14 @@ import Foundation
 ///
 /// Foundation and nothing else, deliberately. The rule is worth testing, so
 /// it must be reachable by a suite that links one file.
-enum QueenBoundaryPaths {
+public enum QueenBoundaryPaths {
     /// Trims whitespace and leading `./` and `/` so two spellings of one path
     /// compare equal.
     ///
     /// `QueenDelegationPolicy.normalizePath` forwards here rather than keeping
     /// a second copy: a rule transcribed twice is two rules that agree until
     /// someone edits one.
-    static func normalize(_ path: String) -> String {
+    public static func normalize(_ path: String) -> String {
         var value = path.trimmingCharacters(in: .whitespacesAndNewlines)
         while value.hasPrefix("./") { value.removeFirst(2) }
         while value.hasPrefix("/") { value.removeFirst() }
@@ -51,7 +51,7 @@ enum QueenBoundaryPaths {
     /// from writing its own. Catching that needs the task's own worktree
     /// passed in. Reporting every correct write as a violation was the worse
     /// of the two, and it is what was happening.
-    static func projectRelative(_ path: String, root: String) -> String {
+    public static func projectRelative(_ path: String, root: String) -> String {
         guard !root.isEmpty else { return path }
         let prefix = root.hasSuffix("/") ? root : root + "/"
         var value = path.hasPrefix(prefix) ? String(path.dropFirst(prefix.count)) : path
@@ -65,7 +65,7 @@ enum QueenBoundaryPaths {
     /// Exactly three components, and only in first position. A path that
     /// merely contains `.worktrees` further down names a different file and
     /// keeps its name.
-    static func strippingWorktree(_ path: String) -> String {
+    public static func strippingWorktree(_ path: String) -> String {
         let parts = path.split(separator: "/", omittingEmptySubsequences: false)
         guard parts.count > 3, parts[0] == ".worktrees" else { return path }
         return parts.dropFirst(3).joined(separator: "/")
@@ -76,7 +76,7 @@ enum QueenBoundaryPaths {
     /// The project is a subdirectory of the repository in this checkout, so a
     /// worktree's copy of it is `<worktree>/trios/…` and git reports paths as
     /// `trios/…`. An owned path never carries that component.
-    static func strippingProject(_ path: String, root: String) -> String {
+    public static func strippingProject(_ path: String, root: String) -> String {
         let project = (root as NSString).lastPathComponent
         guard !project.isEmpty, path.hasPrefix("\(project)/") else { return path }
         return String(path.dropFirst(project.count + 1))
@@ -86,7 +86,7 @@ enum QueenBoundaryPaths {
     ///
     /// An empty boundary means nothing can be outside it - a task with no
     /// declared paths is not a task that owns everything.
-    static func strays(
+    public static func strays(
         among writes: [String],
         ownedPaths: [String],
         root: String

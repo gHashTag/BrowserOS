@@ -13,7 +13,7 @@ import Foundation
 /// The question that separates the two is when the names arrived. If they were
 /// already in the boundary files at the commit that was HEAD when the issue
 /// was written, their presence now says nothing about the issue.
-enum QueenEvidencePolicy {
+public enum QueenEvidencePolicy {
     /// Whether "all the named identifiers are present" may stand as evidence
     /// that the issue is done.
     ///
@@ -29,7 +29,7 @@ enum QueenEvidencePolicy {
     /// evidence, so the issue stays choosable. A false "already done" loses
     /// the work entirely; a false "not done" costs one turn in which the bee
     /// says it is done.
-    static func presenceIsEvidence(
+    public static func presenceIsEvidence(
         symbols: [String],
         contentsWhenFiled: String?
     ) -> Bool {
@@ -51,7 +51,7 @@ enum QueenEvidencePolicy {
     ///
     /// Lived unread inside the view model until 2026-08-23, deciding what the
     /// Queen would work on with nothing able to check it.
-    static func namedIdentifiers(
+    public static func namedIdentifiers(
         in body: String,
         ignoringBacktickedSpans: Bool = false
     ) -> [String] {
@@ -130,7 +130,7 @@ enum QueenEvidencePolicy {
 
     /// The identifiers that may serve as EVIDENCE, which is the same
     /// extraction with path stems left out - see the note above.
-    static func evidenceIdentifiers(in body: String) -> [String] {
+    public static func evidenceIdentifiers(in body: String) -> [String] {
         namedIdentifiers(in: body, ignoringBacktickedSpans: true)
     }
 
@@ -162,7 +162,7 @@ enum QueenEvidencePolicy {
     /// Comment lines are excluded before the search, for the same reason the
     /// keychain gate excludes them: a line that begins with `//` or `*` is
     /// prose, and prose cannot declare a function.
-    static func declaresIdentifier(_ identifier: String, in text: String) -> Bool {
+    public static func declaresIdentifier(_ identifier: String, in text: String) -> Bool {
         guard !identifier.isEmpty else { return false }
         for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
             let line = rawLine.trimmingCharacters(in: .whitespaces)
@@ -195,7 +195,7 @@ enum QueenEvidencePolicy {
     ///
     /// Empty means every name is declared somewhere in the boundary, which is
     /// the only shape in which presence is evidence at all.
-    static func undeclaredIdentifiers(_ identifiers: [String], in text: String) -> [String] {
+    public static func undeclaredIdentifiers(_ identifiers: [String], in text: String) -> [String] {
         identifiers.filter { !declaresIdentifier($0, in: text) }
     }
 }

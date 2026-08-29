@@ -25,16 +25,16 @@ import Foundation
 /// - **Russian inside source code.** This tree's own Swift quotes Russian
 ///   issue text in comments and string literals (`## Границы` is parsed by
 ///   name). Ratio, not presence, is what separates a quote from a rewrite.
-enum QueenLanguagePolicy {
+public enum QueenLanguagePolicy {
     /// A file must carry at least this many letters before its language is
     /// judged. A two-line stub flipping "language" says nothing.
-    static let minimumLettersToJudge = 200
+    public static let minimumLettersToJudge = 200
 
     /// Above this share of non-ASCII letters, the text is not English prose.
-    static let rewrittenRatio = 0.40
+    public static let rewrittenRatio = 0.40
 
     /// At or below this share, the text was English prose.
-    static let wasEnglishRatio = 0.10
+    public static let wasEnglishRatio = 0.10
 
     /// Share of *letters* that are outside ASCII. Letters only: punctuation,
     /// digits, markdown syntax and Swift operators are language-neutral, and
@@ -43,7 +43,7 @@ enum QueenLanguagePolicy {
     ///
     /// Returns 0 for text with no letters at all - nothing to judge is not
     /// evidence of a rewrite.
-    static func nonASCIILetterRatio(_ text: String) -> Double {
+    public static func nonASCIILetterRatio(_ text: String) -> Double {
         var letters = 0
         var nonASCII = 0
         for scalarBearing in text.unicodeScalars {
@@ -56,7 +56,7 @@ enum QueenLanguagePolicy {
     }
 
     /// Number of letters in the text, the size gate for judging it.
-    static func letterCount(_ text: String) -> Int {
+    public static func letterCount(_ text: String) -> Int {
         text.unicodeScalars.reduce(into: 0) { count, scalarBearing in
             if CharacterSet.letters.contains(scalarBearing) { count += 1 }
         }
@@ -68,7 +68,7 @@ enum QueenLanguagePolicy {
     /// Both sides are measured and both numbers go into the message: a
     /// refusal that cannot show its measurement is the same guess this
     /// repository keeps paying for.
-    static func rewriteRefusal(path: String, before: String, after: String) -> String? {
+    public static func rewriteRefusal(path: String, before: String, after: String) -> String? {
         guard letterCount(before) >= minimumLettersToJudge else { return nil }
         let was = nonASCIILetterRatio(before)
         let now = nonASCIILetterRatio(after)
@@ -82,7 +82,7 @@ enum QueenLanguagePolicy {
 
     /// The first refusal among staged files, so a commit carrying one rewrite
     /// among good files still stops and names which file stopped it.
-    static func rewriteRefusal(stagedFiles: [(path: String, before: String, after: String)]) -> String? {
+    public static func rewriteRefusal(stagedFiles: [(path: String, before: String, after: String)]) -> String? {
         for file in stagedFiles {
             if let reason = rewriteRefusal(
                 path: file.path, before: file.before, after: file.after
@@ -119,7 +119,7 @@ enum QueenLanguagePolicy {
     /// title is short, so one accented letter in `Café` or a transliterated
     /// surname stays under the threshold and the title survives; a title
     /// written in another script does not.
-    static func commitSubject(
+    public static func commitSubject(
         title: String,
         ownedPaths: [String],
         issueNumber: Int
@@ -134,7 +134,7 @@ enum QueenLanguagePolicy {
     }
 
     /// The English fallback subject: what this commit was allowed to touch.
-    static func describing(ownedPaths: [String], issueNumber: Int) -> String {
+    public static func describing(ownedPaths: [String], issueNumber: Int) -> String {
         let paths = ownedPaths
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -158,7 +158,7 @@ enum QueenLanguagePolicy {
     /// Compared component by component rather than as strings: `rings/SR-0`
     /// is a common string prefix of `rings/SR-00/A.swift` and
     /// `rings/SR-01/B.swift`, and it is not a directory.
-    static func commonDirectory(of paths: [String]) -> String? {
+    public static func commonDirectory(of paths: [String]) -> String? {
         guard let first = paths.first else { return nil }
         var shared = first.split(separator: "/").map(String.init)
         shared.removeLast()

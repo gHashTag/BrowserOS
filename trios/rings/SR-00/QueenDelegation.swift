@@ -1,4 +1,5 @@
 import Foundation
+import QueenCore
 
 /// A GitHub issue a delegated task is bound to.
 ///

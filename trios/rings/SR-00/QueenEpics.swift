@@ -12,20 +12,20 @@ import Foundation
 /// A constant is the right shape for a law and the wrong shape for a decision
 /// the operator makes. Which work exists is the operator's, so it is stored and
 /// the code only supplies a default.
-enum QueenEpics {
+public enum QueenEpics {
     /// Epics read when nobody has said otherwise.
     ///
     /// #1090 is the supervisor epic she has always known. #1279 is the T27
     /// backend, opened 2026-08-19. Both are defaults rather than constants -
     /// adding a third must not require a build.
-    static let defaultEpics: [Int] = [1090, 1279]
+    public static let defaultEpics: [Int] = [1090, 1279]
 
-    static let key = "queen.epics"
+    public static let key = "queen.epics"
 
     /// The epics to read, in order. Duplicates removed, order preserved: a
     /// repeated epic would fetch the same timeline twice and double-count every
     /// sub-issue in it.
-    static var configured: [Int] {
+    public static var configured: [Int] {
         get {
             guard let stored = UserDefaults.standard.array(forKey: key) as? [Int],
                   !stored.isEmpty else {
@@ -38,19 +38,19 @@ enum QueenEpics {
 
     /// Preserves first appearance rather than sorting: the operator's order is
     /// a statement about priority, and sorting would silently overrule it.
-    static func deduplicated(_ epics: [Int]) -> [Int] {
+    public static func deduplicated(_ epics: [Int]) -> [Int] {
         var seen = Set<Int>()
         return epics.filter { seen.insert($0).inserted }
     }
 
     /// Events per timeline page. GitHub's ceiling is 100, which is why one
     /// page cannot be the whole answer for any epic that has lived a while.
-    static let timelinePageSize = 100
+    public static let timelinePageSize = 100
 
     /// How many pages the reader will walk before giving up. Ten pages is a
     /// thousand events - far past any epic here - and a bound rather than a
     /// `while true` against a paginated API.
-    static let timelinePageLimit = 10
+    public static let timelinePageLimit = 10
 
     /// The timeline URL for one epic, one page at a time.
     ///
@@ -67,7 +67,7 @@ enum QueenEpics {
     /// while she reported "Nothing to choose from 19 candidates" hour after
     /// hour. An epic outgrows one page exactly once, and after that it never
     /// shows its newest work again.
-    static func timelineURL(epic: Int, page: Int = 1, repo: String = "gHashTag/trios") -> URL? {
+    public static func timelineURL(epic: Int, page: Int = 1, repo: String = "gHashTag/trios") -> URL? {
         URL(
             string: "https://api.github.com/repos/\(repo)/issues/\(epic)"
                 + "/timeline?per_page=\(timelinePageSize)&page=\(page)"
@@ -79,12 +79,12 @@ enum QueenEpics {
     /// A short page ends the walk; a full page means there may be more. Kept
     /// as a named function so the stopping rule is stated once and can be
     /// tested without a network.
-    static func isLastTimelinePage(eventCount: Int) -> Bool {
+    public static func isLastTimelinePage(eventCount: Int) -> Bool {
         eventCount < timelinePageSize
     }
 
     /// How the epics read on a log line or in a notice.
-    static var describedList: String {
+    public static var describedList: String {
         configured.map { "#\($0)" }.joined(separator: ", ")
     }
 }

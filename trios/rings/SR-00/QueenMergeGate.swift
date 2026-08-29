@@ -10,9 +10,9 @@ import Foundation
 /// The decision is separated from the request so it can be driven without a
 /// network: the shapes below are the ones the forge actually returns, and each
 /// has a different consequence.
-enum QueenMergeGate {
+public enum QueenMergeGate {
     /// A check rollup as the forge reports it, reduced to what matters here.
-    enum Rollup: String, Equatable, Sendable {
+    public enum Rollup: String, Equatable, Sendable {
         case success = "SUCCESS"
         case pending = "PENDING"
         case failure = "FAILURE"
@@ -21,7 +21,7 @@ enum QueenMergeGate {
         case none = "NONE"
     }
 
-    enum Decision: Equatable {
+    public enum Decision: Equatable {
         /// Every required check passed. Merge.
         case merge
         /// Checks are still running. Ask again later; do not merge and do not
@@ -42,10 +42,10 @@ enum QueenMergeGate {
     /// #74/#75 dozens of times a day, each wake re-briefing a bee about a red
     /// no code change can turn green. A red made only of these checks is the
     /// operator's to resolve, not a worker's.
-    static let administrativeChecks: Set<String> = ["cla"]
+    public static let administrativeChecks: Set<String> = ["cla"]
 
     /// True when every failing check is administrative - nothing for a bee.
-    static func administrativeOnly(_ failingChecks: [String]) -> Bool {
+    public static func administrativeOnly(_ failingChecks: [String]) -> Bool {
         !failingChecks.isEmpty
             && failingChecks.allSatisfy { administrativeChecks.contains($0.lowercased()) }
     }
@@ -57,7 +57,7 @@ enum QueenMergeGate {
     /// forever in a project that has no checks - while treating it as success
     /// would make this gate a decoration in a project that MEANT to have them.
     /// The caller states which world it is in.
-    static func decision(
+    public static func decision(
         rollup: Rollup,
         mergeable: Bool?,
         isDraft: Bool,
@@ -95,7 +95,7 @@ enum QueenMergeGate {
     /// Named separately because a wake-up that says only "it is red" gives the
     /// worker nothing to act on, and a worker with nothing to act on repeats
     /// what it did. The failing check names are the whole point.
-    static func wakeInstruction(
+    public static func wakeInstruction(
         prNumber: Int,
         reason: String,
         failingChecks: [String]

@@ -1,4 +1,5 @@
 import Foundation
+import QueenCore
 
 actor GitHubAPIClient {
     static let shared = GitHubAPIClient()

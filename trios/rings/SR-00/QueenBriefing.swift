@@ -1,4 +1,5 @@
 import Foundation
+import QueenCore
 
 /// The brief a worker receives when the Queen opens its chat.
 ///

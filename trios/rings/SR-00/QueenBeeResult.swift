@@ -37,7 +37,7 @@ import Foundation
 ///
 /// Foundation and nothing else, deliberately. The rule is worth testing, so it
 /// has to be reachable by a suite that links one file.
-struct QueenBeeResult: Codable, Equatable, Sendable {
+public struct QueenBeeResult: Codable, Equatable, Sendable {
 
     // MARK: - the contract
 
@@ -50,7 +50,7 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
     /// only endings a worker is in a position to assert. Keeping the two
     /// vocabularies apart is the point: a bee that could report `accepted`
     /// would be reviewing its own work.
-    enum Status: String, Codable, Equatable, Sendable, CaseIterable {
+    public enum Status: String, Codable, Equatable, Sendable, CaseIterable {
         /// The work is done and the bee is offering it for review.
         case completed
         /// The bee stopped and needs a decision it is not allowed to make.
@@ -67,7 +67,7 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
     /// literally one list. A rule transcribed twice is two rules that agree
     /// until someone edits one, and this repository has paid for that enough
     /// times to stop doing it on purpose.
-    enum Field: String, CodingKey, Codable, Equatable, Sendable, CaseIterable {
+    public enum Field: String, CodingKey, Codable, Equatable, Sendable, CaseIterable {
         case taskID = "task_id"
         case status = "status"
         case baseCommit = "base_commit"
@@ -82,20 +82,20 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
         case humanDecisionsRequired = "human_decisions_required"
     }
 
-    typealias CodingKeys = Field
+    public typealias CodingKeys = Field
 
-    var taskID: String
-    var status: Status
-    var baseCommit: String?
-    var resultCommit: String?
-    var changedSpecs: [String]
-    var changedCompilerFiles: [String]
-    var generatedArtifacts: [String]
-    var testsAdded: [String]
-    var commandsRun: [String]
-    var evidenceManifest: String?
-    var knownRisks: [String]
-    var humanDecisionsRequired: [String]
+    public var taskID: String
+    public var status: Status
+    public var baseCommit: String?
+    public var resultCommit: String?
+    public var changedSpecs: [String]
+    public var changedCompilerFiles: [String]
+    public var generatedArtifacts: [String]
+    public var testsAdded: [String]
+    public var commandsRun: [String]
+    public var evidenceManifest: String?
+    public var knownRisks: [String]
+    public var humanDecisionsRequired: [String]
 
     init(
         taskID: String,
@@ -177,7 +177,7 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
     /// The status is the exception because it selects the requirements. There
     /// is no set of missing fields to report for a result that will not say
     /// what it is claiming, so that one refuses, and it refuses by name.
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let box = try decoder.container(keyedBy: Field.self)
         taskID = (try box.decodeIfPresent(String.self, forKey: .taskID)) ?? ""
 
@@ -217,13 +217,13 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
 
     /// Stable bytes: sorted keys, so two encodings of one result compare equal
     /// and a manifest can be hashed.
-    func jsonData() throws -> Data {
+    public func jsonData() throws -> Data {
         let coder = JSONEncoder()
         coder.outputFormatting = [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes]
         return try coder.encode(self)
     }
 
-    static func decoded(from data: Data) throws -> QueenBeeResult {
+    public static func decoded(from data: Data) throws -> QueenBeeResult {
         try JSONDecoder().decode(QueenBeeResult.self, from: data)
     }
 
@@ -235,7 +235,7 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
     /// is naming. A missing field the platform never captures is not a lazy
     /// bee, and sending the task back for it produces a second identical
     /// failure - which is the loop `sendBacks` was capped at two to stop.
-    enum Capture: Equatable, Sendable {
+    public enum Capture: Equatable, Sendable {
         /// trios records this today; the value can be filled without new wiring.
         case recorded(String)
         /// trios records something ADJACENT and not this. Naming what it
@@ -246,14 +246,14 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
         /// assertion nobody measured is what section 11.3 exists to replace.
         case absent
 
-        var isRecorded: Bool {
+        public var isRecorded: Bool {
             if case .recorded = self { return true }
             return false
         }
 
         /// What is behind the verdict, for a UI or a report that has to explain
         /// itself.
-        var note: String {
+        public var note: String {
             switch self {
             case .recorded(let source): return "recorded today: \(source)"
             case .adjacent(let source): return "not recorded; the nearest thing is \(source)"
@@ -265,7 +265,7 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
     /// Measured against the live registry's own keys on 2026-08-28. Every
     /// number below came from reading the 59 stored tasks, not from reading the
     /// code that writes them - the two disagree, which is the point.
-    static func capture(of field: Field) -> Capture {
+    public static func capture(of field: Field) -> Capture {
         switch field {
         case .taskID:
             return .recorded("DelegatedTask.issue.number, with .id as the stable key")
@@ -315,7 +315,7 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
 
     /// The fields no amount of bee diligence can fill until trios captures
     /// them. Useful for a roadmap; used below to keep a refusal honest.
-    static var fieldsNeedingNewCapture: [Field] {
+    public static var fieldsNeedingNewCapture: [Field] {
         Field.allCases.filter { !capture(of: $0).isRecorded }
     }
 
@@ -328,21 +328,21 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
     /// changed" names three, because a completed result may have touched a
     /// spec, or the compiler, or a generated artifact, and demanding all three
     /// would be demanding a shape of work rather than evidence of it.
-    struct Requirement: Equatable, Sendable {
-        let fields: [Field]
-        let reason: String
+    public struct Requirement: Equatable, Sendable {
+        public let fields: [Field]
+        public let reason: String
 
         /// How the requirement is named in a message.
-        var subject: String {
+        public var subject: String {
             fields.isEmpty ? "result" : fields.map(\.rawValue).joined(separator: " / ")
         }
 
-        var captures: [Capture] { fields.map(QueenBeeResult.capture(of:)) }
+        public var captures: [Capture] { fields.map(QueenBeeResult.capture(of:)) }
 
         /// True when nothing in trios records any field that would satisfy
         /// this, so the gap belongs to the platform and a send-back cannot
         /// close it.
-        var needsNewCapture: Bool { !captures.contains { $0.isRecorded } }
+        public var needsNewCapture: Bool { !captures.contains { $0.isRecorded } }
     }
 
     /// What a status promises, before looking at any particular result.
@@ -362,7 +362,7 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
     ///   that was told to stop is how a cancel gets recorded as a failure, and
     ///   the registry already cannot tell those two apart - `failureKind`
     ///   exists because every ending was spelled with the same word.
-    static func requirements(for status: Status) -> [Requirement] {
+    public static func requirements(for status: Status) -> [Requirement] {
         switch status {
         case .completed:
             return [
@@ -442,7 +442,7 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
     }
 
     /// The requirements this result does not keep. Empty means complete.
-    func missingRequirements() -> [Requirement] {
+    public func missingRequirements() -> [Requirement] {
         var missing = Self.requirements(for: status).filter { requirement in
             !requirement.fields.contains { carries($0) }
         }
@@ -451,9 +451,9 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
     }
 
     /// Field names only, for a caller that just wants the list.
-    var missingFieldNames: [String] { missingRequirements().map(\.subject) }
+    public var missingFieldNames: [String] { missingRequirements().map(\.subject) }
 
-    var isComplete: Bool { missingRequirements().isEmpty }
+    public var isComplete: Bool { missingRequirements().isEmpty }
 
     /// The T27 requirement that is the reason this file exists.
     ///
@@ -468,7 +468,7 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
     ///
     /// Returns nil when the gate does not apply - a non-completed result, or a
     /// completed one that touched no spec and no artifact.
-    func loweringGateRequirement() -> Requirement? {
+    public func loweringGateRequirement() -> Requirement? {
         guard status == .completed else { return nil }
         guard !changedSpecs.isEmpty || !generatedArtifacts.isEmpty else { return nil }
         guard !commandsRun.contains(where: { $0.contains(Self.loweringGateNeedle) }) else {
@@ -483,12 +483,12 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
     }
 
     /// The gate as an operator would type it.
-    static let loweringGateCommand = "make t27-lowering"
+    public static let loweringGateCommand = "make t27-lowering"
 
     /// Matched as a substring so `DEVELOPER_DIR=... make t27-lowering` counts.
     /// The target name is the specific thing; the invocation around it varies
     /// per machine and pinning that would only teach bees to lie about it.
-    static let loweringGateNeedle = "t27-lowering"
+    public static let loweringGateNeedle = "t27-lowering"
 
     /// English refusal naming every unkept promise, and separating the bee's
     /// gaps from the platform's.
@@ -498,7 +498,7 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
     /// worker and would be answered with a send-back that cannot possibly
     /// succeed. Saying which are unrecordable turns four of those into a
     /// roadmap item and leaves two for the bee.
-    var refusal: String? {
+    public var refusal: String? {
         let missing = missingRequirements()
         guard !missing.isEmpty else { return nil }
         let subject = taskID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -521,7 +521,7 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
     /// Blank counts as absent, deliberately: `"commands_run": [""]` is a filled
     /// field and an empty promise, and a completeness check that accepts it is
     /// measuring JSON shape rather than evidence.
-    func carries(_ field: Field) -> Bool {
+    public func carries(_ field: Field) -> Bool {
         switch field {
         case .taskID: return Self.isNamed(taskID)
         case .status: return true
@@ -550,7 +550,7 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
     // MARK: - the classifier
 
     /// What a changed path is, which decides whether a T27 review is owed.
-    enum PathKind: String, Codable, Equatable, Sendable, CaseIterable {
+    public enum PathKind: String, Codable, Equatable, Sendable, CaseIterable {
         /// A `.t27` file. The source of truth under L0.
         case spec
         /// Under a `gen/` directory. An artifact, not edited by hand.
@@ -560,12 +560,12 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
     }
 
     /// A changed set split into section 11.3's three buckets.
-    struct Changes: Equatable, Sendable {
-        var specs: [String] = []
-        var compilerFiles: [String] = []
-        var generatedArtifacts: [String] = []
+    public struct Changes: Equatable, Sendable {
+        public var specs: [String] = []
+        public var compilerFiles: [String] = []
+        public var generatedArtifacts: [String] = []
 
-        var isEmpty: Bool {
+        public var isEmpty: Bool {
             specs.isEmpty && compilerFiles.isEmpty && generatedArtifacts.isEmpty
         }
 
@@ -575,17 +575,17 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
         /// why a `.t27` spec was reviewed exactly like a Swift file. A source
         /// change alone does not need one; a spec or an artifact always does,
         /// including an artifact that moved on its own - especially that.
-        var needsT27Review: Bool { !specs.isEmpty || !generatedArtifacts.isEmpty }
+        public var needsT27Review: Bool { !specs.isEmpty || !generatedArtifacts.isEmpty }
     }
 
     /// The extension that makes a file the source of truth.
-    static let specExtension = ".t27"
+    public static let specExtension = ".t27"
 
     /// The directory component that makes a file an artifact. Measured: the
     /// generated trees in this checkout live at
     /// `rings/RUST-13/trios-mesh/gen/rust`, so the marker is a COMPONENT
     /// anywhere in the path and not a prefix.
-    static let generatedDirectory = "gen"
+    public static let generatedDirectory = "gen"
 
     /// Classifies one path.
     ///
@@ -601,7 +601,7 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
     /// A directory called `Gen` on a case-insensitive filesystem is the same
     /// directory as `gen`, but git records the name it was added under, and
     /// guessing about it would make the bucket depend on the machine.
-    static func kind(of path: String) -> PathKind {
+    public static func kind(of path: String) -> PathKind {
         let value = normalized(path)
         let components = value.split(separator: "/", omittingEmptySubsequences: true)
         if components.contains(where: { $0 == generatedDirectory }) {
@@ -619,7 +619,7 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
     ///
     /// De-duplicated because `./a.t27` and `a.t27` are one file, and a bee that
     /// lists both should not appear to have touched two.
-    static func classify(_ paths: [String]) -> Changes {
+    public static func classify(_ paths: [String]) -> Changes {
         var changes = Changes()
         var seen: Set<String> = []
         for path in paths {
@@ -638,12 +638,12 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
     }
 
     /// Whether this set of paths obliges a T27 review.
-    static func requiresT27Review(paths: [String]) -> Bool {
+    public static func requiresT27Review(paths: [String]) -> Bool {
         classify(paths).needsT27Review
     }
 
     /// What this result changed, recomposed from its three stored buckets.
-    var changes: Changes {
+    public var changes: Changes {
         Changes(
             specs: changedSpecs,
             compilerFiles: changedCompilerFiles,
@@ -665,7 +665,7 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
     /// spec-to-output manifest, which does not exist in this tree - and the
     /// case this catches, an artifact changed with no spec changed at all, is
     /// the one that has actually happened.
-    static func artifactDriftRefusal(_ changes: Changes) -> String? {
+    public static func artifactDriftRefusal(_ changes: Changes) -> String? {
         guard !changes.generatedArtifacts.isEmpty else { return nil }
         guard changes.specs.isEmpty else { return nil }
         return "\(changes.generatedArtifacts.count) generated file(s) changed and no "
@@ -678,7 +678,7 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
 
     /// The same rule against a raw path list, for a caller that has not
     /// classified yet.
-    static func artifactDriftRefusal(paths: [String]) -> String? {
+    public static func artifactDriftRefusal(paths: [String]) -> String? {
         artifactDriftRefusal(classify(paths))
     }
 
@@ -690,7 +690,7 @@ struct QueenBeeResult: Codable, Equatable, Sendable {
     /// where it lives, and a second copy here would be the transcribed rule
     /// this file's `Field`/`CodingKeys` alias exists to avoid. The caller is
     /// expected to hand over project-relative paths.
-    static func normalized(_ path: String) -> String {
+    public static func normalized(_ path: String) -> String {
         var value = path.trimmingCharacters(in: .whitespacesAndNewlines)
         while value.hasPrefix("./") { value.removeFirst(2) }
         while value.hasPrefix("/") { value.removeFirst() }

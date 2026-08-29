@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import QueenCore
 
 /// Holds the Queen's swarm: which task owns which chat, which issue, and which
 /// virtual branch.

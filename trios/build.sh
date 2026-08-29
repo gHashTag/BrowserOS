@@ -576,6 +576,69 @@ if [ -d "$XCTEST_FRAMEWORKS_DIR" ]; then
     SWIFTC_MODULE_FLAGS+=(-F "$XCTEST_FRAMEWORKS_DIR")
 fi
 
+# --- QueenCore: the Queen's policy as its own module ---
+#
+# Eleven files in rings/SR-00 that compile against Foundation alone. Building
+# them separately is what makes "this part could run on a Linux server" a
+# property the build enforces rather than a claim in a document: a file that
+# acquires an AppKit or Keychain dependency stops compiling HERE, in a module
+# that has neither, instead of failing a Linux build nobody has run.
+#
+# `make queen-core` compiles the same list with swiftc directly, so the
+# property is checkable without this script. The two lists must agree.
+#
+# A static archive rather than a dylib on purpose: a dylib would need copying
+# into the bundle, an rpath and a signature, and none of that earns anything
+# for a module that only this binary links.
+QUEEN_CORE_FILES=(
+    "$PROJECT_DIR/rings/SR-00/QueenBeeResult.swift"
+    "$PROJECT_DIR/rings/SR-00/QueenBoundaryPaths.swift"
+    "$PROJECT_DIR/rings/SR-00/QueenEpics.swift"
+    "$PROJECT_DIR/rings/SR-00/QueenEvidencePolicy.swift"
+    "$PROJECT_DIR/rings/SR-00/QueenLanguagePolicy.swift"
+    "$PROJECT_DIR/rings/SR-00/QueenLocalisation.swift"
+    "$PROJECT_DIR/rings/SR-00/QueenMergeGate.swift"
+    "$PROJECT_DIR/rings/SR-00/QueenMissionContract.swift"
+    "$PROJECT_DIR/rings/SR-00/QueenRetryPolicy.swift"
+    "$PROJECT_DIR/rings/SR-00/QueenReviewDecision.swift"
+    "$PROJECT_DIR/rings/SR-00/QueenSkillMatch.swift"
+)
+QUEEN_CORE_DIR="$PROJECT_DIR/.trinity/build/QueenCore"
+mkdir -p "$QUEEN_CORE_DIR"
+if ! swiftc -parse-as-library -emit-module -emit-library -static \
+    -module-name QueenCore \
+    -emit-module-path "$QUEEN_CORE_DIR/QueenCore.swiftmodule" \
+    -o "$QUEEN_CORE_DIR/libQueenCore.a" \
+    "${QUEEN_CORE_FILES[@]}" 2>"$QUEEN_CORE_DIR/err"; then
+    echo "[FAIL] QueenCore no longer compiles on its own."
+    echo "       Something in it now needs the rest of the app, which is the"
+    echo "       one thing this module exists to notice. First error:"
+    sed -n "1,4p" "$QUEEN_CORE_DIR/err" | sed "s/^/       /"
+    exit 1
+fi
+SWIFTC_MODULE_FLAGS+=(-I "$QUEEN_CORE_DIR" "$QUEEN_CORE_DIR/libQueenCore.a")
+
+# Those eleven are compiled above, so the main invocation must not compile them
+# again - swiftc refuses a symbol defined twice. They stay in the PRINTED list
+# (TRIOS_PRINT_SOURCES exits far above this) because they are still sources of
+# this product; `make sources-drift` compares the printed set, and splitting
+# where a file is compiled does not change what the product is made of.
+FILTERED_SWIFT_FILES=()
+for candidate in "${SWIFT_FILES[@]}"; do
+    skip=""
+    for core in "${QUEEN_CORE_FILES[@]}"; do
+        [ "$candidate" = "$core" ] && { skip=1; break; }
+    done
+    [ -n "$skip" ] || FILTERED_SWIFT_FILES+=("$candidate")
+done
+if [ "${#FILTERED_SWIFT_FILES[@]}" -eq "${#SWIFT_FILES[@]}" ]; then
+    echo "[FAIL] QueenCore removed no file from the main compile, so its"
+    echo "       eleven paths no longer match the source list. One of the two"
+    echo "       has moved and they must be brought back together."
+    exit 1
+fi
+SWIFT_FILES=("${FILTERED_SWIFT_FILES[@]}")
+
 if [ -n "$TRIOS_PRINT_FLAGS" ]; then
     # One argument per line on the saved stdout. A path holding a newline would
     # arrive at the reader as two arguments and could not be told from a real

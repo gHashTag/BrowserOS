@@ -15,12 +15,12 @@ import Foundation
 /// conservative: a task that matches nothing gets nothing rather than a
 /// plausible-sounding wrong procedure, since a bee briefed with the wrong
 /// rehearsal is worse off than a bee briefed with none - it will follow it.
-enum QueenSkillMatch {
+public enum QueenSkillMatch {
     /// Boundary shapes and the skill each one calls for, most specific first.
     ///
     /// Order matters: `tests/swift/run_chat_sse_e2e.sh` is both a test path and
     /// a shell script, and the test reading is the useful one.
-    static let rules: [(matches: (String) -> Bool, skill: String)] = [
+    public static let rules: [(matches: (String) -> Bool, skill: String)] = [
         ({ $0.contains("tests/") || $0.hasSuffix("Tests.swift") }, "e2e-testing"),
         ({ $0.hasSuffix("build.sh") || $0.hasSuffix("Makefile") }, "agent-safe-build"),
         ({ $0.contains("rings/RUST-") }, "t27-tri-pipeline"),
@@ -42,11 +42,11 @@ enum QueenSkillMatch {
     /// matched nothing, so the whole match was inert while every test passed -
     /// they supplied a synthetic `available` set in the bare shape and agreed
     /// with themselves.
-    static func normalize(_ id: String) -> String {
+    public static func normalize(_ id: String) -> String {
         id.hasPrefix("/") ? String(id.dropFirst()) : id
     }
 
-    static func skill(forBoundary paths: [String], available: Set<String>) -> String? {
+    public static func skill(forBoundary paths: [String], available: Set<String>) -> String? {
         let available = Set(available.map(normalize))
         guard !paths.isEmpty else { return nil }
         var chosen: String?

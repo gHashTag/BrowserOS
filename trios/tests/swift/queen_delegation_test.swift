@@ -5,6 +5,7 @@
 //     -o /tmp/trios_queen_delegation_test && /tmp/trios_queen_delegation_test
 
 import Foundation
+import QueenCore
 
 @main
 enum QueenDelegationTests {

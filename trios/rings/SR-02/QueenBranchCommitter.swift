@@ -1,4 +1,5 @@
 import Foundation
+import QueenCore
 
 /// Records a worker's edits on its own branch without disturbing the checkout.
 ///

@@ -6,6 +6,7 @@
 import Combine
 import CryptoKit
 import Foundation
+import QueenCore
 import SwiftUI
 
 /// Observable progress state for recovery export/import operations.

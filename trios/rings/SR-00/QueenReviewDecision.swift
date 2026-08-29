@@ -20,8 +20,8 @@ import Foundation
 /// after the autonomy preference, the worktree committer, and the skill match.
 /// The shape is always the same - a mechanism built, a rule to invoke it never
 /// written - and the symptom is always a queue that only a human drains.
-enum QueenReviewDecision {
-    enum Decision: Equatable {
+public enum QueenReviewDecision {
+    public enum Decision: Equatable {
         /// Every criterion met and there is a diff to show for it.
         case accept
         /// Something is unmet. Back to the bee, with the failures named.
@@ -38,7 +38,7 @@ enum QueenReviewDecision {
     /// return is the one that can teach - it names criteria the worker had not
     /// satisfied - and a bee that has failed the same named criteria twice is
     /// telling you about the criteria, not about itself.
-    static let maximumSendBacks = 2
+    public static let maximumSendBacks = 2
 
     /// The decision, from the verdicts and nothing else.
     ///
@@ -47,7 +47,7 @@ enum QueenReviewDecision {
     /// reviewer had nothing in front of it and answered anyway. Accepting that
     /// would let a bee that did nothing be indistinguishable from one that
     /// succeeded, which is the failure this whole review path exists to catch.
-    static func decide(
+    public static func decide(
         verdicts: [(criterion: String, met: Bool)],
         totalCriteria: Int,
         committedFiles: Int?,
@@ -92,7 +92,7 @@ enum QueenReviewDecision {
     /// The unmet criteria verbatim, because "it did not pass" is the one thing
     /// a worker cannot act on. The criteria are the contract it agreed to; the
     /// list of the ones it missed is the whole message.
-    static func sendBackNote(unmet: [String], attempt: Int) -> String {
+    public static func sendBackNote(unmet: [String], attempt: Int) -> String {
         var lines = [
             "Returning this for a \(ordinal(attempt)) pass. "
                 + "\(unmet.count) criterion(s) from your own specification are not met:",

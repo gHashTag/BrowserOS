@@ -31,13 +31,13 @@ import Foundation
 /// it sends the bee to read the wrong place with authority (#1175).
 ///
 /// This is pure static plumbing: source in, range out, no state, no side effects.
-enum QueenLocalisation {
+public enum QueenLocalisation {
 
     /// Maximum number of lines a returned range may span.
     ///
     /// A 3 000-line generated file is useless to a reviewer; three hundred lines
     /// around the mention is enough context without burying the signal.
-    static let maxRegionWidth = 300
+    public static let maxRegionWidth = 300
 
     /// Keywords that open a declaration body, used to anchor the start of
     /// the enclosing scope. Only declarations with a brace-delimited body
@@ -56,7 +56,7 @@ enum QueenLocalisation {
     ///   - source: Swift source text.
     ///   - identifiers: Whole words to search for (case-sensitive).
     /// - Returns: A 1-indexed `ClosedRange`, or `nil` when nothing qualifies.
-    static func region(
+    public static func region(
         in source: String,
         mentioning identifiers: [String]
     ) -> ClosedRange<Int>? {
@@ -649,11 +649,11 @@ enum QueenLocalisation {
     /// yields through `ChatViewModel.identifiers(from:)`, recorded from the
     /// live bodies on 2026-08-19, and what the narrowing must answer.
     struct MeasurementCase {
-        let issue: String
-        let identifiers: [String]
-        let expected: Expected
+        public let issue: String
+        public let identifiers: [String]
+        public let expected: Expected
 
-        enum Expected: Equatable {
+        public enum Expected: Equatable {
             /// The range must lie inside this function's declaration.
             case declaration(String)
             /// No range at all — a wrong range is worse than none (#1175).

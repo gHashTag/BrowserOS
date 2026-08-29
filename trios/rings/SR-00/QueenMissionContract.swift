@@ -53,11 +53,11 @@ import Foundation
 ///   contract can disagree, and for that a whitespace trim is enough.
 ///
 /// Foundation and nothing else, so a suite can link this one file.
-enum QueenMissionContract {
+public enum QueenMissionContract {
     /// The name a contract is written under beside its task, e.g. `Q-1280.json`.
     ///
     /// The directory is the caller's decision - this file knows no paths.
-    static func fileName(for contract: MissionContract) -> String {
+    public static func fileName(for contract: MissionContract) -> String {
         "\(contract.id).json"
     }
 
@@ -68,7 +68,7 @@ enum QueenMissionContract {
     /// diffs the two verdict streams. No other spec in the tree has a twin to
     /// disagree with, which is why a "do not change golden outputs" clause is
     /// enforceable for this spec and for nothing else.
-    static let goldenChainSpec = "rings/T27-00/queen_core.t27"
+    public static let goldenChainSpec = "rings/T27-00/queen_core.t27"
 
     /// Whether `make t27-lowering` would measure this spec at all.
     ///
@@ -80,7 +80,7 @@ enum QueenMissionContract {
     /// a `.claude` copy is a copy of the tree that ships, which the gate
     /// excludes deliberately (an early version scanned 138 specs instead of 70
     /// and reported a defect that had already been fixed).
-    static func loweringGateCovers(_ spec: String) -> Bool {
+    public static func loweringGateCovers(_ spec: String) -> Bool {
         let path = spec.trimmingCharacters(in: .whitespacesAndNewlines)
         guard path.hasPrefix("rings/"), isSpecPath(path) else { return false }
         return !path.contains("/.worktrees/") && !path.contains("/.claude/")
@@ -88,7 +88,7 @@ enum QueenMissionContract {
 
     /// Whether a path names a T27 spec. Extension only, case-insensitively:
     /// deciding it by content would need the compiler this file must not link.
-    static func isSpecPath(_ path: String) -> Bool {
+    public static func isSpecPath(_ path: String) -> Bool {
         path.trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
             .hasSuffix(".t27")
@@ -130,7 +130,7 @@ enum QueenMissionContract {
     /// refuses. That is the true answer: 49 of the 59 tasks in the registry are
     /// not spec-first missions, and dressing one as a mission would put the
     /// document's P0 row back where it started.
-    static func lift(
+    public static func lift(
         issue: Int,
         title: String,
         repository: String,
@@ -167,7 +167,7 @@ enum QueenMissionContract {
     /// `QueenBoundaryPaths.strays` returns nothing for an empty `ownedPaths`,
     /// because a task with no declared paths is not a task that owns
     /// everything.
-    static func standingProhibitions(
+    public static func standingProhibitions(
         spec: String,
         ownedPaths: [String]
     ) -> [MissionProhibition] {
@@ -186,7 +186,7 @@ enum QueenMissionContract {
     /// spec, and a contract whose spec it does not reach is refused once, by
     /// `sourceOfTruthOutsideLoweringGate`. Repeating it per clause would print
     /// the same measurement five times and bury the other refusals.
-    static func applicabilityFault(
+    public static func applicabilityFault(
         of prohibition: MissionProhibition,
         spec: String,
         ownedPaths: [String]
@@ -219,7 +219,7 @@ enum QueenMissionContract {
     /// contract is one file repaired by one edit, and reporting one defect per
     /// round trip costs a round trip per defect for no benefit - the whole
     /// contract is in hand and every check is a string comparison.
-    static func refusals(_ contract: MissionContract) -> [MissionContractRefusal] {
+    public static func refusals(_ contract: MissionContract) -> [MissionContractRefusal] {
         var found: [MissionContractRefusal] = []
         let owned = cleaned(contract.ownedPaths)
         let spec = contract.sourceOfTruth.spec
@@ -290,13 +290,13 @@ enum QueenMissionContract {
     }
 
     /// Whether acceptance may be decided against this contract at all.
-    static func isCheckable(_ contract: MissionContract) -> Bool {
+    public static func isCheckable(_ contract: MissionContract) -> Bool {
         refusals(contract).isEmpty
     }
 
     /// One refusal per line, each naming its measurement, or nil when the
     /// contract is checkable.
-    static func refusalReport(_ contract: MissionContract) -> String? {
+    public static func refusalReport(_ contract: MissionContract) -> String? {
         let found = refusals(contract)
         guard !found.isEmpty else { return nil }
         let lines = found.map { "  - " + $0.message }.joined(separator: "\n")
@@ -320,7 +320,7 @@ enum QueenMissionContract {
     ///
     /// Trailing newline because the file is text and `diff` says
     /// "\\ No newline at end of file" otherwise, on every contract, forever.
-    static func json(_ contract: MissionContract) throws -> String {
+    public static func json(_ contract: MissionContract) throws -> String {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
         let data = try encoder.encode(contract)
@@ -333,7 +333,7 @@ enum QueenMissionContract {
     /// unenforceable prohibition must survive decoding, or the validator never
     /// runs on the contract that needed it and the refusal becomes a parse
     /// error with no measurement in it.
-    static func contract(fromJSON text: String) throws -> MissionContract {
+    public static func contract(fromJSON text: String) throws -> MissionContract {
         try JSONDecoder().decode(MissionContract.self, from: Data(text.utf8))
     }
 
@@ -341,7 +341,7 @@ enum QueenMissionContract {
 
     /// Trimmed, empty entries dropped, order preserved. A blank line in a YAML
     /// list is not an acceptance criterion.
-    static func cleaned(_ values: [String]) -> [String] {
+    public static func cleaned(_ values: [String]) -> [String] {
         values
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -349,7 +349,7 @@ enum QueenMissionContract {
 
     /// An empty string has no name to print, and a message reading "for  this
     /// clause" is how a refusal stops being read.
-    static func displayed(_ value: String) -> String {
+    public static func displayed(_ value: String) -> String {
         value.isEmpty ? "(empty)" : value
     }
 }
@@ -372,19 +372,19 @@ enum QueenMissionContract {
 /// root key is dropped, and `issue` is carried explicitly rather than parsed
 /// back out of `id` - recovering a field by parsing an identifier is how the id
 /// and the thing it names drift apart.
-struct MissionContract: Codable, Equatable, Sendable {
-    var id: String
-    var issue: Int
-    var objective: String
-    var repository: String
-    var sourceOfTruth: MissionSourceOfTruth
-    var requiredBackends: [String]
-    var invariants: [String]
-    var acceptance: [String]
-    var ownedPaths: [String]
-    var prohibited: [String]
+public struct MissionContract: Codable, Equatable, Sendable {
+    public var id: String
+    public var issue: Int
+    public var objective: String
+    public var repository: String
+    public var sourceOfTruth: MissionSourceOfTruth
+    public var requiredBackends: [String]
+    public var invariants: [String]
+    public var acceptance: [String]
+    public var ownedPaths: [String]
+    public var prohibited: [String]
 
-    enum CodingKeys: String, CodingKey {
+    public enum CodingKeys: String, CodingKey {
         case id
         case issue
         case objective
@@ -400,8 +400,8 @@ struct MissionContract: Codable, Equatable, Sendable {
 
 /// 11.1 nests the spec under `source_of_truth`. Kept nested so the shape a
 /// reader sees in the document is the shape they find in the file.
-struct MissionSourceOfTruth: Codable, Equatable, Sendable {
-    var spec: String
+public struct MissionSourceOfTruth: Codable, Equatable, Sendable {
+    public var spec: String
 }
 
 // MARK: - Backends
@@ -418,7 +418,7 @@ struct MissionSourceOfTruth: Codable, Equatable, Sendable {
 /// A fifth name in a contract is not a backend this repository is missing - it
 /// is a claim no gate can decide, which is why `named` returns nil for it
 /// rather than inventing a case.
-enum MissionBackend: String, CaseIterable, Codable, Sendable {
+public enum MissionBackend: String, CaseIterable, Codable, Sendable {
     case rust
     case zig
     case c
@@ -426,7 +426,7 @@ enum MissionBackend: String, CaseIterable, Codable, Sendable {
 
     /// The command that generates it. `zig` is bare `gen` because it was the
     /// first backend and never got a suffix.
-    var generatorCommand: String {
+    public var generatorCommand: String {
         switch self {
         case .rust: return "t27c gen-rust"
         case .zig: return "t27c gen"
@@ -440,7 +440,7 @@ enum MissionBackend: String, CaseIterable, Codable, Sendable {
     /// The generator subcommands are accepted as aliases because that is how
     /// every acceptance criterion in the registry writes them - #1280 says
     /// "`t27c gen-rust ...` produces Rust that compiles", not "backend: rust".
-    static func named(_ raw: String) -> MissionBackend? {
+    public static func named(_ raw: String) -> MissionBackend? {
         let value = raw
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -455,7 +455,7 @@ enum MissionBackend: String, CaseIterable, Codable, Sendable {
     /// pass on C and RTL simulation" and nowhere accidental. The tokeniser
     /// keeps `-` and `_` so `gen-rust` stays one token and `queen_core` does
     /// not decompose into a token `c`.
-    static func mentioned(in criteria: [String]) -> [MissionBackend] {
+    public static func mentioned(in criteria: [String]) -> [MissionBackend] {
         var seen = Set<MissionBackend>()
         for criterion in criteria {
             for token in tokens(criterion) {
@@ -474,7 +474,7 @@ enum MissionBackend: String, CaseIterable, Codable, Sendable {
         "verilog": .verilog, "gen-verilog": .verilog
     ]
 
-    static func tokens(_ text: String) -> [String] {
+    public static func tokens(_ text: String) -> [String] {
         text.lowercased()
             .split(whereSeparator: { character in
                 !(character.isLetter || character.isNumber
@@ -494,7 +494,7 @@ enum MissionBackend: String, CaseIterable, Codable, Sendable {
 /// and quietly unenforced. Failing closed is safe here: the cost is one word
 /// from the operator, and the alternative is a contract that forbids something
 /// nothing checks.
-enum MissionProhibition: String, CaseIterable, Codable, Sendable {
+public enum MissionProhibition: String, CaseIterable, Codable, Sendable {
     /// The document's own first example, and this repository's L0: "Generated
     /// files are artifacts. A diff that changes a generated file without
     /// changing its `.t27` is a defect."
@@ -516,7 +516,7 @@ enum MissionProhibition: String, CaseIterable, Codable, Sendable {
     case changeGoldenOutputs = "change-golden-outputs"
 
     /// How the clause is written into a lifted contract.
-    var canonicalPhrase: String {
+    public var canonicalPhrase: String {
         switch self {
         case .handEditGeneratedArtifacts:
             return "hand-edit generated files"
@@ -538,7 +538,7 @@ enum MissionProhibition: String, CaseIterable, Codable, Sendable {
     /// What would catch a breach. Every string here names something that exists
     /// in this tree today; that is the whole test of whether a clause belongs
     /// in this enum.
-    var measurement: String {
+    public var measurement: String {
         switch self {
         case .handEditGeneratedArtifacts:
             return "regenerate with `t27c gen-<backend> <spec>` and diff against "
@@ -574,7 +574,7 @@ enum MissionProhibition: String, CaseIterable, Codable, Sendable {
     /// said about that subject. One alone is not a prohibition: "the generated
     /// Rust compiles" is an acceptance criterion, and "do not change anything"
     /// is not a rule.
-    static func recognised(in entry: String) -> [MissionProhibition] {
+    public static func recognised(in entry: String) -> [MissionProhibition] {
         let tokens = MissionBackend.tokens(entry)
             .flatMap { $0.split(separator: "-").map(String.init) }
         return allCases.filter { prohibition in
@@ -595,7 +595,7 @@ enum MissionProhibition: String, CaseIterable, Codable, Sendable {
     /// generator" - a legitimate compiler task - would have been read as a ban
     /// on hand-editing artifacts and passed as enforceable by a measurement
     /// that says nothing about it.
-    var subjects: [String] {
+    public var subjects: [String] {
         switch self {
         case .handEditGeneratedArtifacts: return ["generated", "artifact"]
         case .dropDeclaredFunctions: return ["function", "fn", "declaration"]
@@ -616,7 +616,7 @@ enum MissionProhibition: String, CaseIterable, Codable, Sendable {
     /// `not`. So that clause is keyed on the failure it forbids rather than on
     /// the compiler it mentions, and a positive claim about the same
     /// measurement no longer reads as a ban.
-    var predicates: [String] {
+    public var predicates: [String] {
         switch self {
         case .handEditGeneratedArtifacts:
             return ["edit", "modif", "chang", "rewrit", "touch", "writ", "patch"]
@@ -641,7 +641,7 @@ enum MissionProhibition: String, CaseIterable, Codable, Sendable {
 /// Why a contract cannot be checked. Each case's `message` names the
 /// measurement it wanted and could not have, because a refusal that cannot show
 /// its measurement is the guess this repository keeps paying for.
-enum MissionContractRefusal: Equatable, Sendable {
+public enum MissionContractRefusal: Equatable, Sendable {
     case missingIdentifier
     case missingObjective
     case missingRepository
@@ -656,7 +656,7 @@ enum MissionContractRefusal: Equatable, Sendable {
     case unenforceableProhibition(String)
     case prohibitionOutOfReach(String, reason: String)
 
-    var message: String {
+    public var message: String {
         switch self {
         case .missingIdentifier:
             return "the contract has no `id`, and the id is the file name it is "

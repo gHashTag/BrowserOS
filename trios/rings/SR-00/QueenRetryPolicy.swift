@@ -14,7 +14,7 @@ import Foundation
 /// anything, the process had gone away. The other four had done real work. One
 /// of those two groups should be retried immediately and the other should not
 /// be retried blindly at all, and nothing in the record could tell them apart.
-enum QueenFailureKind: String, Codable, Equatable, Sendable, CaseIterable {
+public enum QueenFailureKind: String, Codable, Equatable, Sendable, CaseIterable {
     /// The process died under the worker - a restart, a crash, a kill. Nobody
     /// failed; the attempt simply stopped existing.
     case interrupted
@@ -38,10 +38,10 @@ enum QueenFailureKind: String, Codable, Equatable, Sendable, CaseIterable {
     /// difficulty. Counting it would retire issues for the crime of having been
     /// open while somebody rebuilt the app - which, on this machine tonight,
     /// would have retired three of them.
-    var countsAgainstTheIssue: Bool { self != .interrupted }
+    public var countsAgainstTheIssue: Bool { self != .interrupted }
 
     /// What a later worker needs told about it.
-    var briefingLine: String {
+    public var briefingLine: String {
         switch self {
         case .interrupted:
             return "the previous attempt was cut off by a restart, not by a problem with the task"
@@ -57,7 +57,7 @@ enum QueenFailureKind: String, Codable, Equatable, Sendable, CaseIterable {
 }
 
 /// How many bees an issue is worth, and what the next one is told.
-enum QueenRetryPolicy {
+public enum QueenRetryPolicy {
     /// Real attempts allowed before the issue is handed back to the operator.
     ///
     /// Two, because the second attempt is the one that can differ from the
@@ -66,9 +66,9 @@ enum QueenRetryPolicy {
     /// number is small on purpose: every attempt is a provider bill and a
     /// worker slot, and an issue that has defeated two briefed bees needs a
     /// person to look at it, not a third bee.
-    static let maximumRealAttempts = 2
+    public static let maximumRealAttempts = 2
 
-    enum Decision: Equatable {
+    public enum Decision: Equatable {
         /// Send a bee. `attempt` is 1-based and counts only real attempts.
         case attempt(number: Int)
         /// Stop choosing this issue; say why.
@@ -85,7 +85,7 @@ enum QueenRetryPolicy {
     /// `outputTokens` is how much the worker actually said. Zero of everything
     /// is the signal that the attempt never got off the ground - the turn
     /// ended, but nothing came back through it.
-    static func classify(
+    public static func classify(
         streamOutcome: String?,
         completedTurns: Int?,
         toolCalls: Int?,
@@ -135,7 +135,7 @@ enum QueenRetryPolicy {
     /// Takes the kinds rather than a count so the caller cannot accidentally
     /// pass the wrong total: the interruption filter belongs to the policy, not
     /// to whoever remembers to apply it.
-    static func decision(priorAttempts: [QueenFailureKind]) -> Decision {
+    public static func decision(priorAttempts: [QueenFailureKind]) -> Decision {
         let real = priorAttempts.filter(\.countsAgainstTheIssue)
         guard real.count < maximumRealAttempts else {
             let kinds = real.map(\.rawValue).joined(separator: ", ")
@@ -157,7 +157,7 @@ enum QueenRetryPolicy {
     /// This is the half that makes a retry worth making. Sending an identical
     /// brief to a fresh worker is not a second attempt, it is the first attempt
     /// run twice - which is exactly what #1127 got, seven times.
-    static func retryBriefing(priorAttempts: [QueenFailureKind]) -> String? {
+    public static func retryBriefing(priorAttempts: [QueenFailureKind]) -> String? {
         let real = priorAttempts.filter(\.countsAgainstTheIssue)
         guard !real.isEmpty else { return nil }
         var lines = [
