@@ -478,7 +478,7 @@ export function composeCards(input: BoardInput): Card[] {
   const cards = new Map<number, Card>()
   addRegistryTasks(cards, input.tasks)
   addInFlight(cards, input.dispatches, input.issues)
-  addUntakenIssues(cards, input.issues, input.tasks, now)
+  addUntakenIssues(cards, input.issues, input.tasks, now, input.dispatches)
   addCriteria(cards, input.issues)
   addLastRoundReasons(cards, input.decision)
   return [...cards.values()].sort((a, b) => b.number - a.number)
@@ -585,8 +585,29 @@ function addUntakenIssues(
   issueRows: Array<Record<string, unknown>>,
   tasks: RegistryTask[],
   now: number,
+  dispatches: Array<Record<string, unknown>> = [],
 ): void {
-  const holding = tasks.filter((t) => stillHoldsBoundary(t, now))
+  // HOLDERS ARE BOTH SIDES, and they were one.
+  //
+  // The list came from the app's registry alone, so a file held by a CLOUD
+  // dispatch looked free. Measured on the live board the day the headline
+  // landed: #1175 was shown in `backlog` and counted in "she can take", while
+  // the round had refused it with
+  //
+  //   rings/SR-00/QueenLocalisation.swift held by gHashTag/trios#1176
+  //
+  // - #1176 being a cloud dispatch, which the registry knows nothing about. The
+  // page and the Queen were reading different boards, and the page's number was
+  // the one on the front in the largest type.
+  const fromCloud: RegistryTask[] = dispatches.map((row) => ({
+    issue: { number: row.issue as number },
+    state: row.finished_at ? 'awaitingReview' : 'running',
+    ownedPaths: asPaths(row.owned_paths),
+    updatedAt: String(row.finished_at ?? row.dispatched_at ?? ''),
+  }))
+  const holding = [...tasks, ...fromCloud].filter((t) =>
+    stillHoldsBoundary(t, now),
+  )
   for (const row of issueRows) {
     const number = row.number as number
     if (cards.has(number)) continue

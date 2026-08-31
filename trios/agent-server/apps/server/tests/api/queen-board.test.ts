@@ -173,6 +173,68 @@ function boardCard(candidate: number, path: string, tasks: Task[]) {
   return card as NonNullable<typeof card>
 }
 
+/**
+ * A file held by a CLOUD dispatch is held, and the board could not see it.
+ *
+ * Measured live the day the headline landed: #1175 sat in `backlog` and was
+ * counted in "she can take", while the round had refused it with
+ *
+ *   rings/SR-00/QueenLocalisation.swift held by gHashTag/trios#1176
+ *
+ * #1176 is a cloud dispatch and the app's registry knows nothing about it. So
+ * the page and the Queen were reading different boards, and the page's number
+ * was the one on the front in the largest type - the headline said an issue was
+ * ready and the Queen's own sentence underneath said there was nothing to
+ * choose.
+ */
+describe('a file held by a cloud dispatch', () => {
+  const HELD = 'rings/SR-00/QueenLocalisation.swift'
+
+  it('puts the issue in blocked, not backlog', () => {
+    const cards = composeCards({
+      tasks: [],
+      dispatches: [
+        {
+          issue: 1176,
+          branch: 'queen-1176',
+          started: true,
+          detail: 'running',
+          finished_at: null,
+          outcome: null,
+          owned_paths: [HELD],
+          dispatched_at: new Date(NOW).toISOString(),
+        },
+      ],
+      issues: [issue(1175, [HELD])],
+      now: NOW,
+    })
+    const card = cards.find((c) => c.number === 1175)
+    expect(card?.column).toBe('blocked')
+    expect(card?.heldBy).toContain('#1176')
+  })
+
+  it('leaves an unrelated issue alone', () => {
+    const cards = composeCards({
+      tasks: [],
+      dispatches: [
+        {
+          issue: 1176,
+          branch: 'queen-1176',
+          started: true,
+          detail: 'running',
+          finished_at: null,
+          outcome: null,
+          owned_paths: [HELD],
+          dispatched_at: new Date(NOW).toISOString(),
+        },
+      ],
+      issues: [issue(1200, ['docs/somewhere-else.md'])],
+      now: NOW,
+    })
+    expect(cards.find((c) => c.number === 1200)?.column).toBe('backlog')
+  })
+})
+
 describe('the board and queend read one registry the same way', () => {
   it('the binary is where the container expects it', () => {
     const dockerfile = readFileSync(
