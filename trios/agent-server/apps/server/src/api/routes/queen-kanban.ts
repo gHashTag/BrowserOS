@@ -57,6 +57,13 @@ interface Card {
   detail?: string
   worker?: string
   heldBy?: string[]
+  /** The last round's own words for why it passed this candidate over. */
+  whyNotChosen?: string
+  /** How many acceptance criteria this issue offers, and where they came from. */
+  criteria?: number
+  criteriaSource?: string
+  /** Spec sections the issue still lacks. */
+  needs?: string[]
 }
 
 const COLUMNS = [
@@ -106,6 +113,55 @@ function asPaths(value: unknown): string[] {
   return value.filter((v): v is string => typeof v === 'string')
 }
 
+/**
+ * What the last round said about each candidate it passed over.
+ *
+ * `queend` writes one line per skipped issue and the round stores the whole
+ * decision. Reading it back is strictly better than the board guessing: the
+ * board can see that an issue has a boundary and is not being worked, and it
+ * cannot see WHY - whether its files are held, whether it is not a spec, or
+ * whether the work already landed and nobody closed the issue.
+ */
+function addLastRoundReasons(
+  cards: Map<number, Card>,
+  decision: unknown,
+): void {
+  const skipped = (decision as { skipped?: unknown })?.skipped
+  if (!Array.isArray(skipped)) return
+  for (const entry of skipped) {
+    const line = String(entry)
+    const match = line.match(/^#(\d+):\s*(.+)$/)
+    if (!match) continue
+    const card = cards.get(Number(match[1]))
+    if (!card) continue
+    // Several lines can name one issue - not a spec AND its files are held.
+    // Both are true and both matter, so they are joined rather than raced.
+    card.whyNotChosen = card.whyNotChosen
+      ? `${card.whyNotChosen}; ${match[2]}`
+      : match[2]
+  }
+}
+
+/**
+ * How judgeable an issue is, for the card.
+ *
+ * A card that shows only a title cannot answer the question the operator keeps
+ * asking - why is nothing happening to this. "0 criteria" and "missing
+ * boundary, requirements" answer it in the issue's own terms, and both are
+ * already computed by the round.
+ */
+function criteriaOf(row: Record<string, unknown>): Partial<Card> {
+  const criteria = Array.isArray(row.criteria) ? row.criteria.length : 0
+  const needs = Array.isArray(row.missing)
+    ? row.missing.filter((m): m is string => typeof m === 'string')
+    : []
+  return {
+    criteria,
+    criteriaSource: String(row.criteria_source ?? 'none'),
+    needs: needs.length > 0 ? needs : undefined,
+  }
+}
+
 interface RegistryTask {
   issue?: { owner?: string; repo?: string; number?: number }
   title?: string
@@ -116,7 +172,7 @@ interface RegistryTask {
 
 async function build(pool: Pool): Promise<Card[]> {
   const variant = process.env.TRIOS_VARIANT || 'prod'
-  const [registry, dispatches, issues] = await Promise.all([
+  const [registry, dispatches, issues, lastTick] = await Promise.all([
     pool.query('SELECT tasks FROM queen_registry WHERE variant = $1', [
       variant,
     ]),
@@ -126,7 +182,19 @@ async function build(pool: Pool): Promise<Card[]> {
         WHERE started = true
           AND (finished_at IS NULL OR outcome NOT LIKE 'reaped%')`,
     ),
-    pool.query('SELECT number, title, owned_paths FROM queen_issues'),
+    pool.query(
+      `SELECT number, title, owned_paths, criteria, criteria_source, missing
+         FROM queen_issues`,
+    ),
+    // The reason the LAST round gave for passing over each candidate, per
+    // issue. The round already works this out and writes it down; the board was
+    // recomputing a thinner version of the same thing and could only ever say
+    // "blocked". "held by #1176" and "not yet a spec - missing requirements"
+    // are different problems with different fixes, and a person looking at this
+    // page has no other way to tell them apart.
+    pool.query(
+      `SELECT decision FROM queen_tick ORDER BY decided_at DESC LIMIT 1`,
+    ),
   ])
 
   const tasks: RegistryTask[] = registry.rowCount
@@ -137,6 +205,7 @@ async function build(pool: Pool): Promise<Card[]> {
   addRegistryTasks(cards, tasks)
   addInFlight(cards, dispatches.rows, issues.rows)
   addUntakenIssues(cards, issues.rows, tasks)
+  addLastRoundReasons(cards, lastTick.rows[0]?.decision)
   return [...cards.values()].sort((a, b) => b.number - a.number)
 }
 
@@ -251,6 +320,7 @@ function addUntakenIssues(
         column: 'backlog',
         paths: [],
         detail: 'declares no boundary, so nothing can be reserved for it',
+        ...criteriaOf(row),
       })
       continue
     }
@@ -263,6 +333,7 @@ function addUntakenIssues(
       column: heldBy.length > 0 ? 'blocked' : 'backlog',
       paths,
       heldBy: heldBy.length > 0 ? heldBy : undefined,
+      ...criteriaOf(row),
     })
   }
 }
@@ -354,6 +425,11 @@ const SHELL = `<!doctype html>
  .t{font-size:var(--f-1);margin:var(--sp-1) 0;line-height:1.4}
  .who{font-size:var(--f-3);color:var(--accent);font-family:var(--mono)}
  .held{font-size:var(--f-3);color:var(--red);font-family:var(--mono)}
+.crit{font-size:var(--f-3);color:var(--golden);margin-top:.35rem}
+.crit.none{color:var(--red)}
+.needs{font-size:var(--f-3);color:var(--dim);font-family:var(--mono)}
+.why-card{font-size:var(--f-3);color:var(--dim);margin-top:.35rem;
+  border-left:2px solid var(--line);padding-left:.5rem;line-height:1.45}
  .d{font-size:var(--f-3);color:var(--muted);margin-top:var(--sp-1);word-break:break-word}
  code{font-family:var(--mono);font-size:var(--f-3);color:var(--muted);
   background:rgba(255,255,255,.05);padding:0 .3em;border-radius:3px;
@@ -455,6 +531,18 @@ const SHELL = `<!doctype html>
      ((c.paths&&c.paths.length)?'<div>'+c.paths.map(function(p){
         return '<code>'+esc(p)+'</code>'}).join(' ')+'</div>':'')+
      (c.detail?'<div class="d">'+esc(c.detail)+'</div>':'')+
+     // How judgeable it is, and the round's own reason for passing it over.
+     // The board could always say a card was stuck and never why.
+     (typeof c.criteria==='number'
+       ? '<div class="crit'+(c.criteria?'':' none')+'">'+
+         (c.criteria
+           ? c.criteria+' criteria to be judged by ('+esc(c.criteriaSource||'')+')'
+           : 'no acceptance criteria - nothing to judge it against')+'</div>'
+       : '')+
+     ((c.needs&&c.needs.length)
+       ? '<div class="needs">still needs: '+esc(c.needs.join(', '))+'</div>':'')+
+     (c.whyNotChosen
+       ? '<div class="why-card">last round: '+esc(c.whyNotChosen)+'</div>':'')+
      '</article>'
    }).join('')||'<div class="empty">nothing here</div>'
    var s=document.createElement('section')
