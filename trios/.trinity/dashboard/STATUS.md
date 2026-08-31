@@ -4,9 +4,13 @@ Regenerate this from measurement at the start of every round. Every number
 below carries the command that produced it, so the next reader can re-run it
 rather than trust it. A number without a command is a rumour.
 
-Last measured: 2026-08-23.
+Last measured: each figure carries its own date inline (2026-08-27 through
+2026-09-01).
 
 ## MVP, against section 23 of Queen_T27_MVP_Architecture.md
+(now in-repo at `docs/architecture/Queen_T27_MVP_Architecture.md`,
+3261 lines, since commit 6d1d50656; the 2026-08-27 re-classification
+below read the ~/Downloads original - same document, moved not rewritten)
 
 **2 of 29 criteria done** (re-classified 2026-08-27, wave 107, by the
 loop's live evidence; was 0/17/12 on 2026-08-23). The two proven done,
@@ -68,12 +72,15 @@ make cassettes            -> fast honest verdict since the ROOT-CAUSE FIX
                               loop's history - cassettes 4/4 replays,
                               mutants caught 2 of 2, dev 199/199
                               warnings-zero - under the diagnostic lock
-                              bypass. Plain `make check` still stops at
-                              the lock phase while the system-layer
-                              anomaly lives (it swallowed the line 26
-                              minutes this run, then released): the
-                              owner's root fs_usage is the cure; the
-                              bypass is diagnostic and never for CI.
+                              bypass (its names and targets are dead
+                              history now; deleting them is the owner's
+                              call). Plain `make check` no longer wedges
+                              either: the cassettes step returns the same
+                              ~2-min verdict, and what is red there is
+                              the SAME four real failures - not the lock
+                              (corrected 2026-09-01: an earlier edit
+                              left this tail saying fs_usage was still
+                              the cure after the root cause above it).
 make t27-lowering           -> counts declared vs emitted functions, per spec
 make t27-rings              -> ring00_parity, ring01_rules, ring00_verilog
 make chain                  -> 80 verdicts, spec and hand-written Swift agree
@@ -118,6 +125,20 @@ path already consults it. Eight errors are that omission. Renaming parameters
 or adding shadow locals would silence it while hiding a one-line fix from its
 author, so it was left and recorded. `T27_NOCOMPILE_CEILING` is lowered 20 ->
 11 to hold the ground.
+
+TWO t27 populations, never merged (split recorded 2026-09-01 from the
+neighbour's measurement, commit 5d837a855): every number above is the
+trios-mesh SUBMODULE corpus. The rings specs are a population of three:
+`rings/T27-00/queen_core.t27` (209 lines, 7 rules) and `rings/T27-01/a2a.t27`
+(223 lines) exist; T27-02 (the Queen tick) does not; zero generated .rs
+under T27-* and no Rust crate hosts any of it - the supervisor instead lives
+in `queen-tick.ts` (1551 lines) plus the Swift `queend`, with
+`can_start_another` present in BOTH `queen_core.t27:198` and
+`QueenDelegation.swift:472` (agreeing today; the two-languages state the
+generation law exists to prevent). t27c is NOT the blocker for this
+population - run on the RING-00 decision core it exits 0 and emits 121 lines
+of Rust. Ring work also cannot be delegated to a cloud bee: the bee image is
+oven/bun with git and queend - no Swift, no Rust, no t27c.
 
 ## How to update this
 
