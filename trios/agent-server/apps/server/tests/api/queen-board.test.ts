@@ -213,6 +213,21 @@ describe('a file held by a cloud dispatch', () => {
     expect(card?.heldBy).toContain('#1176')
   })
 
+  // The fixture supplied owned_paths, and the live query did not SELECT it.
+  // So the holder arrived with no files, held nothing, and the test above was
+  // green while the board was wrong - a fixture richer than the query is a
+  // fixture testing a system that does not exist.
+  it('is selected by the query that feeds it', () => {
+    const source = readFileSync(KANBAN, 'utf8')
+    const dispatchQuery = source
+      .split('`')
+      .find((chunk) => chunk.includes('FROM queen_dispatch'))
+    expect(dispatchQuery).toBeDefined()
+    for (const column of ['owned_paths', 'finished_at', 'dispatched_at']) {
+      expect(dispatchQuery).toContain(column)
+    }
+  })
+
   it('leaves an unrelated issue alone', () => {
     const cards = composeCards({
       tasks: [],

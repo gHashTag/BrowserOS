@@ -344,8 +344,14 @@ async function build(pool: Pool): Promise<{ cards: Card[]; pulse: Pulse }> {
     // that the Queen had already stopped seeing. Two surfaces, one table, two
     // different sets is the shape of every disagreement on this page.
     pool.query(
+      // owned_paths and dispatched_at are read because composeCards uses them:
+      // a cloud dispatch HOLDS the files it was given, and the 48-hour review
+      // clock starts when it finished. Selecting neither is how the holder list
+      // came to hold nothing - the query and its reader disagreed, and the only
+      // place that showed was a headline claiming an issue was ready while the
+      // Queen's own sentence underneath said there was nothing to choose.
       `SELECT issue, branch, started, detail, finished_at, outcome,
-              review_state, review_note
+              review_state, review_note, owned_paths, dispatched_at
          FROM queen_dispatch
         WHERE started = true
           AND (finished_at IS NULL OR outcome NOT LIKE 'reaped%')
