@@ -51,6 +51,10 @@ import {
 import { createQueenLeaseRoute } from './routes/queen-lease'
 import { createQueenRegistryRoute } from './routes/queen-registry'
 import { createQueenRehearsalRoute } from './routes/queen-rehearsal'
+import {
+  createQueenRoadmapDataRoute,
+  createQueenRoadmapRoute,
+} from './routes/queen-roadmap'
 import { createQueenTreeRoute } from './routes/queen-tree'
 import { createRefinePromptRoutes } from './routes/refine-prompt'
 import { createShutdownRoute } from './routes/shutdown'
@@ -222,6 +226,10 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/*', requireTrustedAppOrigin())
     .route('/', createQueenFeedDataRoute())
 
+  const queenRoadmapDataRoutes = new Hono<Env>()
+    .use('/*', requireTrustedAppOrigin())
+    .route('/', createQueenRoadmapDataRoute())
+
   const queenBoardRoutes = new Hono<Env>()
     .use('/*', requireTrustedAppOrigin())
     .route('/', createQueenBoardRoute())
@@ -318,6 +326,8 @@ export async function createHttpServer(config: HttpServerConfig) {
     .route('/queen/tree', createQueenTreeRoute())
     .route('/queen/kanban', createQueenKanbanRoute())
     .route('/queen/board', queenBoardRoutes)
+    .route('/queen/roadmap', createQueenRoadmapRoute())
+    .route('/queen/roadmap/data', queenRoadmapDataRoutes)
     .route('/queen/feed', createQueenFeedRoute())
     .route('/queen/feed/data', queenFeedDataRoutes)
     .route('/queen/lease', queenLeaseRoutes)

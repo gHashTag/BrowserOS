@@ -243,6 +243,30 @@ function run(
   })
 }
 
+/**
+ * How many files a bee's branch actually changed.
+ *
+ * Lives here because `run` here drops to the bee before touching git. A first
+ * version of this counted from the tick and would have run git as root against
+ * a bee-owned tree - the dubious-ownership refusal this repository already paid
+ * for once, reintroduced two files away from its own fix.
+ *
+ * Zero on any failure. The review policy treats zero committed files as
+ * grounds to escalate rather than accept, so an unreadable branch cannot be
+ * mistaken for finished work.
+ */
+export async function committedFileCount(issue: number): Promise<number> {
+  const base = process.env.TRIOS_REPO_REF || 'origin/dev'
+  const out = await run(
+    'git',
+    ['diff', '--name-only', `${base}...queen-${issue}`],
+    workspaceRoot(),
+    60_000,
+  )
+  if (out.code !== 0) return 0
+  return out.out.split('\n').filter((l) => l.trim().length > 0).length
+}
+
 export function workspaceRoot(): string {
   return `${process.env.WORKSPACE_DIR || '/workspace'}/BrowserOS`
 }

@@ -33,6 +33,7 @@ import { spawn } from 'node:child_process'
 import { Pool } from 'pg'
 import { logger } from '../../lib/logger'
 import {
+  committedFileCount,
   dispatchBee,
   reapDispatchesFromPreviousBoot,
   reapStalledDispatches,
@@ -52,7 +53,19 @@ const QUEEND = '/usr/local/bin/queend'
 /// with nothing real.
 const ZERO_UUID = '00000000-0000-0000-0000-000000000000'
 
+interface SpecVerdict {
+  delegatable: boolean
+  isSpec: boolean
+  missing: string[]
+  remedy: string
+}
+
 interface QueendChoice {
+  verdicts?: Record<string, SpecVerdict>
+  /** For `review`: accept, sendBack, escalate or wait. */
+  verdict?: string
+  note?: string
+  unmet?: string[]
   allowed: boolean
   chosen?: number | null
   chosenPaths?: string[] | null
@@ -141,17 +154,30 @@ async function openIssues(
 async function rememberIssues(
   pool: Pool,
   issues: Array<{ number: number; body: string; title: string }>,
+  verdicts?: Record<string, SpecVerdict>,
 ): Promise<void> {
   if (issues.length === 0) return
   for (const issue of issues) {
     const boundary = boundaryPathsOf(issue.body)
+    const v = verdicts?.[String(issue.number)]
     await pool.query(
-      `INSERT INTO queen_issues (number, title, state, owned_paths, seen_at)
-       VALUES ($1, $2, 'open', $3::jsonb, now())
+      `INSERT INTO queen_issues
+         (number, title, state, owned_paths, seen_at, is_spec, delegatable, missing)
+       VALUES ($1, $2, 'open', $3::jsonb, now(), $4, $5, $6::jsonb)
        ON CONFLICT (number) DO UPDATE
          SET title = EXCLUDED.title, state = 'open',
-             owned_paths = EXCLUDED.owned_paths, seen_at = now()`,
-      [issue.number, issue.title.slice(0, 300), JSON.stringify(boundary)],
+             owned_paths = EXCLUDED.owned_paths, seen_at = now(),
+             is_spec = EXCLUDED.is_spec,
+             delegatable = EXCLUDED.delegatable,
+             missing = EXCLUDED.missing`,
+      [
+        issue.number,
+        issue.title.slice(0, 300),
+        JSON.stringify(boundary),
+        v?.isSpec ?? false,
+        v?.delegatable ?? boundary.length > 0,
+        JSON.stringify(v?.missing ?? []),
+      ],
     )
   }
   await pool.query(`DELETE FROM queen_issues WHERE number <> ALL($1::int[])`, [
@@ -334,7 +360,13 @@ async function runRound(
     // Keep what GitHub showed us. The round reads this list anyway, and a board
     // that had to fetch it per page view would burn the anonymous rate limit
     // (60/hour) on being looked at.
-    await rememberIssues(pool, open).catch((error) => {
+    // One call for forty verdicts. The rule lives in queend, so the board and
+    // the Queen cannot disagree about what a spec is.
+    const specs = await askQueend({
+      kind: 'spec',
+      candidateBodies,
+    }).catch(() => null)
+    await rememberIssues(pool, open, specs?.verdicts).catch((error) => {
       logger.warn('Could not store the open issue list', {
         error: error instanceof Error ? error.message : String(error),
       })
@@ -347,6 +379,18 @@ async function runRound(
   // round would skip a candidate on behalf of a bee that died in a redeploy an
   // hour ago. Same ordering the app's own review scheduler uses, for the same
   // reason: housekeeping first, then decide.
+  // Judge what came back, before choosing anything new.
+  //
+  // The operator's rule: she works autonomously and is told afterwards. So a
+  // finished turn cannot wait for a human - it is reviewed here, by the Queen's
+  // own policy, and only an ESCALATION reaches a person. Without this the hold
+  // added to stop the six-times loop would have become a different starvation:
+  // every issue she finished would be locked out of the pool for ever.
+  const reviewed = await reviewFinishedDispatches(pool)
+  if (reviewed.length > 0) {
+    logger.info('Queen reviewed her own work', { verdicts: reviewed })
+  }
+
   const reaped = await reapStalledDispatches(pool)
   if (reaped.length > 0) {
     logger.info('Queen tick reaped stalled dispatches', { issues: reaped })
@@ -467,7 +511,16 @@ async function runRound(
   // answer accounts for what the previous one started. That is what makes the
   // bees help rather than collide: the second choice already knows the first
   // one's boundary is taken.
-  const started: unknown[] = []
+  // Typed, because the report reads these back. `unknown[]` compiled and then
+  // made the reporter unable to say which issues it had started.
+  const started: Array<{
+    started: boolean
+    issue: number
+    branch: string
+    detail: string
+    conversationId?: string
+    keyIndex?: number
+  }> = []
   let board = [...registry.rows[0].tasks, ...containerTasks]
   let current: QueendChoice | null = choice
   let takenKeys = inFlight.rows
@@ -524,6 +577,7 @@ async function runRound(
     }
   }
 
+  await report(pool, reviewed, started, choice, candidates.length)
   if (started.length > 0) {
     return { ran: true, choice, dispatch: started }
   }
@@ -604,6 +658,20 @@ function briefFor(
     'holds no push credential by design, and the work is carried out as a patch',
     'by the operator. A failed push reads as a failed task; a commit is the',
     'deliverable.',
+    '',
+    '## Your verdict, which the Queen reads',
+    '',
+    'End your LAST message with exactly this block and nothing after it:',
+    '',
+    '## VERDICT',
+    "- <the criterion, in the issue's own words>: met | unmet | could-not-check",
+    '- <the next one>: met | unmet | could-not-check',
+    '',
+    'One line per acceptance criterion the issue states. A criterion you could',
+    'not check is could-not-check, never met - claiming met for work you did',
+    'not verify is the one failure nothing downstream can catch, because the',
+    'reviewer has only your word for it. If the issue states no criteria, say',
+    'so in one line instead of inventing some.',
   ].join('\n')
 }
 
@@ -635,6 +703,166 @@ export function workerSystemPrompt(
     'Everything you write is English. When you stop, answer every acceptance criterion in turn: met, not met, or could not check.',
   )
   return lines.join(' ')
+}
+
+/**
+ * Read each finished turn's own verdict block and decide on it.
+ *
+ * The bee ends its last message with a VERDICT block: one line per acceptance
+ * criterion, met / unmet / could-not-check. That is parsed here and handed to
+ * `QueenReviewDecision` through queend - the same policy the Mac uses, so a
+ * task judged in the cloud and a task judged on a laptop get the same answer.
+ *
+ * `could-not-check` counts as UNMET. A criterion nobody verified has not been
+ * satisfied, and treating "I could not tell" as "yes" is how work closes on
+ * faith. The bee is told this in its brief so the accounting is not a surprise.
+ *
+ * Only an escalation reaches a person. accept releases the issue, sendBack
+ * frees it to be dispatched again with the note, and wait leaves it alone.
+ */
+async function reviewFinishedDispatches(pool: Pool): Promise<string[]> {
+  const done = await pool.query(
+    `SELECT d.issue, d.conversation_id, d.review_state,
+            (SELECT string_agg(t.text, '\n' ORDER BY t.seq)
+               FROM queen_transcript t
+              WHERE t.conversation_id = d.conversation_id AND t.kind = 'say')
+              AS said
+       FROM queen_dispatch d
+      WHERE d.started = true AND d.finished_at IS NOT NULL
+        AND d.review_state IS NULL
+        AND d.outcome NOT LIKE 'reaped%'`,
+  )
+  const acted: string[] = []
+  for (const row of done.rows) {
+    const said = String(row.said ?? '')
+    const verdicts = parseVerdictBlock(said)
+    // No block at all is not an accept. It is a bee that did not report, which
+    // the policy sees as zero criteria judged - and it answers `wait` or
+    // `escalate` rather than passing work nobody described.
+    const answer = await askQueend({
+      kind: 'review',
+      verdicts: verdicts.map((v) => ({ criterion: v.criterion, met: v.met })),
+      totalCriteria: verdicts.length,
+      committedFiles: await committedFileCount(row.issue as number),
+      priorSendBacks: 0,
+    }).catch(() => null)
+    const state = String(answer?.verdict ?? 'wait')
+    await pool.query(
+      `UPDATE queen_dispatch
+          SET review_state = $2, review_note = $3, reviewed_at = now()
+        WHERE issue = $1`,
+      [
+        row.issue,
+        state,
+        String(answer?.note ?? answer?.refusal ?? '').slice(0, 900),
+      ],
+    )
+    acted.push(`#${row.issue}:${state}`)
+  }
+  return acted
+}
+
+/** The bee's own VERDICT block, or nothing. */
+export function parseVerdictBlock(
+  text: string,
+): Array<{ criterion: string; met: boolean }> {
+  const at = text.lastIndexOf('## VERDICT')
+  if (at < 0) return []
+  const out: Array<{ criterion: string; met: boolean }> = []
+  for (const line of text.slice(at).split('\n').slice(1)) {
+    const m = line.match(/^\s*[-*]\s*(.+?):\s*(met|unmet|could-not-check)\s*$/i)
+    if (!m) {
+      // A blank line inside the block is fine; anything else ends it, because
+      // the bee was told nothing follows the block.
+      if (line.trim() === '') continue
+      break
+    }
+    out.push({
+      criterion: m[1].trim().slice(0, 300),
+      // could-not-check is UNMET. An unverified criterion is not a satisfied
+      // one, and this is the line that decides whether the swarm can close its
+      // own work honestly.
+      met: m[2].toLowerCase() === 'met',
+    })
+  }
+  return out
+}
+
+/**
+ * One round, in sentences, for whoever is not reading the logs.
+ *
+ * The operator gives the direction and is told afterwards, so being told has to
+ * be a thing the system does rather than a thing they go and find. A log line
+ * is not a report: reading it means already knowing which lines matter.
+ *
+ * Written even when the round did nothing. "Nothing happened and here is why"
+ * is the most useful sentence this can produce, because it is the question
+ * somebody actually opens the page with.
+ */
+async function report(
+  pool: Pool,
+  reviewed: string[],
+  started: Array<{ started?: boolean; issue?: number; detail?: string }>,
+  choice: QueendChoice,
+  candidates: number,
+): Promise<void> {
+  const lines: string[] = []
+  const escalated = reviewed.filter((r) => r.endsWith(':escalate'))
+  const accepted = reviewed.filter((r) => r.endsWith(':accept'))
+  const sentBack = reviewed.filter((r) => r.endsWith(':sendBack'))
+
+  if (started.length > 0) {
+    lines.push(
+      `Started ${started.length} bee(s): ` +
+        started.map((d) => `#${d.issue}`).join(', ') +
+        '.',
+    )
+  }
+  if (accepted.length > 0) {
+    lines.push(`Accepted ${accepted.length}: ${accepted.join(', ')}.`)
+  }
+  if (sentBack.length > 0) {
+    lines.push(
+      `Sent back ${sentBack.length} for another pass: ${sentBack.join(', ')}.`,
+    )
+  }
+  if (escalated.length > 0) {
+    lines.push(
+      `ESCALATED ${escalated.length} to you - the policy would not decide these ` +
+        `on its own: ${escalated.join(', ')}.`,
+    )
+  }
+  if (started.length === 0) {
+    // The refusal, verbatim. A round that started nothing is the case where a
+    // summary in my own words would be the least trustworthy thing on the page.
+    lines.push(
+      `Started nothing. ${choice.refusal ?? 'No reason given'}. ` +
+        `${candidates} issue(s) were on the table.`,
+    )
+    const skipped = (choice.skipped ?? []).slice(0, 6)
+    if (skipped.length > 0) lines.push('', ...skipped.map((s) => `  ${s}`))
+  }
+
+  const headline =
+    escalated.length > 0
+      ? `${escalated.length} waiting on you`
+      : started.length > 0
+        ? `${started.length} bee(s) working`
+        : (choice.refusal ?? 'nothing to do')
+
+  await pool
+    .query(
+      `INSERT INTO queen_report (headline, body, needs_you)
+       VALUES ($1, $2, $3)`,
+      [
+        headline.slice(0, 200),
+        lines.join('\n').slice(0, 4000),
+        escalated.length > 0,
+      ],
+    )
+    .catch(() => {
+      // A report that will not save must not take the round down with it.
+    })
 }
 
 /**

@@ -189,6 +189,43 @@ ALTER TABLE queen_dispatch
 ALTER TABLE queen_dispatch
   ADD COLUMN IF NOT EXISTS key_index int;
 
+-- Whether an issue is a specification, judged by the Queen's own rule and
+-- stored so a board can say WHAT each one is missing instead of only that it
+-- was skipped. Measured the day this landed: 0 of 40 open issues passed, and
+-- requirements were missing from all 40.
+ALTER TABLE queen_issues
+  ADD COLUMN IF NOT EXISTS is_spec boolean NOT NULL DEFAULT false;
+ALTER TABLE queen_issues
+  ADD COLUMN IF NOT EXISTS delegatable boolean NOT NULL DEFAULT false;
+ALTER TABLE queen_issues
+  ADD COLUMN IF NOT EXISTS missing jsonb NOT NULL DEFAULT '[]'::jsonb;
+
+-- The Queen's own verdict on a finished turn. She works autonomously and is
+-- told afterwards, so a finished turn cannot wait for a person: only an
+-- escalation reaches one. Without this the hold that stopped the six-times
+-- loop would have become a different starvation - every issue she finished
+-- locked out of the pool for ever.
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS review_state text;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS review_note text;
+ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS reviewed_at timestamptz;
+
+-- What she did, in her own words, once per round.
+--
+-- The operator gives direction and is told afterwards. That obligation needs a
+-- place to live: a log line is not a report, because reading it means knowing
+-- which lines matter. One row per round, written whether the round did
+-- anything or not - a round that found nothing to do is the most important
+-- thing to say when somebody asks why nothing happened.
+CREATE TABLE IF NOT EXISTS queen_report (
+  id bigserial PRIMARY KEY,
+  at timestamptz NOT NULL DEFAULT now(),
+  headline text NOT NULL,
+  body text NOT NULL,
+  needs_you boolean NOT NULL DEFAULT false
+);
+
+CREATE INDEX IF NOT EXISTS idx_queen_report_at ON queen_report (at DESC);
+
 CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation_order
   ON "conversationMessages" ("conversationId", "orderIndex");
 `

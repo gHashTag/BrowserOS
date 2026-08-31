@@ -1,0 +1,380 @@
+{
+  "source": {
+    "file": "Queen_T27_MVP_Architecture.md",
+    "bytes": 91776,
+    "inGit": false,
+    "note": "Extracted from an unversioned file in ~/Downloads. The index is versioned here so a gate and a dashboard can read it; the prose is not copied. If the two drift, the file is the author and this is the index - regenerate rather than edit."
+  },
+  "epics": [
+    {
+      "id": "E0",
+      "title": "Evidence baseline and repository truth",
+      "issues": [
+        {
+          "id": "E0-I1",
+          "title": "Record canonical repository snapshot"
+        },
+        {
+          "id": "E0-I2",
+          "title": "Reproduce documented T27 quick start"
+        },
+        {
+          "id": "E0-I3",
+          "title": "Generate current backend capability matrix"
+        },
+        {
+          "id": "E0-I4",
+          "title": "Queen subsystem executable audit"
+        }
+      ]
+    },
+    {
+      "id": "E1",
+      "title": "Language contract and source AST",
+      "issues": [
+        {
+          "id": "E1-I1",
+          "title": "Publish T27 language version policy"
+        },
+        {
+          "id": "E1-I2",
+          "title": "Extract canonical AST schema"
+        },
+        {
+          "id": "E1-I3",
+          "title": "Parser corpus and negative corpus"
+        },
+        {
+          "id": "E1-I4",
+          "title": "AST semantic diff prototype"
+        }
+      ]
+    },
+    {
+      "id": "E2",
+      "title": "Semantic validation and versioned IR",
+      "issues": [
+        {
+          "id": "E2-I1",
+          "title": "Symbol and type resolution"
+        },
+        {
+          "id": "E2-I2",
+          "title": "Invariant model"
+        },
+        {
+          "id": "E2-I3",
+          "title": "Determinism and effect model"
+        },
+        {
+          "id": "E2-I4",
+          "title": "Semantic IR v1"
+        },
+        {
+          "id": "E2-I5",
+          "title": "Compatibility test harness"
+        }
+      ]
+    },
+    {
+      "id": "E3",
+      "title": "Backend SDK and progressive lowering",
+      "issues": [
+        {
+          "id": "E3-I1",
+          "title": "Backend trait and descriptor"
+        },
+        {
+          "id": "E3-I2",
+          "title": "Migrate canonical software backend"
+        },
+        {
+          "id": "E3-I3",
+          "title": "Migrate Verilog backend"
+        },
+        {
+          "id": "E3-I4",
+          "title": "Add second software backend"
+        },
+        {
+          "id": "E3-I5",
+          "title": "Experimental Rust backend"
+        },
+        {
+          "id": "E3-I6",
+          "title": "CIRCT bridge feasibility spike"
+        }
+      ]
+    },
+    {
+      "id": "E4",
+      "title": "Golden validation and reproducibility",
+      "issues": [
+        {
+          "id": "E4-I1",
+          "title": "Unified `t27c verify`"
+        },
+        {
+          "id": "E4-I2",
+          "title": "Versioned golden vector format"
+        },
+        {
+          "id": "E4-I3",
+          "title": "Trace-based evaluation"
+        },
+        {
+          "id": "E4-I4",
+          "title": "Reproducibility manifest"
+        },
+        {
+          "id": "E4-I5",
+          "title": "Bug-to-regression gate"
+        },
+        {
+          "id": "E4-I6",
+          "title": "Mutation testing baseline"
+        }
+      ]
+    },
+    {
+      "id": "E5",
+      "title": "Queen mission contracts",
+      "issues": [
+        {
+          "id": "E5-I1",
+          "title": "Mission contract schema"
+        },
+        {
+          "id": "E5-I2",
+          "title": "Mission-to-issue planner"
+        },
+        {
+          "id": "E5-I3",
+          "title": "Structured Bee result"
+        },
+        {
+          "id": "E5-I4",
+          "title": "T27 diagnostic feedback loop"
+        },
+        {
+          "id": "E5-I5",
+          "title": "Semantic review policy"
+        }
+      ]
+    },
+    {
+      "id": "E6",
+      "title": "Bee isolation, evidence, and integration",
+      "issues": [
+        {
+          "id": "E6-I1",
+          "title": "Isolation stress test"
+        },
+        {
+          "id": "E6-I2",
+          "title": "One-writer integration rule"
+        },
+        {
+          "id": "E6-I3",
+          "title": "Evidence score"
+        },
+        {
+          "id": "E6-I4",
+          "title": "Competing-proposal workflow"
+        },
+        {
+          "id": "E6-I5",
+          "title": "Stop-signal policy"
+        }
+      ]
+    },
+    {
+      "id": "E7",
+      "title": "Playground and Graph IR Explorer",
+      "issues": [
+        {
+          "id": "E7-I1",
+          "title": "Playground editor and build API"
+        },
+        {
+          "id": "E7-I2",
+          "title": "AST explorer"
+        },
+        {
+          "id": "E7-I3",
+          "title": "Semantic IR explorer"
+        },
+        {
+          "id": "E7-I4",
+          "title": "Generated code traceability"
+        },
+        {
+          "id": "E7-I5",
+          "title": "Verification dashboard"
+        },
+        {
+          "id": "E7-I6",
+          "title": "Hardware structural view"
+        },
+        {
+          "id": "E7-I7",
+          "title": "Queen demo flow"
+        }
+      ]
+    },
+    {
+      "id": "E8",
+      "title": "Hardware assurance path",
+      "issues": [
+        {
+          "id": "E8-I1",
+          "title": "Synthesizable subset specification"
+        },
+        {
+          "id": "E8-I2",
+          "title": "RTL simulation harness"
+        },
+        {
+          "id": "E8-I3",
+          "title": "Logical equivalence feasibility"
+        },
+        {
+          "id": "E8-I4",
+          "title": "Synthesis evidence manifest"
+        },
+        {
+          "id": "E8-I5",
+          "title": "Hardware-in-the-loop adapter"
+        }
+      ]
+    },
+    {
+      "id": "E9",
+      "title": "Release engineering and security",
+      "issues": [
+        {
+          "id": "E9-I1",
+          "title": "Canonical build container"
+        },
+        {
+          "id": "E9-I2",
+          "title": "Multi-platform CLI release"
+        },
+        {
+          "id": "E9-I3",
+          "title": "SBOM and dependency policy"
+        },
+        {
+          "id": "E9-I4",
+          "title": "Playground sandbox threat model"
+        },
+        {
+          "id": "E9-I5",
+          "title": "Release evidence bundle"
+        }
+      ]
+    },
+    {
+      "id": "E10",
+      "title": "Scientific evaluation and arXiv package",
+      "issues": [
+        {
+          "id": "E10-I1",
+          "title": "Benchmark task corpus"
+        },
+        {
+          "id": "E10-I2",
+          "title": "Direct-code baseline"
+        },
+        {
+          "id": "E10-I3",
+          "title": "Spec-first condition"
+        },
+        {
+          "id": "E10-I4",
+          "title": "Metrics pipeline"
+        },
+        {
+          "id": "E10-I5",
+          "title": "Reproducible paper artifact"
+        },
+        {
+          "id": "E10-I6",
+          "title": "Paper draft"
+        }
+      ]
+    }
+  ],
+  "milestones": [
+    {
+      "id": "M0",
+      "title": "Truthful baseline",
+      "gate": "- canonical commits recorded;"
+    },
+    {
+      "id": "M1",
+      "title": "Semantic core",
+      "gate": "- stable AST contract;"
+    },
+    {
+      "id": "M2",
+      "title": "Two-domain compilation",
+      "gate": "- one software backend;"
+    },
+    {
+      "id": "M3",
+      "title": "Queen vertical slice",
+      "gate": "- mission contract;"
+    },
+    {
+      "id": "M4",
+      "title": "Public Playground alpha",
+      "gate": "- editor;"
+    },
+    {
+      "id": "M5",
+      "title": "Reproducible public MVP",
+      "gate": "- installable CLI;"
+    },
+    {
+      "id": "M6",
+      "title": "Research release",
+      "gate": "- benchmark corpus;"
+    }
+  ],
+  "dod": {
+    "open": [
+      "A documented T27 language subset has a version.",
+      "Parser produces a canonical source AST.",
+      "Semantic validation is mandatory.",
+      "Semantic IR v1 is versioned and serializable.",
+      "At least one software and one hardware backend consume validated IR.",
+      "Unsupported semantics fail before emission.",
+      "Golden vectors are versioned.",
+      "`t27c verify` runs the MVP conformance suite.",
+      "Cross-backend mismatches identify the first divergence.",
+      "Every accepted defect has a regression test.",
+      "Release build reproduces on two clean runners.",
+      "Build manifest covers source, compiler, backend, tools, artifacts, and results.",
+      "Queen mission contract is machine-readable.",
+      "Every Bee task is bound to an issue and owned paths.",
+      "Worker result is structured.",
+      "Queen cannot accept required work without evidence.",
+      "One-writer integration is enforced.",
+      "A full mission can be replayed from logs and manifests.",
+      "User can edit a T27 example.",
+      "AST and semantic IR are visible.",
+      "Generated software and Verilog are visible.",
+      "Source-to-output traceability works.",
+      "Verification status and manifest are downloadable.",
+      "Jobs execute in an isolated sandbox.",
+      "CLI is installable on documented platforms.",
+      "Release artifacts have checksums and signatures/seals.",
+      "Known limitations are explicit.",
+      "Benchmark corpus and experimental protocol are public.",
+      "Paper artifact can be reproduced from documented inputs."
+    ],
+    "done": [],
+    "total": 29
+  }
+}

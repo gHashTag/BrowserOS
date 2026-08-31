@@ -47,6 +47,26 @@ struct Question: Decodable {
     let priorSendBacks: Int?
 }
 
+struct SpecAnswer: Encodable {
+    let delegatable: Bool
+    let isSpec: Bool
+    let missing: [String]
+    let remedy: String
+}
+
+func emitSpecs(_ verdicts: [String: SpecAnswer]) {
+    let encoder = JSONEncoder()
+    guard let data = try? encoder.encode(["kind": "specs"]),
+          let head = String(data: data, encoding: .utf8),
+          let body = try? encoder.encode(verdicts),
+          let tail = String(data: body, encoding: .utf8)
+    else { fail("could not encode the spec verdicts") }
+    // Two objects merged by hand rather than a wrapper type: the answer is a
+    // map keyed by issue number and a Codable struct cannot have dynamic keys
+    // without a container dance that would be longer than this comment.
+    print(head.dropLast() + ",\"verdicts\":" + tail + "}")
+}
+
 struct Verdict: Decodable {
     let criterion: String
     let met: Bool
@@ -192,10 +212,25 @@ case "choose":
                 + "boundary is unknown")
             continue
         }
-        guard let owned = QueenIssueBoundary.paths(from: body), !owned.isEmpty else {
-            skipped.append("#\(number): declares no boundary section, so "
-                + "nothing can be reserved for it")
+        // Every task is a spec. The rule is the operator's and this is where it
+        // becomes checkable: an issue that is not one is skipped with the list
+        // of sections it still needs, so the refusal is a to-do rather than a
+        // shrug. Measured when this landed: 24 of 27 open issues were not
+        // specs, which is why the swarm had one candidate and looked idle.
+        let quality = QueenSpecQuality.judge(body: body)
+        guard quality.delegatable,
+              let owned = QueenIssueBoundary.paths(from: body), !owned.isEmpty else {
+            skipped.append("#\(number): "
+                + (QueenSpecQuality.shortfall(quality) ?? "declares no boundary"))
             continue
+        }
+        if !quality.isSpec {
+            // Delegatable but incomplete: it can be worked, and the gap is
+            // named so it can be closed. Refusing outright would stall the
+            // swarm on paperwork; saying nothing would let a thin task through
+            // and blame the bee for the ambiguity.
+            skipped.append("#\(number): delegatable but "
+                + (QueenSpecQuality.shortfall(quality) ?? ""))
         }
 
         let holders = QueenDelegationPolicy.conflictingTasks(
@@ -266,6 +301,30 @@ case "review":
                     chosen: nil, chosenPaths: nil, verdict: "wait",
                     unmet: nil, note: reason, skipped: nil, error: nil))
     }
+
+case "spec":
+    // Judge one issue body against the spec rule, on demand.
+    //
+    // The board needs this per issue and cannot spawn a process per card, so
+    // it is here for tooling and for a person asking "what does #1279 still
+    // need" without reading the parser.
+    guard let bodies = question.candidateBodies, !bodies.isEmpty else {
+        fail("spec needs candidateBodies")
+    }
+    // Every body in one call. The board wants a verdict per issue and a
+    // process per card would be forty processes a round; the rule is cheap and
+    // the spawn is not.
+    var verdicts: [String: SpecAnswer] = [:]
+    for (key, body) in bodies {
+        let q = QueenSpecQuality.judge(body: body)
+        verdicts[key] = SpecAnswer(
+            delegatable: q.delegatable,
+            isSpec: q.isSpec,
+            missing: q.missing,
+            remedy: q.checks.filter { !$0.met }.map(\.remedy).joined(separator: " ")
+        )
+    }
+    emitSpecs(verdicts)
 
 case "language":
     // L3: everything written here is English. Judged on the rewrite rather
