@@ -316,6 +316,23 @@ const SHELL = `<!doctype html>
  button{cursor:pointer;border-color:#00CC66;color:var(--accent)}
  button:hover{background:rgba(0,255,136,.08)}
  .err{color:var(--golden);font-size:var(--f-1);margin-bottom:var(--sp1)}
+ .explain{display:grid;gap:var(--sp1);margin-bottom:var(--sp3);
+  grid-template-columns:repeat(auto-fit,minmax(168px,1fr))}
+ .stat{background:var(--panel);border:1px solid var(--border);
+  border-radius:var(--sp0);padding:var(--sp1) var(--sp2)}
+ .stat b{display:block;font-size:2.4rem;font-weight:600;line-height:1;
+  letter-spacing:-.03em;margin-bottom:var(--sp-1)}
+ .stat .lbl{font-size:var(--f-3);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--muted)}
+ .stat .why{font-size:var(--f-3);color:#999;margin-top:var(--sp-1);line-height:1.45}
+ .stat.good b{color:var(--accent)} .stat.warn b{color:var(--golden)}
+ .stat.bad b{color:var(--red)}
+ .flow{display:flex;gap:var(--sp0);align-items:center;flex-wrap:wrap;
+  margin-bottom:var(--sp2);font-size:var(--f-2);color:var(--muted)}
+ .flow i{font-style:normal;background:var(--panel);border:1px solid var(--border);
+  border-radius:99px;padding:.2rem .7rem}
+ .flow i.on{color:var(--accent);border-color:rgba(0,255,136,.4)}
+ .flow s{text-decoration:none;color:#444}
  .board{display:grid;gap:var(--sp1);
   grid-template-columns:repeat(auto-fit,minmax(240px,1fr));align-items:start}
  .col-head{display:flex;align-items:baseline;justify-content:space-between;
@@ -363,6 +380,7 @@ const SHELL = `<!doctype html>
   <span class="sub" style="margin:0">never in the URL &#8212; sent as a header</span>
  </div>
  <div class="err" id="err"></div>
+<div class="explain" id="explain"></div>
  <div class="board" id="board"></div>
  <footer>
   <span>&#966;<sup>2</sup> + 1/&#966;<sup>2</sup> = 3 <span class="phi">TRINITY</span></span>
@@ -383,6 +401,38 @@ const SHELL = `<!doctype html>
    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
  function draw(d){
   var repo=d.repo, board=$('board'); board.innerHTML=''
+  // The explainer, from the same numbers the columns are built from. A reader
+  // who has never seen this should learn what it is without asking: how many
+  // the Queen COULD take, how many she is on, and what is in her way.
+  var by={}; d.cards.forEach(function(c){by[c.column]=(by[c.column]||0)+1})
+  var free=d.cards.filter(function(c){
+    return c.column==='backlog' && c.paths && c.paths.length}).length
+  var noBoundary=(by.backlog||0)-free
+  var ex=$('explain')
+  ex.innerHTML=
+   '<div class="stat good"><b>'+(by.running||0)+'</b>'+
+     '<span class="lbl">bees working</span>'+
+     '<div class="why">a bee is one model turn in its own checkout</div></div>'+
+   '<div class="stat'+(free===0?' bad':'')+'"><b>'+free+'</b>'+
+     '<span class="lbl">she can take</span>'+
+     '<div class="why">an issue is only delegatable once it names the files it will touch</div></div>'+
+   '<div class="stat warn"><b>'+noBoundary+'</b>'+
+     '<span class="lbl">no boundary</span>'+
+     '<div class="why">these cannot be given out: nothing can be reserved for them</div></div>'+
+   '<div class="stat'+((by.review||0)>0?' warn':'')+'"><b>'+(by.review||0)+'</b>'+
+     '<span class="lbl">awaiting you</span>'+
+     '<div class="why">finished work holds its files until somebody judges it</div></div>'+
+   '<div class="stat'+((by.blocked||0)>0?' bad':'')+'"><b>'+(by.blocked||0)+'</b>'+
+     '<span class="lbl">blocked</span>'+
+     '<div class="why">their files are held by something in review</div></div>'
+  var flow=document.createElement('div')
+  flow.className='flow'
+  flow.innerHTML='<i'+(free>0?' class="on"':'')+'>1 pick an issue</i><s>&#8594;</s>'+
+   '<i'+((by.running||0)>0?' class="on"':'')+'>2 cut a branch</i><s>&#8594;</s>'+
+   '<i'+((by.running||0)>0?' class="on"':'')+'>3 a bee works</i><s>&#8594;</s>'+
+   '<i'+((by.review||0)>0?' class="on"':'')+'>4 wait for a verdict</i><s>&#8594;</s>'+
+   '<i>5 land it</i>'
+  ex.parentNode.insertBefore(flow, ex)
   var total=d.cards.length
   $('sub').textContent=total+" issues from "+repo+". Columns are the Queen's own states."
   if(total===0){

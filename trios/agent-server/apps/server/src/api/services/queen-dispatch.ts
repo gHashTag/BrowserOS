@@ -406,6 +406,27 @@ class Scribe {
     private issue: number,
   ) {}
 
+  /**
+   * Frames that carry no information for a reader.
+   *
+   * The model's stream is mostly bookkeeping: a step opening, a step closing,
+   * reasoning starting, a text block starting. Storing them filled the feed
+   * with lines like {"type":"start-step"} between every sentence, which is
+   * exactly what made it unreadable to anyone who had not written the parser.
+   */
+  private static readonly NOISE = new Set([
+    'start',
+    'start-step',
+    'finish-step',
+    'finish',
+    'text-start',
+    'text-end',
+    'reasoning-start',
+    'reasoning-end',
+    'tool-input-start',
+    'tool-input-delta',
+  ])
+
   async frame(line: string): Promise<void> {
     const trimmed = line.trim()
     if (!trimmed.startsWith('data:')) return
@@ -415,30 +436,63 @@ class Scribe {
     try {
       event = JSON.parse(payload) as Record<string, unknown>
     } catch {
-      // A frame this cannot parse is still a frame the bee sent. Recording it
-      // raw beats dropping it, because a stream shape we did not anticipate is
-      // exactly what a reader would want to see.
       await this.note('raw', payload.slice(0, 2000))
       return
     }
     const type = String(event.type ?? 'event')
+    if (Scribe.NOISE.has(type)) return
+
     const text =
       (event.text as string) ??
       (event.delta as string) ??
       (event.errorText as string) ??
       ''
 
-    if (type.includes('delta') || type === 'text') {
+    // Reasoning and answer both read as the bee talking. Separating them in the
+    // feed would ask a reader to care about a distinction the model makes for
+    // its own reasons.
+    if (type.includes('delta') || type === 'text' || type === 'reasoning') {
       this.buffer += text
       const old = Date.now() - this.lastFlush > 2500
       if (this.buffer.length > 400 || old) await this.flush()
       return
     }
-    // Anything that is not text is a landmark: flush what came before it so
-    // the order on the page is the order it happened in.
+
     await this.flush()
-    if (type === 'start' || type === 'finish') return
-    await this.note(type, text || JSON.stringify(event).slice(0, 1500))
+
+    // Tool traffic, rendered as a sentence rather than as a payload.
+    //
+    // A tool call is the most interesting thing in a turn and it arrived as
+    // 2 KB of JSON with the command buried in it. What a reader wants is the
+    // verb and the object: which tool, and what it was pointed at.
+    if (type === 'tool-input-available') {
+      const name = String(event.toolName ?? 'tool')
+      const input = (event.input ?? {}) as Record<string, unknown>
+      const what =
+        (input.command as string) ??
+        (input.path as string) ??
+        (input.pattern as string) ??
+        JSON.stringify(input)
+      await this.note('tool', `${name}  ${String(what).slice(0, 600)}`)
+      return
+    }
+    if (type === 'tool-output-available') {
+      const out = (event.output ?? {}) as Record<string, unknown>
+      const body = String(out.text ?? JSON.stringify(out))
+      const lines = body.split('\n').length
+      const head = body.slice(0, 400).trimEnd()
+      // The head plus a count, not the whole thing. A grep can return a
+      // thousand lines and none of them is the point; the point is that it
+      // answered and roughly what it said.
+      await this.note(
+        'result',
+        out.isError
+          ? `FAILED  ${head}`
+          : `${head}${lines > 8 ? `\n... ${lines} lines` : ''}`,
+      )
+      return
+    }
+    await this.note(type, text || JSON.stringify(event).slice(0, 800))
   }
 
   async flush(): Promise<void> {
@@ -592,6 +646,8 @@ export interface DispatchOutcome {
   branch: string
   detail: string
   conversationId?: string
+  /** Which provider key this bee took, so the next one takes a different one. */
+  keyIndex?: number
 }
 
 /**
@@ -681,7 +737,14 @@ export async function dispatchBee(
     conversationId,
   )
   logger.info('Queen dispatch', { issue, branch, started: turn.ok, detail })
-  return { started: turn.ok, issue, branch, detail, conversationId }
+  return {
+    started: turn.ok,
+    issue,
+    branch,
+    detail,
+    conversationId,
+    keyIndex: chosen.keyIndex,
+  }
 }
 
 async function recordDispatch(

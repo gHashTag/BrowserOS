@@ -455,26 +455,77 @@ async function runRound(
   // And then start it. A supervisor that only chooses is a supervisor in name:
   // the choice was the visible half of the round, and for several deploys it
   // was the only half, which reads in a log exactly like a working loop.
-  if (choice.allowed && typeof choice.chosen === 'number') {
-    // Which keys the bees already in flight are holding. Passed in rather than
-    // derived inside dispatch, because the in-flight set is the round's own
-    // view of the board and deriving it twice is how two views disagree.
-    const takenKeys = inFlight.rows
-      .map((r) => r.key_index)
-      .filter((i): i is number => typeof i === 'number')
+  // Keep choosing until the Queen's own limit, not one and stop.
+  //
+  // `queend` answers with ONE candidate, which is correct - it is a decision,
+  // not a plan - and the round then dispatched it and returned. So the ceiling
+  // was 1 per half hour while QueenDelegationPolicy.maximumConcurrentWorkers
+  // has said 4 all along, and the key rotation built for four bees could never
+  // hand out a second key.
+  //
+  // The loop asks again with the new dispatch folded into the board, so every
+  // answer accounts for what the previous one started. That is what makes the
+  // bees help rather than collide: the second choice already knows the first
+  // one's boundary is taken.
+  const started: unknown[] = []
+  let board = [...registry.rows[0].tasks, ...containerTasks]
+  let current: QueendChoice | null = choice
+  let takenKeys = inFlight.rows
+    .map((r) => r.key_index)
+    .filter((i): i is number => typeof i === 'number')
+
+  while (current?.allowed && typeof current.chosen === 'number') {
+    const issue = current.chosen
+    const paths = current.chosenPaths ?? []
     const dispatch = await dispatchBee(
       pool,
-      choice.chosen,
-      briefFor(
-        choice.chosen,
-        repo,
-        choice.chosenPaths ?? [],
-        candidateBodies[String(choice.chosen)] ?? '',
-      ),
-      choice.chosenPaths ?? [],
+      issue,
+      briefFor(issue, repo, paths, candidateBodies[String(issue)] ?? ''),
+      paths,
       takenKeys,
     )
-    return { ran: true, choice, dispatch }
+    started.push(dispatch)
+    if (!dispatch.started) break
+
+    // Fold it into the board so the next answer treats its files as held, and
+    // mark its key as taken so the next bee gets a different one.
+    board = [
+      ...board,
+      {
+        id: dispatch.conversationId ?? ZERO_UUID,
+        conversationId: dispatch.conversationId ?? ZERO_UUID,
+        issue: { owner, repo: repoName, number: issue },
+        title: 'just dispatched by this round',
+        worker: 'cloud-tick',
+        state: 'running',
+        ownedPaths: paths,
+        virtualBranch: dispatch.branch,
+        createdAt: isoSeconds(new Date().toISOString()),
+        updatedAt: isoSeconds(new Date().toISOString()),
+      },
+    ]
+    if (typeof dispatch.keyIndex === 'number') {
+      takenKeys = [...takenKeys, dispatch.keyIndex]
+    }
+    // `queend` applies canStartAnother itself, so the loop ends when the policy
+    // says so rather than on a count kept here - two places counting workers is
+    // how they come to disagree.
+    current = await askQueend({
+      kind: 'choose',
+      candidates,
+      candidateBodies,
+      tasks: board,
+    })
+    if (!current?.allowed) {
+      logger.info('Queen tick stopped dispatching', {
+        started: started.length,
+        why: current?.refusal ?? 'no answer',
+      })
+    }
+  }
+
+  if (started.length > 0) {
+    return { ran: true, choice, dispatch: started }
   }
   return { ran: true, choice }
 }
