@@ -94,6 +94,23 @@ make cassettes            -> fast honest verdict since the ROOT-CAUSE FIX
 make t27-lowering           -> counts declared vs emitted functions, per spec
 make t27-rings              -> ring00_parity, ring01_rules, ring00_verilog
 make chain                  -> 80 verdicts, spec and hand-written Swift agree
+make test / make mutants    -> DEAD since the QueenCore module split
+                              (12b97dedc, measured wave 120):
+                              tests/swift/run_chat_sse_e2e.sh:91 compiles
+                              all of rings as ONE module while six rings
+                              files now `import QueenCore` - the suite
+                              fails at compile, so all 22 registry
+                              mutants are unscorable (the gate stays
+                              fail-closed and never lies green).
+                              Blast radius measured live wave 121:
+                              chain [OK] 80 verdicts, t27-rings [OK]
+                              (iverilog 14 rows), t27-lowering EXIT=0
+                              (wave 117), queen-core [OK] - only the
+                              e2e script is affected. The fix pattern
+                              already exists in-repo: clade-e2e
+                              (mutants-logic) is module-aware and uses
+                              .trinity/build/QueenCore
+                              (rings/RUST-02/clade-e2e/src/main.rs:1140).
 curl -s 127.0.0.1:9105/health
 python3 -c "import json;from collections import Counter;print(Counter(t.get('state') for t in json.load(open('.trinity/state/queen_delegation.json')) if isinstance(t,dict)))"
 ```
