@@ -70,6 +70,11 @@ export interface WorkerProvider {
   /** This server's own token, when the turn is aimed back at this server. */
   apiKey?: string
   rehearsal?: boolean
+  /** Which of this provider's keys was handed out, 0-based. */
+  keyIndex?: number
+  keyCount?: number
+  /** Set when every key is already in use; carries how many there are. */
+  exhausted?: number
 }
 
 /**
@@ -81,11 +86,66 @@ export interface WorkerProvider {
  * anything that reads the value. The same trap exists in a platform's variable
  * editor, where saving an empty box leaves the name behind.
  */
-export function resolveWorkerProvider(): WorkerProvider | null {
+/**
+ * Every key this deployment holds for one provider, in index order.
+ *
+ * `ZAI_API_KEY`, then `ZAI_API_KEY_2`, `_3`, `_4`, ... The unsuffixed name is
+ * index 0 so a deployment with one key needs no migration and reads exactly as
+ * it did.
+ *
+ * Empty strings are skipped rather than counted. A platform variable saved with
+ * an empty box leaves the NAME behind, and a rotation that hands a bee index 2
+ * because the name exists gives it nothing to authenticate with - the same trap
+ * `~/.trios/config.json` has been sitting in for months.
+ */
+function keysFor(envVar: string): string[] {
+  const keys: string[] = []
+  const first = process.env[envVar]
+  if (first && first.length > 0) keys.push(first)
+  for (let i = 2; i <= 16; i++) {
+    const next = process.env[`${envVar}_${i}`]
+    if (next && next.length > 0) keys.push(next)
+  }
+  return keys
+}
+
+/**
+ * A key per concurrent bee, not a key per request.
+ *
+ * Four bees sharing one credential share one rate limit, so the swarm's real
+ * ceiling becomes whatever that single key allows rather than what the Queen's
+ * policy permits - and the failure arrives as a 429 blamed on the work.
+ *
+ * Assignment is by SLOT, not by issue number. Issue numbers look random and are
+ * not: the four issues in flight when this was written were 1176, 1216, 1240
+ * and 1244, and every one of them is 0 mod 4. A hash of the issue would have
+ * put all four bees on the same key and looked like rotation while doing
+ * nothing.
+ *
+ * So the caller passes the indices already in use, and this returns the lowest
+ * that is free. The index is stored with the dispatch, which is what makes a
+ * retry attributable: the same bee comes back to the same key, and a key that
+ * keeps failing is visible as a key rather than as four unlucky tasks.
+ */
+export function resolveWorkerProvider(
+  takenKeyIndices: number[] = [],
+): WorkerProvider | null {
   const override = process.env.TRIOS_QUEEN_WORKER_MODEL
   for (const candidate of WORKER_PROVIDERS) {
-    const key = process.env[candidate.envVar]
-    if (key && key.length > 0) {
+    const keys = keysFor(candidate.envVar)
+    if (keys.length > 0) {
+      let index = 0
+      while (index < keys.length && takenKeyIndices.includes(index)) index++
+      // Every key busy. Handing out a duplicate would be the quiet version of
+      // this problem, so say which limit was reached instead.
+      if (index >= keys.length) {
+        return {
+          provider: candidate.provider,
+          model: override || candidate.model,
+          exhausted: keys.length,
+        }
+      }
+      const key = keys[index]
       // The key travels WITH the choice, and leaving it out was a real defect:
       // `/chat` resolves a provider from what the CALLER supplies, because its
       // usual caller is an app on someone's laptop holding its own credentials.
@@ -101,6 +161,8 @@ export function resolveWorkerProvider(): WorkerProvider | null {
         provider: candidate.provider,
         model: override || candidate.model,
         apiKey: key,
+        keyIndex: index,
+        keyCount: keys.length,
       }
     }
   }
@@ -384,6 +446,33 @@ export async function finishDispatch(
  * Returns what it reaped so the round can say so out loud. A reaper that works
  * silently is indistinguishable from one that is not running.
  */
+/**
+ * Everything in flight belonged to a process that no longer exists.
+ *
+ * Called once at startup. A container that has just booted is not running any
+ * turn it dispatched before - the stream, the agent session and the process are
+ * all gone with the old container - so a row still marked in-flight is a
+ * phantom, and it holds its boundary against every overlapping issue until the
+ * two-hour stall sweep eventually notices.
+ *
+ * Measured 2026-08-31: the board reported four bees running while the container
+ * held ONE worktree and zero commits. Three of the four had been killed by
+ * redeploys and the board had no way to know. A supervisor whose board says
+ * "busy" about work that no longer exists will refuse real work on its behalf.
+ */
+export async function reapDispatchesFromPreviousBoot(
+  pool: Pool,
+): Promise<number[]> {
+  const reaped = await pool.query(
+    `UPDATE queen_dispatch
+        SET finished_at = now(),
+            outcome = 'reaped at boot: the container running this turn was replaced'
+      WHERE started = true AND finished_at IS NULL
+      RETURNING issue`,
+  )
+  return reaped.rows.map((r) => r.issue as number)
+}
+
 export async function reapStalledDispatches(
   pool: Pool,
   stallMinutes = 120,
@@ -417,10 +506,27 @@ export async function dispatchBee(
   issue: number,
   brief: string,
   ownedPaths: string[],
+  takenKeyIndices: number[] = [],
 ): Promise<DispatchOutcome> {
   const branch = `queen-${issue}`
 
-  const chosen = resolveWorkerProvider()
+  const chosen = resolveWorkerProvider(takenKeyIndices)
+  if (chosen?.exhausted !== undefined) {
+    // Not a missing credential: every key this deployment has is already
+    // carrying a bee. Named separately because the fix is different - one more
+    // key, not a first one.
+    const detail =
+      `all ${chosen.exhausted} provider key(s) are already in use by bees in ` +
+      'flight. Add another with ZAI_API_KEY_' +
+      String(chosen.exhausted + 1) +
+      ' (or the equivalent for your provider) to widen the swarm.'
+    logger.warn('Queen tick chose an issue but every key is busy', {
+      issue,
+      detail,
+    })
+    await recordDispatch(pool, issue, branch, false, detail, ownedPaths)
+    return { started: false, issue, branch, detail }
+  }
   if (!chosen) {
     const detail = missingProviderRefusal()
     logger.warn('Queen tick chose an issue but cannot dispatch', {
@@ -463,6 +569,9 @@ export async function dispatchBee(
   )
   const detail = turn.ok
     ? `${worktree.detail}; ${chosen.provider}/${chosen.model}` +
+      (chosen.keyCount && chosen.keyCount > 1
+        ? ` key ${(chosen.keyIndex ?? 0) + 1}/${chosen.keyCount}`
+        : '') +
       (chosen.rehearsal ? ' (REHEARSAL - a recorded stream, not a model)' : '')
     : turn.detail
 
@@ -487,6 +596,7 @@ async function recordDispatch(
   detail: string,
   ownedPaths: string[],
   conversationId?: string,
+  keyIndex?: number,
 ): Promise<void> {
   await pool.query(
     // A dispatch that never started is already over, so it is written with its
@@ -495,10 +605,11 @@ async function recordDispatch(
     // an hour" are the two states an operator most needs to tell apart.
     `INSERT INTO queen_dispatch
        (issue, branch, started, detail, owned_paths, conversation_id,
-        dispatched_at, finished_at, outcome)
+        dispatched_at, finished_at, outcome, key_index)
      VALUES ($1, $2, $3, $4, $5::jsonb, $6, now(),
              CASE WHEN $3 THEN NULL ELSE now() END,
-             CASE WHEN $3 THEN NULL ELSE $4 END)
+             CASE WHEN $3 THEN NULL ELSE $4 END,
+             $7)
      ON CONFLICT (issue) DO UPDATE
        SET branch = EXCLUDED.branch,
            started = EXCLUDED.started,
@@ -507,7 +618,8 @@ async function recordDispatch(
            conversation_id = EXCLUDED.conversation_id,
            dispatched_at = EXCLUDED.dispatched_at,
            finished_at = EXCLUDED.finished_at,
-           outcome = EXCLUDED.outcome`,
+           outcome = EXCLUDED.outcome,
+           key_index = EXCLUDED.key_index`,
     [
       issue,
       branch,
@@ -515,6 +627,7 @@ async function recordDispatch(
       detail,
       JSON.stringify(ownedPaths),
       conversationId ?? null,
+      keyIndex ?? null,
     ],
   )
 }

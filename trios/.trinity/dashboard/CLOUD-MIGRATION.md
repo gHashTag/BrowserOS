@@ -1078,3 +1078,71 @@ shell, no token  -> HTTP 200
 data,  no token  -> HTTP 403
 data,  token     -> HTTP 200
 ```
+
+---
+
+## The volume, and two things it revealed
+
+`railway volume add --mount-path /workspace` — `trios-agent-server-volume`, 50 GB.
+
+Proven the only way that counts, across a real redeploy:
+
+```
+before   echo "проба-персистентности 09:05:48" > /workspace/PERSIST-PROBE.txt
+redeploy
+after    проба-персистентности 09:05:48
+         /dev/zd29056  46G  /workspace          <- a block device, not overlay
+         git reflog -1: "checkout: moving from feat/queen-supervisor"
+```
+
+That last line is the one to read twice. Before the volume the reflog said
+`clone:` on every boot; now the entrypoint finds the checkout already there. A
+bee's branch, its worktree and its commits survive a deploy.
+
+### The board was describing bees that no longer existed
+
+Mounting it surfaced something worse than the lost work. The dispatch board
+reported **four bees running** while the container held one worktree and zero
+commits: three of the four had been killed by redeploys, and nothing told the
+board. Those rows went on holding their boundaries against every overlapping
+issue, and the two-hour stall sweep would not have noticed for two hours.
+
+A container that has just booted is not running any turn it dispatched before -
+the stream, the session and the process all died with the old container. So the
+tick now clears them on the way up, and said so on the first boot after:
+
+```
+Queen tick reaped dispatches from a previous boot  issues=[1244,1240,1216,1176]
+```
+
+A supervisor whose board says "busy" about work that does not exist will refuse
+real work on its behalf. That is worse than an empty board.
+
+## Key rotation: a key per bee, not a key per swarm
+
+Four bees on one credential share one rate limit, so the swarm's real ceiling
+becomes whatever that key allows rather than what the Queen permits - and the
+429 arrives blamed on the work.
+
+`ZAI_API_KEY`, then `ZAI_API_KEY_2`, `_3`, `_4`. The unsuffixed name stays index
+0, so a one-key deployment needs no migration.
+
+**Assignment is by SLOT, not by issue number**, and that is the whole design.
+The four issues in flight when this was written were 1176, 1216, 1240 and 1244 -
+every one of them 0 mod 4. A hash of the issue number would have put all four
+bees on the same key and looked exactly like rotation while doing nothing. So
+the round passes the indices already in use and the lowest free one is handed
+out; the index is stored with the dispatch, which is what makes a retry return
+to the same key and a bad key visible as a key rather than as four unlucky
+tasks.
+
+An empty string is not a key. A platform variable saved with an empty box leaves
+the NAME behind, which is the trap `~/.trios/config.json` has been sitting in
+for months.
+
+When every key is busy the refusal says so by name - `all N provider key(s) are
+already in use ... add another with ZAI_API_KEY_N+1` - because the fix for that
+is one more key, not a first one.
+
+Five checks pin it, including one that asserts the mod-4 collision directly so
+nobody re-derives the broken version.

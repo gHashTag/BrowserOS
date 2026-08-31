@@ -28,7 +28,11 @@
 import { spawn } from 'node:child_process'
 import { Pool } from 'pg'
 import { logger } from '../../lib/logger'
-import { dispatchBee, reapStalledDispatches } from './queen-dispatch'
+import {
+  dispatchBee,
+  reapDispatchesFromPreviousBoot,
+  reapStalledDispatches,
+} from './queen-dispatch'
 import {
   acquireQueenLease,
   logLeaseOutcome,
@@ -278,7 +282,7 @@ async function runRound(
   // is why the boundary is stored at dispatch - a task holding no paths holds
   // nothing against anyone.
   const inFlight = await pool.query(
-    `SELECT issue, branch, owned_paths, conversation_id, dispatched_at
+    `SELECT issue, branch, owned_paths, conversation_id, dispatched_at, key_index
        FROM queen_dispatch
       WHERE started = true
         AND finished_at IS NULL
@@ -352,6 +356,12 @@ async function runRound(
   // the choice was the visible half of the round, and for several deploys it
   // was the only half, which reads in a log exactly like a working loop.
   if (choice.allowed && typeof choice.chosen === 'number') {
+    // Which keys the bees already in flight are holding. Passed in rather than
+    // derived inside dispatch, because the in-flight set is the round's own
+    // view of the board and deriving it twice is how two views disagree.
+    const takenKeys = inFlight.rows
+      .map((r) => r.key_index)
+      .filter((i): i is number => typeof i === 'number')
     const dispatch = await dispatchBee(
       pool,
       choice.chosen,
@@ -362,6 +372,7 @@ async function runRound(
         candidateBodies[String(choice.chosen)] ?? '',
       ),
       choice.chosenPaths ?? [],
+      takenKeys,
     )
     return { ran: true, choice, dispatch }
   }
@@ -527,6 +538,20 @@ export function startQueenTick(): void {
     intervalSeconds: interval,
     holder: queenHolderName(),
   })
+
+  // Clear the previous container's phantoms before the first round reads the
+  // board. A row still in flight belongs to a process that died with the
+  // deployment it ran in, and it holds its boundary against real work until
+  // somebody notices.
+  reapDispatchesFromPreviousBoot(pool)
+    .then((issues) => {
+      if (issues.length > 0) {
+        logger.info('Queen tick reaped dispatches from a previous boot', {
+          issues,
+        })
+      }
+    })
+    .catch(() => {})
 
   const round = () => {
     runQueenTickOnce(pool).catch((error) => {

@@ -141,6 +141,11 @@ ALTER TABLE queen_dispatch
   ADD COLUMN IF NOT EXISTS finished_at timestamptz;
 ALTER TABLE queen_dispatch
   ADD COLUMN IF NOT EXISTS outcome text;
+-- Which provider key carried this bee. Stored so a retry returns to the same
+-- one and a key that keeps failing is visible as a key rather than as several
+-- unlucky tasks.
+ALTER TABLE queen_dispatch
+  ADD COLUMN IF NOT EXISTS key_index int;
 
 CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation_order
   ON "conversationMessages" ("conversationId", "orderIndex");
