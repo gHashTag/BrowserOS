@@ -367,12 +367,15 @@ final class QueenDelegationRegistry: ObservableObject {
     /// Tasks whose model is not in the price table contribute nothing, so this
     /// is a floor rather than a total - and the caller says so.
     /// Micro-dollars, summed exactly.
+    ///
+    /// The sum itself moved to `SwarmBudget.spentToday`, in the module the
+    /// Linux container also compiles. It was written only here, so the cloud
+    /// dispatch path - the one that actually starts bees - had no figure to
+    /// compare against the ceiling and started them regardless. Copying the
+    /// expression into `queend` would have made it a rule in two files, which
+    /// is how the two come to disagree.
     func spentToday(now: Date = Date()) -> Int {
-        let calendar = Calendar.current
-        return tasks
-            .filter { calendar.isDate($0.updatedAt, inSameDayAs: now) }
-            .compactMap(\.estimatedCostUSD)
-            .reduce(0, +)
+        SwarmBudget.spentToday(tasks: tasks, now: now)
     }
 
     /// Records what landed and the commit it landed in.

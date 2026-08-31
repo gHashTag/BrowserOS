@@ -100,6 +100,141 @@ function columnFor(state: string): string {
 }
 
 /**
+ * How far along the pipeline a column is, for collapsing several tasks on one
+ * issue into one card.
+ *
+ * This is NOT the left-to-right order. COLUMNS is serialized to the client and
+ * consumed as the render order, so ranking by index into it put `dropped`
+ * (last, therefore highest) above `done` - and an issue whose attempts were
+ * [accepted, cancelled] was drawn as dropped.
+ *
+ * The rule it mirrors is `QueenDelegationPolicy.claimOnIssue`
+ * (rings/SR-00/QueenDelegation.swift:505-520): live beats done beats dead,
+ * whatever order the registry lists them in. Verified against the shipped
+ * binary - on [accepted, cancelled] and on [cancelled, accepted] alike, queend
+ * answers "the work already landed (accepted)".
+ *
+ * `running` and `review` share a rank because `claimOnIssue` folds all four
+ * non-terminal states into one `.live` and takes the first: a tie must leave
+ * the earlier card standing, not promote the later one.
+ */
+function pipelineRank(column: string): number {
+  switch (column) {
+    case 'dropped':
+      return 0
+    case 'done':
+      return 1
+    default:
+      // running and review. backlog and blocked never reach here - no registry
+      // task produces them - and they are live for the same reason.
+      return 2
+  }
+}
+
+/**
+ * How long a task awaiting a verdict keeps its file boundary.
+ *
+ * Mirrors `QueenDelegationPolicy.reviewBoundaryHoldHours`
+ * (rings/SR-00/QueenDelegation.swift:618). The number is checked against the
+ * Swift source by queen-board.test.ts, because the failure mode when these
+ * drift is silent: the board says BLOCKED and names a holder while the Queen
+ * has already released the hold and will start a bee on it at the next tick.
+ */
+const REVIEW_BOUNDARY_HOLD_HOURS = 48
+
+/**
+ * Whether this task's boundary should still exclude other work.
+ *
+ * Mirrors `QueenDelegationPolicy.stillHoldsBoundary`
+ * (rings/SR-00/QueenDelegation.swift:626-634): terminal never holds, only
+ * `awaitingReview` ages out, and `queued`, `running` and `rejected` hold for
+ * ever because a bee may be writing right now or is expected back.
+ */
+function stillHoldsBoundary(task: RegistryTask, now: number): boolean {
+  const state = task.state
+  if (state === 'queued' || state === 'running' || state === 'rejected') {
+    return true
+  }
+  if (state !== 'awaitingReview') return false
+  const updated = Date.parse(task.updatedAt ?? '')
+  // A timestamp that will not parse is not evidence the hold expired. Reading
+  // NaN as "released" would free every boundary the moment the field changed
+  // shape, which is the loud failure pretending to be a quiet one.
+  if (Number.isNaN(updated)) return true
+  return (now - updated) / 3.6e6 < REVIEW_BOUNDARY_HOLD_HOURS
+}
+
+/**
+ * A boundary path reduced to its comparable form.
+ *
+ * Mirrors `QueenBoundaryPaths.normalize`
+ * (rings/SR-00/QueenBoundaryPaths.swift:36-41), including its deliberate
+ * silence about a TRAILING slash - `rings/SR-00/` is left alone and the prefix
+ * test below is what catches it.
+ */
+function normalizeBoundaryPath(path: string): string {
+  let value = path.trim()
+  while (value.startsWith('./')) value = value.slice(2)
+  while (value.startsWith('/')) value = value.slice(1)
+  return value
+}
+
+/**
+ * Whether two boundaries can reach the same file.
+ *
+ * Mirrors `QueenDelegationPolicy.pathsOverlap`
+ * (rings/SR-00/QueenDelegation.swift:577-583). The board used array membership,
+ * which is string equality, so the ordinary containment case - one task owning
+ * `rings/SR-00` and an issue claiming `rings/SR-00/Foo.swift` - was drawn in
+ * BACKLOG as free work that the Queen would have refused. Measured against the
+ * shipped binary: queend answers `rings/SR-00/Foo.swift held by ...#1286`, and
+ * so does `./rings/SR-00` and `rings/SR-00/`.
+ *
+ * Compared by path COMPONENT, so `docs` and `docsite` stay disjoint - that
+ * distinction is the point of the Swift comment at :571-574.
+ */
+function pathsOverlap(first: string, second: string): boolean {
+  const a = normalizeBoundaryPath(first)
+  const b = normalizeBoundaryPath(second)
+  if (a === '' || b === '') return false
+  return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`)
+}
+
+/**
+ * Which column a container dispatch belongs in.
+ *
+ * `row.finished_at ? 'review' : 'running'` was the whole rule, so no cloud work
+ * could ever reach `done` and the Queen's own verdict appeared on no surface at
+ * all: `review_state` is written by queen-tick.ts:942 and was read by no route.
+ * The page could show that turns finish and never that any of them landed.
+ *
+ * The values are `QueenReviewDecision.Verdict`
+ * (rings/SR-00/QueenReviewDecision.swift:26-32). A reaped row cannot appear
+ * here - the query excludes it, and its issue is released back to BACKLOG,
+ * which is what the Queen does with it too.
+ */
+function dispatchColumn(row: Record<string, unknown>): string {
+  const verdict = row.review_state == null ? '' : String(row.review_state)
+  if (verdict === 'accept') return 'done'
+  if (verdict !== '') return 'review'
+  return row.finished_at ? 'review' : 'running'
+}
+
+/** What the dispatch card says under its title. */
+function dispatchDetail(row: Record<string, unknown>): string {
+  const said = String(row.detail ?? '')
+  const verdict = row.review_state == null ? '' : String(row.review_state)
+  if (verdict !== '') {
+    const note = String(row.review_note ?? '').slice(0, 88)
+    return `the Queen judged this ${verdict}${note ? ` - ${note}` : ''}`
+  }
+  if (row.finished_at) {
+    return `turn finished, waiting for a verdict - ${said.slice(0, 88)}`
+  }
+  return said.slice(0, 140)
+}
+
+/**
  * A jsonb column read as a list of paths, or nothing.
  *
  * `owned_paths` is jsonb and jsonb holds whatever was put in it - a string, a
@@ -178,6 +313,22 @@ interface RegistryTask {
   state?: string
   worker?: string
   ownedPaths?: string[]
+  /**
+   * When the task last changed, ISO-8601, as `DelegatedTask.updatedAt` writes
+   * it. Read because a boundary hold has a clock on it - see
+   * `stillHoldsBoundary` above - and this function had no way to see one.
+   */
+  updatedAt?: string
+}
+
+/** Everything the board is built from, so it can be built without a database. */
+export interface BoardInput {
+  tasks: RegistryTask[]
+  dispatches: Array<Record<string, unknown>>
+  issues: Array<Record<string, unknown>>
+  decision?: unknown
+  /** Milliseconds, for the 48-hour boundary ageout. Defaults to now. */
+  now?: number
 }
 
 async function build(pool: Pool): Promise<Card[]> {
@@ -186,11 +337,19 @@ async function build(pool: Pool): Promise<Card[]> {
     pool.query('SELECT tasks FROM queen_registry WHERE variant = $1', [
       variant,
     ]),
+    // The SAME set the round decides against, bound the same way. The tick has
+    // carried `AND dispatched_at > now() - interval '7 days'` since it learned
+    // to stop counting ancient rows (queen-tick.ts); the board had no age bound
+    // at all, so a week-old dispatch was still shown holding an issue in review
+    // that the Queen had already stopped seeing. Two surfaces, one table, two
+    // different sets is the shape of every disagreement on this page.
     pool.query(
-      `SELECT issue, branch, started, detail, finished_at, outcome
+      `SELECT issue, branch, started, detail, finished_at, outcome,
+              review_state, review_note
          FROM queen_dispatch
         WHERE started = true
-          AND (finished_at IS NULL OR outcome NOT LIKE 'reaped%')`,
+          AND (finished_at IS NULL OR outcome NOT LIKE 'reaped%')
+          AND dispatched_at > now() - interval '7 days'`,
     ),
     pool.query(
       `SELECT number, title, owned_paths, criteria, criteria_source, missing
@@ -207,16 +366,31 @@ async function build(pool: Pool): Promise<Card[]> {
     ),
   ])
 
-  const tasks: RegistryTask[] = registry.rowCount
-    ? (registry.rows[0].tasks as RegistryTask[])
-    : []
+  return composeCards({
+    tasks: registry.rowCount ? (registry.rows[0].tasks as RegistryTask[]) : [],
+    dispatches: dispatches.rows,
+    issues: issues.rows,
+    decision: lastTick.rows[0]?.decision,
+  })
+}
 
+/**
+ * The board, from rows rather than from a pool.
+ *
+ * Split out so the rules on this page - containment, the 48-hour hold, and
+ * which of several tasks describes an issue - can be driven against the real
+ * `queend` binary in a test. Every one of the three used to disagree with the
+ * policy it claimed to mirror, and none of that was reachable without a
+ * database.
+ */
+export function composeCards(input: BoardInput): Card[] {
+  const now = input.now ?? Date.now()
   const cards = new Map<number, Card>()
-  addRegistryTasks(cards, tasks)
-  addInFlight(cards, dispatches.rows, issues.rows)
-  addUntakenIssues(cards, issues.rows, tasks)
-  addCriteria(cards, issues.rows)
-  addLastRoundReasons(cards, lastTick.rows[0]?.decision)
+  addRegistryTasks(cards, input.tasks)
+  addInFlight(cards, input.dispatches, input.issues)
+  addUntakenIssues(cards, input.issues, input.tasks, now)
+  addCriteria(cards, input.issues)
+  addLastRoundReasons(cards, input.decision)
   return [...cards.values()].sort((a, b) => b.number - a.number)
 }
 
@@ -244,10 +418,13 @@ function addRegistryTasks(
     // A number can carry several tasks over its life. The one furthest along
     // the pipeline is the one that describes it - otherwise a merged issue
     // reappears in "dropped" because an earlier attempt was cancelled.
-    const rank = COLUMNS.findIndex((c) => c.key === card.column)
-    const prior = existing
-      ? COLUMNS.findIndex((c) => c.key === existing.column)
-      : -1
+    //
+    // That is exactly what happened: the rank was an index into COLUMNS, which
+    // is the RENDER order and ends [... done, dropped], so `dropped` outranked
+    // `done` and the guard produced the case it was written to prevent.
+    // pipelineRank is the Queen's order instead.
+    const rank = pipelineRank(card.column)
+    const prior = existing ? pipelineRank(existing.column) : -1
     if (!existing || rank > prior) cards.set(number, card)
   }
 }
@@ -286,15 +463,13 @@ function addInFlight(
       number,
       title: prior?.title ?? known.get(number)?.title ?? `#${number}`,
       // Finished is not free. A turn that ended with work sits in review until
-      // somebody judges it; calling it running would be a lie and calling it
-      // done would be a bigger one.
-      column: row.finished_at ? 'review' : 'running',
+      // somebody judges it - but once she HAS judged it, that verdict is the
+      // fact worth showing, and it was on no surface in this deployment.
+      column: dispatchColumn(row),
       paths: prior?.paths?.length
         ? prior.paths
         : (known.get(number)?.paths ?? []),
-      detail: row.finished_at
-        ? `turn finished, waiting for a verdict - ${String(row.detail ?? '').slice(0, 88)}`
-        : String(row.detail ?? '').slice(0, 140),
+      detail: dispatchDetail(row),
       worker: 'cloud tick',
     })
   }
@@ -303,23 +478,25 @@ function addInFlight(
 /**
  * The open issues nobody has taken.
  *
- * Held-versus-free is decided by the rule the Queen uses: does any NON-terminal
- * task own an overlapping path. `awaitingReview` counts as holding, which is
- * the whole reason a parked review blocks work - and the reason the board shows
- * it rather than hiding it in a state nobody looks at.
+ * Held-versus-free is decided by the rule the Queen uses: does any task that
+ * STILL HOLDS its boundary own an overlapping path. `awaitingReview` counts as
+ * holding, which is the whole reason a parked review blocks work - until it
+ * ages out at 48 hours, which is the whole reason the swarm is no longer
+ * starved by one.
+ *
+ * Both halves of that sentence were wrong here. Overlap was array membership,
+ * so containment collisions were drawn as free work; and the hold had no clock,
+ * so a review the Queen released days ago was still drawn as BLOCKED. The board
+ * was simultaneously too permissive about paths and too strict about age, on
+ * the one screen built to explain why the swarm is stalled.
  */
 function addUntakenIssues(
   cards: Map<number, Card>,
   issueRows: Array<Record<string, unknown>>,
   tasks: RegistryTask[],
+  now: number,
 ): void {
-  const holding = tasks.filter(
-    (t) =>
-      t.state === 'running' ||
-      t.state === 'queued' ||
-      t.state === 'awaitingReview' ||
-      t.state === 'rejected',
-  )
+  const holding = tasks.filter((t) => stillHoldsBoundary(t, now))
   for (const row of issueRows) {
     const number = row.number as number
     if (cards.has(number)) continue
@@ -335,7 +512,11 @@ function addUntakenIssues(
       continue
     }
     const heldBy = holding
-      .filter((t) => (t.ownedPaths ?? []).some((p) => paths.includes(p)))
+      .filter((t) =>
+        (t.ownedPaths ?? []).some((owned) =>
+          paths.some((wanted) => pathsOverlap(owned, wanted)),
+        ),
+      )
       .map((t) => `#${t.issue?.number}`)
     cards.set(number, {
       number,
@@ -465,7 +646,15 @@ const SHELL = `<!doctype html>
   <span class="sub" style="margin:0">never in the URL &#8212; sent as a header</span>
  </div>
  <div class="err" id="err"></div>
-<div class="explain" id="explain"></div>
+ <!-- Every node draw() writes into is HERE, and permanent. The flow strip and
+      the empty-board notice were built fresh and spliced in ahead of a sibling
+      on each draw, and nothing removed the previous one: on a 30-second
+      refresh the board's top was measured 4135px down the document after five
+      refreshes, about two and a half minutes. A drawing function that appends
+      is a leak with a timer on it. -->
+ <div class="flow" id="flow" hidden></div>
+ <div class="explain" id="explain"></div>
+ <div class="empty-board" id="empty-board" hidden></div>
  <div class="board" id="board"></div>
  <footer>
   <span>&#966;<sup>2</sup> + 1/&#966;<sup>2</sup> = 3 <span class="phi">TRINITY</span></span>
@@ -510,22 +699,23 @@ const SHELL = `<!doctype html>
    '<div class="stat'+((by.blocked||0)>0?' bad':'')+'"><b>'+(by.blocked||0)+'</b>'+
      '<span class="lbl">blocked</span>'+
      '<div class="why">their files are held by something in review</div></div>'
-  var flow=document.createElement('div')
-  flow.className='flow'
+  // Assigned into a node the shell already owns, never inserted. Same rule as
+  // #explain above, for the reason written next to those nodes in the markup.
+  var flow=$('flow')
   flow.innerHTML='<i'+(free>0?' class="on"':'')+'>1 pick an issue</i><s>&#8594;</s>'+
    '<i'+((by.running||0)>0?' class="on"':'')+'>2 cut a branch</i><s>&#8594;</s>'+
    '<i'+((by.running||0)>0?' class="on"':'')+'>3 a bee works</i><s>&#8594;</s>'+
    '<i'+((by.review||0)>0?' class="on"':'')+'>4 wait for a verdict</i><s>&#8594;</s>'+
-   '<i>5 land it</i>'
-  ex.parentNode.insertBefore(flow, ex)
+   '<i'+((by.done||0)>0?' class="on"':'')+'>5 land it</i>'
+  flow.hidden=false
   var total=d.cards.length
   $('sub').textContent=total+" issues from "+repo+". Columns are the Queen's own states."
-  if(total===0){
-   var w=document.createElement('div'); w.className='empty-board'
-   w.textContent='This database holds no registry, no dispatches and no issues. '+
+  var w=$('empty-board')
+  w.textContent=total===0
+   ?'This database holds no registry, no dispatches and no issues. '+
     'That is a database without a swarm in it, not a swarm with nothing to do.'
-   board.parentNode.insertBefore(w, board)
-  }
+   :''
+  w.hidden=total!==0
   d.columns.forEach(function(col){
    var mine=d.cards.filter(function(c){return c.column===col.key})
    var cards=mine.map(function(c){

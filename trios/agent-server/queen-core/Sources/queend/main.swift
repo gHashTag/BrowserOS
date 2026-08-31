@@ -181,12 +181,13 @@ case "retry":
 case "choose":
     // The tick's own decision, made where the work is.
     //
-    // Capacity, then boundaries, then order. The three rules that decide which
-    // bee starts next were the last part of the supervision loop still
+    // Capacity, then money, then boundaries, then order. The rules that decide
+    // which bee starts next were the last part of the supervision loop still
     // reasoning on a laptop about a filesystem it cannot see.
     guard let candidates = question.candidates, let tasks = question.tasks else {
         fail("choose needs candidates and tasks")
     }
+    let now = Date()
     let running = tasks.filter { $0.state == .running }.count
     guard QueenDelegationPolicy.canStartAnother(running: running) else {
         emit(Answer(kind: "choose", strays: nil,
@@ -195,10 +196,52 @@ case "choose":
                     allowed: false, chosen: nil, chosenPaths: nil, verdict: nil, unmet: nil, note: nil, skipped: nil, error: nil))
         exit(0)
     }
+
+    // Then money, which had no gate here at all.
+    //
+    // `SwarmBudget` compiled into the QueenPolicy module this binary links and
+    // was referenced by nothing in it: `grep -rn SwarmBudget Sources/` found
+    // the declaration and no call site. Every enforcement of the $10/day
+    // ceiling was in the Mac app - ChatViewModel and the review scheduler -
+    // while the path that actually starts bees runs in a container the app
+    // cannot see. Over the three hours of the deployment that have transcripts
+    // the swarm moved 17,820,473 input and 233,293 output tokens across eight
+    // turns on three issues, against a limit nothing on that path could read.
+    // The exposure grew when the round became a loop: an exhausted budget now
+    // buys a round of bees rather than one.
+    //
+    // Judged here rather than by the caller because the caller is TypeScript
+    // and has no price table: asking it for a spend figure would put the sum
+    // and the prices in a second language, which is the defect this whole file
+    // exists to avoid. The board already carries what the sum needs.
+    //
+    // WHAT THIS CAN SEE, stated because a cap that silently measures nothing is
+    // worse than none: every task on the board carrying a provider, a model and
+    // its token counts. The registry mirror the app publishes carries them; the
+    // container's own `queen_dispatch` rows do not, because that table has no
+    // usage column yet - their cost reads as zero until it grows one. A floor
+    // that can refuse is still not the nothing that was here before.
+    //
+    // Refusing to START is the whole intervention. Killing a bee mid-edit
+    // leaves a tree nobody chose, which is why `SwarmBudget` calls itself
+    // advisory; declining the next one is safe at any instant.
+    let budget = SwarmBudget.current(
+        stateDirectory: question.root ?? "/workspace/BrowserOS"
+    )
+    let spent = SwarmBudget.spentToday(tasks: tasks, now: now)
+    if case .exhausted(let overBy) = budget.verdict(spentToday: spent) {
+        emit(Answer(kind: "choose", strays: nil,
+                    refusal: "the swarm has spent about \(ModelPricing.format(spent)) today, "
+                        + "\(ModelPricing.format(overBy)) past its "
+                        + "\(ModelPricing.format(budget.dailyLimitUSD)) daily limit "
+                        + "(raise it with TRIOS_SWARM_DAILY_CAP_USD)",
+                    allowed: false, chosen: nil, chosenPaths: nil, verdict: nil, unmet: nil, note: nil, skipped: nil, error: nil))
+        exit(0)
+    }
+
     var skipped: [String] = []
     var pick: Int?
     var pickPaths: [String] = []
-    let now = Date()
     for number in candidates {
         // Every task recorded against this issue, not the first one found.
         // A retry after a failure leaves two, and which of them the registry

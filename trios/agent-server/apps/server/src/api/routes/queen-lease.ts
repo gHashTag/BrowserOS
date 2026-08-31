@@ -27,6 +27,35 @@ import { runQueenTickOnce } from '../services/queen-tick'
 
 const LEASE_NAME = 'queen-tick'
 
+/**
+ * The pool a round runs on, which outlives the request that asked for the round.
+ *
+ * Every other handler here finishes its database work before it answers, so a
+ * request-scoped pool ended in `finally` is correct for them. `/tick` is not
+ * like them: a round's last act is fire-and-forget - `void drain(pool, ...)` in
+ * queen-dispatch.ts - a background reader that writes the bee's transcript and
+ * its ending on this same pool for the whole multi-minute model turn. `drain`
+ * has no client checked out when it starts (its first act is `await
+ * reader.read()`), so `pool.end()` does not wait for it and returns at once.
+ *
+ * Measured: `new Pool(...)`, `await pool.end()`, then a query rejects with
+ * "Cannot use a pool after calling end on the pool" (pg-pool 3.14.0). Every
+ * later transcript INSERT and the terminal `finishDispatch` UPDATE swallow
+ * their rejection, so the route still answered 200 while the bee it started
+ * left no transcript row and never got `finished_at` - which the kanban reads
+ * as permanently running until the 120-minute stall reaper fires.
+ *
+ * So the tick pool is created once and never ended, the same lifetime the
+ * timer's own pool has in `startQueenTick`. Never ending it is the point: there
+ * is no moment at which no round's drain can still be writing.
+ */
+let tickPool: Pool | undefined
+
+function poolForTick(url: string): Pool {
+  if (!tickPool) tickPool = new Pool({ connectionString: url })
+  return tickPool
+}
+
 export function createQueenLeaseRoute() {
   return (
     new Hono()
@@ -87,7 +116,7 @@ export function createQueenLeaseRoute() {
         const override = Array.isArray(body?.candidates)
           ? body.candidates.filter((n: unknown) => typeof n === 'number')
           : undefined
-        const pool = new Pool({ connectionString: url })
+        const pool = poolForTick(url)
         try {
           const result = await runQueenTickOnce(pool, override)
           return c.json({ ...result, candidatesOverridden: override ?? null })
@@ -96,8 +125,6 @@ export function createQueenLeaseRoute() {
             { error: error instanceof Error ? error.message : String(error) },
             500,
           )
-        } finally {
-          await pool.end()
         }
       })
       .get('/', async (c) => {

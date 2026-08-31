@@ -11,7 +11,6 @@
 
 import { Hono } from 'hono'
 import { stream } from 'hono/streaming'
-import { logger } from '../../lib/logger'
 import type {
   A2aAgentCard,
   A2aMessage,
@@ -195,15 +194,29 @@ export function createA2aRoutes(deps: A2aRouteDeps) {
           sendMessage(msg)
         }
 
+        await s.write(encoder.encode(':heartbeat\n\n'))
+
+        const heartbeat = setInterval(() => {
+          s.write(encoder.encode(':heartbeat\n\n')).catch(() => {})
+        }, 15_000)
+
+        // This waits on onAbort rather than on a write throwing, because on this
+        // runtime a write cannot throw. hono@4.12.3 dist/utils/stream.js is
+        // `async write(input) { try { await this.writer.write(input) } catch {} }`,
+        // and dist/helper/streaming/stream.js registers the c.req.raw.signal
+        // abort listener only `if (isOldBunVersion())` - true only for Bun
+        // "1.1", "1.0" or "0.x", while the image is oven/bun:1.3.6. Measured on
+        // two routes in this codebase: nine heartbeats after the client had
+        // gone, still writing, with the teardown never reached. onAbort fires
+        // from the `cancel` handler of responseReadable, which is the one
+        // disconnect signal that survives here.
         try {
-          while (true) {
-            await s.write(encoder.encode(':heartbeat\n\n'))
-            await new Promise((r) => setTimeout(r, 15_000))
-          }
-        } catch {
-          // Client disconnected — expected during reconnect cycle
+          await new Promise<void>((resolve) => {
+            s.onAbort(() => resolve())
+          })
         } finally {
           service.unsubscribe(agentId)
+          clearInterval(heartbeat)
         }
       })
     })

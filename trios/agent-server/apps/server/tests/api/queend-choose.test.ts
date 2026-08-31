@@ -34,10 +34,16 @@ const BIN = join(
 const DOCKERFILE = join(import.meta.dir, '../../../../Dockerfile')
 const present = existsSync(BIN)
 
-function ask(question: unknown): Record<string, unknown> {
+function ask(
+  question: unknown,
+  env?: Record<string, string>,
+): Record<string, unknown> {
   const run = spawnSync(BIN, {
     input: JSON.stringify(question),
     encoding: 'utf8',
+    // The cap knob is read from the environment, so the test has to be able to
+    // set it. Inherited so the binary still finds its loader paths.
+    env: { ...process.env, ...(env ?? {}) },
   })
   return JSON.parse(run.stdout)
 }
@@ -127,5 +133,124 @@ describe('queend chooses the next bee', () => {
     // Swift omits a nil rather than encoding null, so the key is absent.
     expect(answer.chosen ?? null).toBeNull()
     expect(String(answer.skipped)).toContain('a worker has it')
+  })
+
+  /**
+   * A boundary line whose separator is a tab, not a space.
+   *
+   * `QueenIssueBoundary.pathToken` split on the ASCII space alone, while the
+   * deliberate second implementation in `queen-tick.ts` has always split on
+   * `/\s+/`. Fed "-<TAB>docs/only-1301.md" the two returned
+   * "-\tdocs/only-1301.md" and "docs/only-1301.md": one issue, two readings of
+   * what it claims. Nothing downstream repairs it - the outer trim only
+   * reaches the ends of the line, no strip removes a "-", and the fused token
+   * still contains "/" so it is returned as a path.
+   *
+   * The consequence is not cosmetic. A claim of "-\tdocs/only-1301.md" matches
+   * no file and collides with no holder, so the chooser starts a bee straight
+   * over a path another worker is holding - the one collision this whole gate
+   * exists to prevent.
+   */
+  const tabbedBody = (n: number) =>
+    [
+      '## Success Criteria',
+      '- make check exits 0.',
+      '',
+      '## Boundary',
+      `-\tdocs/only-${n}.md`,
+    ].join('\n')
+
+  const tabbedBoard = (n: number, tasks: Array<ReturnType<typeof task>>) => ({
+    kind: 'choose',
+    candidates: [n],
+    candidateBodies: { [String(n)]: tabbedBody(n) },
+    tasks,
+  })
+
+  it.skipIf(!present)('reads a tab as a token boundary', () => {
+    const answer = ask(tabbedBoard(1301, []))
+    expect(answer.chosen).toBe(1301)
+    expect(answer.chosenPaths).toEqual(['docs/only-1301.md'])
+  })
+
+  it.skipIf(!present)('sees a collision on a tabbed boundary', () => {
+    const holder = {
+      ...task(1302, 'running'),
+      issue: { owner: 'gHashTag', repo: 'trios', number: 1302 },
+      ownedPaths: ['docs/only-1301.md'],
+    }
+    const answer = ask(tabbedBoard(1301, [holder]))
+    // Swift omits a nil rather than encoding null, so the key is absent.
+    expect(answer.chosen ?? null).toBeNull()
+    expect(String(answer.skipped)).toContain('held by')
+  })
+})
+
+/**
+ * The money ceiling, on the path that actually spends it.
+ *
+ * WHAT IT PINS. `choose` is the only gate between a tick and a dispatched bee,
+ * and it weighed capacity, boundaries and order - nothing else. `SwarmBudget`
+ * was compiled into the QueenPolicy module this binary links and referenced by
+ * nothing in it: the $10/day ceiling existed only in the Mac app, while the
+ * dispatching path runs in a container. Since the round became a loop rather
+ * than one dispatch, an exhausted budget bought a whole round of bees.
+ *
+ * The board below spends $12 of a $5 cap and then a $100 one. Same board, same
+ * candidate, two answers - so the refusal is the budget and not the boundary.
+ */
+describe('queend refuses to start a bee once the day is spent', () => {
+  // $15 per million input tokens for claude-opus in ModelPricing.table, so
+  // 800k input tokens is $12.00 exactly. Dated now, because the budget is a
+  // DAILY one and a task updated yesterday must not count against today.
+  function spentTask(issue: number, inputTokens: number) {
+    return {
+      ...task(issue, 'accepted'),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      provider: 'anthropic',
+      model: 'claude-opus-4.5',
+      inputTokens,
+      outputTokens: 0,
+    }
+  }
+
+  it.skipIf(!present)('refuses when today is over the cap', () => {
+    const answer = ask(board([1201], [spentTask(999, 800_000)]), {
+      TRIOS_SWARM_DAILY_CAP_USD: '5',
+    })
+    expect(answer.allowed).toBe(false)
+    // Swift omits a nil rather than encoding null, so the key is absent.
+    expect(answer.chosen ?? null).toBeNull()
+    // ModelPricing.format drops the cents above $10, so $12.00 prints as $12.
+    expect(String(answer.refusal)).toContain('spent about $12 today')
+    expect(String(answer.refusal)).toContain('past its $5.00 daily limit')
+  })
+
+  it.skipIf(!present)('starts the same bee when the cap is raised', () => {
+    const answer = ask(board([1201], [spentTask(999, 800_000)]), {
+      TRIOS_SWARM_DAILY_CAP_USD: '100',
+    })
+    expect(answer.chosen).toBe(1201)
+  })
+
+  // Yesterday's spend is not today's. Without the day filter the cap would
+  // latch shut permanently the first time a swarm had an expensive afternoon.
+  it.skipIf(!present)('ignores spend from another day', () => {
+    const yesterday = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString()
+    const stale = { ...spentTask(999, 800_000), updatedAt: yesterday }
+    const answer = ask(board([1201], [stale]), {
+      TRIOS_SWARM_DAILY_CAP_USD: '5',
+    })
+    expect(answer.chosen).toBe(1201)
+  })
+
+  // A task with no provider or model has no price, and an unknown price stays
+  // unknown rather than becoming an average - the same rule the table states.
+  it.skipIf(!present)('does not invent a price for an unpriced task', () => {
+    const answer = ask(board([1201], [task(999, 'accepted')]), {
+      TRIOS_SWARM_DAILY_CAP_USD: '5',
+    })
+    expect(answer.chosen).toBe(1201)
   })
 })

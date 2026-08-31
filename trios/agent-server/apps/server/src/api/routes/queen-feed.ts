@@ -241,6 +241,10 @@ const SHELL = `<!doctype html>
  }
 
  function load(){
+  // Which shape THIS request has, captured before the reply can pin conv.
+  // The two server branches answer in opposite orders and only one of them
+  // honours since, so the reply has to be read against the question asked.
+  var issueScoped=!conv
   // Try WITHOUT a token first. A local dev server has none configured, so
   // the guard trusts a loopback socket and the form is pure noise there.
   // Only a 403 proves a credential is actually required, and that is when
@@ -271,10 +275,17 @@ const SHELL = `<!doctype html>
        if(seen[k]) return false
        seen[k]=1; return true})
      // The no-conversation query returns newest-first; put it back in the order
-     // it happened so the page reads downward like a conversation.
-     if(!conv) fresh.reverse()
+     // it happened so the page reads downward like a conversation. Test on
+     // conv and this never fires: the pin above has already made it truthy.
+     if(issueScoped) fresh.reverse()
      fresh.forEach(post)
-     fresh.forEach(function(e){if(e.seq>since) since=e.seq})
+     // seq is counted per conversation, and the issue-scoped batch mixes
+     // them: on #1244 it held 433 rows of the dispatch's conversation, whose
+     // seq stops at 433, and 67 rows of an earlier attempt reaching seq 677.
+     // Taking the maximum over the batch asked the pinned conversation for
+     // rows past its own end, and every poll after that returned nothing.
+     fresh.forEach(function(e){
+       if((!conv || e.conversationId===conv) && e.seq>since) since=e.seq})
      if(d.entries.length===0 && $('feed').children.length===0){
       $('feed').innerHTML='<div class="empty">No transcript for this issue yet. '+
        'Rows appear while a bee is talking; a turn dispatched before this feed '+

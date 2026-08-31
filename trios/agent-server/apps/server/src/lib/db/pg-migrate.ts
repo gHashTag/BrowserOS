@@ -23,7 +23,11 @@ function createPool(databaseUrl: string): Pool {
   })
 }
 
-const MIGRATION_SQL = `
+// Exported so a test can read the exact string the container executes at boot,
+// rather than a transcription of it. This block runs once per deploy and its
+// only reader is a database: a missing comma or a bad type here is a broken
+// deployment that no gate above this line can see.
+export const MIGRATION_SQL = `
 CREATE TABLE IF NOT EXISTS agent_tasks (
   id uuid PRIMARY KEY,
   agent_id text NOT NULL,
@@ -188,6 +192,41 @@ ALTER TABLE queen_dispatch
 -- unlucky tasks.
 ALTER TABLE queen_dispatch
   ADD COLUMN IF NOT EXISTS key_index int;
+
+-- What the turn cost, on the row the board already reads.
+--
+-- The stream has carried a usage frame since 2026-08-21 and this table had
+-- nowhere to put it, so the only price of a round was 800 characters of JSON
+-- inside one transcript row and the only way to read it was to parse that
+-- string. Written with finished_at, so a turn that ends is priced; a turn
+-- killed mid-stream never reaches its usage frame and stays NULL, which is the
+-- honest answer - unknown is not zero.
+ALTER TABLE queen_dispatch
+  ADD COLUMN IF NOT EXISTS input_tokens bigint;
+ALTER TABLE queen_dispatch
+  ADD COLUMN IF NOT EXISTS output_tokens bigint;
+
+-- The attempts that queen_dispatch overwrote.
+--
+-- queen_dispatch is keyed by issue alone, so dispatching an issue a second
+-- time replaces detail, conversation_id, dispatched_at, finished_at, outcome
+-- and key_index in place and attempt N-1 stops existing: #1244 was dispatched
+-- six times and one row survived it. The transcripts of the others are still
+-- in queen_transcript, keyed by conversation_id, with nothing left pointing at
+-- them.
+--
+-- One jsonb snapshot of the whole row rather than a copy of its columns. A
+-- second column list would be a second rule, and it would go stale on the
+-- first ALTER above it; to_jsonb takes whatever the row holds.
+CREATE TABLE IF NOT EXISTS queen_dispatch_history (
+  id bigserial PRIMARY KEY,
+  issue int NOT NULL,
+  archived_at timestamptz NOT NULL DEFAULT now(),
+  snapshot jsonb NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_queen_dispatch_history_issue
+  ON queen_dispatch_history (issue, archived_at DESC);
 
 -- Whether an issue is a specification, judged by the Queen's own rule and
 -- stored so a board can say WHAT each one is missing instead of only that it

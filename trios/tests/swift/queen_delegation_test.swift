@@ -87,6 +87,18 @@ enum QueenDelegationTests {
               "prose after the path does not become the path")
         check(QueenIssueBoundary.pathToken(from: "just some words") == nil,
               "a line with no path-shaped token yields nil")
+        // A list marker separated from its path by a tab. Splitting on the
+        // ASCII space alone returned "-\trings/SR-00/Foo.swift" here while
+        // queen-tick.ts, splitting on /\s+/, returned "rings/SR-00/Foo.swift"
+        // from the same line - the board and the Queen reading one issue two
+        // ways. The outer trim only reaches the ends of the line, and no strip
+        // removes a "-", so the fused token survived and still contained "/".
+        check(QueenIssueBoundary.pathToken(from: "-\trings/SR-00/Foo.swift")
+              == "rings/SR-00/Foo.swift",
+              "a tab between the marker and the path is a token boundary")
+        check(QueenIssueBoundary.paths(from: "## Boundary\n\n-\ta/b.swift\n")
+              == ["a/b.swift"],
+              "a tab-separated boundary line yields the path alone")
 
         print("\n\(checks) checks, \(failures) failures")
         if failures > 0 { exit(1) }

@@ -53,8 +53,18 @@ public enum QueenIssueBoundary {
     /// worker's real edits as being outside its boundary. The bee is then
     /// recorded as having produced nothing, which is the commonest failure in
     /// the registry.
+    ///
+    /// The token boundary is any whitespace, not the ASCII space. Splitting on
+    /// " " alone made this disagree with the deliberate second implementation
+    /// in `queen-tick.ts`, which has always split on `/\s+/`: fed the line
+    /// "-<TAB>rings/SR-00/Foo.swift", the two parsers returned
+    /// "-\trings/SR-00/Foo.swift" and "rings/SR-00/Foo.swift" respectively.
+    /// Nothing strips the marker afterwards - the leading-strip set below is
+    /// "`\"'(" and holds no "-" - and the fused token still contains "/", so it
+    /// is returned as if it were a path. That is a path claim the board and the
+    /// Queen would then read differently for the same issue.
     public static func pathToken(from line: String) -> String? {
-        for raw in line.split(separator: " ", omittingEmptySubsequences: true) {
+        for raw in line.split(omittingEmptySubsequences: true, whereSeparator: { $0.isWhitespace }) {
             var cleaned = String(raw)
             var changed = true
             while changed, !cleaned.isEmpty {

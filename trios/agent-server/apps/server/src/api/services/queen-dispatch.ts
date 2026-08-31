@@ -244,18 +244,26 @@ function run(
 }
 
 /**
- * How many files a bee's branch actually changed.
+ * WHICH files a bee's branch actually changed.
  *
  * Lives here because `run` here drops to the bee before touching git. A first
  * version of this counted from the tick and would have run git as root against
  * a bee-owned tree - the dubious-ownership refusal this repository already paid
  * for once, reintroduced two files away from its own fix.
  *
- * Zero on any failure. The review policy treats zero committed files as
+ * The names, not the count. The count was all that ever left this module, and
+ * the diff that produced it is the only measurement of where a bee wrote: the
+ * `boundary` question `queend` has been able to answer since it was written
+ * (queend/main.swift, case "boundary") compares written paths against
+ * `owned_paths` and has never had a caller, because the one place holding the
+ * paths threw them away at `.length`. Handing back the list costs nothing and
+ * is the half of that comparison that lives on this side.
+ *
+ * Empty on any failure. The review policy treats zero committed files as
  * grounds to escalate rather than accept, so an unreadable branch cannot be
  * mistaken for finished work.
  */
-export async function committedFileCount(issue: number): Promise<number> {
+export async function committedFiles(issue: number): Promise<string[]> {
   const base = process.env.TRIOS_REPO_REF || 'origin/dev'
   const out = await run(
     'git',
@@ -263,8 +271,16 @@ export async function committedFileCount(issue: number): Promise<number> {
     workspaceRoot(),
     60_000,
   )
-  if (out.code !== 0) return 0
-  return out.out.split('\n').filter((l) => l.trim().length > 0).length
+  if (out.code !== 0) return []
+  return out.out
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+}
+
+/** The same measurement, counted. One rule, asked two ways. */
+export async function committedFileCount(issue: number): Promise<number> {
+  return (await committedFiles(issue)).length
 }
 
 export function workspaceRoot(): string {
@@ -293,7 +309,35 @@ export async function prepareWorktree(
 
   const existing = await run('git', ['worktree', 'list', '--porcelain'], root)
   if (existing.out.includes(path)) {
-    return { ok: true, path, detail: 'reused an existing worktree' }
+    // Reuse is not a fresh checkout, and saying "reused an existing worktree"
+    // let that pass unnoticed: the next bee inherits whatever the last one left
+    // uncommitted, and both the dispatch row and the brief read as if it had
+    // started from `origin/dev`. So count the leftovers and say so - the same
+    // sentence reaches the board, the operator and the reviewer.
+    //
+    // It counts and does not clean. The container holds no push credential by
+    // design, so unpushed work in that tree is the ONLY copy of it; a reset
+    // here would destroy the predecessor's turn to make this one tidy.
+    const dirty = await run('git', ['status', '--porcelain'], path, 60_000)
+    if (dirty.code !== 0) {
+      return {
+        ok: true,
+        path,
+        detail: 'reused an existing worktree (its state could not be read)',
+      }
+    }
+    const changed = dirty.out
+      .split('\n')
+      .filter((l) => l.trim().length > 0).length
+    return {
+      ok: true,
+      path,
+      detail:
+        changed === 0
+          ? 'reused an existing worktree (clean)'
+          : `reused an existing worktree (${changed} uncommitted file(s) ` +
+            'left by a previous attempt)',
+    }
   }
 
   const fetched = await run(
@@ -423,6 +467,14 @@ class Scribe {
   private seq = 0
   private buffer = ''
   private lastFlush = Date.now()
+  /**
+   * What the turn cost, as the stream reported it.
+   *
+   * Undefined until a `usage` frame arrives, and undefined is not zero: a turn
+   * killed mid-stream never reaches its usage frame, and writing 0 tokens for
+   * it would price a real turn at nothing instead of admitting it is unknown.
+   */
+  tokens: TokenUsage | undefined
 
   constructor(
     private pool: Pool,
@@ -484,6 +536,23 @@ class Scribe {
 
     await this.flush()
 
+    // What the turn cost, read rather than stringified.
+    //
+    // This frame was falling through to the default branch and being stored as
+    // 800 characters of JSON, which was the only place a price existed: no
+    // column on `queen_dispatch` carried a token count, so pricing one round
+    // meant string-parsing one transcript row. The row is still written - the
+    // feed keeps its line - and the numbers now also leave here as numbers.
+    const usage = type === 'usage' ? Scribe.usageIn(event) : undefined
+    if (usage) {
+      this.tokens = usage
+      await this.note(
+        'usage',
+        `${usage.inputTokens} in / ${usage.outputTokens} out tokens`,
+      )
+      return
+    }
+
     // Tool traffic, rendered as a sentence rather than as a payload.
     //
     // A tool call is the most interesting thing in a turn and it arrived as
@@ -517,6 +586,34 @@ class Scribe {
       return
     }
     await this.note(type, text || JSON.stringify(event).slice(0, 800))
+  }
+
+  /**
+   * The token counts in a usage frame, or nothing if it carries none.
+   *
+   * The shape is the one this server emits (chat-service.ts, `withUsageFrame`
+   * -> {"type":"usage","usage":{"inputTokens":n,"outputTokens":n}}). The
+   * unnested form is read too, because a provider stream that arrives without
+   * that transform puts the same two fields at the top level.
+   *
+   * A frame with neither field returns nothing rather than a pair of zeros, so
+   * it falls through and is stored whole - an unrecognised usage shape should
+   * be visible in the feed, not silently priced at nothing.
+   */
+  private static usageIn(
+    event: Record<string, unknown>,
+  ): TokenUsage | undefined {
+    const nested = event.usage
+    const raw = (
+      typeof nested === 'object' && nested !== null ? nested : event
+    ) as Record<string, unknown>
+    const input = Number(raw.inputTokens)
+    const output = Number(raw.outputTokens)
+    if (!Number.isFinite(input) && !Number.isFinite(output)) return undefined
+    return {
+      inputTokens: Number.isFinite(input) ? input : 0,
+      outputTokens: Number.isFinite(output) ? output : 0,
+    }
   }
 
   async flush(): Promise<void> {
@@ -556,7 +653,7 @@ class Scribe {
  * too, because a bee whose connection dropped is a bee that is not working, and
  * treating it as still running is how the boundary leaks.
  */
-async function drain(
+export async function drain(
   pool: Pool,
   response: Response,
   conversationId: string,
@@ -593,19 +690,72 @@ async function drain(
     logger.warn('Queen worker stream ended badly', { conversationId, issue })
     await scribe.note('error', outcome).catch(() => {})
   }
-  await finishDispatch(pool, issue, outcome).catch(() => {})
+  await closeDispatch(pool, issue, conversationId, outcome, scribe.tokens)
+}
+
+/** What one turn cost, as its own stream reported it. */
+export interface TokenUsage {
+  inputTokens: number
+  outputTokens: number
+}
+
+/**
+ * Write the ending, and if it cannot be written, say so out loud.
+ *
+ * This was `finishDispatch(...).catch(() => {})` - an empty catch on the ONLY
+ * statement that ends a turn, inside a function that is itself `void`ed, so no
+ * caller could see the failure either. What it produces is a phantom: the row
+ * keeps `finished_at IS NULL` and `started = true`, which the board reads as
+ * `running` (queen-tick.ts, `state: finished ? 'awaitingReview' : 'running'`),
+ * so a bee that has stopped holds its boundary against every overlapping issue
+ * until the 120-minute stall sweep reaps it - and reaping RELEASES the issue
+ * for retry, which is how the same issue gets picked six times.
+ *
+ * One retry, then silence, because the stall reaper is the real backstop and a
+ * loop here would hold a dead stream open. The first failure is the part that
+ * matters: it is the only signal separating a phantom running bee from a real
+ * one, and it used to produce no line anywhere.
+ */
+export async function closeDispatch(
+  pool: Pool,
+  issue: number,
+  conversationId: string,
+  outcome: string,
+  tokens?: TokenUsage,
+): Promise<void> {
+  try {
+    await finishDispatch(pool, issue, outcome, tokens)
+  } catch (error) {
+    logger.error('Queen dispatch could not be closed', {
+      issue,
+      conversationId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    await finishDispatch(pool, issue, outcome, tokens).catch(() => {})
+  }
 }
 
 export async function finishDispatch(
   pool: Pool,
   issue: number,
   outcome: string,
+  tokens?: TokenUsage,
 ): Promise<void> {
   await pool.query(
+    // COALESCE, not assignment: a turn that ended without a usage frame must
+    // not overwrite a price with NULL. Unknown and free are different answers,
+    // and only one of them can be added up.
     `UPDATE queen_dispatch
-        SET finished_at = now(), outcome = $2
+        SET finished_at = now(), outcome = $2,
+            input_tokens = COALESCE($3::bigint, input_tokens),
+            output_tokens = COALESCE($4::bigint, output_tokens)
       WHERE issue = $1 AND finished_at IS NULL`,
-    [issue, outcome.slice(0, 500)],
+    [
+      issue,
+      outcome.slice(0, 500),
+      tokens?.inputTokens ?? null,
+      tokens?.outputTokens ?? null,
+    ],
   )
 }
 
@@ -784,7 +934,7 @@ export async function dispatchBee(
   }
 }
 
-async function recordDispatch(
+export async function recordDispatch(
   pool: Pool,
   issue: number,
   branch: string,
@@ -796,6 +946,37 @@ async function recordDispatch(
   criteria: string[] = [],
   criteriaSource = 'none',
 ): Promise<void> {
+  // Keep the attempt this one replaces.
+  //
+  // `queen_dispatch` is keyed by issue alone, so the upsert below overwrites
+  // detail, conversation_id, dispatched_at, finished_at, outcome and key_index
+  // in place: after a second dispatch of the same issue, attempt N-1 cannot be
+  // recovered from this table at all - which key it took, how long it ran, or
+  // why it ended. The transcript survives (queen_transcript is keyed by
+  // conversation_id and seq) but nothing left points at the conversation.
+  //
+  // Stored as `to_jsonb(queen_dispatch)` rather than as a copied column list.
+  // A second column list is the defect this repository keeps shipping: two
+  // statements of one rule that agree until someone adds a column to one of
+  // them. This captures whatever the row holds today and whatever is added to
+  // it later, with no second place to edit.
+  //
+  // Separate from the upsert, and its failure does not stop the dispatch: on a
+  // database that has not run this migration the archive is the part worth
+  // losing, not the round.
+  await pool
+    .query(
+      `INSERT INTO queen_dispatch_history (issue, snapshot)
+       SELECT issue, to_jsonb(queen_dispatch) FROM queen_dispatch
+        WHERE issue = $1`,
+      [issue],
+    )
+    .catch((error) => {
+      logger.warn('Queen dispatch history could not be kept', {
+        issue,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
   await pool.query(
     // A dispatch that never started is already over, so it is written with its
     // ending. Leaving `finished_at` null for a refusal would put it on the board
@@ -819,6 +1000,13 @@ async function recordDispatch(
            finished_at = EXCLUDED.finished_at,
            outcome = EXCLUDED.outcome,
            key_index = EXCLUDED.key_index,
+           -- A price belongs to the turn that spent it. Left in place it would
+           -- be read as this attempt's cost: measured on a scratch database
+           -- while this was being written, a second dispatch of #1244
+           -- inherited the first one's 18308 input tokens and reported them
+           -- again. The archived row above still holds them.
+           input_tokens = NULL,
+           output_tokens = NULL,
            criteria = EXCLUDED.criteria,
            criteria_source = EXCLUDED.criteria_source,
            -- A dispatch that starts again is new work, so last turn's verdict

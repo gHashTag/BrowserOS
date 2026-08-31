@@ -40,10 +40,11 @@ import { spawn } from 'node:child_process'
 import { Pool } from 'pg'
 import { logger } from '../../lib/logger'
 import {
-  committedFileCount,
+  committedFiles,
   dispatchBee,
   reapDispatchesFromPreviousBoot,
   reapStalledDispatches,
+  workspaceRoot,
 } from './queen-dispatch'
 import {
   acquireQueenLease,
@@ -54,7 +55,20 @@ import {
 } from './queen-lease'
 
 const LEASE_NAME = 'queen-tick'
-const QUEEND = '/usr/local/bin/queend'
+/**
+ * Where the policy binary is, with an override no deployment sets.
+ *
+ * The container installs it at `/usr/local/bin/queend` and that stays the
+ * answer there. The override exists so a test can drive the SAME binary this
+ * file drives, out of `queen-core/.build/release/queend` on a machine that has
+ * built it - which is the difference between a test that exercises the round
+ * and a test that exercises a stub of the round. Read per call rather than at
+ * import, because a constant frozen at module load cannot be pointed anywhere
+ * by a test that imports the module.
+ */
+function queendPath(): string {
+  return process.env.TRIOS_QUEEND_PATH || '/usr/local/bin/queend'
+}
 /// A task shaped for the policy needs an id; a dispatch that never opened a
 /// conversation has none. All-zeroes is a UUID that decodes and can collide
 /// with nothing real.
@@ -82,6 +96,8 @@ interface QueendChoice {
   chosenPaths?: string[] | null
   refusal?: string | null
   skipped?: string[] | null
+  /** For `boundary`: the committed paths that fall outside what was owned. */
+  strays?: string[] | null
 }
 
 /**
@@ -114,40 +130,75 @@ function tickIntervalSeconds(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : 0
 }
 
+/** GitHub's maximum, so the fewest requests per round. */
+const ISSUE_PAGE_SIZE = 100
+/**
+ * How many pages a round will follow before it calls the list untrustworthy.
+ *
+ * Five pages is 500 open items against a repository that had 44 on 2026-08-31,
+ * and five requests against an anonymous rate limit of 60/hour on a loop that
+ * ticks at most a few times an hour. A repository that really has more than 500
+ * open items is not one this loop should be silently guessing about.
+ */
+const ISSUE_PAGE_CAP = 5
+
 /**
  * Open issues, read without a credential.
  *
  * Anonymous on purpose: the repository is public, this is a read, and a token
  * here would be a credential in a container for no gain. GitHub's anonymous
  * rate limit is 60/hour against a loop that ticks at most a few times an hour.
+ *
+ * PAGINATED, and it says whether it got everything. One page of 50 was the
+ * whole list for as long as the repository stayed under the horizon - 44 open
+ * items on 2026-08-31, of which 4 were pull requests taking slots on the same
+ * page - and `rememberIssues` deletes every stored row that is not in the list
+ * it is handed. So at 51 open items the oldest backlog issue would have been
+ * erased from the board on every round, with nothing anywhere saying so.
+ * `complete` is what stops that: a truncated list is still worth deciding
+ * against, but it must never be treated as the whole truth.
  */
-async function openIssues(
-  repo: string,
-): Promise<Array<{ number: number; body: string; title: string }>> {
-  const response = await fetch(
-    `https://api.github.com/repos/${repo}/issues?state=open&per_page=50`,
-    { headers: { Accept: 'application/vnd.github+json' } },
-  )
-  if (!response.ok) throw new Error(`GitHub returned ${response.status}`)
-  const issues = (await response.json()) as Array<{
-    number: number
-    title?: string
-    body?: string | null
-    pull_request?: unknown
-  }>
-  // The issues endpoint returns pull requests too, and a PR is not work to
-  // delegate - it is work already done waiting for a verdict.
-  //
-  // The BODY comes along, because the boundary lives in it. Fetching numbers
-  // here and bodies later would be a second round trip per candidate against an
-  // anonymous rate limit that is 60 an hour.
-  return issues
-    .filter((i) => !i.pull_request)
-    .map((i) => ({
-      number: i.number,
-      body: i.body ?? '',
-      title: i.title ?? `#${i.number}`,
-    }))
+export async function openIssues(repo: string): Promise<{
+  issues: Array<{ number: number; body: string; title: string }>
+  complete: boolean
+}> {
+  const collected: Array<{ number: number; body: string; title: string }> = []
+  let complete = false
+  for (let page = 1; page <= ISSUE_PAGE_CAP; page++) {
+    const response = await fetch(
+      `https://api.github.com/repos/${repo}/issues` +
+        `?state=open&per_page=${ISSUE_PAGE_SIZE}&page=${page}`,
+      { headers: { Accept: 'application/vnd.github+json' } },
+    )
+    if (!response.ok) throw new Error(`GitHub returned ${response.status}`)
+    const batch = (await response.json()) as Array<{
+      number: number
+      title?: string
+      body?: string | null
+      pull_request?: unknown
+    }>
+    // The issues endpoint returns pull requests too, and a PR is not work to
+    // delegate - it is work already done waiting for a verdict.
+    //
+    // The BODY comes along, because the boundary lives in it. Fetching numbers
+    // here and bodies later would be a second round trip per candidate against
+    // an anonymous rate limit that is 60 an hour.
+    for (const i of batch) {
+      if (i.pull_request) continue
+      collected.push({
+        number: i.number,
+        body: i.body ?? '',
+        title: i.title ?? `#${i.number}`,
+      })
+    }
+    // The RAW page length decides, not the filtered one: a page that was all
+    // pull requests is still a full page and there is more behind it.
+    if (batch.length < ISSUE_PAGE_SIZE) {
+      complete = true
+      break
+    }
+  }
+  return { issues: collected, complete }
 }
 
 /**
@@ -171,7 +222,25 @@ async function ensureQueenColumns(pool: Pool): Promise<void> {
       ADD COLUMN IF NOT EXISTS criteria_source text NOT NULL DEFAULT 'none';
     ALTER TABLE queen_dispatch
       ADD COLUMN IF NOT EXISTS criteria jsonb NOT NULL DEFAULT '[]'::jsonb,
-      ADD COLUMN IF NOT EXISTS criteria_source text NOT NULL DEFAULT 'none';
+      ADD COLUMN IF NOT EXISTS criteria_source text NOT NULL DEFAULT 'none',
+      -- How many times THIS issue has been returned to a bee.
+      --
+      -- The escalation ceiling depends on it: QueenReviewDecision escalates
+      -- once priorSendBacks reaches maximumSendBacks (2). The container used to
+      -- send the literal 0 with every review, so 0 < 2 always held, the
+      -- escalate arm was unreachable from the cloud, and an issue whose
+      -- criteria stayed unmet would be returned for ever and never become a
+      -- person's problem - which is the exact failure the constant exists to
+      -- stop.
+      --
+      -- On queen_dispatch rather than in a table of its own because the row is
+      -- already keyed by issue and already survives a redispatch: the upsert in
+      -- recordDispatch names every column it overwrites and this is not one of
+      -- them, so the count accumulates across attempts instead of resetting
+      -- with the bee it is counting.
+      ADD COLUMN IF NOT EXISTS send_backs integer NOT NULL DEFAULT 0,
+      -- The committed paths that fell outside the boundary this bee was given.
+      ADD COLUMN IF NOT EXISTS strays jsonb NOT NULL DEFAULT '[]'::jsonb;
   `)
 }
 
@@ -186,10 +255,17 @@ async function ensureQueenColumns(pool: Pool): Promise<void> {
  * Issues that have closed since the last round are dropped, so the board does
  * not accumulate work nobody can do. Written in one statement per issue rather
  * than a bulk upsert because the list is tens of rows, once every half hour.
+ *
+ * The drop happens ONLY against a complete list. "Not in the list I was given"
+ * means closed only if the list is everything GitHub has; against a truncated
+ * one it means "past the horizon", and deleting on that reading turns a paging
+ * limit into an issue disappearing off the board. The rows go stale instead,
+ * which is the failure that leaves evidence.
  */
-async function rememberIssues(
+export async function rememberIssues(
   pool: Pool,
   issues: Array<{ number: number; body: string; title: string }>,
+  complete: boolean,
   verdicts?: Record<string, SpecVerdict>,
 ): Promise<void> {
   if (issues.length === 0) return
@@ -221,21 +297,18 @@ async function rememberIssues(
       ],
     )
   }
+  if (!complete) {
+    logger.warn('Open issue list was truncated; keeping the board as it is', {
+      fetched: issues.length,
+      pages: ISSUE_PAGE_CAP,
+    })
+    return
+  }
   await pool.query(`DELETE FROM queen_issues WHERE number <> ALL($1::int[])`, [
     issues.map((i) => i.number),
   ])
 }
 
-/**
- * The declared boundary of one issue body.
- *
- * A deliberate second implementation of a rule `QueenIssueBoundary` owns in
- * Swift, and the only one in this file - it exists so the board can be drawn
- * without spawning `queend` per issue. Kept to the same two headings and the
- * same "no section means nil, not empty" distinction; if the Swift rule grows a
- * case, this must follow it or the board will disagree with the Queen about
- * what an issue claims.
- */
 /// Seconds, no fraction.
 ///
 /// Postgres hands back a JS Date and JSON.stringify writes it with
@@ -321,6 +394,27 @@ export function boardTask(
   }
 }
 
+/**
+ * The declared boundary of one issue body.
+ *
+ * A deliberate second implementation of a rule `QueenIssueBoundary` owns in
+ * Swift, and the only one in this file - it exists so the board can be drawn
+ * without spawning `queend` per issue. Kept to the same two headings; if the
+ * Swift rule grows a case, this must follow it or the board will disagree with
+ * the Queen about what an issue claims.
+ *
+ * It does NOT keep Swift's nil-versus-empty distinction, and the comment here
+ * used to claim it did while the body had no `found` flag at all: both "no
+ * boundary section" and "an empty boundary section" return `[]`. That is
+ * deliberate rather than merely unfixed, because no caller in either language
+ * branches on the difference - `queend/main.swift` guards
+ * `let owned = ..., !owned.isEmpty`, `QueenSpecQuality` computes
+ * `boundary?.isEmpty == false`, `ChatViewModel` writes `?? []`, and this file
+ * derives `delegatable` from `boundary.length > 0`. Every one of them collapses
+ * nil into []. If a caller ever needs the difference, the flag goes back in
+ * HERE and in `rememberIssues`, which currently JSON-stringifies the result
+ * into `owned_paths` with no way to say "the issue never said".
+ */
 function boundaryPathsOf(body: string): string[] {
   const lines = body.split('\n')
   let inside = false
@@ -373,7 +467,7 @@ async function bodiesFor(
  */
 function askQueend(question: unknown): Promise<QueendChoice> {
   return new Promise((resolve, reject) => {
-    const child = spawn(QUEEND, [], { stdio: ['pipe', 'pipe', 'pipe'] })
+    const child = spawn(queendPath(), [], { stdio: ['pipe', 'pipe', 'pipe'] })
     let out = ''
     let err = ''
     child.stdout.on('data', (d) => {
@@ -400,6 +494,88 @@ function askQueend(question: unknown): Promise<QueendChoice> {
   })
 }
 
+/**
+ * Whether the round that owns this watch is still the Queen.
+ *
+ * Read by `runRound` before every dispatch. It is an object rather than a
+ * returned boolean because the answer changes WHILE the round runs - that is
+ * the entire point - and a value copied out at the start would be the stale
+ * belief this exists to correct.
+ */
+export interface LeaseWatch {
+  held: boolean
+}
+
+/**
+ * Every heartbeat currently beating, so shutdown can stop all of them.
+ *
+ * This was one module-scoped variable, and two overlapping rounds in one
+ * process is a reachable state, not a theoretical one: `POST /queen/lease/tick`
+ * runs `runQueenTickOnce` on demand alongside the `setInterval` loop, both
+ * calls get `acquired: true` because `queenHolderName()` is stable within a
+ * process and acquisition renews on `queen_lease.holder = EXCLUDED.holder`, and
+ * a round now takes minutes. With one variable the second round's assignment
+ * overwrote the first's handle: the first finisher cleared the LATER round's
+ * interval and nulled the variable, the other finisher cleared nothing, and the
+ * orphan went on renewing the lease every 60 seconds for the life of the
+ * process - pinning the hive to a container that had stopped working.
+ *
+ * The handle is local to the round now; this set exists only so `handover` can
+ * still reach a beat it does not own.
+ */
+const heartbeats = new Set<ReturnType<typeof setInterval>>()
+
+/**
+ * Renew the lease while the work runs, and notice when the renewal is refused.
+ *
+ * `acquireQueenLease` does not throw when the lease has moved - it returns
+ * `{ acquired: false, holder: <someone else> }`. The heartbeat used to call it
+ * for effect and drop the verdict on the floor, so a round that lost the lease
+ * carried on through `askQueend`, `dispatchBee` and `recordDispatch` believing
+ * it was the Queen. `recordDispatch` carries no fence (only `recordTick` does),
+ * so its upsert would overwrite the legitimate Queen's row for the same issue,
+ * `conversation_id` included, and point the feed at the wrong bee.
+ *
+ * Losing it takes three consecutive refusals or a stall past the TTL
+ * (HEARTBEAT_SECONDS 60 against LEASE_TTL_SECONDS 180). A rejection is LOGGED
+ * rather than swallowed: `pool.query` rejects on connection errors, which is
+ * precisely the failure that goes on to lose the lease, so the empty catch was
+ * hiding the signal and not an impossible case.
+ *
+ * `everyMs` is a parameter so a test can watch a whole heartbeat lifecycle
+ * without waiting a minute for the first beat.
+ */
+export function startLeaseHeartbeat(
+  pool: Pool,
+  holder: string,
+  everyMs: number = HEARTBEAT_SECONDS * 1000,
+): { watch: LeaseWatch; stop: () => void } {
+  const watch: LeaseWatch = { held: true }
+  const beat = setInterval(() => {
+    acquireQueenLease(pool, LEASE_NAME, holder, LEASE_TTL_SECONDS)
+      .then((renewal) => {
+        if (renewal.acquired) return
+        watch.held = false
+        logger.warn('Queen lease moved while a round was running', {
+          holder: renewal.holder,
+          self: holder,
+        })
+        stop()
+      })
+      .catch((error) => {
+        logger.warn('Queen lease renewal failed', {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      })
+  }, everyMs)
+  heartbeats.add(beat)
+  function stop(): void {
+    clearInterval(beat)
+    heartbeats.delete(beat)
+  }
+  return { watch, stop }
+}
+
 export async function runQueenTickOnce(
   pool: Pool,
   candidateOverride?: number[],
@@ -422,16 +598,11 @@ export async function runQueenTickOnce(
   // Renew while the work runs. A round that outlives its TTL would finish as a
   // private citizen: still delegating, while a second supervisor legitimately
   // holds the lease and delegates too.
-  heartbeat = setInterval(() => {
-    acquireQueenLease(pool, LEASE_NAME, holder, LEASE_TTL_SECONDS).catch(
-      () => {},
-    )
-  }, HEARTBEAT_SECONDS * 1000)
+  const { watch, stop } = startLeaseHeartbeat(pool, holder)
   try {
-    return await runRound(pool, holder, grant.fence, candidateOverride)
+    return await runRound(pool, holder, grant.fence, watch, candidateOverride)
   } finally {
-    if (heartbeat) clearInterval(heartbeat)
-    heartbeat = undefined
+    stop()
     // Give it back even when the round threw. A round that fails still had its
     // turn; holding the lease through the failure would make one bad minute
     // cost the other supervisor its next three.
@@ -439,11 +610,25 @@ export async function runQueenTickOnce(
   }
 }
 
-/** The work of a round, with the lease already in hand. */
-async function runRound(
+/**
+ * The work of a round, with the lease already in hand.
+ *
+ * EXPORTED FOR THE SUITE, and the reason is the defect it covers. Every write
+ * below the `askQueend` for a choice is unfenced, so `watch.held` is the only
+ * thing standing between a round that has lost its lease and a round that goes
+ * on dispatching bees against the real Queen's board. Nothing tested it: a
+ * critic deleted `watch.held &&` from the dispatch loop and all 364 tests
+ * stayed green, because no test in the repository called this function or
+ * `runQueenTickOnce` at all. `runQueenTickOnce` cannot stand in for it - it
+ * builds its own heartbeat on a sixty-second interval, so a test driving it
+ * would be a test that waits a minute to lose a lease it can lose here by
+ * passing `{ held: false }`.
+ */
+export async function runRound(
   pool: Pool,
   holder: string,
   fence: number,
+  watch: LeaseWatch,
   candidateOverride?: number[],
 ): Promise<{
   ran: boolean
@@ -486,7 +671,7 @@ async function runRound(
       (await askQueend({ kind: 'spec', candidateBodies }).catch(() => null))
         ?.verdicts ?? {}
   } else {
-    const open = await openIssues(repo)
+    const { issues: open, complete } = await openIssues(repo)
     candidates = open.map((i) => i.number)
     candidateBodies = Object.fromEntries(
       open.map((i) => [String(i.number), i.body]),
@@ -501,11 +686,13 @@ async function runRound(
       candidateBodies,
     }).catch(() => null)
     specVerdicts = specs?.verdicts ?? {}
-    await rememberIssues(pool, open, specs?.verdicts).catch((error) => {
-      logger.warn('Could not store the open issue list', {
-        error: error instanceof Error ? error.message : String(error),
-      })
-    })
+    await rememberIssues(pool, open, complete, specs?.verdicts).catch(
+      (error) => {
+        logger.warn('Could not store the open issue list', {
+          error: error instanceof Error ? error.message : String(error),
+        })
+      },
+    )
   }
   // Reap before reading the board, not after.
   //
@@ -522,8 +709,8 @@ async function runRound(
   // added to stop the six-times loop would have become a different starvation:
   // every issue she finished would be locked out of the pool for ever.
   const reviewed = await reviewFinishedDispatches(pool)
-  if (reviewed.length > 0) {
-    logger.info('Queen reviewed her own work', { verdicts: reviewed })
+  if (reviewed.acted.length > 0) {
+    logger.info('Queen reviewed her own work', { verdicts: reviewed.acted })
   }
 
   const reaped = await reapStalledDispatches(pool)
@@ -641,7 +828,12 @@ async function runRound(
     .map((r) => r.key_index)
     .filter((i): i is number => typeof i === 'number')
 
-  while (current?.allowed && typeof current.chosen === 'number') {
+  // `watch.held` first, and re-read on every pass: the heartbeat can refuse a
+  // renewal in the minutes a single dispatch takes, and every write below this
+  // point is unfenced. `recordTick` above needs no such guard - its
+  // `WHERE queen_tick.fence <= EXCLUDED.fence` already refuses a stale term,
+  // and a second copy of that rule here is how the two come to disagree.
+  while (watch.held && current?.allowed && typeof current.chosen === 'number') {
     const issue = current.chosen
     const paths = current.chosenPaths ?? []
     const spec = specVerdicts[String(issue)]
@@ -699,6 +891,12 @@ async function runRound(
     }
   }
 
+  if (!watch.held) {
+    logger.warn('Queen tick stood down mid-round; the lease moved', {
+      started: started.length,
+    })
+  }
+
   await report(pool, reviewed, started, choice, candidates.length)
   if (started.length > 0) {
     return { ran: true, choice, dispatch: started }
@@ -729,11 +927,23 @@ export function briefFor(
   // refused three other candidates on the strength of it - and then was the one
   // thing the bee itself was never told. A rule enforced against everyone
   // except the party it constrains is not a rule, it is a trap.
+  //
+  // AND IT NO LONGER PROMISES SOMETHING THAT DOES NOT HAPPEN. This sentence
+  // read "Work outside them is dropped rather than reviewed", and nothing in
+  // either the container or the app drops anything: a bee's commit is its
+  // commit, whatever it touched. What actually happens is that the review asks
+  // `queend`'s `boundary` question about the files the branch changed and
+  // records the ones outside the boundary. A promise the system does not keep
+  // is worse than no promise - a bee told its stray work will be discarded has
+  // been told the cheapest possible lie, and will believe an out-of-boundary
+  // edit costs nothing.
   const boundary =
     ownedPaths.length > 0
       ? 'You may create or edit files under these paths and nowhere else: ' +
         ownedPaths.join(', ') +
-        '. Work outside them is dropped rather than reviewed.'
+        '. Files you change outside them are not discarded - they are ' +
+        'compared against this boundary when your work is reviewed, named ' +
+        'in the record of it, and reported.'
       : 'No paths were assigned to you. Say so in this chat before editing ' +
         'anything, rather than guessing at a boundary nobody set.'
 
@@ -865,13 +1075,53 @@ export function workerSystemPrompt(
   ]
   if (ownedPaths.length > 0) {
     lines.push(
-      `You may create or edit files under these paths and nowhere else: ${ownedPaths.join(', ')}. Work outside them is dropped rather than reviewed.`,
+      `You may create or edit files under these paths and nowhere else: ${ownedPaths.join(', ')}. Files you change outside them are not discarded - they are compared against this boundary when your work is reviewed and named in the record of it.`,
     )
   }
   lines.push(
     'Everything you write is English. When you stop, answer every acceptance criterion in turn: met, not met, or could not check.',
   )
   return lines.join(' ')
+}
+
+/**
+ * Which of a bee's committed files fell outside the boundary it was given.
+ *
+ * `queend` has been able to answer the `boundary` question since it was
+ * written and nothing has ever asked it: the one place holding both halves of
+ * the comparison threw the file names away at `.length`. This is the caller.
+ *
+ * The ROOT is the project directory, not the checkout root, and that is the
+ * whole subtlety. `committedFiles` runs `git diff --name-only` from the
+ * repository root, so a path arrives as `trios/docs/x.md` while an owned path
+ * is project-relative `docs/x.md`. `QueenBoundaryPaths.strippingProject` drops
+ * the LAST component of the root it is handed, so handing it `/workspace/
+ * BrowserOS` would strip nothing and report every correct write as a stray -
+ * the same false accusation that file's own header records being paid for on
+ * #1286.
+ *
+ * Empty on any failure, and empty when the issue declared no boundary: a task
+ * that owns no paths is not a task that owns everything, and `strays` says so
+ * on the Swift side too. A boundary question that cannot be asked must not
+ * invent an accusation.
+ */
+async function boundaryStrays(
+  files: string[],
+  ownedPaths: string[],
+): Promise<string[]> {
+  if (files.length === 0 || ownedPaths.length === 0) return []
+  const answer = await askQueend({
+    kind: 'boundary',
+    writes: files,
+    ownedPaths,
+    root: `${workspaceRoot()}/trios`,
+  }).catch((error) => {
+    logger.warn('Queen could not check the boundary of finished work', {
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return null
+  })
+  return answer?.strays ?? []
 }
 
 /**
@@ -888,11 +1138,28 @@ export function workerSystemPrompt(
  *
  * Only an escalation reaches a person. accept releases the issue, sendBack
  * frees it to be dispatched again with the note, and wait leaves it alone.
+ *
+ * AND IT COUNTS THE RETURNS. `priorSendBacks` was the literal 0 here, which is
+ * the sort of placeholder that reads as harmless and is not: the policy
+ * escalates once the count reaches `QueenReviewDecision.maximumSendBacks` (2),
+ * so a constant 0 made `0 < 2` permanently true and deleted the escalate arm
+ * from the cloud path entirely. An issue whose criteria stayed unmet would be
+ * returned for ever and never reach a person - and the note it was returned
+ * with said "Returning this for a second pass" every single time, because
+ * `sendBackNote` is given `priorSendBacks + 1`. The count now comes off the
+ * row, so the fifth return says "sixth pass" and the third does not happen.
  */
-async function reviewFinishedDispatches(pool: Pool): Promise<string[]> {
+interface ReviewRound {
+  /** `#1234:accept`, one per dispatch judged this round. */
+  acted: string[]
+  /** Issues whose commit reached outside the boundary, and where. */
+  strays: Array<{ issue: number; paths: string[] }>
+}
+
+async function reviewFinishedDispatches(pool: Pool): Promise<ReviewRound> {
   const done = await pool.query(
     `SELECT d.issue, d.conversation_id, d.review_state,
-            d.criteria, d.criteria_source,
+            d.criteria, d.criteria_source, d.send_backs, d.owned_paths,
             (SELECT string_agg(t.text, '\n' ORDER BY t.seq)
                FROM queen_transcript t
               WHERE t.conversation_id = d.conversation_id AND t.kind = 'say')
@@ -903,6 +1170,7 @@ async function reviewFinishedDispatches(pool: Pool): Promise<string[]> {
         AND d.outcome NOT LIKE 'reaped%'`,
   )
   const acted: string[] = []
+  const strayed: Array<{ issue: number; paths: string[] }> = []
   for (const row of done.rows) {
     const said = String(row.said ?? '')
     const verdicts = parseVerdictBlock(said)
@@ -922,12 +1190,34 @@ async function reviewFinishedDispatches(pool: Pool): Promise<string[]> {
     // that is the case where the Queen supplied none and the bee stated its
     // own, which the brief asks for.
     const totalCriteria = Math.max(promised.length, verdicts.length)
+    // ONE git diff, asked once and used twice. The count is what the review
+    // policy weighs; the names are what the boundary rule compares. Calling
+    // `committedFileCount` and then `committedFiles` would run the same diff
+    // against the same branch twice and could, between the two, disagree.
+    const files = await committedFiles(row.issue as number)
+    const strays = await boundaryStrays(files, row.owned_paths ?? [])
+    if (strays.length > 0) {
+      strayed.push({ issue: row.issue as number, paths: strays })
+      logger.warn('Queen found work outside the boundary she gave', {
+        issue: row.issue,
+        strays: strays.slice(0, 20),
+      })
+    }
+    // The real count, not the literal 0 that used to sit here.
+    //
+    // Postgres hands an `integer` back as a JS number, but the column is read
+    // through a driver that has returned strings for wider integer types in
+    // this same file, so it is coerced rather than trusted: `'2' < 2` is true
+    // in JSON only after Number() has been applied on the Swift side, and it
+    // is not - `priorSendBacks` decodes as Int and a string would make queend
+    // refuse the whole question.
+    const priorSendBacks = Number(row.send_backs ?? 0) || 0
     const answer = await askQueend({
       kind: 'review',
       verdicts: verdicts.map((v) => ({ criterion: v.criterion, met: v.met })),
       totalCriteria,
-      committedFiles: await committedFileCount(row.issue as number),
-      priorSendBacks: 0,
+      committedFiles: files.length,
+      priorSendBacks,
     }).catch(() => null)
     const state = String(answer?.verdict ?? 'wait')
     logger.info('Queen reviewed her own work', {
@@ -936,20 +1226,30 @@ async function reviewFinishedDispatches(pool: Pool): Promise<string[]> {
       criteria: totalCriteria,
       judged: verdicts.length,
       source: row.criteria_source ?? 'none',
+      priorSendBacks,
+      strays: strays.length,
     })
     await pool.query(
+      // The increment is part of the same statement that records the verdict,
+      // because a count kept by a second write is a count that a crash between
+      // the two makes wrong in the direction that matters: an issue whose
+      // send-backs are undercounted is an issue that never escalates.
       `UPDATE queen_dispatch
-          SET review_state = $2, review_note = $3, reviewed_at = now()
+          SET review_state = $2, review_note = $3, reviewed_at = now(),
+              strays = $4::jsonb,
+              send_backs = CASE WHEN $2::text = 'sendBack'
+                                THEN send_backs + 1 ELSE send_backs END
         WHERE issue = $1`,
       [
         row.issue,
         state,
         String(answer?.note ?? answer?.refusal ?? '').slice(0, 900),
+        JSON.stringify(strays),
       ],
     )
     acted.push(`#${row.issue}:${state}`)
   }
-  return acted
+  return { acted, strays: strayed }
 }
 
 /** The bee's own VERDICT block, or nothing. */
@@ -991,15 +1291,15 @@ export function parseVerdictBlock(
  */
 async function report(
   pool: Pool,
-  reviewed: string[],
+  reviewed: ReviewRound,
   started: Array<{ started?: boolean; issue?: number; detail?: string }>,
   choice: QueendChoice,
   candidates: number,
 ): Promise<void> {
   const lines: string[] = []
-  const escalated = reviewed.filter((r) => r.endsWith(':escalate'))
-  const accepted = reviewed.filter((r) => r.endsWith(':accept'))
-  const sentBack = reviewed.filter((r) => r.endsWith(':sendBack'))
+  const escalated = reviewed.acted.filter((r) => r.endsWith(':escalate'))
+  const accepted = reviewed.acted.filter((r) => r.endsWith(':accept'))
+  const sentBack = reviewed.acted.filter((r) => r.endsWith(':sendBack'))
 
   if (started.length > 0) {
     lines.push(
@@ -1020,6 +1320,20 @@ async function report(
     lines.push(
       `ESCALATED ${escalated.length} to you - the policy would not decide these ` +
         `on its own: ${escalated.join(', ')}.`,
+    )
+  }
+  // The boundary, reported rather than only recorded.
+  //
+  // The brief tells a bee its out-of-boundary work is named and reported. That
+  // sentence replaced one saying such work is "dropped", which nothing did -
+  // and replacing an unkept promise with a second unkept promise would be the
+  // same defect wearing a different word. This is the line that makes it true.
+  for (const stray of reviewed.strays) {
+    lines.push(
+      `#${stray.issue} committed ${stray.paths.length} file(s) outside the ` +
+        `boundary it was given: ${stray.paths.slice(0, 8).join(', ')}` +
+        (stray.paths.length > 8 ? ', ...' : '') +
+        '.',
     )
   }
   if (started.length === 0) {
@@ -1083,7 +1397,6 @@ async function recordTick(
 }
 
 let timer: ReturnType<typeof setInterval> | undefined
-let heartbeat: ReturnType<typeof setInterval> | undefined
 
 /**
  * Start the loop, or explain why not.
@@ -1139,7 +1452,10 @@ export function startQueenTick(): void {
 
   const handover = () => {
     if (timer) clearInterval(timer)
-    if (heartbeat) clearInterval(heartbeat)
+    // Every beat, not one: a round in flight owns its own handle, and on
+    // SIGTERM nobody is going to reach its `finally` before the process ends.
+    for (const beat of heartbeats) clearInterval(beat)
+    heartbeats.clear()
     releaseQueenLease(pool, LEASE_NAME, queenHolderName()).catch(() => {})
   }
   process.once('SIGTERM', handover)

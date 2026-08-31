@@ -1,9 +1,21 @@
 import { afterEach, describe, expect, it } from 'bun:test'
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import type { Pool } from 'pg'
 import {
+  closeDispatch,
+  committedFileCount,
+  committedFiles,
+  drain,
+  finishDispatch,
   missingProviderRefusal,
+  prepareWorktree,
+  recordDispatch,
   resolveWorkerProvider,
   workspaceRoot,
 } from '../../src/api/services/queen-dispatch'
+import { logger } from '../../src/lib/logger'
 
 const KEYS = [
   'ZAI_API_KEY',
@@ -117,5 +129,295 @@ describe('queen dispatch precheck', () => {
       expect(resolveWorkerProvider([])?.keyCount).toBe(2)
       expect(resolveWorkerProvider([0])?.apiKey).toBe('c')
     })
+  })
+})
+
+/** Every statement a call made, with the values it bound. */
+function recordingPool(
+  answer: (sql: string, attempt: number) => unknown = () => ({
+    rowCount: 1,
+    rows: [],
+  }),
+) {
+  const asked: Array<{ sql: string; params: unknown[] }> = []
+  const pool = {
+    query: async (sql: string, params: unknown[] = []) => {
+      asked.push({ sql: String(sql), params })
+      const answered = answer(String(sql), asked.length)
+      if (answered instanceof Error) throw answered
+      return answered as { rowCount: number; rows: unknown[] }
+    },
+  } as unknown as Pool
+  return { pool, asked }
+}
+
+/** The statements that touched one table, in the order they were sent. */
+const touching = (
+  asked: Array<{ sql: string; params: unknown[] }>,
+  table: string,
+) => asked.filter((q) => q.sql.includes(table))
+
+/**
+ * The only statement that ends a turn used to fail in complete silence.
+ *
+ * `finishDispatch(...).catch(() => {})` inside a function that is itself
+ * `void`ed: no log, no retry, no counter, and no caller able to see it either.
+ * What it leaves behind is a phantom - the row keeps finished_at NULL and
+ * started true, which the board reads as `running`, so a bee that has stopped
+ * holds its boundary until the 120-minute stall sweep reaps it. Reaping
+ * RELEASES the issue for retry, which is how #1244 was dispatched six times.
+ */
+describe('closing a dispatch', () => {
+  const captureErrors = () => {
+    const errors: Array<{ message: string; meta?: Record<string, unknown> }> =
+      []
+    const original = logger.error.bind(logger)
+    logger.error = (message: string, meta?: Record<string, unknown>) => {
+      errors.push({ message, meta })
+    }
+    return { errors, restore: () => (logger.error = original) }
+  }
+
+  it('logs and retries when the ending cannot be written', async () => {
+    const { pool, asked } = recordingPool((_sql, attempt) =>
+      attempt === 1 ? new Error('connection terminated unexpectedly') : {},
+    )
+    const { errors, restore } = captureErrors()
+    try {
+      await closeDispatch(pool, 1244, 'conv-1', 'finished')
+    } finally {
+      restore()
+    }
+    expect(asked.length).toBe(2)
+    expect(errors.length).toBe(1)
+    // The issue and the conversation, or the line cannot be traced to a bee.
+    expect(errors[0].meta?.issue).toBe(1244)
+    expect(errors[0].meta?.conversationId).toBe('conv-1')
+    expect(String(errors[0].meta?.error)).toContain('connection terminated')
+  })
+
+  it('does not throw when the retry fails too', async () => {
+    const { pool, asked } = recordingPool(() => new Error('still down'))
+    const { restore } = captureErrors()
+    try {
+      await closeDispatch(pool, 1244, 'conv-1', 'finished')
+    } finally {
+      restore()
+    }
+    // Two attempts and no more: the stall reaper is the backstop, and a loop
+    // here would hold a dead stream open.
+    expect(asked.length).toBe(2)
+  })
+
+  // Unknown is not zero. A turn killed mid-stream never reaches its usage
+  // frame, and writing 0 for it would price a real turn at nothing.
+  it('leaves an existing price alone when the turn reported none', async () => {
+    const { pool, asked } = recordingPool()
+    await finishDispatch(pool, 1244, 'reaped')
+    expect(asked[0].sql).toContain('COALESCE')
+    expect(asked[0].params[2]).toBeNull()
+    expect(asked[0].params[3]).toBeNull()
+  })
+})
+
+/**
+ * What the turn cost, on the row rather than inside a string.
+ *
+ * The stream has carried a usage frame since 2026-08-21 and this module let it
+ * fall through to the default branch, where it was stored as 800 characters of
+ * JSON in the transcript. queen_dispatch had no numeric column at all, so
+ * pricing one round meant string-parsing one transcript row.
+ */
+describe('draining a turn', () => {
+  const sse = (frames: unknown[]) =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder()
+          for (const frame of frames) {
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify(frame)}\n\n`),
+            )
+          }
+          controller.close()
+        },
+      }),
+    )
+
+  it('writes the token counts the stream reported', async () => {
+    const { pool, asked } = recordingPool()
+    await drain(
+      pool,
+      sse([
+        { type: 'text-delta', delta: 'working' },
+        // The shape chat-service.ts emits, nested under `usage`.
+        { type: 'usage', usage: { inputTokens: 18308, outputTokens: 45 } },
+        { type: 'finish' },
+      ]),
+      'conv-1',
+      1244,
+    )
+    const closing = touching(asked, 'UPDATE queen_dispatch')
+    expect(closing.length).toBe(1)
+    expect(closing[0].params).toEqual([1244, 'finished', 18308, 45])
+  })
+
+  it('still shows the cost in the feed a person watches', async () => {
+    const { pool, asked } = recordingPool()
+    await drain(
+      pool,
+      sse([{ type: 'usage', usage: { inputTokens: 12, outputTokens: 3 } }]),
+      'conv-1',
+      1244,
+    )
+    const rows = touching(asked, 'queen_transcript')
+    expect(rows.some((r) => r.params[3] === 'usage')).toBe(true)
+    expect(
+      rows.some((r) => String(r.params[4]).includes('12 in / 3 out')),
+    ).toBe(true)
+  })
+
+  it('reports no price rather than a free turn when the frame never came', async () => {
+    const { pool, asked } = recordingPool()
+    await drain(pool, sse([{ type: 'text-delta', delta: 'killed' }]), 'c', 1244)
+    const closing = touching(asked, 'UPDATE queen_dispatch')
+    expect(closing[0].params[2]).toBeNull()
+    expect(closing[0].params[3]).toBeNull()
+  })
+})
+
+/**
+ * queen_dispatch is keyed by issue alone, so a second attempt overwrites the
+ * first in place: which key it took, how long it ran and why it ended all stop
+ * existing. #1244 was dispatched six times and one row survived it.
+ */
+describe('recording a dispatch', () => {
+  it('archives the attempt it is about to overwrite, first', async () => {
+    const { pool, asked } = recordingPool()
+    await recordDispatch(pool, 1244, 'queen-1244', true, 'cut from dev', [])
+    const archive = asked.findIndex((q) =>
+      q.sql.includes('queen_dispatch_history'),
+    )
+    const upsert = asked.findIndex((q) => q.sql.includes('ON CONFLICT (issue)'))
+    expect(archive).toBeGreaterThanOrEqual(0)
+    expect(archive).toBeLessThan(upsert)
+    expect(asked[archive].params).toEqual([1244])
+    // The whole row as one value. A copied column list would be a second rule,
+    // stale on the first ALTER that touched the table it copies.
+    expect(asked[archive].sql).toContain('to_jsonb(queen_dispatch)')
+  })
+
+  it('does not fail the dispatch when the archive cannot be written', async () => {
+    const { pool, asked } = recordingPool((sql) =>
+      sql.includes('queen_dispatch_history')
+        ? new Error('relation "queen_dispatch_history" does not exist')
+        : {},
+    )
+    await recordDispatch(pool, 1244, 'queen-1244', true, 'cut from dev', [])
+    expect(touching(asked, 'ON CONFLICT (issue)').length).toBe(1)
+  })
+
+  // Measured on a scratch database while this was written: without the reset a
+  // second dispatch of #1244 inherited the first attempt's 18308 input tokens
+  // and reported them as its own.
+  it('starts the new attempt with no price of its own', async () => {
+    const { pool, asked } = recordingPool()
+    await recordDispatch(pool, 1244, 'queen-1244', true, 'cut from dev', [])
+    const upsert = touching(asked, 'ON CONFLICT (issue)')[0]
+    expect(upsert.sql).toContain('input_tokens = NULL')
+    expect(upsert.sql).toContain('output_tokens = NULL')
+  })
+})
+
+/**
+ * Git-backed. These drive real `git` in a throwaway repository, because the
+ * defect being fixed is that the code did not RUN a git command it should
+ * have - a mocked git would agree with whatever the source says.
+ */
+describe('an existing worktree', () => {
+  const git = (cwd: string, args: string[]) => {
+    const done = Bun.spawnSync(['git', ...args], {
+      cwd,
+      env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' },
+    })
+    if (done.exitCode !== 0) {
+      throw new Error(`git ${args.join(' ')} failed: ${done.stderr.toString()}`)
+    }
+    return done.stdout.toString().trim()
+  }
+
+  /** A repository with one commit and a worktree cut for issue 99. */
+  function hive(): { root: string; worktree: string; restore: () => void } {
+    const previous = process.env.WORKSPACE_DIR
+    const workspace = realpathSync(mkdtempSync(join(tmpdir(), 'queen-hive-')))
+    const root = join(workspace, 'BrowserOS')
+    mkdirSync(root)
+    git(root, ['init', '-q', '-b', 'dev'])
+    git(root, ['config', 'user.email', 'bee@example.com'])
+    git(root, ['config', 'user.name', 'Bee'])
+    writeFileSync(join(root, 'README.md'), 'hive\n')
+    git(root, ['add', '.'])
+    git(root, ['-c', 'commit.gpgsign=false', 'commit', '-qm', 'first'])
+    const worktree = join(root, '.worktrees', 'queen-99')
+    git(root, ['worktree', 'add', '-q', '-B', 'queen-99', worktree, 'dev'])
+    process.env.WORKSPACE_DIR = workspace
+    return {
+      root,
+      worktree,
+      restore: () => {
+        if (previous === undefined) delete process.env.WORKSPACE_DIR
+        else process.env.WORKSPACE_DIR = previous
+      },
+    }
+  }
+
+  // The container holds no push credential by design, so what a previous bee
+  // left uncommitted in that tree is the only copy of it. The next bee inherits
+  // it either way; the row and the brief used to say "reused an existing
+  // worktree" and let that pass unnoticed.
+  it('says how much a previous attempt left behind', async () => {
+    const { worktree, restore } = hive()
+    try {
+      writeFileSync(join(worktree, 'half-done.ts'), 'export const x = 1\n')
+      writeFileSync(join(worktree, 'README.md'), 'edited\n')
+      const prepared = await prepareWorktree(99)
+      expect(prepared.ok).toBe(true)
+      expect(prepared.detail).toContain('2 uncommitted file(s)')
+    } finally {
+      restore()
+    }
+  })
+
+  it('says it is clean when it is', async () => {
+    const { restore } = hive()
+    try {
+      const prepared = await prepareWorktree(99)
+      expect(prepared.detail).toBe('reused an existing worktree (clean)')
+    } finally {
+      restore()
+    }
+  })
+
+  // The measurement `queend`'s unused `boundary` question needs. The count was
+  // all that ever left this module, and the diff that produces it is the only
+  // record of WHERE a bee wrote.
+  it('names the files a branch committed, not just how many', async () => {
+    const { root, worktree, restore } = hive()
+    const previousRef = process.env.TRIOS_REPO_REF
+    process.env.TRIOS_REPO_REF = 'dev'
+    try {
+      writeFileSync(join(worktree, 'owned.ts'), 'export const a = 1\n')
+      writeFileSync(join(worktree, 'stray.ts'), 'export const b = 2\n')
+      git(worktree, ['add', '.'])
+      git(worktree, ['-c', 'commit.gpgsign=false', 'commit', '-qm', 'bee work'])
+      expect(git(root, ['rev-parse', '--abbrev-ref', 'HEAD'])).toBe('dev')
+      const files = await committedFiles(99)
+      expect(files.sort()).toEqual(['owned.ts', 'stray.ts'])
+      expect(await committedFileCount(99)).toBe(2)
+    } finally {
+      if (previousRef === undefined) delete process.env.TRIOS_REPO_REF
+      else process.env.TRIOS_REPO_REF = previousRef
+      restore()
+    }
   })
 })

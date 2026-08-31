@@ -154,6 +154,27 @@ public struct SwarmBudget: Equatable, Sendable {
         return SwarmBudget(dailyLimitUSD: Int(dollars * 1_000_000))
     }
 
+    /// Estimated spend, in micro-dollars, across every task the board says was
+    /// touched today.
+    ///
+    /// One expression with two callers - `QueenDelegationRegistry.spentToday`
+    /// in the app and the `choose` gate in `queend` - rather than the same sum
+    /// written twice. A threshold that two places compute is a threshold they
+    /// will one day disagree about, and this repository's recurring defect is
+    /// exactly that: one rule in two files, agreeing until one is edited.
+    ///
+    /// A task whose provider or model is unknown, or whose model is not in the
+    /// price table, contributes nothing. So this is a FLOOR, not a total, and
+    /// every caller says so. Inventing an average for an unpriced task is how a
+    /// cheap day gets refused.
+    public static func spentToday(tasks: [DelegatedTask], now: Date = Date()) -> Int {
+        let calendar = Calendar.current
+        return tasks
+            .filter { calendar.isDate($0.updatedAt, inSameDayAs: now) }
+            .compactMap(\.estimatedCostUSD)
+            .reduce(0, +)
+    }
+
     public enum Verdict: Equatable {
         case fine(remaining: Int)
         case nearingLimit(remaining: Int)
