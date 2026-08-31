@@ -225,10 +225,13 @@ const SHELL = `<!doctype html>
  }
 
  function load(){
-  if(!token) return
+  // Try WITHOUT a token first. A local dev server has none configured, so
+  // the guard trusts a loopback socket and the form is pure noise there.
+  // Only a 403 proves a credential is actually required, and that is when
+  // the form appears - measured rather than assumed from the URL.
   var u='/queen/feed/data?issue='+encodeURIComponent(issue)+
         (conv?('&conversation='+encodeURIComponent(conv)+'&since='+since):'')
-  fetch(u,{headers:{Authorization:'Bearer '+token}})
+  fetch(u,token?{headers:{Authorization:'Bearer '+token}}:undefined)
    .then(function(r){
      if(r.status===403) throw new Error('That token was refused.')
      if(!r.ok) throw new Error('The feed answered '+r.status+'.')
@@ -273,7 +276,7 @@ const SHELL = `<!doctype html>
   ;(keep?localStorage:sessionStorage).setItem(KEY,token)
   ;(keep?sessionStorage:localStorage).removeItem(KEY); start()})
  $('token').addEventListener('keydown',function(e){if(e.key==='Enter')$('go').click()})
- if(token){$('auth').hidden=true; start()}
+ $('auth').hidden=true; start()
 })()
 </script>
 </body></html>`

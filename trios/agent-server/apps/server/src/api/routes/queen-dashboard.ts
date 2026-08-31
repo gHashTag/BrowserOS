@@ -219,7 +219,7 @@ const PAGE = `<!doctype html>
   }
 
   function load() {
-    fetch('/queen/lease', { headers: { Authorization: 'Bearer ' + token } })
+    fetch('/queen/lease', { headers: token ? { Authorization: 'Bearer ' + token } : undefined })
       .then(function (r) {
         if (r.status === 403) throw new Error('the deployment refused that token')
         if (!r.ok) throw new Error('server answered ' + r.status)
@@ -250,7 +250,11 @@ const PAGE = `<!doctype html>
   })
 
   $('where').textContent = location.host
-  if (token) load()
+  // Try WITHOUT a token first. A local dev server has none configured, so the
+  // guard trusts a loopback socket and the form is pure noise there. Only a 403
+  // proves a credential is needed, and that is when the form appears.
+  $('auth').hidden = true
+  load()
   setInterval(function () { if (token && !$('app').hidden) load() }, 15000)
 })()
 </script>

@@ -393,8 +393,11 @@ const SHELL = `<!doctype html>
   })
  }
  function load(){
-  if(!token) return
-  fetch('/queen/board',{headers:{Authorization:'Bearer '+token}})
+  // Try WITHOUT a token first. A local dev server has none configured, so
+  // the guard trusts a loopback socket and the form is pure noise there.
+  // Only a 403 proves a credential is actually required, and that is when
+  // the form appears - measured rather than assumed from the URL.
+  fetch('/queen/board',token?{headers:{Authorization:'Bearer '+token}}:undefined)
    .then(function(r){
      if(r.status===403){throw new Error('That token was refused.')}
      if(!r.ok){throw new Error('The board answered '+r.status+'.')}
@@ -412,7 +415,7 @@ const SHELL = `<!doctype html>
   ;(keep?localStorage:sessionStorage).setItem(KEY,token)
   ;(keep?sessionStorage:localStorage).removeItem(KEY); load()})
  $('token').addEventListener('keydown',function(e){if(e.key==='Enter')$('go').click()})
- if(token){$('auth').hidden=true; load()}
+ $('auth').hidden=true; load()
  setInterval(load, 30000)
 })()
 </script>

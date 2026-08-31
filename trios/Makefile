@@ -1331,6 +1331,97 @@ make-dollars:
 		echo "[OK] no single-dollar shell variables in recipes"; \
 	fi
 
+# --- Queen dev mode: the pages, locally, with nothing to type ---------------
+#
+# The deployed pages ask for a bearer token because the deployment is reachable
+# from the internet and `requireTrustedAppOrigin` refuses everything without one
+# the moment TRIOS_API_TOKEN is set. That is right for production and pure
+# friction on a laptop.
+#
+# Locally the same guard has a different answer already written into it: with no
+# token configured, a request whose SOCKET is loopback is trusted. So a local
+# server started WITHOUT that variable serves every page with nothing to paste.
+#
+# The only thing missing was the data, which lives in the deployment's Postgres.
+# `railway run` injects that service's variables into a local process, so the
+# values never pass through a terminal, a file, or an agent's output. Two are
+# overridden on the way in:
+#
+#   TRIOS_API_TOKEN=          empty is "not configured", which is what re-opens
+#                             the loopback path. Clearing a credential, not
+#                             supplying one.
+#   DATABASE_URL=<public>     the injected one is Railway's INTERNAL hostname
+#                             and does not resolve off their network - measured,
+#                             the routes answered 500 with getaddrinfo ENOTFOUND
+#                             until this was swapped for DATABASE_PUBLIC_URL.
+#
+# The tick is off here on purpose. A second Queen dispatching from a laptop is
+# the exact race the lease exists to prevent, and a dev server should not be
+# taking the hive's turn while somebody reads a page.
+.PHONY: dev-queen
+dev-queen:
+	@port=$${QUEEN_DEV_PORT:-9106}; \
+	SEARCH_PATH="?options=-c%20search_path%3Dtrios"; \
+	export SEARCH_PATH; \
+	echo "[dev-queen] starting on 127.0.0.1:$$port with no token required"; \
+	pkill -f "server-port $$port" 2>/dev/null || true; \
+	sleep 1; \
+	: "The port travels in the ENVIRONMENT, not spliced into the quoted"; \
+	: "command. A first version concatenated it into the sh -c string and"; \
+	: "broke the quoting context, so DATABASE_PUBLIC_URL never expanded and"; \
+	: "the server fell back to a local default - the log said 'database"; \
+	: "playra does not exist' while the page answered 503."; \
+	cd "$(ROOT)/agent-server" && \
+	: "--service Postgres, not trios-agent-server. DATABASE_PUBLIC_URL is a"; \
+	: "variable of the DATABASE service; the app service does not carry it,"; \
+	: "measured - its length there is 0 while Postgres has 92. And the app"; \
+	: "service's own DATABASE_URL is the internal hostname, which does not"; \
+	: "resolve off Railway's network. A read-only view needs the database"; \
+	: "and nothing else: no provider key, because the tick is off here."; \
+	: "THE SCHEMA. The deployment connects with"; \
+	: "?options=-c search_path=trios, and the public URL carries no such"; \
+	: "option - so a connection made without it looks at the DEFAULT schema,"; \
+	: "finds nothing, and the migration helpfully creates a second empty set"; \
+	: "of tables there. Measured: every queen_* table read 0 rows through the"; \
+	: "public URL while the deployment served 57 cards from the same"; \
+	: "database. The board was not empty; it was the wrong schema."; \
+	QUEEN_DEV_PORT="$$port" railway run --service Postgres -- \
+	  sh -c 'exec env TRIOS_API_TOKEN= TRIOS_QUEEN_TICK_SECONDS= \
+	    TRIOS_QUEEN_REHEARSAL= \
+	    DATABASE_URL="$$DATABASE_PUBLIC_URL$$SEARCH_PATH" \
+	    bun apps/server/src/index.ts --server-port "$$QUEEN_DEV_PORT"' \
+	  > /tmp/trios_dev_queen.log 2>&1 & \
+	for i in $$(seq 1 25); do \
+	  code=$$(curl -s -o /dev/null -w "%{http_code}" -m 4 \
+	    "http://127.0.0.1:$$port/health" 2>/dev/null); \
+	  [ "$$code" = "200" ] && break; \
+	  sleep 2; \
+	done; \
+	board=$$(curl -s -o /dev/null -w "%{http_code}" -m 20 \
+	  "http://127.0.0.1:$$port/queen/board" 2>/dev/null); \
+	if [ "$$board" != "200" ]; then \
+	  echo "[FAIL] the guarded data route answered $$board, not 200."; \
+	  echo "       That is not a token problem - loopback is trusted here."; \
+	  echo "       Last lines of /tmp/trios_dev_queen.log:"; \
+	  tail -3 /tmp/trios_dev_queen.log | cut -c1-140 | sed "s/^/         /"; \
+	  exit 1; \
+	fi; \
+	cards=$$(curl -s -m 20 "http://127.0.0.1:$$port/queen/board" \
+	  | tr ',' '\n' | grep -c '"number"'); \
+	echo "[OK] no token, no form, $$cards cards from the deployment's database"; \
+	echo "     http://127.0.0.1:$$port/queen/kanban     the board"; \
+	echo "     http://127.0.0.1:$$port/queen/feed?issue=1244   a bee"; \
+	echo "     http://127.0.0.1:$$port/queen/tree       the technology tree"; \
+	echo "     http://127.0.0.1:$$port/queen/dashboard  the swarm"; \
+	echo "     make dev-queen-stop to end it"
+
+.PHONY: dev-queen-stop
+dev-queen-stop:
+	@port=$${QUEEN_DEV_PORT:-9106}; \
+	pkill -f "server-port $$port" 2>/dev/null && \
+	  echo "[OK] dev-queen on $$port stopped" || \
+	  echo "[OK] nothing was running on $$port"
+
 # --- Backticks in recipes ------------------------------------------------
 #
 # A backtick in a recipe is command substitution, including inside a `: "..."`
