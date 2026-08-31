@@ -473,6 +473,52 @@ public enum QueenDelegationPolicy {
         running < maximumConcurrentWorkers
     }
 
+    /// What the tasks already recorded against an issue mean for choosing it
+    /// again.
+    public enum IssueClaim: Equatable, Sendable {
+        /// Someone has it now, or is expected back on it.
+        case live(DelegatedTaskState)
+        /// The work landed. Choosing it again would redo finished work - which
+        /// this repository has done: #1244 collected six duplicate
+        /// "verification record" commits in one afternoon that way.
+        case done(DelegatedTaskState)
+    }
+
+    /// Whether an open issue is spoken for, and by what.
+    ///
+    /// THE DEFECT THIS REPLACES. The chooser skipped any issue that had a task
+    /// in ANY state - "a task already exists for it" - and its own doc comment
+    /// listed the states it meant: queued, running, awaitingReview, rejected,
+    /// accepted, merged. `cancelled` and `failed` were never in that list and
+    /// were excluded anyway.
+    ///
+    /// So a task that was abandoned, or that failed and must be retried,
+    /// silenced its issue permanently. Measured on the live board 2026-08-31:
+    /// of 40 candidates, SIX were unreachable for this reason - #1127, #1147,
+    /// #1173 and #1286 cancelled, #1111 and #1133 failed - every one of them
+    /// still open on GitHub and none of them ever choosable again. A failure is
+    /// the state that most obviously means "do this again", and it was read as
+    /// "never do this".
+    ///
+    /// `rejected` stays live on purpose: it means the Queen sent the work back
+    /// and the same bee is expected to return to those files.
+    public static func claimOnIssue(states: [DelegatedTaskState]) -> IssueClaim? {
+        // Live beats done beats dead, whatever order the registry lists them
+        // in. An issue with a failed attempt AND a running retry is claimed by
+        // the retry.
+        if let live = states.first(where: {
+            $0 == .queued || $0 == .running || $0 == .awaitingReview || $0 == .rejected
+        }) {
+            return .live(live)
+        }
+        if let done = states.first(where: { $0 == .accepted || $0 == .merged }) {
+            return .done(done)
+        }
+        // Only cancelled and/or failed remain, and neither produced work that
+        // landed. The issue is free.
+        return nil
+    }
+
     /// How the tick should report a candidate it passed over because its issue
     /// is already spoken for.
     ///

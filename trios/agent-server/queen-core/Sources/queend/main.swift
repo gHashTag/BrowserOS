@@ -200,10 +200,23 @@ case "choose":
     var pickPaths: [String] = []
     let now = Date()
     for number in candidates {
-        if let existing = tasks.first(where: { $0.issue.number == number }) {
-            skipped.append("#\(number): a task already exists for it "
-                + "(\(existing.state.rawValue))")
+        // Every task recorded against this issue, not the first one found.
+        // A retry after a failure leaves two, and which of them the registry
+        // happens to list first is not a fact about the work.
+        let claim = QueenDelegationPolicy.claimOnIssue(
+            states: tasks.filter { $0.issue.number == number }.map(\.state)
+        )
+        switch claim {
+        case .live(let state):
+            skipped.append("#\(number): a worker has it or is expected back "
+                + "(\(state.rawValue))")
             continue
+        case .done(let state):
+            skipped.append("#\(number): the work already landed "
+                + "(\(state.rawValue)) - the issue is open and nobody closed it")
+            continue
+        case nil:
+            break
         }
 
         // What THIS issue says it will touch.
