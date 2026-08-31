@@ -50,10 +50,20 @@ as gHashTag/t27#2508.
 ## Measured here
 
 ```
-make check-bypass          -> EXIT=0 x2: waves 090/091 AND 103 (daytime,
-                              neighbour-edited tree; the anomaly swallowed
-                              the lock line ~35 min, then released - both
-                              walks self-completed at 25 [OK]):
+make cassettes            -> fast honest verdict since the ROOT-CAUSE FIX
+                              (commit 4d56070ef, 2026-08-29): the
+                              14-wave "system-layer exec anomaly" was a
+                              BACKTICK in a `: "..."` comment - `make
+                              check` inside backticks ran as command
+                              substitution from the lock recipe line, the
+                              exact phantom subshell our waves 069-076
+                              measured. Evidence right, layer wrong. The
+                              wedge is dead (verdict in ~2 min, was
+                              26+ min); 4 of 5 replays fail on one real
+                              cause (diagnosed in commit aa3b6fc14, fix
+                              in flight). The old EXIT=0 x2 walks (090/
+                              091, 103) stand as history - they ran under
+                              the diagnostic bypass, now obsolete:
                               the FIRST full single-pass walk in the
                               loop's history - cassettes 4/4 replays,
                               mutants caught 2 of 2, dev 199/199
