@@ -85,9 +85,21 @@ export function resolveWorkerProvider(): WorkerProvider | null {
   for (const candidate of WORKER_PROVIDERS) {
     const key = process.env[candidate.envVar]
     if (key && key.length > 0) {
+      // The key travels WITH the choice, and leaving it out was a real defect:
+      // `/chat` resolves a provider from what the CALLER supplies, because its
+      // usual caller is an app on someone's laptop holding its own credentials.
+      // The server does not go looking in its own environment. So a deployment
+      // with ZAI_API_KEY set got past the credential precheck and then died at
+      // the chat route with the same sentence the precheck exists to prevent -
+      //
+      //   chat answered 500: "z.ai provider requires apiKey"
+      //
+      // - which reads like a missing key and was a key that was never handed
+      // over. Measured on the first round after the operator set one.
       return {
         provider: candidate.provider,
         model: override || candidate.model,
+        apiKey: key,
       }
     }
   }

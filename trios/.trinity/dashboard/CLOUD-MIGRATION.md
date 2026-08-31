@@ -912,3 +912,57 @@ Three numbers, and only the smallest one matters:
 
 The hardware was never the limit. It is the boundary ledger, and a review nobody
 has given a verdict on.
+
+---
+
+## A real bee, a real model, a real commit - and the boundary it stepped over
+
+The operator set `ZAI_API_KEY` and removed the rehearsal flag. The first round
+after that failed, and the failure was mine:
+
+```
+chat answered 500: {"message":"z.ai provider requires apiKey"}
+```
+
+The key WAS in the deployment. `/chat` resolves a provider from what the CALLER
+supplies - its usual caller is an app on somebody's laptop holding its own
+credentials - and the server does not go looking in its own environment. My
+`resolveWorkerProvider` found the key and then did not hand it over, so the
+round got past the credential precheck and died at the chat route with the exact
+sentence that precheck exists to prevent. A key that was never passed reads
+identically to a key that is not there.
+
+With the key travelling alongside the choice:
+
+```
+выбрана : 1244 ['BR-OUTPUT/QueenTabView.swift']
+started : True
+detail  : reused an existing worktree; zai/glm-4.6
+```
+
+And four minutes later, in the container, on the bee's own branch:
+
+```
+e52f41ad Trinity Bee <bee@trinity.local>
+feat: seal QueenTabView.swift against embedded-trinity-queen-ui spec
+
+ trios/.trinity/seals/QueenTabView.json | 16 ++++++++++++
+ trios/BR-OUTPUT/QueenTabView.swift     | 30 +++++++++++++---
+```
+
+A bee chose by the Queen, briefed by the Queen, running a real model in a
+container with no laptop involved, writing real code and committing it.
+
+### And it wrote outside its boundary
+
+#1244 declares exactly one path: `BR-OUTPUT/QueenTabView.swift`. The commit
+carries two. `trios/.trinity/seals/QueenTabView.json` is a new file nobody
+reserved for it - defensible work, and outside the boundary all the same.
+
+**Nothing noticed.** The log has no `queen.observer.outOfBounds` for it. That
+observer's cassette is one of the four that has never run since wave 069 - so
+the very first real cloud bee did the thing those cassettes exist to catch, and
+the catching is the part that is still broken.
+
+That is the honest state to end on: the loop runs, and its supervision has a
+measured hole in it.
