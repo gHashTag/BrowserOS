@@ -39,6 +39,7 @@ import { createMonitoringRoutes } from './routes/monitoring'
 import { createOAuthRoutes } from './routes/oauth'
 import { createOpenClawRoutes } from './routes/openclaw'
 import { createProviderRoutes } from './routes/provider'
+import { createQueenDashboardRoute } from './routes/queen-dashboard'
 import { createQueenLeaseRoute } from './routes/queen-lease'
 import { createQueenRegistryRoute } from './routes/queen-registry'
 import { createQueenRehearsalRoute } from './routes/queen-rehearsal'
@@ -288,6 +289,10 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/*', trustedCorsMiddleware())
     .route('/health', createHealthRoute({ browser, stateBackend: a2aService }))
     .route('/queen/registry', queenRegistryRoutes)
+    // The shell only. It holds no state and no token; every byte of data it
+    // shows comes from /queen/lease, which stays guarded. See the route header
+    // for why a token in a URL was not the answer.
+    .route('/queen/dashboard', createQueenDashboardRoute())
     .route('/queen/lease', queenLeaseRoutes)
     .route('/queen/rehearsal', queenRehearsalRoutes)
     .use('/shutdown/*', requireTrustedAppOrigin())

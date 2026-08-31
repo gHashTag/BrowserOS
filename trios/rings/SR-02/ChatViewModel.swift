@@ -12405,15 +12405,55 @@ struct ChatRequestBuilder {
 
         let runtimeConfiguration = modelConfiguration ?? .environmentFallback()
 
+        // `messages` is not a key this server has ever accepted.
+        //
+        // Measured 2026-08-31, statically and at both ends. `ChatRequestSchema`
+        // (agent-server/apps/server/src/api/types.ts) contains no `messages`
+        // field at all - `grep -c messages` on that file returns 0 - and it is a
+        // plain z.object with no `.passthrough()`, so zod strips the key before
+        // any handler sees it. Everything assembled above therefore travelled to
+        // the server and was discarded: the system prompt AND the history.
+        //
+        // What was lost, on every send, for as long as this has been here:
+        //
+        //   - the Queen's own system prompt, with her commands, her skills and
+        //     her voice rules
+        //   - every worker bee's prompt: who it is, which issue is its own,
+        //     which checkout is its own, its boundary and its branch
+        //   - the reviewer's prompt
+        //   - the conversation history
+        //
+        // All three ran as the generic assistant with an empty preferences
+        // block, which is why a bee behaves like a stranger to this project no
+        // matter how carefully its briefing is written. The server has accepted
+        // `userSystemPrompt` and `previousConversation` the whole time; the
+        // client was filling neither.
+        //
+        // The array is still built above because `systemContent` composes the
+        // memory prompt with the caller's prompt, and that composition is the
+        // thing to send.
         var body: [String: Any] = [
             "conversationId": conversationId.uuidString,
             "message": message,
             "mode": mode,
             "origin": origin,
             "supportsImages": true,
-            "messages": messages,
+            "userSystemPrompt": systemContent,
             "userWorkingDir": homeDir
         ]
+
+        // History, in the shape the schema names: role limited to user or
+        // assistant, content non-empty. The server injects these only when the
+        // session is new, so re-sending them on a continued turn is harmless.
+        let history = previousConversation.compactMap { msg -> [String: Any]? in
+            let role = msg.role == .assistant ? "assistant" : "user"
+            let text = msg.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !text.isEmpty else { return nil }
+            return ["role": role, "content": msg.content]
+        }
+        if !history.isEmpty {
+            body["previousConversation"] = history
+        }
         runtimeConfiguration.apply(to: &body)
 
         if let attachments = attachments, !attachments.isEmpty {

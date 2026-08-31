@@ -28,6 +28,7 @@ import { randomUUID } from 'node:crypto'
 import type { Pool } from 'pg'
 import { logger } from '../../lib/logger'
 import { shellArgv } from '../../tools/filesystem/bash'
+import { workerSystemPrompt } from './queen-tick'
 
 /**
  * Providers this deployment could use, in preference order, with the variable
@@ -43,7 +44,7 @@ const WORKER_PROVIDERS: Array<{
   envVar: string
   model: string
 }> = [
-  { provider: 'zai', envVar: 'ZAI_API_KEY', model: 'glm-4.6' },
+  { provider: 'zai', envVar: 'ZAI_API_KEY', model: 'glm-5.3' },
   {
     provider: 'anthropic',
     envVar: 'ANTHROPIC_API_KEY',
@@ -260,6 +261,7 @@ async function startTurn(
   brief: string,
   workingDirectory: string,
   chosen: WorkerProvider,
+  ownedPaths: string[],
 ): Promise<{ ok: boolean; detail: string }> {
   const token = process.env.TRIOS_API_TOKEN
   if (!token)
@@ -291,6 +293,14 @@ async function startTurn(
         // instead of its own worktree - its edits and its branch in different
         // trees, which is the failure the worktree exists to prevent.
         userWorkingDir: workingDirectory,
+        // The standing identity, in the field the server reads (types.ts:42 ->
+        // prompt.ts:649). The brief is the task; this is who is doing it.
+        userSystemPrompt: workerSystemPrompt(
+          issue,
+          process.env.TRIOS_GITHUB_REPO || 'gHashTag/trios',
+          workingDirectory,
+          ownedPaths,
+        ),
       }),
     })
     if (!response.ok) {
@@ -449,6 +459,7 @@ export async function dispatchBee(
     brief,
     workingDirectory,
     chosen,
+    ownedPaths,
   )
   const detail = turn.ok
     ? `${worktree.detail}; ${chosen.provider}/${chosen.model}` +

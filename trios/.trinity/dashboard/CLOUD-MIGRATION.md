@@ -966,3 +966,115 @@ the catching is the part that is still broken.
 
 That is the honest state to end on: the loop runs, and its supervision has a
 measured hole in it.
+
+---
+
+## The prompts were computed and never sent
+
+The largest defect this session found, and it had been there the whole time.
+
+`ChatRequestBuilder.build()` assembles a `messages` array - the system prompt,
+the conversation history, the current turn - and puts it in the request body
+under the key `messages`. **The server has no such field.**
+`grep -c messages` on `agent-server/apps/server/src/api/types.ts` returns **0**,
+`ChatRequestSchema` is a plain `z.object` with no `.passthrough()`, so zod
+strips the key before any handler sees it.
+
+The server accepts, and has always accepted, exactly the two fields that were
+being thrown away:
+
+```
+types.ts:42   userSystemPrompt: z.string().optional()      -> prompt.ts:649
+types.ts:82   previousConversation: ...                     -> chat-service.ts:378
+```
+
+So on every send, for as long as this has been here:
+
+| computed | arrived |
+|---|---|
+| the Queen's own prompt - her commands, her skills, her voice | nothing |
+| every bee's prompt - who it is, which issue, which checkout, its boundary | nothing |
+| the reviewer's prompt | nothing |
+| the conversation history | nothing |
+
+All three ran as the generic assistant with an empty preferences block. Which
+explains a thing that had no other explanation: a bee behaves like a stranger to
+this project no matter how carefully its briefing is written, because the part
+that told it what it was never left the laptop.
+
+The codebase had already recorded the cost without naming the cause - a comment
+at `ChatViewModel.swift:12320` describes a bee that "found an unrelated old
+checkout under ~/gitbutler and edited that instead, so its branch here stayed
+empty." The sentence that would have prevented it was computed on every send and
+dropped on every send.
+
+Fixed by sending them in the fields the server reads.
+
+## The cloud bee was worse off than that
+
+Three things it never got, each one variable away in the same function:
+
+- **its boundary.** `queend` computed it per candidate and refused three other
+  issues on the strength of it, then never told the bee it constrains.
+- **the issue body.** The brief opened with "Read the issue first" - impossible
+  in that container: the image has git, ca-certificates and openssh-client, no
+  `gh`, and the agent shell's environment is scrubbed to ten entries with
+  GITHUB_TOKEN deliberately excluded. The only description of the task it
+  received was the number.
+- **an identity.** No `userSystemPrompt` at all.
+
+All three now travel with the dispatch.
+
+## And the work does not survive a deploy
+
+The Dockerfile said "A volume mounts here in production so a redeploy does not
+throw away an in-flight worktree." No volume was ever created. Measured inside
+the running container:
+
+```
+df -h /workspace        -> overlay (the container's own layer)
+mount | grep workspace  -> nothing
+git reflog              -> "clone: from https://github.com/gHashTag/BrowserOS.git"
+railway volume list     -> one volume, redis-volume, on the Redis service
+```
+
+Every redeploy re-clones. It has already cost a real commit: `e52f41ad`, the
+seal a real model wrote for #1244, gone with the deploy that followed it. The
+comment described an intention and read as a fact, which is exactly the defect
+class this repository keeps writing skills about. It now states what is true and
+names the command that would make it false.
+
+## Four bees, at the Queen's own ceiling
+
+```
+#1176 РАБОТАЕТ  zai/glm-5.3
+#1216 РАБОТАЕТ  zai/glm-5.3
+#1240 РАБОТАЕТ  zai/glm-5.3
+#1244 РАБОТАЕТ  zai/glm-4.6
+
+next round -> refusal: "4 workers already running (limit 4)"
+```
+
+Not a hardware limit and not an error: `QueenDelegationPolicy.
+maximumConcurrentWorkers`. The container measured 96 concurrent calls without
+degradation; the Queen allows four. glm-5.3 is confirmed live rather than
+assumed - three bees are running on it.
+
+## The dashboard
+
+`/queen/dashboard` on the deployment, in t27.ai's own palette: black, #00FF88,
+#FFD700, and a type and spacing scale on phi - which here is the L5 identity
+law rather than decoration.
+
+The shell is unguarded and holds no state; every byte it shows comes from
+`/queen/lease`, which stays guarded. The obvious alternative - a token in the
+URL - is the one thing that must not happen, because query strings end up in
+logs, proxies, history and shared links. The operator pastes the token into the
+page, the browser keeps it for the tab, and it travels in an Authorization
+header like every other caller's.
+
+```
+shell, no token  -> HTTP 200
+data,  no token  -> HTTP 403
+data,  token     -> HTTP 200
+```

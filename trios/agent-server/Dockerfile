@@ -93,8 +93,26 @@ COPY apps/server apps/server
 COPY packages/shared packages/shared
 COPY packages/cdp-protocol packages/cdp-protocol
 
-# Where bees check out and work. A volume mounts here in production so a
-# redeploy does not throw away an in-flight worktree.
+# Where bees check out and work.
+#
+# THIS COMMENT USED TO SAY "A volume mounts here in production so a redeploy
+# does not throw away an in-flight worktree." No volume was ever created.
+# Measured 2026-08-31 inside the running container:
+#
+#   df -h /workspace   -> overlay (the container's own layer)
+#   mount | grep workspace -> nothing
+#   git reflog         -> "clone: from https://github.com/..."
+#   railway volume list -> one volume, redis-volume, on the Redis service
+#
+# So every redeploy re-clones and every bee's branch, worktree and COMMIT is
+# destroyed. It has already cost one: e52f41ad, a real seal written by a real
+# model, gone with the deploy that followed it.
+#
+# The comment described an intention and read as a fact, which is the whole
+# reason it is worth this many lines now. Until a volume exists, treat any work
+# in here as lost at the next deploy:
+#
+#   railway volume add --service trios-agent-server --mount-path /workspace
 ENV WORKSPACE_DIR=/workspace
 RUN mkdir -p /workspace
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh

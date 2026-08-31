@@ -285,17 +285,53 @@ async function runRound(
         AND dispatched_at > now() - interval '24 hours'`,
   )
   const [owner, repoName] = repo.split('/')
+  // Seconds, no fraction.
+  //
+  // Postgres hands back a JS Date and JSON.stringify writes it with
+  // milliseconds - "2026-08-29T16:13:06.821Z". Swift's `.iso8601` decoding
+  // strategy does not accept a fractional second, so `queend` refused the whole
+  // question the moment there was anything in flight to report:
+  //
+  //   codingPath: ["tasks", "Index 67"]
+  //   "Expected date string to be ISO8601-formatted."
+  //
+  // Index 67 is the first of MINE, after the registry's own sixty-seven - which
+  // is what made it obvious. The app's tasks encode without the fraction
+  // because Swift wrote them; mine have to match that, not merely be valid
+  // ISO 8601.
+  const isoSeconds = (value: unknown): string =>
+    new Date(value as string).toISOString().replace(/\.\d{3}Z$/, 'Z')
+  // EVERY non-optional field of DelegatedTask, not the ones that seemed
+  // interesting.
+  //
+  // Swift's synthesised Codable refuses the whole document for one missing
+  // key, and `queend` reports which - so this was found the honest way, one
+  // refusal at a time, until the list was read properly:
+  //
+  //   codingPath: ["tasks", "Index 67"]  "Expected date string to be ISO8601"
+  //   keyNotFound("acceptanceCriteria")
+  //
+  // Index 67 is the first of MINE, after the registry's own sixty-seven. The
+  // lesson is not "add acceptanceCriteria": it is that a hand-built record
+  // standing in for a real type must be built from the type's field list, not
+  // from what the author remembers of it.
   const containerTasks = inFlight.rows.map((row) => ({
     id: row.conversation_id ?? ZERO_UUID,
     conversationId: row.conversation_id ?? ZERO_UUID,
     issue: { owner, repo: repoName, number: row.issue },
-    title: `dispatched by the cloud tick`,
+    title: 'dispatched by the cloud tick',
     worker: 'cloud-tick',
     state: 'running',
     ownedPaths: row.owned_paths ?? [],
     virtualBranch: row.branch,
-    createdAt: row.dispatched_at,
-    updatedAt: row.dispatched_at,
+    createdAt: isoSeconds(row.dispatched_at),
+    updatedAt: isoSeconds(row.dispatched_at),
+    // Empty, and empty is the truthful value: the cloud tick does not yet read
+    // acceptance criteria out of the issue, so claiming any here would be
+    // inventing a contract the bee was never given.
+    acceptanceCriteria: [],
+    interventions: [],
+    criterionVerdicts: {},
   }))
 
   const choice = await askQueend({
@@ -319,7 +355,12 @@ async function runRound(
     const dispatch = await dispatchBee(
       pool,
       choice.chosen,
-      briefFor(choice.chosen, repo),
+      briefFor(
+        choice.chosen,
+        repo,
+        choice.chosenPaths ?? [],
+        candidateBodies[String(choice.chosen)] ?? '',
+      ),
       choice.chosenPaths ?? [],
     )
     return { ran: true, choice, dispatch }
@@ -336,22 +377,102 @@ async function runRound(
  * a patch the Mac replays - proven end to end - and the bee's job ends at a
  * commit on its own branch.
  */
-function briefFor(issue: number, repo: string): string {
+function briefFor(
+  issue: number,
+  repo: string,
+  ownedPaths: string[],
+  issueBody: string,
+): string {
+  // The boundary, in the words the Mac uses.
+  //
+  // It was computed FOR this bee - `queend` parsed it out of the issue and
+  // refused three other candidates on the strength of it - and then was the one
+  // thing the bee itself was never told. A rule enforced against everyone
+  // except the party it constrains is not a rule, it is a trap.
+  const boundary =
+    ownedPaths.length > 0
+      ? 'You may create or edit files under these paths and nowhere else: ' +
+        ownedPaths.join(', ') +
+        '. Work outside them is dropped rather than reviewed.'
+      : 'No paths were assigned to you. Say so in this chat before editing ' +
+        'anything, rather than guessing at a boundary nobody set.'
+
+  // The issue text, inlined, because the bee cannot go and get it.
+  //
+  // The old brief opened with "Read the issue first" - an instruction this
+  // container makes impossible. The image installs git, ca-certificates and
+  // openssh-client and no `gh`; the agent shell's environment is scrubbed to a
+  // ten-entry allowlist with GITHUB_TOKEN deliberately excluded. So the bee's
+  // first instruction could never be followed, and the only description of the
+  // task it actually received was the number. Meanwhile the tick had already
+  // fetched every candidate's body to decide with - it was one variable away.
+  const body = issueBody.trim()
+  const description = body
+    ? ['## The issue, in full', '', body].join('\n')
+    : '## The issue\n\nIts body could not be read. Say so rather than guessing ' +
+      'at what it wanted.'
+
   return [
-    `You are a Trinity worker bee. Your task is issue #${issue} in ${repo}.`,
+    `# ${repo}#${issue}`,
     '',
-    'Read the issue first, then do the work in this checkout. You are on your',
-    `own branch, queen-${issue}, in your own worktree: nothing you do here`,
-    'touches another bee.',
+    description,
+    '',
+    '## Boundary',
+    '',
+    boundary,
+    `Your branch is queen-${issue} and this worktree is yours alone - no other`,
+    'worker and no build reads or writes it while you have it.',
+    '',
+    '## Verification',
+    '',
+    'When you stop, answer every acceptance criterion the issue states in turn:',
+    'met, not met, or could not check. Do not summarise and do not shorten this',
+    'part - an unchecked criterion is not a pass, and saying so plainly costs',
+    'you nothing.',
+    '',
+    '## Out of scope',
+    '',
+    'Anything the issue does not ask for. Work that seems obviously needed and',
+    'is not asked for is a thing to raise here, not to do quietly.',
+    '',
+    '## Finishing',
     '',
     'Everything you write is English - source, comments, documentation, commit',
-    'messages. Run the project gates before you claim anything works, and quote',
-    'what they printed rather than describing it.',
-    '',
-    'Finish with a commit on your branch. Do NOT push: this machine holds no',
-    'push credential, and the work is carried out as a patch by the operator.',
-    'A failed push reads as a failed task; a commit is the deliverable.',
+    'messages. Finish with a commit on your branch. Do NOT push: this machine',
+    'holds no push credential by design, and the work is carried out as a patch',
+    'by the operator. A failed push reads as a failed task; a commit is the',
+    'deliverable.',
   ].join('\n')
+}
+
+/**
+ * Who the bee is, sent in the field the server actually reads.
+ *
+ * Separate from the briefing because they are different things: the brief is
+ * the task, this is the standing identity that should hold across every turn of
+ * it. The Mac composes an equivalent and - until today - threw it away on the
+ * wire, so neither side has ever had one arrive.
+ */
+export function workerSystemPrompt(
+  issue: number,
+  repo: string,
+  workingDirectory: string,
+  ownedPaths: string[],
+): string {
+  const lines = [
+    `You are a Trinity worker bee, supervised by the Queen. You work on exactly one issue: ${repo}#${issue}.`,
+    `Your repository is ${workingDirectory}. Work only inside it: other checkouts of this project exist on this machine, and editing one of those puts your work where nobody looks for it.`,
+    'This checkout is yours alone. Do the work yourself: do not delegate and do not open other chats.',
+  ]
+  if (ownedPaths.length > 0) {
+    lines.push(
+      `You may create or edit files under these paths and nowhere else: ${ownedPaths.join(', ')}. Work outside them is dropped rather than reviewed.`,
+    )
+  }
+  lines.push(
+    'Everything you write is English. When you stop, answer every acceptance criterion in turn: met, not met, or could not check.',
+  )
+  return lines.join(' ')
 }
 
 /**
