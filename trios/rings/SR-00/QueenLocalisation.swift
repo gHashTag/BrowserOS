@@ -48,15 +48,66 @@ public enum QueenLocalisation {
 
     // MARK: - Public
 
-    /// Returns the range (1-indexed) of the declaration the identifiers point
-    /// at, decided by the rules in the type documentation, or `nil` when no
-    /// rule answers.
+    /// Returns the range (1-indexed) of the declaration the identifiers
+    /// NAME — and only that — or `nil` when nothing can be confirmed.
+    ///
+    /// The rules below propose; none of them may answer on its own. A
+    /// proposal leaves this function only when it survives the
+    /// self-check (#1176): its first line must declare the one identifier
+    /// that names a declaration in this source. Four passes of measuring
+    /// never once produced the function the issue meant — the answer was
+    /// a 300-line window starting mid-comment, or the neighbouring guard
+    /// whose name the issue happened to quote as well (#1158 names
+    /// `autoAcceptIfUnambiguous` and also mentions
+    /// `acceptanceBlockReasonDistinguishingEmptyAnswers`; every range it
+    /// got pointed at the neighbour). When several identifiers name
+    /// declarations, which one the issue meant is not knowable from
+    /// here, so the check fails and the answer is silence. Silence beats
+    /// a confident wrong pointer (#1175, #1176).
     ///
     /// - Parameters:
     ///   - source: Swift source text.
     ///   - identifiers: Whole words to search for (case-sensitive).
-    /// - Returns: A 1-indexed `ClosedRange`, or `nil` when nothing qualifies.
+    /// - Returns: A 1-indexed `ClosedRange` whose first line declares the
+    ///   sole identifier that names a declaration here, or `nil` in every
+    ///   other case.
     public static func region(
+        in source: String,
+        mentioning identifiers: [String]
+    ) -> ClosedRange<Int>? {
+        guard let proposal = proposedRegion(in: source, mentioning: identifiers) else {
+            return nil
+        }
+
+        // Self-check (#1176): the answer must coincide with a name. The
+        // first line of the range has to declare the one identifier that
+        // names a declaration in this source. Anything else — a capped
+        // window that starts mid-body or in a comment, a neighbouring
+        // declaration the issue also quotes — is a pointer this function
+        // cannot confirm, so it is silence rather than a guess.
+        let codeLines = maskCommentsAndStrings(
+            source
+                .replacingOccurrences(of: "\r\n", with: "\n")
+                .replacingOccurrences(of: "\r", with: "\n")
+        ).components(separatedBy: "\n")
+
+        guard proposal.lowerBound >= 1, proposal.lowerBound <= codeLines.count else {
+            return nil
+        }
+        let declared = identifiers.filter { id in
+            codeLines.contains { declarationName(on: $0) == id }
+        }
+        guard declared.count == 1,
+              declarationName(on: codeLines[proposal.lowerBound - 1]) == declared[0]
+        else { return nil }
+
+        return proposal
+    }
+
+    /// The rules themselves, unchecked. Nothing outside `region` may call
+    /// this: every proposal is verified against the identifiers before it
+    /// is allowed to become an answer (#1176).
+    private static func proposedRegion(
         in source: String,
         mentioning identifiers: [String]
     ) -> ClosedRange<Int>? {
