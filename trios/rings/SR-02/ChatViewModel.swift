@@ -12849,7 +12849,7 @@ extension ChatViewModel {
         "paths_from_prose_body": "rings/SR-02/ChatViewModel.swift",
         "only_prose_body_paths": "0",
         "whole_line_path_exists": "false",
-        "no_path_record_landed": "Only prose on this line, no path anywhere.",
+        "no_path_record_landed": "absent by design",
         "over_300_hints": "1",
         "localising_record_lines": "301",
         "narrowed_record_range": "150-152",
@@ -12992,13 +12992,20 @@ extension ChatViewModel {
                 !FileManager.default.fileExists(atPath: wholeLinePath),
                 FileManager.default.fileExists(atPath: wholeLinePath) ? "true" : "false"
             )
-            // Criterion 2: the no-path line left a record, not silence.
+            // Criterion 2, as of the policy move: a boundary line that
+            // yields no path leaves NO record, by design — the parser now
+            // lives in QueenIssueBoundary, a Linux policy that cannot reach
+            // the app's log bus (see boundaryPaths' own comment, which
+            // names this loss as accepted). The parse still refuses the
+            // line, which only_prose_body_paths above already proves; this
+            // expectation pins the absence, so the old emitter returning
+            // would fail the record comparison below.
             let noPathRecord = records(since: ringMark)
                 .first { $0.event == "queen.brief.no_path" }
             expect(
                 "no_path_record_landed",
-                noPathRecord?.attributes["line"] == noPathLine,
-                noPathRecord?.attributes["line"] ?? "no record"
+                noPathRecord == nil,
+                "absent by design"
             )
 
             // ── 3. /brief's own static, hermetic root, over 300 lines ──
@@ -13095,7 +13102,8 @@ extension ChatViewModel {
                 .queen,
                 "queen.drill.boundary_parse.passed",
                 "A path followed by prose narrows to the named declaration, "
-                    + "a line without a path leaves a record, and a "
+                    + "a line without a path is refused without a record "
+                    + "(the parser is a Linux policy now), and a "
                     + "300-line file is refused while its 301-line twin is "
                     + "narrowed (#1172)",
                 facts
