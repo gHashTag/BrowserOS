@@ -383,6 +383,89 @@ async function startTurn(
 }
 
 /**
+ * Turns the bee's stream into rows a person can read.
+ *
+ * Two things it must not do. It must not write a row per token - a turn emits
+ * thousands of text deltas and a row each would make the table the expensive
+ * part of watching. And it must not wait for the turn to end before writing
+ * anything, or "live" means "ten minutes late".
+ *
+ * So text is coalesced and flushed on a size or time bound, whichever comes
+ * first, while a tool call or an error flushes immediately: those are the
+ * events somebody watching is actually waiting for, and batching them to save a
+ * round trip would hide the one frame that mattered.
+ */
+class Scribe {
+  private seq = 0
+  private buffer = ''
+  private lastFlush = Date.now()
+
+  constructor(
+    private pool: Pool,
+    private conversationId: string,
+    private issue: number,
+  ) {}
+
+  async frame(line: string): Promise<void> {
+    const trimmed = line.trim()
+    if (!trimmed.startsWith('data:')) return
+    const payload = trimmed.slice(5).trim()
+    if (payload === '' || payload === '[DONE]') return
+    let event: Record<string, unknown>
+    try {
+      event = JSON.parse(payload) as Record<string, unknown>
+    } catch {
+      // A frame this cannot parse is still a frame the bee sent. Recording it
+      // raw beats dropping it, because a stream shape we did not anticipate is
+      // exactly what a reader would want to see.
+      await this.note('raw', payload.slice(0, 2000))
+      return
+    }
+    const type = String(event.type ?? 'event')
+    const text =
+      (event.text as string) ??
+      (event.delta as string) ??
+      (event.errorText as string) ??
+      ''
+
+    if (type.includes('delta') || type === 'text') {
+      this.buffer += text
+      const old = Date.now() - this.lastFlush > 2500
+      if (this.buffer.length > 400 || old) await this.flush()
+      return
+    }
+    // Anything that is not text is a landmark: flush what came before it so
+    // the order on the page is the order it happened in.
+    await this.flush()
+    if (type === 'start' || type === 'finish') return
+    await this.note(type, text || JSON.stringify(event).slice(0, 1500))
+  }
+
+  async flush(): Promise<void> {
+    if (this.buffer.length === 0) return
+    const text = this.buffer
+    this.buffer = ''
+    this.lastFlush = Date.now()
+    await this.note('say', text)
+  }
+
+  async note(kind: string, text: string): Promise<void> {
+    this.seq += 1
+    await this.pool
+      .query(
+        `INSERT INTO queen_transcript (conversation_id, seq, issue, kind, text)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (conversation_id, seq) DO NOTHING`,
+        [this.conversationId, this.seq, this.issue, kind, text.slice(0, 8000)],
+      )
+      .catch(() => {
+        // A transcript row that will not save must not take the bee down with
+        // it. Watching is a convenience; the work is not.
+      })
+  }
+}
+
+/**
  * Read the stream to its end, and write down that it ended.
  *
  * The recording is the point, not the reading. A dispatch with no way to finish
@@ -402,22 +485,35 @@ async function drain(
   issue: number,
 ): Promise<void> {
   let outcome = 'finished'
+  const scribe = new Scribe(pool, conversationId, issue)
   try {
     const reader = response.body?.getReader()
     if (!reader) {
       outcome = 'no stream'
     } else {
+      const decoder = new TextDecoder()
+      let carry = ''
       while (true) {
-        const { done } = await reader.read()
+        const { done, value } = await reader.read()
         if (done) break
+        // The bytes are the point now. They were read and discarded here, which
+        // is why a running bee had nothing anyone could look at.
+        carry += decoder.decode(value, { stream: true })
+        const lines = carry.split('\n')
+        // The last fragment may be half a line; carry it to the next chunk
+        // rather than parsing a truncated JSON object and losing the frame.
+        carry = lines.pop() ?? ''
+        for (const line of lines) await scribe.frame(line)
       }
     }
+    await scribe.flush()
     logger.info('Queen worker turn finished', { conversationId, issue })
   } catch (error) {
     outcome = `stream ended badly: ${
       error instanceof Error ? error.message : String(error)
     }`
     logger.warn('Queen worker stream ended badly', { conversationId, issue })
+    await scribe.note('error', outcome).catch(() => {})
   }
   await finishDispatch(pool, issue, outcome).catch(() => {})
 }

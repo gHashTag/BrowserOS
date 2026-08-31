@@ -41,6 +41,10 @@ import { createOpenClawRoutes } from './routes/openclaw'
 import { createProviderRoutes } from './routes/provider'
 import { createQueenDashboardRoute } from './routes/queen-dashboard'
 import {
+  createQueenFeedDataRoute,
+  createQueenFeedRoute,
+} from './routes/queen-feed'
+import {
   createQueenBoardRoute,
   createQueenKanbanRoute,
 } from './routes/queen-kanban'
@@ -213,6 +217,11 @@ export async function createHttpServer(config: HttpServerConfig) {
 
   // The board's DATA, behind the same bearer check as the lease. The page at
   // /queen/kanban is a shell and carries none of this.
+  // The transcript is the bee's own words and its tool calls. Guarded.
+  const queenFeedDataRoutes = new Hono<Env>()
+    .use('/*', requireTrustedAppOrigin())
+    .route('/', createQueenFeedDataRoute())
+
   const queenBoardRoutes = new Hono<Env>()
     .use('/*', requireTrustedAppOrigin())
     .route('/', createQueenBoardRoute())
@@ -309,6 +318,8 @@ export async function createHttpServer(config: HttpServerConfig) {
     .route('/queen/tree', createQueenTreeRoute())
     .route('/queen/kanban', createQueenKanbanRoute())
     .route('/queen/board', queenBoardRoutes)
+    .route('/queen/feed', createQueenFeedRoute())
+    .route('/queen/feed/data', queenFeedDataRoutes)
     .route('/queen/lease', queenLeaseRoutes)
     .route('/queen/rehearsal', queenRehearsalRoutes)
     .use('/shutdown/*', requireTrustedAppOrigin())

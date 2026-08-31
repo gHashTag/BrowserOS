@@ -108,6 +108,36 @@ CREATE TABLE IF NOT EXISTS queen_lease (
 -- spending the anonymous rate limit (60/hour) on every page load. The tick
 -- already fetches this list each round; storing it costs nothing and turns a
 -- transient read into something a dashboard can render.
+-- What the bee actually said, kept so a person can watch.
+--
+-- The turn already streams through /chat and the container was reading those
+-- bytes and throwing them away: drain() destructured only the done flag from
+-- the reader and never touched the value. So there was nothing to click on -
+-- the work happened, and the only trace was a commit at the end.
+--
+-- Coalesced rather than one row per token: a turn emits thousands of text
+-- deltas and a row each would make the table the expensive part of watching.
+--
+-- NO BACKTICKS IN THIS STRING. The warning is already written further down
+-- this same file and I broke it twice in thirty minutes anyway - once quoting
+-- a function name, and once inside the sentence telling myself not to. A
+-- backtick ends the template literal and the SQL after it becomes code. The
+-- rule is now enforced by make ts-template-backticks instead of by memory,
+-- because two violations of a comment by the person who wrote it is the
+-- clearest evidence there is that a comment was the wrong instrument.
+CREATE TABLE IF NOT EXISTS queen_transcript (
+  conversation_id text NOT NULL,
+  seq int NOT NULL,
+  issue int,
+  at timestamptz NOT NULL DEFAULT now(),
+  kind text NOT NULL,
+  text text NOT NULL,
+  PRIMARY KEY (conversation_id, seq)
+);
+
+CREATE INDEX IF NOT EXISTS idx_queen_transcript_issue
+  ON queen_transcript (issue, at DESC);
+
 CREATE TABLE IF NOT EXISTS queen_issues (
   number int PRIMARY KEY,
   title text NOT NULL,

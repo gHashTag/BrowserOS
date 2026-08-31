@@ -369,6 +369,8 @@ const SHELL = `<!doctype html>
     return '<article class="card '+esc(col.key)+'">'+
      '<a class="num" target="_blank" rel="noreferrer" href="https://github.com/'+
        esc(repo)+'/issues/'+c.number+'">#'+c.number+'</a>'+
+     ' <a class="num" style="color:var(--golden)" href="/queen/feed?issue='+
+       c.number+'">watch &#8594;</a>'+
      '<div class="t">'+esc(c.title)+'</div>'+
      (c.worker?'<div class="who">'+esc(c.worker)+'</div>':'')+
      (c.heldBy?'<div class="held">held by '+esc(c.heldBy.join(', '))+'</div>':'')+
