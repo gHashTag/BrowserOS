@@ -119,7 +119,24 @@ make test / make mutants    -> DEAD since the QueenCore module split
                               default 6.3.3; a toolchain disagreement
                               between build.sh and the suite compiler
                               will re-break this gate on the next app
-                              build.
+                              build. Cause sharpened wave 124: nothing
+                              pins a toolchain - the SYSTEM updated
+                              6.0.3 -> 6.3.3 mid-day (documented at
+                              build.sh:397) and the old toolchain is
+                              gone; only a future system update re-arms
+                              the mine. Consumers audited: exactly two
+                              (build.sh:606 producer+app,
+                              clade-e2e:1140 suites). Structural cure,
+                              VALIDATED in a temp dir wave 124: add
+                              `-enable-library-evolution
+                              -emit-module-interface-path
+                              $QUEEN_CORE_DIR/QueenCore.swiftinterface`
+                              to the emit at build.sh:607 - the
+                              .swiftinterface pair emits clean (0
+                              errors) and a consumer typecheck passes;
+                              per Swift module stability a newer
+                              compiler imports the older-built
+                              interface, exactly the failing direction.
 curl -s 127.0.0.1:9105/health
 python3 -c "import json;from collections import Counter;print(Counter(t.get('state') for t in json.load(open('.trinity/state/queen_delegation.json')) if isinstance(t,dict)))"
 ```
