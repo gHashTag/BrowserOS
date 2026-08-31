@@ -12,22 +12,32 @@ Last measured: each figure carries its own date inline (2026-08-27 through
 3261 lines, since commit 6d1d50656; the 2026-08-27 re-classification
 below read the ~/Downloads original - same document, moved not rewritten)
 
-**2 of 29 criteria done** (re-classified 2026-08-27, wave 107, by the
-loop's live evidence; was 0/17/12 on 2026-08-23). The two proven done,
-both Queen/Bees, by live measurement rather than claim:
+**3 of 29 criteria done** (re-classified 2026-09-01, wave 118, against
+the in-repo arch doc's section 23; the 2026-08-27 pass (wave 107) read
+the ~/Downloads original; was 0/17/12 on 2026-08-23). The three proven
+done, all Queen/Bees:
 - "Every Bee task is bound to an issue and owned paths" - live
   delegations with criterion+boundary, waves 081-103;
 - "Queen cannot accept required work without evidence" - the
   acceptance gate proven live AND closed by three independent defense
-  layers (contract cache, terminality, judgement notice), waves 092-093.
+  layers (contract cache, terminality, judgement notice), waves 092-093;
+- "Worker result is structured" (closed 2026-09-01, wave 118) - the
+  bee's turn ends in a "## VERDICT" block the round parses
+  (queen-tick.ts:1329-1333), pinned by 11 parser tests
+  (tests/api/verdict-block.test.ts) incl. last-block-wins and
+  colon-bearing criteria; the long-line loss class was found and fixed
+  in the wild (a8df984af); the Swift side carries QueenBeeResult as a
+  Codable struct (rings/SR-00/QueenBeeResult.swift:40). Verified by
+  direct file read this wave; the test suite was not rerun by this loop
+  (method note below).
 Method note: a desktop re-classification against wave evidence, not a
-per-criterion rerun; the remaining 27 keep their 17-partial/10-not
+per-criterion rerun; the remaining 26 keep their 16-partial/10-not
 standing. No adversarial challenge has yet run against a Playground
 or Language "done" claim - none exists to challenge.
 
 | Section | done | partial | not started | of |
 |---|---:|---:|---:|---:|
-| Queen and bees | 2 | 4 | 0 | 6 |
+| Queen and bees | 3 | 3 | 0 | 6 |
 | Verification | 0 | 4 | 2 | 6 |
 | Release and research | 0 | 4 | 1 | 5 |
 | Language and compiler | 0 | 2 | 4 | 6 |
