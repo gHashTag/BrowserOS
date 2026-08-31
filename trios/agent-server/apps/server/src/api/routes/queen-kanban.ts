@@ -150,15 +150,25 @@ function addLastRoundReasons(
  * boundary, requirements" answer it in the issue's own terms, and both are
  * already computed by the round.
  */
-function criteriaOf(row: Record<string, unknown>): Partial<Card> {
-  const criteria = Array.isArray(row.criteria) ? row.criteria.length : 0
-  const needs = Array.isArray(row.missing)
-    ? row.missing.filter((m): m is string => typeof m === 'string')
-    : []
-  return {
-    criteria,
-    criteriaSource: String(row.criteria_source ?? 'none'),
-    needs: needs.length > 0 ? needs : undefined,
+function addCriteria(
+  cards: Map<number, Card>,
+  issueRows: Array<Record<string, unknown>>,
+): void {
+  // ONE pass over every card, not a spread at each of the three places a card
+  // is created. The first version applied it only where a card is built from an
+  // untaken issue, so 2 of 57 cards carried criteria - and the 16 issues that
+  // DO state them mostly have a registry task, which is a different branch.
+  // Three creation sites and a rule applied at one of them is the same shape as
+  // the two board-record builders that took the round down this morning.
+  for (const row of issueRows) {
+    const card = cards.get(row.number as number)
+    if (!card) continue
+    const needs = Array.isArray(row.missing)
+      ? row.missing.filter((m): m is string => typeof m === 'string')
+      : []
+    card.criteria = Array.isArray(row.criteria) ? row.criteria.length : 0
+    card.criteriaSource = String(row.criteria_source ?? 'none')
+    card.needs = needs.length > 0 ? needs : undefined
   }
 }
 
@@ -205,6 +215,7 @@ async function build(pool: Pool): Promise<Card[]> {
   addRegistryTasks(cards, tasks)
   addInFlight(cards, dispatches.rows, issues.rows)
   addUntakenIssues(cards, issues.rows, tasks)
+  addCriteria(cards, issues.rows)
   addLastRoundReasons(cards, lastTick.rows[0]?.decision)
   return [...cards.values()].sort((a, b) => b.number - a.number)
 }
@@ -320,7 +331,6 @@ function addUntakenIssues(
         column: 'backlog',
         paths: [],
         detail: 'declares no boundary, so nothing can be reserved for it',
-        ...criteriaOf(row),
       })
       continue
     }
@@ -333,7 +343,6 @@ function addUntakenIssues(
       column: heldBy.length > 0 ? 'blocked' : 'backlog',
       paths,
       heldBy: heldBy.length > 0 ? heldBy : undefined,
-      ...criteriaOf(row),
     })
   }
 }
