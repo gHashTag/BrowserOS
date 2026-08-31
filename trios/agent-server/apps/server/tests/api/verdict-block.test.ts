@@ -87,6 +87,41 @@ describe('the bee verdict block', () => {
 
   // A criterion quoted from the issue can carry a colon of its own. The grade
   // is the LAST colon-separated token, so the criterion keeps its punctuation.
+  // THE REAL BLOCK THAT WAS THROWN AWAY, quoted from the #1272 transcript.
+  //
+  // The bee wrote all nine criteria and marked every one met. Read line by
+  // line, the fourth wrapped, did not match, and the loop BROKE - so the review
+  // saw "3 of 9 criteria judged so far", answered wait, and held finished,
+  // correct work. One long line was the whole defect.
+  it('reads a criterion that wrapped onto a second line', () => {
+    const said = [
+      '## VERDICT',
+      '- `grep -c "WHY FOUR, ASKED HONESTLY" Makefile` prints `0`: met',
+      '- `grep -c "It is not lowered to zero today" Makefile` prints `0`: met',
+      '- `grep -c "73/75/77/79" Makefile` prints `0`: met',
+      '- `grep -c "why is',
+      ' it green at this number" Makefile` prints `1`: met',
+      '- `grep -c "WARNING_CEILING := 0" Makefile` prints `1`: met',
+    ].join('\n')
+    const read = parseVerdictBlock(said)
+    expect(read).toHaveLength(5)
+    expect(read.every((v) => v.met)).toBe(true)
+    expect(read[3].criterion).toContain('why is it green at this number')
+  })
+
+  // The rule the wrap-joining must NOT break: prose after a COMPLETE bullet
+  // still ends the block. Otherwise a bee's closing paragraph gets parsed as
+  // criteria and the review judges sentences.
+  it('still stops at prose that follows a finished criterion', () => {
+    const said = [
+      '## VERDICT',
+      '- One: met',
+      'and then some prose about what I did next',
+      '- Two: met',
+    ].join('\n')
+    expect(parseVerdictBlock(said)).toHaveLength(1)
+  })
+
   it('keeps a criterion that contains a colon', () => {
     const said = [
       '## VERDICT',

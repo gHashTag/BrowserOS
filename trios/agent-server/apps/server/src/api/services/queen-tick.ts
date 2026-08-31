@@ -1288,7 +1288,37 @@ export function parseVerdictBlock(
   const at = text.lastIndexOf('## VERDICT')
   if (at < 0) return []
   const out: Array<{ criterion: string; met: boolean }> = []
-  for (const line of text.slice(at).split('\n').slice(1)) {
+  // A WRAPPED CRITERION IS STILL ONE CRITERION.
+  //
+  // Read line by line, a bullet that runs onto a second line did not match, and
+  // the loop then BROKE - so one wrap silently discarded the whole rest of the
+  // block. Measured on #1272: the bee wrote all nine criteria and marked every
+  // one met; the fourth was
+  //
+  //   - `grep -c "why is
+  //    it green at this number" Makefile` prints `1`: met
+  //
+  // and the review counted "3 of 9 criteria judged so far" and answered wait.
+  // Finished, correct work was held because a line was too long.
+  //
+  // Joining first, and only then splitting on bullets, keeps the original rule
+  // intact: a line that follows a COMPLETE bullet still ends the block, because
+  // the bee was told nothing follows it. Only a line continuing an unfinished
+  // bullet is glued on.
+  const joined: string[] = []
+  for (const raw of text.slice(at).split('\n').slice(1)) {
+    const isBullet = /^\s*[-*]\s/.test(raw)
+    const previous = joined[joined.length - 1]
+    const previousIsComplete =
+      previous === undefined ||
+      /:\s*(met|unmet|could-not-check)\s*$/i.test(previous)
+    if (!isBullet && !previousIsComplete && raw.trim() !== '') {
+      joined[joined.length - 1] = `${previous} ${raw.trim()}`
+      continue
+    }
+    joined.push(raw)
+  }
+  for (const line of joined) {
     const m = line.match(/^\s*[-*]\s*(.+?):\s*(met|unmet|could-not-check)\s*$/i)
     if (!m) {
       // A blank line inside the block is fine; anything else ends it, because
