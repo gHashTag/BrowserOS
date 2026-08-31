@@ -195,6 +195,76 @@ async function rememberIssues(
  * case, this must follow it or the board will disagree with the Queen about
  * what an issue claims.
  */
+/// Seconds, no fraction.
+///
+/// Postgres hands back a JS Date and JSON.stringify writes it with
+/// milliseconds - "2026-08-29T16:13:06.821Z". Swift's `.iso8601` decoding
+/// strategy does not accept a fractional second, so `queend` refused the whole
+/// question the moment there was anything in flight to report:
+///
+///   codingPath: ["tasks", "Index 67"]
+///   "Expected date string to be ISO8601-formatted."
+///
+/// Index 67 is the first of MINE, after the registry's own sixty-seven - which
+/// is what made it obvious. The app's tasks encode without the fraction because
+/// Swift wrote them; mine have to match that, not merely be valid ISO 8601.
+const isoSeconds = (value: unknown): string =>
+  new Date(value as string).toISOString().replace(/\.\d{3}Z$/, 'Z')
+
+/**
+ * A running bee as `DelegatedTask`, for the board `queend` is asked to reason
+ * about. EVERY non-optional field of that Swift type, not the ones that seemed
+ * interesting.
+ *
+ * Swift's synthesised Codable refuses the whole document for one missing key,
+ * and `queend` names which - so both defects here were found the honest way,
+ * one refusal at a time:
+ *
+ *   codingPath: ["tasks", "Index 67"]  "Expected date string to be ISO8601"
+ *   codingPath: ["tasks", "Index 70"]  keyNotFound("acceptanceCriteria")
+ *
+ * ONE builder, because there were two, sixty lines apart, and the second was
+ * written by copying the first and dropping the three fields at the bottom. It
+ * decoded fine for weeks: it only ran when a bee was ALREADY running, and until
+ * the concurrency fix that never happened. So the first round that ever started
+ * a second bee was the first round to fail, and the fix and the failure looked
+ * like the same commit.
+ *
+ * `queen-board-record.test.ts` compares these keys against the Swift struct, so
+ * a field added there fails here rather than in a live round.
+ */
+export function boardTask(
+  owner: string,
+  repoName: string,
+  task: {
+    conversationId: string | null
+    issue: number
+    ownedPaths: string[]
+    branch: string | null
+    at: string
+    title: string
+  },
+) {
+  return {
+    id: task.conversationId ?? ZERO_UUID,
+    conversationId: task.conversationId ?? ZERO_UUID,
+    issue: { owner, repo: repoName, number: task.issue },
+    title: task.title,
+    worker: 'cloud-tick',
+    state: 'running',
+    ownedPaths: task.ownedPaths,
+    virtualBranch: task.branch,
+    createdAt: isoSeconds(task.at),
+    updatedAt: isoSeconds(task.at),
+    // Empty, and empty is the truthful value: the cloud tick does not yet read
+    // acceptance criteria out of the issue, so claiming any here would be
+    // inventing a contract the bee was never given.
+    acceptanceCriteria: [] as string[],
+    interventions: [] as string[],
+    criterionVerdicts: {} as Record<string, unknown>,
+  }
+}
+
 function boundaryPathsOf(body: string): string[] {
   const lines = body.split('\n')
   let inside = false
@@ -447,40 +517,16 @@ async function runRound(
   // is what made it obvious. The app's tasks encode without the fraction
   // because Swift wrote them; mine have to match that, not merely be valid
   // ISO 8601.
-  const isoSeconds = (value: unknown): string =>
-    new Date(value as string).toISOString().replace(/\.\d{3}Z$/, 'Z')
-  // EVERY non-optional field of DelegatedTask, not the ones that seemed
-  // interesting.
-  //
-  // Swift's synthesised Codable refuses the whole document for one missing
-  // key, and `queend` reports which - so this was found the honest way, one
-  // refusal at a time, until the list was read properly:
-  //
-  //   codingPath: ["tasks", "Index 67"]  "Expected date string to be ISO8601"
-  //   keyNotFound("acceptanceCriteria")
-  //
-  // Index 67 is the first of MINE, after the registry's own sixty-seven. The
-  // lesson is not "add acceptanceCriteria": it is that a hand-built record
-  // standing in for a real type must be built from the type's field list, not
-  // from what the author remembers of it.
-  const containerTasks = inFlight.rows.map((row) => ({
-    id: row.conversation_id ?? ZERO_UUID,
-    conversationId: row.conversation_id ?? ZERO_UUID,
-    issue: { owner, repo: repoName, number: row.issue },
-    title: 'dispatched by the cloud tick',
-    worker: 'cloud-tick',
-    state: 'running',
-    ownedPaths: row.owned_paths ?? [],
-    virtualBranch: row.branch,
-    createdAt: isoSeconds(row.dispatched_at),
-    updatedAt: isoSeconds(row.dispatched_at),
-    // Empty, and empty is the truthful value: the cloud tick does not yet read
-    // acceptance criteria out of the issue, so claiming any here would be
-    // inventing a contract the bee was never given.
-    acceptanceCriteria: [],
-    interventions: [],
-    criterionVerdicts: {},
-  }))
+  const containerTasks = inFlight.rows.map((row) =>
+    boardTask(owner, repoName, {
+      conversationId: row.conversation_id,
+      issue: row.issue,
+      ownedPaths: row.owned_paths ?? [],
+      branch: row.branch,
+      at: row.dispatched_at,
+      title: 'dispatched by the cloud tick',
+    }),
+  )
 
   const choice = await askQueend({
     kind: 'choose',
@@ -544,18 +590,14 @@ async function runRound(
     // mark its key as taken so the next bee gets a different one.
     board = [
       ...board,
-      {
-        id: dispatch.conversationId ?? ZERO_UUID,
-        conversationId: dispatch.conversationId ?? ZERO_UUID,
-        issue: { owner, repo: repoName, number: issue },
-        title: 'just dispatched by this round',
-        worker: 'cloud-tick',
-        state: 'running',
+      boardTask(owner, repoName, {
+        conversationId: dispatch.conversationId ?? null,
+        issue,
         ownedPaths: paths,
-        virtualBranch: dispatch.branch,
-        createdAt: isoSeconds(new Date().toISOString()),
-        updatedAt: isoSeconds(new Date().toISOString()),
-      },
+        branch: dispatch.branch,
+        at: new Date().toISOString(),
+        title: 'just dispatched by this round',
+      }),
     ]
     if (typeof dispatch.keyIndex === 'number') {
       takenKeys = [...takenKeys, dispatch.keyIndex]
