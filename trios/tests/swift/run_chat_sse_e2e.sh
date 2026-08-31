@@ -128,6 +128,53 @@ if [ -z "$SQLCIPHER_INCLUDE" ] || [ -z "$SQLCIPHER_LIB" ] || [ ! -d "$SQLCIPHER_
     exit 1
 fi
 
+# --- QueenCore: the Queen's policy is its own module (since 12b97dedc) ------
+# build.sh compiles these fifteen first and passes -I plus the static lib.
+# This suite used to compile all of rings as ONE module, which stopped
+# working the moment six rings files began `import QueenCore` - the suite
+# died at compile and every registry mutant became unscorable. Same cure as
+# build.sh: emit the module fresh (so its toolchain always matches the suite
+# compiler below, never a stale artifact), then filter the fifteen out of the
+# main compile - swiftc refuses a symbol defined twice.
+QUEEN_CORE_DIR="$PROJECT_DIR/.trinity/build/QueenCore"
+QUEEN_CORE_FILES=(
+    "$PROJECT_DIR/rings/SR-00/QueenBeeResult.swift"
+    "$PROJECT_DIR/rings/SR-00/QueenBoundaryPaths.swift"
+    "$PROJECT_DIR/rings/SR-00/QueenEpics.swift"
+    "$PROJECT_DIR/rings/SR-00/QueenEvidencePolicy.swift"
+    "$PROJECT_DIR/rings/SR-00/QueenLanguagePolicy.swift"
+    "$PROJECT_DIR/rings/SR-00/QueenLocalisation.swift"
+    "$PROJECT_DIR/rings/SR-00/QueenMergeGate.swift"
+    "$PROJECT_DIR/rings/SR-00/QueenMissionContract.swift"
+    "$PROJECT_DIR/rings/SR-00/QueenRetryPolicy.swift"
+    "$PROJECT_DIR/rings/SR-00/QueenReviewDecision.swift"
+    "$PROJECT_DIR/rings/SR-00/QueenSkillMatch.swift"
+)
+mkdir -p "$QUEEN_CORE_DIR"
+if ! swiftc -parse-as-library -emit-module -emit-library -static \
+    -module-name QueenCore \
+    -emit-module-path "$QUEEN_CORE_DIR/QueenCore.swiftmodule" \
+    -o "$QUEEN_CORE_DIR/libQueenCore.a" \
+    "${QUEEN_CORE_FILES[@]}" 2>"$QUEEN_CORE_DIR/err"; then
+    echo "[FAIL] QueenCore no longer compiles on its own (see $QUEEN_CORE_DIR/err):"
+    sed -n "1,4p" "$QUEEN_CORE_DIR/err" | sed "s/^/       /"
+    exit 1
+fi
+FILTERED_PROD_FILES=()
+for candidate in "${PROD_FILES[@]}"; do
+    skip=""
+    for core in "${QUEEN_CORE_FILES[@]}"; do
+        [ "$candidate" = "$core" ] && { skip=1; break; }
+    done
+    [ -n "$skip" ] || FILTERED_PROD_FILES+=("$candidate")
+done
+if [ "${#FILTERED_PROD_FILES[@]}" -eq "${#PROD_FILES[@]}" ]; then
+    echo "[FAIL] QueenCore removed no file from the main compile - its fifteen"
+    echo "       paths no longer match the rings glob; the two lists moved apart."
+    exit 1
+fi
+PROD_FILES=("${FILTERED_PROD_FILES[@]}")
+
 # Object stems are the repo-relative path with "/" turned into "_", not the
 # basename: two files named the same in different rings would otherwise share
 # one .o and one of them would silently vanish from the binary. Assert it.
@@ -173,6 +220,7 @@ fi
 echo "Compiling ${#PROD_FILES[@]} Swift files with SQLCipher..."
 
 swiftc "${SWIFTC_INCREMENTAL_FLAGS[@]}" -j 1 -disable-batch-mode "$SWIFT_TEST_OPTIMIZATION" -o "$OUTPUT" \
+    -I "$QUEEN_CORE_DIR" "$QUEEN_CORE_DIR/libQueenCore.a" \
     -framework SwiftUI \
     -framework AppKit \
     -framework WebKit \

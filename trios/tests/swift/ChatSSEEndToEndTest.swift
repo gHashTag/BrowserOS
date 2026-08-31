@@ -7,6 +7,7 @@
 
 import Foundation
 import SwiftUI
+import QueenCore
 
 /// A transport that replays a fixed sequence of SSE events on every call and
 /// counts how many times `sendMessage` was invoked. Used to feed the reviewer
