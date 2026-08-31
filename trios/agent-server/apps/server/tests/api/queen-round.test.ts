@@ -104,11 +104,21 @@ const saved: Record<string, string | undefined> = {}
 const realFetch = globalThis.fetch
 
 beforeEach(() => {
-  for (const key of [...PROVIDER_KEYS, 'TRIOS_QUEEND_PATH', 'WORKSPACE_DIR']) {
+  for (const key of [
+    ...PROVIDER_KEYS,
+    'TRIOS_QUEEND_PATH',
+    'WORKSPACE_DIR',
+    'TRIOS_GITHUB_REPO',
+  ]) {
     saved[key] = process.env[key]
     delete process.env[key]
   }
   process.env.TRIOS_QUEEND_PATH = BIN
+  // Named, because the round no longer guesses. It used to fall back to
+  // `gHashTag/BrowserOS` - the monorepo this checkout happens to be, not the
+  // issue tracker - and a supervisor that guesses which repository it serves
+  // can dispatch bees at a stranger's issues.
+  process.env.TRIOS_GITHUB_REPO = 'gHashTag/trios'
   // A workspace that is not there: `committedFiles` runs git in it, fails, and
   // returns nothing - which is what this suite wants to be true every time.
   process.env.WORKSPACE_DIR = join(tmpdir(), 'queen-round-no-such-workspace')
@@ -395,5 +405,48 @@ describe('the brief promises only what the system does', () => {
     ])
     expect(prompt).not.toContain('dropped rather than reviewed')
     expect(prompt).toContain('not discarded')
+  })
+})
+
+/**
+ * A supervisor that guesses which repository it serves can dispatch bees at a
+ * stranger's issues.
+ *
+ * The round used to fall back to `gHashTag/BrowserOS` when TRIOS_GITHUB_REPO
+ * was unset - and that is the CHECKOUT, the monorepo this tree happens to be,
+ * not the issue tracker. The mistake has already been made by a reader: two
+ * rounds reported "0 open issues, confirmed twice" while both counts were taken
+ * against BrowserOS and trios had forty.
+ *
+ * Unset is a configuration error. It must stop the round rather than pick a
+ * repository, because reading the wrong one looks exactly like working.
+ */
+describe('queen round, repository named', () => {
+  it('refuses to run rather than guess a repository', async () => {
+    const before = process.env.TRIOS_GITHUB_REPO
+    delete process.env.TRIOS_GITHUB_REPO
+    try {
+      const { pool } = roundPool()
+      await expect(
+        runRound(pool, 'me', 7, { held: true }, [ISSUE]),
+      ).rejects.toThrow(/TRIOS_GITHUB_REPO is not set/)
+    } finally {
+      if (before === undefined) delete process.env.TRIOS_GITHUB_REPO
+      else process.env.TRIOS_GITHUB_REPO = before
+    }
+  })
+
+  it('names BrowserOS in the refusal, so the old default is recognisable', async () => {
+    const before = process.env.TRIOS_GITHUB_REPO
+    delete process.env.TRIOS_GITHUB_REPO
+    try {
+      const { pool } = roundPool()
+      await expect(
+        runRound(pool, 'me', 7, { held: true }, [ISSUE]),
+      ).rejects.toThrow(/gHashTag\/BrowserOS/)
+    } finally {
+      if (before === undefined) delete process.env.TRIOS_GITHUB_REPO
+      else process.env.TRIOS_GITHUB_REPO = before
+    }
   })
 })

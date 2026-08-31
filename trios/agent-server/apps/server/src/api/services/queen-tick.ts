@@ -700,7 +700,23 @@ export async function runRound(
     return { ran: true, reason: 'no registry mirror' }
   }
 
-  const repo = process.env.TRIOS_GITHUB_REPO || 'gHashTag/BrowserOS'
+  // NO FALLBACK. A supervisor that guesses which repository it serves is a
+  // supervisor that can dispatch bees at a stranger's issues, and the guess it
+  // used to make was `gHashTag/BrowserOS` - the monorepo this checkout happens
+  // to be, which is NOT where the issues live. That mistake has already been
+  // made by a reader: two rounds of "0 open issues, confirmed twice" were both
+  // counted against BrowserOS while trios had forty.
+  //
+  // Unset is a configuration error and must stop the round, loudly. Reading the
+  // wrong repository looks like working.
+  const repo = process.env.TRIOS_GITHUB_REPO
+  if (!repo) {
+    throw new Error(
+      'TRIOS_GITHUB_REPO is not set. The round refuses to guess which ' +
+        'repository it supervises: the old default was gHashTag/BrowserOS, ' +
+        'which is the checkout, not the issue tracker.',
+    )
+  }
   // An override still goes through `queend`. The point of a diagnostic round is
   // to exercise the real decision on chosen inputs, not to bypass it - a probe
   // that skipped the policy would prove the probe.
