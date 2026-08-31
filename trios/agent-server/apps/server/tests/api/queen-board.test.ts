@@ -407,7 +407,15 @@ describe('a cloud dispatch can reach a verdict', () => {
     // query contains the clause too - so it stayed green with the clause
     // deleted from the query. A test that passes both ways proves nothing.
     const board = dispatchWindows(readFileSync(KANBAN, 'utf8'))
-    expect(board).toEqual(['7 days'])
+    // Two windows, and they are different on purpose. The LISTING - the query
+    // that decides which dispatches become cards - must match the round's 7
+    // days, or the board shows work the Queen has already forgotten. The
+    // 24-hour window belongs to the pulse counters at the top of the page,
+    // which answer "what did she do today" and would be meaningless over a
+    // week. An unbounded query is what this test is really watching for.
+    expect(board).toContain('7 days')
+    expect(board).not.toContain('unbounded')
+    expect(new Set(board)).toEqual(new Set(['7 days', '24 hours']))
     expect(dispatchWindows(readFileSync(TICK, 'utf8'))).toContain('7 days')
   })
 })

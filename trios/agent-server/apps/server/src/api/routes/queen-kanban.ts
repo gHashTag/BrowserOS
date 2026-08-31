@@ -331,9 +331,9 @@ export interface BoardInput {
   now?: number
 }
 
-async function build(pool: Pool): Promise<Card[]> {
+async function build(pool: Pool): Promise<{ cards: Card[]; pulse: Pulse }> {
   const variant = process.env.TRIOS_VARIANT || 'prod'
-  const [registry, dispatches, issues, lastTick] = await Promise.all([
+  const [registry, dispatches, issues, lastTick, day] = await Promise.all([
     pool.query('SELECT tasks FROM queen_registry WHERE variant = $1', [
       variant,
     ]),
@@ -362,16 +362,106 @@ async function build(pool: Pool): Promise<Card[]> {
     // are different problems with different fixes, and a person looking at this
     // page has no other way to tell them apart.
     pool.query(
-      `SELECT decision FROM queen_tick ORDER BY decided_at DESC LIMIT 1`,
+      `SELECT decision, decided_at FROM queen_tick ORDER BY decided_at DESC LIMIT 1`,
+    ),
+    // The last day, in five numbers. A board that shows only the present cannot
+    // answer "is she working at all" - the honest answer to which is a count of
+    // rounds, not a spinner.
+    pool.query(
+      `SELECT
+         (SELECT count(*) FROM queen_tick
+           WHERE decided_at > now() - interval '24 hours') AS rounds,
+         (SELECT count(*) FROM queen_dispatch
+           WHERE started AND dispatched_at > now() - interval '24 hours') AS bees,
+         (SELECT count(*) FROM queen_dispatch
+           WHERE reviewed_at > now() - interval '24 hours') AS verdicts,
+         (SELECT coalesce(sum(input_tokens), 0) FROM queen_dispatch
+           WHERE dispatched_at > now() - interval '24 hours') AS input_tokens,
+         (SELECT coalesce(sum(output_tokens), 0) FROM queen_dispatch
+           WHERE dispatched_at > now() - interval '24 hours') AS output_tokens`,
     ),
   ])
 
-  return composeCards({
-    tasks: registry.rowCount ? (registry.rows[0].tasks as RegistryTask[]) : [],
-    dispatches: dispatches.rows,
-    issues: issues.rows,
-    decision: lastTick.rows[0]?.decision,
-  })
+  const counts = day.rows[0] ?? {}
+  return {
+    cards: composeCards({
+      tasks: registry.rowCount
+        ? (registry.rows[0].tasks as RegistryTask[])
+        : [],
+      dispatches: dispatches.rows,
+      issues: issues.rows,
+      decision: lastTick.rows[0]?.decision,
+    }),
+    pulse: {
+      rounds: Number(counts.rounds ?? 0),
+      bees: Number(counts.bees ?? 0),
+      verdicts: Number(counts.verdicts ?? 0),
+      inputTokens: Number(counts.input_tokens ?? 0),
+      outputTokens: Number(counts.output_tokens ?? 0),
+      lastRoundAt: lastTick.rows[0]?.decided_at
+        ? new Date(lastTick.rows[0].decided_at).toISOString()
+        : null,
+      lastRefusal:
+        (lastTick.rows[0]?.decision as { refusal?: string } | undefined)
+          ?.refusal ?? null,
+      roundSeconds: Number(process.env.TRIOS_QUEEN_TICK_SECONDS ?? '0') || null,
+      workerKeys: providerKeyCount(),
+      workerLimit: 4,
+    },
+  }
+}
+
+/**
+ * The swarm's last day, and the one number that caps it.
+ *
+ * WHY A KEY COUNT IS ON A BOARD. The operator's question, asked in those
+ * words, was "what is she doing - I do not understand". The board could show
+ * that nothing was running and could not show WHY, and the why is usually not
+ * on the board at all: with one provider key the swarm's ceiling is one bee,
+ * whatever the policy's limit of four says. A page that shows 0 of 4 and does
+ * not mention the key is inviting the reader to look for a bug that is not
+ * there.
+ */
+export interface Pulse {
+  rounds: number
+  bees: number
+  verdicts: number
+  inputTokens: number
+  outputTokens: number
+  lastRoundAt: string | null
+  /** The Queen's own sentence for why the last round started nobody. */
+  lastRefusal: string | null
+  roundSeconds: number | null
+  workerKeys: number
+  workerLimit: number
+}
+
+/**
+ * How many provider keys this deployment holds. The COUNT, never a value.
+ *
+ * An empty string is not a key. A platform variable saved with an empty box
+ * leaves the name behind, and counting the name would report a swarm that can
+ * run four bees while three of them have nothing to authenticate with - the
+ * same trap this repository's config file has been sitting in for months.
+ */
+export function providerKeyCount(
+  env: Record<string, string | undefined> = process.env,
+): number {
+  const names = [
+    'ZAI_API_KEY',
+    'ANTHROPIC_API_KEY',
+    'OPENROUTER_API_KEY',
+    'MOONSHOT_API_KEY',
+    'OPENAI_API_KEY',
+  ]
+  let found = 0
+  for (const name of names) {
+    if ((env[name] ?? '').length > 0) found++
+    for (let i = 2; i <= 16; i++) {
+      if ((env[name + '_' + i] ?? '').length > 0) found++
+    }
+  }
+  return found
 }
 
 /**
@@ -608,6 +698,18 @@ const SHELL = `<!doctype html>
  .card.running{border-left-color:var(--accent)}
  .card.review{border-left-color:var(--golden)}
  .card.blocked{border-left-color:var(--red)}
+ .verdict{margin:var(--sp1) 0 var(--sp0);padding:var(--sp1) var(--sp1);
+   border:1px solid var(--border);border-left:4px solid var(--accent);
+   background:var(--panel);border-radius:8px}
+ .verdict h2{font-size:clamp(1.5rem,3.4vw,2.6rem);line-height:1.12;margin:0;
+   letter-spacing:-.02em;font-weight:700}
+ .verdict.idle{border-left-color:var(--red)}
+ .verdict p{margin:.5rem 0 0;color:var(--muted);font-size:var(--f-1);
+   line-height:1.5;max-width:74ch}
+ .verdict code{color:var(--golden);font-family:var(--mono)}
+ .pulse{display:flex;gap:var(--sp1);flex-wrap:wrap;margin:var(--sp0) 0;
+   color:var(--muted);font-size:var(--f-2);font-family:var(--mono)}
+ .pulse b{color:var(--fg);font-weight:600}
  .card.done{border-left-color:#2a6}
  .card.dropped{border-left-color:#333}
  .num{font-family:var(--mono);font-size:var(--f-2);color:var(--accent);text-decoration:none}
@@ -652,8 +754,10 @@ const SHELL = `<!doctype html>
       refresh the board's top was measured 4135px down the document after five
       refreshes, about two and a half minutes. A drawing function that appends
       is a leak with a timer on it. -->
+ <div class="verdict" id="verdict" hidden></div>
  <div class="flow" id="flow" hidden></div>
  <div class="explain" id="explain"></div>
+ <div class="pulse" id="pulse" hidden></div>
  <div class="empty-board" id="empty-board" hidden></div>
  <div class="board" id="board"></div>
  <footer>
@@ -699,6 +803,62 @@ const SHELL = `<!doctype html>
    '<div class="stat'+((by.blocked||0)>0?' bad':'')+'"><b>'+(by.blocked||0)+'</b>'+
      '<span class="lbl">blocked</span>'+
      '<div class="why">their files are held by something in review</div></div>'
+  // THE SENTENCE THE PAGE EXISTS FOR.
+  //
+  // The operator's words: "what is she doing - I do not understand". The board
+  // showed five counters and a legend, and a reader could see that nothing was
+  // running without learning WHY - which is usually not a fact about the board
+  // at all. With one provider key the ceiling is one bee whatever the policy's
+  // four says, so a page reading 0 of 4 invites a hunt for a bug that is not
+  // there. The Queen already writes her own reason down every round; this puts
+  // it at the top in the largest type on the page.
+  var p=d.pulse||{}
+  var v=$('verdict')
+  var run=by.running||0
+  var keys=p.workerKeys||0
+  var ceiling=Math.min(keys||0, p.workerLimit||4)
+  var head, why
+  if(run>0){
+   head=run===1?'One bee is working right now.':run+' bees are working right now.'
+   why='Each has its own checkout and its own branch. Click <b>watch</b> on a '+
+    'card to read what it is saying, as it says it.'
+  } else if(free>0){
+   head='Nothing is running, and '+free+' issue'+(free===1?' is':'s are')+' ready.'
+   why='She wakes on a timer rather than on demand, so this is the gap between '+
+    'rounds. Her last round said: <code>'+esc(p.lastRefusal||'nothing to choose')+'</code>'
+  } else {
+   head='Nothing is running, and there is nothing she may start.'
+   why='Her own reason, from the last round: <code>'+
+    esc(p.lastRefusal||'nothing to choose')+'</code>. '+
+    (noBoundary>0?noBoundary+' issues name no files, so nothing can be reserved '+
+      'for them and no bee can be sent at one. ':'')+
+    ((by.review||0)>0?(by.review)+' finished and hold their files until judged. ':'')
+  }
+  v.className='verdict'+(run>0?'':' idle')
+  v.innerHTML='<h2>'+esc(head)+'</h2><p>'+why+'</p>'+
+   '<p>Capacity: <b>'+run+' of '+ceiling+'</b> workers busy. '+
+   (keys===0
+     ? 'This deployment holds <b>no provider key</b>, so no bee can start at all.'
+     : keys<(p.workerLimit||4)
+       ? 'The policy allows '+(p.workerLimit||4)+', and this deployment holds <b>'+
+         keys+' provider key'+(keys===1?'':'s')+'</b> - one bee per key, so '+
+         keys+' is the real ceiling.'
+       : 'Keys are not the limit here.')+'</p>'
+  v.hidden=false
+
+  // What she actually did, over a day. A board that shows only the present
+  // cannot answer "is she working at all"; the honest answer is a count of
+  // rounds, not a spinner.
+  var pu=$('pulse')
+  var mins=p.roundSeconds?Math.round(p.roundSeconds/60):null
+  pu.innerHTML='<span><b>'+(p.rounds||0)+'</b> rounds in 24h</span>'+
+   '<span><b>'+(p.bees||0)+'</b> bees started</span>'+
+   '<span><b>'+(p.verdicts||0)+'</b> verdicts given</span>'+
+   '<span><b>'+(((p.inputTokens||0)+(p.outputTokens||0))/1000).toFixed(1)+
+     'k</b> tokens</span>'+
+   (mins?'<span>wakes every <b>'+mins+' min</b></span>':'')
+  pu.hidden=false
+
   // Assigned into a node the shell already owns, never inserted. Same rule as
   // #explain above, for the reason written next to those nodes in the markup.
   var flow=$('flow')
@@ -788,7 +948,13 @@ export function createQueenBoardRoute() {
     const repo = process.env.TRIOS_GITHUB_REPO || 'gHashTag/trios'
     const pool = new Pool({ connectionString: url })
     try {
-      return c.json({ repo, columns: COLUMNS, cards: await build(pool) })
+      const built = await build(pool)
+      return c.json({
+        repo,
+        columns: COLUMNS,
+        cards: built.cards,
+        pulse: built.pulse,
+      })
     } finally {
       await pool.end()
     }
