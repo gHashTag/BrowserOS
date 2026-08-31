@@ -172,6 +172,7 @@ const SHELL = `<!doctype html>
  <div class="auth" id="auth">
   <input type="password" id="token" placeholder="deployment token" size="30" autocomplete="off" />
   <button id="go">connect</button>
+  <label style="color:var(--muted);font-size:var(--f-2);display:flex;gap:.3rem;align-items:center;cursor:pointer"><input type="checkbox" id="remember" style="width:auto;margin:0" checked />remember on this device</label>
   <span style="color:var(--muted);font-size:var(--f-2)">stays in this tab &#8212; never in the URL</span>
  </div>
  <div class="err" id="err"></div>
@@ -186,7 +187,11 @@ const SHELL = `<!doctype html>
 (function(){
  var $=function(i){return document.getElementById(i)}
  var KEY='trios.queen.token'
- var token=sessionStorage.getItem(KEY)||''
+  // localStorage when the operator ticked the box, sessionStorage otherwise.
+  // BOTH are read, so a token stored either way is found and ticking the box
+  // on one page carries to the other two without a second paste. That second
+  // paste per tab was the whole friction.
+ var token=localStorage.getItem(KEY)||sessionStorage.getItem(KEY)||''
  var q=new URLSearchParams(location.search)
  var issue=q.get('issue')||''
  var conv=q.get('conversation')||''
@@ -258,13 +263,15 @@ const SHELL = `<!doctype html>
      }})
    .catch(function(e){
      $('err').textContent=e.message; $('auth').hidden=false
-     sessionStorage.removeItem(KEY); token=''
+     sessionStorage.removeItem(KEY); localStorage.removeItem(KEY); token=''
      if(timer){clearInterval(timer); timer=null}})
  }
  function start(){ load(); if(!timer) timer=setInterval(load, 2000) }
  $('go').addEventListener('click',function(){
   token=$('token').value.trim(); if(!token) return
-  sessionStorage.setItem(KEY,token); start()})
+  var keep=$('remember')&&$('remember').checked
+  ;(keep?localStorage:sessionStorage).setItem(KEY,token)
+  ;(keep?sessionStorage:localStorage).removeItem(KEY); start()})
  $('token').addEventListener('keydown',function(e){if(e.key==='Enter')$('go').click()})
  if(token){$('auth').hidden=true; start()}
 })()
