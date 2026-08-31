@@ -92,7 +92,41 @@ struct QueenDashboardView: View {
                 .font(TriosType.font(11, weight: .semibold))
                 .foregroundColor(waiting.isEmpty ? .clear : .yellow)
             Spacer()
+            cloudDashboardLink
             autonomyToggle
+        }
+    }
+
+    /// The way to the swarm that is NOT on this machine.
+    ///
+    /// This strip reads the local registry, which is the whole board only while
+    /// the Queen is the only supervisor. She is not: a tick runs in the
+    /// container, takes its own lease, cuts its own worktrees and dispatches its
+    /// own bees, and none of that appears in a file on this Mac. An operator
+    /// looking here at a quiet strip would conclude the hive is idle while four
+    /// bees are working in the cloud.
+    ///
+    /// A link rather than a mirror, deliberately. Reproducing cloud state in
+    /// this view means a second model of the same board, free to disagree with
+    /// the first - the defect this whole line of work keeps repairing. The
+    /// dashboard the container serves is the one place that state is authored.
+    ///
+    /// Hidden when no cloud supervisor is configured, because then there is
+    /// nothing on the other end of it.
+    @ViewBuilder
+    private var cloudDashboardLink: some View {
+        if let base = QueenLease.endpoint, let url = URL(string: "\(base)/queen/dashboard") {
+            Link(destination: url) {
+                HStack(spacing: 4) {
+                    Image(systemName: "cloud")
+                    Text("CLOUD")
+                        .tracking(1.1)
+                }
+                .font(TriosType.font(11, weight: .semibold))
+                .foregroundColor(.grokMuted)
+            }
+            .buttonStyle(.plain)
+            .help("The swarm running in the container - lease, last round, dispatches")
         }
     }
 
