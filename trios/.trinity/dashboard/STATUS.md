@@ -111,6 +111,15 @@ make test / make mutants    -> DEAD since the QueenCore module split
                               (mutants-logic) is module-aware and uses
                               .trinity/build/QueenCore
                               (rings/RUST-02/clade-e2e/src/main.rs:1140).
+                              mutants-logic measured GREEN wave 122
+                              (2 of 2 caught) after refreshing the stale
+                              .trinity/build/QueenCore module - it was
+                              built by Swift 6.0.3 (build.sh run, Aug 31)
+                              while the logic suites compile with the
+                              default 6.3.3; a toolchain disagreement
+                              between build.sh and the suite compiler
+                              will re-break this gate on the next app
+                              build.
 curl -s 127.0.0.1:9105/health
 python3 -c "import json;from collections import Counter;print(Counter(t.get('state') for t in json.load(open('.trinity/state/queen_delegation.json')) if isinstance(t,dict)))"
 ```
