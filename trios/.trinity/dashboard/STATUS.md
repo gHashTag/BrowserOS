@@ -101,13 +101,16 @@ user's app is rebuilt and a verdict is sealed there.
 Mesh ring, the seven specs repaired today: 91 functions declared, 91 emitted,
 0 stubs, artifacts byte-identical to a fresh `gen-rust`.
 
-Corpus-wide (re-measured live 2026-08-27, wave 106): 22 of 68 mesh
-artifacts are byte-identical to a fresh `gen-rust` (was 12 of 68 at the
-board's founding); 46 differ, so most committed artifacts are still stale
-relative to their spec - the regeneration decision is owner-gated.
+Corpus-wide (re-measured live 2026-09-01, wave 117): 29 of 68 mesh
+artifacts are byte-identical to a fresh `gen-rust` (was 22 of 68 on
+2026-08-27, 12 of 68 at the board's founding - the neighbour's weekend
+submodule repairs moved it +7); 39 differ, so most committed artifacts are
+still stale relative to their spec - the regeneration decision is
+owner-gated.
 
 **59 of 70 generated Rust files compile; 11 do not** (re-measured live
-2026-08-28 with a full `--crate-type lib` build. `--emit=metadata`, which the
+2026-09-01, wave 117 - count and spec list identical to the 2026-08-28
+measure, EXIT=0; full `--crate-type lib` build. `--emit=metadata`, which the
 gate used until today, does not run the MIR const-prop lint and hides every
 `arithmetic_overflow`: olsr_routing reports 13 errors under metadata and 26
 under a full build. It happens not to change WHICH specs fail today, because
