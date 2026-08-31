@@ -5462,47 +5462,102 @@ final class ChatViewModel: ObservableObject {
     }
 
     /// Idempotent — `providerKeyWarmupStarted` ensures only one background
-    /// task ever runs. Called from the bootstrap at launch (after the keychain
-    /// gate lowers) and from the dispatch precheck (when it refuses because
-    /// the key is empty), so a refusal brings the next success closer.
+    /// task ever runs. Called from the bootstrap at launch (while the keychain
+    /// gate may still be up) and from the dispatch precheck (when it refuses
+    /// because the key is empty), so a refusal brings the next success closer.
+    /// The warm-up never spends an attempt against a closed door: it first
+    /// waits out the keychain launch gate, then spaces its attempts far
+    /// enough apart that any 60-second stall cooldown has expired (#1240).
     /// Logs only whether the warm-up succeeded, never the key itself.
     private func warmupProviderKey() {
         guard !providerKeyWarmupStarted else { return }
         providerKeyWarmupStarted = true
 
         let maxAttempts = 10
-        // #1240: 65 s — longer than the 60-second global cooldown in
-        // KeychainSecrets.  When a read times out, the cooldown refuses every
-        // subsequent read for 60 s; at 500 ms spacing all ten attempts were
-        // swallowed at once.  65 s guarantees the refusal has expired before
-        // the next attempt.
+        // #1240: 65 s — longer than the 60-second cooldown KeychainSecrets
+        // arms after a read or listing exceeds its deadline.  When a read
+        // times out, that cooldown refuses every later read of the same item
+        // for 60 s; at 500 ms spacing all ten attempts were swallowed inside
+        // the first cooldown window.  65 s guarantees the refusal has expired
+        // before the next attempt.
         let retryDelayNanos: UInt64 = 65_000_000_000  // 65s
+        // #1240: The gate wait is bounded by how long the gate can
+        // LEGITIMATELY stay up, not by a guess at when reads would like it
+        // down.  `clearLaunchGate()` holds the gate until the owned-item warm
+        // pass finishes — measured 35.3 s, hard ceiling
+        // `KeychainSecrets.warmupGateCeiling` — and main.swift waits 5 s
+        // before even calling it.  A 10-second poll here gave up while the
+        // gate was still legitimately raised and burned attempts 1 and 2
+        // against it; the bound below covers the delay, the ceiling, and
+        // poll slack, so the first attempt fires only once the gate can no
+        // longer be up for a reason that is not a defect.
+        let gatePollNanos: UInt64 = 200_000_000  // 200ms
+        let gateWaitSeconds = KeychainSecrets.warmupGateCeiling + 10
         let provider = modelStore.selectedProvider
 
         Task { [weak self, modelStore] in
             guard let self else { return }
 
             // Wait for the keychain launch gate to lower before the first
-            // read. From the bootstrap the gate may still be up; from the
-            // precheck it is already down — either way the poll is short.
-            // #1240: While the gate is up every keychain operation — including
-            // the entry listing that resolvedAPIKey relies on — returns empty,
-            // so retries before the gate lowers are wasted.  Log the wait so
-            // it is visible in the journal.
-            if KeychainSecrets.isLaunching {
+            // attempt.  resolvedAPIKey first lists the stored entries
+            // (ModelCredentialStore.list → KeychainSecrets.readAllAttributes),
+            // and while the gate is up that listing — and therefore the key
+            // read two steps behind it — returns empty without ever touching
+            // the Keychain.  An attempt fired against the raised gate is
+            // spent for nothing, so none are: the wait ends when the gate
+            // lowers or when the gate has outlived its own ceiling.
+            // From the precheck the gate is already down and the poll ends
+            // on its first iteration; from the bootstrap it can legitimately
+            // hold for the whole item warm-up.
+            let gateWasUpAtStart = KeychainSecrets.isLaunching
+            if gateWasUpAtStart {
                 TriosLogBus.shared.info(
                     .queen,
                     "queen.key.warmup",
                     "Provider key warm-up waiting for the keychain launch gate "
-                        + "to lower before first attempt — key reads return "
-                        + "empty while the gate is up (#1240).",
+                        + "to lower before first attempt (up to "
+                        + "\(Int(gateWaitSeconds)) s — the gate holds through "
+                        + "the keychain item warm-up); the entry listing "
+                        + "resolvedAPIKey needs returns empty while the gate "
+                        + "is up, so attempts against it are wasted (#1240).",
                     ["provider": provider.rawValue]
                 )
             }
-            let gateDeadline = Date().addingTimeInterval(10)
+            let gateWaitStarted = Date()
+            let gateDeadline = gateWaitStarted.addingTimeInterval(gateWaitSeconds)
             while KeychainSecrets.isLaunching, Date() < gateDeadline {
-                try? await Task.sleep(nanoseconds: 200_000_000)
+                try? await Task.sleep(nanoseconds: gatePollNanos)
             }
+            if gateWasUpAtStart {
+                let waited = Date().timeIntervalSince(gateWaitStarted)
+                if KeychainSecrets.isLaunching {
+                    // The gate outlived its own ceiling — a latch, not a slow
+                    // warm-up.  Say so once here: every attempt from now on
+                    // will come back empty for a reason ten identical failure
+                    // lines would never reveal.
+                    TriosLogBus.shared.warn(
+                        .queen,
+                        "queen.key.warmup",
+                        "The keychain launch gate did not lower within its "
+                            + "own ceiling (\(Int(gateWaitSeconds)) s waited); "
+                            + "the warm-up will attempt anyway and every "
+                            + "attempt will be refused by the gate (#1240).",
+                        ["provider": provider.rawValue]
+                    )
+                } else {
+                    TriosLogBus.shared.info(
+                        .queen,
+                        "queen.key.warmup",
+                        "Keychain launch gate lowered after "
+                            + String(format: "%.1f", waited)
+                            + " s of waiting; the first warm-up attempt can "
+                            + "now reach the keychain (#1240).",
+                        ["provider": provider.rawValue]
+                    )
+                }
+            }
+            // `isLaunching` is a one-way latch — nothing raises it again —
+            // so the attempts below do not re-check it.
 
             for attempt in 1...maxAttempts {
                 let key = modelStore.resolvedAPIKey(for: provider)
@@ -5569,12 +5624,15 @@ final class ChatViewModel: ObservableObject {
                     // #1240: Log the inter-attempt wait so the journal shows
                     // why the warm-up is pausing — the 60-second keychain
                     // cooldown needs to expire before the next read can reach
-                    // the key.
+                    // the key.  The wait is derived from retryDelayNanos so
+                    // the journal can never claim a number the code no
+                    // longer uses.
                     TriosLogBus.shared.info(
                         .queen,
                         "queen.key.warmup",
                         "Provider key warm-up attempt \(attempt) of "
-                            + "\(maxAttempts) found no key; waiting 65 s "
+                            + "\(maxAttempts) found no key; waiting "
+                            + "\(Int(retryDelayNanos / 1_000_000_000)) s "
                             + "before retry so the keychain cooldown can "
                             + "expire (#1240).",
                         ["provider": provider.rawValue, "attempt": "\(attempt)"]
