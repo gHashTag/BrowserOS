@@ -121,8 +121,10 @@ async function build(pool: Pool): Promise<Card[]> {
       variant,
     ]),
     pool.query(
-      `SELECT issue, branch, started, detail, finished_at
-         FROM queen_dispatch WHERE started = true AND finished_at IS NULL`,
+      `SELECT issue, branch, started, detail, finished_at, outcome
+         FROM queen_dispatch
+        WHERE started = true
+          AND (finished_at IS NULL OR outcome NOT LIKE 'reaped%')`,
     ),
     pool.query('SELECT number, title, owned_paths FROM queen_issues'),
   ])
@@ -203,11 +205,16 @@ function addInFlight(
     cards.set(number, {
       number,
       title: prior?.title ?? known.get(number)?.title ?? `#${number}`,
-      column: 'running',
+      // Finished is not free. A turn that ended with work sits in review until
+      // somebody judges it; calling it running would be a lie and calling it
+      // done would be a bigger one.
+      column: row.finished_at ? 'review' : 'running',
       paths: prior?.paths?.length
         ? prior.paths
         : (known.get(number)?.paths ?? []),
-      detail: String(row.detail ?? '').slice(0, 140),
+      detail: row.finished_at
+        ? `turn finished, waiting for a verdict - ${String(row.detail ?? '').slice(0, 88)}`
+        : String(row.detail ?? '').slice(0, 140),
       worker: 'cloud tick',
     })
   }
@@ -281,12 +288,26 @@ const SHELL = `<!doctype html>
   --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
   --f-3:.7rem;--f-2:.8125rem;--f-1:.875rem;--f0:1rem;--f3:2.058rem;
   --sp-1:.382rem;--sp0:.618rem;--sp1:1rem;--sp2:1.618rem;--sp3:2.618rem}
+ /* The hidden attribute is a UA rule and loses to any author display rule.
+    A rule like .auth{display:flex} therefore kept the token form on screen
+    while el.hidden was true - measured: hidden=true, computed display=flex,
+    57 cards behind it. Anything hidden must actually be hidden.
+    NO BACKTICKS: this is inside a template literal. Fourth time today. */
+ [hidden]{display:none !important}
  *{box-sizing:border-box}
  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);
   font-weight:300;line-height:var(--phi);-webkit-font-smoothing:antialiased}
  .wrap{padding:var(--sp3) var(--sp2)}
- h1{font-size:var(--f3);font-weight:500;margin:0 0 var(--sp-1);letter-spacing:-.02em}
+ h1{font-size:clamp(2.6rem,7vw,5.2rem);font-weight:600;margin:0 0 var(--sp-1);
+  letter-spacing:-.045em;line-height:.95;text-wrap:balance}
  h1 span{color:var(--accent)}
+ h1 a{color:var(--accent);text-decoration:none}
+ .kicker{font-size:var(--f-3);letter-spacing:.34em;text-transform:uppercase;
+  color:var(--muted);font-weight:500;margin-bottom:var(--sp0)}
+ .rule{height:1px;background:linear-gradient(90deg,var(--accent),transparent 62%);
+  margin:var(--sp1) 0 var(--sp2)}
+ .lede{font-size:var(--f1,1.272rem);line-height:1.5;color:#bbb;max-width:52ch;
+  font-weight:300;margin-bottom:var(--sp2)}
  .sub{color:var(--muted);font-size:var(--f-1);margin-bottom:var(--sp2)}
  .auth{display:flex;gap:var(--sp0);align-items:center;flex-wrap:wrap;margin-bottom:var(--sp2)}
  input,button{font-family:var(--font);font-size:var(--f-1);border-radius:var(--sp0);
@@ -330,14 +351,16 @@ const SHELL = `<!doctype html>
  .phi{color:var(--golden)}
 </style></head>
 <body><div class="wrap">
- <h1>trios <span>&#8226;</span> the board</h1>
+ <div class="kicker">what the swarm is doing</div>
+ <h1>the board</h1>
+ <div class="rule"></div>
  <div class="sub" id="sub">Columns are the Queen's own states, not invented
   ones &#8212; every card clicks through to its issue.</div>
  <div class="auth" id="auth">
   <input type="password" id="token" placeholder="deployment token" size="34" autocomplete="off" />
   <button id="go">connect</button>
   <label style="color:var(--muted);font-size:var(--f-2);display:flex;gap:.3rem;align-items:center;cursor:pointer"><input type="checkbox" id="remember" style="width:auto;margin:0" checked />remember on this device</label>
-  <span class="sub" style="margin:0">stays in this tab only &#8212; never in the URL</span>
+  <span class="sub" style="margin:0">never in the URL &#8212; sent as a header</span>
  </div>
  <div class="err" id="err"></div>
  <div class="board" id="board"></div>

@@ -158,12 +158,26 @@ function render(tree: Tree): string {
    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
    --f-3:.75rem;--f-2:.8125rem;--f-1:.875rem;--f0:1rem;--f1:1.272rem;--f2:1.618rem;--f3:2.058rem;
    --sp-1:.382rem;--sp0:.618rem;--sp1:1rem;--sp2:1.618rem;--sp3:2.618rem;--max-w:1200px}
+ /* The hidden attribute is a UA rule and loses to any author display rule.
+    A rule like .auth{display:flex} therefore kept the token form on screen
+    while el.hidden was true - measured: hidden=true, computed display=flex,
+    57 cards behind it. Anything hidden must actually be hidden.
+    NO BACKTICKS: this is inside a template literal. Fourth time today. */
+ [hidden]{display:none !important}
  *{box-sizing:border-box}
  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);
    font-weight:300;line-height:var(--phi);-webkit-font-smoothing:antialiased}
  .wrap{max-width:var(--max-w);margin:0 auto;padding:var(--sp3) var(--sp2)}
- h1{font-size:var(--f3);font-weight:500;margin:0 0 var(--sp-1);letter-spacing:-.02em}
+ h1{font-size:clamp(2.6rem,7vw,5.2rem);font-weight:600;margin:0 0 var(--sp-1);
+  letter-spacing:-.045em;line-height:.95;text-wrap:balance}
  h1 span{color:var(--accent)}
+ h1 a{color:var(--accent);text-decoration:none}
+ .kicker{font-size:var(--f-3);letter-spacing:.34em;text-transform:uppercase;
+  color:var(--muted);font-weight:500;margin-bottom:var(--sp0)}
+ .rule{height:1px;background:linear-gradient(90deg,var(--accent),transparent 62%);
+  margin:var(--sp1) 0 var(--sp2)}
+ .lede{font-size:var(--f1,1.272rem);line-height:1.5;color:#bbb;max-width:52ch;
+  font-weight:300;margin-bottom:var(--sp2)}
  .sub{color:var(--muted);font-size:var(--f-1);margin-bottom:var(--sp2)}
  .tally{display:flex;gap:var(--sp1);flex-wrap:wrap;margin-bottom:var(--sp3);
    font-size:var(--f-1)}
@@ -211,7 +225,9 @@ function render(tree: Tree): string {
  a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
 </style></head>
 <body><div class="wrap">
- <h1>trios <span>&#8226;</span> technology tree</h1>
+ <div class="kicker">what this is built out of</div>
+ <h1>technology<br/>tree</h1>
+ <div class="rule"></div>
  <div class="sub">Every status carries the evidence that produced it. Where two
    sources disagree, the disagreement is shown rather than resolved.</div>
  <div class="tally">

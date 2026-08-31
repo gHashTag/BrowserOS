@@ -93,6 +93,43 @@ function sqlBlockOffences(source: string): string[] {
   return offences
 }
 
+/**
+ * The same scan, for template literals that open an HTML document.
+ *
+ * The SQL-only version above missed a backtick in a CSS comment inside a page
+ * shell, which is the fourth time in one day and the second class of literal.
+ * A page shell is hand-written prose wrapped in a template literal - exactly
+ * where an author reaches for backticks out of habit - and it never needs one.
+ */
+function shellOffences(source: string): string[] {
+  const lines = source.split('\n')
+  const offences: string[] = []
+  let inShell = false
+  let opened = 0
+  lines.forEach((line, index) => {
+    if (!inShell) {
+      if (/=\s*`<!doctype html>/i.test(line)) {
+        inShell = true
+        opened = index + 1
+      }
+      return
+    }
+    // The literal closes either on its own line or at the END of the last
+    // markup line - `</body></html>` followed by the backtick is the common
+    // shape here. A detector that only knew the first spelling reported three
+    // closing backticks as offences, which is the kind of noise that gets a
+    // check switched off.
+    if (/^\s*`/.test(line) || /`\s*$/.test(line)) {
+      inShell = false
+      return
+    }
+    if (line.includes('`')) {
+      offences.push(`line ${opened + index}: ${line.trim().slice(0, 70)}`)
+    }
+  })
+  return offences
+}
+
 describe('SQL template literals', () => {
   it('contain no backticks, in any source file', () => {
     const offenders: string[] = []
@@ -136,5 +173,54 @@ describe('SQL template literals', () => {
       '`',
     ].join('\n')
     expect(sqlBlockOffences(markdown)).toEqual([])
+  })
+  // FOURTH occurrence, same day, and the SQL-only scope let it through: a
+  // backtick in a CSS comment inside a page SHELL. 16 typecheck errors from
+  // four files at once.
+  //
+  // The scope widens to any template literal that opens an HTML document,
+  // because those carry no legitimate backticks either - and they are, in this
+  // codebase, exactly where long hand-written prose ends up.
+  it('finds backticks in a page shell, not only in SQL', () => {
+    const broken = [
+      'const SHELL = `<!doctype html>',
+      '<style>',
+      '/* the `hidden` attribute loses to an author rule */',
+      '</style>',
+      '`',
+    ].join('\n')
+    expect(shellOffences(broken).length).toBe(1)
+  })
+
+  it('does not flag a shell that is clean', () => {
+    const fine = [
+      'const SHELL = `<!doctype html>',
+      '<style>',
+      '/* the hidden attribute loses to an author rule */',
+      '</style>',
+      '`',
+    ].join('\n')
+    expect(shellOffences(fine)).toEqual([])
+  })
+
+  // The false positive this detector had: the literal closes at the end of the
+  // last markup line, not on a line of its own.
+  it('does not flag the closing backtick of a shell', () => {
+    const fine = [
+      'const SHELL = `<!doctype html>',
+      '<style>/* fine */</style>',
+      '</body></html>`',
+    ].join('\n')
+    expect(shellOffences(fine)).toEqual([])
+  })
+
+  it('every page shell in the tree is clean', () => {
+    const offenders: string[] = []
+    for (const file of everyTsFile(SRC)) {
+      for (const hit of shellOffences(readFileSync(file, 'utf8'))) {
+        offenders.push(`${file.replace(SRC, 'src')} ${hit}`)
+      }
+    }
+    expect(offenders).toEqual([])
   })
 })

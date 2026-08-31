@@ -53,13 +53,28 @@ const PAGE = `<!doctype html>
     --sp-1:.382rem; --sp0:.618rem; --sp1:1rem; --sp2:1.618rem; --sp3:2.618rem;
     --max-w:1200px;
   }
-  *{box-sizing:border-box}
+  /* The hidden attribute is a UA rule and loses to any author display rule.
+    A rule like .auth{display:flex} therefore kept the token form on screen
+    while el.hidden was true - measured: hidden=true, computed display=flex,
+    57 cards behind it. Anything hidden must actually be hidden.
+    NO BACKTICKS: this is inside a template literal. Fourth time today. */
+ [hidden]{display:none !important}
+ *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);
        font-weight:300;line-height:var(--phi);-webkit-font-smoothing:antialiased}
   .wrap{max-width:var(--max-w);margin:0 auto;padding:var(--sp3) var(--sp2)}
   header{display:flex;align-items:baseline;gap:var(--sp1);flex-wrap:wrap;
          margin-bottom:var(--sp3)}
-  h1{font-size:var(--f3);font-weight:500;margin:0;letter-spacing:-.02em}
+  h1{font-size:clamp(2.6rem,7vw,5.2rem);font-weight:600;margin:0 0 var(--sp-1);
+  letter-spacing:-.045em;line-height:.95;text-wrap:balance}
+ h1 span{color:var(--accent)}
+ h1 a{color:var(--accent);text-decoration:none}
+ .kicker{font-size:var(--f-3);letter-spacing:.34em;text-transform:uppercase;
+  color:var(--muted);font-weight:500;margin-bottom:var(--sp0)}
+ .rule{height:1px;background:linear-gradient(90deg,var(--accent),transparent 62%);
+  margin:var(--sp1) 0 var(--sp2)}
+ .lede{font-size:var(--f1,1.272rem);line-height:1.5;color:#bbb;max-width:52ch;
+  font-weight:300;margin-bottom:var(--sp2)}
   h1 span{color:var(--accent)}
   .sub{color:var(--muted);font-size:var(--f-1)}
   .grid{display:grid;gap:var(--sp1);
@@ -104,7 +119,9 @@ const PAGE = `<!doctype html>
 <body>
 <div class="wrap">
   <header>
-    <h1>trios <span>&#8226;</span> queen</h1>
+    <div class="kicker">the supervisor, where she runs</div>
+    <h1>the queen</h1>
+    <div class="rule"></div>
     <div class="sub" id="where">the supervisor, where she actually runs</div>
   </header>
 
@@ -112,7 +129,7 @@ const PAGE = `<!doctype html>
     <input type="password" id="token" placeholder="deployment token" size="34" autocomplete="off" />
     <button id="go">connect</button>
   <label style="color:var(--muted);font-size:var(--f-2);display:flex;gap:.3rem;align-items:center;cursor:pointer"><input type="checkbox" id="remember" style="width:auto;margin:0" checked />remember on this device</label>
-    <span class="sub">stays in this tab only &#8212; never in the URL</span>
+    <span class="sub">never in the URL &#8212; sent as a header</span>
   </div>
   <div class="err" id="err"></div>
 

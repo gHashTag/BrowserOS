@@ -370,8 +370,23 @@ async function runRound(
     `SELECT issue, branch, owned_paths, conversation_id, dispatched_at, key_index
        FROM queen_dispatch
       WHERE started = true
-        AND finished_at IS NULL
-        AND dispatched_at > now() - interval '24 hours'`,
+        -- Still running, OR finished with work that nobody has judged.
+        --
+        -- Releasing an issue the moment its turn ended was a loop: the bee
+        -- committed, the dispatch closed, the issue was choosable again, and
+        -- thirty minutes later another bee arrived to find the work already
+        -- done. It verified it and committed a record saying so. Six times, on
+        -- #1244, in one afternoon:
+        --
+        --   sixth verification record for #1244 - all checks hold
+        --   fifth verification record for #1244 - all checks hold
+        --   fourth verification record ...
+        --
+        -- A reaped dispatch DOES release the issue: its container died, so
+        -- nothing was finished and the work must be retried. A finished one
+        -- holds until a verdict, exactly as awaitingReview does on the Mac.
+        AND (finished_at IS NULL OR outcome NOT LIKE 'reaped%')
+        AND dispatched_at > now() - interval '7 days'`,
   )
   const [owner, repoName] = repo.split('/')
   // Seconds, no fraction.

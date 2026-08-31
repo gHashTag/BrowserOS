@@ -123,12 +123,26 @@ const SHELL = `<!doctype html>
   --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
   --f-3:.7rem;--f-2:.8125rem;--f-1:.875rem;--f0:1rem;--f2:1.618rem;--f3:2.058rem;
   --sp-1:.382rem;--sp0:.618rem;--sp1:1rem;--sp2:1.618rem;--sp3:2.618rem}
+ /* The hidden attribute is a UA rule and loses to any author display rule.
+    A rule like .auth{display:flex} therefore kept the token form on screen
+    while el.hidden was true - measured: hidden=true, computed display=flex,
+    57 cards behind it. Anything hidden must actually be hidden.
+    NO BACKTICKS: this is inside a template literal. Fourth time today. */
+ [hidden]{display:none !important}
  *{box-sizing:border-box}
  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);
   font-weight:300;line-height:var(--phi);-webkit-font-smoothing:antialiased}
  .wrap{max-width:70ch;margin:0 auto;padding:var(--sp3) var(--sp2)}
- h1{font-size:var(--f2);font-weight:500;margin:0;letter-spacing:-.01em}
+ h1{font-size:clamp(2.6rem,7vw,5.2rem);font-weight:600;margin:0 0 var(--sp-1);
+  letter-spacing:-.045em;line-height:.95;text-wrap:balance}
+ h1 span{color:var(--accent)}
  h1 a{color:var(--accent);text-decoration:none}
+ .kicker{font-size:var(--f-3);letter-spacing:.34em;text-transform:uppercase;
+  color:var(--muted);font-weight:500;margin-bottom:var(--sp0)}
+ .rule{height:1px;background:linear-gradient(90deg,var(--accent),transparent 62%);
+  margin:var(--sp1) 0 var(--sp2)}
+ .lede{font-size:var(--f1,1.272rem);line-height:1.5;color:#bbb;max-width:52ch;
+  font-weight:300;margin-bottom:var(--sp2)}
  .meta{color:var(--muted);font-size:var(--f-2);margin:var(--sp-1) 0 var(--sp2)}
  .live{display:inline-block;width:.5rem;height:.5rem;border-radius:50%;
   background:var(--accent);box-shadow:0 0 8px var(--accent);margin-right:.4rem;
@@ -167,13 +181,15 @@ const SHELL = `<!doctype html>
  .phi{color:var(--golden)}
 </style></head>
 <body><div class="wrap">
+ <div class="kicker">a worker, in its own words</div>
  <h1 id="title">the bee</h1>
+ <div class="rule"></div>
  <div class="meta" id="meta"><span class="live off" id="dot"></span>connecting</div>
  <div class="auth" id="auth">
   <input type="password" id="token" placeholder="deployment token" size="30" autocomplete="off" />
   <button id="go">connect</button>
   <label style="color:var(--muted);font-size:var(--f-2);display:flex;gap:.3rem;align-items:center;cursor:pointer"><input type="checkbox" id="remember" style="width:auto;margin:0" checked />remember on this device</label>
-  <span style="color:var(--muted);font-size:var(--f-2)">stays in this tab &#8212; never in the URL</span>
+  <span style="color:var(--muted);font-size:var(--f-2)">never in the URL &#8212; sent as a header</span>
  </div>
  <div class="err" id="err"></div>
  <div id="feed"></div>
