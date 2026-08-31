@@ -18,11 +18,15 @@
  * in TypeScript would be a second policy - agreeing at first, drifting later,
  * and impossible to tell apart from the first when they disagree.
  *
- * WHAT THIS LOOP DOES NOT DO: start the bee. Choosing and dispatching are
- * separate on purpose and this is the honest boundary of the migration today.
- * The container can cut a worktree and run a worker - that is proven - but the
- * dispatch path is still driven from the app. Recording the choice makes the
- * gap visible rather than hiding it behind a loop that appears to run.
+ * IT ALSO STARTS THE BEE. This header used to end "WHAT THIS LOOP DOES NOT DO:
+ * start the bee ... the dispatch path is still driven from the app", and that
+ * stopped being true the moment `dispatchBee` was called from `runRound` below.
+ * The sentence survived the change by several commits and was caught by a sweep
+ * rather than by anyone reading it - which is the whole argument for keeping a
+ * comment's claim narrow enough to notice when it dies.
+ *
+ * What the loop still does NOT do: judge what comes back. `queend` answers a
+ * `review` question now, and nothing asks it one.
  */
 
 import { spawn } from 'node:child_process'

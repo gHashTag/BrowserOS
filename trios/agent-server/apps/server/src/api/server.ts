@@ -43,6 +43,7 @@ import { createQueenDashboardRoute } from './routes/queen-dashboard'
 import { createQueenLeaseRoute } from './routes/queen-lease'
 import { createQueenRegistryRoute } from './routes/queen-registry'
 import { createQueenRehearsalRoute } from './routes/queen-rehearsal'
+import { createQueenTreeRoute } from './routes/queen-tree'
 import { createRefinePromptRoutes } from './routes/refine-prompt'
 import { createShutdownRoute } from './routes/shutdown'
 import { createSkillsRoutes } from './routes/skills'
@@ -293,6 +294,9 @@ export async function createHttpServer(config: HttpServerConfig) {
     // shows comes from /queen/lease, which stays guarded. See the route header
     // for why a token in a URL was not the answer.
     .route('/queen/dashboard', createQueenDashboardRoute())
+    // Also shell-only: it renders a generated file that is already in the
+    // repository, so there is nothing here a reader could not get from git.
+    .route('/queen/tree', createQueenTreeRoute())
     .route('/queen/lease', queenLeaseRoutes)
     .route('/queen/rehearsal', queenRehearsalRoutes)
     .use('/shutdown/*', requireTrustedAppOrigin())

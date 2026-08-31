@@ -1,0 +1,618 @@
+{
+  "nodes": [
+    {
+      "id": "mvp-architecture-doc",
+      "label": "Queen+T27 MVP Architecture - the roadmap, outside the repository",
+      "layer": "seed",
+      "status": "partial",
+      "evidence": "/Users/playra/Downloads/Queen_T27_MVP_Architecture.md, 91776 bytes, mtime 2026-08-23. `git log --all -- '**/Queen_T27_MVP_Architecture.md'` returns nothing and no copy exists under trios/. Referenced from STATUS.md:9, RELEASE-BLOCKER.md:13, rings/SR-00/QueenMissionContract.swift:5 and its Linux twin.",
+      "note": "The single source of truth for what gets built next is an unversioned file in ~/Downloads. Nothing in the repo can diff against it, no gate can read it, and a second copy on another machine would drift in silence. Every number on the status board descends from it."
+    },
+    {
+      "id": "mvp-dod-and-epics",
+      "label": "MVP scope: 29-item DoD, epics E0-E10, gate-based milestones M0-M6",
+      "layer": "seed",
+      "status": "partial",
+      "evidence": "Queen_T27_MVP_Architecture.md:2834 (S23): `grep -c '^- \\[ \\]'` = 29 and `grep -c '^- \\[x\\]'` = 0. Epics at :1829-2484, milestones at :2510-2590, an eight-issue first batch at :3105-3119, the 12-step vertical slice at :1769-1782. STATUS.md:11 instead claims '2 of 29 criteria done (re-classified 2026-08-27)'.",
+      "note": "Two numbers, neither picked: the document's own checkboxes say 0 of 29, the board says 2, and the board admits its figure is 'a desktop re-classification against wave evidence, not a per-criterion rerun'. No E-number maps to a GitHub issue anywhere in the tree: `grep -rn 'E5-I1|E6-I2'` over trios/ returns nothing."
+    },
+    {
+      "id": "t27-epic-001-sealing",
+      "label": "In-repo sealing epic: spec-drive every BR-OUTPUT Swift file",
+      "layer": "seed",
+      "status": "partial",
+      "evidence": ".trinity/current-issue.md:14-18 - one box checked, four open (pilot RecursionGuard, expand to all BR-OUTPUT, govern Rust rings, enforce via hooks/queue/claims). Measured: 3 seals in .trinity/seals/ (ChatLogic, CladeGuard, RecursionGuard) against 52 BR-OUTPUT/*.swift.",
+      "note": "`grep -rl 'T27-EPIC-001' .trinity/specs/ | wc -l` = 32 - thirty-two specs cite a placeholder issue id that was never replaced with a real number, so they point at an issue that does not exist."
+    },
+    {
+      "id": "t27c",
+      "label": "t27c bootstrap compiler (the seed)",
+      "layer": "seed",
+      "status": "shipped",
+      "evidence": ".trinity/t27c-build/release/t27c (10830368 bytes, 2026-08-23) and /Users/playra/t27/target/release/t27c (2026-08-26). gen-rust / gen / gen-verilog run clean over all 70 specs. Makefile:713 builds it into .trinity/t27c-build so no product lands in the sibling checkout.",
+      "note": "Lives in gHashTag/t27, which this repo may not edit (CLAUDE.md:174). Everything in the ring layer descends from a compiler trios does not own."
+    },
+    {
+      "id": "t27c-frontend-gaps",
+      "label": "t27c front-end: statements dropped, no semantic stage, typecheck exits 0",
+      "layer": "seed",
+      "status": "blocked",
+      "blockedBy": "gHashTag/t27#2508 - upstream repo trios may not edit",
+      "evidence": "Verified verbatim today at /Users/playra/t27/bootstrap/src/compiler.rs:1887-1893 - Parser::parse_fn_body does `Err(_) => { self.recover_to_stmt_boundary(); }`, dropping the error and skipping to the next `;`. STATUS.md:35-48 adds two more: `t27c typecheck` prints FAILED and exits 0 so its only consumer (`suite.rs cmd_typecheck`, which tests `!st.status.success()`) can never fire; and all four gen_* entry points take the raw &Node, so no semantic stage exists between parse and codegen.",
+      "note": "Measured cost inside this repo: rings/SR-00/QueenMissionContract.swift:18-24 - trust_manager.t27 declared 21 functions and emitted 12; nine had been silently gone for as long as the spec existed. It is also why both trios rings are written with parenthesised conditions and integer constants (queen_core.t27:15-21). This gap is exactly MVP epic E2."
+    },
+    {
+      "id": "t27c-mut-emit",
+      "label": "gen-rust never emits `mut` on a function parameter",
+      "layer": "seed",
+      "status": "blocked",
+      "blockedBy": "gHashTag/t27 - collect_mutable_names (compiler.rs:11267) computes the set, gen_fn (compiler.rs:12668) never asks",
+      "evidence": "Makefile:940-945 names it the chief remaining cause of the 11 non-compiling generated files; STATUS.md:102-121 measures 'Eight errors are that omission'. wave-loop-114.md W2 lists it as one of exactly two ownership boundaries still open.",
+      "note": "Deliberately not worked around: 'Renaming parameters or adding shadow locals would silence it while hiding a one-line fix from its author.'"
+    },
+    {
+      "id": "clade-build-prod-default",
+      "label": "clade-build: a second builder that defaults to prod and has no dev arm",
+      "layer": "ring",
+      "status": "blocked",
+      "blockedBy": "resolve_variant has only a staging arm and an else that writes prod; five skills still tell an agent to run it bare",
+      "evidence": "Read today: rings/RUST-01/clade-build/src/main.rs:54 `env::var(\"TRIOS_VARIANT\").unwrap_or_else(|_| \"prod\".into())`; resolve_variant at :330 tests only `name == \"staging\"` and otherwise returns prod writing {project_dir()}/trios.app at :347; its own unit test at :551 is named resolve_variant_unknown_defaults_to_prod. Against it: build.sh:19 `VARIANT=\"${TRIOS_VARIANT:-dev}\"` and build.sh:32 hard-rejects 'staging'. `grep -c clade-build Makefile` = 0.",
+      "note": "THE HEADLINE HAZARD. Running it as doctor, clade-seal, t27-tri-pipeline, t27-phi-loop and phi-loop instruct replaces the app the user is running - the exact accident build.sh:10-12 and the agent-safe-build skill exist to prevent. `TRIOS_VARIANT=dev cargo run --bin clade-build` also builds prod, because no dev arm exists."
+    },
+    {
+      "id": "mesh-generated-code-dead",
+      "label": "RUST-13: the generated code is excluded, the forbidden hand-written code ships",
+      "layer": "ring",
+      "status": "blocked",
+      "blockedBy": "t27c-mut-emit upstream, a build.rs hook that cannot find its compiler, and an owner-gated regeneration decision",
+      "evidence": "rings/RUST-13/trios-mesh/src/lib.rs:3-5 - 'The hand-written modules below are the current runtime surface. The generated gen/rust/ stubs are excluded from compilation.' The four shipping modules - crypto.rs (948 lines), router.rs (927), routing.rs (480), wire.rs (155) - are exactly the four categories that submodule's own CLAUDE.md lists as FORBIDDEN to write by hand. build.rs:15-18 looks for t27c at ../t27/target/release/t27c, which does not exist, and returns early in silence. STATUS.md:97-101: 46 of 68 committed artifacts differ from a fresh gen-rust.",
+      "note": "Same failure shape as the t27-rings gate that slept for months: a hook that cannot find its tool and reports nothing."
+    },
+    {
+      "id": "queen-core-sync-gate",
+      "label": "make queen-core-sync - the byte-for-byte gate on the duplicated policy",
+      "layer": "ring",
+      "status": "partial",
+      "evidence": "Makefile:1077-1106 compares each rings/SR-00 policy file with its agent-server/queen-core copy via `cmp -s`. Run today: '[FAIL] the Linux copy of the Queen's policy has drifted: DIFFERS QueenLocalisation.swift' - identical at HEAD, so the drift is another agent's uncommitted work. Confirmed wired to nothing: `check:` at Makefile:1931 lists 25 targets and neither queen-core nor queen-core-sync is among them, and no .github workflow mentions it.",
+      "note": "The Makefile calls this gate 'what stops that being a bug' (:1066) while nothing runs it automatically. Two copies of the Queen's rule, one hand-run comparator."
+    },
+    {
+      "id": "queend-linux-policy",
+      "label": "queend - the Queen's policy compiled for Linux",
+      "layer": "ring",
+      "status": "shipped",
+      "evidence": "agent-server/queen-core/Sources/queend/main.swift - stdin/stdout, four question kinds (boundary :102, retry :114, choose :131, language :206), with QueenIssueBoundary.paths at :177 and conflictingTasks at :183-192 producing per-issue refusals. Dockerfile:45 builds it, :53-55 smoke-runs it, :128 copies it to /usr/local/bin/queend; queen-tick.ts:41 consumes it and rejects rather than defaulting when it is missing (:152-165).",
+      "note": "The count 'eleven Swift files' is stale in four places (Makefile:1034, :1066, CLOUD-MIGRATION.md:341, queen-tick.ts:17): QUEEN_CORE_LINUX_FILES lists 12, plus 4 policy files = 16. Separately `make queen-core` (the portable-closure target) is not in `check:` and the closure reached 54 files / 14085 lines without converging."
+    },
+    {
+      "id": "rust-clade-crates",
+      "label": "RUST-00..RUST-14, RUST-99 - the clade toolchain (17 crates)",
+      "layer": "ring",
+      "status": "partial",
+      "evidence": "Cargo.toml declares 17 workspace members. `ls target/release` and `target/debug` show exactly one built binary: clade-e2e, and Makefile:742 is the only place any of them is invoked. Panic hardening is genuinely complete: [workspace.lints.clippy] denies unwrap_used and expect_used, all 17 crates opt in with a two-line [lints]/workspace stanza, and only 2 prod-side unwraps remain (RUST-13 src/bin/smoke_m1.rs).",
+      "note": "CLAUDE.md:23 and :43-44 instruct agents to run `cargo run --bin clade-build` as the AEL baseline and verify step, but `grep -c clade-build Makefile` = 0 - confirmed today. 15 of the 17 crates compile as members and are run by nothing in the shipped gate chain."
+    },
+    {
+      "id": "rust13-trios-mesh",
+      "label": "RUST-13 trios-mesh (git submodule of gHashTag/tri-net)",
+      "layer": "ring",
+      "status": "partial",
+      "evidence": "`git submodule status` -> 2257dea0e5, heads/feat/trios-integration. 68 .t27 specs, 68 files in gen/rust/, 84 .rs files / 17363 lines. Measured: 11 of the 68 generated Rust files fail a full `rustc --crate-type lib` build.",
+      "note": "`cargo test -p trios-mesh` was not run (it writes to target/), so its test status is unknown. Its ROADMAP.md is dated 2026-07-04 and belongs to a different project (drone mesh / DePIN), with two dated gates now passed and no in-tree evidence either way."
+    },
+    {
+      "id": "swift-rings-sr",
+      "label": "Swift rings SR-00 / SR-01 / SR-02 (154 files, all in the app)",
+      "layer": "ring",
+      "status": "shipped",
+      "evidence": "105 + 30 + 19 .swift files; `TRIOS_PRINT_SOURCES=1 ./build.sh` lists every one of them, so all 154 ship in the binary. SR-01 holds transport/storage/log bus (SSETransport, SQLCipherMemoryStore, TriosLogBus, ReplayTransport); SR-02 holds the ViewModels and Queen services.",
+      "note": "Only SR-02 has a per-ring charter (.trinity/ring-SR-02.md:1-3). SOUL.md:176 covers SR-00/SR-01 only 'when marked with a T27 seal', which leaves the canon status of 135 Swift files undetermined by any document in the tree."
+    },
+    {
+      "id": "t27-00-queen-core",
+      "label": "T27-00 decision core (queen_core.t27)",
+      "layer": "ring",
+      "status": "partial",
+      "evidence": "rings/T27-00/queen_core.t27, 209 lines, 7 fns: gen-rust 7/7 with 0 stubs, Zig 7, Verilog 8, `rustc --crate-type lib` clean. tests/t27/ring00_parity.sh -> '[OK] ring00_parity: 14 rows checked and 21 constants pinned'. But `find . -name queen_core.rs -o -name queen_core.v` (worktrees excluded) returns NOTHING - re-confirmed today.",
+      "note": "Generated four ways, consumed nowhere. rings/SR-00/QueenT27Acceptance.swift:93 says it in its own words: 'a ring that commits no artifact - rings/T27-00 today'. QueenRetryPolicy / QueenReviewDecision / QueenMergeGate in Swift are still the running implementation."
+    },
+    {
+      "id": "t27-01-a2a",
+      "label": "T27-01 A2A protocol (a2a.t27)",
+      "layer": "ring",
+      "status": "partial",
+      "evidence": "rings/T27-01/a2a.t27, 223 lines, 9 fns: gen-rust 9/9 with 0 stubs, Zig 9, Verilog 10, rustc clean. tests/t27/ring01_rules.sh -> '[OK] ring01_rules: the A2A rules hold in the generated Rust'.",
+      "note": "Same gap as ring 00: nothing consumes the generated Rust. The A2A runtime in production is TypeScript (agent-server/.../a2a.ts) plus rings/SR-02/A2ARegistryClient.swift, which is why the missing rings have no user-visible cost today."
+    },
+    {
+      "id": "t27-lowering-gate",
+      "label": "make t27-lowering - every declared fn must survive into all four backends",
+      "layer": "ring",
+      "status": "shipped",
+      "evidence": "Makefile:1135-1229, wired into `check:` at Makefile:1931. Reproduced by hand over the same 70 specs: 0 files with declared != emitted, 11 non-compiling - exactly T27_NOCOMPILE_CEILING := 11 (Makefile:946). All 11 are in the tri-net submodule; both trios rings compile clean.",
+      "note": "Excludes */.worktrees/* and */.claude/* (Makefile:1152-1153) after an earlier version scanned a stray worktree and counted 138 specs instead of 70. Only 2 of the 70 specs are trios' own - 68 belong to the RUST-13 submodule."
+    },
+    {
+      "id": "t27-parity-gates",
+      "label": "Ring parity gates: t27-rings + golden chain",
+      "layer": "ring",
+      "status": "shipped",
+      "evidence": "Makefile:1232-1258 and 710-735, both members of `check:` at Makefile:1931. Run live today: ring00_parity.sh, ring01_rules.sh and ring00_verilog.sh all green, all writing only to mktemp dirs. The chain compiles the generated ring with bare rustc and the Swift twin, runs both over one input grid and diffs.",
+      "note": "Makefile:913-921 records that this gate 'spent months asleep' because it looked for t27c at exactly one path that had never existed on this machine, printed [SKIP] and exited 0. It now distinguishes binary-present / sources-present / neither and says NOT MEASURED in those words."
+    },
+    {
+      "id": "t27-rings-02-03-04",
+      "label": "T27-02 orchestration / T27-03 transport / T27-04 TNF scoring",
+      "layer": "ring",
+      "status": "planned",
+      "evidence": "`ls -d rings/T27-*` returns exactly rings/T27-00 and rings/T27-01, run today. `grep -rn 'T27-02' .trinity/ .claude/ docs/` has one hit in the whole tree: the t27-backend skill's own ring table at SKILL.md:33. T27-04 has a design doc and nothing else: docs/t27/tnf-scoring.md:1-7, which disclaims implementation ('no .t27 module in this repository uses it').",
+      "note": "Consistent with the skill's own law - 'a ring is not started until the one inside it runs in production' - since ring 00 has no production artifact. T27-03's behaviour already runs in TypeScript, so it would be a reimplementation rather than new capability."
+    },
+    {
+      "id": "ring00-silicon",
+      "label": "Ring 00 on silicon: simulated, never synthesised",
+      "layer": "silicon",
+      "status": "blocked",
+      "blockedBy": "no board is allocated to the Queen's rings, and trios invokes no synthesis tool",
+      "evidence": "Simulated and green: `bash tests/t27/ring00_verilog.sh` -> '[OK] ring00_verilog: 14 rows checked, simulation answers the Swift table / generated from rings/T27-00/queen_core.t27, compiled with iverilog, run under vvp' - the same 14-row table as the Rust parity harness by design. Not synthesised: `grep -rn 'yosys|nextpnr|openFPGALoader' --include=Makefile --include='*.sh' --include='*.swift'` over trios returns ZERO hits, although all three tools resolve on this machine. docs/t27/stands.md:13-15: 'The Zynq xc7z020 stand runs tri-net. The Queen's rings do not go there.'",
+      "note": "The iverilog run is the strongest evidence in the tree for one-rule-many-targets. But the t27-backend skill's own rule - 'Verify on hardware, never by reading the Verilog' - is unmet for ring 00, and queen_core.t27:23-25's claim that 'it can be synthesised without argument' is unverified here."
+    },
+    {
+      "id": "agent-server-bun",
+      "label": "agent-server - the bun/TypeScript runtime (MCP, A2A, the only CI'd path)",
+      "layer": "runtime",
+      "status": "shipped",
+      "evidence": "Full bun workspace. Nine A2A routes verified at apps/server/src/api/routes/a2a.ts (:70,79,88,100,105,114,123,132,144) with an SSE fan-out at :144 and per-agent buffers at :52,:58. Live tools/list on 127.0.0.1:9105 returned 80 tools including fs_read, fs_write, fs_edit, fs_list and shell_execute; /health returned ok. .github/workflows/code-quality.yml runs biome + typecheck on `paths: trios/agent-server/**` - the only CI in the repository.",
+      "note": "No skill covers it: three passing one-line mentions across all 31 skills, and none names `bun run typecheck` or `biome ci`. The largest documentation gap in the library."
+    },
+    {
+      "id": "ascii-purity-law",
+      "label": "L3 ASCII purity: stated in three places, measured in none",
+      "layer": "runtime",
+      "status": "blocked",
+      "blockedBy": "no gate was ever built, and the spec was never amended to retire the law",
+      "evidence": "Measured today: 37 of 206 .swift files under rings/ and BR-OUTPUT/ contain non-ASCII (BR-OUTPUT/SmoothStreamingEnhancements.swift:55 carries a Russian comment in shipped source; rings/SR-02/ChatViewModel.swift has ~491 such lines), and 5 of 31 SKILL.md files do too. `grep -ciE ascii Makefile build.sh` = 0 and no .github workflow mentions it. The law is asserted at .trinity/specs/ascii-purity.md:4 (which explicitly extends it to .claude/skills/*/*.md), AGENTS.md:154, and the ascii-lint skill.",
+      "note": "Either the law was retired without amending its spec, or the gate was never built. The newest and best skills are among the files breaking it."
+    },
+    {
+      "id": "bash-process-group",
+      "label": "Shell timeout kills the parent only, not the process group",
+      "layer": "runtime",
+      "status": "blocked",
+      "blockedBy": "unfixed: proc.kill() signals the parent and the read then waits on a pipe every surviving child still holds",
+      "evidence": "Confirmed unchanged today: agent-server/apps/server/src/tools/filesystem/bash.ts:208 `proc.kill()` inside the setTimeout, with no setsid or detached handling in the Bun.spawn options at :198-205. PARALLEL-BEES.md:141 marks it verbatim 'Not fixed.' - a 3 s timeout still pending at 25 s; one `bun run dev &` costs a worker slot until the process restarts.",
+      "note": "The sibling fixes in the same file DID land - readBoundedTail at :212-213 (the 890 MB RSS bug) and the 900 s timeout cap. This one did not, and it is a prerequisite for raising the bee cap."
+    },
+    {
+      "id": "build-variant-fence",
+      "label": "build.sh variant fence (dev / prod / test isolation)",
+      "layer": "runtime",
+      "status": "shipped",
+      "evidence": "build.sh:19 defaults to dev, :32 rejects anything but dev/prod/test. rings/SR-00/BuildVariantPolicy.swift pins bundle ids (:11-13), binaries (:27-29), data roots (:43-45) and ports (:105-109); usesFileSecretStore is `!isRelease` (:72). `variant-fence` is a check target (Makefile:1672) with its own fixture corpus under tests/fixtures/guards/variant-fence/. Verified live: 9105 and 9305 answer /health, 9205 does not.",
+      "note": "build.sh:24-30 records why `test` had to be split from `dev`: the cassette suite killed trios-dev and destroyed a real delegation registry of 4 tasks on 2026-08-17. No skill teaches the fence - agent-safe-build's table stops at dev vs release and omits `test` entirely."
+    },
+    {
+      "id": "replay-cassette-suite",
+      "label": "Deterministic replay: ReplayTransport + the four observer cassettes",
+      "layer": "runtime",
+      "status": "partial",
+      "evidence": "Organ shipped and wired - confirmed today: rings/SR-01/ReplayTransport.swift:19 `actor ReplayTransport: ChatTransportProtocol`, CassetteRecorder at :163, constructed at rings/SR-00/CompositionRoot.swift:66 and consumed at rings/SR-02/QueenWorkerRunner.swift:223; 4 cassettes in tests/cassettes/; `cassettes` is a member of `check:` at Makefile:1931. Suite red: CLOUD-MIGRATION.md:771 measures 't+15s..t+75s alive=0 lines=9 server.launch=0 queen.selftest=0', and wave-loop-113.md reports 4 of 5 replays failing.",
+      "blockedBy": "one Task in main.swift that never fires server.launch or queen.selftest; main.swift carries another agent's uncommitted work (git status: M trios/main.swift)",
+      "note": "'Nothing here says the observers are broken. It says they were never asked.' The organ's own docstring reads 'The missing organ from the brain atlas' - the atlas still lists deterministic simulation as absent."
+    },
+    {
+      "id": "tmp-zero-gate",
+      "label": "tmp-zero: a gate that would fail, invoked by nothing",
+      "layer": "runtime",
+      "status": "blocked",
+      "blockedBy": "the checker is wired to no target and no workflow, so the violation it exists to find is invisible",
+      "evidence": "`grep -rn '/tmp' rings/*/*/src/*.rs | wc -l` = 90 today, almost all production consts rather than tests, e.g. rings/RUST-02/clade-e2e/src/main.rs:193-196 `SwiftLogicSuite { bin: \"/tmp/trios_chat_logic_test\", ... }`. The checker exists at rings/RUST-99/tmp-zero-gate/src/main.rs and its EXEMPT_DIRS (:12-18) do not include clade-e2e, so it would fail. `grep -c tmp-zero Makefile` = 0.",
+      "note": "The clearest case in the repo of a rule whose contradiction is invisible precisely because nobody invokes the checker written to find it."
+    },
+    {
+      "id": "workspace-volume",
+      "label": "/workspace survives a redeploy",
+      "layer": "runtime",
+      "status": "blocked",
+      "blockedBy": "an operator action - no Railway volume exists on the agent-server service",
+      "evidence": "Measured inside the running container: `df -h /workspace` -> overlay; `mount | grep workspace` -> nothing; `railway volume list` -> one volume, redis-volume, on the Redis service. Dockerfile:97-115 now states it plainly and gives the fix: `railway volume add --service trios-agent-server --mount-path /workspace`.",
+      "note": "The old comment claimed 'A volume mounts here in production' and no volume was ever created - it described an intention and read as a fact. Already cost a real artifact: e52f41ad, the seal a real model wrote for #1244, gone with the deploy that followed it."
+    },
+    {
+      "id": "bee-ceiling",
+      "label": "Raise the bee ceiling: cap 4 -> 19, after key rotation and process-group kills",
+      "layer": "supervisor",
+      "status": "planned",
+      "evidence": "Confirmed today: rings/SR-00/QueenDelegation.swift:470 `public static let maximumConcurrentWorkers = 4`, against a container that took 96 concurrent calls with no degradation (CLOUD-MIGRATION.md:1047 shows the cap firing: 'refusal: 4 workers already running (limit 4)'). PARALLEL-BEES.md:136-147 orders the prerequisites: multi-key rotation exists at ModelConfigurationStore+KeyRotation.swift:44-59 and has NO caller on the request path (its only callers are a UI toggle in ModelsTabView.swift), while QueenRetryPolicy.swift:88-108 classifies a 429 as producedNothing and :67 retires the issue after two.",
+      "note": "PARALLEL-BEES refutes the cap's own stated reasons: verdicts are one-shot requests with empty history, and merge conflicts are already handled structurally by pathsOverlap/conflictingTasks. It is a policy number, not a measured limit. Item 1 of that list is already done: awaitingReview boundaries age out after 48h (QueenDelegation.swift:572), which ended 13 consecutive ticks that ran zero bees."
+    },
+    {
+      "id": "boundary-observer-container",
+      "label": "Write-time boundary enforcement in the container",
+      "layer": "supervisor",
+      "status": "blocked",
+      "blockedBy": "the observer exists only on the Mac, and the cassette that would prove it fires is one of the four blocked by the main.swift launch Task",
+      "evidence": "`grep -rln 'queen.observer.outOfBounds'` over the whole tree returns exactly one file, confirmed today: rings/SR-02/ChatViewModel.swift. Nothing in agent-server emits it. CLOUD-MIGRATION.md:956-968: #1244 declared one path, the commit carried two, 'Nothing noticed. The log has no queen.observer.outOfBounds for it.'",
+      "note": "The first real cloud bee did precisely the thing those cassettes exist to catch, and the catching is the broken part. The document's own closing line: 'the loop runs, and its supervision has a measured hole in it.'"
+    },
+    {
+      "id": "cloud-dispatch",
+      "label": "Dispatch: worktree, real model turn, recorded outcome, 2h reaper",
+      "layer": "supervisor",
+      "status": "shipped",
+      "evidence": "queen-dispatch.ts:415 dispatchBee, called from queen-tick.ts:355; the credential check (:423) precedes prepareWorktree (:434) so a refusal costs no branch. Live run at CLOUD-MIGRATION.md:850-853 ('16:13:06 Queen dispatch issue=1244 branch=\"queen-1244\" started=true') and a real-model commit at :946-951 (e52f41ad, glm-4.6). reapStalledDispatches at queen-dispatch.ts:387-402 runs at queen-tick.ts:261, before the in-flight board read at :280.",
+      "note": "CONFLICT: queen-tick.ts:21-25 still says 'WHAT THIS LOOP DOES NOT DO: start the bee', 330 lines above the call that starts it. The branch-out-of-container transfer also exists (rings/SR-01/QueenGitExecutor.swift:405 importRemoteBranch, wired at QueenBranchCommitter.swift:281) although CLOUD-MIGRATION.md:124-128 still says it is missing. No measurement of an actual git-am transfer exists anywhere."
+    },
+    {
+      "id": "cloud-tick",
+      "label": "Cloud supervision tick (self-firing round)",
+      "layer": "supervisor",
+      "status": "shipped",
+      "evidence": "queen-tick.ts:516 startQueenTick(), wired unconditionally after migrations at main.ts:87, gated on TRIOS_QUEEN_TICK_SECONDS (:81, :518). TTL 180 / heartbeat 60 at :77-78, renewed at :192-196. Measured self-firing round at CLOUD-MIGRATION.md:333-340: 'lease : held by 9680f61f-...:1 fence=1 / tick : same holder ... Nobody asked for that round. It fired on its own interval.'",
+      "note": "Whether the timer is enabled on the deployment today is unknown from this tree: TRIOS_QUEEN_TICK_SECONDS appears in no Dockerfile, railway config or doc - only in queen-tick.ts itself. A manual round is reachable at POST /queen/lease/tick."
+    },
+    {
+      "id": "mission-bee-contracts",
+      "label": "Mission contract, structured Bee result, T27-aware acceptance",
+      "layer": "supervisor",
+      "status": "partial",
+      "evidence": "rings/SR-00/QueenMissionContract.swift and QueenBeeResult.swift exist with unit tests, and QueenBeeResult.swift:471 already computes a loweringGateRequirement naming `make t27-lowering` (:486). Confirmed today that neither has a production caller: `grep -rln 'QueenMissionContract|QueenBeeResult' --include=*.swift` returns only the two files, their two tests and their two Linux twins. `ls .trinity/missions` -> No such file or directory.",
+      "note": "CONFLICT: RELEASE-BLOCKER.md:32-34, written the same day the types landed, says '11.1 machine-readable mission contract | absent - nothing in rings/, no .trinity/missions'. The rings/ half is now false; the .trinity/missions half is still true. Written and tested but unwired, so a .t27 spec is still accepted exactly like a Swift file with nothing checking that it still lowers."
+    },
+    {
+      "id": "owner-cutover",
+      "label": "Owner decisions: rebuild the release app; rule on the agent-server rename",
+      "layer": "supervisor",
+      "status": "blocked",
+      "blockedBy": "two decisions only the owner can make - authorising the release rebuild (her provider key then travels to the container in each request body) and choosing whether the bun runtime lives in trios/agent-server or packages/browseros-agent",
+      "evidence": "PARALLEL-BEES.md:150 gives the exact commands (`DEVELOPER_DIR=/Library/Developer/CommandLineTools make release`, then `open -a trios.app --env TRIOS_AGENT_SERVER_URL=...`) and notes the running release app 'predates all of it and knows nothing of the boundary ageing or the patch transport'. STATUS.md:84-92 measures the consequence: treeStateFingerprint on 0 of the release store's tasks, 12 tasks with no acceptance criteria. RELEASE-BLOCKER.md:95-102: 763 commits ahead, 17 behind, 570 conflict markers over 1096 files, of which packages/browseros-agent (546) and trios/agent-server (436) are the same directory in two places.",
+      "note": "'The choice is about which repository owns the runtime, which is an ownership question, not a merge question.' And it decays: 'This number will be worse next week than it is today.'"
+    },
+    {
+      "id": "queen-lease",
+      "label": "Queen lease (Postgres, fenced, single-statement)",
+      "layer": "supervisor",
+      "status": "shipped",
+      "evidence": "agent-server/apps/server/src/api/services/queen-lease.ts:72-84 - one `INSERT ... ON CONFLICT (name) DO UPDATE ... WHERE queen_lease.expires_at < now() OR queen_lease.holder = EXCLUDED.holder RETURNING holder, fence, expires_at`; release expires rather than deletes (:131). Live race at CLOUD-MIGRATION.md:316-324: '6 contenders, fired together, at a free lease ... VERDICT: exactly one Queen'. Verified live today: /queen/lease -> 403 unauthenticated.",
+      "note": "The earlier monopoly (one lease held across rounds) is fixed in code: acquire per round, release in `finally` including on the throw path."
+    },
+    {
+      "id": "queen-observer-cost",
+      "label": "QueenObserver - present, but evaluated on the main actor per SSE delta",
+      "layer": "supervisor",
+      "status": "partial",
+      "evidence": "rings/SR-00/QueenObserver.swift:15/:54 with reapStalledWorkers at rings/SR-02/ChatViewModel.swift:8871. Called at ChatViewModel.swift:8467 from an @MainActor runner on every SSE delta, O(all accumulated tool-argument bytes): PARALLEL-BEES.md measures 13.1 s of main-thread CPU for one 100-turn worker - 'The UI freezes long before the container notices.'",
+      "note": "An untracked stray copy sits at /Users/playra/BrowserOS/trios/QueenObserver.swift; `git ls-files` reports it unadded and diff against the canon rings/SR-00 file is one line (a missing `import QueenCore`). Hygiene, not a second implementation."
+    },
+    {
+      "id": "queen-skill-match",
+      "label": "Skill routing reaches 2 of 31 skills - the rules are dead on case",
+      "layer": "supervisor",
+      "status": "blocked",
+      "blockedBy": "a case bug: skill(forBoundary:) lowercases the path at line 54 and then applies case-sensitive uppercase patterns at lines 24-27",
+      "evidence": "Read in full today. rings/SR-00/QueenSkillMatch.swift:54 `let lower = path.lowercased()` then :55 `rules.first(where: { $0.matches(lower) })`. The rules at :24-27 include `$0.hasSuffix(\"Tests.swift\")`, `$0.hasSuffix(\"Makefile\")` and `$0.contains(\"rings/RUST-\")` - none can ever match a lowercased string. Only tests/, build.sh and .swift survive, so e2e-testing and agent-safe-build are the only reachable skills of 31 installed. A rings/RUST- boundary matches nothing, hits `guard let match ... else { return nil }` and gets NO skill.",
+      "note": "tests/swift/ChatSSEEndToEndTest.swift:8065 says 'the Rust rule was dead from the moment it was written' - it was fixed for the name and is still dead for the case, and no test covers a rings/RUST- boundary. The file's own doc comment still says 'Twenty-six of them'; there are 31. One of the three skills the rules name, t27-tri-pipeline, is among the most stale in the library - so the one live routing path leads to a skill that would overwrite the user's app."
+    },
+    {
+      "id": "registry-and-secrets",
+      "label": "Mac -> cloud address and token: registry mirror and lease contention",
+      "layer": "supervisor",
+      "status": "blocked",
+      "blockedBy": "an unpaid operator secret - neither app bundle carries TRIOS_AGENT_SERVER_URL or TRIOS_QUEEN_LEASE_URL, so the mirror never publishes and the Mac never contends",
+      "evidence": "Measured on the running app (pid 41623): `ps -Eww | grep '^TRIOS_'` returns nothing, and PlistBuddy on trios.app and trios-dev.app lists only TRIOS_A2A_PORT, TRIOS_CANARY_MCP_PORT, TRIOS_VARIANT, TRIOS_MCP_PORT, TRIOS_MESH_PORT. So ProjectPaths.agentServerIsRemote is false (:197-199), QueenDelegationRegistry.swift:717 returns at its guard, and QueenLease.endpoint is nil so acquire returns .uncontested (QueenLease.swift:39-44). The tick then refuses at queen-tick.ts:231-235 with 'no registry mirror published yet'. `grep -n TRIOS_AGENT_SERVER_URL build.sh` returns nothing.",
+      "note": "QueenLease.swift:31-37 names the consequence itself: 'an unconfigured Mac standing beside a running cloud tick is two Queens - and this case is what that looks like from here.' Deliberate per CLOUD-MIGRATION.md:546-561: 'the address goes in when the token does, in that order.'"
+    },
+    {
+      "id": "salience-learner",
+      "label": "Learned salience (the amygdala the atlas calls missing)",
+      "layer": "supervisor",
+      "status": "shipped",
+      "evidence": "rings/SR-00/QueenSalience.swift:13 and rings/SR-01/SalienceLearner.swift:15 form a closed loop: read at rings/SR-02/ChatViewModel.swift:5694 (`QueenDelegationPolicy.learnedWeight = { feature in ... }`, installed against QueenDelegation.swift:993), written at :10986 and :12106 via SalienceLearner.shared.record(task:neededUser:). Laplace-smoothed per-feature tallies persisted to .trinity/state/queen_salience.json.",
+      "note": "Directly contradicts the brain-atlas skill, which still lists 'Amygdala - partial, ordering only, no learned salience'. The file's own docstring reads 'The missing amygdala from the brain atlas'."
+    },
+    {
+      "id": "br-output-swiftui",
+      "label": "BR-OUTPUT - the SwiftUI interface layer",
+      "layer": "interface",
+      "status": "shipped",
+      "evidence": "52 .swift files, all 52 present in the `TRIOS_PRINT_SOURCES=1 ./build.sh` source list. SOUL.md:174 names BR-OUTPUT/*.swift canon/generated. Chat UX claims verified in code: SmoothStreamingEnhancements.swift:59 `debounceInterval = 0.016`, TypingIndicatorView.swift, glassmorphism in TriosTabView.swift.",
+      "note": "Six files are app-only and cannot enter the test target - Makefile:2619-2624 names the compiler error forcing each, and five of the six are one entanglement in MenuBuilder.swift."
+    },
+    {
+      "id": "playground",
+      "label": "t27.ai Playground - eight screens, no owner and no code",
+      "layer": "interface",
+      "status": "planned",
+      "evidence": "Queen_T27_MVP_Architecture.md:1433-1610 (spec editor, source AST, semantic view, IR explorer, generated outputs, hardware view, verification, provenance timeline) and :2225-2299 (E7-I1..I7). No directory, route or spec for it exists anywhere in this repository. RELEASE-BLOCKER.md:44: 'the Playground has no owner and no code.' STATUS.md scores Playground 0 done / 1 partial / 5 not started.",
+      "note": "Six of the 29 DoD criteria depend on it, and 11 of the 12 vertical-slice steps are not owned by this repo at all - RELEASE-BLOCKER.md:24 records the correction that only step 12, the Queen half, moves from here."
+    },
+    {
+      "id": "queen-dashboard",
+      "label": "Queen dashboard - unguarded shell, guarded data",
+      "layer": "interface",
+      "status": "shipped",
+      "evidence": "Cloud shell at agent-server/apps/server/src/api/routes/queen-dashboard.ts, mounted at api/server.ts:295; data route at routes/queen-lease.ts:103-135 returns lease status, last tick decision and the 10 most recent dispatches. Verified live today: /queen/dashboard -> 200, /queen/lease -> 403, /health -> {\"status\":\"ok\",\"pid\":1}. Mac-side entry at BR-OUTPUT/QueenDashboardView.swift:118 plus QueenCompactSupervisorBar.swift:14.",
+      "note": "The Mac view is dark for the same unconfigured-address reason as the registry mirror: it resolves through QueenLease.endpoint, which is nil on this machine."
+    }
+  ],
+  "edges": [
+    {
+      "from": "t27c",
+      "to": "t27-00-queen-core"
+    },
+    {
+      "from": "t27c",
+      "to": "t27-01-a2a"
+    },
+    {
+      "from": "t27c",
+      "to": "t27-lowering-gate"
+    },
+    {
+      "from": "t27c",
+      "to": "rust13-trios-mesh"
+    },
+    {
+      "from": "t27c-frontend-gaps",
+      "to": "t27-00-queen-core"
+    },
+    {
+      "from": "t27c-mut-emit",
+      "to": "t27-lowering-gate"
+    },
+    {
+      "from": "t27c-mut-emit",
+      "to": "mesh-generated-code-dead"
+    },
+    {
+      "from": "t27-00-queen-core",
+      "to": "t27-01-a2a"
+    },
+    {
+      "from": "t27-01-a2a",
+      "to": "t27-rings-02-03-04"
+    },
+    {
+      "from": "t27-00-queen-core",
+      "to": "t27-parity-gates"
+    },
+    {
+      "from": "t27-01-a2a",
+      "to": "t27-parity-gates"
+    },
+    {
+      "from": "t27-00-queen-core",
+      "to": "ring00-silicon"
+    },
+    {
+      "from": "rust13-trios-mesh",
+      "to": "mesh-generated-code-dead"
+    },
+    {
+      "from": "mvp-architecture-doc",
+      "to": "mvp-dod-and-epics"
+    },
+    {
+      "from": "mvp-dod-and-epics",
+      "to": "playground"
+    },
+    {
+      "from": "mvp-dod-and-epics",
+      "to": "mission-bee-contracts"
+    },
+    {
+      "from": "t27-lowering-gate",
+      "to": "mission-bee-contracts"
+    },
+    {
+      "from": "swift-rings-sr",
+      "to": "mission-bee-contracts"
+    },
+    {
+      "from": "swift-rings-sr",
+      "to": "queend-linux-policy"
+    },
+    {
+      "from": "queend-linux-policy",
+      "to": "queen-core-sync-gate"
+    },
+    {
+      "from": "queend-linux-policy",
+      "to": "cloud-tick"
+    },
+    {
+      "from": "queen-lease",
+      "to": "cloud-tick"
+    },
+    {
+      "from": "agent-server-bun",
+      "to": "cloud-tick"
+    },
+    {
+      "from": "registry-and-secrets",
+      "to": "cloud-tick"
+    },
+    {
+      "from": "cloud-tick",
+      "to": "cloud-dispatch"
+    },
+    {
+      "from": "workspace-volume",
+      "to": "cloud-dispatch"
+    },
+    {
+      "from": "cloud-dispatch",
+      "to": "boundary-observer-container"
+    },
+    {
+      "from": "replay-cassette-suite",
+      "to": "boundary-observer-container"
+    },
+    {
+      "from": "swift-rings-sr",
+      "to": "replay-cassette-suite"
+    },
+    {
+      "from": "build-variant-fence",
+      "to": "replay-cassette-suite"
+    },
+    {
+      "from": "agent-server-bun",
+      "to": "bash-process-group"
+    },
+    {
+      "from": "bash-process-group",
+      "to": "bee-ceiling"
+    },
+    {
+      "from": "queen-observer-cost",
+      "to": "bee-ceiling"
+    },
+    {
+      "from": "cloud-dispatch",
+      "to": "bee-ceiling"
+    },
+    {
+      "from": "swift-rings-sr",
+      "to": "queen-skill-match"
+    },
+    {
+      "from": "swift-rings-sr",
+      "to": "salience-learner"
+    },
+    {
+      "from": "swift-rings-sr",
+      "to": "queen-observer-cost"
+    },
+    {
+      "from": "swift-rings-sr",
+      "to": "br-output-swiftui"
+    },
+    {
+      "from": "swift-rings-sr",
+      "to": "ascii-purity-law"
+    },
+    {
+      "from": "br-output-swiftui",
+      "to": "queen-dashboard"
+    },
+    {
+      "from": "queen-lease",
+      "to": "queen-dashboard"
+    },
+    {
+      "from": "br-output-swiftui",
+      "to": "t27-epic-001-sealing"
+    },
+    {
+      "from": "cloud-dispatch",
+      "to": "owner-cutover"
+    },
+    {
+      "from": "registry-and-secrets",
+      "to": "owner-cutover"
+    },
+    {
+      "from": "agent-server-bun",
+      "to": "owner-cutover"
+    },
+    {
+      "from": "build-variant-fence",
+      "to": "clade-build-prod-default"
+    },
+    {
+      "from": "rust-clade-crates",
+      "to": "clade-build-prod-default"
+    },
+    {
+      "from": "rust-clade-crates",
+      "to": "tmp-zero-gate"
+    }
+  ],
+  "conflicts": [
+    "BUILD VARIANT, two answers. build.sh:19 defaults to dev and build.sh:32 rejects 'staging'; rings/RUST-01/clade-build/src/main.rs:54 defaults to 'prod' and its resolve_variant (:330-355) has only a staging arm plus an else that writes {project_dir()}/trios.app (:347) - no dev arm at all. The Makefile invokes clade-build zero times. Resolution: build.sh is the real builder (it is what `make dev/release/run` calls); clade-build is a divergent second builder that five skills still invoke bare. Verified today.",
+    "SIMULATION ORGAN. brain-atlas SKILL.md says 'Simulation ... none - e2e is scripted, not simulated | missing'; the tree has rings/SR-01/ReplayTransport.swift:19 wired at CompositionRoot.swift:66 and QueenWorkerRunner.swift:223, 4 cassettes, and `cassettes` inside `check:`. Resolution: the organ shipped (tree wins), but the suite is currently red - 4 of 5 replays fail because a Task in main.swift never fires server.launch or queen.selftest. Both halves are true and neither map alone had them.",
+    "LEARNED SALIENCE. brain-atlas says the amygdala is 'partial - ordering only, no learned salience'; rings/SR-00/QueenSalience.swift + rings/SR-01/SalienceLearner.swift form a closed read/write loop through ChatViewModel.swift:5694, :10986, :12106. Resolution: shipped. The doc is a month stale.",
+    "MVP DEFINITION OF DONE. The roadmap's own checkboxes are 0 of 29 done; STATUS.md:11 says 2 of 29. STATUS.md admits its figure is 'a desktop re-classification against wave evidence, not a per-criterion rerun' and that no adversarial challenge has run against any Playground or Language 'done' claim. Both reported; neither picked.",
+    "BRANCH PUBLICATION OUT OF THE CONTAINER. CLOUD-MIGRATION.md:124-128 says the transfer does not exist and that QueenDelegationPolicy.unpublishableWorkRefusal therefore refuses remote delegations; the tree implements it at rings/SR-01/QueenGitExecutor.swift:405 (format-patch out, git am --3way in), wired at QueenBranchCommitter.swift:281, and canPublish at :378 is `executor.isLocal || executor.repositoryRoot != nil` so the refusal cannot fire remotely at all. Resolution: the code wins on existence, but queen-dispatch.ts:21's claim 'proven end to end on 2026-08-29' has no matching measurement anywhere - no importRemoteBranch or git-am run is recorded.",
+    "SOURCE HEADER VS SOURCE. queen-tick.ts:21-25 says 'WHAT THIS LOOP DOES NOT DO: start the bee ... the dispatch path is still driven from the app' and line 354-366 calls dispatchBee. CLOUD-MIGRATION.md carries the same stale claim at :361 and self-corrects at :850 with a measured dispatch. The document is chronological and honest; the source header is simply wrong now.",
+    "MISSION AND BEE CONTRACTS. RELEASE-BLOCKER.md:32-34 says they are 'absent - nothing in rings/, no .trinity/missions'; rings/SR-00/QueenMissionContract.swift and QueenBeeResult.swift exist with tests. Resolution: half the doc is false (the types exist), half is still true (.trinity/missions does not exist and there is no production caller - confirmed today by grep). Written and tested, unwired.",
+    "MESH SUBMODULE LAW VS PRACTICE. rings/RUST-13/trios-mesh/CLAUDE.md forbids 'writing .rs files by hand for any business logic (crypto, mesh, routing, wire format)'; src/lib.rs:3-5 excludes the 68 generated files from compilation and the four modules that ship - crypto.rs, router.rs, routing.rs, wire.rs - are exactly those four forbidden categories, hand-written.",
+    "ASCII PURITY. The ascii-lint skill, .trinity/specs/ascii-purity.md:4 and AGENTS.md:154 all assert ASCII-only source; measured today, 37 of 206 Swift files and 5 of 31 SKILL.md files violate it and no gate exists in Makefile, build.sh or any workflow. Either the law was retired without amending its spec, or the gate was never built.",
+    "T27 RING TABLE. The t27-backend skill lists rings T27-00 through T27-04; `ls -d rings/T27-*` returns two directories and `grep -rn 'T27-02'` over .trinity/, .claude/ and docs/ has one hit - the skill's own table. Also stale in the same skill: '14 of 1286 emitted functions are unimplemented!() stubs' against a measured 1300 emitted, 0 stubs.",
+    "COUNTS THAT DRIFTED. queend is called 'eleven Swift files' in four places (Makefile:1034, :1066, CLOUD-MIGRATION.md:341, queen-tick.ts:17) against 12 + 4 policy = 16. QueenSkillMatch.swift:7 and ChatSSEEndToEndTest.swift:7983 say 'Twenty-six skills'; there are 31. brain-atlas claims 23 modules and maps 19. STATUS.md:7 says 'Last measured: 2026-08-23' while its own body cites facts through 2026-08-29 - the one field it carried forward, in the file whose closing rule forbids exactly that.",
+    "GATES THAT DO NOT RUN. Three checkers exist and are invoked by nothing: `make queen-core-sync` (RED in the working tree today, and absent from `check:` and from every workflow), rings/RUST-99/tmp-zero-gate (would fail on 90 /tmp hits; `grep -c tmp-zero Makefile` = 0), and rings/RUST-13/trios-mesh/build.rs (looks for t27c at a path that does not exist and returns early in silence). This is the same shape as the t27-rings gate that 'spent months asleep'."
+  ],
+  "staleSkills": [
+    {
+      "skill": "t27-tri-pipeline",
+      "staleClaim": "Instructs `# prod\\n./build.sh` and `TRIOS_VARIANT=staging cargo run --bin clade-build`. Bare ./build.sh builds DEV (build.sh:19), build.sh:32 hard-rejects 'staging', .worktrees/staging does not exist, and clade-build defaults to prod and would overwrite the running trios.app.",
+      "shouldSay": "Rewrite around `make dev`, `make check`, `make release`. Delete every clade-build and staging reference. Highest priority in the library: this is one of only three skills QueenSkillMatch names, so a stale build recipe is on the one live routing path to a worker."
+    },
+    {
+      "skill": "doctor",
+      "staleClaim": "Steps 1 and 2a run `cargo run --bin clade-build` (defaults to prod, replaces trios.app); step 2b runs `git add -A && git commit`; clade-health reads .trinity/snapshots/, which does not exist on this machine.",
+      "shouldSay": "Use `make doctor` / `make dev` / `make check`; commit by pathspec, never `git add -A` in a repository several agents share; drop or gate the snapshot read. The model pin (claude-sonnet-4-6) is the one part still valid."
+    },
+    {
+      "skill": "ascii-lint",
+      "staleClaim": "'Ensures all trios source, build, policy, agent and skill files stay ASCII-only.'",
+      "shouldSay": "Either state the measured reality (37 of 206 Swift files and 5 of 31 SKILL.md files carry non-ASCII, and no gate exists anywhere) and build the check, or retire the law and amend .trinity/specs/ascii-purity.md:4 and AGENTS.md:154 with it. Do not leave a rule asserted in three places and measured in none."
+    },
+    {
+      "skill": "tmp-zero",
+      "staleClaim": "'Ensure trios workspace Rust rings never use /tmp for test fixtures or runtime state.'",
+      "shouldSay": "90 /tmp references live in rings/*/*/src/*.rs, mostly production consts in clade-e2e. Say that the gate exists at rings/RUST-99/tmp-zero-gate, does not exempt clade-e2e, would fail today, and is invoked by no target - then wire it into `check:` or exempt clade-e2e deliberately."
+    },
+    {
+      "skill": "brain-atlas",
+      "staleClaim": "'The two missing organs' - learned salience and deterministic simulation. Also claims 23 modules while the table maps 19.",
+      "shouldSay": "Both organs shipped: rings/SR-01/SalienceLearner.swift (wired at ChatViewModel.swift:5694/:10986/:12106) and rings/SR-01/ReplayTransport.swift with four cassettes in `check:`. Only evolution simulation is still absent. Fix the module count, and stop naming types as if they were files - QueenDelegationPolicy, NetworkRetrier, LogRotationPolicy and AuditRotationScheduler all live inside differently-named files, so filename search gives false negatives."
+    },
+    {
+      "skill": "t27-backend",
+      "staleClaim": "'14 of 1286 emitted functions (1.1%) are unimplemented!() stubs'; and a ring table listing T27-00 through T27-04.",
+      "shouldSay": "Measured today over the same 70 specs: 1300 emitted, 0 stubs - the skill's own later 'gaps measured 2026-08-28' section made the earlier paragraph stale. And only T27-00 and T27-01 exist; T27-02/03/04 appear nowhere in the tree except that table. Otherwise the best-evidenced skill in the library."
+    },
+    {
+      "skill": "clade-promote",
+      "staleClaim": "Gate 'E-value >= 5.0' read from .trinity/state/clade.json, and a 'staging -> prod' variant vocabulary.",
+      "shouldSay": "The file does not exist, so main.rs:689 answers from the placeholder default e_value 1.0 and the gate can never pass - a silent-default failure, not a red gate. And 'staging' is rejected by build.sh:32."
+    },
+    {
+      "skill": "clade-seal",
+      "staleClaim": "'variant: prod or staging (default staging)', and a body that invokes clade-build.",
+      "shouldSay": "The whole variant vocabulary predates the dev/prod/test split. Following it either fails at build.sh:32 or silently ships to trios.app. Rewrite for dev/prod/test or retire the skill."
+    },
+    {
+      "skill": "phi-loop",
+      "staleClaim": "'Agent experiments in .worktrees/staging'; clade gate reading .trinity/state/clade.json; phases 6-7 routing through clade-build/clade-seal/clade-promote.",
+      "shouldSay": "No .worktrees/staging exists (only chat-stream-smoothness, dev, prod, test) and no clade.json exists. Also decide between phi-loop and t27-phi-loop - they are the same 9-phase loop for one repo with only phase 5 differing."
+    },
+    {
+      "skill": "trios-launch",
+      "staleClaim": "`open ~/Applications/trios.app`, a Cmd+Shift+T global hotkey, `cat /tmp/trios_debug.log`, and a troubleshooting path that rebuilds with a bare `swiftc -O -o trios_app`.",
+      "shouldSay": "None of the four holds: the path does not exist, no hotkey is registered anywhere in Swift, logs are at .trinity/logs/trios-app.jsonl, and hand-building the release binary contradicts agent-safe-build outright. Delete it and point at `make run`."
+    },
+    {
+      "skill": "tri",
+      "staleClaim": "Full-mode step 8 probes http://127.0.0.1:9200/a2a/registry.",
+      "shouldSay": "That returns 404 and always will: BR-OUTPUT/ProjectPaths.swift:203 already documents that a2aPort 9200 is not served. Point the probe at /a2a/agents on 9105, which answers 200. A check that can only report DOWN is worse than no check."
+    },
+    {
+      "skill": "clade-guard",
+      "staleClaim": "A rollback story built on .trinity/snapshots/, .trinity/clades/fitness.csv and .trinity/state/clade.json; and calls port 9205 the 'Canary'.",
+      "shouldSay": "All three paths are absent on this machine (they are gitignored, so the ring has never run here) - every rollback would hit CladeGuard.swift:230 'No snapshots available'. And BuildVariantPolicy.swift:107 gives 9205 to the DEV variant, so two skills name the same port for two different things."
+    },
+    {
+      "skill": "unmeasured-cause",
+      "staleClaim": "Front-matter description: 'Carries eight instances found in trios'; the body runs through a tenth sweep.",
+      "shouldSay": "Update the count to match the body. Cheapest fix in the library, and it is otherwise one of the three genuinely current skills alongside agent-safe-build and trios-live-forensics."
+    },
+    {
+      "skill": "golden-chain-brand / golden-chain-rebrand",
+      "staleClaim": "A branding and rename plan for 'GOLDEN CHAIN' / 'GOLDEN BRIDGE' and $TRI mining on TinyTapeout silicon.",
+      "shouldSay": "Those strings appear nowhere in trios except inside these two files and .trinity/goldenchain/README.md (which is the parity-harness scratch dir, titled 'TriOS - Trinity Queen Supervisor'). 167 lines aimed at a different project - move or delete."
+    }
+  ]
+}
