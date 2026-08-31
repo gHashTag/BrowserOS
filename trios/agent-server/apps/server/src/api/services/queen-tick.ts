@@ -284,6 +284,21 @@ export function boardTask(
     branch: string | null
     at: string
     title: string
+    /**
+     * `running` while a bee holds it, `awaitingReview` once its turn ended.
+     *
+     * The distinction is the whole difference between a busy swarm and a stuck
+     * one, and it was missing: every dispatch went on the board as `running`
+     * for as long as its row survived, so three finished-and-judged tasks held
+     * three of four worker slots with nobody at the keyboard. The refusal read
+     * "4 workers already running (limit 4)" while exactly one bee existed.
+     *
+     * `awaitingReview` is the state the policy already knows how to handle: it
+     * is not counted by `canStartAnother`, it still blocks its own issue from
+     * being chosen twice, and `stillHoldsBoundary` expires its file claim after
+     * 48 hours rather than never.
+     */
+    state?: 'running' | 'awaitingReview'
   },
 ) {
   return {
@@ -292,7 +307,7 @@ export function boardTask(
     issue: { owner, repo: repoName, number: task.issue },
     title: task.title,
     worker: 'cloud-tick',
-    state: 'running',
+    state: task.state ?? 'running',
     ownedPaths: task.ownedPaths,
     virtualBranch: task.branch,
     createdAt: isoSeconds(task.at),
@@ -531,10 +546,13 @@ async function runRound(
   // is why the boundary is stored at dispatch - a task holding no paths holds
   // nothing against anyone.
   const inFlight = await pool.query(
-    `SELECT issue, branch, owned_paths, conversation_id, dispatched_at, key_index
+    `SELECT issue, branch, owned_paths, conversation_id, dispatched_at,
+            key_index, finished_at, review_state
        FROM queen_dispatch
       WHERE started = true
-        -- Still running, OR finished with work that nobody has judged.
+        -- A reaped dispatch releases its issue: its container died, so nothing
+        -- was finished and the work must be retried. Everything else stays on
+        -- the board, and the STATE below decides what that costs.
         --
         -- Releasing an issue the moment its turn ended was a loop: the bee
         -- committed, the dispatch closed, the issue was choosable again, and
@@ -546,37 +564,31 @@ async function runRound(
         --   fifth verification record for #1244 - all checks hold
         --   fourth verification record ...
         --
-        -- A reaped dispatch DOES release the issue: its container died, so
-        -- nothing was finished and the work must be retried. A finished one
-        -- holds until a verdict, exactly as awaitingReview does on the Mac.
-        AND (finished_at IS NULL OR outcome NOT LIKE 'reaped%')
+        -- coalesce, because outcome is NULL while a bee runs and
+        -- NULL NOT LIKE 'reaped%' is NULL - which excludes the row. The
+        -- previous clause escaped that only by ORing on finished_at.
+        AND coalesce(outcome, '') NOT LIKE 'reaped%'
         AND dispatched_at > now() - interval '7 days'`,
   )
   const [owner, repoName] = repo.split('/')
-  // Seconds, no fraction.
-  //
-  // Postgres hands back a JS Date and JSON.stringify writes it with
-  // milliseconds - "2026-08-29T16:13:06.821Z". Swift's `.iso8601` decoding
-  // strategy does not accept a fractional second, so `queend` refused the whole
-  // question the moment there was anything in flight to report:
-  //
-  //   codingPath: ["tasks", "Index 67"]
-  //   "Expected date string to be ISO8601-formatted."
-  //
-  // Index 67 is the first of MINE, after the registry's own sixty-seven - which
-  // is what made it obvious. The app's tasks encode without the fraction
-  // because Swift wrote them; mine have to match that, not merely be valid
-  // ISO 8601.
-  const containerTasks = inFlight.rows.map((row) =>
-    boardTask(owner, repoName, {
+  const containerTasks = inFlight.rows.map((row) => {
+    const finished = row.finished_at != null
+    return boardTask(owner, repoName, {
       conversationId: row.conversation_id,
       issue: row.issue,
       ownedPaths: row.owned_paths ?? [],
       branch: row.branch,
-      at: row.dispatched_at,
-      title: 'dispatched by the cloud tick',
-    }),
-  )
+      // A finished task's clock starts when it FINISHED, not when it was
+      // dispatched: `stillHoldsBoundary` measures the wait for a verdict from
+      // `updatedAt`, and dating it from dispatch would expire the boundary of a
+      // long task the moment its turn ended.
+      at: finished ? row.finished_at : row.dispatched_at,
+      title: finished
+        ? 'finished by the cloud tick, waiting for a verdict'
+        : 'dispatched by the cloud tick',
+      state: finished ? 'awaitingReview' : 'running',
+    })
+  })
 
   const choice = await askQueend({
     kind: 'choose',
@@ -619,7 +631,13 @@ async function runRound(
   }> = []
   let board = [...registry.rows[0].tasks, ...containerTasks]
   let current: QueendChoice | null = choice
+  // Only a bee that is still running is spending its key. A finished dispatch
+  // waiting for a verdict holds its issue and its files; it is not making
+  // requests, so withholding its key from the next bee would shrink the swarm
+  // for nothing - the same mistake as counting it as a running worker, one
+  // layer down.
   let takenKeys = inFlight.rows
+    .filter((r) => r.finished_at == null)
     .map((r) => r.key_index)
     .filter((i): i is number => typeof i === 'number')
 

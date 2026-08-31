@@ -97,3 +97,49 @@ describe('the board record the cloud tick sends to queend', () => {
     expect(record.conversationId).toBe(record.id)
   })
 })
+
+/**
+ * A finished bee is not a working bee.
+ *
+ * Every dispatch went on the board as `running` and stayed there, so three
+ * tasks that had finished, been judged and were waiting on a person held three
+ * of four worker slots indefinitely. The round refused with
+ *
+ *   "4 workers already running (limit 4)"
+ *
+ * while exactly ONE bee existed - #1176, the only row with no finished_at. The
+ * operator's question was "why is only one working"; the answer was that three
+ * of the four were finished, and nothing in the loop said so.
+ *
+ * `awaitingReview` is the state the policy already knows: not counted by
+ * `canStartAnother`, still blocking its own issue from being handed out twice,
+ * and its file claim expires after `reviewBoundaryHoldHours` rather than never.
+ */
+describe('a finished dispatch on the board', () => {
+  const made = (state?: 'running' | 'awaitingReview') =>
+    boardTask('gHashTag', 'trios', {
+      conversationId: null,
+      issue: 1244,
+      ownedPaths: ['BR-OUTPUT/QueenTabView.swift'],
+      branch: 'queen-1244',
+      at: '2026-08-31T13:48:10.523Z',
+      title: 'finished by the cloud tick, waiting for a verdict',
+      state,
+    })
+
+  it('is awaitingReview, so it stops counting as a worker', () => {
+    expect(made('awaitingReview').state).toBe('awaitingReview')
+  })
+
+  it('still holds its files, so nobody is sent to redo the work', () => {
+    expect(made('awaitingReview').ownedPaths).toEqual([
+      'BR-OUTPUT/QueenTabView.swift',
+    ])
+  })
+
+  // Omitting the state must mean a running bee: that is the caller that has not
+  // been taught about the distinction, and the safe reading is "occupied".
+  it('defaults to running when no state is given', () => {
+    expect(made().state).toBe('running')
+  })
+})

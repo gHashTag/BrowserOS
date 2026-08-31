@@ -52,6 +52,32 @@ function everyTsFile(dir: string): string[] {
  * loud in production, and one more cheap net is worth having.
  */
 function sqlBlockOffences(source: string): string[] {
+  // TWO shapes, and the gate must know both. Replacing one with the other is
+  // how a widened check silently narrows: the rewrite that finally caught the
+  // inline form dropped the assignment form, which is the shape of the outage
+  // this file was opened for.
+  const seen = new Set<string>()
+  return [...bufferedBlockOffences(source), ...inlineBlockOffences(source)]
+    .filter((hit) => {
+      const line = hit.split(':')[0]
+      if (seen.has(line)) return false
+      seen.add(line)
+      return true
+    })
+    .sort(
+      (a, b) =>
+        Number(a.match(/\d+/)?.[0] ?? 0) - Number(b.match(/\d+/)?.[0] ?? 0),
+    )
+}
+
+/**
+ * `const SQL = ` on its own line, SQL beneath, a backtick alone to close.
+ *
+ * The original shape, kept because it is the one that took the server down
+ * twice. SELECT was added to the keyword list: reads are most of what the
+ * supervisor runs and none of them looked like SQL to this.
+ */
+function bufferedBlockOffences(source: string): string[] {
   const lines = source.split('\n')
   const offences: string[] = []
   let inBlock = false
@@ -60,7 +86,7 @@ function sqlBlockOffences(source: string): string[] {
   let block: string[] = []
   lines.forEach((line, index) => {
     if (!inBlock) {
-      if (/=\s*(String\.raw)?`\s*$/.test(line)) {
+      if (/(^|[=(,])\s*(String\.raw)?`\s*$/.test(line)) {
         inBlock = true
         looksLikeSql = false
         opened = index + 1
@@ -82,13 +108,64 @@ function sqlBlockOffences(source: string): string[] {
       return
     }
     if (
-      /\b(CREATE TABLE|ALTER TABLE|INSERT INTO|CREATE INDEX|UPDATE |DELETE FROM)\b/i.test(
+      /\b(SELECT |CREATE TABLE|ALTER TABLE|INSERT INTO|CREATE INDEX|UPDATE |DELETE FROM)\b/i.test(
         line,
       )
     ) {
       looksLikeSql = true
     }
     block.push(line)
+  })
+  return offences
+}
+
+/**
+ * A query literal that opens and begins on the SAME line.
+ *
+ *   const inFlight = await pool.query(
+ *     `SELECT issue, branch, owned_paths
+ */
+function inlineBlockOffences(source: string): string[] {
+  const lines = source.split('\n')
+  const offences: string[] = []
+  let inBlock = false
+  lines.forEach((line, index) => {
+    if (!inBlock) {
+      // A query literal opens and its first keyword follows ON THE SAME LINE:
+      //
+      //   const inFlight = await pool.query(
+      //     `SELECT issue, branch, owned_paths
+      //
+      // The previous version required the opening backtick to be the last
+      // character on its line, and demanded CREATE/ALTER/INSERT to believe it
+      // was SQL at all. Almost every query the supervisor runs is a SELECT
+      // opened this way, so the scanner never entered a single one - and the
+      // gate written for this defect reported eight passes across the fifth
+      // occurrence of it. It was not reading the code it claimed to check.
+      if (
+        !/`\s*(SELECT|WITH|INSERT|UPDATE|DELETE|CREATE|ALTER)\b/i.test(line)
+      ) {
+        return
+      }
+      inBlock = true
+      // Everything after the opener on this line is block content too.
+      const rest = line.slice(line.indexOf('`') + 1)
+      if (rest.includes('`')) inBlock = false
+      return
+    }
+    if (!line.includes('`')) return
+    // The closing backtick sits at the end, before a comma or a paren:
+    //
+    //       AND dispatched_at > now() - interval '7 days'`,
+    //
+    // A backtick anywhere ELSE in the block is inside the SQL, ends the
+    // literal early, and turns the rest of the statement into JavaScript.
+    const closer = /`\s*[,);]*\s*$/.test(line)
+    const count = (line.match(/`/g) ?? []).length
+    if (!closer || count > 1) {
+      offences.push(`line ${index + 1}: ${line.trim().slice(0, 70)}`)
+    }
+    if (closer) inBlock = false
   })
   return offences
 }
