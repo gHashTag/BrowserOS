@@ -518,11 +518,25 @@ export class ChatService {
     })
   }
 
+  /**
+   * `modelKey` is a PARAMETER, not a field read back off the old session.
+   *
+   * Four call sites already passed it and the signature took four arguments,
+   * so `bun run typecheck` carried four "Expected 4 arguments, but got 5"
+   * errors while the code did the right thing at runtime - JavaScript drops the
+   * extra. Half of the fix that made a rebuilt session carry its new model
+   * landed; this is the other half.
+   *
+   * It has to be passed rather than derived: the whole reason a session is
+   * being rebuilt is that the model CHANGED, so the one on the session in hand
+   * is the stale one.
+   */
   private async rebuildSession(
     session: AgentSession,
     request: ChatRequest,
     agentConfig: ResolvedAgentConfig,
     mcpServerKey: string,
+    modelKey: string,
   ): Promise<AgentSession> {
     const previousMessages = session.agent.messages
     await session.agent.dispose()
@@ -555,7 +569,10 @@ export class ChatService {
       mcpServerKey,
       // Carry the model identity across a rebuild, otherwise the next model
       // change goes undetected because the key was lost.
-      modelKey: this.buildModelKey(agentConfig),
+      // The key the CALLER computed, not a second computation of it. Two
+      // derivations of the same value agree until one of them is edited, and
+      // this one exists precisely because the model changed mid-conversation.
+      modelKey,
       workingDir: request.userWorkingDir,
       approvalConfigKey: this.buildApprovalConfigKey(
         request.toolApprovalConfig,

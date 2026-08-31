@@ -564,9 +564,31 @@ export class TaskQueueService {
       errorMessage: row.error_message as string | undefined,
       result: row.result != null ? parseJsonb(row.result) : undefined,
       assignedBy: row.assigned_by as string | undefined,
-      metadata: row.metadata != null ? parseJsonb(row.metadata) : undefined,
+      // Narrowed here rather than by widening the field's type. `parseJsonb`
+      // returns `unknown` honestly - a jsonb column can hold a scalar or an
+      // array as easily as an object - so a row whose metadata is a string or a
+      // number becomes `undefined` instead of being asserted into a shape it
+      // does not have.
+      metadata: asRecord(
+        row.metadata != null ? parseJsonb(row.metadata) : undefined,
+      ),
     }
   }
+}
+
+/**
+ * A jsonb value only when it really is an object.
+ *
+ * `null` is an object to `typeof`, and an array is too. Both would satisfy a
+ * bare `typeof x === 'object'` check and then fail at the first property read,
+ * which is a crash one row later rather than at the boundary where the shape
+ * was wrong.
+ */
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return undefined
+  }
+  return value as Record<string, unknown>
 }
 
 function parseJsonb(value: unknown): unknown {
