@@ -52,6 +52,18 @@ struct SpecAnswer: Encodable {
     let isSpec: Bool
     let missing: [String]
     let remedy: String
+    /// What the issue says "done" looks like, in its author's words.
+    ///
+    /// Carried out with the verdict because the cloud supervisor is TypeScript
+    /// and cannot call the parser. It used to reimplement nothing at all - it
+    /// sent an empty criteria list with every task, so `QueenReviewDecision`
+    /// answered "nothing to judge it against" and escalated finished work to a
+    /// person for every single bee.
+    let criteria: [String]
+    /// Whether `criteria` came from a Success Criteria section or was stood in
+    /// for by the numbered requirements. A board that shows criteria must be
+    /// able to say which, or a fallback reads as the author's contract.
+    let criteriaSource: String
 }
 
 func emitSpecs(_ verdicts: [String: SpecAnswer]) {
@@ -317,11 +329,14 @@ case "spec":
     var verdicts: [String: SpecAnswer] = [:]
     for (key, body) in bodies {
         let q = QueenSpecQuality.judge(body: body)
+        let criteria = QueenSpecQuality.criteriaWithSource(from: body)
         verdicts[key] = SpecAnswer(
             delegatable: q.delegatable,
             isSpec: q.isSpec,
             missing: q.missing,
-            remedy: q.checks.filter { !$0.met }.map(\.remedy).joined(separator: " ")
+            remedy: q.checks.filter { !$0.met }.map(\.remedy).joined(separator: " "),
+            criteria: criteria.items,
+            criteriaSource: criteria.source
         )
     }
     emitSpecs(verdicts)

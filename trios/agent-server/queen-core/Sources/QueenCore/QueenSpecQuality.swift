@@ -160,6 +160,117 @@ public enum QueenSpecQuality {
         )
     }
 
+    /// Headings under which an issue states what "done" looks like.
+    ///
+    /// The list is long because the repository's issues span a language change
+    /// and a spec rule. `Готово, когда` is what issues written before
+    /// 2026-08-19 say; `Success Criteria` is what `issue-spec-template.md`
+    /// requires today.
+    ///
+    /// THE GAP THIS CLOSES, and it was mine. The spec rule shipped telling
+    /// authors to write `## Success Criteria`, and the extractor that reads
+    /// criteria out of an issue knew four headings, none of them that one. So a
+    /// perfectly written spec yielded ZERO criteria, `QueenReviewDecision`
+    /// answered "no acceptance criteria, nothing to judge it against", and
+    /// three finished bees escalated to the operator - who had just said the
+    /// Queen must not wait on their review. A rule and its reader, shipped a
+    /// day apart, that had never been introduced.
+    static let criteriaHeadings = [
+        "success criteria",
+        "acceptance criteria",
+        "acceptance",
+        "done when",
+        "готово, когда",
+        "готово когда",
+        "критерии успеха",
+        "критерии приёмки",
+        "критерии приемки",
+        "критерии",
+    ]
+
+    /// The acceptance criteria an issue states, in its author's words.
+    ///
+    /// Only the list under such a heading, and only until the next heading. A
+    /// bullet under "What is already done" is a claim about the past, not a
+    /// contract for this task, and treating it as one would have the Queen
+    /// accepting work for things nobody asked for.
+    ///
+    /// When there is no such section, the numbered requirements stand in.
+    /// `FR-001: the system MUST ...` is an obligation stated by the author,
+    /// which is what a criterion is - judging it met or unmet is exactly the
+    /// question it was written to answer. That is a fallback, not a synonym:
+    /// an issue with a Success Criteria section is judged on that section.
+    public static func criteria(from body: String) -> [String] {
+        criteriaWithSource(from: body).items
+    }
+
+    /// What the issue will be judged by, and where that came from.
+    public struct Criteria: Equatable, Sendable {
+        public let items: [String]
+        /// `stated` - a Success Criteria section. `requirements` - stood in for
+        /// by FR obligations. `none` - the issue says nothing judgeable.
+        public let source: String
+
+        public init(items: [String], source: String) {
+            self.items = items
+            self.source = source
+        }
+    }
+
+    /// The pair, so a caller outside this module cannot compute the source
+    /// differently from the items. Two callers deriving `source` themselves is
+    /// the same duplication that put the criteria parser in two places.
+    public static func criteriaWithSource(from body: String) -> Criteria {
+        let stated = bullets(in: body, under: criteriaHeadings)
+        if !stated.isEmpty { return Criteria(items: stated, source: "stated") }
+        let fallback = requirements(in: body)
+        if !fallback.isEmpty { return Criteria(items: fallback, source: "requirements") }
+        return Criteria(items: [], source: "none")
+    }
+
+    /// Bulleted items under any of `headings`, up to the next heading.
+    static func bullets(in body: String, under headings: [String]) -> [String] {
+        var collecting = false
+        var found: [String] = []
+        for rawLine in body.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("#") {
+                let title = line.drop(while: { $0 == "#" })
+                    .trimmingCharacters(in: .whitespaces)
+                    .lowercased()
+                collecting = headings.contains { title.contains($0) }
+                continue
+            }
+            guard collecting else { continue }
+            guard line.hasPrefix("- ") || line.hasPrefix("* ") else { continue }
+            var item = String(line.dropFirst(2))
+            // A checklist marker is state, not part of the sentence.
+            for marker in ["[x] ", "[X] ", "[ ] "] where item.hasPrefix(marker) {
+                item = String(item.dropFirst(marker.count))
+            }
+            let cleaned = item.trimmingCharacters(in: .whitespaces)
+            if !cleaned.isEmpty { found.append(cleaned) }
+        }
+        return found
+    }
+
+    /// `FR-001` style obligations, wherever they appear in the body.
+    static func requirements(in body: String) -> [String] {
+        var found: [String] = []
+        for rawLine in body.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard line.range(of: #"\bFR-\d{3}\b"#, options: .regularExpression) != nil
+            else { continue }
+            var item = line
+            for prefix in ["- ", "* "] where item.hasPrefix(prefix) {
+                item = String(item.dropFirst(prefix.count))
+            }
+            let cleaned = item.trimmingCharacters(in: .whitespaces)
+            if !cleaned.isEmpty { found.append(cleaned) }
+        }
+        return found
+    }
+
     /// One line naming what the issue still needs, for a log or a board.
     public static func shortfall(_ verdict: Verdict) -> String? {
         let missing = verdict.missing

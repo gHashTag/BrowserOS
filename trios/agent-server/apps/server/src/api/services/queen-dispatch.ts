@@ -683,6 +683,16 @@ export async function dispatchBee(
   brief: string,
   ownedPaths: string[],
   takenKeyIndices: number[] = [],
+  /**
+   * What this bee will be judged by, recorded WITH the dispatch.
+   *
+   * On the row rather than re-read from the issue at review time, because the
+   * issue can be edited while the bee works and the contract a worker was given
+   * is the one it must be judged against. Editing an issue mid-flight to add a
+   * criterion is how a bee fails for something it was never told.
+   */
+  criteria: string[] = [],
+  criteriaSource = 'none',
 ): Promise<DispatchOutcome> {
   const branch = `queen-${issue}`
 
@@ -759,6 +769,9 @@ export async function dispatchBee(
     detail,
     ownedPaths,
     conversationId,
+    chosen.keyIndex,
+    criteria,
+    criteriaSource,
   )
   logger.info('Queen dispatch', { issue, branch, started: turn.ok, detail })
   return {
@@ -780,6 +793,8 @@ async function recordDispatch(
   ownedPaths: string[],
   conversationId?: string,
   keyIndex?: number,
+  criteria: string[] = [],
+  criteriaSource = 'none',
 ): Promise<void> {
   await pool.query(
     // A dispatch that never started is already over, so it is written with its
@@ -788,11 +803,12 @@ async function recordDispatch(
     // an hour" are the two states an operator most needs to tell apart.
     `INSERT INTO queen_dispatch
        (issue, branch, started, detail, owned_paths, conversation_id,
-        dispatched_at, finished_at, outcome, key_index)
+        dispatched_at, finished_at, outcome, key_index,
+        criteria, criteria_source)
      VALUES ($1, $2, $3, $4, $5::jsonb, $6, now(),
              CASE WHEN $3 THEN NULL ELSE now() END,
              CASE WHEN $3 THEN NULL ELSE $4 END,
-             $7)
+             $7, $8::jsonb, $9)
      ON CONFLICT (issue) DO UPDATE
        SET branch = EXCLUDED.branch,
            started = EXCLUDED.started,
@@ -802,7 +818,17 @@ async function recordDispatch(
            dispatched_at = EXCLUDED.dispatched_at,
            finished_at = EXCLUDED.finished_at,
            outcome = EXCLUDED.outcome,
-           key_index = EXCLUDED.key_index`,
+           key_index = EXCLUDED.key_index,
+           criteria = EXCLUDED.criteria,
+           criteria_source = EXCLUDED.criteria_source,
+           -- A dispatch that starts again is new work, so last turn's verdict
+           -- no longer describes anything. Left in place it would exclude the
+           -- row from review for good: the reviewer only looks at dispatches
+           -- whose review_state IS NULL.
+           review_state = CASE WHEN EXCLUDED.started THEN NULL
+                               ELSE queen_dispatch.review_state END,
+           review_note = CASE WHEN EXCLUDED.started THEN NULL
+                              ELSE queen_dispatch.review_note END`,
     [
       issue,
       branch,
@@ -811,6 +837,8 @@ async function recordDispatch(
       JSON.stringify(ownedPaths),
       conversationId ?? null,
       keyIndex ?? null,
+      JSON.stringify(criteria),
+      criteriaSource,
     ],
   )
 }

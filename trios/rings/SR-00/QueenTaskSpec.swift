@@ -116,32 +116,13 @@ enum QueenTaskSpec {
     /// bullet from "What is already done" is a claim about the past, not a
     /// contract for this task, and treating it as one would have the Queen
     /// accepting work for things nobody asked for.
+    /// ONE parser, in `QueenSpecQuality`, because the cloud supervisor needs
+    /// the same answer and cannot call into this ring. Two extractors of the
+    /// same rule agree only until someone adds a heading to one of them - which
+    /// is precisely what went wrong: the spec rule added `## Success Criteria`
+    /// and this list, the only reader, was never told.
     static func criteriaFromIssue(body: String) -> [String] {
-        let headings = ["готово, когда", "acceptance criteria", "done when", "готово когда"]
-        var collecting = false
-        var found: [String] = []
-
-        for rawLine in body.components(separatedBy: .newlines) {
-            let line = rawLine.trimmingCharacters(in: .whitespaces)
-            if line.hasPrefix("#") {
-                let title = line
-                    .drop(while: { $0 == "#" })
-                    .trimmingCharacters(in: .whitespaces)
-                    .lowercased()
-                collecting = headings.contains { title.contains($0) }
-                continue
-            }
-            guard collecting else { continue }
-            guard line.hasPrefix("- ") || line.hasPrefix("* ") else { continue }
-            var item = String(line.dropFirst(2))
-            // A checklist marker is state, not part of the sentence.
-            for marker in ["[x] ", "[X] ", "[ ] "] where item.hasPrefix(marker) {
-                item = String(item.dropFirst(marker.count))
-            }
-            let cleaned = item.trimmingCharacters(in: .whitespaces)
-            if !cleaned.isEmpty { found.append(cleaned) }
-        }
-        return found
+        QueenSpecQuality.criteria(from: body)
     }
 
     /// Whether this specification can be handed to a worker at all.

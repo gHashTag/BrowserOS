@@ -25,8 +25,15 @@
  * rather than by anyone reading it - which is the whole argument for keeping a
  * comment's claim narrow enough to notice when it dies.
  *
- * What the loop still does NOT do: judge what comes back. `queend` answers a
- * `review` question now, and nothing asks it one.
+ * IT ALSO JUDGES WHAT COMES BACK. This header said "nothing asks it one" of the
+ * `review` question, and that too outlived its truth - which is the second time
+ * on this file, so the pattern is the file's and not an accident. A claim about
+ * what a module does not do decays silently; the fix is to keep such claims
+ * narrow enough that a reader notices.
+ *
+ * What the loop still does NOT do: send a bee back. The policy answers
+ * `sendBack` with the unmet criteria named, and nothing yet reopens the worker
+ * on them - such a verdict is recorded and the task waits.
  */
 
 import { spawn } from 'node:child_process'
@@ -58,6 +65,10 @@ interface SpecVerdict {
   isSpec: boolean
   missing: string[]
   remedy: string
+  /** What the issue says "done" looks like, parsed by `queend`. */
+  criteria?: string[]
+  /** `stated`, `requirements` or `none`. */
+  criteriaSource?: string
 }
 
 interface QueendChoice {
@@ -140,6 +151,31 @@ async function openIssues(
 }
 
 /**
+ * Columns the round needs, added if they are not there yet.
+ *
+ * The queen tables were created by hand against the live database, so every
+ * column added since exists only because someone ran the ALTER - and a database
+ * restored from backup, or a second environment, would have the code without
+ * the columns and fail on the first round. `IF NOT EXISTS` makes that a
+ * no-op on the machine that already has them and a repair everywhere else.
+ *
+ * Columns only. The tables themselves are not created here on purpose: a round
+ * that finds no `queen_dispatch` at all is in a situation a silent CREATE would
+ * hide, and losing the swarm's history to a typo in a schema name is exactly
+ * the kind of quiet damage worth failing loudly over.
+ */
+async function ensureQueenColumns(pool: Pool): Promise<void> {
+  await pool.query(`
+    ALTER TABLE queen_issues
+      ADD COLUMN IF NOT EXISTS criteria jsonb NOT NULL DEFAULT '[]'::jsonb,
+      ADD COLUMN IF NOT EXISTS criteria_source text NOT NULL DEFAULT 'none';
+    ALTER TABLE queen_dispatch
+      ADD COLUMN IF NOT EXISTS criteria jsonb NOT NULL DEFAULT '[]'::jsonb,
+      ADD COLUMN IF NOT EXISTS criteria_source text NOT NULL DEFAULT 'none';
+  `)
+}
+
+/**
  * Store the issue list, boundary included.
  *
  * The boundary is parsed HERE by the same rule everything else uses, rather
@@ -162,14 +198,17 @@ async function rememberIssues(
     const v = verdicts?.[String(issue.number)]
     await pool.query(
       `INSERT INTO queen_issues
-         (number, title, state, owned_paths, seen_at, is_spec, delegatable, missing)
-       VALUES ($1, $2, 'open', $3::jsonb, now(), $4, $5, $6::jsonb)
+         (number, title, state, owned_paths, seen_at, is_spec, delegatable,
+          missing, criteria, criteria_source)
+       VALUES ($1, $2, 'open', $3::jsonb, now(), $4, $5, $6::jsonb, $7::jsonb, $8)
        ON CONFLICT (number) DO UPDATE
          SET title = EXCLUDED.title, state = 'open',
              owned_paths = EXCLUDED.owned_paths, seen_at = now(),
              is_spec = EXCLUDED.is_spec,
              delegatable = EXCLUDED.delegatable,
-             missing = EXCLUDED.missing`,
+             missing = EXCLUDED.missing,
+             criteria = EXCLUDED.criteria,
+             criteria_source = EXCLUDED.criteria_source`,
       [
         issue.number,
         issue.title.slice(0, 300),
@@ -177,6 +216,8 @@ async function rememberIssues(
         v?.isSpec ?? false,
         v?.delegatable ?? boundary.length > 0,
         JSON.stringify(v?.missing ?? []),
+        JSON.stringify(v?.criteria ?? []),
+        v?.criteriaSource ?? 'none',
       ],
     )
   }
@@ -418,9 +459,17 @@ async function runRound(
   // that skipped the policy would prove the probe.
   let candidates: number[]
   let candidateBodies: Record<string, string>
+  await ensureQueenColumns(pool)
+  // Kept out of the `else` branch below: the dispatch loop reads criteria from
+  // it, and a variable scoped to the branch that fills it is a variable the
+  // dispatch cannot see.
+  let specVerdicts: Record<string, SpecVerdict> = {}
   if (candidateOverride) {
     candidates = candidateOverride
     candidateBodies = await bodiesFor(repo, candidateOverride)
+    specVerdicts =
+      (await askQueend({ kind: 'spec', candidateBodies }).catch(() => null))
+        ?.verdicts ?? {}
   } else {
     const open = await openIssues(repo)
     candidates = open.map((i) => i.number)
@@ -436,6 +485,7 @@ async function runRound(
       kind: 'spec',
       candidateBodies,
     }).catch(() => null)
+    specVerdicts = specs?.verdicts ?? {}
     await rememberIssues(pool, open, specs?.verdicts).catch((error) => {
       logger.warn('Could not store the open issue list', {
         error: error instanceof Error ? error.message : String(error),
@@ -576,12 +626,24 @@ async function runRound(
   while (current?.allowed && typeof current.chosen === 'number') {
     const issue = current.chosen
     const paths = current.chosenPaths ?? []
+    const spec = specVerdicts[String(issue)]
+    const criteria = spec?.criteria ?? []
+    const criteriaSource = spec?.criteriaSource ?? 'none'
     const dispatch = await dispatchBee(
       pool,
       issue,
-      briefFor(issue, repo, paths, candidateBodies[String(issue)] ?? ''),
+      briefFor(
+        issue,
+        repo,
+        paths,
+        candidateBodies[String(issue)] ?? '',
+        criteria,
+        criteriaSource,
+      ),
       paths,
       takenKeys,
+      criteria,
+      criteriaSource,
     )
     started.push(dispatch)
     if (!dispatch.started) break
@@ -635,11 +697,13 @@ async function runRound(
  * a patch the Mac replays - proven end to end - and the bee's job ends at a
  * commit on its own branch.
  */
-function briefFor(
+export function briefFor(
   issue: number,
   repo: string,
   ownedPaths: string[],
   issueBody: string,
+  criteria: string[] = [],
+  criteriaSource = 'none',
 ): string {
   // The boundary, in the words the Mac uses.
   //
@@ -681,12 +745,22 @@ function briefFor(
     `Your branch is queen-${issue} and this worktree is yours alone - no other`,
     'worker and no build reads or writes it while you have it.',
     '',
+    '## What you will be judged by',
+    '',
+    // Named here, in the brief, because the Queen judges the finished work
+    // against exactly this list and nothing else. She used to send an empty
+    // list with every task: the review then had zero criteria, answered "there
+    // is nothing to judge it against", and escalated finished work to a person
+    // - for every bee, every time. The criteria existed in the issue the whole
+    // while; nobody carried them the last few inches.
+    ...criteriaBlock(criteria, criteriaSource),
+    '',
     '## Verification',
     '',
-    'When you stop, answer every acceptance criterion the issue states in turn:',
-    'met, not met, or could not check. Do not summarise and do not shorten this',
-    'part - an unchecked criterion is not a pass, and saying so plainly costs',
-    'you nothing.',
+    'When you stop, answer every criterion above in turn: met, not met, or',
+    'could not check. Do not summarise and do not shorten this part - an',
+    'unchecked criterion is not a pass, and saying so plainly costs you',
+    'nothing.',
     '',
     '## Out of scope',
     '',
@@ -709,12 +783,47 @@ function briefFor(
     "- <the criterion, in the issue's own words>: met | unmet | could-not-check",
     '- <the next one>: met | unmet | could-not-check',
     '',
-    'One line per acceptance criterion the issue states. A criterion you could',
-    'not check is could-not-check, never met - claiming met for work you did',
-    'not verify is the one failure nothing downstream can catch, because the',
-    'reviewer has only your word for it. If the issue states no criteria, say',
-    'so in one line instead of inventing some.',
+    'One line per criterion in "What you will be judged by", in that order. A',
+    'criterion you could not check is could-not-check, never met - claiming met',
+    'for work you did not verify is the one failure nothing downstream can',
+    'catch, because the reviewer has only your word for it.',
   ].join('\n')
+}
+
+/**
+ * The criteria, numbered, or an instruction to state them.
+ *
+ * When the issue names none, the bee writes the criteria it will be judged by
+ * BEFORE working and repeats them in its verdict. That is weaker than the
+ * author's own words and the board says so - `criteriaSource` records where
+ * they came from. It is still far better than the alternative, which was a
+ * finished task nobody could judge and an escalation to the operator, who had
+ * asked in plain terms not to be the bottleneck.
+ */
+function criteriaBlock(criteria: string[], source: string): string[] {
+  if (criteria.length === 0) {
+    return [
+      'The issue states no acceptance criteria and none could be derived from',
+      'its requirements. So begin by writing, in this chat, the criteria you',
+      'will be judged by - drawn from what the issue asks for, each one',
+      'something a person could check. Three or four is usually right. Then do',
+      'the work, and answer those same criteria in your verdict.',
+      '',
+      "They will be recorded as YOUR criteria, not the issue author's.",
+    ]
+  }
+  const provenance =
+    source === 'requirements'
+      ? "Taken from the issue's numbered requirements, because it states no"
+      : "Taken from the issue's own acceptance criteria."
+  const tail =
+    source === 'requirements'
+      ? [
+          'Success Criteria section. An obligation is a criterion: it is met or',
+          'it is not.',
+        ]
+      : []
+  return [provenance, ...tail, '', ...criteria.map((c, i) => `${i + 1}. ${c}`)]
 }
 
 /**
@@ -765,6 +874,7 @@ export function workerSystemPrompt(
 async function reviewFinishedDispatches(pool: Pool): Promise<string[]> {
   const done = await pool.query(
     `SELECT d.issue, d.conversation_id, d.review_state,
+            d.criteria, d.criteria_source,
             (SELECT string_agg(t.text, '\n' ORDER BY t.seq)
                FROM queen_transcript t
               WHERE t.conversation_id = d.conversation_id AND t.kind = 'say')
@@ -778,17 +888,37 @@ async function reviewFinishedDispatches(pool: Pool): Promise<string[]> {
   for (const row of done.rows) {
     const said = String(row.said ?? '')
     const verdicts = parseVerdictBlock(said)
-    // No block at all is not an accept. It is a bee that did not report, which
-    // the policy sees as zero criteria judged - and it answers `wait` or
-    // `escalate` rather than passing work nobody described.
+    // The contract this bee was given, read from ITS dispatch row rather than
+    // from the issue as it stands now - an issue edited mid-flight would
+    // otherwise judge a worker against a criterion it was never told.
+    //
+    // `totalCriteria` was `verdicts.length` and that made the check circular: a
+    // bee that reported nothing was judged against nothing, so the policy saw
+    // zero criteria and escalated to a person. Three finished bees went that
+    // way on 2026-08-31 with the operator having said in plain terms that the
+    // Queen must not wait on their review.
+    const promised = Array.isArray(row.criteria)
+      ? (row.criteria as string[])
+      : []
+    // A bee that wrote MORE lines than it was given is judged on what it wrote:
+    // that is the case where the Queen supplied none and the bee stated its
+    // own, which the brief asks for.
+    const totalCriteria = Math.max(promised.length, verdicts.length)
     const answer = await askQueend({
       kind: 'review',
       verdicts: verdicts.map((v) => ({ criterion: v.criterion, met: v.met })),
-      totalCriteria: verdicts.length,
+      totalCriteria,
       committedFiles: await committedFileCount(row.issue as number),
       priorSendBacks: 0,
     }).catch(() => null)
     const state = String(answer?.verdict ?? 'wait')
+    logger.info('Queen reviewed her own work', {
+      issue: row.issue,
+      verdict: state,
+      criteria: totalCriteria,
+      judged: verdicts.length,
+      source: row.criteria_source ?? 'none',
+    })
     await pool.query(
       `UPDATE queen_dispatch
           SET review_state = $2, review_note = $3, reviewed_at = now()
