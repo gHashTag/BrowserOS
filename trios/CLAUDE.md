@@ -70,6 +70,11 @@ When operating as the Trinity Agent (Queen), follow this 6-phase loop:
 5. `[AGENTS.md](AGENTS.md)` — 27-agent alphabet and coordination rules.
 6. `[.claude/agents/t27-queen.md](.claude/agents/t27-queen.md)` — T27 Queen AEL v2.0 orchestration.
 7. `[.trinity/experience.md](.trinity/experience.md)` — prior learnings and mistakes.
+8. `[docs/architecture/Queen_T27_MVP_Architecture.md](docs/architecture/Queen_T27_MVP_Architecture.md)`
+   — the MVP architecture for Queen + T27: the executive decision, the ten named
+   Queen gaps, the mission contract and the Bee result contract. It lived only
+   in `~/Downloads` until 2026-09-01 and so was absent from every session that
+   planned against it.
    (`.trinity/state/session_summary.md` was listed here and does not exist;
    the experience files and `git log` are what record what was built last.)
 

@@ -5,6 +5,35 @@ description: Move trios logic out of Swift into T27 rings that generate Rust, Zi
 
 # T27 backend — the trunk and its rings
 
+## Read this first: the architecture document is IN THE REPOSITORY now
+
+`docs/architecture/Queen_T27_MVP_Architecture.md` — 3261 lines, the operator's
+own MVP architecture for Queen + T27.
+
+It lived only in `~/Downloads` until 2026-09-01 and was therefore invisible to
+every session: `.trinity/dashboard/roadmap.json` even recorded the problem in
+its own source note ("Extracted from an unversioned file in ~/Downloads"), and
+work went on being planned without it. A document that cannot be read from the
+project is a document that does not exist for the project.
+
+Three things in it that contradict what was being assumed:
+
+1. **The proven MVP path is Zig/C plus Verilog.** Rust is named a
+   "high-priority extension", not the first target. TypeScript is explicitly
+   behind a capability contract and "should not be advertised as
+   production-ready until it passes the same conformance gates". The ring table
+   below says Rust for the server; section 0 of the architecture is narrower,
+   and it is the later document.
+2. **Ten named Queen gaps** (section 2.2.7). Gap 2: "Worker completion can
+   still be conversational rather than artifact-contract based" - which is
+   exactly what the cloud supervisor does today, a markdown `## VERDICT` block.
+3. **The mission contract** (section 11.1) and the **Bee result contract**
+   (11.3) are specified as structured documents - `source_of_truth.spec`,
+   `required_backends`, `invariants`, `acceptance`, `prohibited`; and
+   `base_commit`, `result_commit`, `changed_specs`, `generated_artifacts`,
+   `evidence_manifest`. Neither exists in code.
+
+
 ## The law
 
 **Everything is written in T27 except a minimal Rust seed.**
