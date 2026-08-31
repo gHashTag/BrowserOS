@@ -135,6 +135,7 @@ const PAGE = String.raw`<!doctype html>
 
   <footer>
     <span>&#966;<sup>2</sup> + 1/&#966;<sup>2</sup> = 3 &nbsp; <span class="phi">TRINITY</span></span>
+    <span><a href="/queen/tree" style="color:var(--accent);text-decoration:none">the technology tree &#8594;</a></span>
     <span id="stamp">—</span>
   </footer>
 </div>

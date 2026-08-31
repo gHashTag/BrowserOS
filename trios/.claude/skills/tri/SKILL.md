@@ -35,7 +35,11 @@ Complete diagnostic via MCP:
 5. Agent Health: queen-browseros.md check
 6. Skill Health: Count loaded skills
 7. Memory: .trinity/experience.md last entry
-8. A2A Network: curl http://127.0.0.1:9200/a2a/registry
+8. A2A Network: curl http://127.0.0.1:9105/health
+   NOT port 9200. `BR-OUTPUT/ProjectPaths.swift:203` says it in the source:
+   "a2aPort (9200) is not currently served, so the Agent status must probe the
+   BrowserOS health endpoint on mcpPort". This step probed 9200 and read its
+   404 as a finding for as long as it has existed. (Corrected 2026-08-31.)
 
 ## Audit Mode
 

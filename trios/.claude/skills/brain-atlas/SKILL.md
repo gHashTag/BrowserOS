@@ -25,7 +25,7 @@ exactly the name for what was absent.
 | Basal ganglia | Action selection, prevents duplicate work | `QueenDelegationRegistry` one-live-task-per-issue, `conflictingTasks` | present |
 | Reticular formation | Broadcast alerting, event bus | `TriosLogBus` + `TriosOTLPExporter` | present |
 | Locus coeruleus | Arousal, exponential backoff | `NetworkRetrier`, provider circuit breaker | present |
-| Amygdala | Emotional salience, prioritises urgent | `QueenDelegationPolicy.reviewQueue` attention-first ordering | partial - ordering only, no learned salience |
+| Amygdala | Emotional salience, prioritises urgent | `QueenSalience` + `rings/SR-01/SalienceLearner.swift`, wired in ChatViewModel | **shipped** - weights are learned from real outcomes, not only ordered (corrected 2026-08-31; this row said "no learned salience" after the learner had landed) |
 | Hippocampus (persistence) | Memory, JSONL replay | `.trinity/logs/trios-app.jsonl`, `MemoryStore` | present |
 | Hippocampus (health history) | Health trend snapshots | `ModelReliabilityService` EMA scorecard | present |
 | Cerebellum (learning) | Motor learning, failure prediction | `ModelReliabilityService` + `PredictiveWarmup` | partial - predicts model health, not task outcome |
@@ -39,7 +39,7 @@ exactly the name for what was absent.
 | Alerts | Critical notification | `SystemNoticeKind` severity + observer concerns | present |
 | State recovery | Persistence across restart | `SessionRecoverySnapshotFactory` | present |
 | Evolution simulation | Deterministic evolution scenarios | **none** | missing |
-| Simulation | Deterministic replay for testing | **none** - e2e is scripted, not simulated | missing |
+| Simulation | Deterministic replay for testing | `rings/SR-01/ReplayTransport.swift`, wired at `CompositionRoot.swift:66`; SSE cassettes under `tests/cassettes/` | **shipped** - a recorded stream replaces the model (corrected 2026-08-31; this row said **none**) |
 
 ## The two missing organs
 

@@ -1,9 +1,19 @@
 ---
 name: unmeasured-cause
-description: Find and fix the defect where a log line, error message or status summary names a cause nobody measured. Use when debugging a symptom whose message has never changed, when a report reads more reassuring than the system's actual state, before trusting any diagnostic string, and when writing a new warn/error/refusal message. Carries eight instances found in trios, the tell that identifies them, and the repair recipe.
+description: Find and fix the defect where a log line, error message or status summary names a cause nobody measured. Use when debugging a symptom whose message has never changed, when a report reads more reassuring than the system's actual state, before trusting any diagnostic string, and when writing a new warn/error/refusal message. Carries ten sweeps of instances found in trios, the tell that identifies them, and the repair recipe.
 ---
 
 # The unmeasured cause
+
+## A note this skill owes itself
+
+Its own description said "eight instances" while the body ran to a **tenth
+sweep**. A number in a front matter is exactly the kind of claim this skill is
+about: written once from a real count, never re-measured, and read afterwards as
+a fact. Corrected 2026-08-31 by counting the headings.
+
+Whoever adds an eleventh sweep: the count lives in two places and the file will
+not tell you when they part.
 
 ## The defect
 
