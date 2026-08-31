@@ -108,11 +108,34 @@ public enum QueenReviewDecision {
         return lines.joined(separator: "\n")
     }
 
+    /// The name of the pass being asked for. `n` is 1-based: 1 is the second
+    /// pass, because a first pass is never something you return work FOR.
+    ///
+    /// The default arm used to emit "\(n + 1)th" for everything else, which is
+    /// right from 3 up and nonsense at the bottom: a caller passing 0 - the raw
+    /// send-back count rather than the count plus one - got "Returning this for
+    /// a 1th pass", in a sentence the Queen says to a worker. Measured when the
+    /// container's new review path made exactly that mistake.
+    ///
+    /// A wrong argument is now a wrong-but-sane word rather than a broken one.
+    /// The suffix is chosen properly too, so an eleventh pass does not become
+    /// "11st" the day somebody's task gets that far.
     private static func ordinal(_ n: Int) -> String {
         switch n {
-        case 1: return "second"
+        case ...1: return "second"
         case 2: return "third"
-        default: return "\(n + 1)th"
+        case 3: return "fourth"
+        default:
+            let value = n + 1
+            let suffix: String
+            switch (value % 10, value % 100) {
+            case (1, 11), (2, 12), (3, 13): suffix = "th"
+            case (1, _): suffix = "st"
+            case (2, _): suffix = "nd"
+            case (3, _): suffix = "rd"
+            default: suffix = "th"
+            }
+            return "\(value)\(suffix)"
         }
     }
 }

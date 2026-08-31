@@ -38,6 +38,18 @@ struct Question: Decodable {
     /// container and the app read a boundary section by the same rule instead
     /// of by two that agree until one is edited.
     let candidateBodies: [String: String]?
+    /// For `review`: one entry per acceptance criterion the bee answered, and
+    /// the counts the policy needs to tell "not finished" from "finished
+    /// badly".
+    let verdicts: [Verdict]?
+    let totalCriteria: Int?
+    let committedFiles: Int?
+    let priorSendBacks: Int?
+}
+
+struct Verdict: Decodable {
+    let criterion: String
+    let met: Bool
 }
 
 struct Answer: Encodable {
@@ -62,12 +74,18 @@ struct Answer: Encodable {
     /// anyone. Recomputing this in TypeScript would be a second parser, which
     /// is the defect this whole file exists to avoid.
     let chosenPaths: [String]?
+    /// For `review`: accept, sendBack, escalate or wait, with the unmet
+    /// criteria when there are any. A verdict without its reasons is a verdict
+    /// nobody can argue with, which is the opposite of what a review is for.
+    let verdict: String?
+    let unmet: [String]?
+    let note: String?
     let skipped: [String]?
     let error: String?
 }
 
 func fail(_ message: String) -> Never {
-    let out = Answer(kind: "error", strays: nil, refusal: nil, allowed: nil, chosen: nil, chosenPaths: nil, skipped: nil, error: message)
+    let out = Answer(kind: "error", strays: nil, refusal: nil, allowed: nil, chosen: nil, chosenPaths: nil, verdict: nil, unmet: nil, note: nil, skipped: nil, error: message)
     if let data = try? JSONEncoder().encode(out) {
         FileHandle.standardOutput.write(data)
     }
@@ -109,7 +127,7 @@ case "boundary":
     let strays = QueenBoundaryPaths.strays(
         among: writes, ownedPaths: owned, root: question.root ?? "/workspace/BrowserOS"
     )
-    emit(Answer(kind: "boundary", strays: strays, refusal: nil, allowed: strays.isEmpty, chosen: nil, chosenPaths: nil, skipped: nil, error: nil))
+    emit(Answer(kind: "boundary", strays: strays, refusal: nil, allowed: strays.isEmpty, chosen: nil, chosenPaths: nil, verdict: nil, unmet: nil, note: nil, skipped: nil, error: nil))
 
 case "retry":
     // Whether an issue is worth another bee, and why not when it is not. The
@@ -123,9 +141,9 @@ case "retry":
     }
     switch QueenRetryPolicy.decision(priorAttempts: kinds) {
     case .escalate(let reason):
-        emit(Answer(kind: "retry", strays: nil, refusal: reason, allowed: false, chosen: nil, chosenPaths: nil, skipped: nil, error: nil))
+        emit(Answer(kind: "retry", strays: nil, refusal: reason, allowed: false, chosen: nil, chosenPaths: nil, verdict: nil, unmet: nil, note: nil, skipped: nil, error: nil))
     default:
-        emit(Answer(kind: "retry", strays: nil, refusal: nil, allowed: true, chosen: nil, chosenPaths: nil, skipped: nil, error: nil))
+        emit(Answer(kind: "retry", strays: nil, refusal: nil, allowed: true, chosen: nil, chosenPaths: nil, verdict: nil, unmet: nil, note: nil, skipped: nil, error: nil))
     }
 
 case "choose":
@@ -142,7 +160,7 @@ case "choose":
         emit(Answer(kind: "choose", strays: nil,
                     refusal: "\(running) workers already running "
                         + "(limit \(QueenDelegationPolicy.maximumConcurrentWorkers))",
-                    allowed: false, chosen: nil, chosenPaths: nil, skipped: nil, error: nil))
+                    allowed: false, chosen: nil, chosenPaths: nil, verdict: nil, unmet: nil, note: nil, skipped: nil, error: nil))
         exit(0)
     }
     var skipped: [String] = []
@@ -201,7 +219,53 @@ case "choose":
                 refusal: pick == nil ? "nothing to choose" : nil,
                 allowed: pick != nil, chosen: pick,
                 chosenPaths: pick == nil ? nil : pickPaths,
+                verdict: nil, unmet: nil, note: nil,
                 skipped: skipped, error: nil))
+
+case "review":
+    // The verdict, made where the work is.
+    //
+    // `QueenReviewDecision` has compiled for Linux since the module split and
+    // was reachable by nothing: `queend` exposed four decisions and this was
+    // not one of them, so the container could start a bee and had no way to
+    // judge what came back. A supervisor that can only dispatch is half a
+    // supervisor, and the missing half was already in the binary.
+    guard let verdicts = question.verdicts, let total = question.totalCriteria else {
+        fail("review needs verdicts and totalCriteria")
+    }
+    let decision = QueenReviewDecision.decide(
+        verdicts: verdicts.map { (criterion: $0.criterion, met: $0.met) },
+        totalCriteria: total,
+        committedFiles: question.committedFiles,
+        priorSendBacks: question.priorSendBacks ?? 0
+    )
+    switch decision {
+    case .accept:
+        emit(Answer(kind: "review", strays: nil, refusal: nil, allowed: true,
+                    chosen: nil, chosenPaths: nil, verdict: "accept",
+                    unmet: nil, note: nil, skipped: nil, error: nil))
+    case .sendBack(let unmet):
+        emit(Answer(kind: "review", strays: nil, refusal: nil, allowed: false,
+                    chosen: nil, chosenPaths: nil, verdict: "sendBack",
+                    unmet: unmet,
+                    // +1, the same as the Mac's call site: `attempt` is the
+                    // number of the pass being ASKED FOR, so a task with zero
+                    // prior send-backs is being returned for its second pass.
+                    // Passing the raw count produced "Returning this for a 1th
+                    // pass" - which is how this was noticed.
+                    note: QueenReviewDecision.sendBackNote(
+                        unmet: unmet, attempt: (question.priorSendBacks ?? 0) + 1
+                    ),
+                    skipped: nil, error: nil))
+    case .escalate(let reason):
+        emit(Answer(kind: "review", strays: nil, refusal: reason, allowed: false,
+                    chosen: nil, chosenPaths: nil, verdict: "escalate",
+                    unmet: nil, note: reason, skipped: nil, error: nil))
+    case .wait(let reason):
+        emit(Answer(kind: "review", strays: nil, refusal: reason, allowed: false,
+                    chosen: nil, chosenPaths: nil, verdict: "wait",
+                    unmet: nil, note: reason, skipped: nil, error: nil))
+    }
 
 case "language":
     // L3: everything written here is English. Judged on the rewrite rather
@@ -215,7 +279,7 @@ case "language":
     let refusal = QueenLanguagePolicy.rewriteRefusal(
         path: path, before: before, after: after
     )
-    emit(Answer(kind: "language", strays: nil, refusal: refusal, allowed: refusal == nil, chosen: nil, chosenPaths: nil, skipped: nil, error: nil))
+    emit(Answer(kind: "language", strays: nil, refusal: refusal, allowed: refusal == nil, chosen: nil, chosenPaths: nil, verdict: nil, unmet: nil, note: nil, skipped: nil, error: nil))
 
 default:
     fail("unknown question kind: \(question.kind)")
