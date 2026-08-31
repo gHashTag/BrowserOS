@@ -52,8 +52,13 @@ interface Tree {
 function candidatePaths(): string[] {
   const workspace = process.env.WORKSPACE_DIR || '/workspace'
   return [
+    // The container: the repository is cloned into the workspace volume.
     `${workspace}/BrowserOS/trios/.trinity/dashboard/tech-tree.json`,
-    `${process.cwd()}/../../.trinity/dashboard/tech-tree.json`,
+    // A laptop: the server runs from `trios/agent-server`, so the project root
+    // is ONE level up, not two. The first version had `../../` and reached
+    // `BrowserOS/.trinity`, which does not exist - the page would have rendered
+    // "no tree found" on the very machine the file was written on.
+    `${process.cwd()}/../.trinity/dashboard/tech-tree.json`,
     `${process.cwd()}/.trinity/dashboard/tech-tree.json`,
   ]
 }
@@ -142,7 +147,7 @@ function render(tree: Tree): string {
   return `<!doctype html>
 <html lang="en"><head>
 <meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>trios — technology tree</title>
+<title>trios &#8212; technology tree</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -219,7 +224,7 @@ function render(tree: Tree): string {
  ${layers}
  <section class="layer">
    <div class="layer-head"><h2>conflicts</h2>
-     <span class="blurb">two sources, two answers — neither picked for you</span>
+     <span class="blurb">two sources, two answers &#8212; neither picked for you</span>
      <span class="count">${tree.conflicts.length}</span></div>
    <ol>${conflicts}</ol>
  </section>
@@ -232,7 +237,7 @@ function render(tree: Tree): string {
  </section>
  <footer>
    <span>&#966;<sup>2</sup> + 1/&#966;<sup>2</sup> = 3 &nbsp; <span class="phi">TRINITY</span></span>
-   <span><a href="/queen/dashboard">the swarm &#8594;</a></span>
+   <span><a href="/queen/kanban">the board &#8594;</a> &nbsp; <a href="/queen/dashboard">the swarm &#8594;</a></span>
  </footer>
 </div></body></html>`
 }

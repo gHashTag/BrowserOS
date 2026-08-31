@@ -40,6 +40,7 @@ import { createOAuthRoutes } from './routes/oauth'
 import { createOpenClawRoutes } from './routes/openclaw'
 import { createProviderRoutes } from './routes/provider'
 import { createQueenDashboardRoute } from './routes/queen-dashboard'
+import { createQueenKanbanRoute } from './routes/queen-kanban'
 import { createQueenLeaseRoute } from './routes/queen-lease'
 import { createQueenRegistryRoute } from './routes/queen-registry'
 import { createQueenRehearsalRoute } from './routes/queen-rehearsal'
@@ -297,6 +298,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     // Also shell-only: it renders a generated file that is already in the
     // repository, so there is nothing here a reader could not get from git.
     .route('/queen/tree', createQueenTreeRoute())
+    .route('/queen/kanban', createQueenKanbanRoute())
     .route('/queen/lease', queenLeaseRoutes)
     .route('/queen/rehearsal', queenRehearsalRoutes)
     .use('/shutdown/*', requireTrustedAppOrigin())

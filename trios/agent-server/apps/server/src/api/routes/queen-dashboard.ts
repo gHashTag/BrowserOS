@@ -31,12 +31,12 @@
 
 import { Hono } from 'hono'
 
-const PAGE = String.raw`<!doctype html>
+const PAGE = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Queen — trios swarm</title>
+<title>Queen &#8212; trios swarm</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -111,22 +111,22 @@ const PAGE = String.raw`<!doctype html>
   <div class="auth" id="auth">
     <input type="password" id="token" placeholder="deployment token" size="34" autocomplete="off" />
     <button id="go">connect</button>
-    <span class="sub">stays in this tab only — never in the URL</span>
+    <span class="sub">stays in this tab only &#8212; never in the URL</span>
   </div>
   <div class="err" id="err"></div>
 
   <div id="app" hidden>
     <div class="grid">
-      <div class="card"><div class="k">lease</div><div class="v small" id="lease">—</div></div>
-      <div class="card"><div class="k">last round</div><div class="v small" id="tick">—</div></div>
-      <div class="card"><div class="k">decision</div><div class="v small" id="decision">—</div></div>
-      <div class="card"><div class="k">bees in flight</div><div class="v" id="inflight">—</div></div>
+      <div class="card"><div class="k">lease</div><div class="v small" id="lease">&#8212;</div></div>
+      <div class="card"><div class="k">last round</div><div class="v small" id="tick">&#8212;</div></div>
+      <div class="card"><div class="k">decision</div><div class="v small" id="decision">&#8212;</div></div>
+      <div class="card"><div class="k">bees in flight</div><div class="v" id="inflight">&#8212;</div></div>
     </div>
 
     <h2>dispatches</h2>
     <table>
       <thead><tr><th>issue</th><th>branch</th><th>state</th><th>detail</th></tr></thead>
-      <tbody id="rows"><tr><td colspan="4" class="off">—</td></tr></tbody>
+      <tbody id="rows"><tr><td colspan="4" class="off">&#8212;</td></tr></tbody>
     </table>
 
     <h2>what binds the swarm</h2>
@@ -135,8 +135,8 @@ const PAGE = String.raw`<!doctype html>
 
   <footer>
     <span>&#966;<sup>2</sup> + 1/&#966;<sup>2</sup> = 3 &nbsp; <span class="phi">TRINITY</span></span>
-    <span><a href="/queen/tree" style="color:var(--accent);text-decoration:none">the technology tree &#8594;</a></span>
-    <span id="stamp">—</span>
+    <span><a href="/queen/kanban" style="color:var(--accent);text-decoration:none">the board &#8594;</a> &nbsp; <a href="/queen/tree" style="color:var(--accent);text-decoration:none">technology tree &#8594;</a></span>
+    <span id="stamp">&#8212;</span>
   </footer>
 </div>
 
@@ -152,7 +152,7 @@ const PAGE = String.raw`<!doctype html>
     })
   }
   function ago(iso) {
-    if (!iso) return '—'
+    if (!iso) return '&#8212;'
     var s = Math.round((Date.now() - new Date(iso).getTime()) / 1000)
     if (s < 0) return 'in ' + (-s) + 's'
     if (s < 90) return s + 's ago'
@@ -178,7 +178,7 @@ const PAGE = String.raw`<!doctype html>
 
     var dec = t && t.decision ? t.decision : null
     $('decision').innerHTML = !dec
-      ? '<span class="off">—</span>'
+      ? '<span class="off">&#8212;</span>'
       : dec.chosen
         ? '<span class="ok">#' + esc(dec.chosen) + '</span>'
         : '<span class="off">' + esc(dec.refusal || 'nothing') + '</span>'

@@ -99,7 +99,7 @@ function tickIntervalSeconds(): number {
  */
 async function openIssues(
   repo: string,
-): Promise<Array<{ number: number; body: string }>> {
+): Promise<Array<{ number: number; body: string; title: string }>> {
   const response = await fetch(
     `https://api.github.com/repos/${repo}/issues?state=open&per_page=50`,
     { headers: { Accept: 'application/vnd.github+json' } },
@@ -107,6 +107,7 @@ async function openIssues(
   if (!response.ok) throw new Error(`GitHub returned ${response.status}`)
   const issues = (await response.json()) as Array<{
     number: number
+    title?: string
     body?: string | null
     pull_request?: unknown
   }>
@@ -118,7 +119,79 @@ async function openIssues(
   // anonymous rate limit that is 60 an hour.
   return issues
     .filter((i) => !i.pull_request)
-    .map((i) => ({ number: i.number, body: i.body ?? '' }))
+    .map((i) => ({
+      number: i.number,
+      body: i.body ?? '',
+      title: i.title ?? `#${i.number}`,
+    }))
+}
+
+/**
+ * Store the issue list, boundary included.
+ *
+ * The boundary is parsed HERE by the same rule everything else uses, rather
+ * than re-derived in the page. A board that computed its own idea of which
+ * files an issue claims would be a second parser, and the two would agree until
+ * one was edited.
+ *
+ * Issues that have closed since the last round are dropped, so the board does
+ * not accumulate work nobody can do. Written in one statement per issue rather
+ * than a bulk upsert because the list is tens of rows, once every half hour.
+ */
+async function rememberIssues(
+  pool: Pool,
+  issues: Array<{ number: number; body: string; title: string }>,
+): Promise<void> {
+  if (issues.length === 0) return
+  for (const issue of issues) {
+    const boundary = boundaryPathsOf(issue.body)
+    await pool.query(
+      `INSERT INTO queen_issues (number, title, state, owned_paths, seen_at)
+       VALUES ($1, $2, 'open', $3::jsonb, now())
+       ON CONFLICT (number) DO UPDATE
+         SET title = EXCLUDED.title, state = 'open',
+             owned_paths = EXCLUDED.owned_paths, seen_at = now()`,
+      [issue.number, issue.title.slice(0, 300), JSON.stringify(boundary)],
+    )
+  }
+  await pool.query(`DELETE FROM queen_issues WHERE number <> ALL($1::int[])`, [
+    issues.map((i) => i.number),
+  ])
+}
+
+/**
+ * The declared boundary of one issue body.
+ *
+ * A deliberate second implementation of a rule `QueenIssueBoundary` owns in
+ * Swift, and the only one in this file - it exists so the board can be drawn
+ * without spawning `queend` per issue. Kept to the same two headings and the
+ * same "no section means nil, not empty" distinction; if the Swift rule grows a
+ * case, this must follow it or the board will disagree with the Queen about
+ * what an issue claims.
+ */
+function boundaryPathsOf(body: string): string[] {
+  const lines = body.split('\n')
+  let inside = false
+  const paths: string[] = []
+  for (const raw of lines) {
+    const line = raw.trim()
+    if (line.startsWith('## ')) {
+      if (inside) break
+      inside = line.startsWith('## Boundary') || line.startsWith('## Границы')
+      continue
+    }
+    if (!inside || line.length === 0) continue
+    for (const token of line.split(/\s+/)) {
+      const cleaned = token
+        .replace(/^[`"'(]+/, '')
+        .replace(/[`"'.,;:!?)]+$/, '')
+      if (cleaned.includes('/') || /\.\w{1,10}$/.test(cleaned)) {
+        paths.push(cleaned)
+        break
+      }
+    }
+  }
+  return paths
 }
 
 /** One body per candidate, keyed as queend expects. */
@@ -258,6 +331,14 @@ async function runRound(
     candidateBodies = Object.fromEntries(
       open.map((i) => [String(i.number), i.body]),
     )
+    // Keep what GitHub showed us. The round reads this list anyway, and a board
+    // that had to fetch it per page view would burn the anonymous rate limit
+    // (60/hour) on being looked at.
+    await rememberIssues(pool, open).catch((error) => {
+      logger.warn('Could not store the open issue list', {
+        error: error instanceof Error ? error.message : String(error),
+      })
+    })
   }
   // Reap before reading the board, not after.
   //

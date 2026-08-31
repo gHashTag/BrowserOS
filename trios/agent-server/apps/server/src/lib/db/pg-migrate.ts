@@ -104,6 +104,18 @@ CREATE TABLE IF NOT EXISTS queen_lease (
   fence bigint NOT NULL DEFAULT 1
 );
 
+-- The open issues as GitHub last showed them, so a board can be drawn without
+-- spending the anonymous rate limit (60/hour) on every page load. The tick
+-- already fetches this list each round; storing it costs nothing and turns a
+-- transient read into something a dashboard can render.
+CREATE TABLE IF NOT EXISTS queen_issues (
+  number int PRIMARY KEY,
+  title text NOT NULL,
+  state text NOT NULL,
+  owned_paths jsonb NOT NULL DEFAULT '[]'::jsonb,
+  seen_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS queen_dispatch (
   issue int PRIMARY KEY,
   branch text NOT NULL,
