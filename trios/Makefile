@@ -167,11 +167,12 @@ help:
 # as a mystery and used to justify a slack ceiling. Cutting at the end of the
 # app build removes the guesswork.
 #
-# The count was 5 when the gate went in and is 4 now: the discarded runProcess
-# result in branch creation became the failure reason the user sees. The four
-# that remain are deprecated Text concatenation in RichTextRenderer, and
-# replacing them means rebuilding inline markdown on AttributedString - visible
-# to the user, and not something to change without looking at the screen.
+# The count was 5 when the gate went in and 4 for a long time after: the
+# discarded runProcess result in branch creation became the failure reason the
+# user sees. Those four were the deprecated Text concatenations in
+# RichTextRenderer, whose removal was the AttributedString rewrite of
+# styledText - see WARNING_CEILING below for how that debt was tracked and
+# then paid.
 #
 # Uses /usr/bin/grep deliberately: this shell has grep shadowed by a function.
 #
@@ -251,22 +252,18 @@ help:
 # slow is a check nobody runs, which is how this gate rotted the first time. See
 # WARN_FULL_ROOT below for what replaced it; the target still prints its own
 # [warnings] timing line, so the figure stays honest either way.
-# WHY FOUR, ASKED HONESTLY. This number is a READING, not a requirement. It is
-# exactly the count of `'+' was deprecated in macOS 26.0` warnings in
-# BR-OUTPUT/RichTextRenderer.swift lines 73/75/77/79, and it was set to that
-# count. The requirement is zero. The same shape sat in XCTEST_ERROR_CEILING for
-# months at 2, where 2 was the number of errors a broken source list happened to
-# produce; asking "why is it green at this number" is what found it.
+# Zero is the requirement, and this ceiling states it. The value was 4 for as
+# long as BR-OUTPUT/RichTextRenderer.swift concatenated Text values with the
+# deprecated +; the AttributedString rewrite of styledText removed those four
+# concatenations, and the count is genuinely 0 (verified by touching the file
+# and recompiling, not from cache).
 #
-# It is not lowered to zero today because the fix is not a one-liner: the four
-# calls concatenate Text values that carry DIFFERENT styling (bold, italic,
-# monospaced), so the modern replacement is an AttributedString rewrite of
-# styledText, not a substitution. That changes rendering, and rendering is not
-# verifiable from a build log. Tracked rather than pretended away.
-# Zero, and derived from the requirement rather than from a reading. It was 4
-# for as long as BR-OUTPUT/RichTextRenderer.swift concatenated Text values with
-# the deprecated +; that rewrite landed on AttributedString and the count is
-# genuinely 0 (verified by touching the file and recompiling, not from cache).
+# The 4 was a reading - exactly the `'+' was deprecated in macOS 26.0` count -
+# and it sat here as a named debt, not a requirement, because the fix was an
+# AttributedString rewrite that changes rendering, and rendering is not
+# verifiable from a build log. The same shape sat in XCTEST_ERROR_CEILING for
+# months at 2, where 2 was the number of errors a broken source list happened
+# to produce; asking "why is it green at this number" is what found it.
 WARNING_CEILING := 0
 
 # Where the per-file warning cache lives. Inside the dev object directory on

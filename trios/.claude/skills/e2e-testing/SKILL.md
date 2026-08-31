@@ -792,14 +792,16 @@ now **0**, and that number comes from a requirement — a suite that compiles �
 so any rise is a regression rather than a new normal. Driven: one planted type
 error takes it red.
 
-The same question asked of `WARNING_CEILING` gave a different answer, and the
-difference is worth keeping. It is 4, which is exactly the four deprecated
-`Text` concatenations in one file — a reading. But the fix is an
-`AttributedString` rewrite that changes rendering, and rendering cannot be
-verified from a build log. So the number stays and **the comment now says it is
-a reading with a named debt**, with the issue linked. Correcting the claim is a
-real repair; retuning a number you cannot justify is the same defect facing the
-other way.
+The same question asked of `WARNING_CEILING` walked the same road, one ceiling
+later. It was 4 - a reading, exactly the four deprecated `Text` concatenations
+in one file - and it stayed there named as a debt rather than passed off as a
+requirement, because the fix was an `AttributedString` rewrite that changes
+rendering, and rendering cannot be verified from a build log. When that rewrite
+landed and removed the four concatenations, the ceiling came down to **0**, and
+that number comes from the requirement - a tree with no deprecated API
+warnings - so any rise is a regression rather than a new normal. Correcting the
+claim is a real repair; retuning a number you cannot justify is the same defect
+facing the other way.
 
 ## Compiling is not passing
 
