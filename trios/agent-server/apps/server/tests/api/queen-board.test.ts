@@ -228,6 +228,57 @@ describe('a file held by a cloud dispatch', () => {
     }
   })
 
+  // WORK SHE ACCEPTED HOLDS NOTHING. Every finished dispatch used to become
+  // awaitingReview whatever the verdict, so #1111 - accepted at 15:26 with two
+  // criteria judged - went on reserving rings/SR-00/QueenInterfaceDivergence.swift
+  // for the full 48-hour review window. Starvation arriving from the one place
+  // nobody looks: a task that succeeded.
+  it('releases the files of work the Queen accepted', () => {
+    const cards = composeCards({
+      tasks: [],
+      dispatches: [
+        {
+          issue: 1111,
+          branch: 'queen-1111',
+          started: true,
+          detail: 'finished',
+          finished_at: new Date(NOW).toISOString(),
+          review_state: 'accept',
+          outcome: 'finished',
+          owned_paths: [HELD],
+          dispatched_at: new Date(NOW).toISOString(),
+        },
+      ],
+      issues: [issue(1175, [HELD])],
+      now: NOW,
+    })
+    expect(cards.find((c) => c.number === 1175)?.column).toBe('backlog')
+  })
+
+  // An escalation still holds: it is waiting on a person, and the 48-hour
+  // clock is what eventually frees it.
+  it('keeps holding when the verdict was escalate', () => {
+    const cards = composeCards({
+      tasks: [],
+      dispatches: [
+        {
+          issue: 1244,
+          branch: 'queen-1244',
+          started: true,
+          detail: 'finished',
+          finished_at: new Date(NOW).toISOString(),
+          review_state: 'escalate',
+          outcome: 'finished',
+          owned_paths: [HELD],
+          dispatched_at: new Date(NOW).toISOString(),
+        },
+      ],
+      issues: [issue(1175, [HELD])],
+      now: NOW,
+    })
+    expect(cards.find((c) => c.number === 1175)?.column).toBe('blocked')
+  })
+
   it('leaves an unrelated issue alone', () => {
     const cards = composeCards({
       tasks: [],

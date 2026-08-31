@@ -586,6 +586,15 @@ function addInFlight(
  * was simultaneously too permissive about paths and too strict about age, on
  * the one screen built to explain why the swarm is stalled.
  */
+/** A cloud dispatch as a task state, from its ending and its verdict. */
+function dispatchState(row: Record<string, unknown>): string {
+  if (!row.finished_at) return 'running'
+  const verdict = String(row.review_state ?? '')
+  if (verdict === 'accept') return 'accepted'
+  if (verdict === 'sendBack') return 'rejected'
+  return 'awaitingReview'
+}
+
 function addUntakenIssues(
   cards: Map<number, Card>,
   issueRows: Array<Record<string, unknown>>,
@@ -607,7 +616,10 @@ function addUntakenIssues(
   // the one on the front in the largest type.
   const fromCloud: RegistryTask[] = dispatches.map((row) => ({
     issue: { number: row.issue as number },
-    state: row.finished_at ? 'awaitingReview' : 'running',
+    // Same rule as the round's, and for the same reason: work the Queen has
+    // ACCEPTED is terminal and holds nothing. Mapping every finished dispatch
+    // to awaitingReview kept accepted work reserving its files for 48 hours.
+    state: dispatchState(row),
     ownedPaths: asPaths(row.owned_paths),
     updatedAt: String(row.finished_at ?? row.dispatched_at ?? ''),
   }))

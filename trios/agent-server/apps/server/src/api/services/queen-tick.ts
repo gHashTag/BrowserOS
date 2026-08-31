@@ -347,6 +347,35 @@ const isoSeconds = (value: unknown): string =>
  * `queen-board-record.test.ts` compares these keys against the Swift struct, so
  * a field added there fails here rather than in a live round.
  */
+/**
+ * What a dispatch IS to the policy, from its ending and its verdict.
+ *
+ * Every finished dispatch used to become `awaitingReview`, whatever the Queen
+ * had decided about it - so work she had ACCEPTED went on holding its files
+ * for the full 48-hour review window, against issues that could otherwise have
+ * been started. Measured the night it was found: #1111 was accepted at 15:26,
+ * two criteria judged, and `rings/SR-00/QueenInterfaceDivergence.swift` stayed
+ * reserved for a task that was over.
+ *
+ * That is the starvation this whole file has been chasing, arriving from the
+ * one place nobody looks: a task that SUCCEEDED.
+ *
+ *   accept    -> accepted, which is terminal and holds nothing at all
+ *   sendBack  -> rejected: the same bee is expected back on those files
+ *   escalate  -> awaitingReview: a person is needed, and the 48-hour clock runs
+ *   wait/none -> awaitingReview: not judged yet, so the hold stands
+ */
+export function stateOfDispatch(
+  finished: boolean,
+  reviewState: unknown,
+): 'running' | 'accepted' | 'rejected' | 'awaitingReview' {
+  if (!finished) return 'running'
+  const verdict = String(reviewState ?? '')
+  if (verdict === 'accept') return 'accepted'
+  if (verdict === 'sendBack') return 'rejected'
+  return 'awaitingReview'
+}
+
 export function boardTask(
   owner: string,
   repoName: string,
@@ -371,7 +400,7 @@ export function boardTask(
      * being chosen twice, and `stillHoldsBoundary` expires its file claim after
      * 48 hours rather than never.
      */
-    state?: 'running' | 'awaitingReview'
+    state?: 'running' | 'accepted' | 'rejected' | 'awaitingReview'
   },
 ) {
   return {
@@ -773,7 +802,7 @@ export async function runRound(
       title: finished
         ? 'finished by the cloud tick, waiting for a verdict'
         : 'dispatched by the cloud tick',
-      state: finished ? 'awaitingReview' : 'running',
+      state: stateOfDispatch(finished, row.review_state),
     })
   })
 
