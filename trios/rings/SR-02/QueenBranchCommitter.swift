@@ -1265,8 +1265,17 @@ enum QueenBranchCommitter {
     /// Asked of the executor rather than measured here, because when the
     /// agent-server is remote the answer is a path in its container and this
     /// machine cannot compute it.
+    ///
+    /// The executor's answer is a fact about ITS repository. A caller that
+    /// passes a different projectRoot - a scratch repo in the suite, a
+    /// worktree - is its own repository and must not be silently re-rooted
+    /// into the executor's: measured when every scratch-git scenario began
+    /// failing with the plumbing running against the real checkout instead
+    /// of the scratch one (rev-parse of a branch that exists only in the
+    /// scratch repo, committed=false everywhere).
     static func repositoryRoot(projectRoot: String = ProjectPaths.root) -> String {
-        QueenGit.executor.repositoryRoot ?? projectRoot
+        guard let root = QueenGit.executor.repositoryRoot else { return projectRoot }
+        return projectRoot.hasPrefix(root) ? root : projectRoot
     }
 
     /// Rewrites a project-relative path (`docs`) into a repository-relative one
