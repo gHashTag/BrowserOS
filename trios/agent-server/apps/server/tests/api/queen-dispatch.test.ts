@@ -196,6 +196,40 @@ describe('closing a dispatch', () => {
     expect(String(errors[0].meta?.error)).toContain('connection terminated')
   })
 
+  // AN UPDATE THAT CHANGED NOTHING DOES NOT THROW, so the `try` above cannot
+  // see it and the old code called it a written ending. A skeptic proved that
+  // matters: with the history archive added, a turn whose frames are all NOISE
+  // reached this function BEFORE its dispatch row existed, the UPDATE matched
+  // zero rows in silence, and the upsert that followed wrote started=true with
+  // finished_at NULL - the exact phantom this function exists to prevent,
+  // arriving with no database failure anywhere in it.
+  it('says so when the ending matched no row at all', async () => {
+    const { pool, asked } = recordingPool(() => ({ rowCount: 0, rows: [] }))
+    const { errors, restore } = captureErrors()
+    try {
+      await closeDispatch(pool, 1244, 'conv-1', 'finished')
+    } finally {
+      restore()
+    }
+    // One statement: it did not throw, so there is nothing to retry.
+    expect(asked.length).toBe(1)
+    expect(errors.length).toBe(1)
+    expect(errors[0].message).toContain('matched no row')
+    expect(errors[0].meta?.issue).toBe(1244)
+    expect(errors[0].meta?.conversationId).toBe('conv-1')
+  })
+
+  it('stays quiet when the ending did land', async () => {
+    const { pool } = recordingPool(() => ({ rowCount: 1, rows: [] }))
+    const { errors, restore } = captureErrors()
+    try {
+      await closeDispatch(pool, 1244, 'conv-1', 'finished')
+    } finally {
+      restore()
+    }
+    expect(errors).toEqual([])
+  })
+
   it('does not throw when the retry fails too', async () => {
     const { pool, asked } = recordingPool(() => new Error('still down'))
     const { restore } = captureErrors()
@@ -259,7 +293,30 @@ describe('draining a turn', () => {
     )
     const closing = touching(asked, 'UPDATE queen_dispatch')
     expect(closing.length).toBe(1)
-    expect(closing[0].params).toEqual([1244, 'finished', 18308, 45])
+    expect(closing[0].params).toEqual([1244, 'finished', 18308, 45, 'conv-1'])
+  })
+
+  // The ending must name the turn it belongs to, not just the issue.
+  //
+  // Keyed by issue alone, a stream from a previous attempt that finishes late
+  // closes the CURRENT attempt's row - and drives its token counts through the
+  // COALESCE that exists to protect a price. The reaper releases an issue for
+  // retry while the old container's stream may still be alive, so two turns for
+  // one issue overlap as a matter of routine.
+  it('closes the turn it belongs to and not merely the issue', async () => {
+    const { pool, asked } = recordingPool()
+    await drain(
+      pool,
+      sse([
+        { type: 'usage', usage: { inputTokens: 7, outputTokens: 1 } },
+        { type: 'finish' },
+      ]),
+      'the-second-attempt',
+      1244,
+    )
+    const closing = touching(asked, 'UPDATE queen_dispatch')[0]
+    expect(closing.params).toContain('the-second-attempt')
+    expect(closing.sql).toContain('conversation_id')
   })
 
   it('still shows the cost in the feed a person watches', async () => {

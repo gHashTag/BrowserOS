@@ -392,7 +392,7 @@ async function startTurn(
   workingDirectory: string,
   chosen: WorkerProvider,
   ownedPaths: string[],
-): Promise<{ ok: boolean; detail: string }> {
+): Promise<{ ok: boolean; detail: string; beginDrain?: () => void }> {
   const token = process.env.TRIOS_API_TOKEN
   if (!token)
     return {
@@ -440,8 +440,25 @@ async function startTurn(
         detail: `chat answered ${response.status}: ${body.slice(0, 200)}`,
       }
     }
-    void drain(pool, response, conversationId, issue)
-    return { ok: true, detail: 'turn accepted' }
+    // HANDED BACK, NOT FIRED. The reader used to start here, and the row it
+    // eventually closes was written by the CALLER afterwards - so the two raced,
+    // and the reader could win.
+    //
+    // Measured by a skeptic on a real stream: a turn whose frames are all
+    // NOISE (start, finish) does no database work of its own, so it reached
+    // `closeDispatch` before `recordDispatch` had inserted anything. The ending
+    // UPDATE then matched ZERO rows - silently, because an UPDATE that changes
+    // nothing does not throw - and the upsert that followed wrote
+    // started=true, finished_at NULL. A bee that had already stopped appeared
+    // to be running and held its files until the 120-minute reaper.
+    //
+    // That is the exact phantom `closeDispatch`'s own logging was added to
+    // catch, arriving by a path with no database failure in it at all.
+    return {
+      ok: true,
+      detail: 'turn accepted',
+      beginDrain: () => void drain(pool, response, conversationId, issue),
+    }
   } catch (error) {
     return {
       ok: false,
@@ -724,14 +741,38 @@ export async function closeDispatch(
   tokens?: TokenUsage,
 ): Promise<void> {
   try {
-    await finishDispatch(pool, issue, outcome, tokens)
+    const closed = await finishDispatch(
+      pool,
+      issue,
+      outcome,
+      tokens,
+      conversationId,
+    )
+    // AN UPDATE THAT CHANGED NOTHING IS NOT AN ENDING.
+    //
+    // It does not throw, so a `try` alone cannot see it: "I wrote the ending"
+    // and "I matched no row" were the same answer, which is the shape of the
+    // defect this function was written to end, one layer further out.
+    //
+    // Zero rows means either the row is not there yet - which the drain
+    // handshake in `startTurn` now prevents - or another writer already closed
+    // it. Both are worth a line: the bee is about to look like it is running.
+    if (closed === 0) {
+      logger.error('Queen dispatch ending matched no row', {
+        issue,
+        conversationId,
+        outcome,
+      })
+    }
   } catch (error) {
     logger.error('Queen dispatch could not be closed', {
       issue,
       conversationId,
       error: error instanceof Error ? error.message : String(error),
     })
-    await finishDispatch(pool, issue, outcome, tokens).catch(() => {})
+    await finishDispatch(pool, issue, outcome, tokens, conversationId).catch(
+      () => {},
+    )
   }
 }
 
@@ -740,8 +781,22 @@ export async function finishDispatch(
   issue: number,
   outcome: string,
   tokens?: TokenUsage,
-): Promise<void> {
-  await pool.query(
+  /**
+   * The turn this ending belongs to.
+   *
+   * Keyed by issue ALONE, a stream from a previous attempt that finishes late
+   * closes the CURRENT attempt's row - and writes its token counts onto it,
+   * straight through the COALESCE that exists to protect a price. The reaper
+   * releases an issue for retry while the old container's stream may still be
+   * alive, so this is routine rather than exotic; it is the six-turns-on-#1244
+   * shape from the other side.
+   *
+   * Optional so the reaper, which legitimately closes a row whose conversation
+   * is gone, can still call it.
+   */
+  conversationId?: string,
+): Promise<number> {
+  const result = await pool.query(
     // COALESCE, not assignment: a turn that ended without a usage frame must
     // not overwrite a price with NULL. Unknown and free are different answers,
     // and only one of them can be added up.
@@ -749,14 +804,17 @@ export async function finishDispatch(
         SET finished_at = now(), outcome = $2,
             input_tokens = COALESCE($3::bigint, input_tokens),
             output_tokens = COALESCE($4::bigint, output_tokens)
-      WHERE issue = $1 AND finished_at IS NULL`,
+      WHERE issue = $1 AND finished_at IS NULL
+        AND ($5::text IS NULL OR conversation_id::text = $5::text)`,
     [
       issue,
       outcome.slice(0, 500),
       tokens?.inputTokens ?? null,
       tokens?.outputTokens ?? null,
+      conversationId ?? null,
     ],
   )
+  return result.rowCount ?? 0
 }
 
 /**
@@ -923,6 +981,10 @@ export async function dispatchBee(
     criteria,
     criteriaSource,
   )
+  // ONLY NOW may the stream be read. Everything that reads the bee's output
+  // eventually writes to the row above, and a writer that can outrun the row's
+  // creation is a writer that silently updates nothing.
+  turn.beginDrain?.()
   logger.info('Queen dispatch', { issue, branch, started: turn.ok, detail })
   return {
     started: turn.ok,
