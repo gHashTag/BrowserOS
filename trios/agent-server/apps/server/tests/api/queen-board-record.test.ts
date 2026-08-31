@@ -115,6 +115,55 @@ describe('the board record the cloud tick sends to queend', () => {
  * `canStartAnother`, still blocking its own issue from being handed out twice,
  * and its file claim expires after `reviewBoundaryHoldHours` rather than never.
  */
+/**
+ * A bee with no provider and no model is a bee that costs nothing.
+ *
+ * `DelegatedTask.estimatedCostUSD` returns nil unless BOTH are present
+ * (rings/SR-00/QueenDelegation.swift:344-350), and the board record carried
+ * neither - so the daily spend cap added for the cloud summed every cloud
+ * dispatch to zero and measured only the Mac app's spend. A ceiling reading
+ * nothing for the only work it was built to govern.
+ */
+describe('the price on a board record', () => {
+  const priced = boardTask('gHashTag', 'trios', {
+    conversationId: null,
+    issue: 1289,
+    ownedPaths: ['docs/issue-spec-template.md'],
+    branch: 'queen-1289',
+    at: '2026-08-31T16:28:00.000Z',
+    title: 'dispatched by the cloud tick',
+    provider: 'zai',
+    model: 'glm-5.3',
+    inputTokens: 18308,
+    outputTokens: 45,
+  })
+
+  it('carries who ran it and on what', () => {
+    expect(priced.provider).toBe('zai')
+    expect(priced.model).toBe('glm-5.3')
+  })
+
+  it('carries the tokens the turn actually spent', () => {
+    expect(priced.inputTokens).toBe(18308)
+    expect(priced.outputTokens).toBe(45)
+  })
+
+  // Unknown is not free. A record with no usage frame must leave the fields
+  // absent rather than send zero, or an unpriced turn reads as a free one.
+  it('leaves the price absent rather than sending zero', () => {
+    const unpriced = boardTask('gHashTag', 'trios', {
+      conversationId: null,
+      issue: 1289,
+      ownedPaths: [],
+      branch: 'queen-1289',
+      at: '2026-08-31T16:28:00.000Z',
+      title: 'dispatched by the cloud tick',
+    })
+    expect(unpriced.inputTokens).toBeUndefined()
+    expect(unpriced.provider).toBeUndefined()
+  })
+})
+
 describe('a finished dispatch on the board', () => {
   const made = (state?: 'running' | 'awaitingReview') =>
     boardTask('gHashTag', 'trios', {

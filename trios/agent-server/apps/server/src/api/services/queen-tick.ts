@@ -223,6 +223,16 @@ async function ensureQueenColumns(pool: Pool): Promise<void> {
     ALTER TABLE queen_dispatch
       ADD COLUMN IF NOT EXISTS criteria jsonb NOT NULL DEFAULT '[]'::jsonb,
       ADD COLUMN IF NOT EXISTS criteria_source text NOT NULL DEFAULT 'none',
+      -- Who ran this bee and on what.
+      --
+      -- The spend cap added for the cloud could not see a single cloud
+      -- bee: DelegatedTask.estimatedCostUSD returns nil unless the task
+      -- carries BOTH provider and model, and the board record carried
+      -- neither. So the ceiling measured the Mac app's spend and called
+      -- it the swarm's - a gate reading zero for the only work it was
+      -- built to govern.
+      ADD COLUMN IF NOT EXISTS provider text,
+      ADD COLUMN IF NOT EXISTS model text,
       -- How many times THIS issue has been returned to a bee.
       --
       -- The escalation ceiling depends on it: QueenReviewDecision escalates
@@ -401,6 +411,10 @@ export function boardTask(
      * 48 hours rather than never.
      */
     state?: 'running' | 'accepted' | 'rejected' | 'awaitingReview'
+    provider?: string
+    model?: string
+    inputTokens?: number
+    outputTokens?: number
   },
 ) {
   return {
@@ -420,6 +434,10 @@ export function boardTask(
     acceptanceCriteria: [] as string[],
     interventions: [] as string[],
     criterionVerdicts: {} as Record<string, unknown>,
+    provider: task.provider,
+    model: task.model,
+    inputTokens: task.inputTokens,
+    outputTokens: task.outputTokens,
   }
 }
 
@@ -763,7 +781,8 @@ export async function runRound(
   // nothing against anyone.
   const inFlight = await pool.query(
     `SELECT issue, branch, owned_paths, conversation_id, dispatched_at,
-            key_index, finished_at, review_state
+            key_index, finished_at, review_state,
+            provider, model, input_tokens, output_tokens
        FROM queen_dispatch
       WHERE started = true
         -- A reaped dispatch releases its issue: its container died, so nothing
@@ -803,6 +822,16 @@ export async function runRound(
         ? 'finished by the cloud tick, waiting for a verdict'
         : 'dispatched by the cloud tick',
       state: stateOfDispatch(finished, row.review_state),
+      // The price, so the daily cap can see the work it exists to govern.
+      // `estimatedCostUSD` returns nil unless BOTH provider and model are
+      // present, so a record missing either contributes nothing to the sum and
+      // the ceiling silently measures somebody else's spend.
+      provider: (row.provider as string) ?? undefined,
+      model: (row.model as string) ?? undefined,
+      inputTokens:
+        row.input_tokens == null ? undefined : Number(row.input_tokens),
+      outputTokens:
+        row.output_tokens == null ? undefined : Number(row.output_tokens),
     })
   })
 

@@ -980,6 +980,8 @@ export async function dispatchBee(
     chosen.keyIndex,
     criteria,
     criteriaSource,
+    chosen.provider,
+    chosen.model,
   )
   // ONLY NOW may the stream be read. Everything that reads the bee's output
   // eventually writes to the row above, and a writer that can outrun the row's
@@ -1007,6 +1009,14 @@ export async function recordDispatch(
   keyIndex?: number,
   criteria: string[] = [],
   criteriaSource = 'none',
+  /**
+   * Who ran this bee and on what. Written because the daily spend cap could
+   * not see a single cloud bee without them: `estimatedCostUSD` returns nil
+   * unless a task carries BOTH, so every cloud dispatch summed to nothing and
+   * the ceiling measured only the Mac app.
+   */
+  provider?: string,
+  model?: string,
 ): Promise<void> {
   // Keep the attempt this one replaces.
   //
@@ -1047,11 +1057,11 @@ export async function recordDispatch(
     `INSERT INTO queen_dispatch
        (issue, branch, started, detail, owned_paths, conversation_id,
         dispatched_at, finished_at, outcome, key_index,
-        criteria, criteria_source)
+        criteria, criteria_source, provider, model)
      VALUES ($1, $2, $3, $4, $5::jsonb, $6, now(),
              CASE WHEN $3 THEN NULL ELSE now() END,
              CASE WHEN $3 THEN NULL ELSE $4 END,
-             $7, $8::jsonb, $9)
+             $7, $8::jsonb, $9, $10, $11)
      ON CONFLICT (issue) DO UPDATE
        SET branch = EXCLUDED.branch,
            started = EXCLUDED.started,
@@ -1071,6 +1081,8 @@ export async function recordDispatch(
            output_tokens = NULL,
            criteria = EXCLUDED.criteria,
            criteria_source = EXCLUDED.criteria_source,
+           provider = EXCLUDED.provider,
+           model = EXCLUDED.model,
            -- A dispatch that starts again is new work, so last turn's verdict
            -- no longer describes anything. Left in place it would exclude the
            -- row from review for good: the reviewer only looks at dispatches
@@ -1089,6 +1101,8 @@ export async function recordDispatch(
       keyIndex ?? null,
       JSON.stringify(criteria),
       criteriaSource,
+      provider ?? null,
+      model ?? null,
     ],
   )
 }
