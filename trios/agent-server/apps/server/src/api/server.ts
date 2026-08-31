@@ -40,7 +40,10 @@ import { createOAuthRoutes } from './routes/oauth'
 import { createOpenClawRoutes } from './routes/openclaw'
 import { createProviderRoutes } from './routes/provider'
 import { createQueenDashboardRoute } from './routes/queen-dashboard'
-import { createQueenKanbanRoute } from './routes/queen-kanban'
+import {
+  createQueenBoardRoute,
+  createQueenKanbanRoute,
+} from './routes/queen-kanban'
 import { createQueenLeaseRoute } from './routes/queen-lease'
 import { createQueenRegistryRoute } from './routes/queen-registry'
 import { createQueenRehearsalRoute } from './routes/queen-rehearsal'
@@ -208,6 +211,12 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/*', requireTrustedAppOrigin())
     .route('/', createQueenRehearsalRoute())
 
+  // The board's DATA, behind the same bearer check as the lease. The page at
+  // /queen/kanban is a shell and carries none of this.
+  const queenBoardRoutes = new Hono<Env>()
+    .use('/*', requireTrustedAppOrigin())
+    .route('/', createQueenBoardRoute())
+
   const queenLeaseRoutes = new Hono<Env>()
     .use('/*', requireTrustedAppOrigin())
     .route('/', createQueenLeaseRoute())
@@ -299,6 +308,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     // repository, so there is nothing here a reader could not get from git.
     .route('/queen/tree', createQueenTreeRoute())
     .route('/queen/kanban', createQueenKanbanRoute())
+    .route('/queen/board', queenBoardRoutes)
     .route('/queen/lease', queenLeaseRoutes)
     .route('/queen/rehearsal', queenRehearsalRoutes)
     .use('/shutdown/*', requireTrustedAppOrigin())
