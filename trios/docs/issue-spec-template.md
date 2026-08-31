@@ -102,6 +102,43 @@ waits rather than colliding.
 Name files, not directories. A directory is a region, and a task that claims a
 region holds everything under it against everyone.
 
+Not every file name parses as a path. A token, once backticks and
+punctuation are stripped, is accepted only when it contains a `/` or ends
+in a dotted extension such as `.swift`, `.md` or `.json`. That test is the
+whole of `QueenIssueBoundary.pathToken`, and its purpose is to keep prose
+out of the boundary: to the parser, `Makefile` is a word. A name with
+neither a slash nor a dot is not a wrong path that gets corrected - it is a
+word that is dropped, and nothing says so.
+
+The names this bites are root files with no extension: `Makefile`,
+`Dockerfile`, `LICENSE`, `Justfile`. Written bare, the token carries no
+slash and no dot, so it is discarded and the boundary comes out empty. The
+failure is silent - no warning, no error - and the issue then parses as
+having no boundary at all. The author sees a `## Boundary` section they
+wrote; the Queen sees an issue she may not start, and the round's refusal
+says "not yet a spec - missing boundary" about an issue whose boundary is
+right there. Measured against the shipped binary, with the bodies identical
+apart from the boundary line:
+
+    `Makefile`     ->  delegatable = false
+    `./Makefile`   ->  delegatable = true
+
+The spelling that works puts a slash in the token, so a root file is
+claimed by its directory prefix:
+
+```
+## Boundary
+
+`docs/issue-spec-template.md`
+`./Makefile`
+```
+
+This already cost a round: #1272 had to be written `./Makefile` for the
+Queen to take it, and that spelling was found by testing the binary rather
+than by reading anything. The parser has not been fixed and still drops the
+bare spelling - only this document changed. Run the `queend` recipe below
+before you file, or the next round learns it the same way.
+
 ## What the checker does and does not do
 
 It checks that the parts a machine can check are **present**. It does not judge
