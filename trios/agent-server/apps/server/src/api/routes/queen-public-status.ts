@@ -8,6 +8,14 @@
  * Detailed state stays behind /queen/lease. This projection is deliberately
  * small enough for a public status page: no holder identity, branch,
  * conversation, transcript, provider detail, or mutation route escapes it.
+ *
+ * The one question it answers about an idle-looking swarm is WHY the last
+ * round started nothing, and it answers with `skipSummary`: counts by fixed
+ * category. The stored reasons name their issue, its paths and its holders,
+ * which is what an operator needs behind the dashboard and is wrong to
+ * publish - so only the category counts leave this file, and the category
+ * set is closed, which keeps the projection bounded however many candidates
+ * a round passed over.
  */
 
 import { Hono } from 'hono'
@@ -42,6 +50,88 @@ function configuredTickIntervalSeconds(): number {
 const asCount = (value: unknown): number => {
   const count = Number(value)
   return Number.isFinite(count) && count >= 0 ? count : 0
+}
+
+/**
+ * Every category `skipSummary` can carry.
+ *
+ * The set is closed on purpose. A category per sentence would grow with
+ * every wording change in `queend`, and an open set is not a contract a
+ * public consumer can rely on. These are the identifiers, not prose:
+ *
+ *   claimed          an existing claim - a worker has the issue or is
+ *                    expected back on it
+ *   completed        the work already landed and nobody closed the issue
+ *   missingBoundary  the issue never said what it touches, so nothing can
+ *                    be reserved for it
+ *   fileConflict     its paths are held by another task
+ *   incompleteSpec   delegatable but missing spec sections
+ *   notFirst         a lower-priority candidate passed over because the
+ *                    round starts one bee
+ *   other            anything unrecognized, including the round-level
+ *                    reasons a tick writes when it never reached a choice
+ */
+const SKIP_CATEGORIES = [
+  'claimed',
+  'completed',
+  'missingBoundary',
+  'fileConflict',
+  'incompleteSpec',
+  'notFirst',
+  'other',
+] as const
+
+type SkipCategory = (typeof SKIP_CATEGORIES)[number]
+
+/**
+ * One stored skip reason, filed under a category.
+ *
+ * The reasons are `queend`'s sentences (queen-core/Sources/queend/main.swift)
+ * and the matchers pin their stable wording, never their payloads: a reason
+ * names its issue, its paths and its holders after that wording, and none of
+ * it is echoed here. ` held by ` is matched first because it is the only
+ * reason whose free text - file paths - could contain one of the shorter
+ * markers; the fixed-template reasons cannot contain a path.
+ */
+function classifySkipReason(line: string): SkipCategory {
+  if (line.includes(' held by ')) return 'fileConflict'
+  if (line.includes('a worker has it or is expected back')) return 'claimed'
+  if (line.includes('the work already landed')) return 'completed'
+  if (line.includes('no issue body was supplied')) return 'missingBoundary'
+  if (line.includes('delegatable but')) return 'incompleteSpec'
+  if (line.includes('not yet a spec')) return 'missingBoundary'
+  if (line.includes('declares no boundary')) return 'missingBoundary'
+  if (line.includes('not first')) return 'notFirst'
+  return 'other'
+}
+
+/**
+ * The public aggregate of one tick's skip reasons.
+ *
+ * Only non-zero categories appear, in the fixed order above, so two reads of
+ * the same tick serialize identically and the object never grows past the
+ * closed category set. Every entry is filed exactly once - unrecognized
+ * sentences under `other` rather than dropped - so the counts always sum to
+ * `skippedCount`. An absent skip array summarises to `{}`: an older tick
+ * stays a valid response, just with nothing to say.
+ */
+function summarizeSkips(
+  skipped: unknown[],
+): Partial<Record<SkipCategory, number>> {
+  const counts = new Map<SkipCategory, number>()
+  for (const entry of skipped) {
+    // jsonb holds whatever was put in it; a non-string reason is counted,
+    // never trusted to carry meaning.
+    const line = typeof entry === 'string' ? entry : String(entry)
+    const category = classifySkipReason(line)
+    counts.set(category, (counts.get(category) ?? 0) + 1)
+  }
+  const summary: Partial<Record<SkipCategory, number>> = {}
+  for (const category of SKIP_CATEGORIES) {
+    const count = counts.get(category)
+    if (count) summary[category] = count
+  }
+  return summary
 }
 
 export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
@@ -102,6 +192,7 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
               refusal:
                 typeof decision?.refusal === 'string' ? decision.refusal : null,
               skippedCount: skipped.length,
+              skipSummary: summarizeSkips(skipped),
             }
           : null,
         dispatches: {
