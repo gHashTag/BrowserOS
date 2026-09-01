@@ -73,7 +73,10 @@ export interface WorkerProvider {
   /** Which of this provider's keys was handed out, 0-based. */
   keyIndex?: number
   keyCount?: number
-  /** Set when every key is already in use; carries how many there are. */
+  /** Which concurrent lane on this credential was handed out, 0-based. */
+  laneIndex?: number
+  laneCount?: number
+  /** Set when every configured worker lane is in use. */
   exhausted?: number
 }
 
@@ -125,6 +128,27 @@ function keysFor(envVar: string): string[] {
 }
 
 /**
+ * Concurrent coding projects allowed on each distinct credential.
+ *
+ * One remains the fail-safe default. Z.ai's published guidance is tier based
+ * and dynamic (Lite 1, Pro 1-2, Max 2+), while an API key does not encode that
+ * contract locally. The operator must therefore opt into a wider value after
+ * checking the live plan. The bound prevents one typo from turning a paid
+ * account into an unbounded request fan-out.
+ */
+export function configuredWorkerLanesPerCredential(
+  raw = process.env.TRIOS_ZAI_CONCURRENCY_PER_KEY,
+): number {
+  const parsed = Number(raw)
+  if (!Number.isInteger(parsed) || parsed < 1) return 1
+  return Math.min(parsed, 4)
+}
+
+function workerLanesFor(provider: string): number {
+  return provider === 'zai' ? configuredWorkerLanesPerCredential() : 1
+}
+
+/**
  * Number of genuinely independent worker credentials available to the first
  * configured provider. The values never leave this module; the public research
  * projection uses only the count to show whether paid capacity is idle.
@@ -132,13 +156,13 @@ function keysFor(envVar: string): string[] {
 export function configuredWorkerCapacity(): number {
   for (const candidate of WORKER_PROVIDERS) {
     const count = keysFor(candidate.envVar).length
-    if (count > 0) return count
+    if (count > 0) return count * workerLanesFor(candidate.provider)
   }
   return 0
 }
 
 /**
- * A key per concurrent bee, not a key per request.
+ * A bounded number of concurrent lanes per distinct credential.
  *
  * Four bees sharing one credential share one rate limit, so the swarm's real
  * ceiling becomes whatever that single key allows rather than what the Queen's
@@ -150,10 +174,10 @@ export function configuredWorkerCapacity(): number {
  * put all four bees on the same key and looked like rotation while doing
  * nothing.
  *
- * So the caller passes the indices already in use, and this returns the lowest
- * that is free. The index is stored with the dispatch, which is what makes a
- * retry attributable: the same bee comes back to the same key, and a key that
- * keeps failing is visible as a key rather than as four unlucky tasks.
+ * So the caller passes the credential indices already in use. Selection first
+ * spreads work across distinct credentials, then fills the next lane on the
+ * least-loaded credential. The credential index is stored with the dispatch,
+ * so repeated 429s remain attributable without publishing a secret.
  */
 export function resolveWorkerProvider(
   takenKeyIndices: number[] = [],
@@ -162,15 +186,30 @@ export function resolveWorkerProvider(
   for (const candidate of WORKER_PROVIDERS) {
     const keys = keysFor(candidate.envVar)
     if (keys.length > 0) {
-      let index = 0
-      while (index < keys.length && takenKeyIndices.includes(index)) index++
-      // Every key busy. Handing out a duplicate would be the quiet version of
-      // this problem, so say which limit was reached instead.
-      if (index >= keys.length) {
+      const laneCount = workerLanesFor(candidate.provider)
+      const occupancy = keys.map(
+        (_, index) => takenKeyIndices.filter((taken) => taken === index).length,
+      )
+      let index = -1
+      let leastBusy = Number.POSITIVE_INFINITY
+      for (
+        let candidateIndex = 0;
+        candidateIndex < keys.length;
+        candidateIndex++
+      ) {
+        const busy = occupancy[candidateIndex]
+        if (busy < laneCount && busy < leastBusy) {
+          index = candidateIndex
+          leastBusy = busy
+        }
+      }
+      // Every lane busy. Reusing one again would be the quiet version of this
+      // problem, so report the actual logical capacity reached.
+      if (index < 0) {
         return {
           provider: candidate.provider,
           model: override || candidate.model,
-          exhausted: keys.length,
+          exhausted: keys.length * laneCount,
         }
       }
       const key = keys[index]
@@ -191,6 +230,8 @@ export function resolveWorkerProvider(
         apiKey: key,
         keyIndex: index,
         keyCount: keys.length,
+        laneIndex: occupancy[index],
+        laneCount,
       }
     }
   }
@@ -1052,6 +1093,9 @@ export async function dispatchBee(
     ? `${worktree.detail}; ${chosen.provider}/${chosen.model}` +
       (chosen.keyCount && chosen.keyCount > 1
         ? ` key ${(chosen.keyIndex ?? 0) + 1}/${chosen.keyCount}`
+        : '') +
+      (chosen.laneCount && chosen.laneCount > 1
+        ? ` lane ${(chosen.laneIndex ?? 0) + 1}/${chosen.laneCount}`
         : '') +
       (chosen.rehearsal ? ' (REHEARSAL - a recorded stream, not a model)' : '')
     : turn.detail
