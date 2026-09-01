@@ -4,7 +4,15 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Pool } from 'pg'
-import { runRound } from '../../src/api/services/queen-tick'
+import {
+  closeDispatch,
+  setDurableCloseListener,
+} from '../../src/api/services/queen-dispatch'
+import {
+  createRoundGate,
+  refillOnBeeCompletion,
+  runRound,
+} from '../../src/api/services/queen-tick'
 import { logger } from '../../src/lib/logger'
 
 /**
@@ -139,6 +147,9 @@ afterEach(() => {
     else process.env[key] = value
   }
   globalThis.fetch = realFetch
+  // The refill wiring installs a module-level listener; a case that leaves
+  // one behind hands its hook to every later close in this process.
+  setDurableCloseListener(undefined)
 })
 
 describe('queen round, lease lost', () => {
@@ -448,5 +459,209 @@ describe('queen round, repository named', () => {
       if (before === undefined) delete process.env.TRIOS_GITHUB_REPO
       else process.env.TRIOS_GITHUB_REPO = before
     }
+  })
+})
+
+/**
+ * #1295. The refill gate: one local round at a time, woken by finished bees.
+ *
+ * A bee's completion frees a key the swarm paid for, and before this the next
+ * eligible mission waited out the periodic tick for it. The gate is the whole
+ * answer and adds nothing else: rounds still run through `runQueenTickOnce`,
+ * so the lease, the fencing, `queend` and the dispatch loop are exactly what
+ * they were - what changes is only WHEN a round starts.
+ *
+ * WHAT IS REAL HERE: nothing, deliberately. The gate is pure scheduling - one
+ * round at a time, one deferred follow-up - so these cases drive it with a
+ * controllable round released by hand. No timer, no sleep, no provider, no
+ * database, because the questions are only ever "how many rounds" and "how
+ * many at once", and a real round underneath would answer with failures of
+ * its own that have suites of their own.
+ */
+describe('the refill gate', () => {
+  /** A round the test can hold open and release, so ordering is observed
+   *  rather than timed. */
+  function controlledRound() {
+    const events: string[] = []
+    let inFlight = 0
+    let peak = 0
+    const held: Array<() => void> = []
+    const run = async () => {
+      inFlight += 1
+      peak = Math.max(peak, inFlight)
+      events.push('start')
+      await new Promise<void>((release) => held.push(release))
+      events.push('end')
+      inFlight -= 1
+    }
+    return {
+      events,
+      run,
+      release: () => held.shift()?.(),
+      /** The most rounds that ever ran at once, measured here rather than
+       *  trusted from the gate's own books. */
+      peak: () => peak,
+    }
+  }
+
+  /** Let every pending continuation run. Microtasks only - the gate schedules
+   *  no timers, so nothing here ever waits in real time. */
+  const settle = async () => {
+    for (let i = 0; i < 16; i++) await Promise.resolve()
+  }
+
+  it('starts a round at once when a slot frees and none is running', async () => {
+    const round = controlledRound()
+    const gate = createRoundGate(round.run)
+
+    gate.request('bee #1295 finished')
+    // At once means synchronously here: no timer fired, nothing was slept.
+    expect(round.events).toEqual(['start'])
+
+    round.release()
+    await settle()
+    await gate.idle()
+    expect(gate.roundsStarted()).toBe(1)
+  })
+
+  /**
+   * THE FOCUSED TEST of the issue: two completions landing while a round is
+   * already in flight must coalesce into at most one follow-up round, and no
+   * two local rounds may overlap - a second concurrent round in this process
+   * would hold the lease as the same holder (the heartbeat comment in
+   * queen-tick.ts records that overlap being reachable), read a half-written
+   * board, and dispatch against work the first round is still recording.
+   */
+  it('holds local round concurrency at 1 across a two-completion burst', async () => {
+    const round = controlledRound()
+    const gate = createRoundGate(round.run)
+
+    // The round already in flight: the one a completion lands during.
+    gate.request('the round already in flight')
+    expect(round.events).toEqual(['start'])
+
+    gate.request('bee #1295-a finished')
+    gate.request('bee #1295-b finished')
+    // Coalesced: neither completion started a round of its own.
+    expect(round.events).toEqual(['start'])
+    expect(gate.roundsStarted()).toBe(1)
+
+    round.release()
+    await settle()
+    // Exactly one follow-up for the burst - not one per completion.
+    expect(gate.roundsStarted()).toBe(2)
+    expect(round.events).toEqual(['start', 'end', 'start'])
+
+    round.release()
+    await settle()
+    await gate.idle()
+    expect(gate.roundsStarted()).toBe(2)
+    // Never two at once, measured outside the gate's own counting...
+    expect(round.peak()).toBe(1)
+    // ...and the gate's own books say the same thing.
+    expect(gate.maxInFlight()).toBe(1)
+  })
+
+  // Work-conserving cuts both ways: a signal that arrives while the
+  // FOLLOW-UP runs must still get its own round, or a busy swarm quietly
+  // stops refilling the moment two bees finish close together.
+  it('still answers a signal that arrives while the follow-up runs', async () => {
+    const round = controlledRound()
+    const gate = createRoundGate(round.run)
+
+    gate.request('first')
+    gate.request('bee #1 finished')
+    round.release()
+    await settle()
+    expect(gate.roundsStarted()).toBe(2)
+
+    gate.request('bee #2 finished')
+    round.release()
+    await settle()
+    expect(gate.roundsStarted()).toBe(3)
+
+    round.release()
+    await settle()
+    await gate.idle()
+    // Three rounds asked for by name, three rounds run, no runaway fourth.
+    expect(gate.roundsStarted()).toBe(3)
+  })
+
+  // Scenario 4, the gate's half: with no completion, nothing starts. The
+  // timer's half is `startQueenTick`, unchanged - it still requests the
+  // initial round and keeps the configured interval.
+  it('runs nothing until something asks, and no more after the last ask', async () => {
+    const round = controlledRound()
+    const gate = createRoundGate(round.run)
+
+    await settle()
+    await gate.idle()
+    expect(round.events).toEqual([])
+    expect(gate.roundsStarted()).toBe(0)
+  })
+
+  // Shutdown symmetry with the timer: `handover` clears the interval so no
+  // periodic round starts after SIGTERM, and the gate must not undo that by
+  // starting one a late completion asked for. A refill round after handover
+  // would re-acquire the lease from a container that has already given the
+  // hive away.
+  it('refuses rounds once stopped, and drops the queued follow-up', async () => {
+    const round = controlledRound()
+    const gate = createRoundGate(round.run)
+
+    gate.request('in flight when SIGTERM arrives')
+    gate.request('bee #1 finished')
+    gate.stop()
+    round.release()
+    await settle()
+    await gate.idle()
+
+    expect(round.events).toEqual(['start', 'end'])
+    expect(gate.roundsStarted()).toBe(1)
+
+    gate.request('bee #2 finished')
+    await settle()
+    expect(gate.roundsStarted()).toBe(1)
+  })
+})
+
+/**
+ * The wiring, not the gate: a durable close must reach the round the tick
+ * loop runs, through the same connection `startQueenTick` makes. A gate that
+ * exists while nothing signals it is indistinguishable from no gate - so this
+ * drives the real hook and the real close, with only the round replaced.
+ */
+describe('a finished bee reaches the gate the tick installs', () => {
+  /** A pool whose every statement answers with `rowCount` rows. */
+  const answeringPool = (rowCount: number) =>
+    ({
+      query: async () => ({ rowCount, rows: [] }),
+    }) as unknown as Pool
+
+  it('runs exactly one round for one durable close', async () => {
+    const rounds: string[] = []
+    const gate = createRoundGate(async () => {
+      rounds.push('round')
+    })
+    refillOnBeeCompletion(gate.request)
+
+    await closeDispatch(answeringPool(1), 1295, 'conv-1295', 'finished')
+    await gate.idle()
+    expect(rounds).toEqual(['round'])
+  })
+
+  // FR-003 at the far end of the wire: a zero-row close reaches nobody. The
+  // gate must not run a round on the strength of a slot the board still shows
+  // as held.
+  it('runs nothing for a close that matched no row', async () => {
+    const rounds: string[] = []
+    const gate = createRoundGate(async () => {
+      rounds.push('round')
+    })
+    refillOnBeeCompletion(gate.request)
+
+    await closeDispatch(answeringPool(0), 1295, 'conv-1295', 'finished')
+    await gate.idle()
+    expect(rounds).toEqual([])
   })
 })
