@@ -155,16 +155,20 @@ fingerprint `9d26541f…` in its own store via one atomic command chain
 stands at 971/971 twice. The release number moves the first time the
 user's app is rebuilt and a verdict is sealed there.
 
-LIVE-VERIFY CHAIN DOWN (measured wave 125, 2026-09-01): the ninth
-reproduction attempt did NOT run - the prebuilt test bundle (Aug 31
-19:17) crashes at launch in the #1172 boundary-parse drill
-(trios_test_app/ChatViewModel.swift:13114, fatal by design: "the
-prose-after-path replay did not come out as the record says") because
-the tree MOVED after that build (the neighbour's evening series). The
-eight prior reproductions stand (fp 9d26541f each). Rebuilding the
-bundle rides tests/swift/run_chat_sse_e2e.sh - the same script dead
-since the QueenCore module split (see the oracle note above): one fix
-unblocks the mutants gate, make test, AND the live regression ritual.
+LIVE-VERIFY CHAIN RESTORED (wave 130, 2026-09-01): the NINTH
+reproduction ran on the freshly rebuilt test bundle - task DDF3788A,
+verdict `make check passes: met`, fingerprint `d3c1d66d95…`. The fp
+differs from the prior eight (`9d26541f…`) because the boundary tree
+moved (four waves of loop fixes + the neighbour's commits); the
+mechanism - approve -> delegate -> verify recorded by the RUNNING app -
+is the invariant, and it works again after the wave-125 outage (stale
+bundle crashed in the #1172 drill; the rebuild had been blocked by a
+build.sh bug: the vendored-fallback module copy did `cp x x`, which
+set -e aborts before bundle assembly - fixed with the same identity
+guard the dylib copy already had). Known-open from this rebuild: the
+post-bundle `swift test` phase fails (`unexpected input file:
+.trinity/build/QueenCore/libQueenCore.a` - module flags leaking into
+the swift-test invocation); the bundle itself is fresh and signed.
 
 Mesh ring, the seven specs repaired today: 91 functions declared, 91 emitted,
 0 stubs, artifacts byte-identical to a fresh `gen-rust`.
