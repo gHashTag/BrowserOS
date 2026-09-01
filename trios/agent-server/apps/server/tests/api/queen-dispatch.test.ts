@@ -14,6 +14,7 @@ import {
   prepareWorktree,
   recordDispatch,
   resolveWorkerProvider,
+  setDurableCloseListener,
   workspaceRoot,
 } from '../../src/api/services/queen-dispatch'
 import { logger } from '../../src/lib/logger'
@@ -550,5 +551,115 @@ describe('an existing worktree', () => {
       else process.env.TRIOS_REPO_REF = previousRef
       restore()
     }
+  })
+})
+
+/**
+ * #1295. A finished bee frees a healthy paid key, and until this the next
+ * eligible mission waited for the periodic tick - up to 1,800 seconds of idle
+ * capacity per finished bee, on a swarm whose whole point is that no laptop
+ * has to be awake to keep it busy.
+ *
+ * The signal must be EARNED by a durable close. An UPDATE that changed
+ * nothing does not throw, so "the write succeeded" and "the write matched no
+ * row" were the same answer one layer out - and announcing a freed slot about
+ * a row that still reads `running` would wake a round that sees the bee as in
+ * flight and skips the very work the signal promised. The retry and, behind
+ * it, the stall reaper stay authoritative for every close that did not land.
+ *
+ * These cases use a recording pool rather than a database because the
+ * question is which CLOSES signal, not whether Postgres can UPDATE - and the
+ * issue's own independent test asks for exactly that shape: fake pools, no
+ * sleeping, no real provider.
+ */
+describe('a durable close frees the slot at once', () => {
+  afterEach(() => {
+    // The listener is module state. A case that forgets to clear it would
+    // hand its hook to every later close in this file - a signal from a test
+    // nobody is looking at.
+    setDurableCloseListener(undefined)
+  })
+
+  /** A stream that has already ended, the way a real bee's does. */
+  const endedStream = () =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode('data: {"type":"finish"}\n\n'),
+          )
+          controller.close()
+        },
+      }),
+    )
+
+  // Scenario 1: one updated row is the durable running-to-finished
+  // transition, and it must ask for a refill without waiting for the timer.
+  it('signals one refill when the ending landed on one row', async () => {
+    const heard: number[] = []
+    setDurableCloseListener((issue) => heard.push(issue))
+    const { pool } = recordingPool(() => ({ rowCount: 1, rows: [] }))
+    await closeDispatch(pool, 1295, 'conv-1295', 'finished')
+    expect(heard).toEqual([1295])
+  })
+
+  // The stream ending is WHEN the slot frees, so the signal must travel the
+  // drain path a real bee takes - not only a hand-made closeDispatch call.
+  it('signals when the stream ends and the close is durable', async () => {
+    const heard: number[] = []
+    setDurableCloseListener((issue) => heard.push(issue))
+    const { pool } = recordingPool(() => ({ rowCount: 1, rows: [] }))
+    await drain(pool, endedStream(), 'conv-1295', 1295)
+    expect(heard).toEqual([1295])
+  })
+
+  // Scenario 3, first half: zero rows means the transition never happened.
+  it('signals nothing when the ending matched no row', async () => {
+    const heard: number[] = []
+    setDurableCloseListener((issue) => heard.push(issue))
+    const { pool, asked } = recordingPool(() => ({ rowCount: 0, rows: [] }))
+    await closeDispatch(pool, 1295, 'conv-1295', 'finished')
+    expect(heard).toEqual([])
+    // Unchanged: nothing threw, so there is no retry to make.
+    expect(asked.length).toBe(1)
+  })
+
+  // Scenario 3, second half: a close whose every write failed leaves the row
+  // running. The stall reaper, not a hopeful signal, decides when that slot
+  // is free.
+  it('signals nothing when both write attempts fail', async () => {
+    const heard: number[] = []
+    setDurableCloseListener((issue) => heard.push(issue))
+    const { pool, asked } = recordingPool(() => new Error('still down'))
+    await closeDispatch(pool, 1295, 'conv-1295', 'finished')
+    expect(heard).toEqual([])
+    // Unchanged: one retry, then silence.
+    expect(asked.length).toBe(2)
+  })
+
+  // A close that needed its retry but LANDED is closed as far as the board
+  // can see - the row says finished - and suppressing the signal here would
+  // restore the half-hour wait for exactly the deployments with the flakiest
+  // databases, which are the ones that most need the slot back.
+  it('signals when only the retry landed, because the row is closed either way', async () => {
+    const heard: number[] = []
+    setDurableCloseListener((issue) => heard.push(issue))
+    const { pool, asked } = recordingPool((_sql, attempt) =>
+      attempt === 1
+        ? new Error('connection terminated unexpectedly')
+        : { rowCount: 1, rows: [] },
+    )
+    await closeDispatch(pool, 1295, 'conv-1295', 'finished')
+    expect(asked.length).toBe(2)
+    expect(heard).toEqual([1295])
+  })
+
+  // The tick loop is the only listener. A server running without it (local
+  // development, the app alongside) must close exactly as before, because a
+  // completion with nobody local to refill is a normal minute, not an error.
+  it('closes quietly when no listener is installed', async () => {
+    const { pool, asked } = recordingPool(() => ({ rowCount: 1, rows: [] }))
+    await closeDispatch(pool, 1295, 'conv-1295', 'finished')
+    expect(asked.length).toBe(1)
   })
 })

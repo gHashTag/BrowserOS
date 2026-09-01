@@ -44,6 +44,7 @@ import {
   dispatchBee,
   reapDispatchesFromPreviousBoot,
   reapStalledDispatches,
+  setDurableCloseListener,
   workspaceRoot,
 } from './queen-dispatch'
 import {
@@ -1500,6 +1501,140 @@ async function recordTick(
   )
 }
 
+/**
+ * The refill gate (#1295): one local round at a time, woken by finished bees.
+ *
+ * WHY IT EXISTS. A bee's completion frees a healthy paid key, and until this
+ * the next eligible mission waited for the periodic tick - up to 1,800 seconds
+ * of idle capacity per finished bee, on a swarm whose whole point is that no
+ * laptop has to be awake to keep it busy. The timer stays; it is the
+ * guarantee that rounds happen even when nothing finishes. The gate only
+ * decides WHEN a round starts.
+ *
+ * WHY A GATE AND NOT A CALL. Two rounds in one process is a reachable state,
+ * not a theoretical one - the heartbeat comment above records the timer and
+ * the on-demand route overlapping, and a refill signal arriving mid-round
+ * would have made it routine. Both rounds would hold the lease as the SAME
+ * holder (acquisition renews on `holder = EXCLUDED.holder`), so nothing
+ * stops the second one, and it reads a board the first round is still
+ * writing - dispatches recorded, keys taken. One round at a time is the only
+ * shape that cannot race itself.
+ *
+ * WORK-CONSERVING AND SINGLE-FLIGHT, by construction: a request while a
+ * round runs sets ONE flag, and the round's own ending starts at most ONE
+ * follow-up. A burst of completions coalesces; a signal arriving during the
+ * follow-up starts another after it, so nothing that asks is ever dropped.
+ *
+ * NOT A SECOND SCHEDULER. There is no clock in here - no interval, no delay,
+ * no queue that outlives a round. Every round runs through the one runner it
+ * was handed, which in production is `runQueenTickOnce`: the same lease, the
+ * same fencing, the same `queend`, the same dispatch loop. The periodic timer
+ * remains the only thing that wakes the gate on its own.
+ */
+export interface RoundGate {
+  /** Ask for one round: start it now if idle, coalesce if one is running. */
+  request(why: string): void
+  /** Resolves once no round is running and none is queued. */
+  idle(): Promise<void>
+  /** Rounds this gate has started, so tests and logs can count them. */
+  roundsStarted(): number
+  /** The most rounds this gate has ever had in flight at once. Must be 1. */
+  maxInFlight(): number
+  /** Refuse further rounds (shutdown). A round already running finishes. */
+  stop(): void
+}
+
+export function createRoundGate(runOneRound: () => Promise<void>): RoundGate {
+  let running = false
+  let wanted = false
+  let stopped = false
+  let started = 0
+  let inFlight = 0
+  let peak = 0
+  let waiters: Array<() => void> = []
+
+  /** Wake everyone once the gate is truly empty: nothing running, nothing
+   *  queued. Called from the one place those two facts can both be true. */
+  const settle = () => {
+    if (running || wanted) return
+    const due = waiters
+    waiters = []
+    for (const wake of due) wake()
+  }
+
+  async function turn(why: string): Promise<void> {
+    running = true
+    started += 1
+    inFlight += 1
+    peak = Math.max(peak, inFlight)
+    logger.info('Queen round starting', { why, round: started })
+    try {
+      await runOneRound()
+    } catch (error) {
+      // The production runner catches its own failures; this is the belt
+      // under that, because a gate whose turn rejects would drop every
+      // follow-up signal with it.
+      logger.warn('Queen round failed inside the refill gate', {
+        why,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+    inFlight -= 1
+    running = false
+    if (wanted && !stopped) {
+      // ONE follow-up, started here and not awaited: awaiting it would
+      // chain every later round onto the first caller's stack, and the
+      // caller - a stream that just ended - has nothing left to wait for.
+      wanted = false
+      void turn('follow-up: a bee finished while a round was running')
+      return
+    }
+    settle()
+  }
+
+  return {
+    request(why: string): void {
+      if (stopped) return
+      if (running) {
+        // The flag, not a count: however many bees finished, the board is
+        // read once and the follow-up sees them all.
+        wanted = true
+        return
+      }
+      void turn(why)
+    },
+    idle(): Promise<void> {
+      return new Promise((resolve) => {
+        waiters.push(resolve)
+        settle()
+      })
+    },
+    roundsStarted: () => started,
+    maxInFlight: () => peak,
+    stop(): void {
+      // Mirror of `handover` clearing the interval: no round may START after
+      // the process has given the hive away. A refill round that re-acquired
+      // the lease after SIGTERM would pin the hive to a dying container for
+      // the TTL, which is the failure the handover exists to prevent.
+      stopped = true
+      wanted = false
+      settle()
+    },
+  }
+}
+
+/**
+ * Connect a durable bee completion to the round gate.
+ *
+ * EXPORTED FOR THE SUITE: the wiring is the feature. A gate that exists while
+ * nothing signals it is indistinguishable from no gate, and the one line
+ * `startQueenTick` adds is otherwise unreachable without a real timer - so
+ * this is the seam the suite drives instead.
+ */
+export function refillOnBeeCompletion(request: (why: string) => void): void {
+  setDurableCloseListener((issue) => request(`bee #${issue} finished`))
+}
+
 let timer: ReturnType<typeof setInterval> | undefined
 
 /**
@@ -1539,8 +1674,8 @@ export function startQueenTick(): void {
     })
     .catch(() => {})
 
-  const round = () => {
-    runQueenTickOnce(pool).catch((error) => {
+  const round = async (): Promise<void> => {
+    await runQueenTickOnce(pool).catch((error) => {
       // A failed round must not kill the loop. The next one may well succeed -
       // GitHub rate limits reset, a database blips - and a supervisor that stops
       // supervising on its first bad minute is worse than no supervisor, because
@@ -1551,11 +1686,22 @@ export function startQueenTick(): void {
     })
   }
 
-  round()
-  timer = setInterval(round, interval * 1000)
+  // THE GATE (#1295). One local round at a time, fed by the timer below AND
+  // by finished bees: a durable completion asks for a round here instead of
+  // waiting out the interval for one. The timer is unchanged - same interval,
+  // same guard, still the only clock - and the gate holds no clock of its
+  // own, so this adds no scheduler, only a queue of at most one.
+  const gate = createRoundGate(round)
+  refillOnBeeCompletion(gate.request)
+
+  gate.request('service starting')
+  timer = setInterval(() => gate.request('periodic tick'), interval * 1000)
 
   const handover = () => {
     if (timer) clearInterval(timer)
+    // The gate with it, for the same reason as the timer: no round may start
+    // after the process has handed the hive back.
+    gate.stop()
     // Every beat, not one: a round in flight owns its own handle, and on
     // SIGTERM nobody is going to reach its `finally` before the process ends.
     for (const beat of heartbeats) clearInterval(beat)
