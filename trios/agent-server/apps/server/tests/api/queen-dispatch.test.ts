@@ -8,6 +8,7 @@ import {
   committedFileCount,
   committedFiles,
   configuredWorkerCapacity,
+  configuredWorkerLanesPerCredential,
   drain,
   finishDispatch,
   missingProviderRefusal,
@@ -29,6 +30,7 @@ const KEYS = [
   'MOONSHOT_API_KEY',
   'OPENAI_API_KEY',
   'TRIOS_QUEEN_WORKER_MODEL',
+  'TRIOS_ZAI_CONCURRENCY_PER_KEY',
 ]
 
 afterEach(() => {
@@ -113,6 +115,49 @@ describe('queen dispatch precheck', () => {
       const chosen = resolveWorkerProvider([0, 1])
       expect(chosen?.exhausted).toBe(2)
       expect(chosen?.apiKey).toBeUndefined()
+    })
+
+    it('spreads Max-plan lanes across keys before reusing either key', () => {
+      process.env.ZAI_API_KEY = 'a'
+      process.env.ZAI_API_KEY_2 = 'b'
+      process.env.TRIOS_ZAI_CONCURRENCY_PER_KEY = '2'
+      expect(configuredWorkerLanesPerCredential()).toBe(2)
+      expect(configuredWorkerCapacity()).toBe(4)
+
+      const first = resolveWorkerProvider([])
+      const second = resolveWorkerProvider([0])
+      const third = resolveWorkerProvider([0, 1])
+      const fourth = resolveWorkerProvider([0, 1, 0])
+      const exhausted = resolveWorkerProvider([0, 1, 0, 1])
+
+      expect([
+        first?.keyIndex,
+        second?.keyIndex,
+        third?.keyIndex,
+        fourth?.keyIndex,
+      ]).toEqual([0, 1, 0, 1])
+      expect([
+        first?.laneIndex,
+        second?.laneIndex,
+        third?.laneIndex,
+        fourth?.laneIndex,
+      ]).toEqual([0, 0, 1, 1])
+      expect(exhausted?.exhausted).toBe(4)
+      expect(exhausted?.apiKey).toBeUndefined()
+    })
+
+    it('fails safe at one lane and bounds an operator override to four', () => {
+      expect(configuredWorkerLanesPerCredential(undefined)).toBe(1)
+      expect(configuredWorkerLanesPerCredential('0')).toBe(1)
+      expect(configuredWorkerLanesPerCredential('not-a-number')).toBe(1)
+      expect(configuredWorkerLanesPerCredential('99')).toBe(4)
+    })
+
+    it('does not apply the Z.ai lane override to another provider', () => {
+      process.env.ANTHROPIC_API_KEY = 'anthropic-a'
+      process.env.TRIOS_ZAI_CONCURRENCY_PER_KEY = '2'
+      expect(configuredWorkerCapacity()).toBe(1)
+      expect(resolveWorkerProvider([0])?.exhausted).toBe(1)
     })
 
     // The trap this design exists to avoid. The four issues in flight when it

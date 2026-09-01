@@ -70,8 +70,8 @@ describe('GET /queen/public-research', () => {
       utilization: 50,
       slots: [
         { slot: 1, state: 'busy' },
-        { slot: 2, state: 'idle' },
-        { slot: 3, state: 'busy' },
+        { slot: 2, state: 'busy' },
+        { slot: 3, state: 'idle' },
         { slot: 4, state: 'idle' },
       ],
     })
@@ -86,6 +86,35 @@ describe('GET /queen/public-research', () => {
     expect(JSON.stringify(body)).not.toContain('/Users/private')
     expect(JSON.stringify(body)).not.toContain('postgres://configured')
     expect(ended).toBe(true)
+  })
+
+  it('counts two logical lanes on one credential as two active Bees', async () => {
+    const response = await createQueenPublicResearchRoute({
+      loadTree: async () => tree,
+      databaseUrl: () => 'postgres://configured',
+      createPool: () => ({
+        query: async () => ({
+          rowCount: 2,
+          rows: [{ key_index: 0 }, { key_index: 0 }],
+        }),
+        end: async () => {},
+      }),
+      workerCapacity: () => 4,
+    }).request('/')
+
+    const body = await response.json()
+    expect(body.workers).toEqual({
+      capacity: 4,
+      active: 2,
+      idle: 2,
+      utilization: 50,
+      slots: [
+        { slot: 1, state: 'busy' },
+        { slot: 2, state: 'busy' },
+        { slot: 3, state: 'idle' },
+        { slot: 4, state: 'idle' },
+      ],
+    })
   })
 
   it('keeps the canonical graph available when runtime telemetry is offline', async () => {

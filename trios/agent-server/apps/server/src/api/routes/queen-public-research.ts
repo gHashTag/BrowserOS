@@ -115,12 +115,14 @@ function projectTree(tree: Tree) {
 
 function workerProjection(capacity: number, busyIndices: number[]) {
   const safeCapacity = Math.max(0, Math.floor(capacity))
-  const busy = new Set(
-    busyIndices.filter(
-      (index) => Number.isInteger(index) && index >= 0 && index < safeCapacity,
-    ),
+  // key_index identifies a credential, not a logical lane. With an explicit
+  // multi-lane plan two rows may legitimately carry the same index; counting
+  // unique indices would show one active Bee while two are working. Public
+  // slots are deliberately anonymous, so only the bounded active count leaves.
+  const active = Math.min(
+    safeCapacity,
+    busyIndices.filter((index) => Number.isInteger(index) && index >= 0).length,
   )
-  const active = busy.size
   return {
     capacity: safeCapacity,
     active,
@@ -129,7 +131,7 @@ function workerProjection(capacity: number, busyIndices: number[]) {
       safeCapacity > 0 ? Math.round((active / safeCapacity) * 100) : 0,
     slots: Array.from({ length: safeCapacity }, (_, index) => ({
       slot: index + 1,
-      state: busy.has(index) ? 'busy' : 'idle',
+      state: index < active ? 'busy' : 'idle',
     })),
   }
 }
