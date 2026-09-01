@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { spawnSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { Pool } from 'pg'
 import {
   closeDispatch,
@@ -347,11 +347,10 @@ describe('queen round, send-backs counted', () => {
  * write as a violation - the exact false accusation `QueenBoundaryPaths`
  * records being paid for on #1286.
  */
-function repoWithStray(): string {
+function repoWithCommit(files: Array<{ path: string; body: string }>): string {
   const root = mkdtempSync(join(tmpdir(), 'queen-round-'))
   const repo = join(root, 'BrowserOS')
-  mkdirSync(join(repo, 'trios', 'docs'), { recursive: true })
-  mkdirSync(join(repo, 'trios', 'src'), { recursive: true })
+  mkdirSync(repo, { recursive: true })
   const git = (...args: string[]) =>
     spawnSync('git', args, { cwd: repo, encoding: 'utf8' })
   git('init', '-b', 'main')
@@ -361,12 +360,26 @@ function repoWithStray(): string {
   git('add', '-A')
   git('commit', '-m', 'base')
   git('checkout', '-b', `queen-${ISSUE}`)
-  writeFileSync(join(repo, 'trios', 'docs', 'only-1234.md'), 'inside\n')
-  writeFileSync(join(repo, 'trios', 'src', 'stray.ts'), 'export const x = 1\n')
+  for (const file of files) {
+    mkdirSync(dirname(join(repo, file.path)), { recursive: true })
+    writeFileSync(join(repo, file.path), file.body)
+  }
   git('add', '-A')
   git('commit', '-m', 'work')
   git('checkout', 'main')
   return root
+}
+
+function repoWithStray(): string {
+  return repoWithCommit([
+    { path: 'trios/docs/only-1234.md', body: 'inside\n' },
+    { path: 'trios/src/stray.ts', body: 'export const x = 1\n' },
+  ])
+}
+
+/** A dispatch row whose boundary may be spelled any way an issue author chose. */
+function finishedRowWithBoundary(ownedPaths: string[]): FinishedRow {
+  return { ...finishedRow(0), owned_paths: ownedPaths }
 }
 
 describe('queen round, boundary checked', () => {
@@ -392,6 +405,62 @@ describe('queen round, boundary checked', () => {
       )
       expect(String(report?.params[1])).toContain('outside the boundary')
       expect(String(report?.params[1])).toContain('src/stray.ts')
+    },
+  )
+
+  /**
+   * The #1306 regression. The write and the boundary both begin `trios/`, in
+   * the identical spelling, and that is the case the old comparison accused:
+   * the write was reduced to the project-relative namespace (`docs/…`) while
+   * the owned path kept its repository-relative `trios/`, so neither equality
+   * nor the prefix test could ever succeed. The bee had committed exactly the
+   * one file it was given.
+   */
+  it.if(present)(
+    'does not accuse a bee whose boundary is spelled repository-relative',
+    async () => {
+      process.env.WORKSPACE_DIR = repoWithCommit([
+        { path: 'trios/docs/only-1234.md', body: 'inside\n' },
+      ])
+      process.env.TRIOS_REPO_REF = 'main'
+      const { pool, queries } = roundPool([
+        finishedRowWithBoundary(['trios/docs/only-1234.md']),
+      ])
+      await runRound(pool, 'me', 7, { held: false }, [ISSUE])
+      delete process.env.TRIOS_REPO_REF
+
+      const update = reviewUpdate(queries)
+      expect(JSON.parse(String(update?.params[3]))).toEqual([])
+
+      // No accusation reaches the operator either: every round writes a
+      // summary report, so the assertion is that this one carries no
+      // boundary complaint rather than that it was never written.
+      const report = queries.find((q) =>
+        q.sql.includes('INSERT INTO queen_report'),
+      )
+      expect(String(report?.params[1])).not.toContain('outside the boundary')
+    },
+  )
+
+  /**
+   * One boundary, two spellings: the file it names repository-relative and the
+   * directory it names project-relative. A comparison that reduced only one
+   * half could accept neither together - whichever half was left carrying its
+   * `trios/` never matched the other.
+   */
+  it.if(present)(
+    'accepts a boundary mixing repository-relative and project-relative spellings',
+    async () => {
+      process.env.WORKSPACE_DIR = repoWithStray()
+      process.env.TRIOS_REPO_REF = 'main'
+      const { pool, queries } = roundPool([
+        finishedRowWithBoundary(['trios/docs/only-1234.md', 'src']),
+      ])
+      await runRound(pool, 'me', 7, { held: false }, [ISSUE])
+      delete process.env.TRIOS_REPO_REF
+
+      const update = reviewUpdate(queries)
+      expect(JSON.parse(String(update?.params[3]))).toEqual([])
     },
   )
 })

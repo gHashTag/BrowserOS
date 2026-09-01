@@ -233,11 +233,88 @@ enum QueenBoundaryPathsTests {
         )
     }
 
+    /// The #1306 regression: a boundary written repository-relative is the
+    /// same boundary as one written project-relative, and neither may accuse
+    /// a bee that committed exactly what it was given.
+    ///
+    /// Git reports writes from the repository root - `trios/…` - while an
+    /// issue's boundary section is written by a human, who may spell the same
+    /// path either way (this issue's own boundary is repository-relative).
+    /// `strays` reduced only the write, so `trios/agent-server/…/x.ts` became
+    /// `agent-server/…/x.ts` and was compared against an owned path still
+    /// carrying its `trios/` - no equality, no prefix, stray. The write was
+    /// exactly the file named in the boundary.
+    static func ownedPathSpellings() {
+        scenario("strays compares both halves in one project-relative namespace")
+
+        let write = "trios/agent-server/apps/server/src/x.ts"
+        let writeInside = "trios/agent-server/apps/server/src/api/y.ts"
+
+        check(
+            QueenBoundaryPaths.strays(
+                among: [write],
+                ownedPaths: ["trios/agent-server/apps/server/src/x.ts"],
+                root: root
+            ).isEmpty,
+            "a repository-relative owned path accepts the identical repository-relative write"
+        )
+
+        check(
+            QueenBoundaryPaths.strays(
+                among: [write, writeInside],
+                ownedPaths: ["agent-server/apps/server/src"],
+                root: root
+            ).isEmpty,
+            "a project-relative owned path accepts the repository-relative write beneath it"
+        )
+
+        check(
+            QueenBoundaryPaths.strays(
+                among: [write, "trios/docs/note.md"],
+                ownedPaths: ["trios/agent-server/apps/server/src/x.ts", "docs"],
+                root: root
+            ).isEmpty,
+            "one boundary may mix the two spellings of the two paths it owns"
+        )
+
+        // FR-003: the reduction takes a LEADING project component, not any
+        // directory that happens to be named like the project.
+        check(
+            QueenBoundaryPaths.strays(
+                among: ["trios/docs/trios/inner.md"],
+                ownedPaths: ["docs/trios"],
+                root: root
+            ).isEmpty,
+            "an interior directory named like the project is a real directory to own"
+        )
+
+        check(
+            QueenBoundaryPaths.strays(
+                among: ["trios/docs/trios/inner.md"],
+                ownedPaths: ["trios"],
+                root: root
+            ) == ["docs/trios/inner.md"],
+            "owning the project name as a path does not swallow the whole project"
+        )
+
+        // FR-005: a genuine violation is still named, at the project-relative
+        // spelling, whichever way the boundary wrote its paths.
+        check(
+            QueenBoundaryPaths.strays(
+                among: ["trios/agent-server/apps/server/src/x.ts", "trios/src/stray.ts"],
+                ownedPaths: ["trios/agent-server/apps/server/src/x.ts", "docs"],
+                root: root
+            ) == ["src/stray.ts"],
+            "a real out-of-boundary write is named at its project-relative path"
+        )
+    }
+
     static func main() {
         rootPrefix()
         worktreePrefix()
         projectPrefix()
         boundaryVerdict()
+        ownedPathSpellings()
 
         print("\n\(checks) checks, \(failures) failures")
         if failures > 0 { exit(1) }
