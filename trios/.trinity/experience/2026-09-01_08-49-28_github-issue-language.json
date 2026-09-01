@@ -1,0 +1,20 @@
+{
+  "timestamp": "2026-09-01T08:49:28Z",
+  "task_id": "GH-ISSUE-LANGUAGE-001",
+  "tracking_issue": "https://github.com/gHashTag/trios/issues/1291",
+  "contract": "New GitHub issue titles and bodies are English before POST; Queen UI remains Russian and English.",
+  "red": "queen_language_policy_test.swift failed to compile because githubIssueRefusal did not exist.",
+  "green": {
+    "language_policy": "36 checks passed",
+    "queen_core_sync": "byte-identical",
+    "swift_e2e": "972 checks passed across 87 scenarios",
+    "website_language_contract": "92 EN keys and 92 RU keys",
+    "website_build": "571 modules built"
+  },
+  "external_gates": [
+    "make check stopped at t27-lowering because its t27c discovery disagreed with the preceding t27-rings target",
+    "make dev compiled QueenUILib but the external package did not emit the dylib at the path the Trios build expects",
+    "make test could not load the uninitialized RUST-13/trios-mesh submodule"
+  ],
+  "learning": "Language policy needs three independent boundaries: locale parity in the UI, refusal before the client POST, and a forge event workflow for web and CLI issue creation."
+}

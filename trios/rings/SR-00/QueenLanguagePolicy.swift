@@ -62,6 +62,34 @@ public enum QueenLanguagePolicy {
         }
     }
 
+    /// Refuses a new GitHub task unless both human-authored fields use only
+    /// ASCII letters. Punctuation, paths, Markdown, URLs and emoji are
+    /// language-neutral and remain allowed. This is deliberately stricter
+    /// than the historical-file ratio: a new issue has no compatibility
+    /// reason to admit even one letter from another writing system.
+    public static func githubIssueRefusal(title: String, body: String) -> String? {
+        for (name, value) in [("title", title), ("body", body)] {
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                return "GitHub issue \(name) must not be empty. Write it in English."
+            }
+
+            var hasASCIILetter = false
+            for scalarBearing in trimmed.unicodeScalars {
+                guard CharacterSet.letters.contains(scalarBearing) else { continue }
+                guard scalarBearing.isASCII else {
+                    return "GitHub issue \(name) contains a non-English letter. "
+                        + "Write the complete task in English before creating it."
+                }
+                hasASCIILetter = true
+            }
+            guard hasASCIILetter else {
+                return "GitHub issue \(name) must contain English words."
+            }
+        }
+        return nil
+    }
+
     /// Names the refusal when an English file is being replaced by a
     /// non-English one, or nil when the change is anything else.
     ///

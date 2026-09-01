@@ -1,5 +1,12 @@
 commit-msg:
   commands:
+    english-only:
+      run: |
+        msg=$(head -1 {1})
+        if LC_ALL=C printf '%s' "$msg" | grep -q '[^ -~]'; then
+          echo "Commit subjects must be English ASCII."
+          exit 1
+        fi
     conventional:
       run: |
         msg=$(head -1 {1})
@@ -16,6 +23,17 @@ commit-msg:
 
 pre-commit:
   commands:
+    github-task-language:
+      run: |
+        swiftc trios/tests/swift/queen_language_policy_test.swift \
+          trios/rings/SR-00/QueenLanguagePolicy.swift \
+          -o /tmp/trios_queen_language_policy_test
+        /tmp/trios_queen_language_policy_test
+        cmp -s trios/rings/SR-00/QueenLanguagePolicy.swift \
+          trios/agent-server/queen-core/Sources/QueenCore/QueenLanguagePolicy.swift || {
+          echo "QueenLanguagePolicy mirror differs from the app policy."
+          exit 1
+        }
     biome-check:
       root: "trios/agent-server/"
       glob: "*.{js,ts,cjs,mjs,d.cts,d.mts,jsx,tsx,json,jsonc}"
@@ -46,7 +64,7 @@ pre-push:
           exit 0
         fi
         if [[ ! "$branch" =~ ^(feat|fix|bugfix|hotfix|release|docs|refactor|test|chore|experiment)/[a-z0-9-]+$ ]]; then
-          echo "⚠️  Warning: Branch name '$branch' doesn't match recommended format."
+          echo "Branch name '$branch' does not match the required format."
           echo "   Use: <type>/<short-description>"
           echo "   Types: feat, fix, bugfix, hotfix, release, docs, refactor, test, chore, experiment"
           echo "   Example: feat/add-auth, fix/login-crash"
@@ -54,4 +72,5 @@ pre-push:
           echo "   To rename your branch:"
           echo "     git branch -m <new-name>"
           echo "     git push -u origin <new-name>"
+          exit 1
         fi

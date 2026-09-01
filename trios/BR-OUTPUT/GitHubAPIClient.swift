@@ -1,3 +1,5 @@
+// AGENT-V-WAIVER: https://github.com/gHashTag/trios/issues/1291 adds the
+// runtime guard defined by the matching behavior spec and policy test.
 import Foundation
 import QueenCore
 
@@ -79,6 +81,9 @@ actor GitHubAPIClient {
     }
 
     func createIssue(repo: String, title: String, body: String, labels: [String] = []) async throws -> GitHubIssue {
+        if let refusal = QueenLanguagePolicy.githubIssueRefusal(title: title, body: body) {
+            throw GitHubAPIError.issueLanguageRefused(reason: refusal)
+        }
         var req = try request(GitHubEndpoint.repositoryPath(repo, "/issues"))
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -513,6 +518,7 @@ enum GitHubAPIError: Error, LocalizedError, CustomStringConvertible {
     /// sentinel number a reader would mistake for an observation.
     case decodeFailed(statusCode: Int?, endpoint: String)
     case createPRFailed(statusCode: Int, message: String)
+    case issueLanguageRefused(reason: String)
 
     var errorDescription: String? {
         switch self {
@@ -533,6 +539,8 @@ enum GitHubAPIError: Error, LocalizedError, CustomStringConvertible {
             }
         case .createPRFailed(let statusCode, let message):
             return "GitHub createPR failed (\(statusCode)): \(message)"
+        case .issueLanguageRefused(let reason):
+            return reason
         }
     }
 
@@ -543,7 +551,8 @@ enum GitHubAPIError: Error, LocalizedError, CustomStringConvertible {
     /// — one format, not two (#1288).
     var description: String {
         switch self {
-        case .missingToken, .badURL, .badServerResponse, .cannotParseResponse:
+        case .missingToken, .badURL, .badServerResponse, .cannotParseResponse,
+             .issueLanguageRefused:
             return errorDescription ?? "GitHub API error"
         case .decodeFailed(.some(let code), let endpoint):
             return "HTTP \(code): response did not decode as a pull request for \(endpoint)"

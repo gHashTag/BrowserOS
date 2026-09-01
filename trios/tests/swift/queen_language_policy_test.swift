@@ -72,6 +72,7 @@ enum QueenLanguagePolicyTests {
         ratioMath()
         theStagedSet()
         theCommitSubject()
+        theGitHubIssueContract()
 
         print("\n\(checks) checks, \(failures) failures")
         if failures > 0 { exit(1) }
@@ -287,6 +288,54 @@ enum QueenLanguagePolicyTests {
                 of: ["x/same/a.swift", "y/same/b.swift"]
             ) == nil,
             "a matching component after a mismatch is not spliced onto the prefix"
+        )
+    }
+
+    static func theGitHubIssueContract() {
+        scenario("new GitHub tasks are English before any network request")
+
+        check(
+            QueenLanguagePolicy.githubIssueRefusal(
+                title: "Enforce English-only GitHub tasks",
+                body: "The Queen refuses non-English issue content before POST."
+            ) == nil,
+            "an English issue title and body are accepted"
+        )
+
+        let nonEnglishTitle = "\u{041D}\u{043E}\u{0432}\u{0430}\u{044F} task"
+        let titleRefusal = QueenLanguagePolicy.githubIssueRefusal(
+            title: nonEnglishTitle,
+            body: "The body is English."
+        )
+        check(
+            titleRefusal?.contains("title") == true,
+            "a non-English title is refused and names the title"
+        )
+
+        let nonEnglishBody = "The first line is English. \u{041D}\u{043E}\u{0432}\u{0430}\u{044F} detail."
+        let bodyRefusal = QueenLanguagePolicy.githubIssueRefusal(
+            title: "An English title",
+            body: nonEnglishBody
+        )
+        check(
+            bodyRefusal?.contains("body") == true,
+            "a non-English body is refused and names the body"
+        )
+
+        check(
+            QueenLanguagePolicy.githubIssueRefusal(title: "", body: "English body") != nil,
+            "an empty issue title is refused"
+        )
+        check(
+            QueenLanguagePolicy.githubIssueRefusal(title: "English title", body: "") != nil,
+            "an empty issue body is refused"
+        )
+        check(
+            QueenLanguagePolicy.githubIssueRefusal(
+                title: "Fix A2A bootstrap \u{1F680}",
+                body: "Update `rings/SR-00/A.swift`; evidence: https://t27.ai."
+            ) == nil,
+            "language-neutral emoji, Markdown, paths and URLs stay allowed"
         )
     }
 }

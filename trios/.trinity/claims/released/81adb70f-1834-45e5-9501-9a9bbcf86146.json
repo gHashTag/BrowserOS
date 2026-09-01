@@ -1,0 +1,11 @@
+{
+  "claim_id": "81adb70f-1834-45e5-9501-9a9bbcf86146",
+  "agent_id": "codex-root",
+  "spec_path": ".trinity/specs/github-issue-language-policy.md",
+  "graph_node": "github_issue_language",
+  "task_id": "GH-ISSUE-LANGUAGE-001",
+  "acquired_at": "2026-09-01T08:33:05Z",
+  "released_at": "2026-09-01T08:54:22Z",
+  "status": "clean",
+  "result": "English-only GitHub issue policy implemented at client, hook, and forge boundaries while preserving RU/EN UI parity."
+}

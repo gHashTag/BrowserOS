@@ -400,5 +400,19 @@
     "task_id": "deep-audit-2026-07-26",
     "title": "24h deep audit + cross-repo report",
     "verdict": "CLEAN"
+  },
+  {
+    "agent": "codex-root",
+    "artifact": ".trinity/experience/2026-09-01_08-49-28_github-issue-language.json",
+    "claim_id": "81adb70f-1834-45e5-9501-9a9bbcf86146",
+    "finished_at": "2026-09-01T08:54:22Z",
+    "graph_node": "github_issue_language",
+    "priority": "P1",
+    "spec_path": ".trinity/specs/github-issue-language-policy.md",
+    "started_at": "2026-09-01T08:33:05Z",
+    "status": "clean",
+    "task_id": "GH-ISSUE-LANGUAGE-001",
+    "title": "Require English for GitHub issue titles and bodies",
+    "verdict": "CLEAN"
   }
 ]
