@@ -17,11 +17,18 @@
  * and is wrong to publish - so only the category counts leave this file, and
  * the category set is closed, which keeps the projection bounded however many
  * candidates a round passed over.
+ *
+ * `queue` is the same answer for the paid slots themselves: `workers`-style
+ * utilization says HOW MANY slots are busy, `queue.state` says why the rest
+ * are not - no eligible work, a full hive, work in flight, or evidence this
+ * page refuses to interpret. One closed word and one timestamp, nothing else,
+ * because the second anything else rides along it becomes a channel.
  */
 
 import { Hono } from 'hono'
 import { Pool } from 'pg'
 import { logger } from '../../lib/logger'
+import { configuredWorkerCapacity } from '../services/queen-dispatch'
 
 interface QueryResult {
   rowCount: number | null
@@ -38,6 +45,10 @@ interface QueenPublicStatusDeps {
   createPool?: (url: string) => StatusPool
   tickIntervalSeconds?: () => number
   billingMode?: () => BillingMode
+  /** Paid worker slots, from the same authority /queen/public-research reads. */
+  workerCapacity?: () => number
+  /** Clock, injectable so staleness is testable against fixed tick dates. */
+  now?: () => number
 }
 
 type BillingMode = 'api_metered' | 'coding_plan'
@@ -219,6 +230,147 @@ function classifySwarmState(facts: {
   return 'healthy_idle'
 }
 
+/**
+ * Every value `queue.state` can carry.
+ *
+ * Closed like `swarmState` and the skip categories: a public consumer must be
+ * able to rely on every value it will ever read. These are the four honest
+ * answers to "why is a paid slot idle":
+ *
+ *   capacity-full     every configured slot is carrying a worker; there is
+ *                     no idle slot left to explain
+ *   work-dispatched   at least one slot is busy and at least one is free -
+ *                     the queue supplied work this round
+ *   no-eligible-work  every slot idle AND the latest decision explicitly
+ *                     found no eligible candidate
+ *   unknown           idle slots this page cannot account for: no readable
+ *                     or recent-enough decision, no configured capacity, a
+ *                     disabled scheduler, or a refusal this projection does
+ *                     not interpret
+ */
+type QueueState =
+  | 'capacity-full'
+  | 'work-dispatched'
+  | 'no-eligible-work'
+  | 'unknown'
+
+/**
+ * How many tick intervals a decision stays trustworthy, measured from
+ * `decided_at`.
+ *
+ * The tick timer guarantees a decision at least every interval while the loop
+ * lives, so a decision older than two intervals means nobody has decided for a
+ * whole extra period - the scheduler stopped, and the last thing it said must
+ * not go on explaining a present it never saw. One missed interval is
+ * tolerated because a round that runs long can straddle the timer.
+ */
+const TICK_STALENESS_INTERVALS = 2
+
+/**
+ * `decided_at` as milliseconds, or null when the row never carried a date
+ * this process could read.
+ *
+ * Postgres returns a timestamptz as a Date and the test fixtures carry ISO
+ * strings; both are read here so the projection judges the same age whichever
+ * shape the row arrives in. Anything else - a corrupt value, a non-date -
+ * vouches for nothing.
+ */
+function decidedAtMs(value: unknown): number | null {
+  if (value instanceof Date) {
+    const ms = value.getTime()
+    return Number.isFinite(ms) ? ms : null
+  }
+  if (typeof value === 'string') {
+    const ms = Date.parse(value)
+    return Number.isFinite(ms) ? ms : null
+  }
+  return null
+}
+
+/**
+ * The one closed word for what the paid slots are doing, from facts this
+ * endpoint already holds.
+ *
+ * No second scheduler and no second eligibility rule feeds this - only the
+ * dispatch counts the page already reads, the capacity the deployment already
+ * declares through `configuredWorkerCapacity` (the same single authority
+ * `/queen/public-research` reads), and the last tick row the page already
+ * publishes. The order is the contract, and it is the order of how directly
+ * each fact speaks about the present:
+ *
+ *   1. `capacity-full` - the dispatch table says every configured slot is
+ *      busy, now. A full hive outranks everything the older tick might say
+ *      about skipped candidates, because the skip story explains a past round
+ *      while the table describes this instant; a hive that filled up after a
+ *      no-choice decision must not keep explaining its busy slots as an empty
+ *      queue.
+ *   2. `work-dispatched` - the table says work is in flight with room to
+ *      spare. The queue is demonstrably supplying work; how many slots remain
+ *      idle is a question about the round that has not happened yet.
+ *   3. `no-eligible-work` - every slot idle, and only now is the tick
+ *      consulted: it must be readable, recent (a decision older than two
+ *      intervals explains a scheduler that stopped, not a queue that is
+ *      empty), produced under an enabled scheduler, with capacity configured,
+ *      and it must be THE explicit no-candidate decision - `allowed: false`
+ *      with queend's closed `nothing to choose` refusal. Any other refusal -
+ *      a spent budget, a capacity limit - is work the queue HAD and money or
+ *      slots refused, which is not this state's to claim.
+ *   4. `unknown` - everything else. Silence, staleness and unreadable
+ *      evidence are never dressed up as an empty queue: an idle slot with no
+ *      explanation is an operator's restart trigger, and this word exists so
+ *      the trigger is pulled for a reason.
+ */
+function classifyQueueState(facts: {
+  activeWorkers: number
+  capacity: number
+  schedulerEnabled: boolean
+  tickDecidedAtMs: number | null
+  tickRefusedNothingToChoose: boolean
+  nowMs: number
+  intervalSeconds: number
+}): QueueState {
+  if (facts.capacity > 0 && facts.activeWorkers >= facts.capacity) {
+    return 'capacity-full'
+  }
+  if (facts.activeWorkers > 0) return 'work-dispatched'
+  const freshWithinMs = facts.intervalSeconds * 1000 * TICK_STALENESS_INTERVALS
+  const tickVouchesForEmptyQueue =
+    facts.schedulerEnabled &&
+    facts.capacity > 0 &&
+    facts.tickDecidedAtMs != null &&
+    facts.tickDecidedAtMs >= facts.nowMs - freshWithinMs &&
+    facts.tickRefusedNothingToChoose
+  return tickVouchesForEmptyQueue ? 'no-eligible-work' : 'unknown'
+}
+
+/**
+ * The public queue projection: a closed state and when the evidence behind it
+ * was observed, and not one byte more.
+ *
+ * `observedAt` dates the evidence, not the HTTP response: the tick's decision
+ * time whenever the state rests on the tick row (`no-eligible-work`, and
+ * `unknown` whose reason is a row that has gone quiet - its age is the
+ * finding), and the read time whenever the dispatch table is the evidence
+ * (`capacity-full`, `work-dispatched`) or nothing was ever recorded. A
+ * dashboard can therefore trust that a non-`unknown` state is either live or
+ * freshly decided, and measure exactly how stale an `unknown` is.
+ */
+function queueProjection(
+  state: QueueState,
+  tickDecidedAtMs: number | null,
+  readAtMs: number,
+): { state: QueueState; observedAt: string } {
+  const restsOnTick =
+    state === 'no-eligible-work' ||
+    (state === 'unknown' && tickDecidedAtMs != null)
+  return {
+    state,
+    observedAt: new Date(
+      restsOnTick && tickDecidedAtMs != null ? tickDecidedAtMs : readAtMs,
+    ).toISOString(),
+  }
+}
+
 export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
   const databaseUrl = deps.databaseUrl ?? configuredDatabaseUrl
   const createPool =
@@ -227,6 +379,8 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
   const tickIntervalSeconds =
     deps.tickIntervalSeconds ?? configuredTickIntervalSeconds
   const billingMode = deps.billingMode ?? configuredBillingMode
+  const workerCapacity = deps.workerCapacity ?? configuredWorkerCapacity
+  const now = deps.now ?? Date.now
 
   return new Hono().get('/', async (c) => {
     c.header('Cache-Control', 'no-store')
@@ -274,11 +428,15 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
       const countRow = counts.rows[0] ?? {}
       const latestRow = latest.rowCount ? latest.rows[0] : null
       const schedulerEnabled = intervalSeconds > 0
+      const readAtMs = now()
+      const activeWorkers = asCount(countRow.running)
+      const capacity = workerCapacity()
+      const tickDecidedAtMs = decidedAtMs(tickRow?.decided_at)
 
       return c.json({
         status: 'ok',
         swarmState: classifySwarmState({
-          running: asCount(countRow.running),
+          running: activeWorkers,
           unreviewed: asCount(countRow.unreviewed),
           schedulerEnabled,
           // A decision that is not a readable object cannot explain the
@@ -292,6 +450,27 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
           // after accepted work finishes.
           decisionFoundNoEligibleCandidate: decision?.allowed === false,
         }),
+        // The queue reading of the same three rows. `running` is the active
+        // worker count: a dispatch that never started is written already
+        // finished, so an unfinished dispatch is a bee holding a paid slot.
+        queue: queueProjection(
+          classifyQueueState({
+            activeWorkers,
+            capacity,
+            schedulerEnabled,
+            tickDecidedAtMs,
+            // queend writes this refusal from one closed template when its
+            // chooser found no candidate (main.swift); any other refusal -
+            // budget, capacity - is not this page's to reinterpret.
+            tickRefusedNothingToChoose:
+              decision?.allowed === false &&
+              decision?.refusal === 'nothing to choose',
+            nowMs: readAtMs,
+            intervalSeconds,
+          }),
+          tickDecidedAtMs,
+          readAtMs,
+        ),
         scheduler: {
           enabled: schedulerEnabled,
           intervalSeconds,

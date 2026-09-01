@@ -9,12 +9,19 @@ type QueryResult = { rowCount: number; rows: Array<Record<string, unknown>> }
 function fakePool(results: QueryResult[]) {
   let at = 0
   let ended = false
+  const statements: string[] = []
   return {
-    query: async () => results[at++] ?? { rowCount: 0, rows: [] },
+    query: async (sql?: string) => {
+      // Counted, not parsed: the contract under test is HOW MANY queries a
+      // read issues, never their text.
+      if (typeof sql === 'string') statements.push(sql)
+      return results[at++] ?? { rowCount: 0, rows: [] }
+    },
     end: async () => {
       ended = true
     },
     wasEnded: () => ended,
+    statementCount: () => statements.length,
   }
 }
 
@@ -28,6 +35,20 @@ const emptyDispatchCounts: QueryResult = {
   rows: [{ total: '0', finished: '0', running: '0', unreviewed: '0' }],
 }
 const noLatestDispatch: QueryResult = { rowCount: 0, rows: [] }
+
+/**
+ * A clock fixed inside the fixtures' own time, so whether a tick is fresh is
+ * a property of the fixture rather than of when the suite happens to run.
+ * READ_AT sits half an interval after FRESH_TICK_DECIDED_AT (interval 1800s,
+ * freshness window two intervals) and hours after every stale date below.
+ *
+ * Tick-backed queue states echo the decision time as `observedAt`; table-
+ * backed ones echo READ_AT - both pinned exactly by these constants.
+ */
+const FRESH_TICK_DECIDED_AT = '2026-09-01T04:17:42.983Z'
+const READ_AT = '2026-09-01T04:47:42.983Z'
+const STALE_TICK_DECIDED_AT = '2026-09-01T00:47:42.983Z'
+const fixedNow = () => Date.parse(READ_AT)
 
 /**
  * One skip reason per sentence `queend` writes, verbatim in shape
@@ -77,7 +98,7 @@ describe('GET /queen/status', () => {
         rowCount: 1,
         rows: [
           {
-            decided_at: '2026-09-01T04:17:42.983Z',
+            decided_at: FRESH_TICK_DECIDED_AT,
             decision: {
               allowed: false,
               refusal: 'nothing to choose',
@@ -112,6 +133,8 @@ describe('GET /queen/status', () => {
       createPool: () => pool,
       tickIntervalSeconds: () => 1800,
       billingMode: () => 'coding_plan',
+      workerCapacity: () => 4,
+      now: fixedNow,
     }).request('/')
 
     expect(response.status).toBe(200)
@@ -121,6 +144,13 @@ describe('GET /queen/status', () => {
       // Eight finished dispatches, two still owing a verdict: the idle
       // reading of the tick's refusal must lose to the verdicts owed.
       swarmState: 'waiting_for_review',
+      // Four paid slots, all idle, and a fresh explicit no-choice decision
+      // behind them: the queue is empty, which is the answer an operator
+      // needs before reaching for a restart.
+      queue: {
+        state: 'no-eligible-work',
+        observedAt: FRESH_TICK_DECIDED_AT,
+      },
       scheduler: {
         enabled: true,
         intervalSeconds: 1800,
@@ -128,7 +158,7 @@ describe('GET /queen/status', () => {
         estimatedUSDGateEnabled: false,
       },
       lastTick: {
-        decidedAt: '2026-09-01T04:17:42.983Z',
+        decidedAt: FRESH_TICK_DECIDED_AT,
         allowed: false,
         refusal: 'nothing to choose',
         skippedCount: representativeSkipped.length,
@@ -215,13 +245,20 @@ describe('GET /queen/status', () => {
     const leakBranch = 'queen-1291-leak-probe'
     const leakTitle = 'Teach the swarm to dream'
     const leakSecret = 'sk-trios-9f8e7d6c5b4a3210fedcba9876543210'
+    // The two values the queue criteria add: an issue body and a transcript
+    // excerpt, planted where a scheduler would actually hold them, to prove
+    // the newest field opens no newest channel.
+    const leakBody =
+      'Boundary: the sacred scroll of queen-secret.ts and nothing else'
+    const leakTranscript =
+      '<turn>worker murmurs the sacred scroll of queen-secret.ts</turn>'
 
     const pool = fakePool([
       {
         rowCount: 1,
         rows: [
           {
-            decided_at: '2026-09-01T04:17:42.983Z',
+            decided_at: FRESH_TICK_DECIDED_AT,
             decision: {
               allowed: false,
               refusal: 'nothing to choose',
@@ -235,6 +272,8 @@ describe('GET /queen/status', () => {
               credentials: { token: leakSecret },
               chosenPaths: [leakPath],
               strays: [{ issue: 1291, paths: [leakPath] }],
+              candidateBodies: { 1291: leakBody },
+              transcript: leakTranscript,
             },
           },
         ],
@@ -250,7 +289,7 @@ describe('GET /queen/status', () => {
             outcome: 'running',
             branch: leakBranch,
             title: leakTitle,
-            detail: leakSecret,
+            detail: leakTranscript,
             review_note: leakSecret,
             conversation_id: leakSecret,
             provider: leakSecret,
@@ -264,6 +303,8 @@ describe('GET /queen/status', () => {
       databaseUrl: () => 'postgres://configured',
       createPool: () => pool,
       tickIntervalSeconds: () => 1800,
+      workerCapacity: () => 4,
+      now: fixedNow,
     }).request('/')
 
     expect(response.status).toBe(200)
@@ -271,9 +312,19 @@ describe('GET /queen/status', () => {
     // The classification ran on planted rows without echoing any of them,
     // and an empty swarm under a live scheduler reads as health.
     expect(body.swarmState).toBe('healthy_idle')
+    // The queue projection is closed: one state word, one timestamp, and no
+    // third key a payload could ever ride.
+    expect(body.queue).toEqual({
+      state: 'no-eligible-work',
+      observedAt: FRESH_TICK_DECIDED_AT,
+    })
+    expect(Object.keys(body.queue as object).sort()).toEqual([
+      'observedAt',
+      'state',
+    ])
     // The categorisation still worked while none of it was echoed back.
     expect(body.lastTick).toEqual({
-      decidedAt: '2026-09-01T04:17:42.983Z',
+      decidedAt: FRESH_TICK_DECIDED_AT,
       allowed: false,
       refusal: 'nothing to choose',
       skippedCount: 3,
@@ -285,6 +336,8 @@ describe('GET /queen/status', () => {
     expect(serialized).not.toContain(leakBranch)
     expect(serialized).not.toContain(leakTitle)
     expect(serialized).not.toContain(leakSecret)
+    expect(serialized).not.toContain(leakBody)
+    expect(serialized).not.toContain(leakTranscript)
   })
 
   it('summarises a legacy decision with no skip array as empty', async () => {
@@ -309,6 +362,8 @@ describe('GET /queen/status', () => {
       databaseUrl: () => 'postgres://configured',
       createPool: () => pool,
       tickIntervalSeconds: () => 1800,
+      workerCapacity: () => 4,
+      now: fixedNow,
     }).request('/')
 
     expect(response.status).toBe(200)
@@ -318,6 +373,13 @@ describe('GET /queen/status', () => {
       // be the real recordTick -> recordDispatch window, so the snapshot is
       // unavailable until the row appears or a no-choice tick supersedes it.
       swarmState: 'unavailable',
+      // And the queue cannot claim dispatched work the table does not show,
+      // nor an empty queue a decision this old never said. The state is
+      // unknown, dated by the row that went quiet.
+      queue: {
+        state: 'unknown',
+        observedAt: '2026-08-30T09:00:00.000Z',
+      },
       scheduler: {
         enabled: true,
         intervalSeconds: 1800,
@@ -602,5 +664,251 @@ describe('GET /queen/status', () => {
       skippedCount: 0,
       skipSummary: {},
     })
+  })
+
+  /**
+   * The queue fixtures below share one shape so each states only what it
+   * varies: four paid slots, a 1800s tick interval, and a read at READ_AT.
+   */
+  const queueRoute = (
+    pool: ReturnType<typeof fakePool>,
+    opts?: {
+      workerCapacity?: () => number
+      tickIntervalSeconds?: () => number
+    },
+  ) =>
+    createQueenPublicStatusRoute({
+      databaseUrl: () => 'postgres://configured',
+      createPool: () => pool,
+      tickIntervalSeconds: opts?.tickIntervalSeconds ?? (() => 1800),
+      workerCapacity: opts?.workerCapacity ?? (() => 4),
+      now: fixedNow,
+    })
+
+  const noChoiceTick = (decidedAt: string): QueryResult => ({
+    rowCount: 1,
+    rows: [
+      {
+        decided_at: decidedAt,
+        decision: {
+          allowed: false,
+          refusal: 'nothing to choose',
+          skipped: ['#1298: not first'],
+        },
+      },
+    ],
+  })
+
+  const runningCounts = (running: number): QueryResult => ({
+    rowCount: 1,
+    rows: [
+      {
+        total: String(running),
+        finished: '0',
+        running: String(running),
+        unreviewed: '0',
+      },
+    ],
+  })
+
+  const queueOf = async (
+    pool: ReturnType<typeof fakePool>,
+    opts?: {
+      workerCapacity?: () => number
+      tickIntervalSeconds?: () => number
+    },
+  ): Promise<{ state: string; observedAt: string }> => {
+    const body = (await (await queueRoute(pool, opts).request('/')).json()) as {
+      queue: { state: string; observedAt: string }
+    }
+    return body.queue
+  }
+
+  it('reads idle paid slots as no-eligible-work from the explicit no-choice decision', async () => {
+    // Acceptance scenario 1: four idle slots, nothing running, and a last
+    // tick refused as `nothing to choose`. The skip summary explains WHY each
+    // candidate was passed over; the queue state is the one word a dashboard
+    // can print next to 0% utilization without guessing.
+    const pool = fakePool([
+      noChoiceTick(FRESH_TICK_DECIDED_AT),
+      runningCounts(0),
+      noLatestDispatch,
+    ])
+    expect(await queueOf(pool)).toEqual({
+      state: 'no-eligible-work',
+      observedAt: FRESH_TICK_DECIDED_AT,
+    })
+  })
+
+  it('reads a full worker pool as capacity-full regardless of skipped candidates', async () => {
+    // Acceptance scenario 2: active workers equal capacity, so there is no
+    // idle slot left to explain - and the tick's skip story must not re-explain
+    // a full hive as an empty queue. The tick here is fresh AND explicitly
+    // no-choice with a skipped candidate, exactly the rows that would read
+    // no-eligible-work if precedence were the other way round.
+    const fullWithSkips = fakePool([
+      noChoiceTick(FRESH_TICK_DECIDED_AT),
+      runningCounts(4),
+      noLatestDispatch,
+    ])
+    expect(await queueOf(fullWithSkips)).toEqual({
+      state: 'capacity-full',
+      observedAt: READ_AT,
+    })
+
+    // And with no tick row at all: the table alone vouches for the full pool,
+    // dated by the read rather than by telemetry that does not exist.
+    const fullWithoutTick = fakePool([
+      { rowCount: 0, rows: [] },
+      runningCounts(4),
+      noLatestDispatch,
+    ])
+    expect(await queueOf(fullWithoutTick)).toEqual({
+      state: 'capacity-full',
+      observedAt: READ_AT,
+    })
+  })
+
+  it('reads partial utilization as work-dispatched on the dispatch table alone', async () => {
+    // The fourth closed state: two of four slots busy. The tick is stale and
+    // no-choice besides, and none of that matters - unfinished dispatches are
+    // a fact about the present, read straight off the table, so the queue is
+    // demonstrably supplying work and the free slots belong to a round that
+    // has not happened yet.
+    const pool = fakePool([
+      noChoiceTick(STALE_TICK_DECIDED_AT),
+      runningCounts(2),
+      noLatestDispatch,
+    ])
+    expect(await queueOf(pool)).toEqual({
+      state: 'work-dispatched',
+      observedAt: READ_AT,
+    })
+  })
+
+  it('never calls a stale or missing tick an empty queue', async () => {
+    // Acceptance scenario 3: scheduler telemetry absent or stale reads as
+    // unknown, never as no-eligible-work. A decision four hours old explains
+    // a scheduler that stopped, not a queue that is empty.
+    const stale = fakePool([
+      noChoiceTick(STALE_TICK_DECIDED_AT),
+      runningCounts(0),
+      noLatestDispatch,
+    ])
+    expect(await queueOf(stale)).toEqual({
+      state: 'unknown',
+      observedAt: STALE_TICK_DECIDED_AT,
+    })
+
+    // No tick row at all: nothing was ever observed, so the observation is
+    // the read itself.
+    const missing = fakePool([
+      { rowCount: 0, rows: [] },
+      runningCounts(0),
+      noLatestDispatch,
+    ])
+    expect(await queueOf(missing)).toEqual({
+      state: 'unknown',
+      observedAt: READ_AT,
+    })
+
+    // A row whose decision cannot be read says nothing, even at a fresh date;
+    // `lastTick` still publishes the row exactly as it always has.
+    const unreadable = fakePool([
+      {
+        rowCount: 1,
+        rows: [{ decided_at: FRESH_TICK_DECIDED_AT, decision: 'corrupt' }],
+      },
+      runningCounts(0),
+      noLatestDispatch,
+    ])
+    expect(await queueOf(unreadable)).toEqual({
+      state: 'unknown',
+      observedAt: FRESH_TICK_DECIDED_AT,
+    })
+  })
+
+  it('reserves no-eligible-work for the closed nothing-to-choose refusal', async () => {
+    // Other refusals are work the queue HAD and something else refused. A
+    // spent budget (queend's other closed template, main.swift) with every
+    // slot idle is not an empty queue, and must not read as one.
+    const budgetRefusal = fakePool([
+      {
+        rowCount: 1,
+        rows: [
+          {
+            decided_at: FRESH_TICK_DECIDED_AT,
+            decision: {
+              allowed: false,
+              refusal:
+                'the swarm has spent about $10.85 today, $0.85 past its ' +
+                '$10.00 daily limit (raise it with TRIOS_SWARM_DAILY_CAP_USD)',
+            },
+          },
+        ],
+      },
+      runningCounts(0),
+      noLatestDispatch,
+    ])
+    expect((await queueOf(budgetRefusal)).state).toBe('unknown')
+
+    // A decision that chose work vouches for neither an empty queue nor a
+    // dispatch the table cannot show - the same window swarmState refuses to
+    // call healthy.
+    const choseWork = fakePool([
+      {
+        rowCount: 1,
+        rows: [
+          {
+            decided_at: FRESH_TICK_DECIDED_AT,
+            decision: { allowed: true, refusal: null, chosen: 1296 },
+          },
+        ],
+      },
+      runningCounts(0),
+      noLatestDispatch,
+    ])
+    expect((await queueOf(choseWork)).state).toBe('unknown')
+
+    // A disabled scheduler: a perfectly fresh, perfectly explicit no-choice
+    // decision from a loop nobody restarted explains yesterday, not today.
+    const schedulerOff = fakePool([
+      noChoiceTick(FRESH_TICK_DECIDED_AT),
+      runningCounts(0),
+      noLatestDispatch,
+    ])
+    expect(
+      (await queueOf(schedulerOff, { tickIntervalSeconds: () => 0 })).state,
+    ).toBe('unknown')
+
+    // No paid slot configured: whether a slot is idle is unknowable, and an
+    // unknowable idle must not borrow the empty-queue word.
+    const noCapacity = fakePool([
+      noChoiceTick(FRESH_TICK_DECIDED_AT),
+      runningCounts(0),
+      noLatestDispatch,
+    ])
+    expect((await queueOf(noCapacity, { workerCapacity: () => 0 })).state).toBe(
+      'unknown',
+    )
+  })
+
+  it('derives the queue projection without a fourth database query', async () => {
+    // The queue state is computed from the rows this route has always read -
+    // the tick row, the counts, the latest dispatch - plus the configured
+    // capacity, which comes from the environment and not the database. The
+    // count proves no query was added and none was skipped to compensate: the
+    // projection still derived a state.
+    const pool = fakePool([
+      noChoiceTick(FRESH_TICK_DECIDED_AT),
+      runningCounts(4),
+      noLatestDispatch,
+    ])
+    const response = await queueRoute(pool).request('/')
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as Record<string, unknown>
+    expect((body.queue as { state: string }).state).toBe('capacity-full')
+    expect(pool.statementCount()).toBe(3)
+    expect(pool.wasEnded()).toBe(true)
   })
 })
