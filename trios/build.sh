@@ -852,7 +852,15 @@ if [ "$COMPILE_STATUS" -eq 0 ]; then
     if [ -z "$TRIOS_VENDORED" ]; then
         mkdir -p "$STANDALONE_FRAMEWORKS/Modules"
         for queen_module_artifact in QueenUILib.swiftmodule QueenUILib.swiftdoc; do
-            if [ -f "$QUEEN_MODULE_DIR/$queen_module_artifact" ]; then
+            # Same identity guard as the dylib copy above: when the repair
+            # path falls back to the vendored halves, the module dir IS the
+            # standalone Modules dir, `cp x x` exits 1, and set -e aborts a
+            # build that had already succeeded - before the bundle was
+            # assembled (measured: --test rebuilt the binary but left the
+            # app carrying the previous one).
+            if [ -f "$QUEEN_MODULE_DIR/$queen_module_artifact" ] \
+                && [ "$QUEEN_MODULE_DIR/$queen_module_artifact" \
+                    != "$STANDALONE_FRAMEWORKS/Modules/$queen_module_artifact" ]; then
                 cp "$QUEEN_MODULE_DIR/$queen_module_artifact" \
                     "$STANDALONE_FRAMEWORKS/Modules/$queen_module_artifact"
             fi
