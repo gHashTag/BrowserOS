@@ -9,6 +9,15 @@
  * conversation ids. None of those belong on t27.ai. This projection returns
  * only the event class, issue, public title and time, which is enough to show
  * that a Bee is moving without exposing how or where it is working.
+ *
+ * Retention: a verbose Bee can emit well over 120 tool/progress rows and push
+ * its own `finished` or the Queen's `review` fact out of a plain newest-120
+ * window, which makes the dashboard look permanently busy or never reviewed.
+ * The single bounded query therefore ranks terminal lifecycle events
+ * (`finished`, `review`) ahead of `progress`/`tool`/`result`/`usage`/`error`
+ * rows before applying `LIMIT 120`, then re-sorts the retained rows so the
+ * response stays newest-first. The query stays bounded; no transcript is
+ * pulled into application memory.
  */
 
 import { Hono } from 'hono'
@@ -102,17 +111,30 @@ export function createQueenPublicActivityRoute(
              FROM queen_dispatch d
              LEFT JOIN queen_issues i ON i.number = d.issue
             WHERE d.reviewed_at >= to_timestamp($1 / 1000.0)
-         )
-         SELECT kind, issue, title, at, state, seq
-           FROM public_events
-          ORDER BY at DESC, seq DESC
-          LIMIT 120`,
+          ),
+          prioritized AS (
+            SELECT kind, issue, title, at, state, seq,
+                   CASE WHEN kind IN ('finished', 'review')
+                        THEN 0 ELSE 1 END AS priority
+              FROM public_events
+          ),
+          bounded AS (
+            SELECT kind, issue, title, at, state, seq
+              FROM prioritized
+             ORDER BY priority ASC, at DESC, seq DESC
+             LIMIT 120
+          )
+          SELECT kind, issue, title, at, state, seq
+            FROM bounded
+           ORDER BY at DESC, seq DESC`,
         [since],
       )
 
       return c.json({
         cursor: current,
-        events: result.rows.map((row) => {
+        // The query is already bounded by LIMIT 120; the slice keeps the
+        // endpoint's at-most-120 contract true even if that bound regresses.
+        events: result.rows.slice(0, 120).map((row) => {
           const issue = asIssue(row.issue)
           const at = new Date(String(row.at)).toISOString()
           const kind = publicKind(row.kind)
