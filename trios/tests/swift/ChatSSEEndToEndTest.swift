@@ -498,12 +498,19 @@ struct ChatSSEEndToEndTests {
             check(json["origin"] as? String == "sidepanel", "request body origin is sidepanel")
             check(json["conversationId"] as? String == conversationId.uuidString, "request body conversationId matches")
 
-            if let messages = json["messages"] as? [[String: Any]] {
-                let roles = messages.compactMap { $0["role"] as? String }
-                check(roles.first == "system", "messages array starts with system prompt")
-                check(roles.last == "user", "messages array ends with current user message")
+            // The wire contract changed 2026-08-31: the server never accepted
+            // a `messages` array (zod stripped the key, so the system prompt
+            // and the history were silently discarded on every send). The
+            // body now carries `userSystemPrompt` with the composed system
+            // content, and history - when there is any - rides
+            // `previousConversation` in the server schema's shape.
+            if let system = json["userSystemPrompt"] as? String, !system.isEmpty {
+                check(system.hasPrefix("You are"),
+                      "userSystemPrompt carries the composed system content")
+                check(json["messages"] == nil,
+                      "the discarded messages key did not come back")
             } else {
-                fail("request body messages array missing or malformed")
+                fail("userSystemPrompt missing - the system prompt is discarded again")
             }
         } else {
             fail("transport did not capture a valid request body")
@@ -1676,10 +1683,12 @@ struct ChatSSEEndToEndTests {
         check(viewModel.recalledMemories.isEmpty == false,
               "chat exposes recalled memories to the UI")
 
+        // Same contract change as the first scenario: the composed system
+        // prompt rides `userSystemPrompt` now - `messages` was stripped by
+        // the server's zod schema before any handler saw it.
         if let body = await transport.lastBody,
            let json = body.asJSONObject(),
-           let messages = json["messages"] as? [[String: Any]],
-           let system = messages.first?["content"] as? String {
+           let system = json["userSystemPrompt"] as? String {
             check(system.contains("UNTRUSTED LONG-TERM MEMORY"),
                   "request labels recalled memory as untrusted")
             check(system.lowercased().contains("trinity"),

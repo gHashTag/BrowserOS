@@ -94,23 +94,27 @@ make cassettes            -> fast honest verdict since the ROOT-CAUSE FIX
 make t27-lowering           -> counts declared vs emitted functions, per spec
 make t27-rings              -> ring00_parity, ring01_rules, ring00_verilog
 make chain                  -> 80 verdicts, spec and hand-written Swift agree
-make test / make mutants    -> DEAD since the QueenCore module split
-                              (12b97dedc, measured wave 120):
-                              tests/swift/run_chat_sse_e2e.sh:91 compiles
-                              all of rings as ONE module while six rings
-                              files now `import QueenCore` - the suite
-                              fails at compile, so all 22 registry
-                              mutants are unscorable (the gate stays
-                              fail-closed and never lies green).
-                              Blast radius measured live wave 121:
-                              chain [OK] 80 verdicts, t27-rings [OK]
-                              (iverilog 14 rows), t27-lowering EXIT=0
-                              (wave 117), queen-core [OK] - only the
-                              e2e script is affected. The fix pattern
-                              already exists in-repo: clade-e2e
-                              (mutants-logic) is module-aware and uses
-                              .trinity/build/QueenCore
-                              (rings/RUST-02/clade-e2e/src/main.rs:1140).
+make test / make mutants    -> RESURRECTED 2026-09-01, waves 126-129
+                              (was dead since the QueenCore module split
+                              12b97dedc, found wave 120). Four causes,
+                              each measured: (1) the script built rings
+                              as one module - fixed by the build.sh
+                              pattern (fresh module emit + QUEEN_CORE
+                              filter + -I, wave 126); (2) the #1172
+                              drill pinned a record the policy move
+                              retired - aligned, wave 127; (3) the global
+                              git executor silently re-rooted scratch
+                              projectRoots - fixed at repositoryRoot,
+                              12 reds healed, wave 128; (4) two checks
+                              pinned the zod-stripped `messages` key -
+                              aligned to userSystemPrompt, wave 129.
+                              Final state MEASURED: 972 of 972 checks
+                              green (floor 962), and registry row 22
+                              (QueenReviewDecision.decide) driven and
+                              CAUGHT (failed twice). Latent notes: the
+                              11-vs-15 module list disagreement
+                              (build.sh vs Makefile) and the toolchain
+                              flag mandate stand (see below).
                               mutants-logic measured GREEN wave 122
                               (2 of 2 caught) after refreshing the stale
                               .trinity/build/QueenCore module - it was
