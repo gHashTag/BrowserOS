@@ -526,7 +526,10 @@ async function startTurn(
     return {
       ok: true,
       detail: 'turn accepted',
-      beginDrain: () => void drain(pool, response, conversationId, issue),
+      // The provider travels with the drain so that a quota stop at the end
+      // of the stream can name whose quota it was (#1301).
+      beginDrain: () =>
+        void drain(pool, response, conversationId, issue, chosen.provider),
     }
   } catch (error) {
     return {
@@ -561,6 +564,17 @@ class Scribe {
    * it would price a real turn at nothing instead of admitting it is unknown.
    */
   tokens: TokenUsage | undefined
+
+  /**
+   * The turn's terminal stream error, if it had one (#1301).
+   *
+   * An `error` frame is terminal: `finishWithError` emits it and then closes
+   * the stream (lib/agents/acp-ui-message-stream.ts), and this is the frame a
+   * provider refusal travels in, because /chat answers 200 and streams the
+   * failure rather than answering non-ok. Kept unread until the ending, where
+   * it may close the dispatch as a quota stop instead of a finish.
+   */
+  streamError: string | undefined
 
   constructor(
     private pool: Pool,
@@ -671,6 +685,11 @@ class Scribe {
       )
       return
     }
+    // The terminal error frame is the one a provider quota refusal arrives
+    // in. Remembered for the ending to classify (#1301) and still noted: the
+    // feed keeps the provider's own words, while the stored outcome keeps
+    // only the closed classification - never the body, never the credential.
+    if (type === 'error' && text.length > 0) this.streamError = text
     await this.note(type, text || JSON.stringify(event).slice(0, 800))
   }
 
@@ -727,6 +746,90 @@ class Scribe {
 }
 
 /**
+ * #1301. Z.ai business codes whose documented meaning is that a quota
+ * window, a plan, or a balance is spent (docs.z.ai, "Errors": every one of
+ * them arrives as HTTP 429).
+ *
+ * Coding Plan removed the synthetic USD start gate (#1300), which makes these
+ * responses the authoritative stop signal: a bee that hits one cannot be
+ * helped by another retry until the provider resets the window or the
+ * operator pays. A generic worker failure hides that distinction, so the
+ * dispatch boundary keeps it as a closed list.
+ *
+ * The transient 429s are deliberately NOT here. 1302 is a request-rate limit
+ * and 1305 a temporary overload; both clear on their own, and closing a bee
+ * as quota-stopped over either would retire work another retry could have
+ * finished. `1113` is also matched at the transport
+ * (lib/provider-error-classifier.ts) to stop SDK retries; this list is about
+ * the ending, not the retry.
+ */
+const ZAI_QUOTA_EXHAUSTED_CODES: ReadonlySet<string> = new Set([
+  '1113', // Insufficient balance or no resource package. Please recharge.
+  '1308', // Usage limit reached for a window; resets at a stated time.
+  '1309', // GLM Coding Plan package expired.
+  '1310', // Weekly/monthly limit exhausted.
+  '1311', // Subscription plan does not include the model.
+  '1313', // Fair Usage Policy limit on the account.
+  '1314', // Enterprise package expired.
+  '1315', // Key limited to enterprise coding package scenarios.
+  '1316', // 5-hour usage limit; no balance for extra usage.
+  '1317', // 7-day usage limit; no balance for extra usage.
+  '1318', // 5-hour usage limit; monthly spend limit reached.
+  '1319', // 7-day usage limit; monthly spend limit reached.
+  '1320', // 5-hour usage limit; monthly spend limit reached.
+  '1321', // 7-day usage limit; monthly spend limit reached.
+])
+
+/**
+ * The one ending a quota-stopped bee closes with (#1301).
+ *
+ * Provider and code only. The response body stays off the row - the message
+ * prose names accounts, windows and reset times, and a credential never
+ * belongs in a column at all - while the code is the documented, enumerable
+ * token a person can look up, not a fragment of prose. Deterministic by
+ * construction: the same failure closes with the same words every time.
+ */
+export function classifyQuotaExhaustion(
+  provider: string,
+  errorText: string,
+): string | null {
+  // No Z.ai state may be inferred about any other provider. Another provider
+  // answering with the same code, or the same words, is answering for itself;
+  // the Coding Plan window this classification names belongs to Z.ai alone.
+  if (provider !== 'zai') return null
+  for (const code of zaiCodesIn(errorText)) {
+    if (ZAI_QUOTA_EXHAUSTED_CODES.has(code)) {
+      return `provider quota exhausted (zai code ${code})`
+    }
+  }
+  return null
+}
+
+/**
+ * The Z.ai business codes a turn's terminal error text carries.
+ *
+ * Only the two code-bearing shapes that can reach this module are read: the
+ * `[1113] message` prefix this server's own transport builds
+ * (lib/openrouter-fetch.ts), and the documented envelope field
+ * `{"error":{"code":"1113",...}}` for when a raw body surfaces inside a
+ * message. Bracket tokens are read first, then envelope tokens, each in text
+ * order. No prose is matched and nothing else is parsed, so an undocumented
+ * code - or digits that merely look like one - returns nothing and the ending
+ * stays whatever it was (#1301, FR-002).
+ */
+function zaiCodesIn(errorText: string): string[] {
+  const found: string[] = []
+  const shapes = [/\[(\d{4})\]/g, /"code"\s*:\s*"(\d{4})"/g]
+  for (const shape of shapes) {
+    for (const match of errorText.matchAll(shape)) {
+      const code = match[1]
+      if (code !== undefined && !found.includes(code)) found.push(code)
+    }
+  }
+  return found
+}
+
+/**
  * Read the stream to its end, and write down that it ended.
  *
  * The recording is the point, not the reading. A dispatch with no way to finish
@@ -744,6 +847,13 @@ export async function drain(
   response: Response,
   conversationId: string,
   issue: number,
+  /**
+   * Who ran this turn (#1301). Optional because every pre-existing caller
+   * closes without it and must keep closing exactly as it did: with no
+   * provider there is no quota classification, only the endings that have
+   * always existed.
+   */
+  provider?: string,
 ): Promise<void> {
   let outcome = 'finished'
   const scribe = new Scribe(pool, conversationId, issue)
@@ -775,6 +885,24 @@ export async function drain(
     }`
     logger.warn('Queen worker stream ended badly', { conversationId, issue })
     await scribe.note('error', outcome).catch(() => {})
+  }
+  // A quota-limited bee stops truthfully (#1301). Coding Plan removed the
+  // synthetic USD gate, so the provider's documented quota response is the
+  // authoritative stop signal, and a turn that reached its own end with one
+  // as its last word closes as exactly that: a closed classification naming
+  // the provider and the code, never the response body and never the
+  // credential. Nothing else moves - the close mechanics, the refill signal,
+  // the reaper and the board see the same transition they always did,
+  // because a quota stop is an ending the turn really reached, not a failure
+  // to end. The ended-badly path keeps its own outcome: a dropped connection
+  // is a transport failure, not a documented provider answer.
+  if (
+    outcome === 'finished' &&
+    provider !== undefined &&
+    scribe.streamError !== undefined
+  ) {
+    const quota = classifyQuotaExhaustion(provider, scribe.streamError)
+    if (quota !== null) outcome = quota
   }
   await closeDispatch(pool, issue, conversationId, outcome, scribe.tokens)
 }

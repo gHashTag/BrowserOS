@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Pool } from 'pg'
 import {
+  classifyQuotaExhaustion,
   closeDispatch,
   committedFileCount,
   committedFiles,
@@ -460,6 +461,287 @@ describe('draining a turn', () => {
     const closing = touching(asked, 'UPDATE queen_dispatch')
     expect(closing[0].params[2]).toBeNull()
     expect(closing[0].params[3]).toBeNull()
+  })
+})
+
+/**
+ * #1301. Coding Plan removed the synthetic USD start gate (#1300), so the
+ * provider's quota response became the authoritative stop signal: a bee that
+ * hits one cannot be helped by another retry until Z.ai resets the window or
+ * the operator pays. A generic worker failure hides that, and a board that
+ * cannot tell a quota stop from a flaky turn reaps and retries work that was
+ * never going to run.
+ *
+ * The classification is CLOSED, deliberately: only Z.ai's documented business
+ * codes (docs.z.ai, "Errors" - all delivered as HTTP 429), only for the
+ * provider zai, matched as code tokens and never as prose. Another provider
+ * answering with the same words - even the same code - is answering for
+ * itself and acquires no Z.ai Coding Plan state; a transient Z.ai 429
+ * (request rate, temporary overload) stays an ordinary ending, because
+ * another retry can help it.
+ */
+describe('classifying a quota stop at the dispatch boundary', () => {
+  it('classifies a Coding Plan usage-limit response with its reset window', () => {
+    const outcome = classifyQuotaExhaustion(
+      'zai',
+      '[1308] Usage limit reached for 5 prompts. Your limit will reset at 2025-06-01 12:00:00 GMT+08:00.',
+    )
+    expect(outcome).toBe('provider quota exhausted (zai code 1308)')
+  })
+
+  it('classifies every documented quota code, and only those', () => {
+    const quotaCodes = [
+      '1113', // Insufficient balance or no resource package.
+      '1308', // Usage limit reached for a window.
+      '1309', // GLM Coding Plan package expired.
+      '1310', // Weekly/Monthly limit exhausted.
+      '1311', // Plan does not include the model.
+      '1313', // Fair Usage Policy.
+      '1314', // Enterprise package expired.
+      '1315', // Key limited to enterprise coding package.
+      '1316', // 5-hour limit, no balance for extra usage.
+      '1317', // 7-day limit, no balance for extra usage.
+      '1318', // 5-hour limit, monthly spend limit.
+      '1319', // 7-day limit, monthly spend limit.
+      '1320', // 5-hour limit, monthly spend limit.
+      '1321', // 7-day limit, monthly spend limit.
+    ]
+    for (const code of quotaCodes) {
+      expect(classifyQuotaExhaustion('zai', `[${code}] stopped`)).toBe(
+        `provider quota exhausted (zai code ${code})`,
+      )
+    }
+    // The transient 429s clear on their own. Closing a bee as quota-stopped
+    // over either would retire work another retry could have finished.
+    expect(
+      classifyQuotaExhaustion('zai', '[1302] Rate limit reached'),
+    ).toBeNull()
+    expect(
+      classifyQuotaExhaustion(
+        'zai',
+        '[1305] The service may be temporarily overloaded',
+      ),
+    ).toBeNull()
+    // Documented codes outside the quota family are not quota stops either.
+    for (const code of ['1000', '1211', '1220', '1301']) {
+      expect(classifyQuotaExhaustion('zai', `[${code}] other`)).toBeNull()
+    }
+  })
+
+  // The message this server's own transport builds is `[code] message`
+  // (lib/openrouter-fetch.ts), but a raw body can surface whole inside an
+  // error message; the documented envelope field is read for that shape.
+  it('reads the code from the documented envelope when a raw body surfaces', () => {
+    const outcome = classifyQuotaExhaustion(
+      'zai',
+      'AI_APICallError: {"error":{"code":"1316","message":"Usage limit reached for the past 5 hours. Insufficient balance for extra usage. Resets at 2025-06-01."}}',
+    )
+    expect(outcome).toBe('provider quota exhausted (zai code 1316)')
+  })
+
+  it('does not classify an ordinary provider failure', () => {
+    expect(classifyQuotaExhaustion('zai', 'fetch failed')).toBeNull()
+    expect(
+      classifyQuotaExhaustion('zai', 'HTTP 500: Internal Error'),
+    ).toBeNull()
+    expect(classifyQuotaExhaustion('zai', '')).toBeNull()
+    // Prose alone proves nothing: the classification matches codes, not
+    // words, so an undocumented body that merely sounds exhausted stays an
+    // ordinary ending and keeps whatever retry path it always had.
+    expect(
+      classifyQuotaExhaustion(
+        'zai',
+        'Insufficient balance or no resource package. Please recharge.',
+      ),
+    ).toBeNull()
+    expect(
+      classifyQuotaExhaustion(
+        'zai',
+        'Usage limit reached for the past 5 hours',
+      ),
+    ).toBeNull()
+  })
+
+  // Scenario 3 of the issue: another provider returning similar prose must
+  // not acquire Z.ai Coding Plan state. The check is the provider, first and
+  // last, so even the exact documented code means nothing in another name.
+  it('infers no Z.ai state about another provider, prose or code', () => {
+    for (const provider of [
+      'openrouter',
+      'anthropic',
+      'openai',
+      'moonshot',
+      '',
+    ]) {
+      expect(
+        classifyQuotaExhaustion(
+          provider,
+          '[1113] Insufficient balance or no resource package. Please recharge.',
+        ),
+      ).toBeNull()
+      expect(
+        classifyQuotaExhaustion(
+          provider,
+          '[1308] Usage limit reached for 5 prompts',
+        ),
+      ).toBeNull()
+    }
+  })
+
+  // Scenario 1 of the issue: the stored outcome identifies quota exhaustion
+  // without exposing the response body or the credential. The provider's own
+  // prose - and anything a message might have echoed - stays off the row.
+  it('never carries the body or a credential into the classification', () => {
+    const failure =
+      '[1310] Weekly/Monthly Limit Exhausted. Your limit will reset at 2025-06-02 00:00 (account key sk-zai-1234-example).'
+    const outcome = classifyQuotaExhaustion('zai', failure)
+    expect(outcome).toBe('provider quota exhausted (zai code 1310)')
+    expect(outcome).not.toContain('reset at')
+    expect(outcome).not.toContain('sk-zai-1234-example')
+    // Deterministic: the same failure closes with the same words every time.
+    expect(classifyQuotaExhaustion('zai', failure)).toBe(outcome)
+  })
+})
+
+/**
+ * The dispatch result path: /chat answers 200 and streams a provider refusal
+ * as a terminal error frame, so the quota classification has to survive the
+ * path a real bee's stream takes - Scribe frames, drain, closeDispatch - and
+ * land on the queen_dispatch row, not merely exist as a pure function.
+ *
+ * Every non-quota path must close exactly as it did before #1301, because
+ * retry, refill and the board read these endings.
+ */
+describe('closing a quota-limited bee', () => {
+  const sse = (frames: unknown[]) =>
+    new Response(
+      new ReadableStream({
+        start(controller) {
+          const encoder = new TextEncoder()
+          for (const frame of frames) {
+            controller.enqueue(
+              encoder.encode(`data: ${JSON.stringify(frame)}\n\n`),
+            )
+          }
+          controller.close()
+        },
+      }),
+    )
+
+  it('stores the quota classification instead of an ordinary finish', async () => {
+    const { pool, asked } = recordingPool()
+    await drain(
+      pool,
+      sse([
+        { type: 'text-delta', delta: 'starting' },
+        // The terminal error frame, carrying the business code this server's
+        // own transport prefixes (lib/openrouter-fetch.ts) and the provider's
+        // prose - which must reach the row as neither.
+        {
+          type: 'error',
+          errorText:
+            '[1308] Usage limit reached for 5 prompts. Your limit will reset at 2025-06-01 12:00:00 GMT+08:00.',
+        },
+        { type: 'finish', finishReason: 'error' },
+      ]),
+      'conv-1301',
+      1301,
+      'zai',
+    )
+    const closing = touching(asked, 'UPDATE queen_dispatch')
+    expect(closing.length).toBe(1)
+    expect(closing[0].params[1]).toBe(
+      'provider quota exhausted (zai code 1308)',
+    )
+    // The reset timestamp and the provider prose stay off the ending.
+    expect(JSON.stringify(closing[0].params)).not.toContain('reset at')
+    expect(JSON.stringify(closing[0].params)).not.toContain(
+      'Usage limit reached',
+    )
+  })
+
+  // Scenario 2 of the issue: a transient non-quota failure keeps the existing
+  // classification and with it every retry behavior that reads the outcome.
+  it('keeps the ordinary ending for a transient Z.ai failure', async () => {
+    const { pool, asked } = recordingPool()
+    await drain(
+      pool,
+      sse([
+        { type: 'error', errorText: '[1302] Rate limit reached for requests' },
+        { type: 'finish', finishReason: 'error' },
+      ]),
+      'conv-1301',
+      1301,
+      'zai',
+    )
+    const closing = touching(asked, 'UPDATE queen_dispatch')
+    expect(closing[0].params[1]).toBe('finished')
+  })
+
+  // Scenario 3 of the issue, on the result path: identical prose under
+  // another provider's name closes as an ordinary ending.
+  it('keeps the ordinary ending when the provider is not Z.ai', async () => {
+    const { pool, asked } = recordingPool()
+    await drain(
+      pool,
+      sse([
+        {
+          type: 'error',
+          errorText: '[1113] Insufficient balance or no resource package.',
+        },
+        { type: 'finish', finishReason: 'error' },
+      ]),
+      'conv-1301',
+      1301,
+      'openrouter',
+    )
+    const closing = touching(asked, 'UPDATE queen_dispatch')
+    expect(closing[0].params[1]).toBe('finished')
+  })
+
+  // drain predates the provider argument; every caller that passes nothing
+  // must close exactly as before, so the argument stays optional and inert.
+  it('keeps the ordinary ending for callers that pass no provider', async () => {
+    const { pool, asked } = recordingPool()
+    await drain(
+      pool,
+      sse([
+        {
+          type: 'error',
+          errorText: '[1308] Usage limit reached for 5 prompts',
+        },
+        { type: 'finish', finishReason: 'error' },
+      ]),
+      'conv-1301',
+      1301,
+    )
+    const closing = touching(asked, 'UPDATE queen_dispatch')
+    expect(closing[0].params[1]).toBe('finished')
+  })
+
+  // A quota stop is an ending the turn really reached, not a failure to end:
+  // the row closes, the key frees, and the refill signal (#1295) fires just
+  // as it does for any durable close. Suppressing it here would hold a paid
+  // key idle against the very issue this classification exists to keep honest.
+  it('still frees the slot: a quota close signals like any durable close', async () => {
+    const heard: number[] = []
+    setDurableCloseListener((issue) => heard.push(issue))
+    try {
+      const { pool } = recordingPool(() => ({ rowCount: 1, rows: [] }))
+      await drain(
+        pool,
+        sse([
+          { type: 'error', errorText: '[1113] Insufficient balance' },
+          { type: 'finish', finishReason: 'error' },
+        ]),
+        'conv-1301',
+        1301,
+        'zai',
+      )
+      expect(heard).toEqual([1301])
+    } finally {
+      setDurableCloseListener(undefined)
+    }
   })
 })
 
