@@ -745,6 +745,31 @@ export interface TokenUsage {
 }
 
 /**
+ * Who is told when a bee's ending actually landed (#1295).
+ *
+ * Installed by the tick loop and by nothing else: a deployment running
+ * without the loop (local development, the app alongside) closes dispatches
+ * exactly as before, because a completion with no listener is a normal
+ * minute, not an error - there is simply nobody local to refill.
+ *
+ * It is a function, not a queue and not a policy. It may not dispatch, may
+ * not retry and may not decide anything; it may only ASK for a round, and the
+ * round it asks for is the same `runQueenTickOnce` the timer runs - lease,
+ * fencing, `queend` and all. A hook that could start work of its own would be
+ * a second supervisor wearing the first one's name.
+ */
+export type DurableCloseListener = (issue: number) => void
+
+let durableCloseListener: DurableCloseListener | undefined
+
+/** Install (or clear) the refill listener. The tick loop owns this. */
+export function setDurableCloseListener(
+  listener: DurableCloseListener | undefined,
+): void {
+  durableCloseListener = listener
+}
+
+/**
  * Write the ending, and if it cannot be written, say so out loud.
  *
  * This was `finishDispatch(...).catch(() => {})` - an empty catch on the ONLY
@@ -760,6 +785,13 @@ export interface TokenUsage {
  * loop here would hold a dead stream open. The first failure is the part that
  * matters: it is the only signal separating a phantom running bee from a real
  * one, and it used to produce no line anywhere.
+ *
+ * AND WHEN THE ENDING LANDS, IT SAYS SO (#1295). A durable running-to-finished
+ * transition is the one moment a healthy paid key becomes free, and until this
+ * the next eligible mission waited out the periodic tick for it. The listener
+ * is fired only on a close that landed - first attempt or retry - and never on
+ * the zero-row or failed paths, which keep the retry and the stall reaper as
+ * their authority.
  */
 export async function closeDispatch(
   pool: Pool,
@@ -768,6 +800,11 @@ export async function closeDispatch(
   outcome: string,
   tokens?: TokenUsage,
 ): Promise<void> {
+  // Whether the row reads finished on the database when this returns. That is
+  // the ONLY condition under which the slot may be announced as free: a signal
+  // about a row that still says `running` wakes a round that sees the bee as
+  // in flight and skips the very work the signal promised.
+  let closedDurably = false
   try {
     const closed = await finishDispatch(
       pool,
@@ -791,6 +828,8 @@ export async function closeDispatch(
         conversationId,
         outcome,
       })
+    } else {
+      closedDurably = true
     }
   } catch (error) {
     logger.error('Queen dispatch could not be closed', {
@@ -798,9 +837,29 @@ export async function closeDispatch(
       conversationId,
       error: error instanceof Error ? error.message : String(error),
     })
-    await finishDispatch(pool, issue, outcome, tokens, conversationId).catch(
-      () => {},
-    )
+    // The retry decides. A retry that lands closes the row as surely as a
+    // first attempt would have, so it signals too - a flaky database is no
+    // reason to hand the slot back half an hour late. A retry that fails
+    // returns 0 here, and 0 is also what a zero-row retry lands as, so one
+    // comparison covers both not-durable outcomes.
+    closedDurably =
+      (await finishDispatch(pool, issue, outcome, tokens, conversationId).catch(
+        () => 0,
+      )) > 0
+  }
+  if (closedDurably && durableCloseListener) {
+    // #1295: the row says finished, so the key this bee held is free and the
+    // next eligible mission should not wait out the periodic tick for it.
+    try {
+      durableCloseListener(issue)
+    } catch (error) {
+      // A listener that breaks must not take the ending with it - the row is
+      // closed, and that fact stands whatever the refill does.
+      logger.warn('Queen refill signal failed', {
+        issue,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
   }
 }
 
