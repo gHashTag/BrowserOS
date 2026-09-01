@@ -5186,6 +5186,24 @@ struct ChatSSEEndToEndTests {
         )
 
         // SwarmBudget. The ceiling declines to start work; it never kills.
+        check(
+            SwarmBillingMode.parsed("coding_plan") == .codingPlan,
+            "an explicit Coding Plan mode disables only the estimated USD start gate"
+        )
+        check(
+            SwarmBillingMode.parsed("api_metered") == .apiMetered,
+            "an explicit metered mode preserves the estimated USD start gate"
+        )
+        check(
+            SwarmBillingMode.parsed("unknown") == .apiMetered,
+            "an unknown billing mode falls back to the conservative metered gate"
+        )
+        check(
+            !SwarmBillingMode.codingPlan.enforcesEstimatedUSDCap
+                && SwarmBillingMode.apiMetered.enforcesEstimatedUSDCap,
+            "billing mode controls only estimated USD enforcement"
+        )
+
         let budget = SwarmBudget(dailyLimitUSD: 10_000_000)
         if case .fine = budget.verdict(spentToday: 1_000_000) {} else {
             check(false, "a tenth of the ceiling is fine")

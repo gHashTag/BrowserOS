@@ -88,6 +88,37 @@ public enum ModelPricing {
     }
 }
 
+/// How the provider account is billed for worker traffic.
+///
+/// This is explicit rather than inferred from a provider, model, or endpoint.
+/// A Z.ai key can be backed by metered API balance or by a Coding Plan, and
+/// guessing the account contract from `glm-5.3` turns telemetry into a false
+/// refusal. Unknown values keep the conservative metered behavior.
+public enum SwarmBillingMode: String, Equatable, Sendable {
+    case apiMetered = "api_metered"
+    case codingPlan = "coding_plan"
+
+    public static func parsed(_ raw: String?) -> SwarmBillingMode {
+        guard let normalized = raw?.trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased(),
+              let mode = SwarmBillingMode(rawValue: normalized) else {
+            return .apiMetered
+        }
+        return mode
+    }
+
+    public static func current(
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> SwarmBillingMode {
+        parsed(environment["TRIOS_SWARM_BILLING_MODE"])
+    }
+
+    /// Coding Plan is governed by provider quota responses and reset windows,
+    /// not by a synthetic pay-as-you-go dollar estimate. Every other Queen
+    /// gate remains outside this decision.
+    public var enforcesEstimatedUSDCap: Bool { self == .apiMetered }
+}
+
 /// A ceiling on what the swarm may spend in one day.
 ///
 /// Advisory rather than enforced at the transport, for the same reason the
