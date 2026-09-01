@@ -16,6 +16,7 @@ import {
   recordDispatch,
   resolveWorkerProvider,
   setDurableCloseListener,
+  workerCapacityBreakdown,
   workspaceRoot,
 } from '../../src/api/services/queen-dispatch'
 import { logger } from '../../src/lib/logger'
@@ -249,6 +250,181 @@ describe('queen dispatch precheck', () => {
         expect(resolveWorkerProvider([0, 1])?.exhausted).toBe(2)
       })
     })
+  })
+})
+
+/**
+ * #1308. `workers.capacity` answers a number; this breakdown answers what the
+ * number is MADE of. An operator seeing capacity 4 cannot act on it without
+ * knowing whether it is two subscriptions at a lane each - one of which may be
+ * quietly disconnected - or one subscription at two lanes each, and a total
+ * alone keeps that a guess.
+ */
+describe('worker capacity breakdown', () => {
+  // Scenario 1 of the issue: two distinct configured Z.ai credentials and two
+  // lanes per credential. The response is closed - three integers, no trace of
+  // WHICH credentials produced them.
+  it('factors capacity into connected credentials and lanes per credential', () => {
+    process.env.ZAI_API_KEY = 'planted-secret-a'
+    process.env.ZAI_API_KEY_2 = 'planted-secret-b'
+    process.env.TRIOS_ZAI_CONCURRENCY_PER_KEY = '2'
+    expect(workerCapacityBreakdown()).toEqual({
+      connectedCredentials: 2,
+      lanesPerCredential: 2,
+      effectiveCapacity: 4,
+    })
+    // The same authority dispatch allocates against, not a second story.
+    expect(configuredWorkerCapacity()).toBe(4)
+    expect(resolveWorkerProvider([0, 1, 0, 1])?.exhausted).toBe(4)
+  })
+
+  // FR-002/FR-003: closed and anonymous. Anything beyond these three fields -
+  // a hash, a suffix, an index, a variable name, a value - is a disclosure.
+  it('is three numeric fields and nothing else', () => {
+    process.env.ZAI_API_KEY = 'planted-secret-a'
+    process.env.ZAI_API_KEY_2 = 'planted-secret-b'
+    const breakdown = workerCapacityBreakdown() as unknown as Record<
+      string,
+      unknown
+    >
+    expect(Object.keys(breakdown).sort()).toEqual([
+      'connectedCredentials',
+      'effectiveCapacity',
+      'lanesPerCredential',
+    ])
+    for (const value of Object.values(breakdown)) {
+      expect(typeof value).toBe('number')
+      expect(Number.isInteger(value)).toBe(true)
+    }
+    const serialized = JSON.stringify(breakdown)
+    expect(serialized).not.toContain('planted-secret')
+    expect(serialized).not.toContain('ZAI_API_KEY')
+    expect(serialized).not.toContain('ANTHROPIC_API_KEY')
+  })
+
+  // Scenario 2: a credential duplicated across slots is one account with one
+  // rate limit (#1293). Neither factor may be inflated by it.
+  it('counts a duplicated credential once so nothing is inflated', () => {
+    process.env.ZAI_API_KEY = 'planted-secret-a'
+    process.env.ZAI_API_KEY_2 = 'planted-secret-a'
+    process.env.ZAI_API_KEY_3 = 'planted-secret-b'
+    process.env.TRIOS_ZAI_CONCURRENCY_PER_KEY = '2'
+    expect(workerCapacityBreakdown()).toEqual({
+      connectedCredentials: 2,
+      lanesPerCredential: 2,
+      effectiveCapacity: 4,
+    })
+    expect(configuredWorkerCapacity()).toBe(4)
+  })
+
+  // FR-003: counted after TRIMMING. ' key' and 'key' in two boxes are one
+  // credential wearing its whitespace differently, and the count must say so
+  // before a second slot is handed a secret the first is already spending.
+  it('trims values before counting, so padded duplicates are one credential', () => {
+    process.env.ZAI_API_KEY = '  planted-secret-a  '
+    process.env.ZAI_API_KEY_2 = 'planted-secret-a'
+    process.env.ZAI_API_KEY_3 = ' planted-secret-b '
+    expect(workerCapacityBreakdown().connectedCredentials).toBe(2)
+    // Selection reads the same trimmed list, so the two can never disagree.
+    expect(resolveWorkerProvider([])?.keyCount).toBe(2)
+  })
+
+  it('treats a whitespace-only value as the empty box it supplies nothing from', () => {
+    process.env.ZAI_API_KEY = '   '
+    expect(workerCapacityBreakdown().connectedCredentials).toBe(0)
+    expect(configuredWorkerCapacity()).toBe(0)
+  })
+
+  // Scenario 3: no supported provider credentials. Every factor is zero or
+  // its safe default, and nothing about a secret leaves with it.
+  it('reports zeros and the safe lane default when nothing is connected', () => {
+    expect(workerCapacityBreakdown()).toEqual({
+      connectedCredentials: 0,
+      lanesPerCredential: 1,
+      effectiveCapacity: 0,
+    })
+    expect(configuredWorkerCapacity()).toBe(0)
+  })
+
+  // FR-005: the lane factor keeps its existing safe default and bound.
+  it('keeps the safe default of one lane and the bound of four', () => {
+    process.env.ZAI_API_KEY = 'planted-secret-a'
+    process.env.TRIOS_ZAI_CONCURRENCY_PER_KEY = '0'
+    expect(workerCapacityBreakdown()).toEqual({
+      connectedCredentials: 1,
+      lanesPerCredential: 1,
+      effectiveCapacity: 1,
+    })
+    process.env.TRIOS_ZAI_CONCURRENCY_PER_KEY = '99'
+    expect(workerCapacityBreakdown()).toEqual({
+      connectedCredentials: 1,
+      lanesPerCredential: 4,
+      effectiveCapacity: 4,
+    })
+  })
+
+  // The lane override belongs to Z.ai's tiered plans; another provider's
+  // capacity stays one credential times one lane, exactly as before.
+  it('does not apply the Z.ai lane factor to another provider', () => {
+    process.env.ANTHROPIC_API_KEY = 'planted-anthropic-secret'
+    process.env.TRIOS_ZAI_CONCURRENCY_PER_KEY = '3'
+    expect(workerCapacityBreakdown()).toEqual({
+      connectedCredentials: 1,
+      lanesPerCredential: 1,
+      effectiveCapacity: 1,
+    })
+    expect(configuredWorkerCapacity()).toBe(1)
+  })
+
+  it('factors only the first configured provider, in preference order', () => {
+    process.env.ZAI_API_KEY = 'planted-secret-a'
+    process.env.ANTHROPIC_API_KEY = 'planted-anthropic-secret'
+    process.env.OPENAI_API_KEY = 'planted-openai-secret'
+    expect(workerCapacityBreakdown().connectedCredentials).toBe(1)
+  })
+
+  // FR-004: effective capacity is the number dispatch allocates against, so
+  // the two must be one number in every configuration, not two that happen to
+  // agree today. Each fixture starts from a cleared environment.
+  it('equals configuredWorkerCapacity in every tested configuration', () => {
+    const configurations: Array<() => void> = [
+      () => undefined,
+      () => {
+        process.env.ZAI_API_KEY = 'a'
+      },
+      () => {
+        process.env.ZAI_API_KEY = 'a'
+        process.env.ZAI_API_KEY_2 = 'b'
+        process.env.TRIOS_ZAI_CONCURRENCY_PER_KEY = '2'
+      },
+      () => {
+        process.env.ZAI_API_KEY = 'a'
+        process.env.ZAI_API_KEY_2 = 'a'
+        process.env.TRIOS_ZAI_CONCURRENCY_PER_KEY = '4'
+      },
+      () => {
+        process.env.ANTHROPIC_API_KEY = 'anthropic-a'
+        process.env.TRIOS_ZAI_CONCURRENCY_PER_KEY = '2'
+      },
+      () => {
+        process.env.OPENAI_API_KEY = 'openai-a'
+        process.env.OPENAI_API_KEY_2 = 'openai-b'
+      },
+      () => {
+        process.env.ZAI_API_KEY = '  a  '
+        process.env.ZAI_API_KEY_2 = 'a'
+        process.env.ZAI_API_KEY_3 = ' b '
+      },
+    ]
+    for (const configure of configurations) {
+      for (const key of KEYS) delete process.env[key]
+      configure()
+      const breakdown = workerCapacityBreakdown()
+      expect(breakdown.effectiveCapacity).toBe(configuredWorkerCapacity())
+      expect(breakdown.effectiveCapacity).toBe(
+        breakdown.connectedCredentials * breakdown.lanesPerCredential,
+      )
+    }
   })
 })
 
