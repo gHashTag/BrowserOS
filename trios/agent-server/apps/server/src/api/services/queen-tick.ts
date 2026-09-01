@@ -1164,16 +1164,21 @@ export function workerSystemPrompt(
  *
  * `queend` has been able to answer the `boundary` question since it was
  * written and nothing has ever asked it: the one place holding both halves of
- * the comparison threw the file names away at `.length`. This is the caller.
+ * the comparison threw the file names away at `.length`. This is the caller,
+ * and deliberately only that - the comparison itself stays in
+ * `QueenBoundaryPaths`, one rule for the container and the Mac.
  *
  * The ROOT is the project directory, not the checkout root, and that is the
  * whole subtlety. `committedFiles` runs `git diff --name-only` from the
  * repository root, so a path arrives as `trios/docs/x.md` while an owned path
- * is project-relative `docs/x.md`. `QueenBoundaryPaths.strippingProject` drops
- * the LAST component of the root it is handed, so handing it `/workspace/
- * BrowserOS` would strip nothing and report every correct write as a stray -
- * the same false accusation that file's own header records being paid for on
- * #1286.
+ * may be spelled either repository-relative (`trios/docs/x.md`, as #1306's
+ * own boundary is) or project-relative (`docs/x.md`). The policy reduces BOTH
+ * halves to the project-relative namespace before comparing, so either
+ * spelling of a boundary accepts the writes it names.
+ * `QueenBoundaryPaths.strippingProject` drops the LAST component of the root
+ * it is handed, so handing it `/workspace/BrowserOS` would strip nothing and
+ * report every correct write as a stray - the same false accusation that
+ * file's own header records being paid for on #1286.
  *
  * Empty on any failure, and empty when the issue declared no boundary: a task
  * that owns no paths is not a task that owns everything, and `strays` says so
