@@ -50,6 +50,7 @@ import {
   createQueenPublicBoardRoute,
 } from './routes/queen-kanban'
 import { createQueenLeaseRoute } from './routes/queen-lease'
+import { createQueenPublicActivityRoute } from './routes/queen-public-activity'
 import { createQueenPublicStatusRoute } from './routes/queen-public-status'
 import { createQueenRegistryRoute } from './routes/queen-registry'
 import { createQueenRehearsalRoute } from './routes/queen-rehearsal'
@@ -319,6 +320,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/*', trustedCorsMiddleware())
     .route('/health', createHealthRoute({ browser, stateBackend: a2aService }))
     .route('/queen/status', createQueenPublicStatusRoute())
+    .route('/queen/public-activity', createQueenPublicActivityRoute())
     .route('/queen/public-board', createQueenPublicBoardRoute())
     .route('/queen/registry', queenRegistryRoutes)
     // The shell only. It holds no state and no token; every byte of data it
