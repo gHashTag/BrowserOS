@@ -47,8 +47,10 @@ import {
 import {
   createQueenBoardRoute,
   createQueenKanbanRoute,
+  createQueenPublicBoardRoute,
 } from './routes/queen-kanban'
 import { createQueenLeaseRoute } from './routes/queen-lease'
+import { createQueenPublicStatusRoute } from './routes/queen-public-status'
 import { createQueenRegistryRoute } from './routes/queen-registry'
 import { createQueenRehearsalRoute } from './routes/queen-rehearsal'
 import {
@@ -316,6 +318,8 @@ export async function createHttpServer(config: HttpServerConfig) {
   const app = new Hono<Env>()
     .use('/*', trustedCorsMiddleware())
     .route('/health', createHealthRoute({ browser, stateBackend: a2aService }))
+    .route('/queen/status', createQueenPublicStatusRoute())
+    .route('/queen/public-board', createQueenPublicBoardRoute())
     .route('/queen/registry', queenRegistryRoutes)
     // The shell only. It holds no state and no token; every byte of data it
     // shows comes from /queen/lease, which stays guarded. See the route header

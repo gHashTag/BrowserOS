@@ -83,6 +83,48 @@ const COLUMNS = [
   { key: 'dropped', title: 'dropped', blurb: 'failed or cancelled' },
 ]
 
+export interface PublicBoard {
+  repo: string
+  columns: typeof COLUMNS
+  cards: Array<Pick<Card, 'number' | 'title' | 'column' | 'criteria' | 'needs'>>
+  pulse: Pick<
+    Pulse,
+    'rounds' | 'bees' | 'verdicts' | 'lastRoundAt' | 'roundSeconds'
+  >
+}
+
+/**
+ * A deliberately small public view of the board for t27.ai.
+ *
+ * Issue numbers, titles and workflow columns are useful public GitHub facts.
+ * Paths, workers, holders, provider capacity, token counts and the Queen's
+ * internal refusal text are operational state and stay behind /queen/board.
+ */
+export function publicBoardProjection(input: {
+  repo: string
+  cards: Card[]
+  pulse: Pulse
+}): PublicBoard {
+  return {
+    repo: input.repo,
+    columns: COLUMNS,
+    cards: input.cards.map((card) => ({
+      number: card.number,
+      title: card.title,
+      column: card.column,
+      criteria: card.criteria,
+      needs: card.needs,
+    })),
+    pulse: {
+      rounds: input.pulse.rounds,
+      bees: input.pulse.bees,
+      verdicts: input.pulse.verdicts,
+      lastRoundAt: input.pulse.lastRoundAt,
+      roundSeconds: input.pulse.roundSeconds,
+    },
+  }
+}
+
 function columnFor(state: string): string {
   switch (state) {
     case 'running':
@@ -993,6 +1035,23 @@ export function createQueenBoardRoute() {
         columns: COLUMNS,
         cards: built.cards,
         pulse: built.pulse,
+      })
+    } finally {
+      await pool.end()
+    }
+  })
+}
+
+export function createQueenPublicBoardRoute() {
+  return new Hono().get('/', async (c) => {
+    const url = queenLeaseDatabaseUrl()
+    if (!url) return c.json({ error: 'No database configured' }, 503)
+    const repo = process.env.TRIOS_GITHUB_REPO || 'gHashTag/trios'
+    const pool = new Pool({ connectionString: url })
+    try {
+      const built = await build(pool)
+      return c.json(publicBoardProjection({ repo, ...built }), 200, {
+        'Cache-Control': 'no-store',
       })
     } finally {
       await pool.end()

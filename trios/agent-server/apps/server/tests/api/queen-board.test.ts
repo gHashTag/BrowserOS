@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import {
   composeCards,
   createQueenKanbanRoute,
+  publicBoardProjection,
 } from '../../src/api/routes/queen-kanban'
 
 /**
@@ -298,6 +299,71 @@ describe('a file held by a cloud dispatch', () => {
       now: NOW,
     })
     expect(cards.find((c) => c.number === 1200)?.column).toBe('backlog')
+  })
+})
+
+describe('the public board projection', () => {
+  it('keeps the kanban useful without exposing swarm internals', () => {
+    const projected = publicBoardProjection({
+      repo: 'gHashTag/trios',
+      cards: [
+        {
+          number: 1176,
+          title: 'Public issue title',
+          column: 'running',
+          paths: ['rings/SR-00/QueenSecrets.swift'],
+          detail: 'provider and branch detail',
+          worker: 'zai/glm-5.3',
+          heldBy: ['#1175'],
+          whyNotChosen: 'internal policy explanation',
+          criteria: 3,
+          criteriaSource: 'issue body',
+          needs: ['boundary'],
+        },
+      ],
+      pulse: {
+        rounds: 12,
+        bees: 4,
+        verdicts: 3,
+        inputTokens: 123456,
+        outputTokens: 9876,
+        lastRoundAt: '2026-09-01T00:00:00.000Z',
+        lastRefusal: 'private decision detail',
+        roundSeconds: 1800,
+        workerKeys: 2,
+        workerLimit: 4,
+      },
+    })
+
+    expect(projected.repo).toBe('gHashTag/trios')
+    expect(projected.columns.map((column) => column.key)).toEqual([
+      'backlog',
+      'blocked',
+      'running',
+      'review',
+      'done',
+      'dropped',
+    ])
+    expect(projected.cards).toEqual([
+      {
+        number: 1176,
+        title: 'Public issue title',
+        column: 'running',
+        criteria: 3,
+        needs: ['boundary'],
+      },
+    ])
+    expect(projected.pulse).toEqual({
+      rounds: 12,
+      bees: 4,
+      verdicts: 3,
+      lastRoundAt: '2026-09-01T00:00:00.000Z',
+      roundSeconds: 1800,
+    })
+    expect(JSON.stringify(projected)).not.toContain('QueenSecrets.swift')
+    expect(JSON.stringify(projected)).not.toContain('glm-5.3')
+    expect(JSON.stringify(projected)).not.toContain('inputTokens')
+    expect(JSON.stringify(projected)).not.toContain('lastRefusal')
   })
 })
 
