@@ -26,7 +26,7 @@ import { readFile } from 'node:fs/promises'
 import { Hono } from 'hono'
 import { logger } from '../../lib/logger'
 
-interface TreeNode {
+export interface TreeNode {
   id: string
   label: string
   layer: string
@@ -36,7 +36,7 @@ interface TreeNode {
   note?: string
 }
 
-interface Tree {
+export interface Tree {
   nodes: TreeNode[]
   edges: Array<{ from: string; to: string }>
   conflicts: string[]
@@ -63,7 +63,7 @@ function candidatePaths(): string[] {
   ]
 }
 
-async function loadTree(): Promise<Tree | null> {
+export async function loadTree(): Promise<Tree | null> {
   for (const path of candidatePaths()) {
     try {
       return JSON.parse(await readFile(path, 'utf8')) as Tree

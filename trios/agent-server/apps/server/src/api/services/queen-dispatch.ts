@@ -110,6 +110,19 @@ function keysFor(envVar: string): string[] {
 }
 
 /**
+ * Number of genuinely independent worker credentials available to the first
+ * configured provider. The values never leave this module; the public research
+ * projection uses only the count to show whether paid capacity is idle.
+ */
+export function configuredWorkerCapacity(): number {
+  for (const candidate of WORKER_PROVIDERS) {
+    const count = keysFor(candidate.envVar).length
+    if (count > 0) return count
+  }
+  return 0
+}
+
+/**
  * A key per concurrent bee, not a key per request.
  *
  * Four bees sharing one credential share one rate limit, so the swarm's real
