@@ -10,12 +10,13 @@
  * conversation, transcript, provider detail, or mutation route escapes it.
  *
  * The one question it answers about an idle-looking swarm is WHY the last
- * round started nothing, and it answers with `skipSummary`: counts by fixed
- * category. The stored reasons name their issue, its paths and its holders,
- * which is what an operator needs behind the dashboard and is wrong to
- * publish - so only the category counts leave this file, and the category
- * set is closed, which keeps the projection bounded however many candidates
- * a round passed over.
+ * round started nothing, and it answers two ways: `swarmState`, one closed
+ * word for what the swarm IS, and `skipSummary`, counts by fixed category for
+ * why the last round started nothing. The stored reasons name their issue, its
+ * paths and its holders, which is what an operator needs behind the dashboard
+ * and is wrong to publish - so only the category counts leave this file, and
+ * the category set is closed, which keeps the projection bounded however many
+ * candidates a round passed over.
  */
 
 import { Hono } from 'hono'
@@ -134,6 +135,72 @@ function summarizeSkips(
   return summary
 }
 
+/**
+ * Every value `swarmState` can carry.
+ *
+ * Closed for the same reason the skip categories are: a public consumer must
+ * be able to rely on every value it will ever read, and an open vocabulary is
+ * not a contract. The four values are the four honest answers to the question
+ * `running: 0` used to leave ambiguous:
+ *
+ *   working             a dispatch has not finished; the table itself vouches
+ *                       for the work, so nothing else is consulted
+ *   waiting_for_review  nothing running, but a finished dispatch still has no
+ *                       verdict - the Queen has not judged her bee
+ *   healthy_idle        nothing running, nothing owed, the scheduler enabled
+ *                       and a readable tick explaining the quiet: the latest
+ *                       round explicitly found no eligible candidate
+ *   unavailable         nothing running and nothing owed, but the scheduler is
+ *                       disabled or no readable tick exists, so this page
+ *                       cannot say WHY the swarm is quiet and refuses to dress
+ *                       the silence up as health
+ */
+type SwarmState =
+  | 'working'
+  | 'waiting_for_review'
+  | 'healthy_idle'
+  | 'unavailable'
+
+/**
+ * The one closed word for what the swarm is, from aggregate facts alone.
+ *
+ * Nothing but the counts, the scheduler interval and the presence of a
+ * readable tick decision feeds it - never a stored sentence, never a skip
+ * reason. The order below is the contract, and it is the order of how
+ * directly each fact speaks about the present:
+ *
+ *   1. `working` - an unfinished dispatch is observable now; a disabled
+ *      scheduler or a missing tick says nothing against work the table
+ *      itself vouches for.
+ *   2. `waiting_for_review` - a finished dispatch with no verdict outranks
+ *      the idle reading: a swarm that looks empty but owes a review is not
+ *      idle, and the backlog is what an operator must act on.
+ *   3. `unavailable` - with the swarm empty and nothing owed, quiet is only
+ *      healthy if this page can say why; a disabled scheduler, an unreadable
+ *      tick, or a tick that says it chose work while no dispatch is observable
+ *      means nobody vouches for the present snapshot.
+ *   4. `healthy_idle` - the scheduler is enabled, the table says the queue is
+ *      empty, and the latest readable decision explicitly found no eligible
+ *      candidate. That is health, not failure.
+ */
+function classifySwarmState(facts: {
+  running: number
+  unreviewed: number
+  schedulerEnabled: boolean
+  trustworthyTick: boolean
+  decisionFoundNoEligibleCandidate: boolean
+}): SwarmState {
+  if (facts.running > 0) return 'working'
+  if (facts.unreviewed > 0) return 'waiting_for_review'
+  if (
+    !facts.schedulerEnabled ||
+    !facts.trustworthyTick ||
+    !facts.decisionFoundNoEligibleCandidate
+  )
+    return 'unavailable'
+  return 'healthy_idle'
+}
+
 export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
   const databaseUrl = deps.databaseUrl ?? configuredDatabaseUrl
   const createPool =
@@ -158,7 +225,15 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
       const counts = await pool.query(
         `SELECT count(*) AS total,
                 count(*) FILTER (WHERE finished_at IS NOT NULL) AS finished,
-                count(*) FILTER (WHERE finished_at IS NULL) AS running
+                count(*) FILTER (WHERE finished_at IS NULL) AS running,
+                -- Finished but never judged. review_state's only writer is the
+                -- Queen's own review (queen-tick.ts), so a NULL on a finished
+                -- row is a verdict still owed - and running 0 with a verdict
+                -- owed is a different swarm from running 0 with nothing owed,
+                -- though both read identically without this column.
+                count(*) FILTER (
+                  WHERE finished_at IS NOT NULL AND review_state IS NULL
+                ) AS unreviewed
            FROM queen_dispatch`,
       )
       const latest = await pool.query(
@@ -178,11 +253,27 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
       const skipped = Array.isArray(decision?.skipped) ? decision.skipped : []
       const countRow = counts.rows[0] ?? {}
       const latestRow = latest.rowCount ? latest.rows[0] : null
+      const schedulerEnabled = intervalSeconds > 0
 
       return c.json({
         status: 'ok',
+        swarmState: classifySwarmState({
+          running: asCount(countRow.running),
+          unreviewed: asCount(countRow.unreviewed),
+          schedulerEnabled,
+          // A decision that is not a readable object cannot explain the
+          // quiet, so it vouches for nothing - `lastTick` still reports the
+          // row itself, exactly as it always has.
+          trustworthyTick: decision != null,
+          // There is a real window between recordTick(allowed: true) and
+          // recordDispatch. Calling that empty snapshot healthy would conceal
+          // a failed dispatch write. Only an explicit no-choice decision can
+          // vouch for healthy idle; the completion-triggered refill writes one
+          // after accepted work finishes.
+          decisionFoundNoEligibleCandidate: decision?.allowed === false,
+        }),
         scheduler: {
-          enabled: intervalSeconds > 0,
+          enabled: schedulerEnabled,
           intervalSeconds,
         },
         lastTick: tickRow
@@ -199,6 +290,7 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
           total: asCount(countRow.total),
           finished: asCount(countRow.finished),
           running: asCount(countRow.running),
+          unreviewed: asCount(countRow.unreviewed),
           latest: latestRow
             ? {
                 issue: asCount(latestRow.issue),
