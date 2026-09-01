@@ -1,1 +1,11 @@
-[]
+[
+  {
+    "agent": "codex-root",
+    "artifact": ".trinity/specs/queen-coding-plan-budget-mode.md",
+    "claim_id": "257ffc81-4be4-4b69-9762-7a77cf2a6ac6",
+    "started_at": "2026-09-01T12:28:26Z",
+    "status": "active",
+    "task_id": "GH-1300",
+    "title": "Do not apply estimated API dollar caps to Coding Plan workers"
+  }
+]

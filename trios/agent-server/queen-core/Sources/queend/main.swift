@@ -225,11 +225,13 @@ case "choose":
     // Refusing to START is the whole intervention. Killing a bee mid-edit
     // leaves a tree nobody chose, which is why `SwarmBudget` calls itself
     // advisory; declining the next one is safe at any instant.
+    let billingMode = SwarmBillingMode.current()
     let budget = SwarmBudget.current(
         stateDirectory: question.root ?? "/workspace/BrowserOS"
     )
     let spent = SwarmBudget.spentToday(tasks: tasks, now: now)
-    if case .exhausted(let overBy) = budget.verdict(spentToday: spent) {
+    if billingMode.enforcesEstimatedUSDCap,
+       case .exhausted(let overBy) = budget.verdict(spentToday: spent) {
         emit(Answer(kind: "choose", strays: nil,
                     refusal: "the swarm has spent about \(ModelPricing.format(spent)) today, "
                         + "\(ModelPricing.format(overBy)) past its "

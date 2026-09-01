@@ -21,10 +21,10 @@ import { join } from 'node:path'
  * builds with. Driving the shipped binary is the strongest proof available and
  * it tests the thing that actually runs.
  *
- * HONEST LIMIT, stated because a quiet skip is how a gate comes to report
- * success it never earned: on a machine that has not built `queend`, the
- * behaviour tests below DO NOT RUN. `binary is where the container expects it`
- * always runs, so the path cannot drift unnoticed.
+ * BUILD PRECONDITION. The broad API suite intentionally does not build Swift,
+ * so behavioral cases retain `skipIf`. Exact-artifact verification sets
+ * `TRIOS_REQUIRE_QUEEND_TESTS=1`; in that mode the first test fails rather than
+ * reporting a quiet green when the release binary is absent.
  */
 
 const BIN = join(
@@ -33,6 +33,7 @@ const BIN = join(
 )
 const DOCKERFILE = join(import.meta.dir, '../../../../Dockerfile')
 const present = existsSync(BIN)
+const required = process.env.TRIOS_REQUIRE_QUEEND_TESTS === '1'
 
 function ask(
   question: unknown,
@@ -89,6 +90,7 @@ describe('queend chooses the next bee', () => {
   it('is where the container expects it', () => {
     expect(readFileSync(DOCKERFILE, 'utf8')).toContain('queend')
     expect(BIN.endsWith('/queend')).toBe(true)
+    if (required) expect(present).toBe(true)
   })
 
   it.skipIf(!present)('picks up an issue whose attempt failed', () => {
@@ -217,6 +219,7 @@ describe('queend refuses to start a bee once the day is spent', () => {
 
   it.skipIf(!present)('refuses when today is over the cap', () => {
     const answer = ask(board([1201], [spentTask(999, 800_000)]), {
+      TRIOS_SWARM_BILLING_MODE: 'api_metered',
       TRIOS_SWARM_DAILY_CAP_USD: '5',
     })
     expect(answer.allowed).toBe(false)
@@ -233,6 +236,18 @@ describe('queend refuses to start a bee once the day is spent', () => {
     })
     expect(answer.chosen).toBe(1201)
   })
+
+  it.skipIf(!present)(
+    'does not turn Coding Plan telemetry into a metered API refusal',
+    () => {
+      const answer = ask(board([1201], [spentTask(999, 800_000)]), {
+        TRIOS_SWARM_BILLING_MODE: 'coding_plan',
+        TRIOS_SWARM_DAILY_CAP_USD: '5',
+      })
+      expect(answer.chosen).toBe(1201)
+      expect(String(answer.refusal ?? '')).not.toContain('daily limit')
+    },
+  )
 
   // Yesterday's spend is not today's. Without the day filter the cap would
   // latch shut permanently the first time a swarm had an expensive afternoon.

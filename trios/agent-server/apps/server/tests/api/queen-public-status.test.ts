@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'bun:test'
-import { createQueenPublicStatusRoute } from '../../src/api/routes/queen-public-status'
+import {
+  configuredBillingMode,
+  createQueenPublicStatusRoute,
+} from '../../src/api/routes/queen-public-status'
 
 type QueryResult = { rowCount: number; rows: Array<Record<string, unknown>> }
 
@@ -57,6 +60,16 @@ const expectedSummary = {
   notFirst: 3,
 }
 
+describe('configuredBillingMode', () => {
+  it('requires the explicit Coding Plan value and otherwise stays metered', () => {
+    expect(configuredBillingMode('coding_plan')).toBe('coding_plan')
+    expect(configuredBillingMode(' CODING_PLAN ')).toBe('coding_plan')
+    expect(configuredBillingMode(undefined)).toBe('api_metered')
+    expect(configuredBillingMode('')).toBe('api_metered')
+    expect(configuredBillingMode('subscription')).toBe('api_metered')
+  })
+})
+
 describe('GET /queen/status', () => {
   it('returns only the public runtime summary', async () => {
     const pool = fakePool([
@@ -98,6 +111,7 @@ describe('GET /queen/status', () => {
       databaseUrl: () => 'postgres://configured',
       createPool: () => pool,
       tickIntervalSeconds: () => 1800,
+      billingMode: () => 'coding_plan',
     }).request('/')
 
     expect(response.status).toBe(200)
@@ -107,7 +121,12 @@ describe('GET /queen/status', () => {
       // Eight finished dispatches, two still owing a verdict: the idle
       // reading of the tick's refusal must lose to the verdicts owed.
       swarmState: 'waiting_for_review',
-      scheduler: { enabled: true, intervalSeconds: 1800 },
+      scheduler: {
+        enabled: true,
+        intervalSeconds: 1800,
+        billingMode: 'coding_plan',
+        estimatedUSDGateEnabled: false,
+      },
       lastTick: {
         decidedAt: '2026-09-01T04:17:42.983Z',
         allowed: false,
@@ -299,7 +318,12 @@ describe('GET /queen/status', () => {
       // be the real recordTick -> recordDispatch window, so the snapshot is
       // unavailable until the row appears or a no-choice tick supersedes it.
       swarmState: 'unavailable',
-      scheduler: { enabled: true, intervalSeconds: 1800 },
+      scheduler: {
+        enabled: true,
+        intervalSeconds: 1800,
+        billingMode: 'api_metered',
+        estimatedUSDGateEnabled: true,
+      },
       lastTick: {
         decidedAt: '2026-08-30T09:00:00.000Z',
         allowed: true,
@@ -336,7 +360,12 @@ describe('GET /queen/status', () => {
       tickIntervalSeconds: () => 0,
     }).request('/')
     const body = await response.json()
-    expect(body.scheduler).toEqual({ enabled: false, intervalSeconds: 0 })
+    expect(body.scheduler).toEqual({
+      enabled: false,
+      intervalSeconds: 0,
+      billingMode: 'api_metered',
+      estimatedUSDGateEnabled: true,
+    })
     // No scheduler, no tick, nothing running and nothing owed: the one
     // honest word for that is unavailable, not idle.
     expect(body.swarmState).toBe('unavailable')

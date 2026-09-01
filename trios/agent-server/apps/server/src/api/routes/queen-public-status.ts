@@ -37,7 +37,10 @@ interface QueenPublicStatusDeps {
   databaseUrl?: () => string | undefined
   createPool?: (url: string) => StatusPool
   tickIntervalSeconds?: () => number
+  billingMode?: () => BillingMode
 }
+
+type BillingMode = 'api_metered' | 'coding_plan'
 
 function configuredDatabaseUrl(): string | undefined {
   return process.env.DATABASE_URL || process.env.RAILWAY_SSOT_URL || undefined
@@ -46,6 +49,21 @@ function configuredDatabaseUrl(): string | undefined {
 function configuredTickIntervalSeconds(): number {
   const raw = Number(process.env.TRIOS_QUEEN_TICK_SECONDS ?? '0')
   return Number.isFinite(raw) && raw > 0 ? raw : 0
+}
+
+/**
+ * Public projection of the explicit worker billing contract.
+ *
+ * This does not decide whether a Bee starts; queend owns that decision in
+ * Swift. It only resolves the same closed environment value for status. An
+ * absent or unknown value stays conservative and reports the metered gate.
+ */
+export function configuredBillingMode(
+  raw = process.env.TRIOS_SWARM_BILLING_MODE,
+): BillingMode {
+  return raw?.trim().toLowerCase() === 'coding_plan'
+    ? 'coding_plan'
+    : 'api_metered'
 }
 
 const asCount = (value: unknown): number => {
@@ -208,6 +226,7 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
     ((url: string) => new Pool({ connectionString: url }) as StatusPool)
   const tickIntervalSeconds =
     deps.tickIntervalSeconds ?? configuredTickIntervalSeconds
+  const billingMode = deps.billingMode ?? configuredBillingMode
 
   return new Hono().get('/', async (c) => {
     c.header('Cache-Control', 'no-store')
@@ -244,6 +263,7 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
       )
 
       const intervalSeconds = tickIntervalSeconds()
+      const resolvedBillingMode = billingMode()
       const tickRow = tick.rowCount ? tick.rows[0] : null
       const rawDecision = tickRow?.decision
       const decision =
@@ -275,6 +295,8 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
         scheduler: {
           enabled: schedulerEnabled,
           intervalSeconds,
+          billingMode: resolvedBillingMode,
+          estimatedUSDGateEnabled: resolvedBillingMode === 'api_metered',
         },
         lastTick: tickRow
           ? {
