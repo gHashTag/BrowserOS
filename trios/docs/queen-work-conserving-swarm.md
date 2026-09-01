@@ -91,8 +91,9 @@ always made them.
 
 ## The single-flight round gate
 
-The gate (`createRoundGate`) holds one rule: **one local round at a time,
-maximum local concurrency one.** A round here means one full
+The gate (`createRoundGate`) holds one rule for every wake path it owns:
+**one gate-owned round at a time, maximum gate-owned concurrency one.** A
+round here means one full
 `runQueenTickOnce` - lease acquisition, board read, `queend` choice, dispatch
 loop, release.
 
@@ -111,15 +112,19 @@ loop, release.
   completion, nothing happens, and that is correct.
 
 Why one at a time, and not merely "usually one": two rounds in one process
-is a reachable state, not a theoretical one. The on-demand tick route can run
-`runQueenTickOnce` alongside the interval loop, and both acquire the lease,
-because the holder is stable within a process and renewal matches on the
-holder. Nothing about the lease stops the second round; it would read a board
-the first round is still writing - dispatches recorded, keys taken - and
-dispatch against work the first round is still recording. One round at a
-time is the only shape that cannot race itself, and the gate enforces it
-structurally: `maxInFlight()` must be 1, a property the tests measure both
-inside the gate and from the round's own books.
+is a reachable state, not a theoretical one. The gate serializes the three
+production wake paths wired through it - startup, periodic timer, and durable
+Bee completion - so a completion cannot race the timer or another completion.
+It enforces that structurally: `maxInFlight()` must be 1, a property the tests
+measure both inside the gate and from the round's own books.
+
+The protected on-demand operator route is a pre-existing exception: it calls
+`runQueenTickOnce` directly and does not pass through this gate. It can still
+overlap a gate-owned round, because both calls use the same in-process holder
+and the lease treats that as renewal. Operators must avoid invoking the manual
+tick while a round is active until that route is joined to the gate. The
+completion-driven contract proved here does not conceal or solve that separate
+diagnostic-route risk.
 
 Coalescing follows from the same rule. The follow-up round reads the board
 once, and the board is the database - every completion that landed during the
@@ -262,7 +267,7 @@ is picked up by whichever round comes first.
 ### 2. Two completions during one running round: coalescing
 
 ```
- [ ONE ROUND RUNNING ]<-- request("bee #A finished") -- set FLAG
+ [ ONE GATE-OWNED ROUND RUNNING ]<-- request("bee #A finished") -- set FLAG
                       <-- request("bee #B finished") -- FLAG (already set:
                            one flag, not a count; two bees or fifty,
                            same single flag)
@@ -279,7 +284,7 @@ is picked up by whichever round comes first.
  dispatches up to capacity in its own loop -> release
                         |
                         v
- [ gate IDLE ]  local round concurrency stayed at ONE
+ [ gate IDLE ]  gate-owned round concurrency stayed at ONE
  throughout; rounds started: 2, never 3, never 2-at-once
 ```
 
