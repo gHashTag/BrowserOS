@@ -17,11 +17,23 @@
  * and is wrong to publish - so only the category counts leave this file, and
  * the category set is closed, which keeps the projection bounded however many
  * candidates a round passed over.
+ *
+ * The other half of `running: 0` is HOW BIG the swarm is at all, and `workers`
+ * answers it: no capacity configured, capacity all idle, or telemetry that
+ * says nothing. Its capacity comes from the same `configuredWorkerCapacity`
+ * authority `/queen/public-research` reads - one count of the provider
+ * environment, never a second parser of it - so the two public pages cannot
+ * tell two different stories about how many paid slots exist. Four numbers
+ * leave and nothing else: the count's source is the credential environment,
+ * and a provider's name, an environment-variable name or a key value has no
+ * business on a public page when the count alone says whether capacity is
+ * idle.
  */
 
 import { Hono } from 'hono'
 import { Pool } from 'pg'
 import { logger } from '../../lib/logger'
+import { configuredWorkerCapacity } from '../services/queen-dispatch'
 
 interface QueryResult {
   rowCount: number | null
@@ -38,6 +50,7 @@ interface QueenPublicStatusDeps {
   createPool?: (url: string) => StatusPool
   tickIntervalSeconds?: () => number
   billingMode?: () => BillingMode
+  workerCapacity?: () => number
 }
 
 type BillingMode = 'api_metered' | 'coding_plan'
@@ -219,6 +232,51 @@ function classifySwarmState(facts: {
   return 'healthy_idle'
 }
 
+/**
+ * The paid worker-slot reading of `dispatches.running`.
+ *
+ * `running` counts every unfinished dispatch; `active` counts only the ones
+ * that actually started - `started = true` and `finished_at IS NULL` - because
+ * a dispatch that never got a turn holds no paid slot. Capacity is read
+ * through the same `configuredWorkerCapacity` authority `/queen/public-research`
+ * uses, never a second parser of the provider environment, so the two public
+ * pages can never disagree about how many slots exist.
+ *
+ * The clamp is total because a count can only arrive wrong: a non-numeric
+ * string, a negative, a float, the same row counted twice. Active above
+ * capacity would promise slots the swarm does not have and a negative idle
+ * would read as over-subscription, so every malformed value folds into the
+ * closed range `0 <= active <= capacity` with `idle = capacity - active` and
+ * an integer percentage from 0 through 100.
+ */
+function workerProjection(
+  capacity: number,
+  startedUnfinished: number,
+): {
+  capacity: number
+  active: number
+  idle: number
+  utilization: number
+} {
+  const safeCapacity =
+    Number.isFinite(capacity) && capacity > 0 ? Math.floor(capacity) : 0
+  const active = Math.min(
+    safeCapacity,
+    Math.floor(
+      Number.isFinite(startedUnfinished) && startedUnfinished > 0
+        ? startedUnfinished
+        : 0,
+    ),
+  )
+  return {
+    capacity: safeCapacity,
+    active,
+    idle: safeCapacity - active,
+    utilization:
+      safeCapacity > 0 ? Math.round((active / safeCapacity) * 100) : 0,
+  }
+}
+
 export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
   const databaseUrl = deps.databaseUrl ?? configuredDatabaseUrl
   const createPool =
@@ -227,6 +285,7 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
   const tickIntervalSeconds =
     deps.tickIntervalSeconds ?? configuredTickIntervalSeconds
   const billingMode = deps.billingMode ?? configuredBillingMode
+  const workerCapacity = deps.workerCapacity ?? configuredWorkerCapacity
 
   return new Hono().get('/', async (c) => {
     c.header('Cache-Control', 'no-store')
@@ -252,7 +311,14 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
                 -- though both read identically without this column.
                 count(*) FILTER (
                   WHERE finished_at IS NOT NULL AND review_state IS NULL
-                ) AS unreviewed
+                ) AS unreviewed,
+                -- A paid slot is spent only by a dispatch that actually started
+                -- and has not finished. running counts dispatches that never
+                -- got a turn too, and those spend nothing, so workers.active
+                -- is counted here rather than derived from running.
+                count(*) FILTER (
+                  WHERE started = true AND finished_at IS NULL
+                ) AS started_running
            FROM queen_dispatch`,
       )
       const latest = await pool.query(
@@ -292,6 +358,10 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
           // after accepted work finishes.
           decisionFoundNoEligibleCandidate: decision?.allowed === false,
         }),
+        workers: workerProjection(
+          workerCapacity(),
+          asCount(countRow.started_running),
+        ),
         scheduler: {
           enabled: schedulerEnabled,
           intervalSeconds,

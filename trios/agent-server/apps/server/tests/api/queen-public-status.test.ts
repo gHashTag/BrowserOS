@@ -3,6 +3,7 @@ import {
   configuredBillingMode,
   createQueenPublicStatusRoute,
 } from '../../src/api/routes/queen-public-status'
+import { configuredWorkerCapacity } from '../../src/api/services/queen-dispatch'
 
 type QueryResult = { rowCount: number; rows: Array<Record<string, unknown>> }
 
@@ -20,12 +21,21 @@ function fakePool(results: QueryResult[]) {
 
 /**
  * The counts row and the latest-dispatch row every fixture below pairs with
- * its tick row, so each test states only the part it varies. `unreviewed`
- * rides along with the other counts the aggregate query returns.
+ * its tick row, so each test states only the part it varies. `unreviewed` and
+ * `started_running` ride along with the other counts the aggregate query
+ * returns.
  */
 const emptyDispatchCounts: QueryResult = {
   rowCount: 1,
-  rows: [{ total: '0', finished: '0', running: '0', unreviewed: '0' }],
+  rows: [
+    {
+      total: '0',
+      finished: '0',
+      running: '0',
+      unreviewed: '0',
+      started_running: '0',
+    },
+  ],
 }
 const noLatestDispatch: QueryResult = { rowCount: 0, rows: [] }
 
@@ -89,7 +99,15 @@ describe('GET /queen/status', () => {
       },
       {
         rowCount: 1,
-        rows: [{ total: '8', finished: '8', running: '0', unreviewed: '2' }],
+        rows: [
+          {
+            total: '8',
+            finished: '8',
+            running: '0',
+            unreviewed: '2',
+            started_running: '0',
+          },
+        ],
       },
       {
         rowCount: 1,
@@ -112,6 +130,7 @@ describe('GET /queen/status', () => {
       createPool: () => pool,
       tickIntervalSeconds: () => 1800,
       billingMode: () => 'coding_plan',
+      workerCapacity: () => 4,
     }).request('/')
 
     expect(response.status).toBe(200)
@@ -121,6 +140,14 @@ describe('GET /queen/status', () => {
       // Eight finished dispatches, two still owing a verdict: the idle
       // reading of the tick's refusal must lose to the verdicts owed.
       swarmState: 'waiting_for_review',
+      // Paid slots exist and are all idle: running 0 here is an empty queue,
+      // not missing capacity.
+      workers: {
+        capacity: 4,
+        active: 0,
+        idle: 4,
+        utilization: 0,
+      },
       scheduler: {
         enabled: true,
         intervalSeconds: 1800,
@@ -309,6 +336,7 @@ describe('GET /queen/status', () => {
       databaseUrl: () => 'postgres://configured',
       createPool: () => pool,
       tickIntervalSeconds: () => 1800,
+      workerCapacity: () => 0,
     }).request('/')
 
     expect(response.status).toBe(200)
@@ -318,6 +346,14 @@ describe('GET /queen/status', () => {
       // be the real recordTick -> recordDispatch window, so the snapshot is
       // unavailable until the row appears or a no-choice tick supersedes it.
       swarmState: 'unavailable',
+      // No paid slot is configured, so every worker field is 0 - capacity 0
+      // with nothing running and nothing to be idle.
+      workers: {
+        capacity: 0,
+        active: 0,
+        idle: 0,
+        utilization: 0,
+      },
       scheduler: {
         enabled: true,
         intervalSeconds: 1800,
@@ -602,5 +638,259 @@ describe('GET /queen/status', () => {
       skippedCount: 0,
       skipSummary: {},
     })
+  })
+
+  it('gives running 0 a denominator: four slots with two started dispatches read half busy', async () => {
+    // Acceptance scenario 1, and the issue's own story: four configured
+    // worker slots, two unfinished started dispatches, no provider key set
+    // anywhere - the capacity is injected, because the point here is the
+    // projection, not the environment. `running: 2` next to
+    // capacity 4 is an operator's whole answer: 2 active, 2 idle, 50%.
+    const pool = fakePool([
+      { rowCount: 0, rows: [] },
+      {
+        rowCount: 1,
+        rows: [
+          {
+            total: '3',
+            finished: '1',
+            running: '2',
+            unreviewed: '1',
+            started_running: '2',
+          },
+        ],
+      },
+      noLatestDispatch,
+    ])
+
+    const response = await createQueenPublicStatusRoute({
+      databaseUrl: () => 'postgres://configured',
+      createPool: () => pool,
+      tickIntervalSeconds: () => 1800,
+      workerCapacity: () => 4,
+    }).request('/')
+
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as Record<string, unknown>
+    expect(body.workers).toEqual({
+      capacity: 4,
+      active: 2,
+      idle: 2,
+      utilization: 50,
+    })
+    // The denominator explains the counts; it must not reshape them.
+    expect((body.dispatches as Record<string, unknown>).running).toBe(2)
+  })
+
+  it('reports all zeros for zero configured capacity and exposes no credential name or value', async () => {
+    // Acceptance scenario 2: zero configured worker slots. Every field is 0,
+    // and the credential-shaped values planted in the rows the projection
+    // reads past - the counts row and the latest-dispatch row - must not ride
+    // along: this page's capacity source is the provider environment, so its
+    // names and values are the one leak that would matter most here.
+    const plantedSecret = 'sk-trios-0123456789abcdef-fedcba'
+    const pool = fakePool([
+      { rowCount: 0, rows: [] },
+      {
+        rowCount: 1,
+        rows: [
+          {
+            total: '1',
+            finished: '0',
+            running: '1',
+            unreviewed: '0',
+            started_running: '1',
+            provider: 'ZAI_API_KEY',
+            credential: plantedSecret,
+            authorization: `Bearer ${plantedSecret}`,
+          },
+        ],
+      },
+      {
+        rowCount: 1,
+        rows: [
+          {
+            issue: 1303,
+            dispatched_at: '2026-09-02T10:00:00.000Z',
+            finished_at: null,
+            outcome: null,
+            branch: 'queen-1303',
+            detail: `Bearer ${plantedSecret}`,
+            conversation_id: plantedSecret,
+            provider: 'ANTHROPIC_API_KEY',
+            model: plantedSecret,
+          },
+        ],
+      },
+    ])
+
+    const response = await createQueenPublicStatusRoute({
+      databaseUrl: () => 'postgres://configured',
+      createPool: () => pool,
+      tickIntervalSeconds: () => 1800,
+      workerCapacity: () => 0,
+    }).request('/')
+
+    expect(response.status).toBe(200)
+    const body = await response.json()
+    expect(body.workers).toEqual({
+      capacity: 0,
+      active: 0,
+      idle: 0,
+      utilization: 0,
+    })
+    const serialized = JSON.stringify(body)
+    expect(serialized).not.toContain('ZAI_API_KEY')
+    expect(serialized).not.toContain('ANTHROPIC_API_KEY')
+    expect(serialized).not.toContain('Bearer')
+    expect(serialized).not.toContain(plantedSecret)
+  })
+
+  it('does not count a started = false unfinished dispatch as active', async () => {
+    // The regression the success criteria name: two unfinished dispatches,
+    // neither of which started. They stay `running` - the table owes them an
+    // ending - but they spend no paid slot, so active is 0 against capacity 4
+    // and all four slots read idle.
+    const pool = fakePool([
+      { rowCount: 0, rows: [] },
+      {
+        rowCount: 1,
+        rows: [
+          {
+            total: '2',
+            finished: '0',
+            running: '2',
+            unreviewed: '0',
+            started_running: '0',
+          },
+        ],
+      },
+      noLatestDispatch,
+    ])
+
+    const response = await createQueenPublicStatusRoute({
+      databaseUrl: () => 'postgres://configured',
+      createPool: () => pool,
+      tickIntervalSeconds: () => 0,
+      workerCapacity: () => 4,
+    }).request('/')
+
+    expect(response.status).toBe(200)
+    const body = (await response.json()) as {
+      workers: Record<string, number>
+      dispatches: { running: number }
+    }
+    expect(body.workers).toEqual({
+      capacity: 4,
+      active: 0,
+      idle: 4,
+      utilization: 0,
+    })
+    expect(body.dispatches.running).toBe(2)
+  })
+
+  it('clamps malformed counts so active never exceeds capacity and idle never goes negative', async () => {
+    // Acceptance scenario 3: a count can only arrive wrong - the same row
+    // counted twice, a float, a negative, a non-number - and every wrong
+    // shape must fold into the closed range rather than promise slots the
+    // swarm does not have or report over-subscription as a negative idle.
+    const read = async (startedRunning: unknown, capacity: number) =>
+      (
+        (await (
+          await createQueenPublicStatusRoute({
+            databaseUrl: () => 'postgres://configured',
+            createPool: () =>
+              fakePool([
+                { rowCount: 0, rows: [] },
+                {
+                  rowCount: 1,
+                  rows: [
+                    {
+                      total: '9',
+                      finished: '0',
+                      running: '9',
+                      unreviewed: '0',
+                      started_running: startedRunning,
+                    },
+                  ],
+                },
+                noLatestDispatch,
+              ]),
+            tickIntervalSeconds: () => 1800,
+            workerCapacity: () => capacity,
+          }).request('/')
+        ).json()) as Record<string, unknown>
+      ).workers
+
+    // Seven "active" dispatches against four slots: the swarm cannot spend
+    // more slots than it has, so the projection says full, never over.
+    expect(await read('7', 4)).toEqual({
+      capacity: 4,
+      active: 4,
+      idle: 0,
+      utilization: 100,
+    })
+    // A negative count is no count at all.
+    expect(await read(-2, 4)).toEqual({
+      capacity: 4,
+      active: 0,
+      idle: 4,
+      utilization: 0,
+    })
+    // A fractional dispatch is not a dispatch.
+    expect(await read('2.9', 4)).toEqual({
+      capacity: 4,
+      active: 2,
+      idle: 2,
+      utilization: 50,
+    })
+    // Malformed capacity admits no slots at all, and with no denominator
+    // there is nothing to be active or idle.
+    expect(await read('3', Number.NaN)).toEqual({
+      capacity: 0,
+      active: 0,
+      idle: 0,
+      utilization: 0,
+    })
+    expect(await read('3', 0)).toEqual({
+      capacity: 0,
+      active: 0,
+      idle: 0,
+      utilization: 0,
+    })
+  })
+
+  it('reads capacity from the same authority as public research, not a second parser', async () => {
+    // FR-002: the denominator must come from `configuredWorkerCapacity` - the
+    // one function that counts provider keys for dispatch and for
+    // /queen/public-research. With a key planted in the environment and NO
+    // workerCapacity injected, this route must report exactly what that one
+    // authority reports, and must not echo the key or its variable name.
+    const planted = 'sk-trios-env-authority-probe-fedcba9876'
+    const saved = process.env.ZAI_API_KEY
+    process.env.ZAI_API_KEY = planted
+    try {
+      const response = await createQueenPublicStatusRoute({
+        databaseUrl: () => 'postgres://configured',
+        createPool: () =>
+          fakePool([
+            { rowCount: 0, rows: [] },
+            emptyDispatchCounts,
+            noLatestDispatch,
+          ]),
+        tickIntervalSeconds: () => 1800,
+      }).request('/')
+
+      const body = (await response.json()) as {
+        workers: { capacity: number }
+      }
+      expect(body.workers.capacity).toBe(configuredWorkerCapacity())
+      const serialized = JSON.stringify(body)
+      expect(serialized).not.toContain('ZAI_API_KEY')
+      expect(serialized).not.toContain(planted)
+    } finally {
+      if (saved === undefined) delete process.env.ZAI_API_KEY
+      else process.env.ZAI_API_KEY = saved
+    }
   })
 })
