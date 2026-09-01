@@ -12,6 +12,10 @@ source of truth. It only signs a redacted projection of configured observations.
 
 - `QUEEN_FPGA_REGISTRY_JSON`: a JSON array of operator-supplied observations.
 - `QUEEN_FPGA_SIGNING_PRIVATE_KEY`: an Ed25519 private key in PKCS8 PEM form.
+- `QUEEN_FPGA_SIGNING_SECRET`: a dedicated high-entropy secret from which the
+  Ed25519 seed is derived with a domain-separated SHA-256 hash. When absent,
+  the already-protected `TRIOS_API_TOKEN` is used as the derivation input so a
+  deployment can start fail-closed without transmitting a new private key.
 - `QUEEN_FPGA_SIGNING_KEY_ID`: a non-secret stable key identifier.
 
 Each observation contains an opaque public `id`, board family, evidence URI,
@@ -40,3 +44,6 @@ last-known payload. No unsigned success response exists.
 
 Existing Queen status, board, activity, and research endpoints remain unchanged.
 No board programming or hardware discovery is introduced.
+
+Rotating the derivation secret rotates the public key. The website must pin the
+new public key before it accepts hardware again.

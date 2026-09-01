@@ -7,6 +7,7 @@
  */
 
 import {
+  createHash,
   createPrivateKey,
   createPublicKey,
   sign as signPayload,
@@ -27,6 +28,7 @@ interface HardwareObservation {
 interface QueenPublicHardwareDeps {
   readRegistry?: () => string | undefined
   readPrivateKey?: () => string | undefined
+  readSigningSecret?: () => string | undefined
   readKeyId?: () => string | undefined
   now?: () => Date
 }
@@ -133,6 +135,19 @@ function registryProjection(raw: string, now: Date) {
   }
 }
 
+function privateKeyFromSecret(secret: string) {
+  const seed = createHash('sha256')
+    .update('queen-fpga-registry/v1\0')
+    .update(secret)
+    .digest()
+  const pkcs8Prefix = Buffer.from('302e020100300506032b657004220420', 'hex')
+  return createPrivateKey({
+    key: Buffer.concat([pkcs8Prefix, seed]),
+    format: 'der',
+    type: 'pkcs8',
+  })
+}
+
 export function createQueenPublicHardwareRoute(
   deps: QueenPublicHardwareDeps = {},
 ) {
@@ -140,6 +155,9 @@ export function createQueenPublicHardwareRoute(
     deps.readRegistry ?? (() => process.env.QUEEN_FPGA_REGISTRY_JSON)
   const readPrivateKey =
     deps.readPrivateKey ?? (() => process.env.QUEEN_FPGA_SIGNING_PRIVATE_KEY)
+  const readSigningSecret =
+    deps.readSigningSecret ??
+    (() => process.env.QUEEN_FPGA_SIGNING_SECRET || process.env.TRIOS_API_TOKEN)
   const readKeyId =
     deps.readKeyId ?? (() => process.env.QUEEN_FPGA_SIGNING_KEY_ID)
   const now = deps.now ?? (() => new Date())
@@ -148,10 +166,11 @@ export function createQueenPublicHardwareRoute(
     c.header('Cache-Control', 'no-store')
     const registry = readRegistry()
     const privateKeyPem = readPrivateKey()
+    const signingSecret = readSigningSecret()
     const keyId = readKeyId()
     if (
       !registry ||
-      !privateKeyPem ||
+      (!privateKeyPem && !signingSecret) ||
       !keyId ||
       !/^[A-Za-z0-9._-]{1,80}$/.test(keyId)
     ) {
@@ -161,7 +180,9 @@ export function createQueenPublicHardwareRoute(
     try {
       const payload = registryProjection(registry, now())
       const canonical = JSON.stringify(payload)
-      const privateKey = createPrivateKey(privateKeyPem)
+      const privateKey = privateKeyPem
+        ? createPrivateKey(privateKeyPem)
+        : privateKeyFromSecret(signingSecret as string)
       if (privateKey.asymmetricKeyType !== 'ed25519') {
         throw new Error('Signing key must be Ed25519')
       }

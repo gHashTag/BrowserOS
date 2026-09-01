@@ -90,6 +90,29 @@ describe('GET /queen/public-hardware', () => {
     expect(response.status).toBe(503)
   })
 
+  it('derives a stable Ed25519 key from a protected deployment secret', async () => {
+    const request = () =>
+      createQueenPublicHardwareRoute({
+        readRegistry: () =>
+          JSON.stringify([
+            {
+              id: 'stand-alpha',
+              family: 'Artix-7',
+              state: 'programmed',
+              evidence: 'https://example.test/evidence',
+            },
+          ]),
+        readPrivateKey: () => undefined,
+        readSigningSecret: () => 'test-only-high-entropy-secret',
+        readKeyId: () => 'queen-fpga-derived-1',
+        now: () => now,
+      }).request('/')
+    const first = await (await request()).json()
+    const second = await (await request()).json()
+    expect(first.publicKey).toBe(second.publicKey)
+    expect(first.signature).toBe(second.signature)
+  })
+
   it('fails closed for duplicate identifiers or malformed evidence', async () => {
     for (const registry of [
       [
