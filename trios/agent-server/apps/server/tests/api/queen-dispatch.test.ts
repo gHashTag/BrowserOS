@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeAll, describe, expect, it } from 'bun:test'
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,6 +7,7 @@ import {
   closeDispatch,
   committedFileCount,
   committedFiles,
+  configuredWorkerCapacity,
   drain,
   finishDispatch,
   missingProviderRefusal,
@@ -30,6 +31,17 @@ const KEYS = [
 ]
 
 afterEach(() => {
+  for (const key of KEYS) delete process.env[key]
+})
+
+// The suite must pass under the environment #1293's independent test describes:
+// `ZAI_API_KEY=x ZAI_API_KEY_2=x bun test ...`. Variables present when the
+// process starts would otherwise walk into the FIRST case, which asserts that a
+// deployment with no credential refuses - and clearing only between cases is
+// one case too late. Clearing here also keeps any real secret sitting in the
+// runner's environment out of every assertion below, so a failure can never
+// print one.
+beforeAll(() => {
   for (const key of KEYS) delete process.env[key]
 })
 
@@ -128,6 +140,68 @@ describe('queen dispatch precheck', () => {
       process.env.ZAI_API_KEY_3 = 'c'
       expect(resolveWorkerProvider([])?.keyCount).toBe(2)
       expect(resolveWorkerProvider([0])?.apiKey).toBe('c')
+    })
+
+    // #1293. A variable duplicated across names - the platform's copy button,
+    // an env block pasted twice - is one account with one rate limit. Counting
+    // it twice makes the dashboard promise parallel capacity that shares a
+    // single limit, and the second "free" slot hands a bee a secret its
+    // sibling is already spending.
+    describe('duplicate secrets', () => {
+      it('reports one slot when both variables hold the same key', () => {
+        process.env.ZAI_API_KEY = 'a'
+        process.env.ZAI_API_KEY_2 = 'a'
+        expect(configuredWorkerCapacity()).toBe(1)
+      })
+
+      it('reports two slots for two distinct keys', () => {
+        process.env.ZAI_API_KEY = 'a'
+        process.env.ZAI_API_KEY_2 = 'b'
+        expect(configuredWorkerCapacity()).toBe(2)
+      })
+
+      // The fixture from the issue: a, a, b - exactly two worker slots.
+      it('counts a, a and b as exactly two worker slots', () => {
+        process.env.ZAI_API_KEY = 'a'
+        process.env.ZAI_API_KEY_2 = 'a'
+        process.env.ZAI_API_KEY_3 = 'b'
+        expect(configuredWorkerCapacity()).toBe(2)
+      })
+
+      // Selection must agree with capacity. If the count says two but the
+      // rotation still had three indices, the dashboard's "one free key" and
+      // the dispatch's key 3 would be two different stories about the same
+      // two secrets - and the third story would hand out a duplicate.
+      it('never assigns the same secret as two independent keys', () => {
+        process.env.ZAI_API_KEY = 'a'
+        process.env.ZAI_API_KEY_2 = 'a'
+        process.env.ZAI_API_KEY_3 = 'b'
+        const first = resolveWorkerProvider([])
+        expect(first?.keyCount).toBe(2)
+        const second = resolveWorkerProvider([first?.keyIndex ?? 0])
+        expect(second?.keyIndex).toBe(1)
+        expect(second?.apiKey).not.toBe(first?.apiKey)
+        // There is no third secret, so a third bee is told the pool is
+        // exhausted rather than handed a copy of one already in flight.
+        const third = resolveWorkerProvider([0, 1])
+        expect(third?.exhausted).toBe(2)
+        expect(third?.apiKey).toBeUndefined()
+      })
+
+      // Deduplication must not reorder or un-skip: the unsuffixed variable
+      // stays index 0 (first occurrence wins), and an empty value stays
+      // absent even when duplicates surround it.
+      it('keeps the unsuffixed key first and empty values absent', () => {
+        process.env.ZAI_API_KEY = 'b'
+        process.env.ZAI_API_KEY_2 = ''
+        process.env.ZAI_API_KEY_3 = 'a'
+        process.env.ZAI_API_KEY_4 = 'b'
+        const first = resolveWorkerProvider([])
+        expect(first?.keyCount).toBe(2)
+        expect(first?.keyIndex).toBe(0)
+        expect(resolveWorkerProvider([0])?.apiKey).toBe('a')
+        expect(resolveWorkerProvider([0, 1])?.exhausted).toBe(2)
+      })
     })
   })
 })

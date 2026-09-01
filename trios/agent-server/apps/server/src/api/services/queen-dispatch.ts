@@ -87,7 +87,7 @@ export interface WorkerProvider {
  * editor, where saving an empty box leaves the name behind.
  */
 /**
- * Every key this deployment holds for one provider, in index order.
+ * Every DISTINCT key this deployment holds for one provider, in index order.
  *
  * `ZAI_API_KEY`, then `ZAI_API_KEY_2`, `_3`, `_4`, ... The unsuffixed name is
  * index 0 so a deployment with one key needs no migration and reads exactly as
@@ -97,14 +97,29 @@ export interface WorkerProvider {
  * an empty box leaves the NAME behind, and a rotation that hands a bee index 2
  * because the name exists gives it nothing to authenticate with - the same trap
  * `~/.trios/config.json` has been sitting in for months.
+ *
+ * Identical values collapse into the slot of their first occurrence (#1293). A
+ * variable duplicated across names - the platform's copy button, an env block
+ * pasted twice - is still ONE account with ONE rate limit, and counting it
+ * twice promises the Queen parallel capacity that does not exist: the second
+ * "free" slot hands a bee a secret its sibling is already spending, and the
+ * 429 that follows is blamed on the work. Deduplicating HERE is what keeps
+ * capacity reporting and key selection in agreement, because both read this
+ * one function - the count a dashboard shows and the index a bee takes are the
+ * same list, never two different stories about one secret. First occurrence
+ * wins, so the unsuffixed variable stays index 0 in every ordering.
  */
 function keysFor(envVar: string): string[] {
   const keys: string[] = []
-  const first = process.env[envVar]
-  if (first && first.length > 0) keys.push(first)
+  const seen = new Set<string>()
+  const admit = (value: string | undefined) => {
+    if (!value || value.length === 0 || seen.has(value)) return
+    seen.add(value)
+    keys.push(value)
+  }
+  admit(process.env[envVar])
   for (let i = 2; i <= 16; i++) {
-    const next = process.env[`${envVar}_${i}`]
-    if (next && next.length > 0) keys.push(next)
+    admit(process.env[`${envVar}_${i}`])
   }
   return keys
 }
