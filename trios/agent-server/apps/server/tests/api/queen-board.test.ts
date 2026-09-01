@@ -32,6 +32,21 @@ import {
  * - which is precisely the failure being fixed, since all three of these agreed
  * once.
  *
+ * TWO CLOCKS, NEVER MIXED. The board half of every case composes against an
+ * explicit `now` (NOW, a fixed instant), and the fixtures it reads are aged
+ * from that same instant - so a board answer is the same on any date the suite
+ * runs. The binary half cannot be given a clock: queend reads its own Date(),
+ * so the fixtures it reads are aged from the wall clock of the moment the test
+ * runs. One fixture cannot honestly serve both readers, because a task dated
+ * from Date.now() is, against the fixed board clock, a task from the future -
+ * the 48-hour release below went red for exactly that reason once the machine's
+ * date passed NOW. Where a case wants both answers, it builds the fixture
+ * twice, once per clock, and the wall clock never leaks into the board
+ * assertion. Timestamps are second-precision ISO 8601 throughout, because
+ * Swift's .iso8601 decoder rejects the milliseconds Date.toISOString() always
+ * emits, and a question the binary cannot decode makes every parity answer
+ * "does not hold" - agreement that was never checked.
+ *
  * HONEST LIMIT, stated because a quiet skip is how a gate reports success it
  * never earned: on a machine that has not built `queend`, the cross-checks DO
  * NOT RUN. `the binary is where the container expects it` always runs, so the
@@ -52,7 +67,19 @@ const present = existsSync(BIN)
 
 const HOUR = 3600_000
 const NOW = Date.parse('2026-08-31T12:00:00Z')
-const ago = (hours: number) => new Date(NOW - hours * HOUR).toISOString()
+
+/**
+ * An instant as second-precision ISO 8601 - `2026-08-31T12:00:00Z`, not
+ * `...12:00:00.000Z`. Date.toISOString() always emits the milliseconds, and
+ * queend decodes dates with Swift's `.iso8601` strategy, which rejects
+ * fractional seconds: a question carrying them fails to decode, the answer
+ * comes back `kind: "error"`, and `queendHolds` reads false for every state.
+ * The board's `Date.parse` accepts both forms, so the strict one serves both
+ * readers. Written once, here, because a format that silently turns a parity
+ * check into a decode error is not a detail to re-derive per fixture.
+ */
+const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, 'Z')
+const ago = (hours: number) => iso(NOW - hours * HOUR)
 
 interface Task {
   id: string
@@ -377,10 +404,13 @@ describe('the board and queend read one registry the same way', () => {
   })
 
   // Live-against-live: the ages here are wall-clock relative so the binary,
-  // which reads its own Date(), sees the same age the board does.
+  // which reads its own Date(), sees the same age the board does. These
+  // fixtures are for the binary ONLY where age matters - a board assertion
+  // must be fed from `task`, which ages against NOW, or the two clocks mix
+  // and the answer drifts with the machine's date.
   const holder = (state: string, paths: string[], ageHours: number): Task => {
     const t = task(1286, state, paths, 0)
-    const at = new Date(Date.now() - ageHours * HOUR).toISOString()
+    const at = iso(Date.now() - ageHours * HOUR)
     return { ...t, createdAt: at, updatedAt: at }
   }
 
@@ -429,15 +459,31 @@ describe('the board and queend read one registry the same way', () => {
 
   it('releases an awaitingReview boundary at 48 hours, as queend does', () => {
     const path = 'rings/SR-00/QueenLocalisation.swift'
-    const stale = [holder('awaitingReview', [path], 70)]
-    const fresh = [holder('awaitingReview', [path], 10)]
 
+    // ONE CLOCK: both fixtures and boardCard's `now` are aged from NOW, so
+    // the stale task is seventy hours old on every date this suite runs. A
+    // wall-clock fixture measured against the fixed board clock is the defect
+    // this case used to carry: once the machine's date passed NOW, the
+    // "70 hours" task was under 48 board hours old - or dated after the board
+    // clock outright, an age of minus days - and the release half below went
+    // red while the production rule was correct.
+    const stale = [task(1286, 'awaitingReview', [path], 70)]
+    const fresh = [task(1286, 'awaitingReview', [path], 10)]
     expect(boardCard(9002, path, stale).column).toBe('backlog')
     expect(boardCard(9002, path, fresh).column).toBe('blocked')
 
+    // THE OTHER CLOCK: queend reads its own Date() and cannot be handed NOW,
+    // so the live comparison re-ages the same two cases against the wall
+    // clock the binary will consult. Ages 70 and 10 hours sit far from the
+    // 48-hour edge, so the binary's answer is the same whenever it runs -
+    // and its wall clock never reaches the assertion above.
     if (present) {
-      expect(queendHolds(9002, path, stale)).toBe(false)
-      expect(queendHolds(9002, path, fresh)).toBe(true)
+      expect(
+        queendHolds(9002, path, [holder('awaitingReview', [path], 70)]),
+      ).toBe(false)
+      expect(
+        queendHolds(9002, path, [holder('awaitingReview', [path], 10)]),
+      ).toBe(true)
     }
   })
 
