@@ -29,12 +29,24 @@ interface QueenPublicResearchDeps {
   databaseUrl?: () => string | undefined
   createPool?: (url: string) => ResearchPool
   workerCapacity?: () => number
+  publicOrigin?: (requestUrl: string) => string
 }
 
 type ResearchState = 'researched' | 'researching' | 'available' | 'locked'
 
 function configuredDatabaseUrl(): string | undefined {
   return process.env.DATABASE_URL || process.env.RAILWAY_SSOT_URL || undefined
+}
+
+function configuredPublicOrigin(requestUrl: string): string {
+  const configured =
+    process.env.RAILWAY_STATIC_URL || process.env.RAILWAY_PUBLIC_DOMAIN
+  if (!configured) return new URL(requestUrl).origin
+
+  const absolute = /^https?:\/\//i.test(configured)
+    ? configured
+    : `https://${configured}`
+  return new URL(absolute).origin
 }
 
 function sanitizeEvidence(value: string): string {
@@ -131,6 +143,7 @@ export function createQueenPublicResearchRoute(
     deps.createPool ??
     ((url: string) => new Pool({ connectionString: url }) as ResearchPool)
   const workerCapacity = deps.workerCapacity ?? configuredWorkerCapacity
+  const publicOrigin = deps.publicOrigin ?? configuredPublicOrigin
 
   return new Hono().get('/', async (c) => {
     c.header('Cache-Control', 'no-store')
@@ -164,7 +177,10 @@ export function createQueenPublicResearchRoute(
       }
     }
 
-    const origin = new URL(c.req.url).origin
+    // Railway terminates TLS at the edge, so c.req.url is HTTP inside the
+    // container. Build copyable A2A links from Railway's trusted public domain
+    // rather than leaking the internal scheme into the bootstrap contract.
+    const origin = publicOrigin(c.req.url)
     return c.json({
       ...graph,
       runtime,

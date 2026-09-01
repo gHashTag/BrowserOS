@@ -49,6 +49,7 @@ describe('GET /queen/public-research', () => {
         },
       }),
       workerCapacity: () => 4,
+      publicOrigin: () => 'https://research.t27.test',
     }).request('/')
 
     expect(response.status).toBe(200)
@@ -77,6 +78,11 @@ describe('GET /queen/public-research', () => {
     expect(body.nodes[0].unlocks).toEqual(['rings'])
     expect(body.nodes[1].prerequisites).toEqual(['compiler'])
     expect(body.nodes[2].state).toBe('locked')
+    expect(body.agentBootstrap.endpoints).toEqual({
+      research: 'https://research.t27.test/queen/public-research',
+      board: 'https://research.t27.test/queen/public-board',
+      activity: 'https://research.t27.test/queen/public-activity',
+    })
     expect(JSON.stringify(body)).not.toContain('/Users/private')
     expect(JSON.stringify(body)).not.toContain('postgres://configured')
     expect(ended).toBe(true)
