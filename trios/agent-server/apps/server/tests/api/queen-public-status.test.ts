@@ -76,7 +76,7 @@ describe('GET /queen/status', () => {
       },
       {
         rowCount: 1,
-        rows: [{ total: '8', finished: '8', running: '0' }],
+        rows: [{ total: '8', finished: '8', running: '0', unreviewed: '2' }],
       },
       {
         rowCount: 1,
@@ -104,6 +104,9 @@ describe('GET /queen/status', () => {
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(await response.json()).toEqual({
       status: 'ok',
+      // Eight finished dispatches, two still owing a verdict: the idle
+      // reading of the tick's refusal must lose to the verdicts owed.
+      swarmState: 'waiting_for_review',
       scheduler: { enabled: true, intervalSeconds: 1800 },
       lastTick: {
         decidedAt: '2026-09-01T04:17:42.983Z',
@@ -116,6 +119,7 @@ describe('GET /queen/status', () => {
         total: 8,
         finished: 8,
         running: 0,
+        unreviewed: 2,
         latest: {
           issue: 1290,
           dispatchedAt: '2026-08-31T17:07:16.580Z',
@@ -245,6 +249,9 @@ describe('GET /queen/status', () => {
 
     expect(response.status).toBe(200)
     const body = (await response.json()) as Record<string, unknown>
+    // The classification ran on planted rows without echoing any of them,
+    // and an empty swarm under a live scheduler reads as health.
+    expect(body.swarmState).toBe('healthy_idle')
     // The categorisation still worked while none of it was echoed back.
     expect(body.lastTick).toEqual({
       decidedAt: '2026-09-01T04:17:42.983Z',
@@ -288,6 +295,9 @@ describe('GET /queen/status', () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
       status: 'ok',
+      // The choice this tick recorded has already finished and been judged -
+      // an allowed decision over an empty table is still an empty table.
+      swarmState: 'healthy_idle',
       scheduler: { enabled: true, intervalSeconds: 1800 },
       lastTick: {
         decidedAt: '2026-08-30T09:00:00.000Z',
@@ -296,7 +306,13 @@ describe('GET /queen/status', () => {
         skippedCount: 0,
         skipSummary: {},
       },
-      dispatches: { total: 0, finished: 0, running: 0, latest: null },
+      dispatches: {
+        total: 0,
+        finished: 0,
+        running: 0,
+        unreviewed: 0,
+        latest: null,
+      },
     })
   })
 
@@ -320,6 +336,9 @@ describe('GET /queen/status', () => {
     }).request('/')
     const body = await response.json()
     expect(body.scheduler).toEqual({ enabled: false, intervalSeconds: 0 })
+    // No scheduler, no tick, nothing running and nothing owed: the one
+    // honest word for that is unavailable, not idle.
+    expect(body.swarmState).toBe('unavailable')
     expect(body.lastTick).toBeNull()
     expect(body.dispatches.latest).toBeNull()
   })
