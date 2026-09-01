@@ -5,14 +5,36 @@
  * route adds directionally-correct prerequisites/unlocks and a secret-free
  * view of paid worker-slot utilisation. It deliberately keeps graph state and
  * worker activity separate: "partial" means the repository has incomplete
- * evidence, not that a model is currently spending tokens on it.
+ * evidence, not that a model is currently spending tokens on it. The `billing`
+ * block explains, in the same closed vocabulary /queen/status publishes,
+ * which quota gate those paid workers answer to - without which an idle
+ * subscription swarm reads as broken capacity.
  */
 
 import { Hono } from 'hono'
 import { Pool } from 'pg'
 import { logger } from '../../lib/logger'
 import { configuredWorkerCapacity } from '../services/queen-dispatch'
+import { configuredBillingMode } from './queen-public-status'
 import { loadTree as loadCanonicalTree, type Tree } from './queen-tree'
+
+/**
+ * The closed billing vocabulary, derived from the one resolver both public
+ * pages share. Deriving it instead of re-declaring it means this route can
+ * never drift from /queen/status even if the vocabulary grows.
+ */
+type BillingMode = ReturnType<typeof configuredBillingMode>
+
+/**
+ * Every value `quotaAuthority` can carry.
+ *
+ *   provider_quota      a Coding Plan spends a provider-side subscription
+ *                       quota; its resets and refusals belong to the
+ *                       provider and are observed, never computed locally
+ *   estimated_usd_gate  metered API work is gated by the Queen's own
+ *                       estimated USD cap, which can refuse a new Bee
+ */
+type QuotaAuthority = 'provider_quota' | 'estimated_usd_gate'
 
 interface QueryResult {
   rowCount: number | null
@@ -29,6 +51,7 @@ interface QueenPublicResearchDeps {
   databaseUrl?: () => string | undefined
   createPool?: (url: string) => ResearchPool
   workerCapacity?: () => number
+  billingMode?: () => BillingMode
   publicOrigin?: (requestUrl: string) => string
 }
 
@@ -134,6 +157,28 @@ function workerProjection(capacity: number, busyIndices: number[]) {
   }
 }
 
+/**
+ * The closed billing explanation behind the worker panel.
+ *
+ * This is an explanation, not a decision: queend owns whether a Bee starts,
+ * and no value here can make one run. The mode comes from the exact
+ * resolver /queen/status publishes, so the two pages can never disagree
+ * about the same swarm. `quotaAuthority` names which gate actually refuses
+ * work under that mode. Only these two closed words leave this file - never
+ * credentials, never provider response bodies, never balances or quota
+ * telemetry, all of which this route never reads in the first place.
+ */
+function billingProjection(mode: BillingMode): {
+  billingMode: BillingMode
+  quotaAuthority: QuotaAuthority
+} {
+  return {
+    billingMode: mode,
+    quotaAuthority:
+      mode === 'coding_plan' ? 'provider_quota' : 'estimated_usd_gate',
+  }
+}
+
 export function createQueenPublicResearchRoute(
   deps: QueenPublicResearchDeps = {},
 ) {
@@ -143,6 +188,7 @@ export function createQueenPublicResearchRoute(
     deps.createPool ??
     ((url: string) => new Pool({ connectionString: url }) as ResearchPool)
   const workerCapacity = deps.workerCapacity ?? configuredWorkerCapacity
+  const billingMode = deps.billingMode ?? configuredBillingMode
   const publicOrigin = deps.publicOrigin ?? configuredPublicOrigin
 
   return new Hono().get('/', async (c) => {
@@ -184,6 +230,7 @@ export function createQueenPublicResearchRoute(
     return c.json({
       ...graph,
       runtime,
+      billing: billingProjection(billingMode()),
       workers: workerProjection(workerCapacity(), busyIndices),
       agentBootstrap: {
         version: 'trinity-research-a2a/v1',
