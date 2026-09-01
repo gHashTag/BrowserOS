@@ -1,1 +1,10 @@
-[]
+[
+  {
+    "agent": "codex-root",
+    "claim_id": "5A13B719-47C0-4490-B68F-8A1D328A8401",
+    "started_at": "2026-09-01T17:42:12Z",
+    "status": "active",
+    "task_id": "GH-1313",
+    "title": "Expose a signed public FPGA registry for Queen"
+  }
+]

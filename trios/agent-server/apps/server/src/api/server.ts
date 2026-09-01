@@ -51,6 +51,7 @@ import {
 } from './routes/queen-kanban'
 import { createQueenLeaseRoute } from './routes/queen-lease'
 import { createQueenPublicActivityRoute } from './routes/queen-public-activity'
+import { createQueenPublicHardwareRoute } from './routes/queen-public-hardware'
 import { createQueenPublicResearchRoute } from './routes/queen-public-research'
 import { createQueenPublicStatusRoute } from './routes/queen-public-status'
 import { createQueenRegistryRoute } from './routes/queen-registry'
@@ -322,6 +323,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     .route('/health', createHealthRoute({ browser, stateBackend: a2aService }))
     .route('/queen/status', createQueenPublicStatusRoute())
     .route('/queen/public-activity', createQueenPublicActivityRoute())
+    .route('/queen/public-hardware', createQueenPublicHardwareRoute())
     .route('/queen/public-research', createQueenPublicResearchRoute())
     .route('/queen/public-board', createQueenPublicBoardRoute())
     .route('/queen/registry', queenRegistryRoutes)
