@@ -295,9 +295,10 @@ describe('GET /queen/status', () => {
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({
       status: 'ok',
-      // The choice this tick recorded has already finished and been judged -
-      // an allowed decision over an empty table is still an empty table.
-      swarmState: 'healthy_idle',
+      // The tick says it chose work while no dispatch is observable. This may
+      // be the real recordTick -> recordDispatch window, so the snapshot is
+      // unavailable until the row appears or a no-choice tick supersedes it.
+      swarmState: 'unavailable',
       scheduler: { enabled: true, intervalSeconds: 1800 },
       lastTick: {
         decidedAt: '2026-08-30T09:00:00.000Z',
@@ -481,6 +482,30 @@ describe('GET /queen/status', () => {
     expect(
       ((await response.json()) as Record<string, unknown>).swarmState,
     ).toBe('healthy_idle')
+  })
+
+  it('does not call an allowed decision with no observable dispatch healthy', async () => {
+    const pool = fakePool([
+      {
+        rowCount: 1,
+        rows: [
+          {
+            decided_at: '2026-09-01T04:17:42.983Z',
+            decision: { allowed: true, refusal: null, chosen: 1296 },
+          },
+        ],
+      },
+      emptyDispatchCounts,
+      noLatestDispatch,
+    ])
+    const response = await createQueenPublicStatusRoute({
+      databaseUrl: () => 'postgres://configured',
+      createPool: () => pool,
+      tickIntervalSeconds: () => 1800,
+    }).request('/')
+    expect(
+      ((await response.json()) as Record<string, unknown>).swarmState,
+    ).toBe('unavailable')
   })
 
   it('classifies a swarm nobody vouches for as unavailable', async () => {

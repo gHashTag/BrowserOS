@@ -149,8 +149,7 @@ function summarizeSkips(
  *                       verdict - the Queen has not judged her bee
  *   healthy_idle        nothing running, nothing owed, the scheduler enabled
  *                       and a readable tick explaining the quiet: the latest
- *                       round found no eligible candidate, or its choice has
- *                       since finished and been judged
+ *                       round explicitly found no eligible candidate
  *   unavailable         nothing running and nothing owed, but the scheduler is
  *                       disabled or no readable tick exists, so this page
  *                       cannot say WHY the swarm is quiet and refuses to dress
@@ -177,22 +176,28 @@ type SwarmState =
  *      the idle reading: a swarm that looks empty but owes a review is not
  *      idle, and the backlog is what an operator must act on.
  *   3. `unavailable` - with the swarm empty and nothing owed, quiet is only
- *      healthy if this page can say why; a disabled scheduler or a tick
- *      whose decision cannot be read means nobody vouches for the queue.
- *   4. `healthy_idle` - the scheduler is enabled, a tick decision is
- *      readable, and the table says the queue is empty: the round started
- *      nothing because nothing was eligible (or its choice already
- *      completed its cycle), which is health, not failure.
+ *      healthy if this page can say why; a disabled scheduler, an unreadable
+ *      tick, or a tick that says it chose work while no dispatch is observable
+ *      means nobody vouches for the present snapshot.
+ *   4. `healthy_idle` - the scheduler is enabled, the table says the queue is
+ *      empty, and the latest readable decision explicitly found no eligible
+ *      candidate. That is health, not failure.
  */
 function classifySwarmState(facts: {
   running: number
   unreviewed: number
   schedulerEnabled: boolean
   trustworthyTick: boolean
+  decisionFoundNoEligibleCandidate: boolean
 }): SwarmState {
   if (facts.running > 0) return 'working'
   if (facts.unreviewed > 0) return 'waiting_for_review'
-  if (!facts.schedulerEnabled || !facts.trustworthyTick) return 'unavailable'
+  if (
+    !facts.schedulerEnabled ||
+    !facts.trustworthyTick ||
+    !facts.decisionFoundNoEligibleCandidate
+  )
+    return 'unavailable'
   return 'healthy_idle'
 }
 
@@ -260,6 +265,12 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
           // quiet, so it vouches for nothing - `lastTick` still reports the
           // row itself, exactly as it always has.
           trustworthyTick: decision != null,
+          // There is a real window between recordTick(allowed: true) and
+          // recordDispatch. Calling that empty snapshot healthy would conceal
+          // a failed dispatch write. Only an explicit no-choice decision can
+          // vouch for healthy idle; the completion-triggered refill writes one
+          // after accepted work finishes.
+          decisionFoundNoEligibleCandidate: decision?.allowed === false,
         }),
         scheduler: {
           enabled: schedulerEnabled,
