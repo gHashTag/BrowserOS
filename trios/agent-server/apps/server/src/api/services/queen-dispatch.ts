@@ -412,9 +412,43 @@ export async function prepareWorktree(
     }
   }
 
+  const base = process.env.TRIOS_REPO_REF || 'origin/dev'
+  const remoteBranch = base.startsWith('origin/')
+    ? base.slice('origin/'.length)
+    : base
+
+  // Fetch the one canonical base this worktree will actually use. An ordinary
+  // `git fetch origin` lets Git validate and offer every local branch.
+  // On a persistent partial clone one stale Bee ref can point at an object the
+  // volume no longer has; the promisor then asks GitHub for that LOCAL commit
+  // and GitHub correctly answers `upload-pack: not our ref`. One lost attempt
+  // must not stop unrelated issues from starting.
+  //
+  // Do not delete the broken ref here. It can be the last name of recoverable
+  // work, and deciding to quarantine or remove it belongs to an explicit
+  // reconciliation path. Narrow negotiation instead, which fixes the shared
+  // fetch without rewriting any Bee history. `fetch-pack` talks to the named
+  // canonical remote ref without walking the repository's local refs; after it
+  // returns the remote's exact object ID, `update-ref` advances only the remote
+  // tracking name this worktree will use.
+  const remote = await run('git', ['remote', 'get-url', 'origin'], root, 60_000)
+  if (remote.code !== 0 || remote.out.length === 0) {
+    return {
+      ok: false,
+      path,
+      detail: `git remote lookup failed: ${remote.out.slice(0, 200)}`,
+    }
+  }
+  const remoteRef = `refs/heads/${remoteBranch}`
   const fetched = await run(
     'git',
-    ['fetch', '--quiet', 'origin'],
+    [
+      'fetch-pack',
+      '--no-progress',
+      '--filter=blob:none',
+      remote.out,
+      remoteRef,
+    ],
     root,
     180_000,
   )
@@ -425,11 +459,36 @@ export async function prepareWorktree(
       detail: `git fetch failed: ${fetched.out.slice(0, 200)}`,
     }
   }
+  const fetchedLine = fetched.out
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.endsWith(` ${remoteRef}`))
+  const canonicalCommit = fetchedLine?.split(/\s+/)[0]
+  if (!canonicalCommit || !/^[0-9a-f]{40,64}$/.test(canonicalCommit)) {
+    return {
+      ok: false,
+      path,
+      detail: `git fetch returned no canonical ${remoteRef}`,
+    }
+  }
+  const trackingRef = `refs/remotes/origin/${remoteBranch}`
+  const updated = await run(
+    'git',
+    ['update-ref', trackingRef, canonicalCommit],
+    root,
+    60_000,
+  )
+  if (updated.code !== 0) {
+    return {
+      ok: false,
+      path,
+      detail: `git tracking ref update failed: ${updated.out.slice(0, 200)}`,
+    }
+  }
 
-  const base = process.env.TRIOS_REPO_REF || 'origin/dev'
   const added = await run(
     'git',
-    ['worktree', 'add', '-B', branch, path, base],
+    ['worktree', 'add', '-B', branch, path, trackingRef],
     root,
     180_000,
   )

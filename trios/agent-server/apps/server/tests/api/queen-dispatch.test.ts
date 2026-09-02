@@ -1,5 +1,11 @@
 import { afterEach, beforeAll, describe, expect, it } from 'bun:test'
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Pool } from 'pg'
@@ -642,6 +648,73 @@ describe('an existing worktree', () => {
       if (previousRef === undefined) delete process.env.TRIOS_REPO_REF
       else process.env.TRIOS_REPO_REF = previousRef
       restore()
+    }
+  })
+})
+
+/**
+ * #1321, Wave A. A persisted Bee ref can outlive its local object. Production
+ * carried exactly this shape after a volume/redeploy boundary:
+ *
+ *   refs/heads/queen-1291 -> 4597e966... (object absent locally and remotely)
+ *
+ * An unrestricted partial-clone fetch negotiated that unrelated broken tip and
+ * GitHub answered `upload-pack: not our ref`, so a healthy issue could not cut
+ * a worktree from the healthy canonical branch. The recovery must narrow the
+ * fetch, not delete the broken ref: deleting is a data-loss policy decision and
+ * this function only prepares new work.
+ */
+describe('a new worktree ignores unrelated broken Bee refs', () => {
+  const git = (cwd: string, args: string[]) => {
+    const done = Bun.spawnSync(['git', ...args], {
+      cwd,
+      env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null' },
+    })
+    if (done.exitCode !== 0) {
+      throw new Error(`git ${args.join(' ')} failed: ${done.stderr.toString()}`)
+    }
+    return done.stdout.toString().trim()
+  }
+
+  it('fetches only the canonical base and preserves the broken ref for quarantine', async () => {
+    const previousWorkspace = process.env.WORKSPACE_DIR
+    const previousRef = process.env.TRIOS_REPO_REF
+    const workspace = realpathSync(mkdtempSync(join(tmpdir(), 'queen-ref-')))
+    const remote = join(workspace, 'origin.git')
+    const seed = join(workspace, 'seed')
+    const root = join(workspace, 'BrowserOS')
+    mkdirSync(remote)
+    git(remote, ['init', '--bare', '-q'])
+    mkdirSync(seed)
+    git(seed, ['init', '-q', '-b', 'dev'])
+    git(seed, ['config', 'user.email', 'bee@example.com'])
+    git(seed, ['config', 'user.name', 'Bee'])
+    writeFileSync(join(seed, 'README.md'), 'canonical\n')
+    git(seed, ['add', '.'])
+    git(seed, ['-c', 'commit.gpgsign=false', 'commit', '-qm', 'canonical'])
+    git(seed, ['remote', 'add', 'origin', remote])
+    git(seed, ['push', '-q', '-u', 'origin', 'dev'])
+    git(workspace, ['clone', '-q', '--branch', 'dev', remote, root])
+
+    const broken = '4597e9664d2638f1de0a1d98ddf022a14e962c2e'
+    writeFileSync(
+      join(root, '.git', 'refs', 'heads', 'queen-1291'),
+      `${broken}\n`,
+    )
+    process.env.WORKSPACE_DIR = workspace
+    process.env.TRIOS_REPO_REF = 'dev'
+    try {
+      const prepared = await prepareWorktree(1321)
+      expect(prepared.detail).toBe('cut from dev')
+      expect(prepared.ok).toBe(true)
+      expect(
+        readFileSync(join(root, '.git', 'refs', 'heads', 'queen-1291'), 'utf8'),
+      ).toBe(`${broken}\n`)
+    } finally {
+      if (previousWorkspace === undefined) delete process.env.WORKSPACE_DIR
+      else process.env.WORKSPACE_DIR = previousWorkspace
+      if (previousRef === undefined) delete process.env.TRIOS_REPO_REF
+      else process.env.TRIOS_REPO_REF = previousRef
     }
   })
 })
