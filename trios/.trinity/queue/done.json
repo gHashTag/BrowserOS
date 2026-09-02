@@ -428,5 +428,19 @@
     "task_id": "GH-1300",
     "title": "Do not apply estimated API dollar caps to Coding Plan workers",
     "verdict": "CLEAN"
+  },
+  {
+    "agent": "codex-root",
+    "artifact": ".trinity/specs/queen-review-lifecycle.md",
+    "claim_id": "0fdb14b8-ff92-409e-bf92-b62679d9ee76",
+    "finished_at": "2026-09-02T05:26:00Z",
+    "graph_node": "queen_review_lifecycle",
+    "priority": "P0",
+    "spec_path": ".trinity/specs/queen-review-lifecycle.md",
+    "started_at": "2026-09-02T04:22:55Z",
+    "status": "done",
+    "task_id": "GH-1314",
+    "title": "Complete the Queen review and Bee retry lifecycle",
+    "verdict": "CLEAN"
   }
 ]

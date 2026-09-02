@@ -8,10 +8,13 @@ import {
   committedFileCount,
   committedFiles,
   configuredWorkerCapacity,
+  dispatchBee,
   drain,
   finishDispatch,
   missingProviderRefusal,
   prepareWorktree,
+  reapDispatchesFromPreviousBoot,
+  reapStalledDispatches,
   recordDispatch,
   resolveWorkerProvider,
   setDurableCloseListener,
@@ -112,6 +115,36 @@ describe('queen dispatch precheck', () => {
       process.env.ZAI_API_KEY_2 = 'b'
       const chosen = resolveWorkerProvider([0, 1])
       expect(chosen?.exhausted).toBe(2)
+      expect(chosen?.apiKey).toBeUndefined()
+    })
+
+    it('preserves the prior provider, model and free key for a retry', () => {
+      process.env.ZAI_API_KEY = 'z0'
+      process.env.ZAI_API_KEY_2 = 'z1'
+      process.env.OPENAI_API_KEY = 'o0'
+      const chosen = resolveWorkerProvider([], {
+        provider: 'zai',
+        model: 'glm-5.3-pinned',
+        keyIndex: 1,
+      })
+      expect(chosen?.provider).toBe('zai')
+      expect(chosen?.model).toBe('glm-5.3-pinned')
+      expect(chosen?.keyIndex).toBe(1)
+      expect(chosen?.apiKey).toBe('z1')
+    })
+
+    it('keeps the retry queued when its exact prior key is still busy', () => {
+      process.env.ZAI_API_KEY = 'z0'
+      process.env.ZAI_API_KEY_2 = 'z1'
+      process.env.OPENAI_API_KEY = 'o0'
+      const chosen = resolveWorkerProvider([1], {
+        provider: 'zai',
+        model: 'glm-5.3',
+        keyIndex: 1,
+      })
+      expect(chosen?.provider).toBe('zai')
+      expect(chosen?.preferredKeyBusy).toBe(1)
+      expect(chosen?.keyIndex).toBeUndefined()
       expect(chosen?.apiKey).toBeUndefined()
     })
 
@@ -231,6 +264,65 @@ const touching = (
   asked: Array<{ sql: string; params: unknown[] }>,
   table: string,
 ) => asked.filter((q) => q.sql.includes(table))
+
+describe('changes-requested retry recovery', () => {
+  it('keeps a retry visible when its prior provider is unavailable', async () => {
+    const { pool, asked } = recordingPool()
+    const outcome = await dispatchBee(
+      pool,
+      1315,
+      'apply the review note',
+      ['trios/agent-server/**'],
+      [],
+      ['second tick must retry'],
+      'github',
+      { provider: 'zai', model: 'glm-5.3', keyIndex: 0 },
+    )
+    expect(outcome.started).toBe(false)
+    const update = touching(asked, 'queen_dispatch')[0]
+    expect(update.sql).toContain("review_state = 'sendBack'")
+    expect(update.sql).not.toContain('started = false')
+  })
+
+  it('keeps a retry visible instead of changing keys when its key is busy', async () => {
+    process.env.ZAI_API_KEY = 'z0'
+    process.env.ZAI_API_KEY_2 = 'z1'
+    const { pool, asked } = recordingPool()
+    const outcome = await dispatchBee(
+      pool,
+      1315,
+      'apply the review note',
+      ['trios/agent-server/**'],
+      [1],
+      ['same key must remain attributable'],
+      'github',
+      { provider: 'zai', model: 'glm-5.3', keyIndex: 1 },
+    )
+    expect(outcome.started).toBe(false)
+    expect(outcome.detail).toContain('prior provider key slot 2')
+    const update = touching(asked, 'queen_dispatch')[0]
+    expect(update.sql).toContain("review_state = 'sendBack'")
+    expect(update.sql).not.toContain('started = false')
+  })
+
+  it('returns only a pre-flight retry claim to sendBack on boot recovery', async () => {
+    const { pool, asked } = recordingPool()
+    await reapDispatchesFromPreviousBoot(pool)
+    const sql = asked[0].sql
+    expect(sql).toContain('CASE WHEN retry_of_send_back')
+    expect(sql).toContain("THEN 'sendBack'")
+    expect(sql).toContain('retry_of_send_back = false')
+  })
+
+  it('returns only a pre-flight retry claim to sendBack on stall recovery', async () => {
+    const { pool, asked } = recordingPool()
+    await reapStalledDispatches(pool, 30)
+    const sql = asked[0].sql
+    expect(sql).toContain('CASE WHEN retry_of_send_back')
+    expect(sql).toContain("THEN 'sendBack'")
+    expect(asked[0].params).toEqual([30])
+  })
+})
 
 /**
  * The only statement that ends a turn used to fail in complete silence.

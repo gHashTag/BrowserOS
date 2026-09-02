@@ -49,6 +49,12 @@ import { Hono } from 'hono'
 import { Pool } from 'pg'
 import { queenLeaseDatabaseUrl } from '../services/queen-lease'
 
+export type ReviewLifecycleState =
+  | 'queenReviewPending'
+  | 'changesRequested'
+  | 'humanEscalation'
+  | 'reconciliationAnomaly'
+
 interface Card {
   number: number
   title: string
@@ -64,6 +70,8 @@ interface Card {
   criteriaSource?: string
   /** Spec sections the issue still lacks. */
   needs?: string[]
+  /** The owner/action hidden by the compatibility `review` column. */
+  reviewState?: ReviewLifecycleState
 }
 
 const COLUMNS = [
@@ -86,11 +94,32 @@ const COLUMNS = [
 export interface PublicBoard {
   repo: string
   columns: typeof COLUMNS
-  cards: Array<Pick<Card, 'number' | 'title' | 'column' | 'criteria' | 'needs'>>
+  cards: Array<
+    Pick<
+      Card,
+      'number' | 'title' | 'column' | 'criteria' | 'needs' | 'reviewState'
+    >
+  >
+  reviewQueues: Record<ReviewLifecycleState, number>
   pulse: Pick<
     Pulse,
     'rounds' | 'bees' | 'verdicts' | 'lastRoundAt' | 'roundSeconds'
   >
+}
+
+function reviewQueueCounts(
+  cards: Card[],
+): Record<ReviewLifecycleState, number> {
+  const counts: Record<ReviewLifecycleState, number> = {
+    queenReviewPending: 0,
+    changesRequested: 0,
+    humanEscalation: 0,
+    reconciliationAnomaly: 0,
+  }
+  for (const card of cards) {
+    if (card.reviewState) counts[card.reviewState] += 1
+  }
+  return counts
 }
 
 /**
@@ -105,6 +134,7 @@ export function publicBoardProjection(input: {
   cards: Card[]
   pulse: Pulse
 }): PublicBoard {
+  const reviewQueues = reviewQueueCounts(input.cards)
   return {
     repo: input.repo,
     columns: COLUMNS,
@@ -114,7 +144,9 @@ export function publicBoardProjection(input: {
       column: card.column,
       criteria: card.criteria,
       needs: card.needs,
+      ...(card.reviewState ? { reviewState: card.reviewState } : {}),
     })),
+    reviewQueues,
     pulse: {
       rounds: input.pulse.rounds,
       bees: input.pulse.bees,
@@ -139,6 +171,14 @@ function columnFor(state: string): string {
     default:
       return 'dropped'
   }
+}
+
+function registryReviewState(state: string): ReviewLifecycleState | undefined {
+  if (state === 'rejected') return 'changesRequested'
+  // The public server has no durable verdict for a registry-only review task.
+  // Calling it Queen debt would assert an owner the ledger cannot prove.
+  if (state === 'awaitingReview') return 'reconciliationAnomaly'
+  return undefined
 }
 
 /**
@@ -260,6 +300,18 @@ function dispatchColumn(row: Record<string, unknown>): string {
   if (verdict === 'accept') return 'done'
   if (verdict !== '') return 'review'
   return row.finished_at ? 'review' : 'running'
+}
+
+function dispatchReviewState(
+  row: Record<string, unknown>,
+): ReviewLifecycleState | undefined {
+  if (!row.finished_at) return undefined
+  const verdict = row.review_state == null ? '' : String(row.review_state)
+  if (verdict === '') return 'queenReviewPending'
+  if (verdict === 'sendBack') return 'changesRequested'
+  if (verdict === 'escalate') return 'humanEscalation'
+  if (verdict === 'accept') return undefined
+  return 'reconciliationAnomaly'
 }
 
 /** What the dispatch card says under its title. */
@@ -552,6 +604,7 @@ function addRegistryTasks(
       paths: task.ownedPaths ?? [],
       detail: state,
       worker: task.worker,
+      reviewState: registryReviewState(state),
     }
     // A number can carry several tasks over its life. The one furthest along
     // the pipeline is the one that describes it - otherwise a merged issue
@@ -609,6 +662,7 @@ function addInFlight(
         : (known.get(number)?.paths ?? []),
       detail: dispatchDetail(row),
       worker: 'cloud tick',
+      reviewState: dispatchReviewState(row),
     })
   }
 }
@@ -867,6 +921,7 @@ const SHELL = `<!doctype html>
   var free=d.cards.filter(function(c){
     return c.column==='backlog' && c.paths && c.paths.length}).length
   var noBoundary=(by.backlog||0)-free
+  var rq=d.reviewQueues||{}
   var ex=$('explain')
   ex.innerHTML=
    '<div class="stat good"><b>'+(by.running||0)+'</b>'+
@@ -878,9 +933,18 @@ const SHELL = `<!doctype html>
    '<div class="stat warn"><b>'+noBoundary+'</b>'+
      '<span class="lbl">no boundary</span>'+
      '<div class="why">these cannot be given out: nothing can be reserved for them</div></div>'+
-   '<div class="stat'+((by.review||0)>0?' warn':'')+'"><b>'+(by.review||0)+'</b>'+
-     '<span class="lbl">awaiting you</span>'+
-     '<div class="why">finished work holds its files until somebody judges it</div></div>'+
+   '<div class="stat'+((rq.queenReviewPending||0)>0?' warn':'')+'"><b>'+
+     (rq.queenReviewPending||0)+'</b><span class="lbl">Queen review pending</span>'+
+     '<div class="why">finished dispatches with no Queen verdict</div></div>'+
+   '<div class="stat'+((rq.changesRequested||0)>0?' warn':'')+'"><b>'+
+     (rq.changesRequested||0)+'</b><span class="lbl">changes requested</span>'+
+     '<div class="why">Queen returned these for another Bee pass</div></div>'+
+   '<div class="stat'+((rq.humanEscalation||0)>0?' bad':'')+'"><b>'+
+     (rq.humanEscalation||0)+'</b><span class="lbl">human escalation</span>'+
+     '<div class="why">policy requires an operator decision</div></div>'+
+   '<div class="stat'+((rq.reconciliationAnomaly||0)>0?' bad':'')+'"><b>'+
+     (rq.reconciliationAnomaly||0)+'</b><span class="lbl">reconciliation anomaly</span>'+
+     '<div class="why">registry and durable dispatch ledger disagree</div></div>'+
    '<div class="stat'+((by.blocked||0)>0?' bad':'')+'"><b>'+(by.blocked||0)+'</b>'+
      '<span class="lbl">blocked</span>'+
      '<div class="why">their files are held by something in review</div></div>'
@@ -913,7 +977,14 @@ const SHELL = `<!doctype html>
     esc(p.lastRefusal||'nothing to choose')+'</code>. '+
     (noBoundary>0?noBoundary+' issues name no files, so nothing can be reserved '+
       'for them and no bee can be sent at one. ':'')+
-    ((by.review||0)>0?(by.review)+' finished and hold their files until judged. ':'')
+    ((rq.queenReviewPending||0)>0
+      ?(rq.queenReviewPending)+' finished dispatches still need a Queen verdict. ':'')+
+    ((rq.changesRequested||0)>0
+      ?(rq.changesRequested)+' are returning to Bees with requested changes. ':'')+
+    ((rq.humanEscalation||0)>0
+      ?(rq.humanEscalation)+' require a human decision. ':'')+
+    ((rq.reconciliationAnomaly||0)>0
+      ?(rq.reconciliationAnomaly)+' need ledger reconciliation. ':'')
   }
   v.className='verdict'+(run>0?'':' idle')
   v.innerHTML='<h2>'+esc(head)+'</h2><p>'+why+'</p>'+
@@ -1034,6 +1105,7 @@ export function createQueenBoardRoute() {
         repo,
         columns: COLUMNS,
         cards: built.cards,
+        reviewQueues: reviewQueueCounts(built.cards),
         pulse: built.pulse,
       })
     } finally {

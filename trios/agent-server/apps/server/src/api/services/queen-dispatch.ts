@@ -75,6 +75,16 @@ export interface WorkerProvider {
   keyCount?: number
   /** Set when every key is already in use; carries how many there are. */
   exhausted?: number
+  /** Exact retry key exists but is carrying another Bee. */
+  preferredKeyBusy?: number
+  /** Exact retry key is no longer configured on this deployment. */
+  preferredKeyUnavailable?: number
+}
+
+export interface WorkerProviderPreference {
+  provider?: string
+  model?: string
+  keyIndex?: number
 }
 
 /**
@@ -157,11 +167,42 @@ export function configuredWorkerCapacity(): number {
  */
 export function resolveWorkerProvider(
   takenKeyIndices: number[] = [],
+  preferred?: WorkerProviderPreference,
 ): WorkerProvider | null {
   const override = process.env.TRIOS_QUEEN_WORKER_MODEL
-  for (const candidate of WORKER_PROVIDERS) {
+  const candidates = preferred?.provider
+    ? WORKER_PROVIDERS.filter(
+        (candidate) => candidate.provider === preferred.provider,
+      )
+    : WORKER_PROVIDERS
+  for (const candidate of candidates) {
     const keys = keysFor(candidate.envVar)
     if (keys.length > 0) {
+      if (preferred?.keyIndex != null) {
+        if (preferred.keyIndex < 0 || preferred.keyIndex >= keys.length) {
+          return {
+            provider: candidate.provider,
+            model: preferred.model || override || candidate.model,
+            preferredKeyUnavailable: preferred.keyIndex,
+            keyCount: keys.length,
+          }
+        }
+        if (takenKeyIndices.includes(preferred.keyIndex)) {
+          return {
+            provider: candidate.provider,
+            model: preferred.model || override || candidate.model,
+            preferredKeyBusy: preferred.keyIndex,
+            keyCount: keys.length,
+          }
+        }
+        return {
+          provider: candidate.provider,
+          model: preferred.model || override || candidate.model,
+          apiKey: keys[preferred.keyIndex],
+          keyIndex: preferred.keyIndex,
+          keyCount: keys.length,
+        }
+      }
       let index = 0
       while (index < keys.length && takenKeyIndices.includes(index)) index++
       // Every key busy. Handing out a duplicate would be the quiet version of
@@ -187,7 +228,7 @@ export function resolveWorkerProvider(
       // over. Measured on the first round after the operator set one.
       return {
         provider: candidate.provider,
-        model: override || candidate.model,
+        model: preferred?.model || override || candidate.model,
         apiKey: key,
         keyIndex: index,
         keyCount: keys.length,
@@ -200,11 +241,14 @@ export function resolveWorkerProvider(
   // Explicitly opt-in, and it must never be the silent fallback on a
   // deployment that HAS a key: a hive that quietly rehearses instead of
   // working is worse than one that stops, because it reports success.
-  if (process.env.TRIOS_QUEEN_REHEARSAL) {
+  if (
+    process.env.TRIOS_QUEEN_REHEARSAL &&
+    (!preferred?.provider || preferred.provider === 'openai-compatible')
+  ) {
     const port = process.env.PORT || '8080'
     return {
       provider: 'openai-compatible',
-      model: override || 'rehearsal',
+      model: preferred?.model || override || 'rehearsal',
       baseUrl: `http://127.0.0.1:${port}/queen/rehearsal`,
       apiKey: process.env.TRIOS_API_TOKEN,
       rehearsal: true,
@@ -935,7 +979,10 @@ export async function reapDispatchesFromPreviousBoot(
   const reaped = await pool.query(
     `UPDATE queen_dispatch
         SET finished_at = now(),
-            outcome = 'reaped at boot: the container running this turn was replaced'
+            outcome = 'reaped at boot: the container running this turn was replaced',
+            review_state = CASE WHEN retry_of_send_back
+                                THEN 'sendBack' ELSE review_state END,
+            retry_of_send_back = false
       WHERE started = true AND finished_at IS NULL
       RETURNING issue`,
   )
@@ -949,7 +996,10 @@ export async function reapStalledDispatches(
   const reaped = await pool.query(
     `UPDATE queen_dispatch
         SET finished_at = now(),
-            outcome = 'reaped: no completion within ' || $1 || ' minutes'
+            outcome = 'reaped: no completion within ' || $1 || ' minutes',
+            review_state = CASE WHEN retry_of_send_back
+                                THEN 'sendBack' ELSE review_state END,
+            retry_of_send_back = false
       WHERE started = true
         AND finished_at IS NULL
         AND dispatched_at < now() - make_interval(mins => $1)
@@ -967,6 +1017,111 @@ export interface DispatchOutcome {
   conversationId?: string
   /** Which provider key this bee took, so the next one takes a different one. */
   keyIndex?: number
+}
+
+export interface SendBackRetry {
+  provider?: string
+  model?: string
+  keyIndex?: number
+}
+
+async function claimSendBackRetry(
+  pool: Pool,
+  issue: number,
+  conversationId: string,
+  chosen: WorkerProvider,
+  ownedPaths: string[],
+  criteria: string[],
+  criteriaSource: string,
+): Promise<boolean> {
+  // Preserve the verdict-bearing attempt before the issue-primary-key row is
+  // turned into a new in-flight attempt. A duplicate archive during a race is
+  // harmless; the conditional UPDATE below is the authority for starting work.
+  await pool
+    .query(
+      `INSERT INTO queen_dispatch_history (issue, snapshot)
+       SELECT issue, to_jsonb(queen_dispatch) FROM queen_dispatch
+        WHERE issue = $1 AND review_state = 'sendBack'`,
+      [issue],
+    )
+    .catch(() => {})
+  const claimed = await pool.query(
+    `UPDATE queen_dispatch
+        SET started = true,
+            detail = 'claimed changes-requested retry',
+            conversation_id = $2,
+            dispatched_at = now(),
+            finished_at = NULL,
+            outcome = NULL,
+            key_index = $3,
+            provider = $4,
+            model = $5,
+            owned_paths = $6::jsonb,
+            criteria = $7::jsonb,
+            criteria_source = $8,
+            input_tokens = NULL,
+            output_tokens = NULL,
+            review_state = NULL,
+            retry_of_send_back = true
+      WHERE issue = $1
+        AND started = true
+        AND finished_at IS NOT NULL
+        AND review_state = 'sendBack'
+      RETURNING issue`,
+    [
+      issue,
+      conversationId,
+      chosen.keyIndex ?? null,
+      chosen.provider,
+      chosen.model,
+      JSON.stringify(ownedPaths),
+      JSON.stringify(criteria),
+      criteriaSource,
+    ],
+  )
+  return (claimed.rowCount ?? 0) === 1
+}
+
+async function releaseSendBackRetryClaim(
+  pool: Pool,
+  issue: number,
+  conversationId: string,
+  detail: string,
+): Promise<void> {
+  await pool.query(
+    `UPDATE queen_dispatch
+        SET started = true,
+            detail = $3,
+            finished_at = now(),
+            outcome = $3,
+            review_state = 'sendBack',
+            retry_of_send_back = false
+      WHERE issue = $1 AND conversation_id = $2
+        AND retry_of_send_back = true`,
+    [issue, conversationId, detail.slice(0, 500)],
+  )
+}
+
+async function recordSendBackRetryRefusal(
+  pool: Pool,
+  issue: number,
+  detail: string,
+): Promise<void> {
+  // A refusal before the durable retry claim is not a new attempt. Preserve
+  // the verdict-bearing row as scheduler-visible work instead of overwriting
+  // it with started=false, which the next round cannot see.
+  await pool.query(
+    `UPDATE queen_dispatch
+        SET detail = $2,
+            outcome = $2,
+            dispatched_at = now(),
+            finished_at = COALESCE(finished_at, now()),
+            review_state = 'sendBack',
+            retry_of_send_back = false
+      WHERE issue = $1 AND started = true
+        AND review_state = 'sendBack'`,
+    [issue, detail.slice(0, 500)],
+  )
 }
 
 /**
@@ -988,10 +1143,28 @@ export async function dispatchBee(
    */
   criteria: string[] = [],
   criteriaSource = 'none',
+  retry?: SendBackRetry,
 ): Promise<DispatchOutcome> {
   const branch = `queen-${issue}`
 
-  const chosen = resolveWorkerProvider(takenKeyIndices)
+  const chosen = resolveWorkerProvider(takenKeyIndices, retry)
+  if (
+    chosen?.preferredKeyBusy !== undefined ||
+    chosen?.preferredKeyUnavailable !== undefined
+  ) {
+    const keyIndex =
+      chosen.preferredKeyBusy ?? chosen.preferredKeyUnavailable ?? 0
+    const detail =
+      chosen.preferredKeyBusy !== undefined
+        ? `prior provider key slot ${keyIndex + 1} is still in use; changes-requested retry remains queued`
+        : `prior provider key slot ${keyIndex + 1} is no longer configured; changes-requested retry remains queued`
+    logger.warn('Queen keeps a changes-requested retry on its exact key', {
+      issue,
+      detail,
+    })
+    await recordSendBackRetryRefusal(pool, issue, detail)
+    return { started: false, issue, branch, detail }
+  }
   if (chosen?.exhausted !== undefined) {
     // Not a missing credential: every key this deployment has is already
     // carrying a bee. Named separately because the fix is different - one more
@@ -1005,29 +1178,69 @@ export async function dispatchBee(
       issue,
       detail,
     })
-    await recordDispatch(pool, issue, branch, false, detail, ownedPaths)
+    if (retry) await recordSendBackRetryRefusal(pool, issue, detail)
+    else
+      await recordDispatch(
+        pool,
+        issue,
+        branch,
+        false,
+        detail,
+        ownedPaths,
+        undefined,
+        undefined,
+        criteria,
+        criteriaSource,
+        undefined,
+        undefined,
+      )
     return { started: false, issue, branch, detail }
   }
   if (!chosen) {
-    const detail = missingProviderRefusal()
+    const detail = retry?.provider
+      ? `the prior retry provider ${retry.provider} is not configured in this deployment`
+      : missingProviderRefusal()
     logger.warn('Queen tick chose an issue but cannot dispatch', {
       issue,
       detail,
     })
-    await recordDispatch(pool, issue, branch, false, detail, ownedPaths)
+    if (retry) await recordSendBackRetryRefusal(pool, issue, detail)
+    else
+      await recordDispatch(
+        pool,
+        issue,
+        branch,
+        false,
+        detail,
+        ownedPaths,
+        undefined,
+        undefined,
+        criteria,
+        criteriaSource,
+        undefined,
+        undefined,
+      )
     return { started: false, issue, branch, detail }
   }
 
   const worktree = await prepareWorktree(issue)
   if (!worktree.ok) {
-    await recordDispatch(
-      pool,
-      issue,
-      branch,
-      false,
-      worktree.detail,
-      ownedPaths,
-    )
+    if (retry) await recordSendBackRetryRefusal(pool, issue, worktree.detail)
+    else
+      await recordDispatch(
+        pool,
+        issue,
+        branch,
+        false,
+        worktree.detail,
+        ownedPaths,
+        undefined,
+        undefined,
+        criteria,
+        criteriaSource,
+        undefined,
+        undefined,
+      )
     return { started: false, issue, branch, detail: worktree.detail }
   }
 
@@ -1039,6 +1252,25 @@ export async function dispatchBee(
   const workingDirectory = `${worktree.path}/trios`
 
   const conversationId = randomUUID()
+  if (retry) {
+    const claimed = await claimSendBackRetry(
+      pool,
+      issue,
+      conversationId,
+      chosen,
+      ownedPaths,
+      criteria,
+      criteriaSource,
+    )
+    if (!claimed) {
+      return {
+        started: false,
+        issue,
+        branch,
+        detail: 'changes-requested retry was already claimed by another round',
+      }
+    }
+  }
   const turn = await startTurn(
     pool,
     issue,
@@ -1055,6 +1287,30 @@ export async function dispatchBee(
         : '') +
       (chosen.rehearsal ? ' (REHEARSAL - a recorded stream, not a model)' : '')
     : turn.detail
+
+  if (retry) {
+    if (!turn.ok) {
+      await releaseSendBackRetryClaim(pool, issue, conversationId, detail)
+      return { started: false, issue, branch, detail, conversationId }
+    }
+    await pool.query(
+      `UPDATE queen_dispatch
+          SET detail = $3
+        WHERE issue = $1 AND conversation_id = $2
+          AND retry_of_send_back = true`,
+      [issue, conversationId, detail.slice(0, 500)],
+    )
+    turn.beginDrain?.()
+    logger.info('Queen dispatch', { issue, branch, started: true, detail })
+    return {
+      started: true,
+      issue,
+      branch,
+      detail,
+      conversationId,
+      keyIndex: chosen.keyIndex,
+    }
+  }
 
   await recordDispatch(
     pool,
@@ -1144,11 +1400,11 @@ export async function recordDispatch(
     `INSERT INTO queen_dispatch
        (issue, branch, started, detail, owned_paths, conversation_id,
         dispatched_at, finished_at, outcome, key_index,
-        criteria, criteria_source, provider, model)
+        criteria, criteria_source, provider, model, retry_of_send_back)
      VALUES ($1, $2, $3, $4, $5::jsonb, $6, now(),
              CASE WHEN $3 THEN NULL ELSE now() END,
              CASE WHEN $3 THEN NULL ELSE $4 END,
-             $7, $8::jsonb, $9, $10, $11)
+             $7, $8::jsonb, $9, $10, $11, false)
      ON CONFLICT (issue) DO UPDATE
        SET branch = EXCLUDED.branch,
            started = EXCLUDED.started,
@@ -1170,6 +1426,7 @@ export async function recordDispatch(
            criteria_source = EXCLUDED.criteria_source,
            provider = EXCLUDED.provider,
            model = EXCLUDED.model,
+           retry_of_send_back = false,
            -- A dispatch that starts again is new work, so last turn's verdict
            -- no longer describes anything. Left in place it would exclude the
            -- row from review for good: the reviewer only looks at dispatches

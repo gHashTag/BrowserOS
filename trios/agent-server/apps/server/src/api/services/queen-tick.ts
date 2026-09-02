@@ -31,9 +31,9 @@
  * what a module does not do decays silently; the fix is to keep such claims
  * narrow enough that a reader notices.
  *
- * What the loop still does NOT do: send a bee back. The policy answers
- * `sendBack` with the unmet criteria named, and nothing yet reopens the worker
- * on them - such a verdict is recorded and the task waits.
+ * A `sendBack` verdict is actionable work. The round removes the superseded
+ * attempt from the policy board, carries its review note and original contract
+ * into the next brief, and asks the same fenced dispatcher to reopen one Bee.
  */
 
 import { spawn } from 'node:child_process'
@@ -250,6 +250,10 @@ async function ensureQueenColumns(pool: Pool): Promise<void> {
       -- them, so the count accumulates across attempts instead of resetting
       -- with the bee it is counting.
       ADD COLUMN IF NOT EXISTS send_backs integer NOT NULL DEFAULT 0,
+      -- True only between the conditional durable claim of a sendBack verdict
+      -- and the verdict on that retry. It lets boot/stall recovery restore the
+      -- exact retry instead of duplicating it or manufacturing fresh backlog.
+      ADD COLUMN IF NOT EXISTS retry_of_send_back boolean NOT NULL DEFAULT false,
       -- The committed paths that fell outside the boundary this bee was given.
       ADD COLUMN IF NOT EXISTS strays jsonb NOT NULL DEFAULT '[]'::jsonb;
   `)
@@ -798,7 +802,8 @@ export async function runRound(
   // nothing against anyone.
   const inFlight = await pool.query(
     `SELECT issue, branch, owned_paths, conversation_id, dispatched_at,
-            key_index, finished_at, review_state,
+            key_index, finished_at, review_state, review_note,
+            criteria, criteria_source,
             provider, model, input_tokens, output_tokens
        FROM queen_dispatch
       WHERE started = true
@@ -819,44 +824,76 @@ export async function runRound(
         -- coalesce, because outcome is NULL while a bee runs and
         -- NULL NOT LIKE 'reaped%' is NULL - which excludes the row. The
         -- previous clause escaped that only by ORing on finished_at.
-        AND coalesce(outcome, '') NOT LIKE 'reaped%'
+        -- A pre-flight sendBack retry reaped after a crash is the exception:
+        -- recovery restored its verdict and its original contract, so it must
+        -- stay visible as changes-requested work rather than degrade to a
+        -- fresh backlog dispatch.
+        AND (review_state = 'sendBack'
+             OR coalesce(outcome, '') NOT LIKE 'reaped%')
         AND dispatched_at > now() - interval '7 days'`,
   )
   const [owner, repoName] = repo.split('/')
-  const containerTasks = inFlight.rows.map((row) => {
-    const finished = row.finished_at != null
-    return boardTask(owner, repoName, {
-      conversationId: row.conversation_id,
-      issue: row.issue,
-      ownedPaths: row.owned_paths ?? [],
-      branch: row.branch,
-      // A finished task's clock starts when it FINISHED, not when it was
-      // dispatched: `stillHoldsBoundary` measures the wait for a verdict from
-      // `updatedAt`, and dating it from dispatch would expire the boundary of a
-      // long task the moment its turn ended.
-      at: finished ? row.finished_at : row.dispatched_at,
-      title: finished
-        ? 'finished by the cloud tick, waiting for a verdict'
-        : 'dispatched by the cloud tick',
-      state: stateOfDispatch(finished, row.review_state),
-      // The price, so the daily cap can see the work it exists to govern.
-      // `estimatedCostUSD` returns nil unless BOTH provider and model are
-      // present, so a record missing either contributes nothing to the sum and
-      // the ceiling silently measures somebody else's spend.
-      provider: (row.provider as string) ?? undefined,
-      model: (row.model as string) ?? undefined,
-      inputTokens:
-        row.input_tokens == null ? undefined : Number(row.input_tokens),
-      outputTokens:
-        row.output_tokens == null ? undefined : Number(row.output_tokens),
+  // A durable row is newer than the app registry mirror for the same issue.
+  // Keeping both is what parked returned work: the dispatch said sendBack,
+  // while the mirror still said awaitingReview, and either live task made the
+  // policy refuse the issue. A sendBack attempt is intentionally absent from
+  // this policy board so the same issue can be chosen for one new pass.
+  const durableIssues = new Set(
+    inFlight.rows.map((row) => Number(row.issue)).filter(Number.isFinite),
+  )
+  const registryTasks = (
+    registry.rows[0].tasks as Array<{
+      issue?: { number?: number }
+    }>
+  ).filter((task) => !durableIssues.has(Number(task.issue?.number)))
+  const retryRows = inFlight.rows.filter(
+    (row) => row.finished_at != null && row.review_state === 'sendBack',
+  )
+  const retryByIssue = new Map(
+    retryRows.map((row) => [Number(row.issue), row] as const),
+  )
+  const containerTasks = inFlight.rows
+    .filter((row) => row.review_state !== 'sendBack')
+    .map((row) => {
+      const finished = row.finished_at != null
+      return boardTask(owner, repoName, {
+        conversationId: row.conversation_id,
+        issue: row.issue,
+        ownedPaths: row.owned_paths ?? [],
+        branch: row.branch,
+        // A finished task's clock starts when it FINISHED, not when it was
+        // dispatched: `stillHoldsBoundary` measures the wait for a verdict from
+        // `updatedAt`, and dating it from dispatch would expire the boundary of a
+        // long task the moment its turn ended.
+        at: finished ? row.finished_at : row.dispatched_at,
+        title: finished
+          ? 'finished by the cloud tick, waiting for a verdict'
+          : 'dispatched by the cloud tick',
+        state: stateOfDispatch(finished, row.review_state),
+        // The price, so the daily cap can see the work it exists to govern.
+        // `estimatedCostUSD` returns nil unless BOTH provider and model are
+        // present, so a record missing either contributes nothing to the sum and
+        // the ceiling silently measures somebody else's spend.
+        provider: (row.provider as string) ?? undefined,
+        model: (row.model as string) ?? undefined,
+        inputTokens:
+          row.input_tokens == null ? undefined : Number(row.input_tokens),
+        outputTokens:
+          row.output_tokens == null ? undefined : Number(row.output_tokens),
+      })
     })
-  })
+
+  const retryCandidates = retryRows
+    .map((row) => Number(row.issue))
+    .filter((issue) => candidates.includes(issue))
+  const choiceCandidates =
+    retryCandidates.length > 0 ? retryCandidates : candidates
 
   const choice = await askQueend({
     kind: 'choose',
-    candidates,
+    candidates: choiceCandidates,
     candidateBodies,
-    tasks: [...registry.rows[0].tasks, ...containerTasks],
+    tasks: [...registryTasks, ...containerTasks],
   })
 
   await recordTick(pool, holder, grant.fence, choice)
@@ -891,7 +928,7 @@ export async function runRound(
     conversationId?: string
     keyIndex?: number
   }> = []
-  let board = [...registry.rows[0].tasks, ...containerTasks]
+  let board = [...registryTasks, ...containerTasks]
   let current: QueendChoice | null = choice
   // Only a bee that is still running is spending its key. A finished dispatch
   // waiting for a verdict holds its issue and its files; it is not making
@@ -910,10 +947,15 @@ export async function runRound(
   // and a second copy of that rule here is how the two come to disagree.
   while (watch.held && current?.allowed && typeof current.chosen === 'number') {
     const issue = current.chosen
-    const paths = current.chosenPaths ?? []
+    const retry = retryByIssue.get(issue)
+    const paths = retry
+      ? (retry.owned_paths ?? [])
+      : (current.chosenPaths ?? [])
     const spec = specVerdicts[String(issue)]
-    const criteria = spec?.criteria ?? []
-    const criteriaSource = spec?.criteriaSource ?? 'none'
+    const criteria = retry ? (retry.criteria ?? []) : (spec?.criteria ?? [])
+    const criteriaSource = retry
+      ? String(retry.criteria_source ?? 'none')
+      : (spec?.criteriaSource ?? 'none')
     const dispatch = await dispatchBee(
       pool,
       issue,
@@ -924,11 +966,21 @@ export async function runRound(
         candidateBodies[String(issue)] ?? '',
         criteria,
         criteriaSource,
+        retry ? String(retry.review_note ?? '') : '',
       ),
       paths,
       takenKeys,
       criteria,
       criteriaSource,
+      retry
+        ? {
+            provider:
+              retry.provider == null ? undefined : String(retry.provider),
+            model: retry.model == null ? undefined : String(retry.model),
+            keyIndex:
+              retry.key_index == null ? undefined : Number(retry.key_index),
+          }
+        : undefined,
     )
     started.push(dispatch)
     if (!dispatch.started) break
@@ -995,6 +1047,7 @@ export function briefFor(
   issueBody: string,
   criteria: string[] = [],
   criteriaSource = 'none',
+  reviewFeedback = '',
 ): string {
   // The boundary, in the words the Mac uses.
   //
@@ -1037,6 +1090,16 @@ export function briefFor(
     : '## The issue\n\nIts body could not be read. Say so rather than guessing ' +
       'at what it wanted.'
 
+  const feedback = reviewFeedback.trim()
+    ? [
+        '## Queen feedback from the previous pass',
+        '',
+        reviewFeedback.trim().slice(0, 900),
+        '',
+        'Address this feedback before returning a new verdict.',
+      ]
+    : []
+
   return [
     `# ${repo}#${issue}`,
     '',
@@ -1058,6 +1121,8 @@ export function briefFor(
     // while; nobody carried them the last few inches.
     ...criteriaBlock(criteria, criteriaSource),
     '',
+    ...feedback,
+    ...(feedback.length > 0 ? [''] : []),
     '## Verification',
     '',
     'When you stop, answer every criterion above in turn: met, not met, or',
@@ -1312,6 +1377,7 @@ async function reviewFinishedDispatches(pool: Pool): Promise<ReviewRound> {
       `UPDATE queen_dispatch
           SET review_state = $2, review_note = $3, reviewed_at = now(),
               strays = $4::jsonb,
+              retry_of_send_back = false,
               send_backs = CASE WHEN $2::text = 'sendBack'
                                 THEN send_backs + 1 ELSE send_backs END
         WHERE issue = $1`,

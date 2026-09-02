@@ -247,6 +247,12 @@ ALTER TABLE queen_issues
 ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS review_state text;
 ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS review_note text;
 ALTER TABLE queen_dispatch ADD COLUMN IF NOT EXISTS reviewed_at timestamptz;
+-- A durable pre-flight claim for a retry. It closes the crash window between
+-- the self-call accepting a Bee and the issue-primary-key dispatch row being
+-- overwritten. Boot and stall recovery turn only this flagged attempt back
+-- into changes-requested work.
+ALTER TABLE queen_dispatch
+  ADD COLUMN IF NOT EXISTS retry_of_send_back boolean NOT NULL DEFAULT false;
 
 -- What she did, in her own words, once per round.
 --

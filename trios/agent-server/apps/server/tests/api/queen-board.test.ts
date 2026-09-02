@@ -365,6 +365,67 @@ describe('the public board projection', () => {
     expect(JSON.stringify(projected)).not.toContain('inputTokens')
     expect(JSON.stringify(projected)).not.toContain('lastRefusal')
   })
+
+  it('publishes separate review queues instead of one misleading debt count', () => {
+    const projected = publicBoardProjection({
+      repo: 'gHashTag/trios',
+      cards: [
+        {
+          number: 1,
+          title: 'not judged',
+          column: 'review',
+          reviewState: 'queenReviewPending',
+          paths: [],
+        },
+        {
+          number: 2,
+          title: 'changes requested',
+          column: 'review',
+          reviewState: 'changesRequested',
+          paths: [],
+        },
+        {
+          number: 3,
+          title: 'needs a person',
+          column: 'review',
+          reviewState: 'humanEscalation',
+          paths: [],
+        },
+        {
+          number: 4,
+          title: 'ledger mismatch',
+          column: 'review',
+          reviewState: 'reconciliationAnomaly',
+          paths: [],
+        },
+      ],
+      pulse: {
+        rounds: 0,
+        bees: 0,
+        verdicts: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        lastRoundAt: null,
+        lastRefusal: null,
+        roundSeconds: 30,
+        workerKeys: 4,
+        workerLimit: 8,
+      },
+    })
+
+    expect(projected.reviewQueues).toEqual({
+      queenReviewPending: 1,
+      changesRequested: 1,
+      humanEscalation: 1,
+      reconciliationAnomaly: 1,
+    })
+    expect(projected.cards.map((card) => card.reviewState)).toEqual([
+      'queenReviewPending',
+      'changesRequested',
+      'humanEscalation',
+      'reconciliationAnomaly',
+    ])
+  })
 })
 
 describe('the board and queend read one registry the same way', () => {
@@ -432,8 +493,20 @@ describe('the board and queend read one registry the same way', () => {
     const stale = [holder('awaitingReview', [path], 70)]
     const fresh = [holder('awaitingReview', [path], 10)]
 
-    expect(boardCard(9002, path, stale).column).toBe('backlog')
-    expect(boardCard(9002, path, fresh).column).toBe('blocked')
+    const atLiveClock = (tasks: Task[]) =>
+      composeCards({
+        tasks,
+        dispatches: [],
+        issues: [issue(9002, [path])],
+        now: Date.now(),
+      }).find((card) => card.number === 9002)
+
+    // holder() intentionally uses the live wall clock so the external queend
+    // process and this TypeScript check observe the same 48-hour edge. Feeding
+    // those timestamps to the file-level fixed NOW made this test expire two
+    // days after it was written and changed no production behavior.
+    expect(atLiveClock(stale)?.column).toBe('backlog')
+    expect(atLiveClock(fresh)?.column).toBe('blocked')
 
     if (present) {
       expect(queendHolds(9002, path, stale)).toBe(false)
@@ -564,6 +637,7 @@ describe('a cloud dispatch can reach a verdict', () => {
   it('is in review when the turn ended and nobody has judged it', () => {
     const card = only(dispatch({ finished_at: ago(1), outcome: 'finished' }))
     expect(card.column).toBe('review')
+    expect(card.reviewState).toBe('queenReviewPending')
     expect(card.detail).toContain('waiting for a verdict')
   })
 
@@ -581,8 +655,13 @@ describe('a cloud dispatch can reach a verdict', () => {
     expect(card.detail).toContain('every criterion met')
   })
 
-  it('shows a sendBack and an escalate as her words, still in review', () => {
-    for (const verdict of ['sendBack', 'escalate', 'wait']) {
+  it('separates changes, human escalation and an ownerless wait', () => {
+    const expected = {
+      sendBack: 'changesRequested',
+      escalate: 'humanEscalation',
+      wait: 'reconciliationAnomaly',
+    } as const
+    for (const [verdict, reviewState] of Object.entries(expected)) {
       const card = only(
         dispatch({
           finished_at: ago(1),
@@ -591,8 +670,20 @@ describe('a cloud dispatch can reach a verdict', () => {
         }),
       )
       expect(card.column).toBe('review')
+      expect(card.reviewState).toBe(reviewState)
       expect(card.detail).toContain(verdict)
     }
+  })
+
+  it('marks registry-only awaitingReview as a reconciliation anomaly', () => {
+    const card = composeCards({
+      tasks: [task(4243, 'awaitingReview', ['docs/a.md'])],
+      dispatches: [],
+      issues: [issue(4243, ['docs/a.md'])],
+      now: NOW,
+    })[0]
+    expect(card.column).toBe('review')
+    expect(card.reviewState).toBe('reconciliationAnomaly')
   })
 
   it('bounds its dispatches by the same 7 days the round does', () => {
@@ -835,6 +926,15 @@ const busy = payload([
 ])
 
 describe('the page redraws in place, every 30 seconds, for ever', () => {
+  it('names the owner of each review queue instead of saying all await you', async () => {
+    const html = await (await createQueenKanbanRoute().request('/')).text()
+    expect(html).toContain('Queen review pending')
+    expect(html).toContain('changes requested')
+    expect(html).toContain('human escalation')
+    expect(html).toContain('reconciliation anomaly')
+    expect(html).not.toContain('awaiting you')
+  })
+
   it('draws the flow strip at all', async () => {
     // The measurements below are worthless if draw() never ran, so this pins
     // that the page under the stub really renders before anything is counted.
