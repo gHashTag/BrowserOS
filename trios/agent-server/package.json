@@ -34,6 +34,7 @@
     "build:agent": "bun run codegen:agent && bun run --filter @browseros/agent build",
     "codegen:agent": "bun run --filter @browseros/agent codegen",
     "test": "bun run test:all",
+    "test:entrypoint": "sh scripts/test-docker-entrypoint-ownership.sh",
     "test:all": "bun run ./scripts/run-test-suite.ts all",
     "test:main": "bun run ./scripts/run-test-suite.ts main",
     "typecheck": "bun run --filter '*' typecheck",

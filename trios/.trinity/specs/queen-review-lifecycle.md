@@ -54,3 +54,15 @@ parking state presented as actionable Queen work.
 - `trios/agent-server/apps/server/tests/api/queen-round.test.ts`
 - `trios/agent-server/apps/server/tests/api/queen-board.test.ts`
 - Public DTO types touched by those two modules only when required.
+## Production boot ownership contract (#1319)
+
+OBSERVED: deployment `6498451d-6fb2-4826-9f8e-9a77b59df25a` reached Railway
+`SUCCESS` while `/queen/status` returned 502. The live process table showed PID
+1 blocked in `chown -R bee /workspace`; the mounted workspace was 38 GiB used.
+
+Given a durable completion marker records the configured unprivileged tool
+user's current numeric UID, the entrypoint MUST skip recursive ownership repair
+and continue to git preflight/server startup. A missing or stale marker MUST
+retain the exact recursive repair before any git command runs, then replace the
+marker only after that repair succeeds. It MUST NOT delete or rewrite repository
+content to achieve the fast path.
