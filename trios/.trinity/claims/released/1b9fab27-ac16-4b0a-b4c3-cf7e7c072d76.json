@@ -1,0 +1,11 @@
+{
+  "claim_id": "1b9fab27-ac16-4b0a-b4c3-cf7e7c072d76",
+  "agent_id": "codex-root",
+  "spec_path": ".trinity/specs/queen-review-lifecycle.md",
+  "graph_node": "queen_finished_wait_recovery",
+  "task_id": "QUEEN-FINISHED-WAIT-RECOVERY-001",
+  "acquired_at": "2026-09-02T14:54:02Z",
+  "released_at": "2026-09-02T15:39:30Z",
+  "status": "clean",
+  "result": "Finished Queen wait reviews recover through canonical bounded rework; production dispatch resumed with Bee #1176 running and live activity visible."
+}
