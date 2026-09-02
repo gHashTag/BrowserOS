@@ -66,3 +66,19 @@ and continue to git preflight/server startup. A missing or stale marker MUST
 retain the exact recursive repair before any git command runs, then replace the
 marker only after that repair succeeds. It MUST NOT delete or rewrite repository
 content to achieve the fast path.
+
+## Finished wait recovery contract (#1320)
+
+OBSERVED: six production dispatches were finished with `review_state = 'wait'`.
+The review sweep selected only rows whose review state was null, so those rows
+could never receive another verdict and continued to hold their file boundaries
+while the public dashboard truthfully reported zero running Bees.
+
+For a finished dispatch, incomplete verdict evidence is not a streaming state:
+the Bee can no longer append evidence. The runtime MUST therefore convert a
+Queen `wait` answer into bounded rework while fewer than two send-backs have
+occurred, with an actionable request for a complete parseable `## VERDICT`
+block. After two prior send-backs it MUST escalate for human action. The review
+sweep MUST include existing durable `wait` rows so production can self-recover,
+while preserving accepted, explicit send-back, explicit escalation, exact
+provider attribution, retry-claim, file-boundary, and single-flight behavior.
