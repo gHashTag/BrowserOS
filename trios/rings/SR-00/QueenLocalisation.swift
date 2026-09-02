@@ -275,9 +275,9 @@ public enum QueenLocalisation {
 
     /// Extracts the name token from a declaration line.
     /// Only `func` and `init` names qualify — a `var`/`let` property name is
-    /// not a function the issue can be about, and local `var` lines are what
-    /// the depth walk of the density era anchored on when it "found" a
-    /// 12 000-line declaration at the top of the file.
+    /// not a function the issue can be about, and a density depth walk can
+    /// anchor on any declaration-keyword line (`class` at line 84 is what it
+    /// anchored on when it "found" a 12 185-line "declaration" here).
     /// For `func foo()` → `foo`, for `init` → `init`.
     private static func declarationName(on line: String) -> String? {
         let nsLine = line as NSString
@@ -353,24 +353,43 @@ public enum QueenLocalisation {
     ///     swiftc -O <driver>.swift rings/SR-00/QueenLocalisation.swift -o probe
     ///     probe <chatvm.swift>        // or call replayMeasurement(in:)
     ///
-    /// **Density, reintroduced verbatim from the first attempt** (the rule of
-    /// 737e5e6f: the enclosing declaration of every mention, the one with the
-    /// most identifier mentions wins) **against these same seven cases goes
-    /// six lines red:**
+    /// **Density, reintroduced on top of this file, breaks the check** — the
+    /// fourth criterion of #1175 stands on it. The rule of 737e5e6f (count
+    /// identifier mentions per enclosing declaration, the one with the most
+    /// mentions wins) was rebuilt against these same seven cases and replayed
+    /// twice with Swift 6.1.2 on the 13 597-line snapshot.
     ///
-    ///     FAIL  #1156 spec:        68-367, not inside handleWorkerFinished
-    ///     FAIL  #1156 body:        12900-13128, expected silence
-    ///     FAIL  #1158:             68-367, expected silence
-    ///     FAIL  #1165:             12900-13128, expected silence
-    ///     FAIL  #1166:             68-367, expected silence
-    ///     FAIL  #1117 witness:     68-367, not inside requestReviewerVerdicts
+    /// Replayed verbatim — a mention at file scope encloses the whole file,
+    /// which therefore always wins — six of seven go red, all with the same
+    /// wrong answer: a 300-line window at the top of the file.
     ///
-    /// The 68-367 answers are the measurement that closed the case: density's
-    /// depth walk anchors on a local `var assistantMessageId: UUID?` at line
-    /// 68, calls everything to line 12 268 one "declaration", and caps it to a
-    /// 300-line window at the top of the file — a region whose only property
-    /// is that ordinary words are common there. Measured 2026-09-02, proven
-    /// from both sides: the one rule goes 7/7, density goes 1/7.
+    ///     FAIL  #1156 spec:    1-300, not inside handleWorkerFinished (5935-6304)
+    ///     FAIL  #1156 body:    1-300, expected silence
+    ///     FAIL  #1158:         1-300, expected silence
+    ///     FAIL  #1165:         1-300, expected silence
+    ///     FAIL  #1166:         1-300, expected silence
+    ///     FAIL  #1117 witness: 1-300, not inside requestReviewerVerdicts (7432-7807)
+    ///
+    /// Replayed with file-scope mentions skipped instead, the same six go red
+    /// with two wrong answers. The winner is the 12 185-line span 84-12268 —
+    /// the depth walk anchors on `final class ChatViewModel` at line 84 and
+    /// calls everything to line 12 268 one "declaration" — capped to 84-383;
+    /// or, when a late helper ties on mentions and the later-declaration
+    /// tie-break of 737e5e6f picks it, `runBoundaryParseDrill` at line 12900,
+    /// which mentions `ChatViewModel` five times in ten lines:
+    ///
+    ///     FAIL  #1156 spec:    84-383, not inside handleWorkerFinished
+    ///     FAIL  #1156 body:    12900-13128, expected silence
+    ///     FAIL  #1158:         84-383, expected silence
+    ///     FAIL  #1165:         12900-13128, expected silence
+    ///     FAIL  #1166:         84-383, expected silence
+    ///     FAIL  #1117 witness: 84-383, not inside requestReviewerVerdicts
+    ///
+    /// Every wrong answer is a region whose only property is that ordinary
+    /// words are common there. Measured 2026-09-02, proven from both sides:
+    /// the one rule goes 7/7, every density replay goes 1/7 — the lone ok is
+    /// the dotted clue, which matches no whole word and stays silent by
+    /// accident.
     static func measurementCases() -> [MeasurementCase] {
         [
             MeasurementCase(
