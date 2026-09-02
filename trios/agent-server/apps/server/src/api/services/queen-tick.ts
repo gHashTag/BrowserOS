@@ -41,6 +41,7 @@ import { Pool } from 'pg'
 import { logger } from '../../lib/logger'
 import {
   committedFiles,
+  configuredWorkerCapacity,
   dispatchBee,
   reapDispatchesFromPreviousBoot,
   reapStalledDispatches,
@@ -129,6 +130,20 @@ const HEARTBEAT_SECONDS = 60
 function tickIntervalSeconds(): number {
   const raw = Number(process.env.TRIOS_QUEEN_TICK_SECONDS ?? '0')
   return Number.isFinite(raw) && raw > 0 ? raw : 0
+}
+
+/**
+ * The policy accepts one measured number, not credentials or provider names.
+ * One is the fail-closed floor: a deployment with no key still records one
+ * precise dispatch refusal instead of claiming the backlog was ineligible.
+ * Eight is the reviewed upper bound in #1311; any larger installation needs a
+ * new policy decision before it can add merge and review pressure.
+ */
+export function effectiveRuntimeWorkerLimit(
+  capacity = configuredWorkerCapacity(),
+): number {
+  const whole = Number.isFinite(capacity) ? Math.floor(capacity) : 1
+  return Math.min(8, Math.max(1, whole))
 }
 
 /** GitHub's maximum, so the fewest requests per round. */
@@ -682,6 +697,7 @@ export async function runRound(
   fence: number,
   watch: LeaseWatch,
   candidateOverride?: number[],
+  workerLimitOverride?: number,
 ): Promise<{
   ran: boolean
   reason?: string
@@ -689,6 +705,11 @@ export async function runRound(
   dispatch?: unknown
 }> {
   const grant = { fence }
+  // Freeze it once for the entire round. Credentials rotating halfway through
+  // a refill must affect the next round, not make two choose calls in this one
+  // disagree about how many Bees may exist.
+  const maximumConcurrentWorkers =
+    effectiveRuntimeWorkerLimit(workerLimitOverride)
 
   const registry = await pool.query(
     'SELECT tasks FROM queen_registry WHERE variant = $1',
@@ -896,6 +917,7 @@ export async function runRound(
     candidates: choiceCandidates,
     candidateBodies,
     tasks: [...registryTasks, ...containerTasks],
+    maximumConcurrentWorkers,
   })
 
   await recordTick(pool, holder, grant.fence, choice)
@@ -1011,6 +1033,7 @@ export async function runRound(
       candidates,
       candidateBodies,
       tasks: board,
+      maximumConcurrentWorkers,
     })
     if (!current?.allowed) {
       logger.info('Queen tick stopped dispatching', {

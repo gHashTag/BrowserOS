@@ -482,6 +482,35 @@ enum QueenDelegationTests {
             !QueenDelegationPolicy.canStartAnother(running: 99),
             "over the cap no new worker starts"
         )
+
+        check(
+            QueenDelegationPolicy.effectiveMaximumConcurrentWorkers(nil) == 4,
+            "an older caller keeps the four-worker default"
+        )
+        check(
+            QueenDelegationPolicy.effectiveMaximumConcurrentWorkers(2) == 2,
+            "a two-slot runtime stays at two"
+        )
+        check(
+            QueenDelegationPolicy.effectiveMaximumConcurrentWorkers(8) == 8,
+            "eight verified runtime slots are admitted"
+        )
+        check(
+            QueenDelegationPolicy.effectiveMaximumConcurrentWorkers(0) == 1,
+            "a below-range runtime limit is clamped to one"
+        )
+        check(
+            QueenDelegationPolicy.effectiveMaximumConcurrentWorkers(99) == 8,
+            "an above-range runtime limit is clamped to eight"
+        )
+        check(
+            QueenDelegationPolicy.canStartAnother(running: 7, maximumConcurrentWorkers: 8),
+            "the eighth worker may start when the effective limit is eight"
+        )
+        check(
+            !QueenDelegationPolicy.canStartAnother(running: 4, maximumConcurrentWorkers: 4),
+            "a four-slot runtime refuses a fifth worker"
+        )
     }
 
     /// Structural conflict prevention: catch the clash at delegation time, not

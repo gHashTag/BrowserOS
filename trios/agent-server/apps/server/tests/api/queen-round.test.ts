@@ -16,6 +16,7 @@ import {
 } from '../../src/api/services/queen-dispatch'
 import {
   createRoundGate,
+  effectiveRuntimeWorkerLimit,
   refillOnBeeCompletion,
   runRound,
 } from '../../src/api/services/queen-tick'
@@ -53,6 +54,25 @@ const BIN = join(
   '../../../../queen-core/.build/release/queend',
 )
 const present = existsSync(BIN)
+
+/**
+ * #1311. This is the server-side authority handed to every choose call in one
+ * round. It is numeric only, closed at eight, and keeps a fail-closed one-slot
+ * diagnostic path when the deployment has no usable provider credential.
+ */
+describe('queen round effective worker limit', () => {
+  it('admits measured capacities 2, 4 and 8 without inventing extra slots', () => {
+    expect(effectiveRuntimeWorkerLimit(2)).toBe(2)
+    expect(effectiveRuntimeWorkerLimit(4)).toBe(4)
+    expect(effectiveRuntimeWorkerLimit(8)).toBe(8)
+  })
+
+  it('clamps invalid and above-policy capacities to the closed range 1 through 8', () => {
+    expect(effectiveRuntimeWorkerLimit(0)).toBe(1)
+    expect(effectiveRuntimeWorkerLimit(Number.NaN)).toBe(1)
+    expect(effectiveRuntimeWorkerLimit(99)).toBe(8)
+  })
+})
 
 /** Every provider credential dispatch consults, so no bee is ever really run. */
 const PROVIDER_KEYS = [

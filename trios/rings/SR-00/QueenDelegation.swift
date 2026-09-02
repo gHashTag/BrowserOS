@@ -469,8 +469,18 @@ public enum QueenDelegationPolicy {
     /// review, and because merge conflicts scale with concurrency.
     public static let maximumConcurrentWorkers = 4
 
-    public static func canStartAnother(running: Int) -> Bool {
-        running < maximumConcurrentWorkers
+    /// One bounded runtime can expose more verified slots than the legacy app
+    /// default, but never an unbounded swarm. Nil preserves every older caller.
+    public static func effectiveMaximumConcurrentWorkers(_ requested: Int?) -> Int {
+        guard let requested else { return maximumConcurrentWorkers }
+        return min(max(requested, 1), 8)
+    }
+
+    public static func canStartAnother(
+        running: Int,
+        maximumConcurrentWorkers requested: Int? = nil
+    ) -> Bool {
+        running < effectiveMaximumConcurrentWorkers(requested)
     }
 
     /// What the tasks already recorded against an issue mean for choosing it

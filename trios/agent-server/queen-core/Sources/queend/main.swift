@@ -33,6 +33,9 @@ struct Question: Decodable {
     /// judges the same record rather than a summary of it.
     let candidates: [Int]?
     let tasks: [DelegatedTask]?
+    /// For `choose`: the server's measured effective worker capacity. Older
+    /// callers omit it and retain the compiled four-worker default.
+    let maximumConcurrentWorkers: Int?
     /// For `choose`: each candidate's issue BODY, keyed by issue number as a
     /// string. The boundary is parsed here rather than by the caller, so the
     /// container and the app read a boundary section by the same rule instead
@@ -189,10 +192,15 @@ case "choose":
     }
     let now = Date()
     let running = tasks.filter { $0.state == .running }.count
-    guard QueenDelegationPolicy.canStartAnother(running: running) else {
+    let maximumConcurrentWorkers = QueenDelegationPolicy
+        .effectiveMaximumConcurrentWorkers(question.maximumConcurrentWorkers)
+    guard QueenDelegationPolicy.canStartAnother(
+        running: running,
+        maximumConcurrentWorkers: maximumConcurrentWorkers
+    ) else {
         emit(Answer(kind: "choose", strays: nil,
                     refusal: "\(running) workers already running "
-                        + "(limit \(QueenDelegationPolicy.maximumConcurrentWorkers))",
+                        + "(limit \(maximumConcurrentWorkers))",
                     allowed: false, chosen: nil, chosenPaths: nil, verdict: nil, unmet: nil, note: nil, skipped: nil, error: nil))
         exit(0)
     }
