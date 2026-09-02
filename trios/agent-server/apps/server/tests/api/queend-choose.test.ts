@@ -77,11 +77,16 @@ const body = (n: number) =>
     `\`docs/only-${n}.md\``,
   ].join('\n')
 
-const board = (numbers: number[], tasks: Array<ReturnType<typeof task>>) => ({
+const board = (
+  numbers: number[],
+  tasks: Array<ReturnType<typeof task>>,
+  maximumConcurrentWorkers?: number,
+) => ({
   kind: 'choose',
   candidates: numbers,
   candidateBodies: Object.fromEntries(numbers.map((n) => [String(n), body(n)])),
   tasks,
+  maximumConcurrentWorkers,
 })
 
 describe('queend chooses the next bee', () => {
@@ -124,6 +129,58 @@ describe('queend chooses the next bee', () => {
     // Swift omits a nil rather than encoding null, so the key is absent.
     expect(answer.chosen ?? null).toBeNull()
     expect(String(answer.skipped)).toContain('expected back')
+  })
+
+  /**
+   * #1311. The server knows the effective capacity for this deployment; the
+   * compiled policy used to know only its static four-worker default. Raising
+   * that constant would over-dispatch smaller installations, while leaving it
+   * alone stranded verified capacity above four. The number therefore travels
+   * with each choose question and is bounded by the policy at 1...8.
+   */
+  it.skipIf(!present)(
+    'admits the eighth worker at an effective limit of eight',
+    () => {
+      const running = Array.from({ length: 7 }, (_, index) => ({
+        ...task(2000 + index, 'running'),
+        ownedPaths: [`docs/running-${index}.md`],
+      }))
+      const answer = ask(board([2100], running, 8))
+      expect(answer.chosen).toBe(2100)
+    },
+  )
+
+  it.skipIf(!present)(
+    'refuses a fifth worker at an effective limit of four',
+    () => {
+      const running = Array.from({ length: 4 }, (_, index) =>
+        task(2200 + index, 'running'),
+      )
+      const answer = ask(board([2300], running, 4))
+      expect(answer.allowed).toBe(false)
+      expect(String(answer.refusal)).toContain('limit 4')
+    },
+  )
+
+  it.skipIf(!present)(
+    'keeps the legacy four-worker default when the field is absent',
+    () => {
+      const running = Array.from({ length: 4 }, (_, index) =>
+        task(2400 + index, 'running'),
+      )
+      const answer = ask(board([2500], running))
+      expect(answer.allowed).toBe(false)
+      expect(String(answer.refusal)).toContain('limit 4')
+    },
+  )
+
+  it.skipIf(!present)('clamps an above-range runtime limit to eight', () => {
+    const running = Array.from({ length: 8 }, (_, index) =>
+      task(2600 + index, 'running'),
+    )
+    const answer = ask(board([2700], running, 99))
+    expect(answer.allowed).toBe(false)
+    expect(String(answer.refusal)).toContain('limit 8')
   })
 
   // A retry running over a past failure is claimed by the retry, whichever

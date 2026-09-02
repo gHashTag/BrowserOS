@@ -47,7 +47,9 @@
 
 import { Hono } from 'hono'
 import { Pool } from 'pg'
+import { configuredWorkerCapacity } from '../services/queen-dispatch'
 import { queenLeaseDatabaseUrl } from '../services/queen-lease'
+import { effectiveRuntimeWorkerLimit } from '../services/queen-tick'
 
 export type ReviewLifecycleState =
   | 'queenReviewPending'
@@ -505,8 +507,11 @@ async function build(pool: Pool): Promise<{ cards: Card[]; pulse: Pulse }> {
         (lastTick.rows[0]?.decision as { refusal?: string } | undefined)
           ?.refusal ?? null,
       roundSeconds: Number(process.env.TRIOS_QUEEN_TICK_SECONDS ?? '0') || null,
-      workerKeys: providerKeyCount(),
-      workerLimit: 4,
+      // The page and the chooser must describe the same swarm. Count distinct
+      // credentials through the allocator's authority, then expose the exact
+      // bounded number queend receives rather than the old literal four.
+      workerKeys: configuredWorkerCapacity(),
+      workerLimit: effectiveRuntimeWorkerLimit(),
     },
   }
 }
