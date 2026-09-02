@@ -776,7 +776,9 @@ export async function runRound(
   // own policy, and only an ESCALATION reaches a person. Without this the hold
   // added to stop the six-times loop would have become a different starvation:
   // every issue she finished would be locked out of the pool for ever.
-  const reviewed = await reviewFinishedDispatches(pool)
+  const reviewed = watch.held
+    ? await reviewFinishedDispatches(pool, watch)
+    : { acted: [], strays: [] }
   if (reviewed.acted.length > 0) {
     logger.info('Queen reviewed her own work', { verdicts: reviewed.acted })
   }
@@ -1296,7 +1298,10 @@ interface ReviewRound {
   strays: Array<{ issue: number; paths: string[] }>
 }
 
-async function reviewFinishedDispatches(pool: Pool): Promise<ReviewRound> {
+async function reviewFinishedDispatches(
+  pool: Pool,
+  watch: LeaseWatch,
+): Promise<ReviewRound> {
   const done = await pool.query(
     `SELECT d.issue, d.conversation_id, d.review_state,
             d.criteria, d.criteria_source, d.send_backs, d.owned_paths,
@@ -1304,14 +1309,15 @@ async function reviewFinishedDispatches(pool: Pool): Promise<ReviewRound> {
                FROM queen_transcript t
               WHERE t.conversation_id = d.conversation_id AND t.kind = 'say')
               AS said
-       FROM queen_dispatch d
+      FROM queen_dispatch d
       WHERE d.started = true AND d.finished_at IS NOT NULL
-        AND d.review_state IS NULL
+        AND (d.review_state IS NULL OR d.review_state = 'wait')
         AND d.outcome NOT LIKE 'reaped%'`,
   )
   const acted: string[] = []
   const strayed: Array<{ issue: number; paths: string[] }> = []
   for (const row of done.rows) {
+    if (!watch.held) break
     const said = String(row.said ?? '')
     const verdicts = parseVerdictBlock(said)
     // The contract this bee was given, read from ITS dispatch row rather than
@@ -1336,13 +1342,6 @@ async function reviewFinishedDispatches(pool: Pool): Promise<ReviewRound> {
     // against the same branch twice and could, between the two, disagree.
     const files = await committedFiles(row.issue as number)
     const strays = await boundaryStrays(files, row.owned_paths ?? [])
-    if (strays.length > 0) {
-      strayed.push({ issue: row.issue as number, paths: strays })
-      logger.warn('Queen found work outside the boundary she gave', {
-        issue: row.issue,
-        strays: strays.slice(0, 20),
-      })
-    }
     // The real count, not the literal 0 that used to sit here.
     //
     // Postgres hands an `integer` back as a JS number, but the column is read
@@ -1352,14 +1351,60 @@ async function reviewFinishedDispatches(pool: Pool): Promise<ReviewRound> {
     // is not - `priorSendBacks` decodes as Int and a string would make queend
     // refuse the whole question.
     const priorSendBacks = Number(row.send_backs ?? 0) || 0
+    // This sweep only receives FINISHED dispatches. A missing verdict line can
+    // therefore never arrive later, so it is unmet review evidence rather than
+    // a streaming `wait` state. Complete the list with explicit failures and
+    // let the canonical Swift policy apply its own send-back ceiling. Keeping
+    // that ceiling in one place prevents the cloud adapter from drifting from
+    // QueenReviewDecision.maximumSendBacks.
+    const reviewVerdicts = verdicts.map((v) => ({
+      criterion: v.criterion,
+      met: v.met,
+    }))
+    const criterionIdentity = (criterion: string) =>
+      criterion.trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US')
+    const reportedCriteria = new Set(
+      reviewVerdicts.map((verdict) => criterionIdentity(verdict.criterion)),
+    )
+    for (const criterion of promised) {
+      if (reportedCriteria.has(criterionIdentity(criterion))) continue
+      reviewVerdicts.push({
+        criterion,
+        met: false,
+      })
+    }
+    while (reviewVerdicts.length < totalCriteria) {
+      reviewVerdicts.push({
+        criterion: `Acceptance criterion ${reviewVerdicts.length + 1} has no verdict evidence`,
+        met: false,
+      })
+    }
+    const missingVerdicts = Math.max(0, reviewVerdicts.length - verdicts.length)
     const answer = await askQueend({
       kind: 'review',
-      verdicts: verdicts.map((v) => ({ criterion: v.criterion, met: v.met })),
+      verdicts: reviewVerdicts,
       totalCriteria,
       committedFiles: files.length,
       priorSendBacks,
     }).catch(() => null)
+    // A policy-process failure is not evidence that the Bee failed. Leave null
+    // rows null and existing wait rows recoverable for the next sweep.
+    if (answer === null) {
+      logger.warn('Queen review policy unavailable; leaving work recoverable', {
+        issue: row.issue,
+        priorState: row.review_state ?? null,
+      })
+      continue
+    }
     const state = String(answer?.verdict ?? 'wait')
+    const evidenceNote =
+      missingVerdicts > 0
+        ? `Finished work omitted ${missingVerdicts} verdict ${missingVerdicts === 1 ? 'line' : 'lines'}. Return with a complete ## VERDICT block covering every acceptance criterion.`
+        : ''
+    const note = [String(answer?.note ?? answer?.refusal ?? ''), evidenceNote]
+      .filter(Boolean)
+      .join(' ')
+    if (!watch.held) break
     logger.info('Queen reviewed her own work', {
       issue: row.issue,
       verdict: state,
@@ -1369,7 +1414,7 @@ async function reviewFinishedDispatches(pool: Pool): Promise<ReviewRound> {
       priorSendBacks,
       strays: strays.length,
     })
-    await pool.query(
+    const written = await pool.query(
       // The increment is part of the same statement that records the verdict,
       // because a count kept by a second write is a count that a crash between
       // the two makes wrong in the direction that matters: an issue whose
@@ -1380,14 +1425,32 @@ async function reviewFinishedDispatches(pool: Pool): Promise<ReviewRound> {
               retry_of_send_back = false,
               send_backs = CASE WHEN $2::text = 'sendBack'
                                 THEN send_backs + 1 ELSE send_backs END
-        WHERE issue = $1`,
+        WHERE issue = $1
+          AND conversation_id = $5
+          AND review_state IS NOT DISTINCT FROM $6::text`,
       [
         row.issue,
         state,
-        String(answer?.note ?? answer?.refusal ?? '').slice(0, 900),
+        note.slice(0, 900),
         JSON.stringify(strays),
+        row.conversation_id,
+        row.review_state ?? null,
       ],
     )
+    if (!written.rowCount) {
+      logger.info('Queen review attempt changed before verdict write', {
+        issue: row.issue,
+        conversationId: row.conversation_id,
+      })
+      continue
+    }
+    if (strays.length > 0) {
+      strayed.push({ issue: row.issue as number, paths: strays })
+      logger.warn('Queen found work outside the boundary she gave', {
+        issue: row.issue,
+        strays: strays.slice(0, 20),
+      })
+    }
     acted.push(`#${row.issue}:${state}`)
   }
   return { acted, strays: strayed }

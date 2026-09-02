@@ -238,7 +238,7 @@ function prepareRetryWorkspace(): void {
  * order is the thing under test in two of the cases below and a fake that
  * encodes it would agree with whatever the code does.
  */
-function roundPool(finished: FinishedRow[] = []) {
+function roundPool(finished: FinishedRow[] = [], reviewWriteCount = 1) {
   const queries: Array<{ sql: string; params: unknown[] }> = []
   const pool = {
     query: async (sql: string, params: unknown[] = []) => {
@@ -249,6 +249,12 @@ function roundPool(finished: FinishedRow[] = []) {
       }
       if (text.includes('FROM queen_dispatch d')) {
         return { rowCount: finished.length, rows: finished }
+      }
+      if (
+        text.includes('UPDATE queen_dispatch') &&
+        text.includes('SET review_state = $2')
+      ) {
+        return { rowCount: reviewWriteCount, rows: [] }
       }
       return { rowCount: 0, rows: [] }
     },
@@ -409,10 +415,110 @@ const reviewUpdate = (queries: Array<{ sql: string; params: unknown[] }>) =>
   queries.find(
     (q) =>
       q.sql.includes('UPDATE queen_dispatch') &&
-      q.sql.includes('review_state ='),
+      q.sql.includes('SET review_state = $2'),
   )
 
 describe('queen round, send-backs counted', () => {
+  it.if(present)(
+    'recovers finished durable wait rows in the next review sweep',
+    async () => {
+      const row = { ...finishedRow(0), said: '', review_state: 'wait' }
+      const { pool, queries } = roundPool([row])
+      await runRound(pool, 'me', 7, { held: true }, [ISSUE])
+
+      const read = queries.find((query) =>
+        query.sql.includes('FROM queen_dispatch d'),
+      )
+      expect(read?.sql).toContain("d.review_state = 'wait'")
+      expect(reviewUpdate(queries)?.params[1]).toBe('sendBack')
+    },
+  )
+
+  it.if(present)(
+    'returns finished incomplete verdict evidence for a bounded retry',
+    async () => {
+      const { pool, queries } = roundPool([{ ...finishedRow(0), said: '' }])
+      await runRound(pool, 'me', 7, { held: true }, [ISSUE])
+
+      const update = reviewUpdate(queries)
+      expect(update?.params[1]).toBe('sendBack')
+      expect(String(update?.params[2])).toContain('complete ## VERDICT block')
+    },
+  )
+
+  it.if(present)(
+    'escalates finished incomplete verdict evidence at the retry ceiling',
+    async () => {
+      const { pool, queries } = roundPool([{ ...finishedRow(2), said: '' }])
+      await runRound(pool, 'me', 7, { held: true }, [ISSUE])
+
+      const update = reviewUpdate(queries)
+      expect(update?.params[1]).toBe('escalate')
+      expect(String(update?.params[2])).toContain('complete ## VERDICT block')
+    },
+  )
+
+  it.if(present)(
+    'writes no review verdict after the Queen lease has moved',
+    async () => {
+      const { pool, queries } = roundPool([{ ...finishedRow(0), said: '' }])
+      await runRound(pool, 'me', 7, { held: false }, [ISSUE])
+
+      expect(reviewUpdate(queries)).toBeUndefined()
+    },
+  )
+
+  it.if(present)(
+    'claims one exact finished attempt before counting a send-back',
+    async () => {
+      const { pool, queries } = roundPool([finishedRow(0)], 0)
+      await runRound(pool, 'me', 7, { held: true }, [ISSUE])
+
+      const update = reviewUpdate(queries)
+      expect(update?.sql).toContain('conversation_id = $5')
+      expect(update?.sql).toContain('IS NOT DISTINCT FROM $6::text')
+      expect(update?.params[4]).toBe(finishedRow(0).conversation_id)
+      expect(update?.params[5]).toBeNull()
+    },
+  )
+
+  it.if(present)(
+    'names a missing middle criterion instead of a positional neighbour',
+    async () => {
+      const row = {
+        ...finishedRow(0),
+        criteria: ['first criterion', 'missing middle', 'third criterion'],
+        said: [
+          '## VERDICT',
+          '- first criterion: met',
+          '- third criterion: met',
+        ].join('\n'),
+      }
+      const { pool, queries } = roundPool([row])
+      await runRound(pool, 'me', 7, { held: true }, [ISSUE])
+
+      const note = String(reviewUpdate(queries)?.params[2])
+      expect(note).toContain('missing middle')
+      expect(note).not.toContain('Unmet: third criterion')
+    },
+  )
+
+  it.if(present)(
+    'leaves review state recoverable when queend is unavailable',
+    async () => {
+      process.env.TRIOS_QUEEND_PATH = join(
+        tmpdir(),
+        'queen-round-no-such-queend',
+      )
+      const { pool, queries } = roundPool([{ ...finishedRow(0), said: '' }])
+      await expect(
+        runRound(pool, 'me', 7, { held: true }, [ISSUE]),
+      ).rejects.toThrow()
+
+      expect(reviewUpdate(queries)).toBeUndefined()
+    },
+  )
+
   it.if(present)(
     'reopens one Bee after sendBack instead of parking behind stale review state',
     async () => {
@@ -479,7 +585,7 @@ describe('queen round, send-backs counted', () => {
 
   it.if(present)('returns a first failure for a second pass', async () => {
     const { pool, queries } = roundPool([finishedRow(0)])
-    await runRound(pool, 'me', 7, { held: false }, [ISSUE])
+    await runRound(pool, 'me', 7, { held: true }, [ISSUE])
 
     const update = reviewUpdate(queries)
     expect(update?.params[1]).toBe('sendBack')
@@ -493,7 +599,7 @@ describe('queen round, send-backs counted', () => {
    */
   it.if(present)('names the pass it is actually asking for', async () => {
     const { pool, queries } = roundPool([finishedRow(1)])
-    await runRound(pool, 'me', 7, { held: false }, [ISSUE])
+    await runRound(pool, 'me', 7, { held: true }, [ISSUE])
 
     const update = reviewUpdate(queries)
     expect(update?.params[1]).toBe('sendBack')
@@ -510,7 +616,7 @@ describe('queen round, send-backs counted', () => {
     'escalates at the ceiling instead of returning for ever',
     async () => {
       const { pool, queries } = roundPool([finishedRow(2)])
-      await runRound(pool, 'me', 7, { held: false }, [ISSUE])
+      await runRound(pool, 'me', 7, { held: true }, [ISSUE])
 
       const update = reviewUpdate(queries)
       expect(update?.params[1]).toBe('escalate')
@@ -523,7 +629,7 @@ describe('queen round, send-backs counted', () => {
     'increments only on a send-back, in the statement that records it',
     async () => {
       const { pool, queries } = roundPool([finishedRow(0)])
-      await runRound(pool, 'me', 7, { held: false }, [ISSUE])
+      await runRound(pool, 'me', 7, { held: true }, [ISSUE])
 
       const update = reviewUpdate(queries)
       expect(update?.sql).toContain('send_backs = CASE')
@@ -540,7 +646,7 @@ describe('queen round, send-backs counted', () => {
    */
   it.if(present)('adds the column before the round reads it', async () => {
     const { pool, sql } = roundPool([finishedRow(0)])
-    await runRound(pool, 'me', 7, { held: false }, [ISSUE])
+    await runRound(pool, 'me', 7, { held: true }, [ISSUE])
 
     const added = sql().findIndex((s) =>
       s.includes('ADD COLUMN IF NOT EXISTS send_backs'),
@@ -594,7 +700,7 @@ describe('queen round, boundary checked', () => {
       process.env.WORKSPACE_DIR = repoWithStray()
       process.env.TRIOS_REPO_REF = 'main'
       const { pool, queries } = roundPool([finishedRow(0)])
-      await runRound(pool, 'me', 7, { held: false }, [ISSUE])
+      await runRound(pool, 'me', 7, { held: true }, [ISSUE])
       delete process.env.TRIOS_REPO_REF
 
       const update = reviewUpdate(queries)
