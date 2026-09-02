@@ -42,7 +42,31 @@ REPO_DIR="$WORKSPACE_DIR/$REPO_NAME"
 if [ -n "$TRIOS_TOOL_SHELL_USER" ] && id "$TRIOS_TOOL_SHELL_USER" >/dev/null 2>&1; then
   AS_USER="su -s /bin/sh $TRIOS_TOOL_SHELL_USER -c"
   mkdir -p "$WORKSPACE_DIR"
-  chown -R "$TRIOS_TOOL_SHELL_USER" "$WORKSPACE_DIR"
+  # A persistent production workspace can be tens of gigabytes. Recursively
+  # walking it on every boot held the public API at 502 even though Railway had
+  # already marked the image deployment successful. The root directory is the
+  # completion sentinel: it is written only after the full traversal succeeds,
+  # so a container stopped halfway through chown cannot make the next boot skip
+  # the unfinished repair. Recording the numeric uid also invalidates the fast
+  # path if the image's account mapping changes.
+  TOOL_UID="$(id -u "$TRIOS_TOOL_SHELL_USER")"
+  OWNERSHIP_MARKER="$WORKSPACE_DIR/.trinity-ownership-v1"
+  if [ -f "$OWNERSHIP_MARKER" ] \
+    && [ "$(cat "$OWNERSHIP_MARKER" 2>/dev/null)" = "uid=$TOOL_UID" ]; then
+    echo "[entrypoint] workspace ownership marker matches $TRIOS_TOOL_SHELL_USER; skipping recursive repair"
+  else
+    echo "[entrypoint] repairing workspace ownership for $TRIOS_TOOL_SHELL_USER"
+    chown -R "$TRIOS_TOOL_SHELL_USER" "$WORKSPACE_DIR"
+    # The parent is Bee-writable after chown, so a predictable filename would
+    # let a persisted symlink redirect this root write. mktemp creates the file
+    # exclusively before printf opens it.
+    MARKER_TMP="$(mktemp "$OWNERSHIP_MARKER.tmp.XXXXXX")"
+    trap 'rm -f "$MARKER_TMP"' 0 1 2 15
+    printf 'uid=%s\n' "$TOOL_UID" >"$MARKER_TMP"
+    chmod 0444 "$MARKER_TMP"
+    mv -f "$MARKER_TMP" "$OWNERSHIP_MARKER"
+    trap - 0 1 2 15
+  fi
   echo "[entrypoint] git runs as $TRIOS_TOOL_SHELL_USER; root does not enter the checkout"
 else
   AS_USER="sh -c"
