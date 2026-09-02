@@ -1,0 +1,56 @@
+# Queen Review Lifecycle
+
+## Observed failure
+
+The public board can report cards as waiting for Queen review while the durable
+dispatch ledger reports zero unreviewed work. The current board maps every
+non-accept verdict to the same review column, and a `sendBack` verdict records
+the unmet criteria without scheduling another Bee. The result is a terminal
+parking state presented as actionable Queen work.
+
+## Observable contract
+
+1. A finished dispatch with no verdict is `queenReviewPending` and is reviewed
+   before Queen chooses unrelated backlog work.
+2. `accept` is terminal, releases the owned boundary, and appears as done.
+3. `sendBack` records the verdict and creates exactly one bounded retry dispatch
+   carrying the unmet criteria. The retry must preserve the original issue,
+   branch boundary, criteria, provider policy, and send-back count.
+4. `escalate` is a distinct human-action state and must never be labelled as
+   waiting for Queen.
+5. A registry task in `awaitingReview` without a matching unreviewed durable
+   dispatch is classified as a reconciliation anomaly, not silently counted as
+   Queen review debt.
+6. The public board exposes separate counts for Queen review pending, changes
+   requested, human escalation, and reconciliation anomalies.
+7. When the last running Bee finishes, the durable close signal wakes Queen.
+   A retry or newly freed slot is refilled in the same bounded round when safe.
+
+## Safety limits
+
+- At most one retry dispatch may be created for one `sendBack` verdict.
+- Existing provider capacity, file-boundary, criteria, and maximum-send-back
+  gates remain authoritative.
+- No credential values or private transcript text may enter public ledgers.
+- The scheduler must remain idempotent across concurrent ticks and restarts.
+- Accepted work is never reopened; escalated work is never auto-dispatched.
+
+## Acceptance criteria
+
+- A deterministic regression test first reproduces the parked `sendBack` state.
+- The test proves one retry is scheduled, a second tick creates no duplicate,
+  and the retry carries the unmet criteria and incremented send-back count.
+- Board tests prove the four review-related states and counters are distinct.
+- Existing Queen round, Kanban, public-status, provider-capacity, and immediate
+  wake tests remain green.
+- Type checking and the production server build pass for the exact branch.
+
+## Boundary
+
+- `trios/agent-server/apps/server/src/api/services/queen-tick.ts`
+- `trios/agent-server/apps/server/src/api/services/queen-dispatch.ts`
+- `trios/agent-server/apps/server/src/api/routes/queen-kanban.ts`
+- `trios/agent-server/apps/server/src/lib/db/pg-migrate.ts`
+- `trios/agent-server/apps/server/tests/api/queen-round.test.ts`
+- `trios/agent-server/apps/server/tests/api/queen-board.test.ts`
+- Public DTO types touched by those two modules only when required.

@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Pool } from 'pg'
@@ -79,9 +85,151 @@ interface FinishedRow {
   said: string
 }
 
+/**
+ * A finished dispatch plus the stale registry mirror observed in production.
+ *
+ * Unlike roundPool, this answers the in-flight query with the row that was just
+ * reviewed. Before #1315 that row became `rejected`, remained on the policy
+ * board, and made queend refuse to choose the same issue for its requested
+ * second pass. The registry mirror makes the second half of the defect visible:
+ * even deleting the cloud row alone would still leave an awaitingReview task.
+ */
+function parkedSendBackPool() {
+  const queries: Array<{ sql: string; params: unknown[] }> = []
+  const row = {
+    ...finishedRow(0),
+    branch: `queen-${ISSUE}`,
+    dispatched_at: '2026-09-02T03:00:00Z',
+    finished_at: '2026-09-02T03:10:00Z',
+    outcome: 'finished',
+    review_state: null as string | null,
+    review_note: null as string | null,
+    key_index: 0,
+    provider: 'zai',
+    model: 'glm-5.3',
+    input_tokens: 100,
+    output_tokens: 20,
+    started: true,
+    retry_of_send_back: false,
+  }
+  const registryTask = {
+    id: '00000000-0000-0000-0000-000000000999',
+    conversationId: '00000000-0000-0000-0000-000000000999',
+    issue: { owner: 'gHashTag', repo: 'trios', number: ISSUE },
+    title: 'stale review mirror',
+    worker: 'old-worker',
+    state: 'awaitingReview',
+    ownedPaths: row.owned_paths,
+    virtualBranch: null,
+    createdAt: row.dispatched_at,
+    updatedAt: row.finished_at,
+    acceptanceCriteria: row.criteria,
+    interventions: [],
+    criterionVerdicts: {},
+  }
+  const pool = {
+    query: async (sql: string, params: unknown[] = []) => {
+      const text = String(sql)
+      queries.push({ sql: text, params })
+      if (text.includes('FROM queen_registry')) {
+        return { rowCount: 1, rows: [{ tasks: [registryTask] }] }
+      }
+      if (text.includes('FROM queen_dispatch d')) {
+        return {
+          rowCount:
+            row.finished_at != null && row.review_state === null ? 1 : 0,
+          rows:
+            row.finished_at != null && row.review_state === null ? [row] : [],
+        }
+      }
+      if (
+        text.includes('UPDATE queen_dispatch') &&
+        text.includes('SET review_state = $2')
+      ) {
+        row.review_state = String(params[1])
+        row.review_note = String(params[2])
+        row.send_backs += row.review_state === 'sendBack' ? 1 : 0
+        return { rowCount: 1, rows: [] }
+      }
+      if (
+        text.includes('UPDATE queen_dispatch') &&
+        text.includes('retry_of_send_back = true')
+      ) {
+        if (row.review_state !== 'sendBack' || row.finished_at == null) {
+          return { rowCount: 0, rows: [] }
+        }
+        row.started = true
+        row.finished_at = null
+        row.outcome = null as unknown as string
+        row.conversation_id = String(params[1])
+        row.review_state = null
+        if (text.includes('review_note = NULL')) row.review_note = null
+        row.retry_of_send_back = true
+        row.key_index = Number(params[2])
+        row.provider = String(params[3])
+        row.model = String(params[4])
+        return { rowCount: 1, rows: [{ issue: ISSUE }] }
+      }
+      if (
+        text.includes('UPDATE queen_dispatch') &&
+        text.includes('detail = $3') &&
+        text.includes('conversation_id = $2')
+      ) {
+        row.review_state = null
+        return { rowCount: 1, rows: [] }
+      }
+      if (
+        text.includes('SELECT issue, branch, owned_paths') &&
+        text.includes('FROM queen_dispatch')
+      ) {
+        return { rowCount: 1, rows: [row] }
+      }
+      return { rowCount: 0, rows: [] }
+    },
+  } as unknown as Pool
+  return { pool, queries, row }
+}
+
 /** A dispatch insert, which `queen_dispatch_history` must not be mistaken for. */
 const isDispatchInsert = (sql: string) =>
   /INSERT INTO queen_dispatch\b/.test(sql)
+
+const isRetryClaim = (sql: string) =>
+  sql.includes('UPDATE queen_dispatch') &&
+  sql.includes('SET started = true') &&
+  sql.includes('retry_of_send_back = true')
+
+const tempWorkspaces: string[] = []
+
+function prepareRetryWorkspace(): void {
+  const parent = mkdtempSync(join(tmpdir(), 'queen-retry-workspace-'))
+  tempWorkspaces.push(parent)
+  const root = join(parent, 'BrowserOS')
+  mkdirSync(join(root, 'trios', 'docs'), { recursive: true })
+  writeFileSync(join(root, 'trios', 'docs', 'only-1234.md'), 'baseline\n')
+  const git = (...args: string[]) =>
+    spawnSync('git', args, { cwd: root, encoding: 'utf8' })
+  expect(git('init').status).toBe(0)
+  expect(git('config', 'user.name', 'Queen Test').status).toBe(0)
+  expect(git('config', 'user.email', 'queen-test@example.invalid').status).toBe(
+    0,
+  )
+  expect(git('add', '.').status).toBe(0)
+  expect(git('commit', '-m', 'baseline').status).toBe(0)
+  mkdirSync(join(root, '.worktrees'), { recursive: true })
+  expect(
+    git(
+      'worktree',
+      'add',
+      '-b',
+      `queen-${ISSUE}`,
+      join(root, '.worktrees', `queen-${ISSUE}`),
+      'HEAD',
+    ).status,
+  ).toBe(0)
+  process.env.WORKSPACE_DIR = parent
+  process.env.TRIOS_REPO_REF = 'HEAD'
+}
 
 /**
  * Postgres, answering the shapes one round asks for and recording all of them.
@@ -117,6 +265,9 @@ beforeEach(() => {
     'TRIOS_QUEEND_PATH',
     'WORKSPACE_DIR',
     'TRIOS_GITHUB_REPO',
+    'TRIOS_API_TOKEN',
+    'TRIOS_QUEEN_REHEARSAL',
+    'TRIOS_REPO_REF',
   ]) {
     saved[key] = process.env[key]
     delete process.env[key]
@@ -150,6 +301,9 @@ afterEach(() => {
   // The refill wiring installs a module-level listener; a case that leaves
   // one behind hands its hook to every later close in this process.
   setDurableCloseListener(undefined)
+  for (const path of tempWorkspaces.splice(0)) {
+    rmSync(path, { recursive: true, force: true })
+  }
 })
 
 describe('queen round, lease lost', () => {
@@ -259,6 +413,70 @@ const reviewUpdate = (queries: Array<{ sql: string; params: unknown[] }>) =>
   )
 
 describe('queen round, send-backs counted', () => {
+  it.if(present)(
+    'reopens one Bee after sendBack instead of parking behind stale review state',
+    async () => {
+      const { pool, queries, row } = parkedSendBackPool()
+      prepareRetryWorkspace()
+      process.env.ZAI_API_KEY = 'test-only-zai-key'
+      process.env.TRIOS_API_TOKEN = 'test-only-server-token'
+      const chatBodies: Array<Record<string, unknown>> = []
+      globalThis.fetch = (async (
+        input: string | URL | Request,
+        init?: RequestInit,
+      ) => {
+        const url = String(input)
+        if (url.endsWith('/chat')) {
+          chatBodies.push(JSON.parse(String(init?.body)))
+          return new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(
+                  new TextEncoder().encode('data: {"type":"start"}\n'),
+                )
+              },
+            }),
+            { status: 200 },
+          )
+        }
+        if (url.includes(`/issues/${ISSUE}`)) {
+          return new Response(JSON.stringify({ number: ISSUE, body: BODY }), {
+            status: 200,
+          })
+        }
+        return new Response('[]', { status: 200 })
+      }) as typeof fetch
+      await runRound(pool, 'me', 7, { held: true }, [ISSUE])
+      await runRound(pool, 'me', 8, { held: true }, [ISSUE])
+
+      expect(reviewUpdate(queries)?.params[1]).toBe('sendBack')
+      const claims = queries.filter((query) => isRetryClaim(query.sql))
+      expect(claims).toHaveLength(1)
+      expect(claims[0].params[0]).toBe(ISSUE)
+      expect(claims[0].params[2]).toBe(0)
+      expect(claims[0].params[3]).toBe('zai')
+      expect(claims[0].params[4]).toBe('glm-5.3')
+      expect(claims[0].sql).not.toContain('review_note = NULL')
+      expect(chatBodies).toHaveLength(1)
+      expect(chatBodies[0].provider).toBe('zai')
+      expect(chatBodies[0].model).toBe('glm-5.3')
+      expect(String(chatBodies[0].message)).toContain(
+        'Queen feedback from the previous pass',
+      )
+      expect(String(chatBodies[0].message)).toContain('the tab opens')
+      expect(row.send_backs).toBe(1)
+      expect(row.retry_of_send_back).toBe(true)
+      expect(row.started).toBe(true)
+      expect(row.review_note).toContain('the tab opens')
+      const dispatchRead = queries.find(
+        (query) =>
+          query.sql.includes('SELECT issue, branch, owned_paths') &&
+          query.sql.includes('FROM queen_dispatch'),
+      )
+      expect(dispatchRead?.sql).toContain("review_state = 'sendBack'")
+    },
+  )
+
   it.if(present)('returns a first failure for a second pass', async () => {
     const { pool, queries } = roundPool([finishedRow(0)])
     await runRound(pool, 'me', 7, { held: false }, [ISSUE])
@@ -416,6 +634,21 @@ describe('the brief promises only what the system does', () => {
     ])
     expect(prompt).not.toContain('dropped rather than reviewed')
     expect(prompt).toContain('not discarded')
+  })
+
+  it('carries the Queens previous verdict into a retry brief', async () => {
+    const { briefFor } = await import('../../src/api/services/queen-tick')
+    const brief = briefFor(
+      ISSUE,
+      'gHashTag/trios',
+      ['docs/only-1234.md'],
+      BODY,
+      ['the tab opens'],
+      'stated',
+      'The tab did not open; return for a second pass.',
+    )
+    expect(brief).toContain('## Queen feedback from the previous pass')
+    expect(brief).toContain('The tab did not open')
   })
 })
 
