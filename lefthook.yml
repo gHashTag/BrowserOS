@@ -34,6 +34,20 @@ pre-commit:
           echo "QueenLanguagePolicy mirror differs from the app policy."
           exit 1
         }
+    # The agent-server half of the same English-only rule (#1291): the focused
+    # test for the TypeScript issue-creation preflight, as a strict gate.
+    # `bun test {files}` with `files:` instead of a hardcoded path is deliberate:
+    # `lefthook run pre-commit` skips index-watching commands when nothing is
+    # staged, so a plain path would make this gate vanish on a clean checkout.
+    # Anchoring on `git ls-files` makes it run whenever the test file exists,
+    # staged or not. `--full-name` keeps the files command's output
+    # repository-relative, which lefthook's root scoping then rewrites to
+    # `./apps/...` for the command itself.
+    queen-issue-language:
+      root: "trios/agent-server/"
+      files: git ls-files --full-name apps/server/tests/api/queen-issue-language.test.ts
+      run: bun test {files}
+
     biome-check:
       root: "trios/agent-server/"
       glob: "*.{js,ts,cjs,mjs,d.cts,d.mts,jsx,tsx,json,jsonc}"
