@@ -127,6 +127,37 @@ function keysFor(envVar: string): string[] {
  * retry attributable: the same bee comes back to the same key, and a key that
  * keeps failing is visible as a key rather than as four unlucky tasks.
  */
+/**
+ * Key indices this process has seen a provider refuse, per provider.
+ *
+ * In memory on purpose, and cleared by a restart. A key with no balance is a
+ * fact about an account at a moment; persisting it would outlive a top-up and
+ * shrink the swarm for a reason nobody could see. A restart is the cheapest
+ * possible retry, and the deployment restarts often.
+ *
+ * Without this the rotation kept handing work to key 1 after it had refused
+ * three turns in a row - #1323, #1324 and #1325, one frame each - because
+ * nothing carried the refusal back to the chooser.
+ */
+const refusedKeys = new Map<string, Set<number>>()
+
+/** Record that a provider refused this key, so the rotation stops offering it. */
+export function noteKeyRefused(provider: string, index: number): void {
+  const seen = refusedKeys.get(provider) ?? new Set<number>()
+  seen.add(index)
+  refusedKeys.set(provider, seen)
+  logger.warn('Queen will stop handing out a refused key', {
+    provider,
+    keyIndex: index,
+    refusedSoFar: [...seen],
+  })
+}
+
+/** For the board and for tests: which keys this process has written off. */
+export function refusedKeyCount(provider = 'zai'): number {
+  return (refusedKeys.get(provider) ?? new Set()).size
+}
+
 export function resolveWorkerProvider(
   takenKeyIndices: number[] = [],
 ): WorkerProvider | null {
@@ -134,8 +165,16 @@ export function resolveWorkerProvider(
   for (const candidate of WORKER_PROVIDERS) {
     const keys = keysFor(candidate.envVar)
     if (keys.length > 0) {
+      // Busy OR refused. A key the provider has already turned down is not a
+      // key: handing it out again spends an issue to learn the same fact.
+      const refused = refusedKeys.get(candidate.provider) ?? new Set<number>()
       let index = 0
-      while (index < keys.length && takenKeyIndices.includes(index)) index++
+      while (
+        index < keys.length &&
+        (takenKeyIndices.includes(index) || refused.has(index))
+      ) {
+        index++
+      }
       // Every key busy. Handing out a duplicate would be the quiet version of
       // this problem, so say which limit was reached instead.
       if (index >= keys.length) {
@@ -515,7 +554,15 @@ async function startTurn(
     return {
       ok: true,
       detail: 'turn accepted',
-      beginDrain: () => void drain(pool, response, conversationId, issue),
+      beginDrain: () =>
+        void drain(
+          pool,
+          response,
+          conversationId,
+          issue,
+          chosen.provider,
+          chosen.keyIndex,
+        ),
     }
   } catch (error) {
     return {
@@ -538,10 +585,26 @@ async function startTurn(
  * events somebody watching is actually waiting for, and batching them to save a
  * round trip would hide the one frame that mattered.
  */
-class Scribe {
+export class Scribe {
   private seq = 0
   private buffer = ''
   private lastFlush = Date.now()
+  /**
+   * The provider's own refusal, if the stream carried one.
+   *
+   * A turn that dies because the account has no balance ends the stream
+   * CLEANLY - the error arrives as a frame, not as a thrown exception - so
+   * `drain` recorded `outcome = 'finished'` and the review then answered
+   * `wait`. Measured 2026-09-03: #1323, #1324 and #1325 each ran on key index
+   * 1, produced ONE frame, and were written down as finished work awaiting a
+   * verdict, indistinguishable from a bee that worked and under-reported.
+   * Meanwhile key 0 was healthy and finishing 257-frame turns.
+   *
+   * So the swarm kept feeding issues to a dead credential and calling the
+   * result finished. That is the difference between a supervisor that is idle
+   * and one that is lying to itself.
+   */
+  providerError: string | null = null
   /**
    * What the turn cost, as the stream reported it.
    *
@@ -578,6 +641,30 @@ class Scribe {
     'tool-input-delta',
   ])
 
+  /**
+   * Whether this frame is the provider refusing, and in its own words.
+   *
+   * Matched on the signatures the providers actually send rather than on a
+   * status code, because the code never reaches here - the turn is a stream and
+   * the failure is inside it. Z.AI answers `[1113] Insufficient balance or no
+   * resource package. Please recharge.`; the Vercel AI SDK wraps it as
+   * `AI_APICallError`. Both are quoted whole, because a bee's log that says
+   * "provider failed" and not why costs another round to diagnose.
+   */
+  static providerRefusal(type: string, said: string): string | null {
+    const signatures = [
+      'Insufficient balance',
+      'AI_APICallError',
+      'no resource package',
+      'invalid_api_key',
+      'Incorrect API key',
+      'quota',
+    ]
+    const hit = signatures.find((s) => said.includes(s))
+    if (!hit && type !== 'error') return null
+    return said.slice(0, 400)
+  }
+
   async frame(line: string): Promise<void> {
     const trimmed = line.trim()
     if (!trimmed.startsWith('data:')) return
@@ -591,6 +678,13 @@ class Scribe {
       return
     }
     const type = String(event.type ?? 'event')
+    // Read BEFORE the noise filter drops it: an error frame is exactly the
+    // thing a filter built for start/finish chatter must not swallow.
+    if (this.providerError === null) {
+      const said = JSON.stringify(event)
+      const refusal = Scribe.providerRefusal(type, said)
+      if (refusal) this.providerError = refusal
+    }
     if (Scribe.NOISE.has(type)) return
 
     const text =
@@ -733,6 +827,14 @@ export async function drain(
   response: Response,
   conversationId: string,
   issue: number,
+  /**
+   * Whose credential ran this turn. Carried so a refusal can be attributed:
+   * without it the stream knows the provider said no and the rotation never
+   * hears about it, which is how key 1 was handed three issues in a row after
+   * it had already refused.
+   */
+  provider?: string,
+  keyIndex?: number,
 ): Promise<void> {
   let outcome = 'finished'
   const scribe = new Scribe(pool, conversationId, issue)
@@ -757,7 +859,24 @@ export async function drain(
       }
     }
     await scribe.flush()
-    logger.info('Queen worker turn finished', { conversationId, issue })
+    // A stream that ENDED is not a turn that WORKED. The provider's refusal
+    // arrives inside the stream, so ending cleanly proves only that the socket
+    // closed.
+    if (scribe.providerError) {
+      outcome = `provider refused: ${scribe.providerError.slice(0, 300)}`
+      logger.error('Queen worker turn refused by the provider', {
+        conversationId,
+        issue,
+        provider,
+        keyIndex,
+        refusal: scribe.providerError.slice(0, 300),
+      })
+      if (provider && typeof keyIndex === 'number') {
+        noteKeyRefused(provider, keyIndex)
+      }
+    } else {
+      logger.info('Queen worker turn finished', { conversationId, issue })
+    }
   } catch (error) {
     outcome = `stream ended badly: ${
       error instanceof Error ? error.message : String(error)

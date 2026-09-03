@@ -12,7 +12,9 @@ import {
   missingProviderRefusal,
   prepareWorktree,
   recordDispatch,
+  refusedKeyCount,
   resolveWorkerProvider,
+  Scribe,
   workspaceRoot,
 } from '../../src/api/services/queen-dispatch'
 import { logger } from '../../src/lib/logger'
@@ -476,5 +478,94 @@ describe('an existing worktree', () => {
       else process.env.TRIOS_REPO_REF = previousRef
       restore()
     }
+  })
+})
+
+/**
+ * A provider that refuses is not a bee that finished.
+ *
+ * Measured 2026-09-03: #1323, #1324 and #1325 each ran on key index 1, produced
+ * ONE frame, and were written down as `outcome = finished` with the review
+ * answering `wait` - indistinguishable from a bee that worked and under-
+ * reported. Key 0 was healthy at the same moment, finishing a 257-frame turn.
+ *
+ * The stream ends CLEANLY when an account runs out of balance: the refusal
+ * arrives as a frame, not as a thrown exception, so `drain`'s catch never runs
+ * and its default outcome stood. The swarm went on feeding issues to a dead
+ * credential and calling the results finished, which is the difference between
+ * a supervisor that is idle and one that is lying to itself.
+ */
+describe('a provider refusal', () => {
+  // Local, because the sibling helper lives inside another describe block.
+  const sse = (frames: unknown[]) =>
+    new Response(
+      frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join('') +
+        'data: [DONE]\n\n',
+    )
+
+  it('is recognised in the frame the provider actually sends', () => {
+    const zai =
+      '{"type":"error","error":{"code":"1113","message":"Insufficient balance or no resource package. Please recharge."}}'
+    expect(Scribe.providerRefusal('error', zai)).toContain(
+      'Insufficient balance',
+    )
+  })
+
+  it('is recognised when the SDK wraps it', () => {
+    const wrapped = '{"type":"finish","detail":"AI_APICallError: [1113] quota"}'
+    expect(Scribe.providerRefusal('finish', wrapped)).toContain(
+      'AI_APICallError',
+    )
+  })
+
+  // Ordinary traffic must not be read as a refusal, or a healthy swarm writes
+  // off its own keys and stops.
+  it('is not seen in ordinary traffic', () => {
+    expect(
+      Scribe.providerRefusal('text-delta', '{"delta":"working on it"}'),
+    ).toBeNull()
+    expect(
+      Scribe.providerRefusal('usage', '{"usage":{"inputTokens":9}}'),
+    ).toBeNull()
+  })
+
+  it('writes the ending as a refusal and quotes the provider', async () => {
+    const { pool, asked } = recordingPool()
+    await drain(
+      pool,
+      sse([
+        {
+          type: 'error',
+          error: {
+            code: '1113',
+            message: 'Insufficient balance, please recharge',
+          },
+        },
+      ]),
+      'conv-refused',
+      1323,
+      'zai',
+      1,
+    )
+    const closing = touching(asked, 'UPDATE queen_dispatch')[0]
+    expect(String(closing.params[1])).toContain('provider refused')
+    expect(String(closing.params[1])).toContain('Insufficient balance')
+  })
+
+  // And the rotation must hear about it, or the next round spends another
+  // issue learning the same fact.
+  it('stops the rotation handing that key out again', async () => {
+    const before = refusedKeyCount('zai')
+    const { pool } = recordingPool()
+    await drain(
+      pool,
+      sse([{ type: 'error', error: { message: 'Insufficient balance' } }]),
+      'conv-refused-2',
+      1324,
+      'zai',
+      1,
+    )
+    expect(refusedKeyCount('zai')).toBeGreaterThan(before - 1)
+    expect(refusedKeyCount('zai')).toBeGreaterThanOrEqual(1)
   })
 })
