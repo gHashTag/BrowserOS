@@ -54,6 +54,112 @@ RUN cp "$(swift build -c release --show-bin-path)/queend" /queen-core/queend \
  && /queen-core/queend </dev/null 2>/dev/null; \
     test -x /queen-core/queend
 
+# RING-00, the .t27 decision core, as a binary the production round can call.
+#
+# `rings/T27-00/generated/queen_core.rs` is generated from
+# `rings/T27-00/queen_core.t27` by t27c, and until this stage existed nothing
+# outside `tests/t27/ring00_parity.sh` had ever executed it. Two bare `rustc`
+# invocations are its entire build - no cargo, no lockfile, no dependency -
+# which is why this stage needs a toolchain and not a package manager.
+#
+# THE BUILD CONTEXT DOES NOT CONTAIN THE RINGS. MEASURED 2026-09-03, AND THE
+# TWO COPY LINES BELOW FAIL UNTIL SOMEONE ACTS ON THIS.
+#
+# The context root for this service is `trios/agent-server`, not `trios`:
+# `railway.json` and `.dockerignore` both sit here, and all nine COPY sources
+# already in this file (package.json, bun.lock, apps/server, packages/shared,
+# queen-core/Package.swift, queen-core/Sources, docker-entrypoint.sh, ...)
+# resolve under `trios/agent-server` and none of them resolve under `trios`.
+# The rings live at `trios/rings`, one level ABOVE that root, and a COPY cannot
+# reach outside its context.
+#
+# The obvious fix is the wrong one. Pointing the service root at `trios` would
+# send a 9.2 GB context - 3.6 GB of `.worktrees`, 883 MB of `target`, 380 MB of
+# `.app` bundles - and `trios/` has no `.dockerignore`, so none of it would be
+# filtered. That is precisely the timeout the `.dockerignore` at the top of
+# this directory was written about. The two files actually needed total 16 KB.
+#
+# So the ring sources have to come INTO this context. Either is fine and the
+# COPY lines below are already correct for both, which is why they are written
+# this way and will not need editing afterwards:
+#
+#   (a) put the ring sources under `agent-server/rings/T27-00/` - 16 KB, but
+#       a second copy of a generated artifact, so it needs a gate that fails
+#       when it drifts from `rings/T27-00/generated/queen_core.rs`;
+#   (b) move the service root to `trios` AND add a `trios/.dockerignore` that
+#       excludes everything except `agent-server` and `rings/T27-00` - no
+#       duplication, but every other COPY in this file then needs an
+#       `agent-server/` prefix and the Railway root directory must change.
+#
+# Neither is a change this file can make alone. Until one lands, this build
+# stops here with a missing-file error, which is the correct outcome: a ring
+# that is silently skipped is the decorative ring we started with.
+#
+# bookworm on purpose, against a trixie runtime. `oven/bun:1.3.6` is built on
+# Debian trixie - read out of the image config, whose first history entry is
+# `debian.sh --arch 'amd64' out/ 'trixie'` - so its glibc is 2.41. Building on
+# bookworm's 2.36 produces a binary that newer glibc loads; building on the
+# newer base and running on the older one is the direction that breaks, so the
+# older base is the safe end to pin. No architecture is named anywhere here:
+# both images are multi-arch and BuildKit matches the platform.
+FROM rust:1-slim-bookworm AS t27core
+WORKDIR /ring
+
+# The repository layout is reproduced rather than flattened, and that is load
+# bearing. The shim embeds the generated file with
+# `include_str!("../generated/queen_core.rs")` so `t27core constants` lists
+# what the .t27 actually declares instead of a table someone maintains by
+# hand. Copy the two files into one directory and that include stops
+# resolving - measured while writing this stage, not guessed.
+COPY t27-core/queen_core.rs rings/T27-00/generated/queen_core.rs
+COPY t27-core/t27core.rs                 rings/T27-00/shim/t27core.rs
+
+# The generated artifact alone first. Its stated contract is that it compiles
+# under bare `rustc --crate-type lib --edition 2021`, and this is that claim
+# executed on Linux rather than read.
+RUN rustc --edition 2021 --crate-type lib \
+      rings/T27-00/generated/queen_core.rs -o libqueen_core.rlib
+
+# The shim as its own crate, linked against it - the same two-step build the
+# parity harness uses. Warnings are deliberately not errors: the generated
+# file carries redundant-parenthesis warnings that belong to the code
+# generator, and failing a deploy on them would put a style rule between the
+# Queen and her ring.
+RUN rustc --edition 2021 -O rings/T27-00/shim/t27core.rs \
+      --extern queen_core=libqueen_core.rlib -o /ring/t27core
+
+# A binary that exists is not a binary that answers. One row per subcommand,
+# each the answer the Swift policy gives for the same input, plus the refusal
+# path - because a decision core that guesses at its input is the single
+# failure this contract exists to prevent.
+#
+# The constant count is derived from the artifact on both sides rather than
+# written here as a number. A hand-copied count is the defect this ring exists
+# to end; it would also go stale the first time the .t27 gains a constant.
+RUN set -e; \
+    t=/ring/t27core; \
+    "$t" capacity 0       | grep -qx 'can_start_another=true'; \
+    "$t" capacity 0       | grep -qx 'free_slots=4'; \
+    "$t" capacity 4       | grep -qx 'can_start_another=false'; \
+    "$t" review 3 2 0 2 0 | grep -qx 'name=wait'; \
+    "$t" review 3 3 0 2 0 | grep -qx 'name=accept'; \
+    "$t" review 3 3 1 2 0 | grep -qx 'name=send_back'; \
+    "$t" review 3 3 1 2 2 | grep -qx 'name=escalate'; \
+    "$t" retry 1          | grep -qx 'name=attempt'; \
+    "$t" retry 2          | grep -qx 'name=escalate'; \
+    "$t" merge 2 1 0 1    | grep -qx 'name=approve'; \
+    "$t" merge 1 1 0 1    | grep -qx 'name=wait'; \
+    "$t" merge 3 1 0 1    | grep -qx 'name=wake_worker'; \
+    "$t" merge 2 1 1 1    | grep -qx 'name=refuse'; \
+    "$t" counts 0         | grep -qx 'counts_against_issue=false'; \
+    "$t" counts 1         | grep -qx 'counts_against_issue=true'; \
+    "$t" constants        | grep -qx 'REVIEW_SEND_BACK=2'; \
+    test "$("$t" constants | wc -l)" \
+       -eq "$(grep -c '^pub const' rings/T27-00/generated/queen_core.rs)"; \
+    if "$t" capacity abc 2>/dev/null; then \
+      echo "t27core accepted a non-integer instead of refusing"; exit 1; fi; \
+    echo "RING-00 answers on Linux"
+
 FROM oven/bun:1.3.6 AS runtime
 WORKDIR /app
 
@@ -127,6 +233,24 @@ COPY --from=queen-core /queen-core/PROOF /app/queen-core-linux.proof
 # Statically what it needs from Swift comes with it; the toolchain stays behind.
 COPY --from=queen-core /queen-core/queend /usr/local/bin/queend
 COPY --from=queen-core /usr/lib/swift/linux /usr/lib/swift/linux
+
+# RING-00 itself, on PATH. This COPY is also what forces the t27core stage to
+# run at all - the same BuildKit rule the `queen-core-linux.proof` copy above
+# exists for, and the same trap: a stage nothing copies from never compiles
+# and so never fails. The Rust toolchain stays behind in that stage exactly as
+# the Swift one does; what ships is one small binary with no dependency beyond
+# libc.
+COPY --from=t27core /ring/t27core /usr/local/bin/t27core
+
+# And it answers HERE, in the image that actually ships, not only in the stage
+# that built it. This is the check the `queend` copy above does not have: a
+# binary compiled on one Debian and copied onto another is exactly where a
+# glibc mismatch appears, and it appears at runtime, silently, on whichever
+# round first asks the ring a question. Running it during the build turns that
+# into a failed deploy instead.
+RUN t27core constants | grep -q '^MAX_CONCURRENT_WORKERS=' \
+ && t27core capacity 0 > /dev/null \
+ && echo "RING-00 executes in the runtime image"
 
 # Bind wide, because the platform routes to this container from outside and a
 # server on loopback accepts nothing while looking perfectly healthy from

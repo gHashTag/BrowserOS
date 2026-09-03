@@ -69,6 +69,19 @@ const LEASE_NAME = 'queen-tick'
 function queendPath(): string {
   return process.env.TRIOS_QUEEND_PATH || '/usr/local/bin/queend'
 }
+
+/**
+ * Where RING-00 is, resolved exactly like `queend` above and for the same
+ * reason: the container installs it, a test points at a build.
+ *
+ * `t27core` is the generated Rust reading of `rings/T27-00/queen_core.t27`
+ * behind an argv CLI. Until this call site existed the ring was proven and
+ * decorative - `tests/t27/ring00_parity.sh` ran fourteen rows through it and
+ * nothing in production ran a single one.
+ */
+function t27corePath(): string {
+  return process.env.TRIOS_T27CORE_PATH || '/usr/local/bin/t27core'
+}
 /// A task shaped for the policy needs an id; a dispatch that never opened a
 /// conversation has none. All-zeroes is a UUID that decodes and can collide
 /// with nothing real.
@@ -542,6 +555,200 @@ function askQueend(question: unknown): Promise<QueendChoice> {
 }
 
 /**
+ * RING-00, asked the same question `queend` was just asked.
+ *
+ * WHY ARGV AND NOT JSON. The ring's stated contract is bare `rustc` - no cargo,
+ * no dependencies - and a JSON parser is a dependency. Every input and output
+ * of the generated code is an integer or a bool, so argv in and `key=value`
+ * out is enough, and keeping it enough is what keeps the contract true.
+ *
+ * Rejects on anything unexpected. The caller catches, because the cross-check
+ * is an observer and an observer that can stop a round is not an observer.
+ */
+function askT27Core(args: string[]): Promise<Record<string, string>> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(t27corePath(), args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+    // AN OBSERVER MUST NOT BE ABLE TO HANG THE THING IT OBSERVES.
+    //
+    // This is awaited inline while the round holds the Queen's lease, so a
+    // binary that never exits would hold the whole hive. Measured on the real
+    // shim: 200 invocations in 1.645 s, 8.22 ms each - so two seconds is three
+    // orders of magnitude of headroom and still bounded.
+    const done = setTimeout(() => {
+      child.kill('SIGKILL')
+      reject(new Error('t27core did not answer within 2s'))
+    }, 2_000)
+    let out = ''
+    let err = ''
+    child.stdout.on('data', (d) => {
+      out += d
+    })
+    child.stderr.on('data', (d) => {
+      err += d
+    })
+    child.on('error', (e) => {
+      clearTimeout(done)
+      reject(e)
+    })
+    child.on('close', (code) => {
+      clearTimeout(done)
+      if (code !== 0) {
+        reject(
+          new Error(
+            `t27core exited ${code}: ${(err.trim() || out.trim()).slice(0, 200)}`,
+          ),
+        )
+        return
+      }
+      const pairs: Record<string, string> = {}
+      for (const line of out.split('\n')) {
+        const at = line.indexOf('=')
+        if (at <= 0) continue
+        pairs[line.slice(0, at).trim()] = line.slice(at + 1).trim()
+      }
+      if (Object.keys(pairs).length === 0) {
+        reject(
+          new Error(`t27core answered nothing parseable: ${out.slice(0, 200)}`),
+        )
+        return
+      }
+      resolve(pairs)
+    })
+  })
+}
+
+/**
+ * The number `queend` counts for `canStartAnother`, counted here on the SAME
+ * array that was sent to it.
+ *
+ * `main.swift` does `tasks.filter { $0.state == .running }.count`, and
+ * `DelegatedTaskState` is a String enum, so `running` is the literal on the
+ * wire. Counted from the array rather than tracked alongside it: a second
+ * count kept in step by hand is the defect this whole cross-check exists to
+ * catch, and it would be embarrassing to introduce one while looking for one.
+ */
+export function runningOnBoard(tasks: readonly unknown[]): number {
+  return tasks.filter(
+    (task) => (task as { state?: unknown } | null)?.state === 'running',
+  ).length
+}
+
+/** What Swift answered about capacity, and the count it answered about. */
+export interface SwiftCapacityAnswer {
+  /** `QueenDelegationPolicy.canStartAnother`, as this choice reveals it. */
+  answer: boolean
+  /**
+   * The running count `queend` itself named, or null when it never said.
+   *
+   * Only a capacity refusal carries it. When it is there it is the one chance
+   * to check that both implementations were asked about the same board, which
+   * is the difference between a cross-check and two answers to two questions.
+   */
+  runningNamed: number | null
+}
+
+/**
+ * Read the capacity answer back out of a choice.
+ *
+ * `queend` does not report `canStartAnother` as a field; the capacity gate is
+ * the FIRST guard in the `choose` case and it exits immediately with a refusal
+ * of a fixed shape. So a choice carrying that refusal is Swift saying false,
+ * and any other choice - allowed, or refused for money, boundaries or order -
+ * is Swift having already passed the gate, which is Swift saying true.
+ *
+ * The shape is matched exactly rather than by substring: a loose match on
+ * "running" would read a future refusal about something else as a capacity
+ * refusal and quietly invert this answer.
+ */
+export function swiftCapacityAnswer(choice: QueendChoice): SwiftCapacityAnswer {
+  const refusal = (choice.refusal ?? '').trim()
+  const named = /^(\d+) workers already running \(limit \d+\)$/.exec(refusal)
+  if (named) return { answer: false, runningNamed: Number(named[1]) }
+  return { answer: true, runningNamed: null }
+}
+
+/** What the cross-check found, for the caller and for the tests. */
+export type Ring00Outcome = 'agree' | 'disagree' | 'unavailable'
+
+/**
+ * Run RING-00 on the round's real capacity question and say whether it agrees.
+ *
+ * THIS IS A CROSS-CHECK, NOT A HANDOVER. The Swift answer stays authoritative:
+ * nothing here feeds back into what the round does. The point is that the ring
+ * is executed on live inputs every round instead of only in a test, so the day
+ * authority moves it will move onto a path with a production record behind it.
+ *
+ * Three outcomes, three volumes:
+ *   agree       - info, so "the ring runs in production" is an observation
+ *                 somebody can read rather than a claim in a document
+ *   disagree    - error, naming both answers and the input. Two implementations
+ *                 of one rule disagreeing is the exact failure L0 exists to
+ *                 prevent, and it must never pass quietly
+ *   unavailable - warn, and the round goes on. A missing or broken observer
+ *                 must not be able to stop the swarm
+ */
+export async function crossCheckRing00Capacity(
+  running: number,
+  swift: SwiftCapacityAnswer,
+): Promise<Ring00Outcome> {
+  let pairs: Record<string, string>
+  try {
+    pairs = await askT27Core(['capacity', String(running)])
+  } catch (error) {
+    logger.warn('Ring-00 cross-check did not run', {
+      path: t27corePath(),
+      running,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return 'unavailable'
+  }
+
+  const said = pairs.can_start_another
+  if (said !== 'true' && said !== 'false') {
+    logger.warn('Ring-00 cross-check did not run', {
+      path: t27corePath(),
+      running,
+      error: `can_start_another was ${said === undefined ? 'absent' : `"${said}"`}`,
+    })
+    return 'unavailable'
+  }
+  const ring = said === 'true'
+
+  // Both implementations must have been asked about the same board. When
+  // `queend` named its own count and it is not this one, the comparison below
+  // is two answers to two questions and its agreement would mean nothing.
+  if (swift.runningNamed !== null && swift.runningNamed !== running) {
+    logger.error('Ring-00 cross-check was fed a different board than queend', {
+      queendCounted: swift.runningNamed,
+      tickCounted: running,
+    })
+  }
+
+  if (ring !== swift.answer) {
+    logger.error('RING-00 DISAGREES WITH THE SWIFT POLICY', {
+      question: 'canStartAnother',
+      running,
+      swift: swift.answer,
+      ring,
+      freeSlots: pairs.free_slots ?? null,
+      authoritative: 'swift',
+      path: t27corePath(),
+    })
+    return 'disagree'
+  }
+
+  logger.info('Ring-00 agrees with the Swift policy', {
+    question: 'canStartAnother',
+    running,
+    answer: ring,
+    freeSlots: pairs.free_slots ?? null,
+  })
+  return 'agree'
+}
+
+/**
  * Whether the round that owns this watch is still the Queen.
  *
  * Read by `runRound` before every dispatch. It is an object rather than a
@@ -851,11 +1058,16 @@ export async function runRound(
     })
   })
 
+  // Named, because RING-00 is asked about this exact array a few lines below
+  // and "the same number" has to be the same number, not a second reading of
+  // the same idea.
+  const openingBoard = [...registry.rows[0].tasks, ...containerTasks]
+
   const choice = await askQueend({
     kind: 'choose',
     candidates,
     candidateBodies,
-    tasks: [...registry.rows[0].tasks, ...containerTasks],
+    tasks: openingBoard,
   })
 
   await recordTick(pool, holder, grant.fence, choice)
@@ -864,6 +1076,17 @@ export async function runRound(
     refusal: choice.refusal ?? null,
     candidates: candidates.length,
   })
+
+  // RING-00, on the round's real capacity question. Here rather than only in
+  // the dispatch loop below because this call happens in EVERY round - the
+  // loop's re-asks happen only in rounds that started a bee - and "the ring is
+  // exercised in production" has to be true of every round or it is a claim
+  // about a subset. Awaited so its verdict is in the log next to the decision
+  // it shadows; it cannot throw, so it cannot delay one either.
+  await crossCheckRing00Capacity(
+    runningOnBoard(openingBoard),
+    swiftCapacityAnswer(choice),
+  )
 
   // And then start it. A supervisor that only chooses is a supervisor in name:
   // the choice was the visible half of the round, and for several deploys it
@@ -957,6 +1180,14 @@ export async function runRound(
       candidateBodies,
       tasks: board,
     })
+    // And again on the board that grew. This is the ONLY place the capacity
+    // gate actually bites - the opening board is at the limit only when the
+    // round has nothing to do anyway - so a cross-check that skipped it would
+    // compare the two implementations exclusively on the easy answer.
+    await crossCheckRing00Capacity(
+      runningOnBoard(board),
+      swiftCapacityAnswer(current),
+    )
     if (!current?.allowed) {
       logger.info('Queen tick stopped dispatching', {
         started: started.length,

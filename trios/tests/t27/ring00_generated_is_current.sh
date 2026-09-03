@@ -61,8 +61,32 @@ if ! rustc --crate-type lib --edition 2021 -o "$FRESH.rlib" "$ARTIFACT" 2> "$FRE
   exit 1
 fi
 
+# THE MIRROR. The Docker build context is `agent-server/`, so `rings/` is
+# outside it and the image cannot COPY the artifact where it lives. The
+# repository already solves this exactly once, for `queen-core`, whose Swift
+# sources are copies of `rings/SR-00/` kept in step by hand - so the same shape
+# is used here rather than a second, different one.
+#
+# A copy nobody checks is a fork. These two lines are the whole reason the
+# mirror is allowed to exist.
+for pair in "generated/queen_core.rs:queen_core.rs" "shim/t27core.rs:t27core.rs"; do
+  src="$ROOT/rings/T27-00/${pair%%:*}"
+  mirror="$ROOT/agent-server/t27-core/${pair##*:}"
+  [ -f "$mirror" ] || fail "the build-context mirror is missing: $mirror
+       copy it with: cp $src $mirror"
+  if ! diff -q "$src" "$mirror" >/dev/null 2>&1; then
+    echo "[FAIL] ring00_generated_is_current: the build-context mirror has drifted" >&2
+    diff -u "$src" "$mirror" | head -30 >&2
+    echo "       the image builds from the MIRROR, so a drift here ships a ring" >&2
+    echo "       that is not the one this repository proves. Fix with:" >&2
+    echo "       cp $src $mirror" >&2
+    exit 1
+  fi
+done
+
 LINES="$(wc -l < "$ARTIFACT" | tr -d ' ')"
 RULES="$(grep -c '^pub fn ' "$ARTIFACT" || true)"
 CONSTS="$(grep -c '^pub const ' "$ARTIFACT" || true)"
 echo "[OK] ring00_generated_is_current: the artifact is what the source generates and it compiles"
 echo "     $LINES lines, $RULES rules, $CONSTS constants, from rings/T27-00/queen_core.t27"
+echo "     the agent-server/t27-core mirror the image builds from matches it"
