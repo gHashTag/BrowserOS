@@ -37,7 +37,7 @@ Link external apps so the agent can access them conversationally. Built-in integ
 Learn more: https://docs.browseros.com/features/connect-mcps
 
 ### MCP Server for Developer Tools
-Built-in MCP server exposes 31 browser automation tools to Claude Code, Gemini CLI, OpenAI Codex CLI, and Claude Desktop. Enables agentic coding (test web apps, read console errors, fix code), data extraction from authenticated pages, and programmatic browser control.
+Built-in MCP server exposes 73 browser automation tools to Claude Code, Gemini CLI, OpenAI Codex CLI, and Claude Desktop. Enables agentic coding (test web apps, read console errors, fix code), data extraction from authenticated pages, and programmatic browser control.
 Learn more: https://docs.browseros.com/features/use-with-claude-code
 
 ### Chat & LLM Hub
