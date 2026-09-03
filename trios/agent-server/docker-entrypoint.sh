@@ -42,7 +42,17 @@ REPO_DIR="$WORKSPACE_DIR/$REPO_NAME"
 if [ -n "$TRIOS_TOOL_SHELL_USER" ] && id "$TRIOS_TOOL_SHELL_USER" >/dev/null 2>&1; then
   AS_USER="su -s /bin/sh $TRIOS_TOOL_SHELL_USER -c"
   mkdir -p "$WORKSPACE_DIR"
-  chown -R "$TRIOS_TOOL_SHELL_USER" "$WORKSPACE_DIR"
+  # Ownership is settled once, not re-walked on every start. On 2026-09-03 the
+  # volume held 41 bee worktrees - 45 GB, three million inodes - and the
+  # unconditional `chown -R` took longer than the 300 s healthcheck, so the
+  # deploy reported success while the server had not yet been started and the
+  # edge answered 502 for ten minutes. Only files root created since the last
+  # start can have the wrong owner, and root creates none here; a fresh volume
+  # is the one case that needs the walk, and it is empty then.
+  if [ "$(stat -c %U "$WORKSPACE_DIR" 2>/dev/null)" != "$TRIOS_TOOL_SHELL_USER" ]; then
+    echo "[entrypoint] $WORKSPACE_DIR is not owned by $TRIOS_TOOL_SHELL_USER; settling ownership once"
+    chown -R "$TRIOS_TOOL_SHELL_USER" "$WORKSPACE_DIR"
+  fi
   echo "[entrypoint] git runs as $TRIOS_TOOL_SHELL_USER; root does not enter the checkout"
 else
   AS_USER="sh -c"
