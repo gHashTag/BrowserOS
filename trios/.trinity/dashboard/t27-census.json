@@ -1,0 +1,232 @@
+{
+  "census": "t27-migration-census",
+  "issue": "gHashTag/trios#1350",
+  "scope": {
+    "treeRoot": "trios",
+    "specFiles": "any file named *.t27 anywhere under the trios tree",
+    "skippedDirectories": [
+      ".git",
+      "node_modules"
+    ],
+    "sourceExtensions": [
+      ".c",
+      ".h",
+      ".cpp",
+      ".hpp",
+      ".js",
+      ".jsx",
+      ".mjs",
+      ".py",
+      ".rs",
+      ".sh",
+      ".swift",
+      ".ts",
+      ".tsx",
+      ".v",
+      ".zig"
+    ]
+  },
+  "exclusionRule": {
+    "rule": "any path containing a \".claude/worktrees/\" segment is a copy of another checkout of this repository, not a distinct file",
+    "appliesTo": "every count in this census",
+    "knownCopyLocation": "rings/RUST-13/trios-mesh/.claude/worktrees/",
+    "excludedCopyPathsSeenThisRun": []
+  },
+  "specs": {
+    "distinct": 2,
+    "copied": 0,
+    "neverSummed": true,
+    "generatedArtifactRule": "a spec has a generated artifact when a directory named \"generated\" beside the spec file (<spec directory>/generated/) exists and holds, under it, a file whose name is the spec stem or begins with the stem followed by \".\"",
+    "withoutGeneratedArtifact": 2,
+    "entries": [
+      {
+        "path": "rings/T27-00/queen_core.t27",
+        "generatedDir": "rings/T27-00/generated",
+        "generatedDirPresent": false,
+        "artifact": null,
+        "hasGeneratedArtifact": false
+      },
+      {
+        "path": "rings/T27-01/a2a.t27",
+        "generatedDir": "rings/T27-01/generated",
+        "generatedDirPresent": false,
+        "artifact": null,
+        "hasGeneratedArtifact": false
+      }
+    ]
+  },
+  "rings": {
+    "rankedBy": "source lines descending, then ring name ascending",
+    "table": [
+      {
+        "ring": "SR-02",
+        "path": "rings/SR-02",
+        "sourceFiles": 19,
+        "sourceLines": 23103,
+        "specFiles": 0,
+        "generatedTarget": false
+      },
+      {
+        "ring": "SR-00",
+        "path": "rings/SR-00",
+        "sourceFiles": 106,
+        "sourceLines": 22041,
+        "specFiles": 0,
+        "generatedTarget": false
+      },
+      {
+        "ring": "SR-01",
+        "path": "rings/SR-01",
+        "sourceFiles": 30,
+        "sourceLines": 8252,
+        "specFiles": 0,
+        "generatedTarget": false
+      },
+      {
+        "ring": "RUST-13",
+        "path": "rings/RUST-13",
+        "sourceFiles": 6,
+        "sourceLines": 2144,
+        "specFiles": 0,
+        "generatedTarget": false
+      },
+      {
+        "ring": "RUST-04",
+        "path": "rings/RUST-04",
+        "sourceFiles": 7,
+        "sourceLines": 1716,
+        "specFiles": 0,
+        "generatedTarget": false
+      },
+      {
+        "ring": "RUST-05",
+        "path": "rings/RUST-05",
+        "sourceFiles": 1,
+        "sourceLines": 1626,
+        "specFiles": 0,
+        "generatedTarget": false
+      },
+      {
+        "ring": "RUST-12",
+        "path": "rings/RUST-12",
+        "sourceFiles": 1,
+        "sourceLines": 1448,
+        "specFiles": 0,
+        "generatedTarget": false
+      },
+      {
+        "ring": "RUST-14",
+        "path": "rings/RUST-14",
+        "sourceFiles": 1,
+        "sourceLines": 1315,
+        "specFiles": 0,
+        "generatedTarget": false
+      },
+      {
+        "ring": "RUST-02",
+        "path": "rings/RUST-02",
+        "sourceFiles": 1,
+        "sourceLines": 1275,
+        "specFiles": 0,
+        "generatedTarget": false
+      },
+      {
+        "ring": "RUST-08",
+        "path": "rings/RUST-08",
+        "sourceFiles": 2,
+        "sourceLines": 1160,
+        "specFiles": 0,
+        "generatedTarget": false
+      },
+      {
+        "ring": "RUST-01",
+        "path": "rings/RUST-01",
+        "sourceFiles": 1,
+        "sourceLines": 555,
+        "specFiles": 0,
+        "generatedTarget": false
+      },
+      {
+        "ring": "RUST-06",
+        "path": "rings/RUST-06",
+        "sourceFiles": 1,
+        "sourceLines": 434,
+        "specFiles": 0,
+        "generatedTarget": false
+      },
+      {
+        "ring": "RUST-10",
+        "path": "rings/RUST-10",
+        "sourceFiles": 1,
+        "sourceLines": 394,
+        "specFiles": 0,
+        "generatedTarget": false
+      },
+      {
+        "ring": "RUST-07",
+        "path": "rings/RUST-07",
+        "sourceFiles": 1,
+        "sourceLines": 281,
+        "specFiles": 0,
+        "generatedTarget": false
+      },
+      {
+        "ring": "RUST-03",
+        "path": "rings/RUST-03",
+        "sourceFiles": 1,
+        "sourceLines": 246,
+        "specFiles": 0,
+        "generatedTarget": false
+      },
+      {
+        "ring": "RUST-09",
+        "path": "rings/RUST-09",
+        "sourceFiles": 1,
+        "sourceLines": 222,
+        "specFiles": 0,
+        "generatedTarget": false
+      },
+      {
+        "ring": "RUST-11",
+        "path": "rings/RUST-11",
+        "sourceFiles": 1,
+        "sourceLines": 158,
+        "specFiles": 0,
+        "generatedTarget": false
+      },
+      {
+        "ring": "RUST-00",
+        "path": "rings/RUST-00",
+        "sourceFiles": 1,
+        "sourceLines": 132,
+        "specFiles": 0,
+        "generatedTarget": false
+      },
+      {
+        "ring": "RUST-99",
+        "path": "rings/RUST-99",
+        "sourceFiles": 1,
+        "sourceLines": 123,
+        "specFiles": 0,
+        "generatedTarget": false
+      },
+      {
+        "ring": "T27-00",
+        "path": "rings/T27-00",
+        "sourceFiles": 0,
+        "sourceLines": 0,
+        "specFiles": 1,
+        "generatedTarget": false
+      },
+      {
+        "ring": "T27-01",
+        "path": "rings/T27-01",
+        "sourceFiles": 0,
+        "sourceLines": 0,
+        "specFiles": 1,
+        "generatedTarget": false
+      }
+    ]
+  },
+  "nonClaim": "This census counts and ranks. It does not decide whether any hand-written file restates a .t27 rule; that judgement belongs to a human (FR-002)."
+}
