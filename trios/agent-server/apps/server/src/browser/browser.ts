@@ -114,21 +114,42 @@ export class Browser {
   private cdp: CdpBackend
   private consoleCollector: ConsoleCollector
   private pages = new Map<number, PageInfo>()
+  /** Per-connection cache: targetId -> sessionId. Every sessionId belongs
+   * to the connection that issued it, so the whole cache dies with that
+   * connection. Cleared by handleReconnected() on every reconnect. */
   private sessions = new Map<string, string>()
   private nextPageId = 1
+  private unsubscribeReconnected: () => void
+  private unsubscribeDetachedFromTarget: () => void
 
   constructor(cdp: CdpBackend) {
     this.cdp = cdp
     this.consoleCollector = new ConsoleCollector(cdp)
-    this.setupEventHandlers()
+    this.unsubscribeDetachedFromTarget = this.setupEventHandlers()
+    // Subscribe exactly once, here — never per operation and never per
+    // reconnect, or handlers accumulate (trios#1368, FR-002).
+    this.unsubscribeReconnected = cdp.onReconnected(() =>
+      this.handleReconnected(),
+    )
+  }
+
+  /**
+   * Teardown. Unsubscribes every backend handler this instance owns so a
+   * disposed Browser leaves nothing behind on a long-lived CdpBackend
+   * (FR-002: a leaked handler is a slower version of the stale-session
+   * defect).
+   */
+  dispose(): void {
+    this.unsubscribeReconnected()
+    this.unsubscribeDetachedFromTarget()
   }
 
   isCdpConnected(): boolean {
     return this.cdp.isConnected()
   }
 
-  private setupEventHandlers(): void {
-    this.cdp.Target.on('detachedFromTarget', (params) => {
+  private setupEventHandlers(): () => void {
+    return this.cdp.Target.on('detachedFromTarget', (params) => {
       if (params.sessionId) {
         for (const [targetId, sid] of this.sessions) {
           if (sid === params.sessionId) {
@@ -138,6 +159,37 @@ export class Browser {
         }
       }
     })
+  }
+
+  /**
+   * A reconnect (trios#1368) established a NEW WebSocket connection. Chrome
+   * issues fresh session ids per connection, so every id cached from the
+   * dead socket is permanently invalid — the socket that would have
+   * delivered `Target.detachedFromTarget` is the one that died. Clearing
+   * here makes the next resolveSession() re-attach and succeed instead of
+   * failing with "Session with given id not found." for the life of the
+   * process.
+   *
+   * Every per-connection cache, by name:
+   * - `this.sessions` (targetId -> sessionId): cleared below. All values
+   *   are ids from the dead connection.
+   * - `CdpBackend.sessionCache` (sessionId -> protocol bindings): cleared
+   *   by the backend itself, before this notification fires.
+   * - `ConsoleCollector.sessionToPage` / `pageToSession` (sessionId <->
+   *   pageId routing): keyed by the same dead ids, but left to self-heal —
+   *   the next attachToPage() calls consoleCollector.attach(), which
+   *   replaces both sides of the mapping, and the only in-reach clearing
+   *   primitive, detach(), would also destroy the page's console history.
+   *   Stale entries are inert: a dead id can no longer arrive as an event.
+   * Not per-connection (and therefore untouched): `this.pages` and the
+   * console buffers, keyed by pageId, which survives reconnects.
+   */
+  private handleReconnected(): void {
+    const cleared = this.sessions.size
+    this.sessions.clear()
+    logger.info(
+      `CDP reconnected: cleared ${cleared} cached session id(s); ids from the dead connection are invalid`,
+    )
   }
 
   // --- Session management ---

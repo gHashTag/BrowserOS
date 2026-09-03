@@ -45,6 +45,12 @@ class CdpBackend implements ICdpBackend {
     string,
     ((params: unknown, sessionId: string) => void)[]
   >()
+  /** Reconnect-notification handlers (trios#1368); named here so tests can
+   * assert that subscriptions do not accumulate across reconnects. */
+  private reconnectedHandlers: (() => void)[] = []
+  /** Per-connection cache: sessionId -> protocol binding. Every sessionId
+   * belongs to the connection that issued it, so the whole cache dies with
+   * that connection. Cleared in reconnectWithRetries on every reconnect. */
   private sessionCache = new Map<string, ProtocolApi>()
   private keepaliveTimer: ReturnType<typeof setInterval> | null = null
   private preferredDiscoveryHost: LoopbackDiscoveryHost | null = null
@@ -328,7 +334,13 @@ class CdpBackend implements ICdpBackend {
         await Bun.sleep(delay)
         await this.attemptConnect()
         this.startKeepalive()
+        // This is the single point where a NEW connection has replaced the
+        // dead one. Per-connection caches are dropped here, at the source,
+        // before consumers are notified, so nobody can observe stale
+        // connection-scoped state after the notification fires.
+        this.sessionCache.clear()
         logger.info('CDP reconnected successfully')
+        this.notifyReconnected()
         return true
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error)
@@ -463,6 +475,37 @@ class CdpBackend implements ICdpBackend {
       if (list) {
         const idx = list.indexOf(handler)
         if (idx !== -1) list.splice(idx, 1)
+      }
+    }
+  }
+
+  /**
+   * Reconnect notification (trios#1368). Fired exactly once, from
+   * reconnectWithRetries, after the backend's own recovery machinery has
+   * established a new WebSocket connection following an unexpected close —
+   * never on the initial connect(). Chrome issues new session ids per
+   * connection, so a consumer holding session ids from the previous
+   * connection must treat all of them as dead when this fires.
+   *
+   * The returned unsubscribe function must be used on teardown; handlers
+   * that are never unsubscribed accumulate on a long-lived backend.
+   */
+  onReconnected(handler: () => void): () => void {
+    this.reconnectedHandlers.push(handler)
+    return () => {
+      const idx = this.reconnectedHandlers.indexOf(handler)
+      if (idx !== -1) this.reconnectedHandlers.splice(idx, 1)
+    }
+  }
+
+  private notifyReconnected(): void {
+    // Copy so a handler may unsubscribe itself (or others) mid-iteration.
+    for (const handler of [...this.reconnectedHandlers]) {
+      try {
+        handler()
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error)
+        logger.warn(`CDP onReconnected handler failed: ${msg}`)
       }
     }
   }
