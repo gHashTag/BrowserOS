@@ -31,6 +31,98 @@ import { shellArgv } from '../../tools/filesystem/bash'
 import { workerSystemPrompt } from './queen-tick'
 
 /**
+ * #1360. Every value the `outcome` column of `queen_dispatch` may carry,
+ * enumerated in ONE place, because the column is read as a short label by
+ * everything downstream: the board groups by it, the public status page
+ * prints it, the reaper matchers prefix-match it (`NOT LIKE 'reaped%'`).
+ *
+ * What this replaces is measured, not hypothetical. Three production rows
+ * (1331, 1330, 1326) held `provider refused: ` followed by an entire
+ * serialized tool-output event - a `git log` dump with nothing to do with
+ * why the turn stopped - because the writer pasted a raw payload behind a
+ * guessed cause. `provider refused` named a cause nobody measured: what was
+ * measured was that a tool event arrived where a completion was expected.
+ *
+ * Two rules follow, and both are enforced at the write sites:
+ *
+ * 1. `outcome` carries one of these labels (or a label extended with a
+ *    closed parameter, like the quota code, still bounded by the cap below).
+ *    The full payload that produced the ending goes to the row's `detail`
+ *    column or to the `queen_transcript` feed - it moves, it is never
+ *    discarded and never lands in `outcome`.
+ *
+ * 2. A cause that was not measured is not named. `endedUnexpectedly` exists
+ *    precisely so an unknown cause can be recorded as unknown; a guessed
+ *    cause is worse than an admitted gap.
+ *
+ * `tools/outcome-shape-audit.mjs` audits stored rows against these same two
+ * rules (it mirrors the cap and this label in plain JS, with comments
+ * pointing back here, because it runs under `node` with no build step).
+ */
+export const DISPATCH_OUTCOME_LABELS = {
+  /** The turn reached its own completion frame and closed normally. */
+  finished: 'finished',
+  /** /chat answered 200 but its body had no readable stream to drain. */
+  noStream: 'no stream',
+  /**
+   * The stream broke mid-turn. The transport's own error text went to
+   * `queen_transcript` (kind `error`) and to the server log, never here.
+   */
+  streamEndedBadly: 'stream ended badly',
+  /**
+   * The stream closed without ever signalling completion - a tool event (or
+   * anything else) arrived where a completion was expected, and nothing in
+   * the stream says why. This is the honest label for the three production
+   * rows above: the cause is NOT determined, so it is not named.
+   */
+  endedUnexpectedly: 'ended unexpectedly (cause undetermined)',
+  /**
+   * The dispatch never started (no credential, no key free, no worktree, no
+   * turn). The full refusal text is the row's `detail` column, which is
+   * where a reader looks for the reason; `outcome` only says it never ran.
+   */
+  refused: 'refused',
+  /**
+   * Base of the Z.ai quota classification (#1301); the writer appends the
+   * documented business code, e.g. `provider quota exhausted (zai code
+   * 1308)`. The response body itself stays off the row.
+   */
+  providerQuotaExhausted: 'provider quota exhausted',
+  /**
+   * Base of the boot reaper's ending; the writer appends the explanation.
+   * Must keep the `reaped` prefix - queen-tick and queen-kanban match on it.
+   */
+  reapedAtBoot: 'reaped at boot',
+  /**
+   * Base of the stall reaper's ending; the writer appends the minute count.
+   * Must keep the `reaped` prefix - queen-tick and queen-kanban match on it.
+   */
+  reapedStalled: 'reaped',
+} as const
+
+/** One label from the set, as a type. */
+export type DispatchOutcomeLabel =
+  (typeof DISPATCH_OUTCOME_LABELS)[keyof typeof DISPATCH_OUTCOME_LABELS]
+
+/**
+ * #1360. The longest `outcome` this module may ever write. A named constant
+ * rather than a literal at each call site, so the column's contract is
+ * stated once and the audit tool can mirror one number. Every label above,
+ * and every parameterized extension of one, fits under it.
+ */
+export const DISPATCH_OUTCOME_MAX_LENGTH = 64
+
+/**
+ * The one place an outcome is bounded before it reaches a statement. A
+ * backstop, not the rule: the writers pass labels from the set above, and
+ * this exists so that no future caller can smuggle a payload through the
+ * column even by accident.
+ */
+function boundedOutcome(outcome: string): string {
+  return outcome.slice(0, DISPATCH_OUTCOME_MAX_LENGTH)
+}
+
+/**
  * Providers this deployment could use, in preference order, with the variable
  * that carries each one's key.
  *
@@ -576,6 +668,18 @@ class Scribe {
    */
   streamError: string | undefined
 
+  /**
+   * Whether the stream ever said it was done (#1360).
+   *
+   * A `finish` frame is the turn's own voice saying it ended - every path in
+   * acp-ui-message-stream.ts that closes a healthy stream enqueues one. A
+   * stream that closes WITHOUT one did not reach its own end, and nothing in
+   * it says why: that is the situation the three production rows of #1360
+   * were mislabelled about, and it is recorded as cause-undetermined rather
+   * than guessed at.
+   */
+  sawCompletion = false
+
   constructor(
     private pool: Pool,
     private conversationId: string,
@@ -616,6 +720,10 @@ class Scribe {
       return
     }
     const type = String(event.type ?? 'event')
+    // The completion frame is remembered before the NOISE filter drops it
+    // (#1360): `finish` carries nothing for a reader, but its PRESENCE is the
+    // difference between a turn that ended and a stream that merely stopped.
+    if (type === 'finish') this.sawCompletion = true
     if (Scribe.NOISE.has(type)) return
 
     const text =
@@ -799,7 +907,9 @@ export function classifyQuotaExhaustion(
   if (provider !== 'zai') return null
   for (const code of zaiCodesIn(errorText)) {
     if (ZAI_QUOTA_EXHAUSTED_CODES.has(code)) {
-      return `provider quota exhausted (zai code ${code})`
+      // The label base is enumerated with every other outcome (#1360); the
+      // code is the one closed parameter it may carry.
+      return `${DISPATCH_OUTCOME_LABELS.providerQuotaExhausted} (zai code ${code})`
     }
   }
   return null
@@ -855,12 +965,12 @@ export async function drain(
    */
   provider?: string,
 ): Promise<void> {
-  let outcome = 'finished'
+  let outcome: string = DISPATCH_OUTCOME_LABELS.finished
   const scribe = new Scribe(pool, conversationId, issue)
   try {
     const reader = response.body?.getReader()
     if (!reader) {
-      outcome = 'no stream'
+      outcome = DISPATCH_OUTCOME_LABELS.noStream
     } else {
       const decoder = new TextDecoder()
       let carry = ''
@@ -880,11 +990,20 @@ export async function drain(
     await scribe.flush()
     logger.info('Queen worker turn finished', { conversationId, issue })
   } catch (error) {
-    outcome = `stream ended badly: ${
+    // #1360: the label is closed and the words are kept, in the two places a
+    // reader already looks for them - the transcript row below (kind `error`,
+    // bounded by that table's own 8000-character column) and the log line,
+    // which is unbounded. `outcome` itself carries only the label.
+    outcome = DISPATCH_OUTCOME_LABELS.streamEndedBadly
+    const detail = `stream ended badly: ${
       error instanceof Error ? error.message : String(error)
     }`
-    logger.warn('Queen worker stream ended badly', { conversationId, issue })
-    await scribe.note('error', outcome).catch(() => {})
+    logger.warn('Queen worker stream ended badly', {
+      conversationId,
+      issue,
+      error: detail,
+    })
+    await scribe.note('error', detail).catch(() => {})
   }
   // A quota-limited bee stops truthfully (#1301). Coding Plan removed the
   // synthetic USD gate, so the provider's documented quota response is the
@@ -897,12 +1016,37 @@ export async function drain(
   // to end. The ended-badly path keeps its own outcome: a dropped connection
   // is a transport failure, not a documented provider answer.
   if (
-    outcome === 'finished' &&
+    outcome === DISPATCH_OUTCOME_LABELS.finished &&
     provider !== undefined &&
     scribe.streamError !== undefined
   ) {
     const quota = classifyQuotaExhaustion(provider, scribe.streamError)
     if (quota !== null) outcome = quota
+  }
+  // #1360. A stream that closed without ever signalling completion ended in a
+  // way nobody measured: something - a tool event, a truncation, anything -
+  // arrived where a completion was expected, and the stream's own words about
+  // why, if it had any, are in the transcript (every frame Scribe read is a
+  // row there; nothing was dropped). The ending says the cause is NOT
+  // DETERMINED. It does not say `provider refused`: that names a cause this
+  // code never measured, and a guessed cause is worse than an admitted gap.
+  //
+  // Quota classification above runs first, because a documented Z.ai quota
+  // code in a terminal error frame IS a measured cause and keeps its closed
+  // classification even when the completion frame that should have followed
+  // never came.
+  if (outcome === DISPATCH_OUTCOME_LABELS.finished && !scribe.sawCompletion) {
+    outcome = DISPATCH_OUTCOME_LABELS.endedUnexpectedly
+    logger.warn('Queen worker turn ended without a completion frame', {
+      conversationId,
+      issue,
+    })
+    await scribe
+      .note(
+        'error',
+        'stream closed without a completion frame; outcome recorded as cause undetermined',
+      )
+      .catch(() => {})
   }
   await closeDispatch(pool, issue, conversationId, outcome, scribe.tokens)
 }
@@ -1064,7 +1208,10 @@ export async function finishDispatch(
         AND ($5::text IS NULL OR conversation_id::text = $5::text)`,
     [
       issue,
-      outcome.slice(0, 500),
+      // #1360: bounded by the named cap, not a bare literal - and callers
+      // pass labels from DISPATCH_OUTCOME_LABELS, so this slice is a
+      // backstop for a future caller, not the rule.
+      boundedOutcome(outcome),
       tokens?.inputTokens ?? null,
       tokens?.outputTokens ?? null,
       conversationId ?? null,
@@ -1102,9 +1249,11 @@ export async function reapDispatchesFromPreviousBoot(
   pool: Pool,
 ): Promise<number[]> {
   const reaped = await pool.query(
+    // The label base is enumerated with every other outcome (#1360); the
+    // explanation is appended and the whole value stays under the cap.
     `UPDATE queen_dispatch
         SET finished_at = now(),
-            outcome = 'reaped at boot: the container running this turn was replaced'
+            outcome = '${DISPATCH_OUTCOME_LABELS.reapedAtBoot}: the container running this turn was replaced'
       WHERE started = true AND finished_at IS NULL
       RETURNING issue`,
   )
@@ -1116,9 +1265,12 @@ export async function reapStalledDispatches(
   stallMinutes = 120,
 ): Promise<number[]> {
   const reaped = await pool.query(
+    // The label base is enumerated with every other outcome (#1360); the
+    // minute count is the one closed parameter it carries, and the whole
+    // value stays under the cap for any sane bound.
     `UPDATE queen_dispatch
         SET finished_at = now(),
-            outcome = 'reaped: no completion within ' || $1 || ' minutes'
+            outcome = '${DISPATCH_OUTCOME_LABELS.reapedStalled}: no completion within ' || $1 || ' minutes'
       WHERE started = true
         AND finished_at IS NULL
         AND dispatched_at < now() - make_interval(mins => $1)
@@ -1277,6 +1429,17 @@ export async function recordDispatch(
   provider?: string,
   model?: string,
 ): Promise<void> {
+  // #1360. A dispatch that never started is recorded with its ending, and the
+  // ending is ONE WORD. It used to be the refusal detail verbatim, which is
+  // how a raw payload reached the `outcome` column: `detail` can carry an
+  // entire error body - an exception message has no length limit of its own -
+  // and anything that groups or renders `outcome` then received a blob.
+  // The full refusal words are not discarded: they move to (stay in) the
+  // `detail` column ($4 below), which is where a reader looks for the reason,
+  // and `outcome` says only that the dispatch refused to start.
+  const outcome = started
+    ? null
+    : boundedOutcome(DISPATCH_OUTCOME_LABELS.refused)
   // Keep the attempt this one replaces.
   //
   // `queen_dispatch` is keyed by issue alone, so the upsert below overwrites
@@ -1313,13 +1476,17 @@ export async function recordDispatch(
     // ending. Leaving `finished_at` null for a refusal would put it on the board
     // looking like work in progress - and "refused an hour ago" and "running for
     // an hour" are the two states an operator most needs to tell apart.
+    //
+    // #1360: the ending is the `refused` LABEL ($12), never the detail. The
+    // reason a reader wants is the `detail` column ($4); `outcome` is the
+    // short label everything else groups by.
     `INSERT INTO queen_dispatch
        (issue, branch, started, detail, owned_paths, conversation_id,
         dispatched_at, finished_at, outcome, key_index,
         criteria, criteria_source, provider, model)
      VALUES ($1, $2, $3, $4, $5::jsonb, $6, now(),
              CASE WHEN $3 THEN NULL ELSE now() END,
-             CASE WHEN $3 THEN NULL ELSE $4 END,
+             CASE WHEN $3 THEN NULL ELSE $12 END,
              $7, $8::jsonb, $9, $10, $11)
      ON CONFLICT (issue) DO UPDATE
        SET branch = EXCLUDED.branch,
@@ -1362,6 +1529,7 @@ export async function recordDispatch(
       criteriaSource,
       provider ?? null,
       model ?? null,
+      outcome,
     ],
   )
 }
