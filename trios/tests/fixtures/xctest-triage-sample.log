@@ -1,0 +1,329 @@
+Building for debugging...
+[3/7] Compiling TriosKit ModelHealthService.swift
+[5/7] Compiling TriosKit VaultAttachment.swift
+[7/7] Linking trios-tests
+Build complete! (3.412s)
+
+Test Suite 'All tests' started at 2025-11-24 10:14:01.208
+Test Suite 'trios-tests.xctest' started at 2025-11-24 10:14:01.209
+Test Suite 'LogsTabViewTests' started at 2025-11-24 10:14:01.215
+Test Case 'LogsTabViewTests.testFilterShowsErrors()' started at 2025-11-24 10:14:01.220
+/Users/ci/dev/trios/Tests/LogsTabViewTests.swift:41: error: LogsTabViewTests.testFilterShowsErrors() : XCTAssertEqual failed: ("12") is not equal to ("0") - error rows should be filtered out by default
+/Users/ci/dev/trios/Tests/LogsTabViewTests.swift:44: error: LogsTabViewTests.testFilterShowsErrors() : XCTAssertTrue failed - expected the toolbar badge to clear
+Test Case 'LogsTabViewTests.testFilterShowsErrors()' failed (0.311 seconds)
+Test Case 'LogsTabViewTests.testFilterShowsErrors()' failed (0.311 seconds)
+Test Case 'LogsTabViewTests.testFilterRespectsSearchTerm()' started at 2025-11-24 10:14:01.544
+/Users/ci/dev/trios/Tests/LogsTabViewTests.swift:52: error: LogsTabViewTests.testFilterRespectsSearchTerm() : XCTAssertTrue failed - search term "rotation" did not pin the matching row
+Test Case 'LogsTabViewTests.testFilterRespectsSearchTerm()' failed (0.098 seconds)
+Test Case 'LogsTabViewTests.testAutoscrollPinsToLatest()' started at 2025-11-24 10:14:01.651
+/Users/ci/dev/trios/Tests/LogsTabViewTests.swift:63: error: LogsTabViewTests.testAutoscrollPinsToLatest() : XCTAssertFalse failed - view scrolled away from the newest entry
+Test Case 'LogsTabViewTests.testAutoscrollPinsToLatest()' failed (0.087 seconds)
+Test Case 'LogsTabViewTests.testTailFollowsRotation()' started at 2025-11-24 10:14:01.742
+/Users/ci/dev/trios/Tests/LogsTabViewTests.swift:67: error: LogsTabViewTests.testTailFollowsRotation() : XCTAssertEqual failed: ("3") is not equal to ("1") - tail re-read more buffers than the rotation produced
+/Users/ci/dev/trios/Tests/LogsTabViewTests.swift:70: error: LogsTabViewTests.testTailFollowsRotation() : XCTAssertLessThan failed: ("2.5") is not less than ("1.0")
+Test Case 'LogsTabViewTests.testTailFollowsRotation()' failed (0.204 seconds)
+Test Case 'LogsTabViewTests.testRotationClearsBackpressure()' started at 2025-11-24 10:14:01.951
+/Users/ci/dev/trios/Tests/LogsTabViewTests.swift:78: error: LogsTabViewTests.testRotationClearsBackpressure() : XCTAssertNil failed: "backlog(2048)" - backpressure should clear after rotation
+Test Case 'LogsTabViewTests.testRotationClearsBackpressure()' failed (0.156 seconds)
+Test Case 'LogsTabViewTests.testBackpressureBannerAppears()' started at 2025-11-24 10:14:02.112
+/Users/ci/dev/trios/Tests/LogsTabViewTests.swift:82: error: LogsTabViewTests.testBackpressureBannerAppears() : XCTAssertTrue failed - banner stayed hidden at 10k buffered lines
+/Users/ci/dev/trios/Tests/LogsTabViewTests.swift:85: error: LogsTabViewTests.testBackpressureBannerAppears() : XCTAssertEqual failed: ("0") is not equal to ("1")
+Test Case 'LogsTabViewTests.testBackpressureBannerAppears()' failed (0.289 seconds)
+Test Case 'LogsTabViewTests.testPauseDuringRotationKeepsBuffer()' started at 2025-11-24 10:14:02.406
+/Users/ci/dev/trios/Tests/LogsTabViewTests.swift:95: error: LogsTabViewTests.testPauseDuringRotationKeepsBuffer() : XCTAssertEqual failed: ("0") is not equal to ("512") - pause dropped the buffer mid-rotation
+Test Case 'LogsTabViewTests.testPauseDuringRotationKeepsBuffer()' failed (0.133 seconds)
+Test Case 'LogsTabViewTests.testResumeFlushesBufferedLines()' started at 2025-11-24 10:14:02.542
+/Users/ci/dev/trios/Tests/LogsTabViewTests.swift:103: error: LogsTabViewTests.testResumeFlushesBufferedLines() : XCTAssertTrue failed - resume dropped buffered lines
+Test Case 'LogsTabViewTests.testResumeFlushesBufferedLines()' failed (0.142 seconds)
+Test Case 'LogsTabViewTests.testCorruptedLineIsSkipped()' started at 2025-11-24 10:14:02.687
+/Users/ci/dev/trios/Tests/LogsTabViewTests.swift:118: error: LogsTabViewTests.testCorruptedLineIsSkipped() : XCTAssertEqual failed: ("nil") is not equal to ("Optional(row)"),
+Test Case 'LogsTabViewTests.testCorruptedLineIsSkipped()' failed (0.091 seconds)
+Test Case 'LogsTabViewTests.testUnicodeWidthMeasuredCorrectly()' started at 2025-11-24 10:14:02.781
+/Users/ci/dev/trios/Tests/LogsTabViewTests.swift:122: error: LogsTabViewTests.testUnicodeWidthMeasuredCorrectly() : XCTAssertEqual failed: ("13") is not equal to ("11") - combining marks miscounted
+/Users/ci/dev/trios/Tests/LogsTabViewTests.swift:125: error: LogsTabViewTests.testUnicodeWidthMeasuredCorrectly() : XCTAssertGreaterThan failed: ("3") is not greater than ("3"),
+Test Case 'LogsTabViewTests.testUnicodeWidthMeasuredCorrectly()' failed (0.166 seconds)
+Test Case 'LogsTabViewTests.testLargePayloadTruncates()' started at 2025-11-24 10:14:02.950
+/Users/ci/dev/trios/Tests/LogsTabViewTests.swift:130: error: LogsTabViewTests.testLargePayloadTruncates() : XCTAssertLessThanOrEqual failed: ("20000") is not less than or equal to ("4096")
+Test Case 'LogsTabViewTests.testLargePayloadTruncates()' failed (0.318 seconds)
+Test Case 'LogsTabViewTests.testTimestampToggleApplies()' started at 2025-11-24 10:14:03.271
+/Users/ci/dev/trios/Tests/LogsTabViewTests.swift:141: error: LogsTabViewTests.testTimestampToggleApplies() : XCTAssertTrue failed - timestamps still rendered after toggle off
+Test Case 'LogsTabViewTests.testTimestampToggleApplies()' failed (0.075 seconds)
+Test Case 'LogsTabViewTests.testEmptyStateShown()' started at 2025-11-24 10:14:03.349
+Test Case 'LogsTabViewTests.testEmptyStateShown()' passed (0.021 seconds)
+Test Case 'LogsTabViewTests.testCopyButtonCopiesSelection()' started at 2025-11-24 10:14:03.372
+Test Case 'LogsTabViewTests.testCopyButtonCopiesSelection()' passed (0.030 seconds)
+Test Suite 'LogsTabViewTests' failed at 2025-11-24 10:14:03.902.
+	 Executed 14 tests, with 16 failures (0 unexpected) in 1.694 seconds
+Test Suite 'LocalAuthProviderTests' started at 2025-11-24 10:14:03.905
+Test Case 'LocalAuthProviderTests.testLoginPersistsSession()' started at 2025-11-24 10:14:03.911
+/Users/ci/dev/trios/Tests/LocalAuthProviderTests.swift:34: error: LocalAuthProviderTests.testLoginPersistsSession() : XCTAssertNotNil failed - session missing after successful login
+Test Case 'LocalAuthProviderTests.testLoginPersistsSession()' failed (0.124 seconds)
+Test Case 'LocalAuthProviderTests.testSessionRefreshOnExpiry()' started at 2025-11-24 10:14:04.040
+/Users/ci/dev/trios/Tests/LocalAuthProviderTests.swift:51: error: LocalAuthProviderTests.testSessionRefreshOnExpiry() : XCTAssertTrue failed - expired session was not refreshed
+Test Case 'LocalAuthProviderTests.testSessionRefreshOnExpiry()' failed (0.187 seconds)
+Test Case 'LocalAuthProviderTests.testLogoutClearsKeychain()' started at 2025-11-24 10:14:04.232
+/Users/ci/dev/trios/Tests/LocalAuthProviderTests.swift:66: error: LocalAuthProviderTests.testLogoutClearsKeychain() : XCTAssertNil failed: "auth-token",
+Test Case 'LocalAuthProviderTests.testLogoutClearsKeychain()' failed (0.063 seconds)
+Test Case 'LocalAuthProviderTests.testKeychainReadFailureSurfaces()' started at 2025-11-24 10:14:04.298
+/Users/ci/dev/trios/Tests/LocalAuthProviderTests.swift:79: error: LocalAuthProviderTests.testKeychainReadFailureSurfaces() : XCTAssertTrue failed - errSecItemNotFound swallowed as a clean logout
+/Users/ci/dev/trios/Tests/LocalAuthProviderTests.swift:82: error: LocalAuthProviderTests.testKeychainReadFailureSurfaces() : XCTAssertEqual failed: ("none") is not equal to ("keychain")
+Test Case 'LocalAuthProviderTests.testKeychainReadFailureSurfaces()' failed (0.142 seconds)
+Test Case 'LocalAuthProviderTests.testTokenExchangeRejectsStaleNonce()' started at 2025-11-24 10:14:04.443
+/Users/ci/dev/trios/Tests/LocalAuthProviderTests.swift:94: error: LocalAuthProviderTests.testTokenExchangeRejectsStaleNonce() : XCTAssertThrowsError failed - stale nonce accepted,
+Test Case 'LocalAuthProviderTests.testTokenExchangeRejectsStaleNonce()' failed (0.108 seconds)
+Test Case 'LocalAuthProviderTests.testPKCEVerifierRoundTrips()' started at 2025-11-24 10:14:04.555
+/Users/ci/dev/trios/Tests/LocalAuthProviderTests.swift:107: error: LocalAuthProviderTests.testPKCEVerifierRoundTrips() : XCTAssertEqual failed: ("42") is not equal to ("43")
+Test Case 'LocalAuthProviderTests.testPKCEVerifierRoundTrips()' failed (0.096 seconds)
+Test Case 'LocalAuthProviderTests.testExpiredRefreshTokenForcesRelogin()' started at 2025-11-24 10:14:04.654
+/Users/ci/dev/trios/Tests/LocalAuthProviderTests.swift:121: error: LocalAuthProviderTests.testExpiredRefreshTokenForcesRelogin() : XCTAssertTrue failed - stale refresh token kept the dead session alive
+/Users/ci/dev/trios/Tests/LocalAuthProviderTests.swift:124: error: LocalAuthProviderTests.testExpiredRefreshTokenForcesRelogin() : XCTAssertEqual failed: ("cached") is not equal to ("relogin")
+Test Case 'LocalAuthProviderTests.testExpiredRefreshTokenForcesRelogin()' failed (0.231 seconds)
+Test Case 'LocalAuthProviderTests.testConcurrentLoginsSerialize()' started at 2025-11-24 10:14:04.888
+/Users/ci/dev/trios/Tests/LocalAuthProviderTests.swift:139: error: LocalAuthProviderTests.testConcurrentLoginsSerialize() : XCTAssertLessThanOrEqual failed: ("2") is not less than or equal to ("1") - two keychain writers overlapped
+Test Case 'LocalAuthProviderTests.testConcurrentLoginsSerialize()' failed (0.356 seconds)
+Test Case 'LocalAuthProviderTests.testClockSkewTolerated()' started at 2025-11-24 10:14:05.247
+/Users/ci/dev/trios/Tests/LocalAuthProviderTests.swift:152: error: LocalAuthProviderTests.testClockSkewTolerated() : XCTAssertTrue failed - 90s server skew rejected a fresh token
+/Users/ci/dev/trios/Tests/LocalAuthProviderTests.swift:155: error: LocalAuthProviderTests.testClockSkewTolerated() : XCTAssertEqual failed: ("rejected") is not equal to ("accepted")
+Test Case 'LocalAuthProviderTests.testClockSkewTolerated()' failed (0.173 seconds)
+Test Case 'LocalAuthProviderTests.testValidSessionRecognized()' started at 2025-11-24 10:14:05.424
+Test Case 'LocalAuthProviderTests.testValidSessionRecognized()' passed (0.044 seconds)
+Test Suite 'LocalAuthProviderTests' failed at 2025-11-24 10:14:05.471.
+	 Executed 10 tests, with 12 failures (0 unexpected) in 1.566 seconds
+Test Suite 'ModelHealthServiceTests' started at 2025-11-24 10:14:05.474
+Test Case 'ModelHealthServiceTests.testHealthReportAggregates()' started at 2025-11-24 10:14:05.480
+/Users/ci/dev/trios/Tests/ModelHealthServiceTests.swift:29: error: ModelHealthServiceTests.testHealthReportAggregates() : XCTAssertEqual failed: ("unknown") is not equal to ("degraded")
+Test Case 'ModelHealthServiceTests.testHealthReportAggregates()' failed (0.093 seconds)
+Test Case 'ModelHealthServiceTests.testColdStartUnderBudget()' started at 2025-11-24 10:14:05.576
+/Users/ci/dev/trios/Tests/ModelHealthServiceTests.swift:41: error: ModelHealthServiceTests.testColdStartUnderBudget() : XCTAssertLessThan failed: ("2.9") is not less than ("2.0")
+/Users/ci/dev/trios/Tests/ModelHealthServiceTests.swift:44: error: ModelHealthServiceTests.testColdStartUnderBudget() : XCTAssertTrue failed - budget exceeded on the second cold start too
+Test Case 'ModelHealthServiceTests.testColdStartUnderBudget()' failed (0.298 seconds)
+Test Case 'ModelHealthServiceTests.testWarmupCompletesWithinLimit()' started at 2025-11-24 10:14:05.877
+/Users/ci/dev/trios/Tests/ModelHealthServiceTests.swift:57: error: ModelHealthServiceTests.testWarmupCompletesWithinLimit() : XCTAssertLessThanOrEqual failed: ("6.0") is not less than or equal to ("5.0")
+Test Case 'ModelHealthServiceTests.testWarmupCompletesWithinLimit()' failed (0.221 seconds)
+Test Case 'ModelHealthServiceTests.testOOMResetsHealth()' started at 2025-11-24 10:14:06.101
+/Users/ci/dev/trios/Tests/ModelHealthServiceTests.swift:70: error: ModelHealthServiceTests.testOOMResetsHealth() : XCTAssertEqual failed: ("healthy") is not equal to ("recovering") - OOM left the gauge untouched
+/Users/ci/dev/trios/Tests/ModelHealthServiceTests.swift:73: error: ModelHealthServiceTests.testOOMResetsHealth() : XCTAssertTrue failed - health did not re-probe after OOM
+Test Case 'ModelHealthServiceTests.testOOMResetsHealth()' failed (0.264 seconds)
+Test Case 'ModelHealthServiceTests.testDiskPressureDegrades()' started at 2025-11-24 10:14:06.368
+/Users/ci/dev/trios/Tests/ModelHealthServiceTests.swift:85: error: ModelHealthServiceTests.testDiskPressureDegrades() : XCTAssertFalse failed - service reported full health at 98% disk
+/Users/ci/dev/trios/Tests/ModelHealthServiceTests.swift:88: error: ModelHealthServiceTests.testDiskPressureDegrades() : XCTAssertEqual failed: ("full") is not equal to ("degraded")
+Test Case 'ModelHealthServiceTests.testDiskPressureDegrades()' failed (0.203 seconds)
+Test Case 'ModelHealthServiceTests.testStaleMetricsExpire()' started at 2025-11-24 10:14:06.574
+/Users/ci/dev/trios/Tests/ModelHealthServiceTests.swift:101: error: ModelHealthServiceTests.testStaleMetricsExpire() : XCTAssertNil failed: "metric(age: 900s)",
+Test Case 'ModelHealthServiceTests.testStaleMetricsExpire()' failed (0.081 seconds)
+Test Case 'ModelHealthServiceTests.testHealthGaugePublishes()' started at 2025-11-24 10:14:06.658
+/Users/ci/dev/trios/Tests/ModelHealthServiceTests.swift:114: error: ModelHealthServiceTests.testHealthGaugePublishes() : XCTAssertNotNil failed - gauge never published
+Test Case 'ModelHealthServiceTests.testHealthGaugePublishes()' failed (0.117 seconds)
+Test Case 'ModelHealthServiceTests.testRecoveryAfterRestart()' started at 2025-11-24 10:14:06.778
+/Users/ci/dev/trios/Tests/ModelHealthServiceTests.swift:128: error: ModelHealthServiceTests.testRecoveryAfterRestart() : XCTAssertEqual failed: ("1") is not equal to ("0") - recovery counter survived the restart
+/Users/ci/dev/trios/Tests/ModelHealthServiceTests.swift:131: error: ModelHealthServiceTests.testRecoveryAfterRestart() : XCTAssertTrue failed - recovery did not re-warm the model
+Test Case 'ModelHealthServiceTests.testRecoveryAfterRestart()' failed (0.286 seconds)
+Test Case 'ModelHealthServiceTests.testHealthStartsNeutral()' started at 2025-11-24 10:14:07.066
+Test Case 'ModelHealthServiceTests.testHealthStartsNeutral()' passed (0.037 seconds)
+Test Suite 'ModelHealthServiceTests' failed at 2025-11-24 10:14:07.104.
+	 Executed 9 tests, with 12 failures (0 unexpected) in 1.630 seconds
+Test Suite 'ChatFailureTests' started at 2025-11-24 10:14:07.107
+Test Case 'ChatFailureTests.testNetworkErrorRetries()' started at 2025-11-24 10:14:07.113
+/Users/ci/dev/trios/Tests/ChatFailureTests.swift:31: error: ChatFailureTests.testNetworkErrorRetries() : XCTAssertEqual failed: ("1") is not equal to ("3") - retried once, expected three attempts
+Test Case 'ChatFailureTests.testNetworkErrorRetries()' failed (0.151 seconds)
+Test Case 'ChatFailureTests.testRateLimitBacksOff()' started at 2025-11-24 10:14:07.267
+/Users/ci/dev/trios/Tests/ChatFailureTests.swift:45: error: ChatFailureTests.testRateLimitBacksOff() : XCTAssertGreaterThan failed: ("0.5") is not greater than ("1.0") - backoff did not grow
+/Users/ci/dev/trios/Tests/ChatFailureTests.swift:48: error: ChatFailureTests.testRateLimitBacksOff() : XCTAssertTrue failed - retry fired immediately after a 429
+Test Case 'ChatFailureTests.testRateLimitBacksOff()' failed (0.234 seconds)
+Test Case 'ChatFailureTests.testMalformedStreamFailsFast()' started at 2025-11-24 10:14:07.503
+/Users/ci/dev/trios/Tests/ChatFailureTests.swift:62: error: ChatFailureTests.testMalformedStreamFailsFast() : XCTAssertThrowsError failed - malformed SSE payload accepted,
+/Users/ci/dev/trios/Tests/ChatFailureTests.swift:96: error: ChatFailureTests.testMalformedStreamFailsFast() : XCTFail failed - parser accepted a payload containing the literal string "Test Case 'ChatFailureTests.testParserNeverAcceptedThis()' failed" and must not
+Test Case 'ChatFailureTests.testMalformedStreamFailsFast()' failed (0.312 seconds)
+Test Case 'ChatFailureTests.testPartialResponsePreserved()' started at 2025-11-24 10:14:07.818
+/Users/ci/dev/trios/Tests/ChatFailureTests.swift:75: error: ChatFailureTests.testPartialResponsePreserved() : XCTAssertEqual failed: ("0") is not equal to ("2") - partial messages dropped on abort
+Test Case 'ChatFailureTests.testPartialResponsePreserved()' failed (0.129 seconds)
+Test Case 'ChatFailureTests.testUserCancelStopsRetries()' started at 2025-11-24 10:14:07.950
+/Users/ci/dev/trios/Tests/ChatFailureTests.swift:89: error: ChatFailureTests.testUserCancelStopsRetries() : XCTAssertFalse failed - retry loop continued after user cancel
+Test Case 'ChatFailureTests.testUserCancelStopsRetries()' failed (0.144 seconds)
+Test Case 'ChatFailureTests.testSuccessPathDeliversMessage()' started at 2025-11-24 10:14:08.096
+Test Case 'ChatFailureTests.testSuccessPathDeliversMessage()' passed (0.058 seconds)
+Test Suite 'ChatFailureTests' failed at 2025-11-24 10:14:08.155.
+	 Executed 6 tests, with 7 failures (0 unexpected) in 1.048 seconds
+Test Suite 'ModelConfigurationStoreCrossProviderTests' started at 2025-11-24 10:14:08.158
+Test Case 'ModelConfigurationStoreCrossProviderTests.testSwitchProviderKeepsOverrides()' started at 2025-11-24 10:14:08.163
+/Users/ci/dev/trios/Tests/ModelConfigurationStoreCrossProviderTests.swift:38: error: ModelConfigurationStoreCrossProviderTests.testSwitchProviderKeepsOverrides() : XCTAssertEqual failed: ("defaults") is not equal to ("overrides") - switching providers reset top_k
+Test Case 'ModelConfigurationStoreCrossProviderTests.testSwitchProviderKeepsOverrides()' failed (0.137 seconds)
+Test Case 'ModelConfigurationStoreCrossProviderTests.testCrossProviderMigrations()' started at 2025-11-24 10:14:08.303
+/Users/ci/dev/trios/Tests/ModelConfigurationStoreCrossProviderTests.swift:52: error: ModelConfigurationStoreCrossProviderTests.testCrossProviderMigrations() : XCTAssertNil failed: "field(provider: anthropic, key: top_k)" - field should have migrated to the openai profile
+/Users/ci/dev/trios/Tests/ModelConfigurationStoreCrossProviderTests.swift:55: error: ModelConfigurationStoreCrossProviderTests.testCrossProviderMigrations() : XCTAssertEqual failed: ("4") is not equal to ("5") - one provider profile lost in migration
+Test Case 'ModelConfigurationStoreCrossProviderTests.testCrossProviderMigrations()' failed (0.259 seconds)
+Test Case 'ModelConfigurationStoreCrossProviderTests.testDuplicateProviderNamesRejected()' started at 2025-11-24 10:14:08.565
+/Users/ci/dev/trios/Tests/ModelConfigurationStoreCrossProviderTests.swift:69: error: ModelConfigurationStoreCrossProviderTests.testDuplicateProviderNamesRejected() : XCTAssertThrowsError failed - duplicate provider name accepted
+/Users/ci/dev/trios/Tests/ModelConfigurationStoreCrossProviderTests.swift:72: error: ModelConfigurationStoreCrossProviderTests.testDuplicateProviderNamesRejected() : XCTAssertEqual failed: ("2") is not equal to ("1") - duplicate persisted
+Test Case 'ModelConfigurationStoreCrossProviderTests.testDuplicateProviderNamesRejected()' failed (0.166 seconds)
+Test Case 'ModelConfigurationStoreCrossProviderTests.testDefaultsSurviveRoundTrip()' started at 2025-11-24 10:14:08.733
+/Users/ci/dev/trios/Tests/ModelConfigurationStoreCrossProviderTests.swift:87: error: ModelConfigurationStoreCrossProviderTests.testDefaultsSurviveRoundTrip() : XCTAssertEqual failed: ("0.5") is not equal to ("0.7") - temperature drifted through codable round trip
+Test Case 'ModelConfigurationStoreCrossProviderTests.testDefaultsSurviveRoundTrip()' failed (0.112 seconds)
+Test Case 'ModelConfigurationStoreCrossProviderTests.testListProvidersSorted()' started at 2025-11-24 10:14:08.847
+Test Case 'ModelConfigurationStoreCrossProviderTests.testListProvidersSorted()' passed (0.029 seconds)
+Test Suite 'ModelConfigurationStoreCrossProviderTests' failed at 2025-11-24 10:14:08.877.
+	 Executed 5 tests, with 6 failures (0 unexpected) in 0.719 seconds
+Test Suite 'WarmupVolatilityTrackerTests' started at 2025-11-24 10:14:08.880
+Test Case 'WarmupVolatilityTrackerTests.testVarianceWithinBounds()' started at 2025-11-24 10:14:08.885
+/Users/ci/dev/trios/Tests/WarmupVolatilityTrackerTests.swift:26: error: WarmupVolatilityTrackerTests.testVarianceWithinBounds() : XCTAssertLessThan failed: ("3.2") is not less than ("2.0") - warmup variance out of budget
+Test Case 'WarmupVolatilityTrackerTests.testVarianceWithinBounds()' failed (0.098 seconds)
+Test Case 'WarmupVolatilityTrackerTests.testOutlierWarmupsFlagged()' started at 2025-11-24 10:14:08.986
+/Users/ci/dev/trios/Tests/WarmupVolatilityTrackerTests.swift:39: error: WarmupVolatilityTrackerTests.testOutlierWarmupsFlagged() : XCTAssertEqual failed: ("0") is not equal to ("2") - two 8s outliers not flagged
+/Users/ci/dev/trios/Tests/WarmupVolatilityTrackerTests.swift:42: error: WarmupVolatilityTrackerTests.testOutlierWarmupsFlagged() : XCTAssertTrue failed - outliers silently folded into the rolling mean
+Test Case 'WarmupVolatilityTrackerTests.testOutlierWarmupsFlagged()' failed (0.147 seconds)
+Test Case 'WarmupVolatilityTrackerTests.testRollingWindowEvicts()' started at 2025-11-24 10:14:09.135
+/Users/ci/dev/trios/Tests/WarmupVolatilityTrackerTests.swift:55: error: WarmupVolatilityTrackerTests.testRollingWindowEvicts() : XCTAssertEqual failed: ("21") is not equal to ("20") - window never evicted
+Test Case 'WarmupVolatilityTrackerTests.testRollingWindowEvicts()' failed (0.089 seconds)
+Test Case 'WarmupVolatilityTrackerTests.testEmptyTrackerReportsZero()' started at 2025-11-24 10:14:09.226
+Test Case 'WarmupVolatilityTrackerTests.testEmptyTrackerReportsZero()' passed (0.019 seconds)
+Test Suite 'WarmupVolatilityTrackerTests' failed at 2025-11-24 10:14:09.246.
+	 Executed 4 tests, with 4 failures (0 unexpected) in 0.354 seconds
+Test Suite 'MemoryStoreFTSTests' started at 2025-11-24 10:14:09.249
+Test Case 'MemoryStoreFTSTests.testPhraseQueryMatches()' started at 2025-11-24 10:14:09.254
+/Users/ci/dev/trios/Tests/MemoryStoreFTSTests.swift:33: error: MemoryStoreFTSTests.testPhraseQueryMatches() : XCTAssertTrue failed - quoted phrase did not match
+Test Case 'MemoryStoreFTSTests.testPhraseQueryMatches()' failed (0.121 seconds)
+Test Case 'MemoryStoreFTSTests.testRankingPrefersRecency()' started at 2025-11-24 10:14:09.377
+/Users/ci/dev/trios/Tests/MemoryStoreFTSTests.swift:47: error: MemoryStoreFTSTests.testRankingPrefersRecency() : XCTAssertGreaterThan failed: ("0") is not greater than ("0") - rank tie between old and new hit
+/Users/ci/dev/trios/Tests/MemoryStoreFTSTests.swift:50: error: MemoryStoreFTSTests.testRankingPrefersRecency() : XCTAssertEqual failed: ("[old, new]") is not equal to ("[new, old]"),
+Test Case 'MemoryStoreFTSTests.testRankingPrefersRecency()' failed (0.184 seconds)
+Test Case 'MemoryStoreFTSTests.testUnicodeTokenization()' started at 2025-11-24 10:14:09.563
+/Users/ci/dev/trios/Tests/MemoryStoreFTSTests.swift:63: error: MemoryStoreFTSTests.testUnicodeTokenization() : XCTAssertEqual failed: ("1") is not equal to ("3") - CJK string tokenized as one blob
+Test Case 'MemoryStoreFTSTests.testUnicodeTokenization()' failed (0.106 seconds)
+Test Case 'MemoryStoreFTSTests.testExactMatchHighlights()' started at 2025-11-24 10:14:09.671
+Test Case 'MemoryStoreFTSTests.testExactMatchHighlights()' passed (0.033 seconds)
+Test Suite 'MemoryStoreFTSTests' failed at 2025-11-24 10:14:09.705.
+	 Executed 4 tests, with 4 failures (0 unexpected) in 0.456 seconds
+Test Suite 'StreamingContextWatchdogTests' started at 2025-11-24 10:14:09.708
+Test Case 'StreamingContextWatchdogTests.testStallDetectsAfterTimeout()' started at 2025-11-24 10:14:09.713
+/Users/ci/dev/trios/Tests/StreamingContextWatchdogTests.swift:24: error: StreamingContextWatchdogTests.testStallDetectsAfterTimeout() : XCTAssertTrue failed - stall not detected after 2x timeout
+/Users/ci/dev/trios/Tests/StreamingContextWatchdogTests.swift:27: error: StreamingContextWatchdogTests.testStallDetectsAfterTimeout() : XCTAssertEqual failed: ("none") is not equal to ("stall"),
+Test Case 'StreamingContextWatchdogTests.testStallDetectsAfterTimeout()' failed (0.218 seconds)
+Test Case 'StreamingContextWatchdogTests.testWatchdogReleasesOnProgress()' started at 2025-11-24 10:14:09.934
+/Users/ci/dev/trios/Tests/StreamingContextWatchdogTests.swift:41: error: StreamingContextWatchdogTests.testWatchdogReleasesOnProgress() : XCTAssertNil failed: "watchdog(armed)" - watchdog stayed armed after progress
+Test Case 'StreamingContextWatchdogTests.testWatchdogReleasesOnProgress()' failed (0.163 seconds)
+Test Case 'StreamingContextWatchdogTests.testWatchdogSilentWhenHealthy()' started at 2025-11-24 10:14:10.099
+Test Case 'StreamingContextWatchdogTests.testWatchdogSilentWhenHealthy()' passed (0.087 seconds)
+Test Suite 'StreamingContextWatchdogTests' failed at 2025-11-24 10:14:10.187.
+	 Executed 3 tests, with 3 failures (0 unexpected) in 0.479 seconds
+Test Suite 'ConversationEncryptionTests' started at 2025-11-24 10:14:10.190
+Test Case 'ConversationEncryptionTests.testRoundTripRestoresPlaintext()' started at 2025-11-24 10:14:10.195
+/Users/ci/dev/trios/Tests/ConversationEncryptionTests.swift:30: error: ConversationEncryptionTests.testRoundTripRestoresPlaintext() : XCTAssertEqual failed: ("gAAAAABg...") is not equal to ("hello") - decrypt returned ciphertext
+Test Case 'ConversationEncryptionTests.testRoundTripRestoresPlaintext()' failed (0.195 seconds)
+Test Case 'ConversationEncryptionTests.testTamperedCiphertextRejected()' started at 2025-11-24 10:14:10.392
+/Users/ci/dev/trios/Tests/ConversationEncryptionTests.swift:44: error: ConversationEncryptionTests.testTamperedCiphertextRejected() : XCTAssertThrowsError failed - tampered payload decrypted without error,
+Test Case 'ConversationEncryptionTests.testTamperedCiphertextRejected()' failed (0.142 seconds)
+Test Case 'ConversationEncryptionTests.testKeyRotationKeepsHistory()' started at 2025-11-24 10:14:10.536
+Test Case 'ConversationEncryptionTests.testKeyRotationKeepsHistory()' passed (0.176 seconds)
+Test Suite 'ConversationEncryptionTests' failed at 2025-11-24 10:14:10.713.
+	 Executed 3 tests, with 2 failures (0 unexpected) in 0.513 seconds
+Test Suite 'KeychainMigrationTests' started at 2025-11-24 10:14:10.716
+Test Case 'KeychainMigrationTests.testLegacyBlobMigrates()' started at 2025-11-24 10:14:10.721
+/Users/ci/dev/trios/Tests/KeychainMigrationTests.swift:36: error: KeychainMigrationTests.testLegacyBlobMigrates() : XCTAssertEqual failed: ("0") is not equal to ("7") - legacy items left behind
+Test Case 'KeychainMigrationTests.testLegacyBlobMigrates()' failed (0.208 seconds)
+Test Case 'KeychainMigrationTests.testMigrationIdempotent()' started at 2025-11-24 10:14:10.932
+/Users/ci/dev/trios/Tests/KeychainMigrationTests.swift:49: error: KeychainMigrationTests.testMigrationIdempotent() : XCTAssertEqual failed: ("14") is not equal to ("7") - migration duplicated every item
+Test Case 'KeychainMigrationTests.testMigrationIdempotent()' failed (0.171 seconds)
+Test Case 'KeychainMigrationTests.testPartialMigrationRecovers()' started at 2025-11-24 10:14:11.105
+/Users/ci/dev/trios/Tests/KeychainMigrationTests.swift:63: error: KeychainMigrationTests.testPartialMigrationRecovers() : XCTAssertTrue failed - corrupt legacy entry aborted the whole migration
+/Users/ci/dev/trios/Tests/KeychainMigrationTests.swift:66: error: KeychainMigrationTests.testPartialMigrationRecovers() : XCTAssertEqual failed: ("corrupt") is not equal to ("recovered"),
+Test Case 'KeychainMigrationTests.testPartialMigrationRecovers()' failed (0.296 seconds)
+Test Case 'KeychainMigrationTests.testMissingLegacyIgnored()' started at 2025-11-24 10:14:11.403
+/Users/ci/dev/trios/Tests/KeychainMigrationTests.swift:78: error: KeychainMigrationTests.testMissingLegacyIgnored() : XCTAssertNil failed: "legacy-ref" - migration invented a legacy reference,
+Test Case 'KeychainMigrationTests.testMissingLegacyIgnored()' failed (0.087 seconds)
+Test Case 'KeychainMigrationTests.testAccessGroupsPreserved()' started at 2025-11-24 10:14:11.492
+/Users/ci/dev/trios/Tests/KeychainMigrationTests.swift:92: error: KeychainMigrationTests.testAccessGroupsPreserved() : XCTAssertEqual failed: ("team.A") is not equal to ("team.A.team.B") - secondary access group dropped
+/Users/ci/dev/trios/Tests/KeychainMigrationTests.swift:95: error: KeychainMigrationTests.testAccessGroupsPreserved() : XCTAssertTrue failed - migrated item invisible to the app extension
+Test Case 'KeychainMigrationTests.testAccessGroupsPreserved()' failed (0.242 seconds)
+Test Case 'KeychainMigrationTests.testDeviceOnlyAttributesSet()' started at 2025-11-24 10:14:11.736
+/Users/ci/dev/trios/Tests/KeychainMigrationTests.swift:109: error: KeychainMigrationTests.testDeviceOnlyAttributesSet() : XCTAssertTrue failed - item migrated without kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+Test Case 'KeychainMigrationTests.testDeviceOnlyAttributesSet()' failed (0.134 seconds)
+Test Case 'KeychainMigrationTests.testMigrationRollsBackOnError()' started at 2025-11-24 10:14:11.872
+/Users/ci/dev/trios/Tests/KeychainMigrationTests.swift:123: error: KeychainMigrationTests.testMigrationRollsBackOnError() : XCTAssertEqual failed: ("7") is not equal to ("0") - rollback left migrated items in place
+/Users/ci/dev/trios/Tests/KeychainMigrationTests.swift:126: error: KeychainMigrationTests.testMigrationRollsBackOnError() : XCTAssertNotNil failed - rollback audit entry missing,
+Test Case 'KeychainMigrationTests.testMigrationRollsBackOnError()' failed (0.263 seconds)
+Test Case 'KeychainMigrationTests.testConcurrentMigrationSafe()' started at 2025-11-24 10:14:12.137
+/Users/ci/dev/trios/Tests/KeychainMigrationTests.swift:140: error: KeychainMigrationTests.testConcurrentMigrationSafe() : XCTAssertLessThanOrEqual failed: ("2") is not less than or equal to ("1") - two migrators ran at once
+/Users/ci/dev/trios/Tests/KeychainMigrationTests.swift:143: error: KeychainMigrationTests.testConcurrentMigrationSafe() : XCTAssertTrue failed - duplicate item created by the second migrator,
+Test Case 'KeychainMigrationTests.testConcurrentMigrationSafe()' failed (0.311 seconds)
+Test Case 'KeychainMigrationTests.testLargeBlobMigrates()' started at 2025-11-24 10:14:12.451
+/Users/ci/dev/trios/Tests/KeychainMigrationTests.swift:157: error: KeychainMigrationTests.testLargeBlobMigrates() : XCTAssertLessThan failed: ("61.0") is not less than ("60.0") - large blob blew the migration budget
+/Users/ci/dev/trios/Tests/KeychainMigrationTests.swift:160: error: KeychainMigrationTests.testLargeBlobMigrates() : XCTAssertEqual failed: ("partial") is not equal to ("complete"),
+Test Case 'KeychainMigrationTests.testLargeBlobMigrates()' failed (0.402 seconds)
+Test Case 'KeychainMigrationTests.testMigrationAuditLogged()' started at 2025-11-24 10:14:12.854
+/Users/ci/dev/trios/Tests/KeychainMigrationTests.swift:173: error: KeychainMigrationTests.testMigrationAuditLogged() : XCTAssertNotNil failed - audit entry never written,
+Test Case 'KeychainMigrationTests.testMigrationAuditLogged()' failed (0.109 seconds)
+Test Case 'KeychainMigrationTests.testPostMigrationReadsWork()' started at 2025-11-24 10:14:12.964
+/Users/ci/dev/trios/Tests/KeychainMigrationTests.swift:186: error: KeychainMigrationTests.testPostMigrationReadsWork() : XCTAssertEqual failed: ("nil") is not equal to ("value") - post-migration read returned nothing
+Test Case 'KeychainMigrationTests.testPostMigrationReadsWork()' failed (0.127 seconds)
+Test Case 'KeychainMigrationTests.testFreshInstallNeedsNoMigration()' started at 2025-11-24 10:14:13.092
+Test Case 'KeychainMigrationTests.testFreshInstallNeedsNoMigration()' passed (0.031 seconds)
+Test Case 'KeychainMigrationTests.testLegacyAbsentNoop()' started at 2025-11-24 10:14:13.124
+Test Case 'KeychainMigrationTests.testLegacyAbsentNoop()' passed (0.026 seconds)
+Test Suite 'KeychainMigrationTests' failed at 2025-11-24 10:14:13.151.
+	 Executed 13 tests, with 16 failures (0 unexpected) in 2.435 seconds
+Test Suite 'TokenRefreshCoordinatorTests' started at 2025-11-24 10:14:13.154
+Test Case 'TokenRefreshCoordinatorTests.testRefreshSchedulesBeforeExpiry()' started at 2025-11-24 10:14:13.159
+/Users/ci/dev/trios/Tests/TokenRefreshCoordinatorTests.swift:31: error: TokenRefreshCoordinatorTests.testRefreshSchedulesBeforeExpiry() : XCTAssertLessThan failed: ("0") is not less than ("60") - refresh never scheduled
+Test Case 'TokenRefreshCoordinatorTests.testRefreshSchedulesBeforeExpiry()' failed (0.115 seconds)
+Test Case 'TokenRefreshCoordinatorTests.testRefreshRetriesOnTransientError()' started at 2025-11-24 10:14:13.276
+/Users/ci/dev/trios/Tests/TokenRefreshCoordinatorTests.swift:45: error: TokenRefreshCoordinatorTests.testRefreshRetriesOnTransientError() : XCTAssertEqual failed: ("1") is not equal to ("3") - single attempt on a 503
+/Users/ci/dev/trios/Tests/TokenRefreshCoordinatorTests.swift:48: error: TokenRefreshCoordinatorTests.testRefreshRetriesOnTransientError() : XCTAssertTrue failed - gave up on the first transient error,
+Test Case 'TokenRefreshCoordinatorTests.testRefreshRetriesOnTransientError()' failed (0.227 seconds)
+Test Case 'TokenRefreshCoordinatorTests.testRefreshGivesUpAfterMaxRetries()' started at 2025-11-24 10:14:13.504
+/Users/ci/dev/trios/Tests/TokenRefreshCoordinatorTests.swift:62: error: TokenRefreshCoordinatorTests.testRefreshGivesUpAfterMaxRetries() : XCTAssertEqual failed: ("9") is not equal to ("5") - max retries not respected
+/Users/ci/dev/trios/Tests/TokenRefreshCoordinatorTests.swift:65: error: TokenRefreshCoordinatorTests.testRefreshGivesUpAfterMaxRetries() : XCTAssertNil failed: "refresh-timer(armed)" - timer still armed after giving up,
+Test Case 'TokenRefreshCoordinatorTests.testRefreshGivesUpAfterMaxRetries()' failed (0.246 seconds)
+Test Case 'TokenRefreshCoordinatorTests.testJitterSpreadsLoad()' started at 2025-11-24 10:14:13.751
+/Users/ci/dev/trios/Tests/TokenRefreshCoordinatorTests.swift:79: error: TokenRefreshCoordinatorTests.testJitterSpreadsLoad() : XCTAssertGreaterThan failed: ("0.2") is not greater than ("1.0") - jitter window too narrow
+Test Case 'TokenRefreshCoordinatorTests.testJitterSpreadsLoad()' failed (0.132 seconds)
+Test Case 'TokenRefreshCoordinatorTests.testCoordinatorSuspendsInBackground()' started at 2025-11-24 10:14:13.884
+/Users/ci/dev/trios/Tests/TokenRefreshCoordinatorTests.swift:93: error: TokenRefreshCoordinatorTests.testCoordinatorSuspendsInBackground() : XCTAssertTrue failed - refresh fired while backgrounded
+/Users/ci/dev/trios/Tests/TokenRefreshCoordinatorTests.swift:96: error: TokenRefreshCoordinatorTests.testCoordinatorSuspendsInBackground() : XCTAssertEqual failed: ("running") is not equal to ("suspended"),
+Test Case 'TokenRefreshCoordinatorTests.testCoordinatorSuspendsInBackground()' failed (0.287 seconds)
+Test Case 'TokenRefreshCoordinatorTests.testRefreshOnForeground()' started at 2025-11-24 10:14:14.172
+/Users/ci/dev/trios/Tests/TokenRefreshCoordinatorTests.swift:110: error: TokenRefreshCoordinatorTests.testRefreshOnForeground() : XCTAssertEqual failed: ("0") is not equal to ("1") - no refresh on foreground
+Test Case 'TokenRefreshCoordinatorTests.testRefreshOnForeground()' failed (0.118 seconds)
+Test Case 'TokenRefreshCoordinatorTests.testSharedSessionReused()' started at 2025-11-24 10:14:14.291
+/Users/ci/dev/trios/Tests/TokenRefreshCoordinatorTests.swift:124: error: TokenRefreshCoordinatorTests.testSharedSessionReused() : XCTAssertEqual failed: ("3") is not equal to ("1") - three sessions created
+Test Case 'TokenRefreshCoordinatorTests.testSharedSessionReused()' failed (0.144 seconds)
+Test Case 'TokenRefreshCoordinatorTests.testRefreshFailureClearsCache()' started at 2025-11-24 10:14:14.436
+/Users/ci/dev/trios/Tests/TokenRefreshCoordinatorTests.swift:138: error: TokenRefreshCoordinatorTests.testRefreshFailureClearsCache() : XCTAssertNil failed: "session-cache(stale)",
+Test Case 'TokenRefreshCoordinatorTests.testRefreshFailureClearsCache()' failed (0.101 seconds)
+Test Case 'TokenRefreshCoordinatorTests.testMultipleWaitersCoalesce()' started at 2025-11-24 10:14:14.538
+/Users/ci/dev/trios/Tests/TokenRefreshCoordinatorTests.swift:152: error: TokenRefreshCoordinatorTests.testMultipleWaitersCoalesce() : XCTAssertEqual failed: ("4") is not equal to ("1") - four refreshes for four waiters
+Test Case 'TokenRefreshCoordinatorTests.testMultipleWaitersCoalesce()' failed (0.193 seconds)
+Test Case 'TokenRefreshCoordinatorTests.testFreshTokenSkipsRefresh()' started at 2025-11-24 10:14:14.732
+Test Case 'TokenRefreshCoordinatorTests.testFreshTokenSkipsRefresh()' passed (0.041 seconds)
+Test Suite 'TokenRefreshCoordinatorTests' failed at 2025-11-24 10:14:14.774.
+	 Executed 10 tests, with 12 failures (0 unexpected) in 1.620 seconds
+Test Suite 'VaultAttachmentTests' started at 2025-11-24 10:14:14.777
+Test Case 'VaultAttachmentTests.testAttachmentUploadResumes()' started at 2025-11-24 10:14:14.782
+/Users/ci/dev/trios/Tests/VaultAttachmentTests.swift:29: error: VaultAttachmentTests.testAttachmentUploadResumes() : XCTAssertEqual failed: ("0") is not equal to ("3") - upload restarted from byte 0
+Test Case 'VaultAttachmentTests.testAttachmentUploadResumes()' failed (0.231 seconds)
+Test Case 'VaultAttachmentTests.testChunkBoundariesAlign()' started at 2025-11-24 10:14:15.014
+/Users/ci/dev/trios/Tests/VaultAttachmentTests.swift:43: error: VaultAttachmentTests.testChunkBoundariesAlign() : XCTAssertEqual failed: ("4095") is not equal to ("4096") - chunk boundary off by one
+/Users/ci/dev/trios/Tests/VaultAttachmentTests.swift:46: error: VaultAttachmentTests.testChunkBoundariesAlign() : XCTAssertTrue failed - final chunk marked complete early,
+Test Case 'VaultAttachmentTests.testChunkBoundariesAlign()' failed (0.189 seconds)
+Test Case '-[VaultAttachmentTests testChecksumVerifiedOnDownload]' started at 2025-11-24 10:14:15.204
+/Users/ci/dev/trios/Tests/VaultAttachmentTests.swift:118: error: -[VaultAttachmentTests testChecksumVerifiedOnDownload] : XCTAssertTrue failed - checksum mismatch after download not detected
+/Users/ci/dev/trios/Tests/VaultAttachmentTests.swift:121: error: -[VaultAttachmentTests testChecksumVerifiedOnDownload] : XCTAssertEqual failed: ("ok") is not equal to ("retried") - corrupt chunk served as success,
+Test Case '-[VaultAttachmentTests testChecksumVerifiedOnDownload]' failed (0.842 seconds)
+Test Case 'VaultAttachmentTests.testEncryptedAttachmentRoundTrip()' started at 2025-11-24 10:14:16.047
+/Users/ci/dev/trios/Tests/VaultAttachmentTests.swift:134: error: VaultAttachmentTests.testEncryptedAttachmentRoundTrip() : XCTAssertEqual failed: ("<encrypted>") is not equal to ("<plaintext>")
+/Users/ci/dev/trios/Tests/VaultAttachmentTests.swift:137: error: VaultAttachmentTests.testEncryptedAttachmentRoundTrip() : XCTAssertThrowsError failed - garbage key accepted,
+Test Case 'VaultAttachmentTests.testEncryptedAttachmentRoundTrip()' failed (0.356 seconds)
+Test Case 'VaultAttachmentTests.testAttachmentDelegationRevokes()' started at 2025-11-24 10:14:16.404
+/Users/ci/dev/trios/Tests/VaultAttachmentTests.swift:151: error: VaultAttachmentTests.testAttachmentDelegationRevokes() : XCTAssertTrue failed - delegated URL still valid after revoke
+Test Case 'VaultAttachmentTests.testAttachmentDelegationRevokes()' failed (0.167 seconds)
+Test Case 'VaultAttachmentTests.testPartialUploadReclaims()' started at 2025-11-24 10:14:16.572
+/Users/ci/dev/trios/Tests/VaultAttachmentTests.swift:165: error: VaultAttachmentTests.testPartialUploadReclaims() : XCTAssertLessThan failed: ("2.0") is not less than ("1.5") - reclaim over budget
+/Users/ci/dev/trios/Tests/VaultAttachmentTests.swift:168: error: VaultAttachmentTests.testPartialUploadReclaims() : XCTAssertEqual failed: ("leaked") is not equal to ("reclaimed") - temp file leaked,
+Test Case 'VaultAttachmentTests.testPartialUploadReclaims()' failed (0.273 seconds)
+Test Case 'VaultAttachmentTests.testSmallAttachmentRoundTrip()' started at 2025-11-24 10:14:16.846
+Test Case 'VaultAttachmentTests.testSmallAttachmentRoundTrip()' passed (0.094 seconds)
+Test Suite 'VaultAttachmentTests' failed at 2025-11-24 10:14:16.941.
+	 Executed 7 tests, with 10 failures (0 unexpected) in 2.164 seconds
+Test Suite 'trios-tests.xctest' failed at 2025-11-24 10:14:42.534.
+	 Executed 88 tests, with 104 failures (0 unexpected) in 41.327 seconds
+Test Suite 'All tests' failed at 2025-11-24 10:14:42.535.
+	 Executed 88 tests, with 104 failures (0 unexpected) in 41.327 seconds
