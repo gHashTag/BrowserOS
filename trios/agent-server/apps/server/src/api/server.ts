@@ -51,6 +51,7 @@ import {
 } from './routes/queen-kanban'
 import { createQueenLeaseRoute } from './routes/queen-lease'
 import { createQueenPublicActivityRoute } from './routes/queen-public-activity'
+import { createQueenPublicAgentsRoute } from './routes/queen-public-agents'
 import { createQueenPublicHardwareRoute } from './routes/queen-public-hardware'
 import { createQueenPublicResearchRoute } from './routes/queen-public-research'
 import { createQueenPublicStatusRoute } from './routes/queen-public-status'
@@ -319,7 +320,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     )
 
   const app = new Hono<Env>()
-    // These five sanitized projections are the only routes a cross-origin
+    // These six sanitized projections are the only routes a cross-origin
     // browser may read, and they are registered BEFORE the global middleware
     // on purpose: trustedCorsMiddleware answers OPTIONS itself and returns,
     // so anything mounted after it never sees a preflight. See
@@ -330,12 +331,14 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/queen/public-activity', publicReadCorsMiddleware())
     .use('/queen/public-hardware', publicReadCorsMiddleware())
     .use('/queen/public-research', publicReadCorsMiddleware())
+    .use('/queen/public-agents', publicReadCorsMiddleware())
     .use('/*', trustedCorsMiddleware())
     .route('/health', createHealthRoute({ browser, stateBackend: a2aService }))
     .route('/queen/status', createQueenPublicStatusRoute())
     .route('/queen/public-activity', createQueenPublicActivityRoute())
     .route('/queen/public-hardware', createQueenPublicHardwareRoute())
     .route('/queen/public-research', createQueenPublicResearchRoute())
+    .route('/queen/public-agents', createQueenPublicAgentsRoute())
     .route('/queen/public-board', createQueenPublicBoardRoute())
     .route('/queen/registry', queenRegistryRoutes)
     // The shell only. It holds no state and no token; every byte of data it
