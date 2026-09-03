@@ -113,6 +113,34 @@ describe('GET /queen/public-hardware', () => {
     expect(first.signature).toBe(second.signature)
   })
 
+  it('never derives a signing key from the API token', async () => {
+    // The page pins one public key. A key derived from TRIOS_API_TOKEN would
+    // sign a 200 the browser discards in silence, which is the failure this
+    // route exists to remove. With no explicit key or secret the answer is 503.
+    const previous = process.env.TRIOS_API_TOKEN
+    process.env.TRIOS_API_TOKEN = 'a-token-that-must-not-become-a-key'
+    try {
+      const response = await createQueenPublicHardwareRoute({
+        readRegistry: () =>
+          JSON.stringify([
+            {
+              id: 'stand-alpha',
+              family: 'Artix-7',
+              state: 'programmed',
+              evidence: 'https://example.test/evidence',
+            },
+          ]),
+        readPrivateKey: () => undefined,
+        readKeyId: () => 'queen-fpga-1',
+        now: () => now,
+      }).request('/')
+      expect(response.status).toBe(503)
+    } finally {
+      if (previous === undefined) delete process.env.TRIOS_API_TOKEN
+      else process.env.TRIOS_API_TOKEN = previous
+    }
+  })
+
   it('fails closed for duplicate identifiers or malformed evidence', async () => {
     for (const registry of [
       [

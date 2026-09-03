@@ -319,7 +319,7 @@ export async function createHttpServer(config: HttpServerConfig) {
     )
 
   const app = new Hono<Env>()
-    // These two sanitized projections are the only routes a cross-origin
+    // These five sanitized projections are the only routes a cross-origin
     // browser may read, and they are registered BEFORE the global middleware
     // on purpose: trustedCorsMiddleware answers OPTIONS itself and returns,
     // so anything mounted after it never sees a preflight. See
@@ -327,6 +327,9 @@ export async function createHttpServer(config: HttpServerConfig) {
     // TRUSTED_ORIGINS entry.
     .use('/queen/status', publicReadCorsMiddleware())
     .use('/queen/public-board', publicReadCorsMiddleware())
+    .use('/queen/public-activity', publicReadCorsMiddleware())
+    .use('/queen/public-hardware', publicReadCorsMiddleware())
+    .use('/queen/public-research', publicReadCorsMiddleware())
     .use('/*', trustedCorsMiddleware())
     .route('/health', createHealthRoute({ browser, stateBackend: a2aService }))
     .route('/queen/status', createQueenPublicStatusRoute())
