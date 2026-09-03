@@ -1,25 +1,36 @@
-# The release blocker is one rename, not 763 commits
+# The release blocker is one rename, not 978 commits
 
-Measured 2026-08-28. Re-run every command here before acting on it.
+Measured 2026-09-03. Re-run every command here before acting on it.
+
+CORRECTION, 2026-09-03. The page as last written (2026-08-28) was wrong in
+two ways, and both are corrected here. First, the second blocker it named -
+the `make check` wedge - had already been root-caused and fixed on
+2026-08-29, one day after that page was written; the second-blocker section
+below is rewritten to say so. Second, three of the five headline numbers had
+drifted; all five were re-measured today, and the tool named at the end of
+this page re-runs them in one command. The area table below, the 1096
+distinct-conflicted-files figure, and the 2026-08-28 narrative numbers
+(filename overlap, the 485/203/282 split, the 85 unpushed commits) were NOT
+re-measured today; they keep their 2026-08-28 provenance.
 
 ## What "release" means, and which one is blocked
 
 Two different things are called release in this project, and they block on
 different work:
 
-**A. A trios release** — this branch merged to `dev`, tagged, built. Blocked by
+**A. A trios release** - this branch merged to `dev`, tagged, built. Blocked by
 exactly one structural problem, described below. Achievable.
 
-**B. The MVP in `Queen_T27_MVP_Architecture.md`** — twelve vertical-slice items
+**B. The MVP in `Queen_T27_MVP_Architecture.md`** - twelve vertical-slice items
 in section 16.1, thirty criteria in section 23.
 
 CORRECTION, 2026-08-28. An earlier version of this file said the MVP was "not
 achievable from here, and no amount of trios work moves it". That is wrong,
 and the owner was right to reject it. **The Queen IS trios.** Section 11 of the
-document — mission contract, task graph, Bee result contract, acceptance
-policy, competing proposals — is entirely work in this repository, and the
+document - mission contract, task graph, Bee result contract, acceptance
+policy, competing proposals - is entirely work in this repository, and the
 whole Queen/Bees section of the Definition of Done, 6 of its 29 criteria, is
-implemented here and nowhere else. The gap table's P0 row "Queen/T27 bridge —
+implemented here and nowhere else. The gap table's P0 row "Queen/T27 bridge -
 [not demonstrated]" names a trios deliverable.
 
 Measured against the live registry the same day, that row is also out of date:
@@ -29,9 +40,9 @@ demonstrated. What is missing is narrower and nameable:
 
 | section 11 | state |
 |---|---|
-| 11.1 machine-readable mission contract | absent — nothing in `rings/`, no `.trinity/missions` |
+| 11.1 machine-readable mission contract | absent - nothing in `rings/`, no `.trinity/missions` |
 | 11.3 structured Bee result | none of its eight fields exist; the registry has `committedFiles` and `committedSHA` |
-| 11.4 T27-aware acceptance | a `.t27` spec is accepted exactly like a Swift file — nothing checks it still lowers |
+| 11.4 T27-aware acceptance | a `.t27` spec is accepted exactly like a Swift file - nothing checks it still lowers |
 
 That third row is the bridge, and `make t27-lowering` already performs the
 checks it needs. It is simply never consulted when the Queen accepts.
@@ -46,9 +57,9 @@ Everything below is about A.
 ## The measurement
 
 ```
-git rev-list --count origin/dev..HEAD   ->  763   (ahead)
+git rev-list --count origin/dev..HEAD   ->  978   (ahead)
 git rev-list --count HEAD..origin/dev   ->   17   (behind)
-git merge-tree --write-tree origin/dev HEAD | grep -c '^CONFLICT\|<<<<<<<'  ->  570
+git merge-tree --write-tree origin/dev HEAD | grep -c '^CONFLICT\|<<<<<<<'  ->  569   (conflicts)
 ```
 
 1096 distinct conflicted files. But they are not spread through the code:
@@ -67,7 +78,7 @@ The top two are the same directory in two places.
 
 ```
 packages/browseros-agent   on dev: 1354 files    on this branch: 0
-trios/agent-server         on dev:    0 files    on this branch: 1537
+trios/agent-server         on dev:    0 files    on this branch: 1593
 ```
 
 This branch moved the bun runtime from `packages/browseros-agent` to
@@ -88,7 +99,7 @@ mechanical, not semantic.
 - **282** do not, so each is either new on `dev` or deliberately dropped here.
 
 That is the real work: carry 203 changes across the rename, and rule on 282.
-Bounded and countable, which 763 commits of conflict output is not.
+Bounded and countable, which 978 commits of conflict output is not.
 
 ## The decision belongs to the owner
 
@@ -104,47 +115,61 @@ The choice is about which repository owns the runtime, which is an ownership
 question, not a merge question. Answering it by whichever side wins a conflict
 resolution would be deciding it by accident.
 
-## The second blocker: the gate does not finish
+## The second blocker, closed 2026-08-29: the wedge was a backtick
 
-`make check` did not complete on 2026-08-28 either. It ran 1h08m and was
-stopped by hand.
+The version of this page dated 2026-08-28 reported `make check` as an open
+blocker. Its evidence, all of it real: a run stopped by hand after one hour
+eight minutes; the whole run reducible to one `/bin/bash` child of `make`,
+57m42s old, in state `S`, whose argv was the `cassettes` lock-acquisition
+prologue; that child having no children at all - no `sleep`, no `cat`, no
+`mkdir` - while the lock file did not exist, a probe `mkdir` on `/tmp`
+answered in milliseconds, and `/tmp` itself was fine. The page read all that
+as "blocked in a syscall", called it the same system-layer anomaly the status
+board had recorded, and prescribed root-level tracing as the next step.
 
-Localised precisely. The whole run reduces to one `/bin/bash` child of `make`,
-alive 57m42s in state `S`, whose argv is the `cassettes` lock-acquisition
-prologue. It has **no children at all** - no `sleep`, no `cat`, no `mkdir` -
-so it is not executing the loop body; it is blocked in a syscall. Meanwhile:
+The layer was wrong. Root-caused one day later, in commit 4d56070ef
+(2026-08-29, "fix: the 'system-layer exec anomaly' was a backtick in a
+comment"), which is an ancestor of this branch:
 
-```
-ls -ld /tmp/trios_harness.lock   ->  No such file or directory   (lock is FREE)
-time mkdir /tmp/trios_harness_probe.lock  ->  0.004s             (mkdir works)
-time touch /tmp/probe_$$                  ->  0.003s             (/tmp is fine)
-```
+The lock-acquisition prologue opens with a `: "..."` line that reads exactly
+like a shell comment. It is not one. The quoted prose mentioned `make check`
+inside backticks, and backticks inside a double-quoted shell word are command
+substitution: that line re-entered `make check`, a target that depends on
+`cassettes`, which runs the same line again. A recursion, terminated only by
+whatever the harness lock did that day; when the lock was changed from
+fail-fast to WAIT, the terminator went with it and the recursion became a
+permanent hang. Every symptom the old page measured follows from that line
+and from nothing else: the recipe's first echo never printed because the
+shell never left the `:` line; it "wedged with the lock free" because it was
+never waiting on the lock; `TRIOS_SKIP_LOCK` did nothing because its branch
+sits downstream of the line that never returns; and the wedged shell "had no
+sleep child" because the child was a nested make. Fourteen waves chased it as
+a system-layer defect; the evidence was right, the layer was wrong.
 
-So the loop should have acquired on its first iteration, and the 1800s timeout
-should have fired 30 minutes before it did not.
+The defect now has a standing gate. `recipe-backticks` (declared `.PHONY` at
+trios/Makefile line 1448, defined at line 1449) fails on any backtick
+surviving a recipe line once shell comments and single-quoted spans are
+removed, and `check:` carries it among its prerequisites at trios/Makefile
+line 2024. Prose in a recipe is code, and the gate says so permanently.
 
-This is the same "system-layer anomaly" earlier waves recorded on the status
-board. They could not clear it either and reached for `make check-bypass`
-(`TRIOS_SKIP_LOCK=1`), whose own banner says *"owner root-heals; never for
-CI"*. A release cannot be cut on a bypass its author marked as diagnostic.
+Nothing on the gate's present state is asserted first-hand here: the author
+of this correction had no `make` to run. The record that the wedge is dead is
+trios/.trinity/dashboard/STATUS.md, lines 67 through 75 - "make cassettes ->
+fast honest verdict since the ROOT-CAUSE FIX (commit 4d56070ef, 2026-08-29)",
+"the wedge is dead (verdict in ~2 min, was 26+ min)" - which also records
+four real cassette-suite failures newly VISIBLE now that the target's output
+can be seen at all. Those are suite findings for their own issue, not lock
+findings and not a wedge.
 
-Aggravating factor, and it is ours: three targets - `cassettes`, `mutants`,
-`mutants-logic` - now WAIT on this lock, and none fails fast any more. The
-fail-fast path was what previously turned a stuck lock into a fast red instead
-of an hour of silence. Converting the last of them to waiting removed the only
-signal that distinguished "contended" from "hung".
-
-Root-level tracing is the next step and it needs the owner:
-
-```
-sudo fs_usage -w -f filesys <pid>
-sudo lsof -p <pid>
-```
+The root-level tracing step the old page prescribed is retired with the
+defect it was meant to diagnose. Do not reach for system tools on a closed
+defect; re-run the measurement instead.
 
 ## What is NOT blocking
 
-- trios' cheap gates. `t27-lowering`, `t27-rings` and `chain` all pass on
-  demand, in seconds to minutes, outside the full walk.
+- trios' cheap gates (measured 2026-08-28; not re-run for the 2026-09-03
+  correction, which had no `make` available). `t27-lowering`, `t27-rings` and
+  `chain` all pass on demand, in seconds to minutes, outside the full walk.
 - trios' own code. Only 27 conflicted files in `rings/` and 43 in `BR-OUTPUT/`,
   against 982 in the two runtime copies.
 - The 85 unpushed commits. They push cleanly to the feature branch; they simply
@@ -153,13 +178,30 @@ sudo lsof -p <pid>
 ## How to re-measure
 
 ```bash
-cd /Users/playra/BrowserOS
+cd "$(git rev-parse --show-toplevel)"
 git fetch origin dev
 git merge-tree --write-tree origin/dev HEAD > /tmp/mt.out
 grep -c '^CONFLICT\|<<<<<<<' /tmp/mt.out
 git ls-tree -r --name-only origin/dev -- packages/browseros-agent | wc -l
 git ls-tree -r --name-only HEAD -- trios/agent-server | wc -l
 ```
+
+The five numbered claims above - ahead, behind, conflicts, dev-agent-files,
+branch-agent-files - are re-measured against this working tree in one command:
+
+```bash
+node trios/tools/release-blocker-recheck.mjs
+```
+
+It exits zero and prints `[recheck] OK` when the page still agrees with the
+repository; it exits non-zero with one line per drifting claim when it does
+not; and a deleted claim line is reported as `MISSING`, so removing a
+sentence is not a route to green. When it cannot measure - a ref that does
+not resolve, a git too old for `merge-tree --write-tree` - it prints
+`cannot measure` and no verdict at all. It is deliberately not wired into
+`make` or any CI workflow: this page's counts decay by design, and a decaying
+number must not be able to turn a release gate red. It is a reader's tool,
+run on demand.
 
 A long-lived branch's conflict count grows on its own. This number will be
 worse next week than it is today, and that is the argument for deciding soon
