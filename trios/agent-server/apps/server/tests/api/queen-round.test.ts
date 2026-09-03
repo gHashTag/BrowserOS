@@ -382,6 +382,13 @@ describe('queen round, boundary checked', () => {
       expect(String(report?.params[1])).toContain('outside the boundary')
       expect(String(report?.params[1])).toContain('src/stray.ts')
     },
+    // repoWithStray() spawns eight synchronous `git` subprocesses to build a
+    // real repository, which is the point - the boundary check is measured
+    // against git rather than a mock. Under bun's 5s default this failed on a
+    // loaded machine and passed on a rerun, which is the worst kind of red: it
+    // teaches everyone that a failure here means nothing. Judged on the work,
+    // not on how busy the laptop was.
+    30000,
   )
 })
 
