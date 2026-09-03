@@ -44,6 +44,7 @@ import {
   createQueenFeedDataRoute,
   createQueenFeedRoute,
 } from './routes/queen-feed'
+import { createQueenHqRoute } from './routes/queen-hq'
 import {
   createQueenBoardRoute,
   createQueenKanbanRoute,
@@ -329,6 +330,8 @@ export async function createHttpServer(config: HttpServerConfig) {
     // repository, so there is nothing here a reader could not get from git.
     .route('/queen/tree', createQueenTreeRoute())
     .route('/queen/kanban', createQueenKanbanRoute())
+    // One screen: the hive, the readings and the one button that wakes her.
+    .route('/queen/hq', createQueenHqRoute())
     .route('/queen/board', queenBoardRoutes)
     .route('/queen/roadmap', createQueenRoadmapRoute())
     .route('/queen/roadmap/data', queenRoadmapDataRoutes)
