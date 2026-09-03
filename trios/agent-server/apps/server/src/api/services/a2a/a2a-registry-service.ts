@@ -10,6 +10,7 @@
  */
 
 import { logger } from '../../../lib/logger'
+import { a2aLivenessThreshold } from './a2a-liveness'
 import { PgAgentStore } from './pg-agent-store'
 
 export interface A2aAgentCard {
@@ -165,12 +166,15 @@ export class A2aRegistryService {
     if (this.pgReady) {
       return this.pg!.listAgents(true)
     }
-    // Memory-only fallback: return agents with recent heartbeats.
-    const threshold = 120_000
+    // Memory-only fallback: return agents with recent heartbeats. The
+    // threshold is derived from the RING-01 spec, and the comparison is
+    // inclusive: an agent silent for exactly the threshold is still alive
+    // (a2a.t27 is_alive, gHashTag/trios#1388).
+    const threshold = a2aLivenessThreshold('milliseconds')
     const now = Date.now()
     return Array.from(this.memoryAgents.values()).filter((card) => {
       const last = this.memoryHeartbeats.get(card.id) ?? 0
-      return now - last < threshold
+      return now - last <= threshold
     })
   }
 
@@ -305,12 +309,17 @@ export class A2aRegistryService {
 
   private startHeartbeatWatchdog(): void {
     this.heartbeatInterval = setInterval(async () => {
-      const threshold = 120_000
+      // One derived threshold for both paths (gHashTag/trios#1388): the
+      // memory comparison below is in milliseconds, pruneOffline takes
+      // seconds, and both come from the same spec product.
+      const threshold = a2aLivenessThreshold('milliseconds')
       const now = Date.now()
 
       if (this.pgReady) {
         try {
-          const stale = await this.pg!.pruneOffline(90)
+          const stale = await this.pg!.pruneOffline(
+            a2aLivenessThreshold('seconds'),
+          )
           for (const agentId of stale) {
             logger.warn('A2A agent marked offline due to missed heartbeats', {
               agentId,
@@ -323,9 +332,11 @@ export class A2aRegistryService {
           })
         }
       } else {
-        // Memory-only pruning.
+        // Memory-only pruning. Strictly greater than the threshold, so an
+        // agent silent for exactly the threshold stays alive here too -
+        // the spec's is_alive is inclusive on the boundary.
         for (const [agentId, last] of this.memoryHeartbeats) {
-          if (now - last >= threshold) {
+          if (now - last > threshold) {
             logger.warn('A2A agent marked offline due to missed heartbeats', {
               agentId,
             })
