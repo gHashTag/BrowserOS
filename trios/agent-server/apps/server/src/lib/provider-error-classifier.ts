@@ -4,12 +4,17 @@
  * The Vercel AI SDK derives `isRetryable` from the HTTP status alone, so 429 is
  * always treated as a transient rate limit. Several providers reuse 429 (or 400)
  * for permanent conditions - Z.AI answers an exhausted account balance with
- * HTTP 429 and business code 1113. Retrying those turns one dead request into
- * three, tripling latency and log noise while the outcome cannot change.
+ * HTTP 429 and business code 1113, and the BrowserOS gateway answers a spent
+ * credit balance with HTTP 429 and code CREDITS_EXHAUSTED. Retrying those turns
+ * one dead request into three, tripling latency and log noise while the outcome
+ * cannot change.
  */
 
 /** Z.AI business code for an exhausted balance or missing resource package. */
 export const ZAI_INSUFFICIENT_BALANCE_CODE = '1113'
+
+/** BrowserOS gateway code for a fully spent account credit balance. */
+export const BROWSEROS_CREDITS_EXHAUSTED_CODE = 'CREDITS_EXHAUSTED'
 
 /**
  * Wording that indicates a spent account, matched case-insensitively as a
@@ -51,12 +56,18 @@ export function isTerminalProviderError({
     return true
   }
 
-  // Structured check for the Z.AI envelope: {"error":{"code":"1113",...}}
+  // Structured checks for known terminal envelopes, e.g. {"error":{"code":"1113",...}}
   try {
     const parsed = JSON.parse(responseBody)
     const code = parsed?.error?.code
-    if (code !== undefined && String(code) === ZAI_INSUFFICIENT_BALANCE_CODE) {
-      return true
+    if (code !== undefined) {
+      const codeString = String(code)
+      if (
+        codeString === ZAI_INSUFFICIENT_BALANCE_CODE ||
+        codeString === BROWSEROS_CREDITS_EXHAUSTED_CODE
+      ) {
+        return true
+      }
     }
   } catch {
     // A non-JSON body is covered by the phrase scan above.
