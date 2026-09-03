@@ -2065,32 +2065,72 @@ SWEEP_CANARY := queen/0-sweep-canary
 #
 # Scoped to the recipe, not the file: DEV_APP and .trinity-dev are legitimate
 # everywhere else in this Makefile.
+#
+# #1276: the gate used to stop at the Makefile. `make check` drives shell
+# scripts as well - build.sh runs tests/swift/run_chat_sse_e2e.sh at the end
+# of a build, `make e2e` and the mutants rows bash it directly - so a
+# `.trinity-dev` rm inside that script passed the gate untouched: the same
+# hole, one level down. The gate now follows the recipe into every
+# tests/**/*.sh path the cassette recipe names (FR-001) plus every script in
+# ISOLATION_SCRIPTS below, and holds all of them to one forbidden list
+# (FR-002), reported on failure with file and line (FR-003).
+#
+# ISOLATION_SCRIPTS - the scripts the gate always scans. Repo-root RELATIVE on
+# purpose: the recipe body re-reads this very line out of the Makefile at run
+# time (grep + cut), so its value must be a path that works both under make
+# and when the body is lifted out verbatim and run with plain sh from the
+# repo root - which is how the gate is proven, the worker image carrying no
+# make. A $(ROOT)-prefixed path would arrive under plain sh as a broken
+# literal.
+ISOLATION_SCRIPTS := tests/swift/run_chat_sse_e2e.sh
+#
+# The forbidden list is written ONCE, in the single grep at the tail of the
+# recipe, and applied to the cassette recipe and to every scanned script in
+# the same invocation - two lists could drift apart, and a drifted half is a
+# hole. The dev-log needle is spelled `(LOG)` rather than `$(LOG)` because the
+# recipe body carries no dollar sign at all: a single one would be eaten by
+# make (or run as a substitution by plain sh), a doubled one would survive
+# make but not plain sh, and `(LOG)` catches both spellings a recipe could
+# use to reach the dev log - `$(LOG)` and `$$(LOG)` - while carrying none
+# itself.
+#
+# The body is one sh -c block reading only repo-root-relative paths so it can
+# be lifted out between its quotes and run as `sh -c '<body>'` from the repo
+# root with no make in sight (FR-004); it therefore carries no dollar sign,
+# no backtick and no nested single quote.
 .PHONY: cassette-isolation
 cassette-isolation:
-	@body=$$(awk '/^cassettes: /,/^# --- Running/' "$(ROOT)/Makefile"); \
-	if [ -z "$$body" ]; then \
-		echo "[FAIL] cassette-isolation could not find the cassettes recipe to read"; \
-		exit 1; \
-	fi; \
-	fail=0; \
-	for needle in 'trios-dev' '.trinity-dev' 'DEV_APP' 'DEV_PROC' '$$(LOG)'; do \
-		if printf '%s\n' "$$body" | /usr/bin/grep -qF -- "$$needle"; then \
-			echo "  [FAIL] the cassette recipe names '$$needle'"; \
-			echo "         The harness runs as the test variant precisely so it can"; \
-			echo "         kill and wipe freely. Reaching into dev destroys the"; \
-			echo "         Queen's live delegation registry (#1275 follow-up)."; \
-			fail=1; \
-		fi; \
-	done; \
-	if ! printf '%s\n' "$$body" | /usr/bin/grep -qF -- 'trios-test'; then \
-		echo "  [FAIL] the cassette recipe names no test variant at all -"; \
-		echo "         a rename would satisfy every check above by accident."; \
-		fail=1; \
-	fi; \
-	if [ $$fail -eq 0 ]; then \
-		echo "[OK] the cassette recipe stays inside the test variant"; \
-	fi; \
-	exit $$fail
+	@sh -c 'if sed -n "/^cassettes: /,/^# --- Running/p" Makefile | grep -q .; then :; else \
+	echo "[FAIL] cassette-isolation could not find the cassettes recipe to read"; exit 1; fi; \
+	if sed -n "/^cassettes: /,/^# --- Running/p" Makefile | grep -qF trios-test; then :; else \
+	echo "[FAIL] the cassette recipe names no test variant at all -"; \
+	echo "       a rename would satisfy every check above by accident."; exit 1; fi; \
+	{ sed -n "/^cassettes: /,/^# --- Running/p" Makefile | grep -o "tests/[A-Za-z0-9_./-]*[.]sh"; \
+	grep "^ISOLATION_SCRIPTS := " Makefile | cut -d " " -f 3- | tr " " "\n" | grep .; } | sort -u \
+	| grep -q . || { echo "[FAIL] cassette-isolation collected no scripts to scan:"; \
+	echo "       ISOLATION_SCRIPTS is empty and the cassette recipe names no"; \
+	echo "       tests/**/*.sh script. A gate that scans no script is the #1276 hole."; exit 1; }; \
+	{ sed -n "/^cassettes: /,/^# --- Running/p" Makefile | grep -o "tests/[A-Za-z0-9_./-]*[.]sh"; \
+	grep "^ISOLATION_SCRIPTS := " Makefile | cut -d " " -f 3- | tr " " "\n" | grep .; } | sort -u \
+	| sed "s/^/  [cassette-isolation] scanning /"; \
+	{ sed -n "/^cassettes: /,/^# --- Running/p" Makefile | grep -o "tests/[A-Za-z0-9_./-]*[.]sh"; \
+	grep "^ISOLATION_SCRIPTS := " Makefile | cut -d " " -f 3- | tr " " "\n" | grep .; } | sort -u \
+	| xargs -n1 test -f || { echo "[FAIL] a script this gate scans (one from the list above) is"; \
+	echo "       not a regular file - a scan that cannot open its file scans nothing"; \
+	echo "       (#1276)."; exit 1; }; \
+	if { sed -n "/^cassettes: /,/^# --- Running/{=;p;}" Makefile | paste -d : - - \
+	| sed "s/^/Makefile:/"; \
+	{ sed -n "/^cassettes: /,/^# --- Running/p" Makefile | grep -o "tests/[A-Za-z0-9_./-]*[.]sh"; \
+	grep "^ISOLATION_SCRIPTS := " Makefile | cut -d " " -f 3- | tr " " "\n" | grep .; } | sort -u \
+	| xargs grep -nH ""; } \
+	| grep -F -e trios-dev -e .trinity-dev -e DEV_APP -e DEV_PROC -e "(LOG)"; then \
+	echo "[FAIL] the cassette pipeline reaches into the dev variant - the first"; \
+	echo "       match above carries its file and line. The harness runs as the"; \
+	echo "       test variant precisely so it can kill and wipe freely. Reaching"; \
+	echo "       into dev destroys the live delegation registry of the Queen (#1275"; \
+	echo "       follow-up; #1276 is the same hole one level down, in the scripts"; \
+	echo "       the recipe calls)."; exit 1; \
+	else echo "[OK] the cassette recipe and every script it drives stay inside the test variant"; fi'
 
 # The harness bundle the cassette suite drives.
 #
