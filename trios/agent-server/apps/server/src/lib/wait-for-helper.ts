@@ -26,7 +26,7 @@ export class WaitForHelper {
     this.#stableDomTimeout = TIMEOUTS.STABLE_DOM * cpuTimeoutMultiplier
     this.#stableDomFor = POLL_INTERVAL * cpuTimeoutMultiplier
     this.#expectNavigationIn = POLL_INTERVAL * cpuTimeoutMultiplier
-    this.#navigationTimeout = TIMEOUTS.STABLE_DOM * networkTimeoutMultiplier
+    this.#navigationTimeout = TIMEOUTS.NAVIGATION * networkTimeoutMultiplier
     this.#page = page as unknown as CdpPage
   }
 

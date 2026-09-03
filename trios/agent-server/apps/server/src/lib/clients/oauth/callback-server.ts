@@ -16,6 +16,7 @@
  */
 
 import { OAUTH_CALLBACK_PORT } from '@browseros/shared/constants/ports'
+import { TIMEOUTS } from '@browseros/shared/constants/timeouts'
 import { logger } from '../../logger'
 import type { OAuthTokenManager } from './token-manager'
 
@@ -150,7 +151,7 @@ export class OAuthCallbackServer {
   private async sendCancel(): Promise<void> {
     try {
       await fetch(`http://127.0.0.1:${OAUTH_CALLBACK_PORT}/cancel`, {
-        signal: AbortSignal.timeout(2000),
+        signal: AbortSignal.timeout(TIMEOUTS.OAUTH_CALLBACK_PROBE),
       })
       logger.info('Sent cancel to existing OAuth callback server')
     } catch {
