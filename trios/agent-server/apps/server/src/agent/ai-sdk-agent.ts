@@ -32,7 +32,11 @@ import { buildMemoryToolSet } from '../tools/memory/build-toolset'
 import type { ToolRegistry } from '../tools/tool-registry'
 import { CHAT_MODE_ALLOWED_TOOLS } from './chat-mode'
 import { createCompactionPrepareStep, type StepWithUsage } from './compaction'
-import { buildMcpServerSpecs, createMcpClients } from './mcp-builder'
+import {
+  buildMcpServerSpecs,
+  createMcpClients,
+  type McpConnectFailure,
+} from './mcp-builder'
 import {
   getMessageNormalizationOptions,
   normalizeMessagesForModel,
@@ -58,6 +62,7 @@ export class AiSdkAgent {
     private _agent: ToolLoopAgent,
     private _messages: UIMessage[],
     private _mcpClients: Array<{ close(): Promise<void> }>,
+    private _mcpConnectFailures: McpConnectFailure[],
     private conversationId: string,
     private _toolNames: Set<string>,
     private toolContext: ToolContext,
@@ -66,6 +71,11 @@ export class AiSdkAgent {
   /** Tool names registered on this agent — used to sanitize messages during session rebuilds. */
   get toolNames(): Set<string> {
     return this._toolNames
+  }
+
+  /** MCP servers that were requested for this session but never connected, after all retries. */
+  get mcpConnectFailures(): McpConnectFailure[] {
+    return this._mcpConnectFailures
   }
 
   static async create(config: AiSdkAgentConfig): Promise<AiSdkAgent> {
@@ -134,7 +144,18 @@ export class AiSdkAgent {
     const specs = await buildMcpServerSpecs({
       browserContext: config.browserContext,
     })
-    const { clients, tools: customMcpTools } = await createMcpClients(specs)
+    const {
+      clients,
+      tools: customMcpTools,
+      failures: mcpConnectFailures,
+    } = await createMcpClients(specs)
+    // A lost MCP server must be visible to the caller, not only to a log file
+    if (mcpConnectFailures.length > 0) {
+      logger.error('MCP servers failed to connect after all retries', {
+        conversationId: config.resolvedConfig.conversationId,
+        failures: mcpConnectFailures,
+      })
+    }
     const collidingToolNames = Object.keys(customMcpTools).filter(
       (name) => name in klavisTools,
     )
@@ -290,6 +311,7 @@ export class AiSdkAgent {
       agent,
       [],
       clients,
+      mcpConnectFailures,
       config.resolvedConfig.conversationId,
       new Set(Object.keys(tools)),
       toolContext,
