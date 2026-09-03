@@ -5,11 +5,13 @@ import type { ModelMessage, ToolResultPart } from 'ai'
 import {
   computeConfig,
   estimateTokens,
+  estimateTokensForThreshold,
   findSafeSplitPoint,
   getCurrentTokenCount,
   reduceToolOutputs,
   type StepWithUsage,
   slidingWindow,
+  toRawTokenBudget,
 } from '../../src/agent/compaction'
 import {
   countBinaryParts,
@@ -436,6 +438,102 @@ describe('estimateTokens', () => {
 
   it('handles empty messages', () => {
     expect(estimateTokens([])).toBe(0)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// toRawTokenBudget — budget/raw scale conversion
+// ---------------------------------------------------------------------------
+
+describe('toRawTokenBudget', () => {
+  it('converts a budget-scale limit back to the raw estimateTokens scale', () => {
+    const config = computeConfig(200_000)
+
+    // Literal expectations (computed once by hand) so the conversion
+    // arithmetic itself lives only in toRawTokenBudget:
+    //   triggerThreshold 180_000, maxSummarizationInput 100_000,
+    //   fixedOverhead 12_000, safetyMultiplier 1.3
+    expect(config.triggerThreshold).toBe(180_000)
+    expect(config.maxSummarizationInput).toBe(100_000)
+    expect(config.fixedOverhead).toBe(12_000)
+    expect(config.safetyMultiplier).toBe(1.3)
+
+    expect(toRawTokenBudget(config.triggerThreshold, config)).toBeCloseTo(
+      129_230.769,
+    )
+    expect(toRawTokenBudget(config.maxSummarizationInput, config)).toBeCloseTo(
+      67_692.308,
+    )
+  })
+
+  it('clamps at zero when fixedOverhead alone exceeds the budget', () => {
+    const config = computeConfig(200_000)
+
+    expect(toRawTokenBudget(0, config)).toBe(0)
+    expect(toRawTokenBudget(config.fixedOverhead - 1, config)).toBe(0)
+
+    // Small contexts: fixedOverhead (40% of window) swallows
+    // maxSummarizationInput entirely — nothing fits, zero is the answer.
+    const small = computeConfig(10_000)
+    expect(small.fixedOverhead).toBeGreaterThan(small.maxSummarizationInput)
+    expect(toRawTokenBudget(small.maxSummarizationInput, small)).toBe(0)
+  })
+
+  it('round-trips: a raw payload sized to the converted budget fits back under the budget', () => {
+    const config = computeConfig(200_000)
+    const rawBudget = toRawTokenBudget(config.triggerThreshold, config)
+
+    // 3 chars per raw token: a payload of exactly floor(rawBudget) tokens.
+    const payload = [userMsg('x'.repeat(3 * Math.floor(rawBudget)))]
+    expect(estimateTokens(payload)).toBe(Math.floor(rawBudget))
+    expect(estimateTokensForThreshold(payload, config)).toBeLessThanOrEqual(
+      config.triggerThreshold,
+    )
+  })
+
+  it('keeps the sliding-window fallback inside the trigger threshold on the budget scale', () => {
+    const config = computeConfig(200_000)
+    // Raw estimate is 2x the context window (400 messages x 3000 chars).
+    const msgs = Array.from({ length: 400 }, (_, i) =>
+      i % 2 === 0 ? userMsg('z'.repeat(3_000)) : assistantMsg('z'.repeat(3_000)),
+    )
+    expect(estimateTokens(msgs)).toBe(400_000)
+
+    const kept = slidingWindow(
+      msgs,
+      toRawTokenBudget(config.triggerThreshold, config),
+    )
+
+    // The whole point of the conversion: what the fallback returns must fit
+    // the budget-scale trigger (and the context window) it is compared
+    // against. Before the fix this measured 246_000 budget tokens against a
+    // 200_000-token window.
+    expect(estimateTokensForThreshold(kept, config)).toBeLessThanOrEqual(
+      config.triggerThreshold,
+    )
+    expect(estimateTokensForThreshold(kept, config)).toBeLessThanOrEqual(
+      config.contextWindow,
+    )
+    expect(kept.length).toBeGreaterThan(0)
+    expect(kept.length).toBeLessThan(msgs.length)
+  })
+
+  it('caps summarization input on the same scale as maxSummarizationInput', () => {
+    const config = computeConfig(200_000)
+    const msgs = Array.from({ length: 400 }, (_, i) =>
+      i % 2 === 0 ? userMsg('z'.repeat(3_000)) : assistantMsg('z'.repeat(3_000)),
+    )
+
+    const capped = slidingWindow(
+      msgs,
+      toRawTokenBudget(config.maxSummarizationInput, config),
+    )
+
+    // The capped list is measured on the same scale as the limit it is
+    // capped to.
+    expect(estimateTokensForThreshold(capped, config)).toBeLessThanOrEqual(
+      config.maxSummarizationInput,
+    )
   })
 })
 

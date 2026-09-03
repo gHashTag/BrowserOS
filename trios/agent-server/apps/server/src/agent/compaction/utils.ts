@@ -286,6 +286,31 @@ export function estimateTokensForThreshold(
   )
 }
 
+/**
+ * Algebraic inverse of `estimateTokensForThreshold`: converts a budget-scale
+ * token limit (raw estimate * safetyMultiplier + fixedOverhead) back to the
+ * raw `estimateTokens()` scale, clamped at zero.
+ *
+ * Budget-scale fields on `ComputedConfig` (`triggerThreshold`,
+ * `maxSummarizationInput`, `minSummarizableTokens`) must never be handed to
+ * raw-scale helpers such as `slidingWindow()` or compared against a raw
+ * `estimateTokens()` result. Every budget -> raw conversion goes through this
+ * one function so the two scales cannot drift apart again.
+ *
+ * When `fixedOverhead` alone exceeds `budgetTokens` the honest raw answer is
+ * zero: nothing fits inside the budget, and the clamp keeps callers from
+ * receiving a negative limit.
+ */
+export function toRawTokenBudget(
+  budgetTokens: number,
+  config: ComputedConfig,
+): number {
+  return Math.max(
+    0,
+    (budgetTokens - config.fixedOverhead) / config.safetyMultiplier,
+  )
+}
+
 export function findSafeSplitPoint(
   messages: ModelMessage[],
   keepRecentTokens: number,
