@@ -1237,16 +1237,35 @@ interface ReviewRound {
 }
 
 async function reviewFinishedDispatches(pool: Pool): Promise<ReviewRound> {
+  // TWO THINGS ABOUT THIS QUERY, BOTH MEASURED ON 2026-09-03.
+  //
+  // The say rows are joined with NOTHING between them, not a newline. The
+  // scribe flushes the bee's text on a size-or-time bound (400 chars or 2.5 s),
+  // so a row boundary can fall inside a word - and did: #1335's closing block
+  // was stored as `## VERD` + `ICT`, the join put a newline between them, and
+  // `parseVerdictBlock` found no header. The review recorded "0 of 5 criteria
+  // judged so far" against a bee that had answered all five. Joining with the
+  // empty string restores the stream the bee actually wrote; re-run against
+  // every finished dispatch, exactly two headers came back whole (#1309, #1335)
+  // and no intact one changed.
+  //
+  // `wait` is revisited, not just NULL. A wait verdict means "not judged yet",
+  // and nothing ever judged it again: the sweep took `review_state IS NULL`
+  // only, so a bee whose verdict was unreadable for any reason - a torn
+  // header, a parser gap - held its boundary for the full 48 hours and then
+  // fell off the board. Three sat that way today. A wait row is re-read each
+  // round and rejudged; the UPDATE below overwrites it in place, so an
+  // unchanged transcript yields the same wait and costs one query.
   const done = await pool.query(
     `SELECT d.issue, d.conversation_id, d.review_state,
             d.criteria, d.criteria_source, d.send_backs, d.owned_paths,
-            (SELECT string_agg(t.text, '\n' ORDER BY t.seq)
+            (SELECT string_agg(t.text, '' ORDER BY t.seq)
                FROM queen_transcript t
               WHERE t.conversation_id = d.conversation_id AND t.kind = 'say')
               AS said
        FROM queen_dispatch d
       WHERE d.started = true AND d.finished_at IS NOT NULL
-        AND d.review_state IS NULL
+        AND (d.review_state IS NULL OR d.review_state = 'wait')
         AND d.outcome NOT LIKE 'reaped%'`,
   )
   const acted: string[] = []

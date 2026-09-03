@@ -27,6 +27,28 @@ describe('the bee verdict block', () => {
     ])
   })
 
+  // The scribe stores the bee's stream in rows of about 400 characters and a
+  // boundary can land inside a word. Production, 2026-09-03, #1335: the last
+  // two rows began `...only.\n\n## VERD` and `ICT\n- The document exists...`.
+  // Joined with a newline the header reads `## VERD\nICT` and the whole block
+  // is lost; joined with nothing it reads as written. The sweep now joins with
+  // nothing. This pins the parser's half of that contract: given the rows as
+  // the bee streamed them, concatenated, every criterion is read.
+  it('reads a block whose header the transcript split across two rows', () => {
+    const rows = [
+      'I committed with --no-verify for that reason only.\n\n## VERD',
+      'ICT\n- The document exists at the boundary path.: met\n- It names a new field.: met',
+      '\n- It contains no sentence recommending a new value for the cap.: met',
+    ]
+    expect(parseVerdictBlock(rows.join('')).map((v) => v.met)).toEqual([
+      true,
+      true,
+      true,
+    ])
+    // And the failure mode, so the fix is not silently undone by a join change.
+    expect(parseVerdictBlock(rows.join('\n'))).toEqual([])
+  })
+
   // The rule the whole file exists for.
   it('counts could-not-check as unmet, never as met', () => {
     const said = ['## VERDICT', '- make check exits 0: could-not-check'].join(
