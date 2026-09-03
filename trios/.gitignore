@@ -16,7 +16,9 @@ Cargo.lock
 .trinity/rollback/
 .trinity/run/
 .trinity/snapshots/
-.trinity/experience/
+.trinity/experience/**
+!.trinity/experience/
+!.trinity/experience/*.json
 .trinity/clades/
 .trinity/self-awareness.json
 .trinity/events/
