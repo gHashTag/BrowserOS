@@ -161,8 +161,8 @@ export class TaskQueueService {
             AND (
               status = 'pending'
               OR (
-                status = 'running'
-                AND (lease_expires_at IS NULL OR lease_expires_at < NOW())
+                -- a running row with no lease, or an expired one, is stale
+                ${STALE_LEASE_PREDICATE}
               )
             )
           ORDER BY priority DESC, created_at ASC
@@ -231,7 +231,7 @@ export class TaskQueueService {
   }
 
   /**
-   * Recover tasks whose leases have expired while still marked running.
+   * Recover tasks still marked running whose lease expired or was never granted.
    */
   async reclaimStaleLeases(): Promise<number> {
     logger.info('Reclaiming stale task leases')
@@ -246,8 +246,8 @@ export class TaskQueueService {
           lease_expires_at = NULL,
           lease_owner = NULL,
           retry_count = LEAST(retry_count + 1, max_retries)
-        WHERE status = 'running'
-          AND lease_expires_at < NOW()
+        WHERE
+          ${STALE_LEASE_PREDICATE}
       `,
         ),
       )
@@ -307,6 +307,22 @@ export class TaskQueueService {
 
       if (status === 'completed') {
         updates.push(`completed_at = NOW()`)
+      }
+
+      if (status === 'running') {
+        // Entering running must leave the row holding a real lease, the same
+        // five minutes the dequeue path grants: a running row with no lease
+        // reads as stale to the reclaim sweep and would be reaped on the next
+        // heartbeat tick.
+        updates.push(`lease_expires_at = NOW() + interval '5 minutes'`)
+        updates.push(`lease_owner = $${paramIndex}`)
+        values.push(this.workerId)
+        paramIndex++
+      } else {
+        // Any move out of running releases the lease so the row does not
+        // carry an owner that no longer applies.
+        updates.push(`lease_expires_at = NULL`)
+        updates.push(`lease_owner = NULL`)
       }
 
       if (result !== undefined) {
@@ -575,6 +591,19 @@ export class TaskQueueService {
     }
   }
 }
+
+/**
+ * One spelling of "this running row is free to take over".
+ *
+ * dequeueNextTask and reclaimStaleLeases answer the same question and used
+ * to answer it with two hand-written copies of the comparison. The copies
+ * drifted: only the dequeue arm matched a running row whose lease was NULL,
+ * so the reaper's UPDATE silently dropped those rows under SQL three-valued
+ * logic and a task parked at running with no lease was invisible to the only
+ * mechanism meant to recover it. Both call sites interpolate this constant;
+ * the rule is written down once and cannot drift apart again.
+ */
+const STALE_LEASE_PREDICATE = `status = 'running' AND (lease_expires_at IS NULL OR lease_expires_at < NOW())`
 
 /**
  * A jsonb value only when it really is an object.
