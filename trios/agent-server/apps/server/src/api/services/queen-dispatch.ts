@@ -347,10 +347,43 @@ export async function prepareWorktree(
     180_000,
   )
   if (fetched.code !== 0) {
+    // MAKE THE FAILURE EXPLAIN ITSELF.
+    //
+    // `fatal: protocol 'https' is not supported` stopped every NEW worktree on
+    // 2026-09-03 while the entrypoint's own fetch, run through the identical
+    // `su -s /bin/sh <user> -c`, succeeded at the same boot - so the remote and
+    // the credentials are fine and the difference is the environment this
+    // spawn inherits. That message is what git prints when it cannot reach the
+    // `git-remote-https` helper, so the three facts that separate the causes
+    // are the exec-path, whether the helper is there, and PATH.
+    //
+    // Guessing cost several rounds. These three commands cost one second and
+    // are only run when the fetch has already failed.
+    const where = await run('git', ['--exec-path'], root, 10_000)
+    const helper = await run(
+      'sh',
+      [
+        '-c',
+        'command -v git-remote-https || ls "$(git --exec-path)" | grep -c remote-http',
+      ],
+      root,
+      10_000,
+    )
+    const path$ = await run('sh', ['-c', 'echo "$PATH"'], root, 10_000)
+    logger.error('Queen worktree fetch failed', {
+      issue,
+      error: fetched.out.slice(0, 300),
+      execPath: where.out.slice(0, 200),
+      remoteHelper: helper.out.slice(0, 200),
+      shellPath: path$.out.slice(0, 300),
+    })
     return {
       ok: false,
       path,
-      detail: `git fetch failed: ${fetched.out.slice(0, 200)}`,
+      detail:
+        `git fetch failed: ${fetched.out.slice(0, 160)}` +
+        ` | exec-path ${where.out.slice(0, 60)}` +
+        ` | helper ${helper.out.slice(0, 40)}`,
     }
   }
 
