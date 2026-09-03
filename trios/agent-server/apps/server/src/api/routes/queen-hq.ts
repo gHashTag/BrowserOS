@@ -189,7 +189,7 @@ const SHELL = `<!doctype html>
     return c.column==='backlog' && c.paths && c.paths.length}).length
   var noBoundary=(by.backlog||0)-free
   var run=by.running||0
-  var keys=p.workerKeys||0
+  var keys=Math.max((p.workerKeys||0)-(p.workerKeysRefused||0),0)
   var limit=p.workerLimit||4
   var ceiling=Math.min(keys||0,limit)
 

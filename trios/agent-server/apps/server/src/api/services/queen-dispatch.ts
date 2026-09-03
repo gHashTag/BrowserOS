@@ -153,6 +153,80 @@ export function noteKeyRefused(provider: string, index: number): void {
   })
 }
 
+/**
+ * Whether a credential can actually pay for a turn, asked before an issue is
+ * spent on finding out.
+ *
+ * Measured 2026-09-03 with four keys configured: two answered HTTP 200 and two
+ * answered 429 with Z.AI business code 1113, "Insufficient balance or no
+ * resource package". Without this the rotation hands each dead key an issue,
+ * the turn dies on its first frame, and the swarm learns by burning work -
+ * once per key, per process. Two of the four keys were dead, so that is two
+ * issues consumed to discover a fact one request answers.
+ *
+ * ONE request, one token, cached for the life of the process. The cache is
+ * deliberately not persisted: a key with no balance is a fact about an account
+ * at a moment, and a restart is the cheapest possible retry after a top-up.
+ *
+ * A network failure is NOT a refusal. If the probe cannot reach the provider at
+ * all, the answer is "assume live" - refusing to dispatch because our own
+ * network hiccuped would stall the swarm for a reason that has nothing to do
+ * with the credential.
+ */
+const keyLiveness = new Map<string, boolean>()
+
+export async function keyIsLive(chosen: WorkerProvider): Promise<boolean> {
+  if (!chosen.apiKey || chosen.rehearsal) return true
+  const slot = `${chosen.provider}:${chosen.keyIndex ?? 0}`
+  const known = keyLiveness.get(slot)
+  if (known !== undefined) return known
+  const base =
+    chosen.baseUrl ||
+    process.env.ZAI_BASE_URL ||
+    'https://api.z.ai/api/coding/paas/v4'
+  try {
+    const response = await fetch(`${base}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${chosen.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: chosen.model,
+        messages: [{ role: 'user', content: 'hi' }],
+        max_tokens: 1,
+      }),
+      signal: AbortSignal.timeout(20_000),
+    })
+    // 429 with business code 1113 is an exhausted package, and 401/403 is a key
+    // that is not a key. Everything else - including a rate limit that is a
+    // real rate limit - is a live credential having a bad moment.
+    const body = response.ok ? '' : await response.text().catch(() => '')
+    const dead =
+      response.status === 401 ||
+      response.status === 403 ||
+      body.includes('1113') ||
+      body.includes('Insufficient balance')
+    keyLiveness.set(slot, !dead)
+    if (dead) {
+      logger.warn('Queen found a credential that cannot pay', {
+        provider: chosen.provider,
+        keyIndex: chosen.keyIndex,
+        status: response.status,
+        said: body.slice(0, 160),
+      })
+    }
+    return !dead
+  } catch (error) {
+    logger.warn('Queen could not reach the provider to check a key', {
+      provider: chosen.provider,
+      keyIndex: chosen.keyIndex,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return true
+  }
+}
+
 /** For the board and for tests: which keys this process has written off. */
 export function refusedKeyCount(provider = 'zai'): number {
   return (refusedKeys.get(provider) ?? new Set()).size
@@ -1081,7 +1155,15 @@ export async function dispatchBee(
 ): Promise<DispatchOutcome> {
   const branch = `queen-${issue}`
 
-  const chosen = resolveWorkerProvider(takenKeyIndices)
+  // Ask the provider before spending an issue. Each dead key costs one probe
+  // once per process instead of one dispatched bee that dies on its first
+  // frame - and a bee that dies that way used to be recorded as finished work.
+  let chosen = resolveWorkerProvider(takenKeyIndices)
+  for (let attempt = 0; attempt < 8 && chosen?.apiKey; attempt++) {
+    if (await keyIsLive(chosen)) break
+    noteKeyRefused(chosen.provider, chosen.keyIndex ?? 0)
+    chosen = resolveWorkerProvider(takenKeyIndices)
+  }
   if (chosen?.exhausted !== undefined) {
     // Not a missing credential: every key this deployment has is already
     // carrying a bee. Named separately because the fix is different - one more

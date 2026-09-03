@@ -47,6 +47,7 @@
 
 import { Hono } from 'hono'
 import { Pool } from 'pg'
+import { refusedKeyCount } from '../services/queen-dispatch'
 import { queenLeaseDatabaseUrl } from '../services/queen-lease'
 
 interface Card {
@@ -454,6 +455,11 @@ async function build(pool: Pool): Promise<{ cards: Card[]; pulse: Pulse }> {
           ?.refusal ?? null,
       roundSeconds: Number(process.env.TRIOS_QUEEN_TICK_SECONDS ?? '0') || null,
       workerKeys: providerKeyCount(),
+      // Configured is not usable. Four keys were set on 2026-09-03 and two of
+      // them answered 429 with Z.AI code 1113 - an exhausted package. A page
+      // that reports the configured count as the ceiling sends the reader
+      // looking for two bees that can never start.
+      workerKeysRefused: refusedKeyCount('zai'),
       workerLimit: 4,
     },
   }
@@ -481,6 +487,8 @@ export interface Pulse {
   lastRefusal: string | null
   roundSeconds: number | null
   workerKeys: number
+  /** Of those, how many the provider has refused in this process. */
+  workerKeysRefused: number
   workerLimit: number
 }
 
@@ -896,7 +904,7 @@ const SHELL = `<!doctype html>
   var p=d.pulse||{}
   var v=$('verdict')
   var run=by.running||0
-  var keys=p.workerKeys||0
+  var keys=Math.max((p.workerKeys||0)-(p.workerKeysRefused||0),0)
   var ceiling=Math.min(keys||0, p.workerLimit||4)
   var head, why
   if(run>0){

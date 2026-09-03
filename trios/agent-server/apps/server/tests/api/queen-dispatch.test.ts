@@ -9,6 +9,7 @@ import {
   committedFiles,
   drain,
   finishDispatch,
+  keyIsLive,
   missingProviderRefusal,
   prepareWorktree,
   recordDispatch,
@@ -567,5 +568,99 @@ describe('a provider refusal', () => {
     )
     expect(refusedKeyCount('zai')).toBeGreaterThan(before - 1)
     expect(refusedKeyCount('zai')).toBeGreaterThanOrEqual(1)
+  })
+})
+
+/**
+ * A credential is asked whether it can pay BEFORE an issue is spent on it.
+ *
+ * Measured 2026-09-03 with four keys configured: two answered HTTP 200 and two
+ * answered 429 with Z.AI business code 1113, "Insufficient balance or no
+ * resource package". Without the probe the rotation hands each dead key an
+ * issue, the turn dies on its first frame, and - before the refusal fix - that
+ * was written down as finished work awaiting a verdict. Two dead keys meant two
+ * issues consumed to learn what one request answers.
+ */
+describe('checking a credential before spending an issue', () => {
+  const realFetch = globalThis.fetch
+  afterEach(() => {
+    globalThis.fetch = realFetch
+  })
+
+  const answer = (status: number, body: string) => {
+    globalThis.fetch = (async () =>
+      new Response(body, { status })) as typeof fetch
+  }
+
+  it('reads an exhausted package as dead', async () => {
+    answer(429, '{"error":{"code":"1113","message":"Insufficient balance"}}')
+    expect(
+      await keyIsLive({
+        provider: 'zai',
+        model: 'glm-5.3',
+        apiKey: 'k',
+        keyIndex: 90,
+      }),
+    ).toBe(false)
+  })
+
+  it('reads a rejected key as dead', async () => {
+    answer(401, 'unauthorized')
+    expect(
+      await keyIsLive({
+        provider: 'zai',
+        model: 'glm-5.3',
+        apiKey: 'k',
+        keyIndex: 91,
+      }),
+    ).toBe(false)
+  })
+
+  it('reads a working key as live', async () => {
+    answer(200, '{"choices":[]}')
+    expect(
+      await keyIsLive({
+        provider: 'zai',
+        model: 'glm-5.3',
+        apiKey: 'k',
+        keyIndex: 92,
+      }),
+    ).toBe(true)
+  })
+
+  // A network failure is not a refusal. Refusing to dispatch because our own
+  // network hiccuped would stall the swarm for a reason that has nothing to do
+  // with the credential.
+  it('assumes live when the provider cannot be reached at all', async () => {
+    globalThis.fetch = (async () => {
+      throw new Error('getaddrinfo ENOTFOUND')
+    }) as typeof fetch
+    expect(
+      await keyIsLive({
+        provider: 'zai',
+        model: 'glm-5.3',
+        apiKey: 'k',
+        keyIndex: 93,
+      }),
+    ).toBe(true)
+  })
+
+  // A rehearsal turn aims at this server and has no credential to check.
+  it('does not probe a rehearsal', async () => {
+    let called = false
+    globalThis.fetch = (async () => {
+      called = true
+      return new Response('{}', { status: 200 })
+    }) as typeof fetch
+    expect(
+      await keyIsLive({
+        provider: 'openai-compatible',
+        model: 'rehearsal',
+        apiKey: 'x',
+        rehearsal: true,
+        keyIndex: 94,
+      }),
+    ).toBe(true)
+    expect(called).toBe(false)
   })
 })
