@@ -24,6 +24,7 @@ name: clade-seal
  - Must exit 0
  - Must produce `.worktrees/staging/trios_app`
  - Must produce `.worktrees/staging/trios-staging.app/Contents/Info.plist` with TRIOS_VARIANT=staging
+ - `TRIOS_VARIANT=staging` stays on the same line as the command on purpose: a bare `cargo run --bin clade-build` defaults to prod and overwrites `trios.app` (`docs/clade-build-variant-hazard.md`); `tools/clade-build-guard.mjs` fails the tree if the opt-in is dropped
 
  ## Cell 2: Health Probe (Seal-2)
 

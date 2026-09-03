@@ -22,13 +22,19 @@ access issue. TriOS Queen can override per-invocation with `/doctor --model <mod
 ```
 shell_execute: "cd /Users/playra/BrowserOS/trios && git status --porcelain | wc -l"
 shell_execute: "curl -s http://127.0.0.1:9105/health"
-shell_execute: "cd /Users/playra/BrowserOS/trios && cargo run --bin clade-build 2>&1 | tail -5"
+shell_execute: "cd /Users/playra/BrowserOS/trios && make check 2>&1 | tail -5"
 fs_read: "/Users/playra/BrowserOS/trios/.trinity/doctor_prev.dat"
 ```
 
+The build probe is `make check` (dev build + every logic suite), the safe form
+documented in `.claude/skills/agent-safe-build/SKILL.md`. It replaces a bare
+run of the `clade-build` binary, which carries no `TRIOS_VARIANT`, defaults to
+prod, and would overwrite the running `trios.app` while the doctor only meant
+to check that the build passes.
+
 ### Step 2: HEAL
 
-**2a. Build broken?** -> fs_read errors, fs_edit fix, shell_execute rebuild with `cargo run --bin clade-build`
+**2a. Build broken?** -> fs_read errors, fs_edit fix, shell_execute rebuild with `make check` (safe form from `agent-safe-build`: dev build + every logic suite, never touches `trios.app`)
 **2b. Dirty .swift?** -> Commit via shell_execute:
 ```
 shell_execute: "cd /Users/playra/BrowserOS/trios && git add -A && git commit -m ring-NNN-fix: desc (Closes #N)"
@@ -74,7 +80,7 @@ shell_execute: "ls -lt /Users/playra/BrowserOS/trios/.trinity/snapshots/ | head 
 - L1 TRACEABILITY: ring-NNN-type: desc (Closes #N)
 - L2 GENERATION: No hand-editing generated code
 - L3 PURITY: ASCII-only identifiers
-- L4 TESTABILITY: Build passes after heal (cargo run --bin clade-build)
+- L4 TESTABILITY: Build passes after heal (make check)
 - L7 UNITY: No .sh/.py scripts, Rust rings only
 
 ## Report Format
