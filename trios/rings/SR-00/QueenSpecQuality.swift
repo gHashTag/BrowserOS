@@ -143,7 +143,7 @@ public enum QueenSpecQuality {
             ),
             Check(
                 name: "success criteria",
-                met: (hasSection(body, ["Success Criteria", "Критерии", "Done when", "Готово когда"])
+                met: (hasSection(body, criteriaHeadings)
                       || hasSection(body, ["Acceptance"]))
                     && hasMeasurableOutcome(body),
                 remedy: "Add `## Success Criteria` with outcomes something can "
