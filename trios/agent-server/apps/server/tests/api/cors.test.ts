@@ -5,14 +5,15 @@
 
 import { describe, expect, it } from 'bun:test'
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
 
 import {
   isAllowedCorsOrigin,
   publicReadCorsMiddleware,
   trustedCorsMiddleware,
-} from '../../../src/api/utils/cors'
+} from '../../src/api/utils/cors'
 
 describe('cors allowlist', () => {
   it('allows loopback origins', () => {
@@ -153,8 +154,15 @@ describe('public-read CORS on the sanitized Queen projections', () => {
  * middleware registered ABOVE the trusted catch-all.
  */
 describe('every public Queen projection is mounted with public-read CORS', () => {
+  // `server.ts` lives one directory above the middleware this suite imports.
+  // Rather than hard-code how many levels separate this file from it, resolve
+  // the middleware module itself and go up from there - the suite then finds
+  // server.ts no matter where under tests/ it ends up living.
+  const corsModuleDir = dirname(
+    fileURLToPath(import.meta.resolve('../../src/api/utils/cors')),
+  )
   const source = readFileSync(
-    resolve(import.meta.dir, '..', 'server.ts'),
+    resolve(corsModuleDir, '..', 'server.ts'),
     'utf8',
   )
   const mounted = [
