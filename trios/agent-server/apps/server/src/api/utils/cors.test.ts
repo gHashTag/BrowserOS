@@ -4,6 +4,8 @@
  */
 
 import { describe, expect, it } from 'bun:test'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { Hono } from 'hono'
 
 import {
@@ -139,5 +141,50 @@ describe('public-read CORS on the sanitized Queen projections', () => {
     expect(res.status).toBe(204)
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*')
     expect(res.headers.get('Access-Control-Allow-Methods')).toContain('GET')
+  })
+})
+
+/**
+ * Three public projections were mounted on 2026-09-01 without this
+ * middleware, and nothing noticed: the routes answered curl and returned 404
+ * from the browser at t27.ai just the same, because a missing CORS header and
+ * a missing route look identical from a page. This reads server.ts and holds
+ * that every /queen/public-* and /queen/status mount has its public-read
+ * middleware registered ABOVE the trusted catch-all.
+ */
+describe('every public Queen projection is mounted with public-read CORS', () => {
+  const source = readFileSync(
+    resolve(import.meta.dir, '..', 'server.ts'),
+    'utf8',
+  )
+  const mounted = [
+    ...source.matchAll(/\.route\('(\/queen\/(?:status|public-[a-z-]+))'/g),
+  ].map((m) => m[1])
+  const publicRead = [
+    ...source.matchAll(
+      /\.use\('(\/queen\/[a-z-]+)', publicReadCorsMiddleware\(\)\)/g,
+    ),
+  ].map((m) => m[1])
+  const catchAll = source.indexOf(".use('/*', trustedCorsMiddleware())")
+
+  it('mounts at least the five the page reads', () => {
+    for (const path of [
+      '/queen/status',
+      '/queen/public-board',
+      '/queen/public-activity',
+      '/queen/public-hardware',
+      '/queen/public-research',
+    ]) {
+      expect(mounted).toContain(path)
+    }
+  })
+
+  it('gives each of them public-read CORS, registered before the catch-all', () => {
+    for (const path of mounted) {
+      expect(publicRead).toContain(path)
+      const at = source.indexOf(`.use('${path}', publicReadCorsMiddleware())`)
+      expect(at).toBeGreaterThan(-1)
+      expect(at).toBeLessThan(catchAll)
+    }
   })
 })

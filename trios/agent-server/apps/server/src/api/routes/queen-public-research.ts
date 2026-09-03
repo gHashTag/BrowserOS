@@ -51,8 +51,8 @@ function configuredPublicOrigin(requestUrl: string): string {
 
 function sanitizeEvidence(value: string): string {
   return value
-    .replace(/\/Users\/[^/\s]+\//g, '/Users/…/')
-    .replace(/\/home\/[^/\s]+\//g, '/home/…/')
+    .replace(/\/Users\/[^/\s]+\//g, '/Users/.../')
+    .replace(/\/home\/[^/\s]+\//g, '/home/.../')
     .slice(0, 1200)
 }
 

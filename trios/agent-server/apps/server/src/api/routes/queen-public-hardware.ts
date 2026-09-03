@@ -155,9 +155,12 @@ export function createQueenPublicHardwareRoute(
     deps.readRegistry ?? (() => process.env.QUEEN_FPGA_REGISTRY_JSON)
   const readPrivateKey =
     deps.readPrivateKey ?? (() => process.env.QUEEN_FPGA_SIGNING_PRIVATE_KEY)
+  // No fallback to the API token. The browser pins one public key and
+  // silently discards any envelope signed by another, so a key derived from
+  // whatever token happens to be set produces a 200 that renders as nothing -
+  // indistinguishable from the 404 this route replaces. Unconfigured is 503.
   const readSigningSecret =
-    deps.readSigningSecret ??
-    (() => process.env.QUEEN_FPGA_SIGNING_SECRET || process.env.TRIOS_API_TOKEN)
+    deps.readSigningSecret ?? (() => process.env.QUEEN_FPGA_SIGNING_SECRET)
   const readKeyId =
     deps.readKeyId ?? (() => process.env.QUEEN_FPGA_SIGNING_KEY_ID)
   const now = deps.now ?? (() => new Date())
