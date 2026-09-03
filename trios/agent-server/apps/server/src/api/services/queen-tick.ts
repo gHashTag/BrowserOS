@@ -399,6 +399,96 @@ export function stateOfDispatch(
   return 'awaitingReview'
 }
 
+/**
+ * Work the repository has already measured and nobody has written down.
+ *
+ * THE BLOCKER THIS ANSWERS. Of the issues a bee has ever worked here, not one
+ * was written by the Queen: every single one came from a person or an agent
+ * outside the loop. So each time the backlog is fed she drains it within the
+ * hour and returns to `nothing to choose` - which is not a defect in the
+ * scheduler, it is the absence of a supply. Measured 2026-09-03: 41 done, 17
+ * in backlog, 0 she may start.
+ *
+ * WHY FILE LENGTH AND NOT SOMETHING CLEVERER. It is the one backlog this
+ * repository already computes and already complains about: the pre-commit gate
+ * prints a warning for every file over 400 lines, on every commit, and has for
+ * as long as the files have been long. That makes each entry EVIDENCE rather
+ * than an opinion - a count anyone can reproduce with `wc -l` - and it gives
+ * the one thing a candidate needs to be delegatable at all: a boundary, which
+ * is the file itself.
+ *
+ * SCOPED TO WHAT THIS PROJECT OWNS. Forty-six files in the tree are over the
+ * threshold and most of them are BrowserOS upstream - openclaw, the container
+ * runtime, klavis. Splitting those would create merge pain in someone else's
+ * code for a gate they did not write. Only the queen and ring files are ours.
+ *
+ * IT DOES NOT FILE ANYTHING. The container holds no GitHub credential, by
+ * design, so it could not publish an issue if it wanted to. Deriving and
+ * reporting is the whole job here; publishing stays with a machine that has
+ * the credential, and that separation is a feature rather than a limitation -
+ * a supervisor that files its own work list unsupervised is a different and
+ * much larger decision.
+ */
+export interface DerivedCandidate {
+  /** The boundary, and the reason, in one: the file is both. */
+  path: string
+  lines: number
+  /** The command that produced it, so the claim can be re-run. */
+  source: string
+}
+
+/** Files this project owns, as prefixes. Everything else belongs to upstream. */
+const OWNED = [
+  'apps/server/src/api/routes/queen-',
+  'apps/server/src/api/services/queen-',
+  'apps/server/tests/api/queen-',
+  'apps/server/tests/api/ring00-',
+  'apps/server/tests/api/pg-migrate',
+  'apps/server/tests/api/queend-',
+]
+
+/** The threshold the pre-commit gate uses. Read from one place or it drifts. */
+export const FILE_LENGTH_THRESHOLD = 400
+
+export async function deriveCandidates(
+  root: string,
+  read: (path: string) => Promise<string> = async (p) =>
+    (await import('node:fs/promises')).readFile(p, 'utf8'),
+): Promise<DerivedCandidate[]> {
+  const out: DerivedCandidate[] = []
+  for (const prefix of OWNED) {
+    const dir = `${root}/trios/agent-server/${prefix.slice(0, prefix.lastIndexOf('/'))}`
+    let names: string[]
+    try {
+      const fs = await import('node:fs/promises')
+      names = await fs.readdir(dir)
+    } catch {
+      continue
+    }
+    const leaf = prefix.slice(prefix.lastIndexOf('/') + 1)
+    for (const name of names) {
+      if (!name.startsWith(leaf) || !name.endsWith('.ts')) continue
+      const rel = `${prefix.slice(0, prefix.lastIndexOf('/'))}/${name}`
+      let text: string
+      try {
+        text = await read(`${root}/trios/agent-server/${rel}`)
+      } catch {
+        continue
+      }
+      const lines = text.split('\n').length
+      if (lines <= FILE_LENGTH_THRESHOLD) continue
+      out.push({
+        path: `agent-server/${rel}`,
+        lines,
+        source: `wc -l agent-server/${rel} -> ${lines}, over the ${FILE_LENGTH_THRESHOLD}-line threshold the pre-commit gate warns on`,
+      })
+    }
+  }
+  // Biggest first: the longest file is the one the gate has complained about
+  // most often and the one a split helps most.
+  return out.sort((a, b) => b.lines - a.lines)
+}
+
 export function boardTask(
   owner: string,
   repoName: string,
