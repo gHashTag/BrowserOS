@@ -27,7 +27,7 @@ import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import type { Pool } from 'pg'
 import { logger } from '../../lib/logger'
-import { shellArgv } from '../../tools/filesystem/bash'
+import { shellArgv, spawnEnv } from '../../tools/filesystem/bash'
 import { workerSystemPrompt } from './queen-tick'
 
 /**
@@ -223,7 +223,32 @@ function run(
     .join(' ')
   const argv = shellArgv(quoted)
   return new Promise((resolve) => {
-    const child = spawn(argv[0], argv.slice(1), { cwd })
+    // THE SAME ENVIRONMENT THE BEE'S OWN SHELL GETS, and that is the whole fix.
+    //
+    // This spawn passed no env, so it inherited the server's full container
+    // environment - 52 variables on the live service. Something in it made git
+    // refuse https:
+    //
+    //   git fetch failed: fatal: protocol 'https' is not supported
+    //
+    // Every dispatch needing a NEW worktree died there from 2026-09-02, while
+    // reused worktrees kept working because `prepareWorktree` returns before
+    // the fetch on reuse - so the swarm looked half-alive rather than blocked.
+    //
+    // It was not git and it was not the remote. Asked directly through
+    // `filesystem_bash`, the container answered: git 2.47.3, exec-path
+    // /usr/lib/git-core, git-remote-https present and linked against libcurl,
+    // origin https://github.com/gHashTag/BrowserOS.git, no protocol or url
+    // config - and `git fetch --quiet origin` in that same directory SUCCEEDED.
+    // The only difference between the two calls was that `filesystem_bash`
+    // goes through `spawnEnv()` and this one did not.
+    //
+    // The allowlist exists for exactly this class: its own comment records that
+    // the inherited environment carried SSH_AUTH_SOCK, DATABASE_URL and a
+    // Kaggle token into every worker command. Passing a git command more
+    // environment than it needs is how one of those variables gets to decide
+    // what git may do.
+    const child = spawn(argv[0], argv.slice(1), { cwd, env: spawnEnv() })
     let out = ''
     const done = setTimeout(() => child.kill('SIGKILL'), timeoutMs)
     child.stdout.on('data', (d) => {

@@ -69,7 +69,7 @@ const ENV_ALLOWLIST = [
   'DEVELOPER_DIR',
 ] as const
 
-function spawnEnv(): Record<string, string | undefined> {
+export function spawnEnv(): Record<string, string | undefined> {
   if (process.env.TRIOS_BASH_ENV_ALLOWLIST === '0') {
     return { ...process.env }
   }
