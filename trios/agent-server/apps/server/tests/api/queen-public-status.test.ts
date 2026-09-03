@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import {
   configuredBillingMode,
   createQueenPublicStatusRoute,
+  SKIP_ISSUE_LIST_CAP,
 } from '../../src/api/routes/queen-public-status'
 
 type QueryResult = { rowCount: number; rows: Array<Record<string, unknown>> }
@@ -51,14 +52,89 @@ const representativeSkipped = [
   '#1242: not first',
 ]
 
+/**
+ * What every category above becomes: the count it always was, the issue
+ * numbers behind it, and `more`, everything counted but not listed. Every
+ * reason here carries its number, so every `more` is 0 and every list has
+ * its count's length - the invariant the equality tests below pin.
+ */
 const expectedSummary = {
-  claimed: 2,
-  completed: 1,
-  missingBoundary: 3,
-  fileConflict: 2,
-  incompleteSpec: 2,
-  notFirst: 3,
+  claimed: { count: 2, issues: [1210, 1211], more: 0 },
+  completed: { count: 1, issues: [1215], more: 0 },
+  missingBoundary: { count: 3, issues: [1204, 1205, 1206], more: 0 },
+  fileConflict: { count: 2, issues: [1220, 1221], more: 0 },
+  incompleteSpec: { count: 2, issues: [1230, 1231], more: 0 },
+  notFirst: { count: 3, issues: [1240, 1241, 1242], more: 0 },
 }
+
+/**
+ * The tick of 2026-09-03T17:24:42Z that issue #1352 quotes: 51 skips whose
+ * counts were all true and none usable, because no issue number was
+ * published. The two missing boundaries the operator dug out by hand were
+ * #957 and #380 - the payload has to say so itself now.
+ */
+const incidentSkipped = [
+  ...Array.from(
+    { length: 13 },
+    (_, i) => `#${1010 + i}: a worker has it or is expected back (running)`,
+  ),
+  ...Array.from(
+    { length: 34 },
+    (_, i) =>
+      `#${2001 + i}: the work already landed (accepted) - the issue is open and nobody closed it`,
+  ),
+  '#957: declares no boundary',
+  '#380: no issue body was supplied, so its boundary is unknown',
+  '#410: apps/server/src/api/routes/queen-status.ts held by gHashTag/trios#1188',
+  '#420: delegatable but not yet a spec - missing scenarios, success criteria',
+] as string[]
+
+/**
+ * User story 2's tick: one reason matching 200 issues, past the cap, plus
+ * the round-level sentence a tick stores without a number.
+ */
+const truncatedSkipped = [
+  ...Array.from({ length: 200 }, (_, i) => `#${3000 + i}: not first`),
+  'no registry mirror published yet',
+] as string[]
+
+type PublishedSummary = {
+  lastTick: {
+    skippedCount: number
+    skipIssueListCap: number
+    skipSummary: Record<
+      string,
+      { count: number; issues: number[]; more: number }
+    >
+  }
+}
+
+/** Read /queen/status over one tick's skip array with an empty dispatch table. */
+const readTick = async (skipped: unknown[]): Promise<PublishedSummary> =>
+  (await (
+    await createQueenPublicStatusRoute({
+      databaseUrl: () => 'postgres://configured',
+      createPool: () =>
+        fakePool([
+          {
+            rowCount: 1,
+            rows: [
+              {
+                decided_at: '2026-09-03T17:24:42.000Z',
+                decision: {
+                  allowed: false,
+                  refusal: 'nothing to choose',
+                  skipped,
+                },
+              },
+            ],
+          },
+          emptyDispatchCounts,
+          noLatestDispatch,
+        ]),
+      tickIntervalSeconds: () => 1800,
+    }).request('/')
+  ).json()) as PublishedSummary
 
 describe('configuredBillingMode', () => {
   it('requires the explicit Coding Plan value and otherwise stays metered', () => {
@@ -118,9 +194,12 @@ describe('GET /queen/status', () => {
     expect(response.headers.get('cache-control')).toBe('no-store')
     expect(await response.json()).toEqual({
       status: 'ok',
-      // Eight finished dispatches, two still owing a verdict: the idle
-      // reading of the tick's refusal must lose to the verdicts owed.
-      swarmState: 'waiting_for_review',
+      // Eight finished dispatches, two still owing a verdict - but the latest
+      // tick refused with `nothing to choose`, so the tick measured the
+      // blockade and it is the backlog, not the owed reviews. The verdicts
+      // stay counted under dispatches.unreviewed; they just cannot name the
+      // quiet while the tick that measured it says otherwise.
+      swarmState: 'healthy_idle',
       scheduler: {
         enabled: true,
         intervalSeconds: 1800,
@@ -133,6 +212,7 @@ describe('GET /queen/status', () => {
         refusal: 'nothing to choose',
         skippedCount: representativeSkipped.length,
         skipSummary: expectedSummary,
+        skipIssueListCap: SKIP_ISSUE_LIST_CAP,
       },
       dispatches: {
         total: 8,
@@ -182,7 +262,10 @@ describe('GET /queen/status', () => {
       )
         .request('/')
         .then((r) => r.json())) as {
-        lastTick: { skippedCount: number; skipSummary: Record<string, number> }
+        lastTick: {
+          skippedCount: number
+          skipSummary: Record<string, { count: number; more: number }>
+        }
       }
 
     // Two reads of the same tick: identical bytes, or the summary is not
@@ -193,20 +276,28 @@ describe('GET /queen/status', () => {
       JSON.stringify(second.lastTick.skipSummary),
     )
 
+    // The numberless pair is counted under `other` and contributes no issue:
+    // its count is whole and its `more` carries the whole count, so the
+    // category still obeys list + more === count.
     const summary = first.lastTick.skipSummary
-    expect(summary).toEqual({ ...expectedSummary, other: 2 })
-    const total = Object.values(summary).reduce((a, b) => a + b, 0)
+    expect(summary).toEqual({
+      ...expectedSummary,
+      other: { count: 2, issues: [], more: 2 },
+    })
+    const total = Object.values(summary).reduce((a, b) => a + b.count, 0)
     expect(total).toBe(first.lastTick.skippedCount)
     expect(total).toBeLessThanOrEqual(first.lastTick.skippedCount)
     expect(total).toBeGreaterThan(0)
   })
 
-  it('leaks no issue number, path, branch, title or secret from the skip reasons', async () => {
-    // The four values the success criteria name - an issue number, a
-    // repository path, a branch name, a title, a secret-looking value - plus
-    // the one FR-003 adds. They are planted in the skip reasons AND in the
-    // decision fields and dispatch-row columns the projection must ignore, so
-    // the assertion covers every road out of this route, not just the summary.
+  it('publishes issue numbers bare and leaks no path, branch, title or secret', async () => {
+    // A repository path, a branch name, a title, a secret-looking value, and
+    // the one shape an issue number can ride in - a `#`-prefixed token. They
+    // are planted in the skip reasons AND in the decision fields and
+    // dispatch-row columns the projection must ignore, so the assertion
+    // covers every road out of this route, not just the summary. The issue
+    // number itself now leaves, by design and bare (issue #1352); the probe
+    // pins that nothing beyond the number can.
     // One deliberate exception: `refusal` stays queend's closed template
     // ('nothing to choose' and its fixed siblings, main.swift), published as
     // it always has been, so it is not a channel a payload can ride.
@@ -226,7 +317,7 @@ describe('GET /queen/status', () => {
               allowed: false,
               refusal: 'nothing to choose',
               skipped: [
-                `#1291: ${leakPath} held by ${leakSecret}`,
+                `${leakIssue}: ${leakPath} held by ${leakSecret}`,
                 `#1292: ${leakBranch}: a worker has it or is expected back (running)`,
                 `#1293: ${leakTitle} not first`,
               ],
@@ -271,16 +362,26 @@ describe('GET /queen/status', () => {
     // The classification ran on planted rows without echoing any of them,
     // and an empty swarm under a live scheduler reads as health.
     expect(body.swarmState).toBe('healthy_idle')
-    // The categorisation still worked while none of it was echoed back.
+    // The categorisation still worked, and what it published is the issue
+    // numbers - bare integers - and nothing else the reasons carried.
     expect(body.lastTick).toEqual({
       decidedAt: '2026-09-01T04:17:42.983Z',
       allowed: false,
       refusal: 'nothing to choose',
       skippedCount: 3,
-      skipSummary: { claimed: 1, fileConflict: 1, notFirst: 1 },
+      skipSummary: {
+        fileConflict: { count: 1, issues: [1291], more: 0 },
+        claimed: { count: 1, issues: [1292], more: 0 },
+        notFirst: { count: 1, issues: [1293], more: 0 },
+      },
+      skipIssueListCap: SKIP_ISSUE_LIST_CAP,
     })
     const serialized = JSON.stringify(body)
-    expect(serialized).not.toContain(leakIssue)
+    // FR-001, stated positively and negatively: the numbers leave as bare
+    // integers, so no `#`-prefixed token - the shape the reasons store, and
+    // the only shape a payload could ride out in - appears anywhere, while
+    // the path, the branch, the title and the secret never appear at all.
+    expect(serialized).not.toContain('#')
     expect(serialized).not.toContain(leakPath)
     expect(serialized).not.toContain(leakBranch)
     expect(serialized).not.toContain(leakTitle)
@@ -330,6 +431,7 @@ describe('GET /queen/status', () => {
         refusal: null,
         skippedCount: 0,
         skipSummary: {},
+        skipIssueListCap: SKIP_ISSUE_LIST_CAP,
       },
       dispatches: {
         total: 0,
@@ -439,17 +541,19 @@ describe('GET /queen/status', () => {
     expect(healthyBody.dispatches.unreviewed).toBe(0)
   })
 
-  it('classifies finished unjudged work as waiting_for_review', async () => {
-    // Scenario 2's rows: no unfinished dispatch, one finished dispatch whose
-    // review_state is still null. The tick says the last round found nothing
-    // eligible - the idle signal - and must lose to the verdict still owed,
-    // because a swarm that looks empty but owes a review is not idle.
-    const pool = fakePool([
+  it('cannot read waiting_for_review off a tick that refused with nothing to choose', async () => {
+    // Issue #1352's second wrong signal, verbatim: swarmState
+    // waiting_for_review, running 0, refusal 'nothing to choose'. The tick
+    // measured the blockade - it examined every candidate and could start
+    // none - so the quiet belongs to the backlog, and a state naming the
+    // owed review as its cause is naming a cause the tick did not measure.
+    // The refusal and the state must be readings of the same tick record.
+    const emptyBacklog = fakePool([
       {
         rowCount: 1,
         rows: [
           {
-            decided_at: '2026-09-01T04:17:42.983Z',
+            decided_at: '2026-09-03T17:24:42.000Z',
             decision: {
               allowed: false,
               refusal: 'nothing to choose',
@@ -464,14 +568,46 @@ describe('GET /queen/status', () => {
       },
       noLatestDispatch,
     ])
-    const response = await createQueenPublicStatusRoute({
-      databaseUrl: () => 'postgres://configured',
-      createPool: () => pool,
-      tickIntervalSeconds: () => 1800,
-    }).request('/')
-    const body = (await response.json()) as Record<string, unknown>
-    expect(body.swarmState).toBe('waiting_for_review')
+    const body = (await (
+      await createQueenPublicStatusRoute({
+        databaseUrl: () => 'postgres://configured',
+        createPool: () => emptyBacklog,
+        tickIntervalSeconds: () => 1800,
+      }).request('/')
+    ).json()) as Record<string, unknown>
+    expect(body.swarmState).not.toBe('waiting_for_review')
+    expect(body.swarmState).toBe('healthy_idle')
+    // The verdict still owed is not erased - it stays counted, just not
+    // mislabeled as the reason the swarm is quiet.
     expect((body.dispatches as Record<string, unknown>).unreviewed).toBe(1)
+
+    // And the control: identical counts, but the tick chose work rather than
+    // measuring the backlog empty. Nothing outranks the owed verdict then,
+    // and waiting_for_review keeps the meaning it always had.
+    const owesVerdict = fakePool([
+      {
+        rowCount: 1,
+        rows: [
+          {
+            decided_at: '2026-09-03T17:24:42.000Z',
+            decision: { allowed: true, refusal: null, chosen: 1296 },
+          },
+        ],
+      },
+      {
+        rowCount: 1,
+        rows: [{ total: '1', finished: '1', running: '0', unreviewed: '1' }],
+      },
+      noLatestDispatch,
+    ])
+    const control = (await (
+      await createQueenPublicStatusRoute({
+        databaseUrl: () => 'postgres://configured',
+        createPool: () => owesVerdict,
+        tickIntervalSeconds: () => 1800,
+      }).request('/')
+    ).json()) as Record<string, unknown>
+    expect(control.swarmState).toBe('waiting_for_review')
   })
 
   it('classifies an empty swarm under a live scheduler as healthy_idle', async () => {
@@ -601,6 +737,124 @@ describe('GET /queen/status', () => {
       refusal: null,
       skippedCount: 0,
       skipSummary: {},
+      skipIssueListCap: SKIP_ISSUE_LIST_CAP,
     })
+  })
+})
+
+describe('skipSummary issue numbers', () => {
+  it('keeps issues.length + more === count for every reason across three fixture ticks', async () => {
+    // FR-005's three ticks: one with zero skips, the 2026-09-03 incident,
+    // and one whose reasons outrun the cap. For every reason in every tick
+    // the equality the success criteria name must hold, and the counts must
+    // still sum to skippedCount. Drop `more` from the payload and the
+    // equality line fails: a missing number is never a count.
+    const fixtures = [[], incidentSkipped, truncatedSkipped] as unknown[][]
+
+    for (const skipped of fixtures) {
+      const body = await readTick(skipped)
+      expect(body.lastTick.skipIssueListCap).toBe(SKIP_ISSUE_LIST_CAP)
+      const entries = Object.values(body.lastTick.skipSummary)
+      expect(entries.reduce((sum, entry) => sum + entry.count, 0)).toBe(
+        body.lastTick.skippedCount,
+      )
+      for (const entry of entries) {
+        expect(Number.isInteger(entry.count)).toBe(true)
+        expect(entry.issues.every(Number.isInteger)).toBe(true)
+        expect(entry.issues.length).toBeLessThanOrEqual(SKIP_ISSUE_LIST_CAP)
+        expect(entry.more).toBeGreaterThanOrEqual(0)
+        expect(entry.issues.length + entry.more).toBe(entry.count)
+      }
+    }
+
+    // The zero-skip tick says nothing rather than guessing: no category
+    // appears, so a page cannot render a reason the round never had.
+    expect((await readTick([])).lastTick.skipSummary).toEqual({})
+  })
+
+  it('names the two issues behind missingBoundary: 2', async () => {
+    // Scenario 1.2, straight from the incident: the two numbers the operator
+    // had to read all 51 issues to learn are in the payload, and their sum
+    // matches the count.
+    const body = await readTick(incidentSkipped)
+    expect(body.lastTick.skippedCount).toBe(51)
+    expect(body.lastTick.skipSummary.missingBoundary).toEqual({
+      count: 2,
+      issues: [957, 380],
+      more: 0,
+    })
+    expect(body.lastTick.skipSummary.claimed).toEqual({
+      count: 13,
+      issues: Array.from({ length: 13 }, (_, i) => 1010 + i),
+      more: 0,
+    })
+    expect(body.lastTick.skipSummary.incompleteSpec).toEqual({
+      count: 1,
+      issues: [420],
+      more: 0,
+    })
+  })
+
+  it('caps the numbers it publishes and stays inside a stated byte ceiling', async () => {
+    // User story 2: a reason matching 200 issues. The payload carries the
+    // cap worth of numbers plus the remainder, the cap itself rides along
+    // so the truncation is knowable, and the whole response stays under
+    // this stated ceiling: 4096 bytes, room for every category truncated.
+    const response = await createQueenPublicStatusRoute({
+      databaseUrl: () => 'postgres://configured',
+      createPool: () =>
+        fakePool([
+          {
+            rowCount: 1,
+            rows: [
+              {
+                decided_at: '2026-09-03T17:24:42.000Z',
+                decision: {
+                  allowed: false,
+                  refusal: 'nothing to choose',
+                  skipped: truncatedSkipped,
+                },
+              },
+            ],
+          },
+          emptyDispatchCounts,
+          noLatestDispatch,
+        ]),
+      tickIntervalSeconds: () => 1800,
+    }).request('/')
+    const text = await response.text()
+    expect(text.length).toBeLessThan(4096)
+
+    const body = JSON.parse(text) as PublishedSummary
+    expect(body.lastTick.skipIssueListCap).toBe(SKIP_ISSUE_LIST_CAP)
+    expect(body.lastTick.skippedCount).toBe(201)
+    expect(body.lastTick.skipSummary.notFirst).toEqual({
+      count: 200,
+      issues: Array.from({ length: SKIP_ISSUE_LIST_CAP }, (_, i) => 3000 + i),
+      more: 200 - SKIP_ISSUE_LIST_CAP,
+    })
+    // The round-level sentence is counted but never numbered, and `more`
+    // carries it whole rather than dropping it from the sum.
+    expect(body.lastTick.skipSummary.other).toEqual({
+      count: 1,
+      issues: [],
+      more: 1,
+    })
+  })
+
+  it('lists the skipped issue, never the holder a conflict names', async () => {
+    // A file conflict names its holders after the paths - `#1188` is another
+    // issue's number, the holder's, and only the leading number is the
+    // skipped issue. The holder must not ride out as a number either: the
+    // count is about #1220, and 1188 belongs to a live task's brief.
+    const body = await readTick([
+      '#1220: apps/server/src/api/routes/queen-status.ts held by gHashTag/trios#1188',
+    ])
+    expect(body.lastTick.skipSummary.fileConflict).toEqual({
+      count: 1,
+      issues: [1220],
+      more: 0,
+    })
+    expect(JSON.stringify(body)).not.toContain('1188')
   })
 })
