@@ -102,6 +102,20 @@ export interface WorkerProvider {
  * because the name exists gives it nothing to authenticate with - the same trap
  * `~/.trios/config.json` has been sitting in for months.
  */
+/**
+ * How many bees the configured credentials can carry at once: one lane per
+ * key of the first provider that has any keys, which is the same rule
+ * chooseProvider() applies when it hands a key out. The public research
+ * projection uses only this count, so no key and no provider name leaves.
+ */
+export function configuredWorkerCapacity(): number {
+  for (const candidate of WORKER_PROVIDERS) {
+    const count = keysFor(candidate.envVar).length
+    if (count > 0) return count
+  }
+  return 0
+}
+
 function keysFor(envVar: string): string[] {
   const keys: string[] = []
   const first = process.env[envVar]
