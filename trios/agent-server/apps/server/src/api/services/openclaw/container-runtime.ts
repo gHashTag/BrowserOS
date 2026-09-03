@@ -35,6 +35,15 @@ const OPENCLAW_NAME_RELEASE_WAIT: WaitForContainerNameReleaseOptions = {
   timeoutMs: 10_000,
   intervalMs: 100,
 }
+/** Default total budget for `waitForReady` before it gives up. */
+export const GATEWAY_READY_TIMEOUT_MS = 30_000
+/**
+ * Budget for a single readiness probe. It must stay strictly below
+ * GATEWAY_READY_TIMEOUT_MS so any wait always allows at least two attempts;
+ * tests/api/services/openclaw/ready-probe.test.ts asserts that relation.
+ */
+export const GATEWAY_READY_PROBE_TIMEOUT_MS = 10_000
+const GATEWAY_READY_RETRY_INTERVAL_MS = 1000
 // Prepend user-installed bin so tools like `claude` / `gemini` CLI that
 // are installed via npm into the mounted home are discoverable by
 // OpenClaw's child-process spawns (no login shell is involved).
@@ -164,27 +173,54 @@ export class ContainerRuntime {
   }
 
   async isReady(hostPort: number): Promise<boolean> {
-    try {
-      const res = await fetch(`http://127.0.0.1:${hostPort}/readyz`)
-      return res.ok
-    } catch {
-      return false
-    }
+    return (await probeGatewayReady(hostPort)).ready
   }
 
-  async waitForReady(hostPort: number, timeoutMs = 30_000): Promise<boolean> {
+  async waitForReady(
+    hostPort: number,
+    timeoutMs: number = GATEWAY_READY_TIMEOUT_MS,
+  ): Promise<boolean> {
     logger.info('Waiting for OpenClaw gateway readiness', {
       hostPort,
       timeoutMs,
     })
     const start = Date.now()
+    let attempts = 0
+    let lastFailure:
+      | Extract<GatewayReadyProbeResult, { ready: false }>
+      | undefined
     while (Date.now() - start < timeoutMs) {
-      if (await this.isReady(hostPort)) return true
-      await Bun.sleep(1000)
+      attempts += 1
+      // A single probe may never outlive the remaining wait budget: a port
+      // that accepts the connection and then stays silent is aborted here,
+      // not allowed to hold the lifecycle lock past the deadline.
+      const remaining = timeoutMs - (Date.now() - start)
+      const probe = await probeGatewayReady(
+        hostPort,
+        Math.min(GATEWAY_READY_PROBE_TIMEOUT_MS, remaining),
+      )
+      if (probe.ready) return true
+      lastFailure = probe
+      logger.debug('OpenClaw gateway probe failed', {
+        hostPort,
+        attempt: attempts,
+        failureKind: probe.reason,
+        failureDetail: probe.detail,
+      })
+      const remainingAfterProbe = timeoutMs - (Date.now() - start)
+      if (remainingAfterProbe > 0) {
+        await Bun.sleep(
+          Math.min(GATEWAY_READY_RETRY_INTERVAL_MS, remainingAfterProbe),
+        )
+      }
     }
     logger.error('Timed out waiting for OpenClaw gateway readiness', {
       hostPort,
       timeoutMs,
+      attempts,
+      failureKind: lastFailure?.reason ?? 'not-attempted',
+      failureDetail:
+        lastFailure?.detail ?? 'deadline expired before first probe',
     })
     return false
   }
@@ -423,6 +459,59 @@ export class ContainerRuntime {
       return `${GUEST_OPENCLAW_HOME}${path.slice(openclawHostDir.length)}`
     }
     return hostPathToGuest(path)
+  }
+}
+
+/** Why a single readiness probe failed. Three different operational problems. */
+export type GatewayReadyProbeReason = 'refused' | 'timed-out' | 'not-ok'
+
+export type GatewayReadyProbeResult =
+  | { ready: true }
+  | {
+      ready: false
+      reason: GatewayReadyProbeReason
+      detail: string
+    }
+
+/**
+ * Probe the gateway `/readyz` endpoint exactly once.
+ *
+ * The request carries its own abort signal so a port that accepts the TCP
+ * connection and then never responds cannot outlive the probe budget: when
+ * the budget expires the fetch is aborted - the request is never left
+ * pending. The outcome records why the probe failed, because a refused
+ * port, a wedged port, and a gateway answering non-2xx are three different
+ * operational problems.
+ */
+export async function probeGatewayReady(
+  hostPort: number,
+  timeoutMs: number = GATEWAY_READY_PROBE_TIMEOUT_MS,
+): Promise<GatewayReadyProbeResult> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(`http://127.0.0.1:${hostPort}/readyz`, {
+      signal: controller.signal,
+    })
+    if (res.ok) {
+      return { ready: true }
+    }
+    return { ready: false, reason: 'not-ok', detail: `HTTP ${res.status}` }
+  } catch (err) {
+    if (controller.signal.aborted) {
+      return {
+        ready: false,
+        reason: 'timed-out',
+        detail: `no response within ${timeoutMs}ms`,
+      }
+    }
+    return {
+      ready: false,
+      reason: 'refused',
+      detail: err instanceof Error ? err.message : String(err),
+    }
+  } finally {
+    clearTimeout(timer)
   }
 }
 
