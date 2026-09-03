@@ -1,3 +1,8 @@
+---
+name: trios-launch
+description: trios-launch Skill
+---
+
 ## trios-launch Skill
 
 ### Launch trios_app

@@ -1,7 +1,7 @@
 ---
 name: clade-promote
- description: Promote Canary clade to Sovereign after Agent V verdict + e-value gate + safety budget. Rust-first.
- parameters:
+description: Promote Canary clade to Sovereign after Agent V verdict + e-value gate + safety budget. Rust-first.
+parameters:
    - name: clade_id
      type: string
      description: Clade to promote, e.g. clade-1.1.0

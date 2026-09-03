@@ -1467,6 +1467,26 @@ recipe-backticks:
 		echo "[OK] no command substitution hidden in recipe prose"; \
 	fi
 
+# --- Skill frontmatter gate ----------------------------------------------
+#
+# The deployed skill loader (trios/agent-server/apps/server/src/skills/
+# loader.ts) runs every SKILL.md through gray-matter and drops any file whose
+# frontmatter is not valid YAML with a non-empty name and description. Most
+# of the shipped skills violated that contract and nothing read those files,
+# so the breakage was invisible: the Swift-side SkillCatalog hand-parses and
+# falls back to the directory name and first heading, which painted every
+# skill as healthy.
+#
+# The gate is a structural line reader in tools/skill-frontmatter-gate.mjs,
+# not a YAML parser: Node ships none, and Bun's disagrees with the shipped
+# loader on duplicated mapping keys, so a parser-based gate could pass a file
+# the loader drops. Skills owned by issue 1356 (doctor, clade-seal,
+# t27-phi-loop, t27-tri-pipeline) are audited and reported but never counted
+# here, so this check stays green while that issue edits its own files.
+.PHONY: skill-frontmatter
+skill-frontmatter:
+	node "$(ROOT)/tools/skill-frontmatter-gate.mjs"
+
 # --- Empty-source guard ------------------------------------------------
 #
 # Mid-run on #1238, rings/SR-00/QueenObserver.swift turned up at zero bytes
@@ -2021,7 +2041,7 @@ check-bypass:
 	@echo "[check-bypass] diagnostic full walk: lock phase jumped (owner root-heals; never for CI)"
 	@TRIOS_SKIP_LOCK=1 $(MAKE) --no-print-directory check
 
-check: check-selftest keychain-doors type-floor t27-rings t27-lowering chain make-dollars recipe-backticks empty-sources sources-drift sources-drift-selftest finish-mark-order guard-shapes variant-fence parse-tests run-completeness-selftest cassette-isolation vendor-step dev warnings test cassettes mutants-changed
+check: check-selftest keychain-doors type-floor t27-rings t27-lowering chain make-dollars recipe-backticks empty-sources sources-drift sources-drift-selftest finish-mark-order guard-shapes variant-fence parse-tests run-completeness-selftest cassette-isolation vendor-step dev warnings test cassettes mutants-changed skill-frontmatter
 
 # Replay every cassette and assert the expected signal appears in the log.
 #

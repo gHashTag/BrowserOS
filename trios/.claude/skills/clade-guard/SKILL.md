@@ -1,7 +1,7 @@
 ---
 name: clade-guard
- description: Health monitor + snapshot ring + emergency rollback. Swift CladeGuard actor + Rust clade-rollback CLI.
- parameters:
+description: Health monitor + snapshot ring + emergency rollback. Swift CladeGuard actor + Rust clade-rollback CLI.
+parameters:
    - name: action
      type: string
      description: quick|snapshot|rollback|health|audit
