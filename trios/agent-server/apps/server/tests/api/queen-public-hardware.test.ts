@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'bun:test'
 import { generateKeyPairSync, verify } from 'node:crypto'
-import { createQueenPublicHardwareRoute } from '../../src/api/routes/queen-public-hardware'
+import {
+  createQueenPublicHardwareRoute,
+  HARDWARE_REFUSAL_REASONS,
+} from '../../src/api/routes/queen-public-hardware'
+import { logger } from '../../src/lib/logger'
 
 const { privateKey } = generateKeyPairSync('ed25519')
 const privateKeyPem = privateKey
@@ -180,6 +184,327 @@ describe('GET /queen/public-hardware', () => {
         readKeyId: () => 'queen-fpga-test-1',
       }).request('/')
       expect(response.status).toBe(503)
+    }
+  })
+})
+
+interface CapturedWarning {
+  message: string
+  meta?: Record<string, unknown>
+}
+
+/**
+ * Runs one request against the route with logger.warn captured, so a test can
+ * assert on the exact warnings one refusal produced.
+ */
+async function requestCapturingWarnings(
+  makeRequest: () => Promise<Response>,
+): Promise<{ response: Response; warnings: CapturedWarning[] }> {
+  const warnings: CapturedWarning[] = []
+  const originalWarn = logger.warn
+  logger.warn = (message: string, meta?: Record<string, unknown>) => {
+    warnings.push({ message, meta })
+  }
+  try {
+    const response = await makeRequest()
+    return { response, warnings }
+  } finally {
+    logger.warn = originalWarn
+  }
+}
+
+/** The one sentence every refusal has always answered with, byte for byte. */
+const REFUSAL_BODY = '{"error":"Signed hardware registry is unavailable"}'
+
+const validRegistryEntry = {
+  id: 'stand-alpha',
+  family: 'Artix-7',
+  state: 'programmed',
+  evidence: 'https://example.test/evidence',
+}
+
+const validRegistryJson = JSON.stringify([validRegistryEntry])
+
+/**
+ * The eight documented refusal causes, one row per cause. Each row names the
+ * distinct member of HARDWARE_REFUSAL_REASONS the refusal must log.
+ */
+const refusalCauses = [
+  {
+    cause: 'nothing configured at all',
+    reason: HARDWARE_REFUSAL_REASONS.REGISTRY_UNSET,
+    deps: {
+      readRegistry: () => undefined,
+      readPrivateKey: () => undefined,
+      readSigningSecret: () => undefined,
+      readKeyId: () => undefined,
+    },
+  },
+  {
+    cause: 'registry set, no signing key',
+    reason: HARDWARE_REFUSAL_REASONS.SIGNING_KEY_UNSET,
+    deps: {
+      readRegistry: () => validRegistryJson,
+      readPrivateKey: () => undefined,
+      readSigningSecret: () => undefined,
+      readKeyId: () => 'queen-fpga-1',
+    },
+  },
+  {
+    cause: 'registry and key set, keyId missing',
+    reason: HARDWARE_REFUSAL_REASONS.KEY_ID_UNSET,
+    deps: {
+      readRegistry: () => validRegistryJson,
+      readPrivateKey: () => privateKeyPem,
+      readKeyId: () => undefined,
+    },
+  },
+  {
+    cause: 'keyId has a space in it',
+    reason: HARDWARE_REFUSAL_REASONS.KEY_ID_MALFORMED,
+    deps: {
+      readRegistry: () => validRegistryJson,
+      readPrivateKey: () => privateKeyPem,
+      readKeyId: () => 'queen fpga 1',
+    },
+  },
+  {
+    cause: 'registry is not valid JSON',
+    reason: HARDWARE_REFUSAL_REASONS.REGISTRY_UNPARSEABLE,
+    deps: {
+      readRegistry: () => '{"registry": ',
+      readPrivateKey: () => privateKeyPem,
+      readKeyId: () => 'queen-fpga-1',
+    },
+  },
+  {
+    cause: 'registry is not an array',
+    reason: HARDWARE_REFUSAL_REASONS.REGISTRY_NOT_ARRAY,
+    deps: {
+      readRegistry: () => '{"devices":[]}',
+      readPrivateKey: () => privateKeyPem,
+      readKeyId: () => 'queen-fpga-1',
+    },
+  },
+  {
+    cause: 'registry contains an invalid observation',
+    reason: HARDWARE_REFUSAL_REASONS.REGISTRY_INVALID_OBSERVATION,
+    deps: {
+      readRegistry: () =>
+        JSON.stringify([
+          validRegistryEntry,
+          {
+            id: 'stand-beta',
+            family: 'Zynq-7000',
+            state: 'registered',
+            evidence: 'file:///private/path',
+          },
+        ]),
+      readPrivateKey: () => privateKeyPem,
+      readKeyId: () => 'queen-fpga-1',
+    },
+  },
+  {
+    cause: 'registry contains a duplicate hardware id',
+    reason: HARDWARE_REFUSAL_REASONS.REGISTRY_DUPLICATE_ID,
+    deps: {
+      readRegistry: () =>
+        JSON.stringify([
+          validRegistryEntry,
+          { ...validRegistryEntry, family: 'Zynq-7000' },
+        ]),
+      readPrivateKey: () => privateKeyPem,
+      readKeyId: () => 'queen-fpga-1',
+    },
+  },
+] as const
+
+describe('GET /queen/public-hardware refusal diagnostics', () => {
+  const emittedReasons: string[] = []
+
+  for (const { cause, reason, deps } of refusalCauses) {
+    it(`refuses '${cause}' with 503, the one sentence, and exactly one warning '${reason}'`, async () => {
+      const { response, warnings } = await requestCapturingWarnings(() =>
+        createQueenPublicHardwareRoute({ ...deps, now: () => now }).request(
+          '/',
+        ),
+      )
+      expect(response.status).toBe(503)
+      expect(await response.text()).toBe(REFUSAL_BODY)
+      expect(warnings).toHaveLength(1)
+      expect(warnings[0].meta?.reason).toBe(reason)
+      emittedReasons.push(reason)
+    })
+  }
+
+  it('yields eight distinct reasons, every one a member of the closed set', () => {
+    expect(emittedReasons).toHaveLength(8)
+    expect(new Set(emittedReasons).size).toBe(8)
+    const members = Object.values(HARDWARE_REFUSAL_REASONS)
+    for (const reason of emittedReasons) {
+      expect(members).toContain(reason)
+    }
+  })
+
+  it('names the index and the field that failed, so a six-board registry needs no search', async () => {
+    const registry = Array.from({ length: 6 }, (_, index) => ({
+      ...validRegistryEntry,
+      id: `stand-${index}`,
+      ...(index === 4 ? { state: 'invented' } : {}),
+    }))
+    const { response, warnings } = await requestCapturingWarnings(() =>
+      createQueenPublicHardwareRoute({
+        readRegistry: () => JSON.stringify(registry),
+        readPrivateKey: () => privateKeyPem,
+        readKeyId: () => 'queen-fpga-test-1',
+        now: () => now,
+      }).request('/'),
+    )
+    expect(response.status).toBe(503)
+    expect(await response.text()).toBe(REFUSAL_BODY)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].meta).toEqual({
+      reason: HARDWARE_REFUSAL_REASONS.REGISTRY_INVALID_OBSERVATION,
+      index: 4,
+      field: 'state',
+    })
+  })
+
+  it('names both positions of a duplicate hardware id, never the id itself', async () => {
+    const { response, warnings } = await requestCapturingWarnings(() =>
+      createQueenPublicHardwareRoute({
+        readRegistry: () =>
+          JSON.stringify([
+            validRegistryEntry,
+            { ...validRegistryEntry, id: 'stand-beta' },
+            { ...validRegistryEntry, family: 'Zynq-7000' },
+          ]),
+        readPrivateKey: () => privateKeyPem,
+        readKeyId: () => 'queen-fpga-test-1',
+        now: () => now,
+      }).request('/'),
+    )
+    expect(response.status).toBe(503)
+    expect(await response.text()).toBe(REFUSAL_BODY)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].meta).toEqual({
+      reason: HARDWARE_REFUSAL_REASONS.REGISTRY_DUPLICATE_ID,
+      firstIndex: 0,
+      index: 2,
+    })
+  })
+
+  it('reports the explicit unknown member for a cause the code does not classify', async () => {
+    // Configuration passes every named check, but the key material cannot be
+    // loaded - no member of the set names this, so the refusal must carry the
+    // explicit unknown member rather than omitting or guessing a reason.
+    const { response, warnings } = await requestCapturingWarnings(() =>
+      createQueenPublicHardwareRoute({
+        readRegistry: () => validRegistryJson,
+        readPrivateKey: () => 'not loadable key material',
+        readKeyId: () => 'queen-fpga-1',
+        now: () => now,
+      }).request('/'),
+    )
+    expect(response.status).toBe(503)
+    expect(await response.text()).toBe(REFUSAL_BODY)
+    expect(warnings).toHaveLength(1)
+    expect(warnings[0].meta?.reason).toBe(HARDWARE_REFUSAL_REASONS.UNKNOWN)
+  })
+
+  it('never logs the value of any of the four environment inputs', async () => {
+    const sentinel = {
+      registry: 'SENTINEL-REGISTRY-9f1c',
+      privateKey: 'SENTINEL-PRIVATE-KEY-9f1c',
+      signingSecret: 'SENTINEL-SIGNING-SECRET-9f1c',
+      keyId: 'SENTINEL-KEY-ID-9f1c',
+    }
+    const names = [
+      'QUEEN_FPGA_REGISTRY_JSON',
+      'QUEEN_FPGA_SIGNING_PRIVATE_KEY',
+      'QUEEN_FPGA_SIGNING_SECRET',
+      'QUEEN_FPGA_SIGNING_KEY_ID',
+    ] as const
+    const previous = Object.fromEntries(
+      names.map((name) => [name, process.env[name]]),
+    ) as Record<string, string | undefined>
+
+    const warnings: CapturedWarning[] = []
+    const originalWarn = logger.warn
+    logger.warn = (message: string, meta?: Record<string, unknown>) => {
+      warnings.push({ message, meta })
+    }
+    try {
+      // Drive every refusal cause through the real environment wiring, with a
+      // recognisable sentinel in each input wherever that input is present.
+      const setAll = () => {
+        process.env.QUEEN_FPGA_REGISTRY_JSON = JSON.stringify([
+          { ...validRegistryEntry, family: sentinel.registry },
+        ])
+        process.env.QUEEN_FPGA_SIGNING_PRIVATE_KEY = sentinel.privateKey
+        process.env.QUEEN_FPGA_SIGNING_SECRET = sentinel.signingSecret
+        process.env.QUEEN_FPGA_SIGNING_KEY_ID = `${sentinel.keyId}-1`
+      }
+      const request = () => createQueenPublicHardwareRoute().request('/')
+
+      setAll()
+      // registry set, no signing key
+      delete process.env.QUEEN_FPGA_SIGNING_PRIVATE_KEY
+      delete process.env.QUEEN_FPGA_SIGNING_SECRET
+      await request()
+      setAll()
+      // keyId missing
+      delete process.env.QUEEN_FPGA_SIGNING_KEY_ID
+      await request()
+      // keyId malformed, sentinel inside the malformed value
+      process.env.QUEEN_FPGA_SIGNING_KEY_ID = `${sentinel.keyId} has a space`
+      await request()
+      setAll()
+      // registry unparseable, sentinel inside the malformed JSON
+      process.env.QUEEN_FPGA_REGISTRY_JSON = `{"family":"${sentinel.registry}"`
+      await request()
+      // registry not an array, sentinel inside the object
+      process.env.QUEEN_FPGA_REGISTRY_JSON = `{"devices":"${sentinel.registry}"}`
+      await request()
+      // invalid observation, sentinel inside the failing field
+      process.env.QUEEN_FPGA_REGISTRY_JSON = JSON.stringify([
+        validRegistryEntry,
+        {
+          ...validRegistryEntry,
+          id: 'stand-beta',
+          evidence: `file://${sentinel.registry}`,
+        },
+      ])
+      await request()
+      // duplicate hardware id, sentinel inside a family value
+      process.env.QUEEN_FPGA_REGISTRY_JSON = JSON.stringify([
+        { ...validRegistryEntry, family: sentinel.registry },
+        { ...validRegistryEntry, id: 'stand-beta' },
+        { ...validRegistryEntry },
+      ])
+      await request()
+      // nothing configured at all
+      delete process.env.QUEEN_FPGA_REGISTRY_JSON
+      delete process.env.QUEEN_FPGA_SIGNING_PRIVATE_KEY
+      delete process.env.QUEEN_FPGA_SIGNING_SECRET
+      delete process.env.QUEEN_FPGA_SIGNING_KEY_ID
+      await request()
+    } finally {
+      logger.warn = originalWarn
+      for (const name of names) {
+        if (previous[name] === undefined) delete process.env[name]
+        else process.env[name] = previous[name]
+      }
+    }
+
+    // Every cause must have logged, or this check would pass vacuously.
+    expect(warnings).toHaveLength(8)
+    for (const warning of warnings) {
+      const line = JSON.stringify(warning)
+      expect(line).not.toContain(sentinel.registry)
+      expect(line).not.toContain(sentinel.privateKey)
+      expect(line).not.toContain(sentinel.signingSecret)
+      expect(line).not.toContain(sentinel.keyId)
     }
   })
 })
