@@ -88,6 +88,36 @@ async function boardFacts(pool: Pool) {
   }
 }
 
+/**
+ * The .t27 migration, read from the file the ledger tools write.
+ *
+ * It lives beside the roadmap rather than inside it because the two answer
+ * different questions: the roadmap is what somebody planned, this is how far
+ * one law has travelled from being written to being generated. A plan can be
+ * wrong; a line count cannot, which is why every number in this file is
+ * produced by walking the tree and none is typed.
+ */
+async function loadMigration(): Promise<unknown | null> {
+  for (const path of migrationPaths()) {
+    try {
+      return JSON.parse(await readFile(path, 'utf8'))
+    } catch {
+      // The next candidate. Absent on a laptop that runs the server from
+      // somewhere else, and that is not an error - the panel simply says so.
+    }
+  }
+  return null
+}
+
+function migrationPaths(): string[] {
+  const workspace = process.env.WORKSPACE_DIR || '/workspace'
+  return [
+    `${workspace}/BrowserOS/trios/.trinity/dashboard/t27-migration.json`,
+    `${process.cwd()}/../.trinity/dashboard/t27-migration.json`,
+    `${process.cwd()}/.trinity/dashboard/t27-migration.json`,
+  ]
+}
+
 export function createQueenRoadmapDataRoute() {
   return new Hono().get('/', async (c) => {
     const url = queenLeaseDatabaseUrl()
@@ -95,7 +125,11 @@ export function createQueenRoadmapDataRoute() {
     const roadmap = await loadRoadmap()
     const pool = new Pool({ connectionString: url })
     try {
-      return c.json({ roadmap, board: await boardFacts(pool) })
+      return c.json({
+        roadmap,
+        migration: await loadMigration(),
+        board: await boardFacts(pool),
+      })
     } finally {
       await pool.end()
     }
@@ -167,7 +201,7 @@ const SHELL = `<!doctype html>
  .bar{display:grid;grid-template-columns:9rem 1fr 3rem;gap:var(--sp0);
   align-items:center;font-size:var(--f-2)}
  .bar .track{height:.6rem;background:#141414;border-radius:99px;overflow:hidden}
- .bar .fill{height:100%;background:var(--red)}
+ .bar .fill{display:block;height:100%;background:var(--red)}
  .bar .num{font-family:var(--mono);color:var(--muted);text-align:right}
  table{width:100%;border-collapse:collapse;font-size:var(--f-2);margin-top:var(--sp1)}
  th{text-align:left;color:var(--muted);font-size:var(--f-3);letter-spacing:.1em;
@@ -209,9 +243,14 @@ const SHELL = `<!doctype html>
 
  function draw(d){
   var r=d.roadmap, b=d.board
+  // A missing roadmap file used to end the render here, which would have made
+  // the migration panel below unreachable in exactly the case it is most worth
+  // reading - a checkout without the planning file still has rings and still
+  // has git history. Each half now stands or falls on its own input.
   if(!r){$('app').innerHTML='<div class="gap"><b>No roadmap index</b><p>'+
     'Expected .trinity/dashboard/roadmap.json in the checkout. This is a '+
-    'missing FILE, not an empty plan.</p></div>';return}
+    'missing FILE, not an empty plan.</p></div>'+migrationPanel(d.migration)
+   return}
   var planned=r.epics.reduce(function(n,e){return n+e.issues.length},0)
   var html=''
 
@@ -279,7 +318,106 @@ const SHELL = `<!doctype html>
   html+='<p style="color:var(--muted);font-size:var(--f-3);max-width:62ch;margin-top:var(--sp1)">'+
    esc(r.source.note)+'</p>'
 
+  html+=migrationPanel(d.migration)
+
   $('app').innerHTML=html
+ }
+
+ // The .t27 migration: the plan, and how far it has actually moved.
+ //
+ // Two things are drawn and they must not be confused. The TABLE is the plan -
+ // five rings, innermost first, each with the hand-written file that answers
+ // today. The CHART is the measurement: spec lines and hand-written lines per
+ // day, read out of git history rather than recorded by anyone. The chart is
+ // the honest part, and what it shows is that the two curves rose together -
+ // writing the specification did not remove one line of what it specifies.
+ function migrationPanel(m){
+  if(!m) return '<h2>.t27 migration</h2><div class="gap"><b>No migration ledger</b>'+
+    '<p>The server found no <code>.trinity/dashboard/t27-migration.json</code>. '+
+    'It is written by the ledger tools; without it this panel states nothing '+
+    'rather than guessing.</p></div>'
+  var rings=m.rings||[], series=m.series||[]
+  var specNow=rings.reduce(function(n,x){return n+(x.specLines||0)},0)
+  var handNow=rings.reduce(function(n,x){return n+(x.handLines||0)},0)
+  var genNow=rings.reduce(function(n,x){return n+(x.generated||0)},0)
+  var h='<h2>.t27 migration &#183; '+genNow+' generated of '+rings.length+' rings</h2>'
+  h+='<p style="color:var(--muted);max-width:74ch;margin:0 0 var(--sp1)">'+esc(m.law)+'</p>'
+  h+='<div class="bars">'+
+   bar('specification written', specNow, specNow+handNow, 'var(--accent)')+
+   bar('still hand-written', handNow, specNow+handNow, 'var(--golden)')+
+   bar('generated', genNow, rings.length, 'var(--accent)')+
+   '</div>'
+  h+=chart(series)
+  h+='<table><thead><tr><th>ring</th><th>what</th><th>spec</th>'+
+     '<th>hand-written today</th><th>state</th></tr></thead><tbody>'
+  rings.forEach(function(x){
+   h+='<tr><td class="mono">'+esc(x.id)+'</td><td>'+esc(x.what)+'</td>'+
+     '<td class="mono">'+(x.specLines?x.specLines+' lines':'&#8212;')+'</td>'+
+     '<td class="mono" style="color:var(--golden)">'+esc(x.handWrittenIn)+
+     (x.handLines?' &#183; '+x.handLines+' lines':'')+'</td>'+
+     '<td>'+esc(x.state)+'</td></tr>'
+  })
+  h+='</tbody></table>'
+  h+='<h2>what blocks generation</h2><table><thead><tr><th>id</th><th>what</th>'+
+     '<th>where</th><th>status</th></tr></thead><tbody>'
+  ;(m.blockers||[]).forEach(function(b){
+   h+='<tr><td class="mono">'+esc(b.id)+'</td><td>'+esc(b.what)+'</td>'+
+     '<td class="mono">'+esc(b.where)+'</td>'+
+     '<td class="mono" style="color:'+(String(b.status).indexOf('closed')===0?
+       'var(--accent)':'var(--golden)')+'">'+esc(b.status)+'</td></tr>'
+  })
+  h+='</tbody></table>'
+  return h
+ }
+
+ function bar(label,n,total,colour){
+  var pct=total?Math.round(n/total*100):0
+  return '<div class="bar"><span>'+esc(label)+'</span><span class="track">'+
+   '<span class="fill" style="width:'+pct+'%;background:'+(colour||'var(--accent)')+
+   '"></span></span><span class="num">'+n+'/'+total+'</span></div>'
+ }
+
+ // An inline SVG, drawn from the series with no library: two polylines over a
+ // shared scale, one point per day that has a commit. A day with no commit is
+ // absent rather than interpolated - a flat segment between two points is the
+ // truth that nothing landed, and inventing a point would make it look like it did.
+ function chart(series){
+  if(series.length<2) return ''
+  var W=1100,H=260,P=44
+  var max=1; series.forEach(function(p){
+   max=Math.max(max,p.spec_lines||0,p.hand_lines||0)})
+  max=Math.ceil(max/100)*100
+  var x=function(i){return P+i*(W-P*2)/(series.length-1)}
+  var y=function(v){return H-P-(v/max)*(H-P*2)}
+  var line=function(key,colour){
+   var pts=series.map(function(p,i){return x(i).toFixed(1)+','+y(p[key]||0).toFixed(1)}).join(' ')
+   return '<polyline fill="none" stroke="'+colour+'" stroke-width="2" points="'+pts+'"/>'
+  }
+  var svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" height="260" '+
+   'style="background:var(--panel);border:1px solid var(--border);border-radius:4px">'
+  for(var g=0;g<=4;g++){
+   var gv=max*g/4, gy=y(gv)
+   svg+='<line x1="'+P+'" x2="'+(W-P)+'" y1="'+gy+'" y2="'+gy+
+     '" stroke="rgba(255,255,255,.06)"/>'+
+     '<text x="6" y="'+(gy+4)+'" fill="#888" font-size="11" font-family="monospace">'+
+     gv+'</text>'
+  }
+  svg+=line('hand_lines','#FFD700')+line('spec_lines','#00FF88')
+  series.forEach(function(p,i){
+   if(i%3&&i!==series.length-1) return
+   svg+='<text x="'+x(i)+'" y="'+(H-12)+'" fill="#888" font-size="11" '+
+     'text-anchor="middle" font-family="monospace">'+esc(p.day)+'</text>'
+  })
+  svg+='<text x="'+(W-P)+'" y="20" fill="#00FF88" font-size="12" text-anchor="end" '+
+   'font-family="monospace">specification (.t27)</text>'+
+   '<text x="'+(W-P)+'" y="38" fill="#FFD700" font-size="12" text-anchor="end" '+
+   'font-family="monospace">hand-written</text></svg>'
+  return '<h2>the two curves, from git history</h2>'+
+   '<p style="color:var(--muted);max-width:74ch;margin:0 0 var(--sp0)">One point '+
+   'per day that has a commit on this branch, counted by walking the tree at '+
+   'that commit. The specification appears on 08-19 and stops; nothing was '+
+   'generated and nothing hand-written was removed. A flat line here is a fact, '+
+   'not a gap in the data.</p>'+svg
  }
 
  function load(){
