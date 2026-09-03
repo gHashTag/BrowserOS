@@ -96,6 +96,48 @@ case "$VARIANT" in
         ;;
 esac
 
+# --- Gate: the vendored -I directory must hold at least one .swiftmodule ---
+#
+# TRIOS_VENDORED=1 is the documented way to build without the sibling trinity
+# checkout, which on a clean machine is the ONLY path (#1265). It compiles
+# nothing of QueenUILib and points swiftc's -I straight at Frameworks*/Modules;
+# a checkout that never ran a normal build ships the dylibs but no interface
+# there, and that used to surface only as a wall of "no such module
+# 'QueenUILib'" compiler errors minutes into the compile. This gate names the
+# gap in one line before any compiler is invoked. Called from the vendored
+# branch only; the default (trinity) path is unchanged.
+#
+# POSIX sh only, on purpose: both arms of this gate are exercised by pulling
+# this function out of this file and running it under plain `sh` against a
+# scratch directory, so no bash-only construct may appear in it.
+require_swiftmodules() {
+    # $1: the directory swiftc's -I will point at. Printed absolute, whatever
+    # the caller passed, so the failure names a path a human can go inspect.
+    _rqsm_dir="$1"
+    case "$_rqsm_dir" in
+        /*) ;;
+        *) _rqsm_dir="$(cd "$_rqsm_dir" 2>/dev/null && pwd || printf '%s' "$_rqsm_dir")" ;;
+    esac
+    _rqsm_found=""
+    if [ -d "$_rqsm_dir" ]; then
+        # A .swiftmodule is a file on macOS and a directory on Linux; -e
+        # accepts either. An unmatched glob stays literal and fails -e.
+        for _rqsm_candidate in "$_rqsm_dir"/*.swiftmodule; do
+            if [ -e "$_rqsm_candidate" ]; then
+                _rqsm_found=1
+                break
+            fi
+        done
+    fi
+    if [ -z "$_rqsm_found" ]; then
+        echo "[FAIL] no swiftmodule in the vendored module directory: $_rqsm_dir"
+        echo "       TRIOS_VENDORED=1 compiles no QueenUILib, so -I must already"
+        echo "       hold an interface. Run a normal build first (it vendors both"
+        echo "       halves), or unset TRIOS_VENDORED."
+        exit 1
+    fi
+}
+
 # Persistent build directory: the objects, the output file map and the
 # dependency graph survive between runs so swiftc can compile incrementally
 # instead of rebuilding all 185 files every time.
@@ -271,6 +313,9 @@ fi
 
 # --- QueenUILib resolution: compile from source or use vendored dylib ---
 if [ -n "$TRIOS_VENDORED" ]; then
+    # Gate the -I directory before anything can compile: the vendored path
+    # must find at least one .swiftmodule already sitting there (#1265).
+    require_swiftmodules "$STANDALONE_FRAMEWORKS/Modules"
     # Use the pre-built QueenUILib from Frameworks-dev/ or Frameworks/.
     #
     # QueenUILib has two halves and the vendored build needs BOTH: the dylib
