@@ -73,8 +73,12 @@ export interface WorkerProvider {
   /** Which of this provider's keys was handed out, 0-based. */
   keyIndex?: number
   keyCount?: number
-  /** Set when every key is already in use; carries how many there are. */
+  /** Set when no index is left; carries how many keys are configured. */
   exhausted?: number
+  /** Of those, how many are carrying a bee right now. */
+  busy?: number
+  /** Of those, how many the provider has refused. */
+  refusedCount?: number
 }
 
 /**
@@ -227,6 +231,20 @@ export async function keyIsLive(chosen: WorkerProvider): Promise<boolean> {
   }
 }
 
+/**
+ * Forget every refusal, so a topped-up account is tried again without a restart.
+ *
+ * The cache is process-lifetime by design - a key with no balance is a fact
+ * about an account at a moment - and until this existed the only way to clear
+ * it was to restart the container. It is also what keeps tests honest: a
+ * module-level cache leaks between them, and one did, making a check about a
+ * healthy swarm fail because an earlier check had written a key off.
+ */
+export function clearRefusedKeys(): void {
+  refusedKeys.clear()
+  keyLiveness.clear()
+}
+
 /** For the board and for tests: which keys this process has written off. */
 export function refusedKeyCount(provider = 'zai'): number {
   return (refusedKeys.get(provider) ?? new Set()).size
@@ -249,13 +267,22 @@ export function resolveWorkerProvider(
       ) {
         index++
       }
-      // Every key busy. Handing out a duplicate would be the quiet version of
-      // this problem, so say which limit was reached instead.
+      // No index left. BUSY and REFUSED are different reasons and the fix for
+      // each is the opposite of the other, so they are counted apart.
+      //
+      // They were one number, and the live board showed what that costs: with
+      // two bees running on the two credentials that can pay, the refusal read
+      // "all 4 provider key(s) are already in use by bees in flight. Add
+      // another with ZAI_API_KEY_5". Four were configured, two were carrying a
+      // bee and two could not pay - and the operator was told to buy a fifth.
       if (index >= keys.length) {
+        const refusedHere = [...refused].filter((i) => i < keys.length).length
         return {
           provider: candidate.provider,
           model: override || candidate.model,
           exhausted: keys.length,
+          busy: takenKeyIndices.filter((i) => i < keys.length).length,
+          refusedCount: refusedHere,
         }
       }
       const key = keys[index]
@@ -1165,17 +1192,26 @@ export async function dispatchBee(
     chosen = resolveWorkerProvider(takenKeyIndices)
   }
   if (chosen?.exhausted !== undefined) {
-    // Not a missing credential: every key this deployment has is already
-    // carrying a bee. Named separately because the fix is different - one more
-    // key, not a first one.
+    // Not a missing credential. But WHICH kind of unavailable decides what the
+    // operator should do, and saying the wrong one costs them money: a message
+    // that reads "all 4 keys are in use, add a fifth" when two of the four
+    // cannot pay asks for a purchase that fixes nothing.
+    const busy = chosen.busy ?? chosen.exhausted
+    const refusedCount = chosen.refusedCount ?? 0
     const detail =
-      `all ${chosen.exhausted} provider key(s) are already in use by bees in ` +
-      'flight. Add another with ZAI_API_KEY_' +
-      String(chosen.exhausted + 1) +
-      ' (or the equivalent for your provider) to widen the swarm.'
-    logger.warn('Queen tick chose an issue but every key is busy', {
+      refusedCount > 0
+        ? `${chosen.exhausted} provider key(s) configured: ${busy} carrying a ` +
+          `bee and ${refusedCount} refused by the provider - top those up ` +
+          'rather than adding another, a refused key is not extra capacity.'
+        : `all ${chosen.exhausted} provider key(s) are already in use by bees ` +
+          'in flight. Add another with ZAI_API_KEY_' +
+          String(chosen.exhausted + 1) +
+          ' (or the equivalent for your provider) to widen the swarm.'
+    logger.warn('Queen tick chose an issue and had no credential free', {
       issue,
-      detail,
+      configured: chosen.exhausted,
+      busy,
+      refused: refusedCount,
     })
     await recordDispatch(pool, issue, branch, false, detail, ownedPaths)
     return { started: false, issue, branch, detail }

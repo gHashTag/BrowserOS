@@ -1,9 +1,10 @@
-import { afterEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Pool } from 'pg'
 import {
+  clearRefusedKeys,
   closeDispatch,
   committedFileCount,
   committedFiles,
@@ -11,6 +12,7 @@ import {
   finishDispatch,
   keyIsLive,
   missingProviderRefusal,
+  noteKeyRefused,
   prepareWorktree,
   recordDispatch,
   refusedKeyCount,
@@ -662,5 +664,67 @@ describe('checking a credential before spending an issue', () => {
       }),
     ).toBe(true)
     expect(called).toBe(false)
+  })
+})
+
+/**
+ * Busy and refused are opposite problems, and telling the operator the wrong
+ * one costs them money.
+ *
+ * Seen on the live board 2026-09-03 with two bees running on the two
+ * credentials that could pay:
+ *
+ *   ALL 4 PROVIDER KEY(S) ARE ALREADY IN USE BY BEES IN FLIGHT.
+ *   ADD ANOTHER WITH ZAI_API_KEY_5
+ *
+ * Four were configured, two were carrying a bee and two had answered 1113
+ * Insufficient balance. The advice was to buy a fifth key, which would have
+ * fixed nothing: a refused key is not capacity that exists, it is capacity that
+ * has been paid for and run out.
+ */
+describe('running out of credentials', () => {
+  // The refusal cache lives for the life of the process, so it leaks between
+  // checks unless it is cleared - and it did, failing the healthy-swarm case
+  // because the case above had written two keys off.
+  beforeEach(() => {
+    clearRefusedKeys()
+  })
+
+  const withKeys = (n: number, fn: () => void) => {
+    const saved: Record<string, string | undefined> = {}
+    for (let i = 1; i <= n; i++) {
+      const name = i === 1 ? 'ZAI_API_KEY' : `ZAI_API_KEY_${i}`
+      saved[name] = process.env[name]
+      process.env[name] = `key-${i}`
+    }
+    try {
+      fn()
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k]
+        else process.env[k] = v
+      }
+    }
+  }
+
+  it('counts a busy key apart from a refused one', () => {
+    withKeys(4, () => {
+      noteKeyRefused('zai', 1)
+      noteKeyRefused('zai', 3)
+      const out = resolveWorkerProvider([0, 2])
+      expect(out?.exhausted).toBe(4)
+      expect(out?.busy).toBe(2)
+      expect(out?.refusedCount).toBe(2)
+    })
+  })
+
+  // With nothing refused the old advice is the right advice, and it must
+  // survive: more keys IS the fix when every key is working and carrying a bee.
+  it('still asks for another key when every one of them is working', () => {
+    withKeys(2, () => {
+      const out = resolveWorkerProvider([0, 1])
+      expect(out?.exhausted).toBe(2)
+      expect(out?.refusedCount).toBe(0)
+    })
   })
 })
