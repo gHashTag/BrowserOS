@@ -12,7 +12,12 @@ import { Hono } from 'hono'
 import { Pool } from 'pg'
 import { logger } from '../../lib/logger'
 import { configuredWorkerCapacity } from '../services/queen-dispatch'
-import { loadTree as loadCanonicalTree, type Tree } from './queen-tree'
+import {
+  isTreeLoadFailure,
+  loadTree as loadCanonicalTree,
+  type Tree,
+  type TreeLoadFailure,
+} from './queen-tree'
 
 interface QueryResult {
   rowCount: number | null
@@ -25,7 +30,7 @@ interface ResearchPool {
 }
 
 interface QueenPublicResearchDeps {
-  loadTree?: () => Promise<Tree | null>
+  loadTree?: () => Promise<Tree | TreeLoadFailure | null>
   databaseUrl?: () => string | undefined
   createPool?: (url: string) => ResearchPool
   workerCapacity?: () => number
@@ -150,7 +155,13 @@ export function createQueenPublicResearchRoute(
   return new Hono().get('/', async (c) => {
     c.header('Cache-Control', 'no-store')
     const tree = await loadTree()
-    if (!tree)
+    // Every way the canonical file can be broken answers the same fixed
+    // sentence. This endpoint is public behind a wildcard CORS policy, so the
+    // established cause - which path, which field, what position - goes to the
+    // log (the loader already wrote it) and never into this body. Before the
+    // loader checked the shape, a wrong-shape file reached projectTree() as a
+    // Tree and escaped as an unhandled 500 instead of this 503.
+    if (!tree || isTreeLoadFailure(tree))
       return c.json({ error: 'Canonical research graph is unavailable' }, 503)
 
     const graph = projectTree(tree)
