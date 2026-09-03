@@ -214,6 +214,35 @@ export async function clearField(session: ProtocolApi): Promise<void> {
   })
 }
 
+/** A best-effort release dispatch for one held key or mouse button. */
+export type HeldInputRelease = () => Promise<void>
+
+/**
+ * Release input still held after a failed dispatch sequence.
+ *
+ * Called from `finally` blocks in pressCombo (this file) and dispatchDrag
+ * (mouse.ts), so it must never throw: an exception here would replace the
+ * original CDP error (for example `CDP request timeout:
+ * Input.dispatchKeyEvent (id=<n>)`) with a cleanup error, and the caller
+ * would lose the real failure. Releases run in reverse order of pressing and
+ * each one is attempted even if the previous one failed.
+ */
+export async function releaseHeldInput(
+  held: readonly HeldInputRelease[],
+): Promise<void> {
+  for (let i = held.length - 1; i >= 0; i--) {
+    try {
+      await held[i]()
+    } catch {
+      // Best effort: the release dispatch can fail too (a dropped CDP socket
+      // is often why we are here at all). Swallow it so the remaining
+      // releases still run and the original error from the try block
+      // survives. Releasing a key or button that is already up is harmless;
+      // leaving one down is not.
+    }
+  }
+}
+
 function parseKeyCombo(input: string): {
   key: string
   modifiers: string[]
@@ -248,50 +277,81 @@ export async function pressCombo(
 
   const modBitmask = modifierBitmask(modifiers)
 
-  for (const mod of modifiers) {
-    const info = getKeyInfo(mod)
+  // Keys currently held down, in press order. The release dispatch is
+  // registered BEFORE its keyDown is awaited: a CDP dispatch that times out
+  // was still sent, so the key may be down in the renderer even when the
+  // await rejects. An entry is removed only after its keyUp has completed
+  // successfully, so a failed keyUp gets a second attempt from the finally
+  // block (releasing a key that is already up is harmless).
+  const held: HeldInputRelease[] = []
+
+  try {
+    for (const mod of modifiers) {
+      const info = getKeyInfo(mod)
+      held.push(() =>
+        session.Input.dispatchKeyEvent({
+          type: 'keyUp',
+          key: mod,
+          code: info.code,
+          windowsVirtualKeyCode: info.keyCode,
+        }),
+      )
+      await session.Input.dispatchKeyEvent({
+        type: 'keyDown',
+        key: mod,
+        code: info.code,
+        windowsVirtualKeyCode: info.keyCode,
+      })
+    }
+
+    const mainInfo = getKeyInfo(mainKey)
+
+    // Control/Alt/Meta suppress character generation (Shift does not)
+    const suppressChar = modifiers.some(
+      (m) => m === 'Control' || m === 'Alt' || m === 'Meta',
+    )
+    const text = suppressChar ? '' : getCharText(mainKey)
+
+    const mainKeyUp = (): Promise<void> =>
+      session.Input.dispatchKeyEvent({
+        type: 'keyUp',
+        key: mainKey,
+        code: mainInfo.code,
+        modifiers: modBitmask,
+        windowsVirtualKeyCode: mainInfo.keyCode,
+      })
+
+    held.push(mainKeyUp)
+
+    // keyDown with text → Chrome generates both keydown + keypress DOM events
+    // keyDown without text → Chrome generates only keydown
     await session.Input.dispatchKeyEvent({
       type: 'keyDown',
-      key: mod,
-      code: info.code,
-      windowsVirtualKeyCode: info.keyCode,
+      key: mainKey,
+      code: mainInfo.code,
+      modifiers: modBitmask,
+      windowsVirtualKeyCode: mainInfo.keyCode,
+      ...(text && { text }),
     })
-  }
 
-  const mainInfo = getKeyInfo(mainKey)
+    await mainKeyUp()
+    held.pop()
 
-  // Control/Alt/Meta suppress character generation (Shift does not)
-  const suppressChar = modifiers.some(
-    (m) => m === 'Control' || m === 'Alt' || m === 'Meta',
-  )
-  const text = suppressChar ? '' : getCharText(mainKey)
-
-  // keyDown with text → Chrome generates both keydown + keypress DOM events
-  // keyDown without text → Chrome generates only keydown
-  await session.Input.dispatchKeyEvent({
-    type: 'keyDown',
-    key: mainKey,
-    code: mainInfo.code,
-    modifiers: modBitmask,
-    windowsVirtualKeyCode: mainInfo.keyCode,
-    ...(text && { text }),
-  })
-
-  await session.Input.dispatchKeyEvent({
-    type: 'keyUp',
-    key: mainKey,
-    code: mainInfo.code,
-    modifiers: modBitmask,
-    windowsVirtualKeyCode: mainInfo.keyCode,
-  })
-
-  for (const mod of modifiers.reverse()) {
-    const info = getKeyInfo(mod)
-    await session.Input.dispatchKeyEvent({
-      type: 'keyUp',
-      key: mod,
-      code: info.code,
-      windowsVirtualKeyCode: info.keyCode,
-    })
+    for (const mod of modifiers.reverse()) {
+      const info = getKeyInfo(mod)
+      await session.Input.dispatchKeyEvent({
+        type: 'keyUp',
+        key: mod,
+        code: info.code,
+        windowsVirtualKeyCode: info.keyCode,
+      })
+      held.pop()
+    }
+  } finally {
+    // Any dispatch above may have rejected with keys still down in the
+    // renderer. Release what is still held, newest pressed first.
+    // releaseHeldInput never throws, so the original error still reaches
+    // the caller.
+    await releaseHeldInput(held)
   }
 }
