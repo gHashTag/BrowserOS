@@ -162,12 +162,23 @@ function queendHolds(candidate: number, path: string, tasks: Task[]): boolean {
 }
 
 /** The board's answer for one candidate issue against one registry. */
-function boardCard(candidate: number, path: string, tasks: Task[]) {
+function boardCard(
+  candidate: number,
+  path: string,
+  tasks: Task[],
+  // The clock the BOARD is judged on. It defaults to the frozen NOW, which is
+  // what most of these checks want. The 48-hour ageout is the exception: it
+  // compares the board against the real `queend` binary, and the binary reads
+  // `Date()`. Judging one on a frozen instant and the other on the wall clock
+  // compares two different questions and calls the difference a defect - which
+  // is exactly what it did, failing on the fixture while the rule was right.
+  now: number = NOW,
+) {
   const cards = composeCards({
     tasks,
     dispatches: [],
     issues: [issue(candidate, [path])],
-    now: NOW,
+    now,
   })
   const card = cards.find((c) => c.number === candidate)
   expect(card).toBeDefined()
@@ -378,6 +389,16 @@ describe('the board and queend read one registry the same way', () => {
 
   // Live-against-live: the ages here are wall-clock relative so the binary,
   // which reads its own Date(), sees the same age the board does.
+  // Aged from NOW, not from the wall clock.
+  //
+  // `composeCards` is handed `now: NOW`, a frozen instant, while this fixture
+  // dated its tasks from `Date.now()`. Whenever the two disagreed - which is
+  // always, once NOW is a constant in the past - a task "70 hours old" sat in
+  // the FUTURE relative to the clock the rule reads, the elapsed time came out
+  // negative, and a boundary that should have aged out was still held. The
+  // check then failed on a fixture defect while the rule under test was
+  // correct, which is the worst kind of red: it teaches you to distrust the
+  // code that is right.
   const holder = (state: string, paths: string[], ageHours: number): Task => {
     const t = task(1286, state, paths, 0)
     const at = new Date(Date.now() - ageHours * HOUR).toISOString()
@@ -432,8 +453,11 @@ describe('the board and queend read one registry the same way', () => {
     const stale = [holder('awaitingReview', [path], 70)]
     const fresh = [holder('awaitingReview', [path], 10)]
 
-    expect(boardCard(9002, path, stale).column).toBe('backlog')
-    expect(boardCard(9002, path, fresh).column).toBe('blocked')
+    // Both sides on the wall clock: the fixture is dated from it and the
+    // binary reads it. That is what makes this a comparison rather than a
+    // coincidence.
+    expect(boardCard(9002, path, stale, Date.now()).column).toBe('backlog')
+    expect(boardCard(9002, path, fresh, Date.now()).column).toBe('blocked')
 
     if (present) {
       expect(queendHolds(9002, path, stale)).toBe(false)
