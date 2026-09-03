@@ -1,9 +1,9 @@
 {
   "source": {
-    "file": "Queen_T27_MVP_Architecture.md",
+    "file": "trios/docs/architecture/Queen_T27_MVP_Architecture.md",
     "bytes": 91776,
-    "inGit": false,
-    "note": "Extracted from an unversioned file in ~/Downloads. The index is versioned here so a gate and a dashboard can read it; the prose is not copied. If the two drift, the file is the author and this is the index - regenerate rather than edit."
+    "inGit": true,
+    "note": "The document is tracked in git at trios/docs/architecture/Queen_T27_MVP_Architecture.md since commit 6d1d50656 (2026-09-01). This file is the extracted index of it - ids, titles, gates - versioned so a gate and a dashboard can read it; the prose is not copied. If the two drift, the document is the author and this is the index - regenerate rather than edit. node trios/tools/roadmap-source-gate.mjs re-derives the byte count and both DoD lists from the document on disk and fails on any disagreement."
   },
   "epics": [
     {
