@@ -2,7 +2,7 @@
 
 Task: `SESSION-RECOVERY-002`
 
-Issue: `#T27-EPIC-001`
+Issue: T27-EPIC-001
 
 ## Problem
 

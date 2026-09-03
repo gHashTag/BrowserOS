@@ -1,5 +1,5 @@
 ---
-issue: "#T27-EPIC-001"
+issue: "T27-EPIC-001"
 title: "trios T27 automation epic: seal all BR-OUTPUT Swift behind spec-driven agents"
 branch: "feat/t27-automation"
 status: active
@@ -28,4 +28,4 @@ Make `BR-OUTPUT/RecursionGuard.swift` the first canon file with:
 
 ## Notes
 
-GitHub issue number is a placeholder until `gh auth login` succeeds; replace `#T27-EPIC-001` with the real issue number before final PR.
+`T27-EPIC-001` is an internal label, not an issue number: it must never carry a leading `#` and must never follow a closing keyword, and `node trios/tools/spec-issue-ref-gate.mjs` is what proves it.
