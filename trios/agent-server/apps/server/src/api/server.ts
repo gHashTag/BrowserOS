@@ -79,7 +79,7 @@ import { convertOpenClawHistoryToAgentHistory } from './services/openclaw/histor
 import { getOpenClawService } from './services/openclaw/openclaw-service'
 import { TaskQueueService } from './services/task-queue-service'
 import type { Env, HttpServerConfig } from './types'
-import { trustedCorsMiddleware } from './utils/cors'
+import { publicReadCorsMiddleware, trustedCorsMiddleware } from './utils/cors'
 import { requireTrustedAppOrigin } from './utils/request-auth'
 
 async function assertPortAvailable(port: number): Promise<void> {
@@ -319,6 +319,14 @@ export async function createHttpServer(config: HttpServerConfig) {
     )
 
   const app = new Hono<Env>()
+    // These two sanitized projections are the only routes a cross-origin
+    // browser may read, and they are registered BEFORE the global middleware
+    // on purpose: trustedCorsMiddleware answers OPTIONS itself and returns,
+    // so anything mounted after it never sees a preflight. See
+    // publicReadCorsMiddleware for why this is a wildcard rather than a
+    // TRUSTED_ORIGINS entry.
+    .use('/queen/status', publicReadCorsMiddleware())
+    .use('/queen/public-board', publicReadCorsMiddleware())
     .use('/*', trustedCorsMiddleware())
     .route('/health', createHealthRoute({ browser, stateBackend: a2aService }))
     .route('/queen/status', createQueenPublicStatusRoute())
