@@ -4,7 +4,7 @@ import Foundation
 ///
 /// The Queen's own charter says it plainly: a skill "is a rehearsed procedure
 /// rather than something I improvise, which is why switching one off narrows
-/// what I can do rather than how well I do it." Twenty-six of them sit in
+/// what I can do rather than how well I do it." Thirty-one of them sit in
 /// `.claude/skills/`, the briefing has carried a `skillBody` slot since it was
 /// written, `/delegate --skill` has always accepted a name - and not one
 /// delegation in this project's history has ever named one. Every bee has
@@ -51,8 +51,12 @@ public enum QueenSkillMatch {
         guard !paths.isEmpty else { return nil }
         var chosen: String?
         for path in paths {
-            let lower = path.lowercased()
-            guard let match = rules.first(where: { $0.matches(lower) })?.skill else {
+            // Compared as written, never folded: the literals above carry the
+            // real casing of the things they name (`Tests.swift`, `Makefile`,
+            // `rings/RUST-`), and a path lowercased before the rules ran could
+            // never contain any of them - three literals in four rules were
+            // dead and `rings/RUST-*` boundaries fell through to no skill.
+            guard let match = rules.first(where: { $0.matches(path) })?.skill else {
                 return nil
             }
             if let chosen, chosen != match { return nil }
