@@ -54,6 +54,14 @@ import {
   queenLeaseDatabaseUrl,
   releaseQueenLease,
 } from './queen-lease'
+import {
+  type DispatchReportOutcome,
+  dispatchesThatStarted,
+  nothingStartedLine,
+  refusedLines,
+  reportHeadline,
+  startedLine,
+} from './queen-report-lines'
 
 const LEASE_NAME = 'queen-tick'
 /**
@@ -960,7 +968,10 @@ export async function runRound(
     })
     if (!current?.allowed) {
       logger.info('Queen tick stopped dispatching', {
-        started: started.length,
+        // Counted from the booleans, not the array: the array also holds the
+        // refusal that stopped the loop, and counting that as a bee is the
+        // #1379 defect in miniature.
+        started: dispatchesThatStarted(started).length,
         why: current?.refusal ?? 'no answer',
       })
     }
@@ -968,12 +979,15 @@ export async function runRound(
 
   if (!watch.held) {
     logger.warn('Queen tick stood down mid-round; the lease moved', {
-      started: started.length,
+      started: dispatchesThatStarted(started).length,
     })
   }
 
   await report(pool, reviewed, started, choice, candidates.length)
-  if (started.length > 0) {
+  // A round every one of whose dispatches was refused started nothing, so it
+  // reports no dispatch - the tick response agrees with the report, and a
+  // caller cannot mistake a refusal for a bee in flight.
+  if (dispatchesThatStarted(started).length > 0) {
     return { ran: true, choice, dispatch: started }
   }
   return { ran: true, choice }
@@ -1421,7 +1435,7 @@ export function parseVerdictBlock(
 async function report(
   pool: Pool,
   reviewed: ReviewRound,
-  started: Array<{ started?: boolean; issue?: number; detail?: string }>,
+  started: Array<DispatchReportOutcome>,
   choice: QueendChoice,
   candidates: number,
 ): Promise<void> {
@@ -1430,13 +1444,13 @@ async function report(
   const accepted = reviewed.acted.filter((r) => r.endsWith(':accept'))
   const sentBack = reviewed.acted.filter((r) => r.endsWith(':sendBack'))
 
-  if (started.length > 0) {
-    lines.push(
-      `Started ${started.length} bee(s): ` +
-        started.map((d) => `#${d.issue}`).join(', ') +
-        '.',
-    )
-  }
+  // The sentences about dispatch are built in queen-report-lines.ts, which
+  // counts bees from the `started` boolean at the point each sentence is
+  // built. Counting the array here instead counted refusals as workers, and
+  // a round that started nothing was reported as a bee in flight (#1379).
+  const dispatchSentence = startedLine(started)
+  if (dispatchSentence !== '') lines.push(dispatchSentence)
+  for (const refused of refusedLines(started)) lines.push(refused)
   if (accepted.length > 0) {
     lines.push(`Accepted ${accepted.length}: ${accepted.join(', ')}.`)
   }
@@ -1465,23 +1479,18 @@ async function report(
         '.',
     )
   }
-  if (started.length === 0) {
+  if (dispatchesThatStarted(started).length === 0) {
     // The refusal, verbatim. A round that started nothing is the case where a
     // summary in my own words would be the least trustworthy thing on the page.
-    lines.push(
-      `Started nothing. ${choice.refusal ?? 'No reason given'}. ` +
-        `${candidates} issue(s) were on the table.`,
-    )
+    // This fires for a round that dispatched and was refused as it does for a
+    // round that never dispatched - the sentence is the same because the fact
+    // (no bee started) is the same. The refused dispatches above carry the why.
+    lines.push(nothingStartedLine(choice.refusal, candidates))
     const skipped = (choice.skipped ?? []).slice(0, 6)
     if (skipped.length > 0) lines.push('', ...skipped.map((s) => `  ${s}`))
   }
 
-  const headline =
-    escalated.length > 0
-      ? `${escalated.length} waiting on you`
-      : started.length > 0
-        ? `${started.length} bee(s) working`
-        : (choice.refusal ?? 'nothing to do')
+  const headline = reportHeadline(escalated.length, started, choice.refusal)
 
   await pool
     .query(
