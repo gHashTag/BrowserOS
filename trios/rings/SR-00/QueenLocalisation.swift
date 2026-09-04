@@ -64,6 +64,22 @@ public enum QueenLocalisation {
         in source: String,
         mentioning identifiers: [String]
     ) -> ClosedRange<Int>? {
+        region(in: source, mentioning: identifiers, nameRuleEnabled: true)
+    }
+
+    /// The same choice with the name rule removable — the ablation half of
+    /// #1173's fourth criterion. "The check breaks if the name preference is
+    /// removed" needs the removal to be runnable, not merely described:
+    /// `replayMeasurement(in:ignoringNameRule: true)` drives this entry point
+    /// and must go red on #1158 and #1117, because no other rule can find a
+    /// function an issue names by name. The switch lives beside the public
+    /// entry point so the ablation and the choice it ablates cannot drift
+    /// apart.
+    static func region(
+        in source: String,
+        mentioning identifiers: [String],
+        nameRuleEnabled: Bool
+    ) -> ClosedRange<Int>? {
         guard !source.isEmpty, !identifiers.isEmpty else { return nil }
 
         let cleaned = source
@@ -83,7 +99,7 @@ public enum QueenLocalisation {
         let depths = braceDepths(lines: codeLines)
 
         // Rule 1 — a declaration whose name matches one of the identifiers.
-        if let named = namedDeclaration(
+        if nameRuleEnabled, let named = namedDeclaration(
             in: codeLines,
             depths: depths,
             identifiers: identifiers,
@@ -800,10 +816,29 @@ public enum QueenLocalisation {
     ///
     ///     swiftc -O <driver>.swift rings/SR-00/QueenLocalisation.swift -o probe
     ///     probe <chatvm.swift>   # or call replayMeasurement(in:)
+    ///     replayMeasurement(in: <chatvm>, ignoringNameRule: true)
     ///
     /// With the name preference (rule 1) removed, the replay goes red on
     /// #1158 and #1117 — nothing else can find a function the issue names —
     /// and the live замер falls to 1/4. Proven from both sides 2026-09-04.
+    ///
+    /// Repeated the same day by a second, independent pass: the six bodies
+    /// re-fetched live from the tracker, the identifiers re-extracted through
+    /// a freshly derived port of `namedIdentifiers` — the same lists — and
+    /// `region` re-run through a port re-derived from the finished source.
+    /// Every number reproduced unchanged: 8251-8460, 7508-7807, 9976-10275,
+    /// 7432-7731; 6/6 ok as written, 4/6 with the name rule ignored. Two
+    /// counts that close the two live misses, measured the same way:
+    /// `characterCount` stands as its own token on **zero** lines of the
+    /// 13 598-line file — every occurrence is a component of the dotted log
+    /// event, whose home is now `settleCharacterCountVerdicts` — and
+    /// `awaitingReview` stands on four, `ChatViewModel` on eight, so no rule
+    /// in this file can answer for #1156 while its body names no symbol;
+    /// silence is final, not pending. And #1165's clue still dies in
+    /// `namedIdentifiers`' letters-and-digits filter —
+    /// `rings/SR-00/QueenEvidencePolicy.swift`, #1178/#1179's ground —
+    /// before `region` is ever asked. Both are outside this task's boundary;
+    /// both are recorded here so the next pass does not re-measure them blind.
     static func measurementCases() -> [MeasurementCase] {
         [
             MeasurementCase(
@@ -852,12 +887,18 @@ public enum QueenLocalisation {
     /// Replays the замер against a source file (the boundary file the issues
     /// talk about — for these cases, `rings/SR-02/ChatViewModel.swift`) and
     /// returns one verdict line per case: "ok …" or "FAIL …". This is the
-    /// check the fourth criterion of #1173 stands on — remove the name
-    /// preference (rule 1) and the #1158/#1117 lines go red, because nothing
-    /// else can find a function the issue names. Pure; no I/O. Re-verified
-    /// 2026-09-04 against the 13 598-line file: 6/6 ok as written, 4/6 with
-    /// rule 1 deleted.
-    static func replayMeasurement(in source: String) -> [String] {
+    /// check the fourth criterion of #1173 stands on. Pure; no I/O.
+    ///
+    /// - Parameter ignoringNameRule: `true` removes the name preference
+    ///   (rule 1) for the whole replay — the negative half of the criterion.
+    ///   As written it is 6/6 ok against the 13 598-line file; with the name
+    ///   rule ignored it is 4/6, red on #1158 and #1117, because nothing
+    ///   else can find a function the issue names. Both directions verified
+    ///   2026-09-04 by two independent passes.
+    static func replayMeasurement(
+        in source: String,
+        ignoringNameRule: Bool = false
+    ) -> [String] {
         let cleaned = source
             .replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\r", with: "\n")
@@ -865,7 +906,11 @@ public enum QueenLocalisation {
         let depths = braceDepths(lines: codeLines)
 
         return measurementCases().map { measure -> String in
-            let range = region(in: source, mentioning: measure.identifiers)
+            let range = region(
+                in: source,
+                mentioning: measure.identifiers,
+                nameRuleEnabled: !ignoringNameRule
+            )
             switch (range, measure.expected) {
             case (nil, .silence):
                 return "ok    \(measure.issue): silence"
