@@ -1276,6 +1276,54 @@ before the reporting the tool already had, so NONE of the other branches reached
 the remote. That is the exact defect the tool exists to fix, committed by the
 tool. A partly-rejected push is an outcome, not an exception.
 
+## Load is not health, and health is not value
+
+The swarm looked perfect by every measure I had built: **4 of 4 running, 100%
+acceptance, zero unjudged.** And all forty of the last authored issues were one
+thing - replacing box-drawing characters in comments.
+
+```
+the last 40 authored issues, by KIND
+  ascii cleanup   40  100%  #################################
+```
+
+Goodhart in miniature: "keep the workers busy" became the target and produced
+busy workers on the cheapest available work. **Not one of load, acceptance,
+queue depth or latency could see it** - they all count TASKS, and a monoculture
+is invisible to anything that counts tasks rather than kinds.
+
+`tri mix` counts kinds, and exits 3 when one is more than four fifths of the
+backlog.
+
+### The cause was not what I first assumed
+
+I read it as an exhausted corpus - ascii had 111 candidates, untested 9, length
+5, so the big one wins. Wrong. The `untested` template had been failing
+`brief-gate` the whole time:
+
+```
+!! a criterion asks for a count ... but does not require that command to be independent
+!! 2 criterion(s) name a command but none asks for its raw output
+```
+
+So the only detector that COULD file was the cheapest one. **Fifth time one of my
+own gates refused honest work, and the first time it silently shaped what the
+swarm did for a day.** A gate that refuses is loud; a gate that refuses one
+PRODUCER while another keeps working is silent, and shows up as a preference.
+
+### Three repairs, and one refusal to claim
+
+- no detector may take more than half a round - a corpus of 111 and one of 25
+  are not equally urgent, and the larger must not win by being larger;
+- the untested bar drops 250 -> 120 lines: at 250 the tree holds 9 such modules
+  and all 9 were already filed, so the bar was set by where the fuel ran out
+  rather than by what deserves a test;
+- the template now carries the independence clause and demands raw stdout.
+
+And the refusal: the verdict-first brief has **n=3 after the cut against n=67
+before**. That is not a measurement, and reporting it as one would be the same
+error as the 17% figure - a rate over a window that has not happened yet.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
