@@ -3,7 +3,7 @@
  * Copyright 2025 BrowserOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * ChatHistoryService — Read and search conversation history from PostgreSQL
+ * ChatHistoryService - Read and search conversation history from PostgreSQL
  */
 
 import { Pool } from 'pg'
