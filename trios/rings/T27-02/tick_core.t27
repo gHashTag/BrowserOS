@@ -1,0 +1,383 @@
+// RING-02 -- the tick's pure core.
+//
+// The third layer of the trunk, and the first spec written from a survey
+// rather than from memory: for gHashTag/trios#1341 every function at module
+// level in agent-server/apps/server/src/api/services/queen-tick.ts was
+// classified pure, io or prose, and this file declares the pure subset --
+// three functions of twenty-five -- and nothing else. The other twenty-two
+// stay in TypeScript: nineteen touch the pool, the network, the clock or the
+// process, and three build sentences a person reads. Neither kind can be
+// generated, and a ring that pretended otherwise would start life lying
+// about what it is.
+//
+// The three pure rows of docs/t27-02-tick-survey.md, and what became of
+// each:
+//
+//   stateOfDispatch (line 379)
+//     Declared whole, as state_of_dispatch below. The verdict word it
+//     compares arrives here already coded as an integer; comparing the word
+//     is the boundary's text work.
+//   boundaryPathsOf (line 466)
+//     The scan's decisions are declared. Deliberately omitted, one line
+//     each: splitting the body into lines and tokens, trimming and cleaning
+//     each token, and matching the section heading words -- text shaping
+//     and text matching, which stay in TypeScript.
+//   parseVerdictBlock (line 1355)
+//     The verdict and line-joining decisions are declared. Deliberately
+//     omitted, one line each: finding the VERDICT block in the message and
+//     matching a line against the criterion shape -- text search, which
+//     stays in TypeScript, along with cutting a criterion at 300 chars
+//     (the cap itself is declared; the cutting is text work).
+//
+// Constructs this file avoids, for the same reasons ring 00 gives:
+//
+//   Variant types. Verdicts are coded as integer constants, not variant
+//   types: the seed compiler's variant paths are not generation-safe yet
+//   (variant shorthand emits as `variant::`, switch arms are dropped, and
+//   deriving on a variant drags `serde` into code that must compile under
+//   bare `rustc --crate-type lib`). Every coded set gets its constants
+//   from one block below, so the coding stays one table, not scattered
+//   magic numbers. When the seed grows up, the constants become variant
+//   values and nothing else in this file changes shape.
+//
+//   Floating point. None anywhere in this ring, by law: integers and
+//   booleans all the way down, which is exactly why it can be generated to
+//   Rust and checked against the TypeScript that runs today without
+//   argument.
+//
+//   Text. A construct this ring adds to ring 00's list on its own
+//   evidence: the two pure parsers take text and return lists of text, and
+//   text is not a shape a ring can hold -- the law of this very spec
+//   forbids it, and one of the two headings boundaryPathsOf matches is not
+//   writable inside the ASCII this file is confined to. So the words are
+//   matched at the boundary, once, and this file owns only the decisions
+//   over what the boundary has already recognised: codes, counts and
+//   booleans.
+//
+// Not generated, not compiled, not run: no compiler for .t27 exists in
+// this image. Like ring 00 and ring 01 this is a source file that states
+// law, and queen-tick.ts is not edited by it -- behaviour moves only when
+// a migration is planned around what is written here, which is the reason
+// to write it before the ring law lets anyone start the migration.
+//
+// phi^2 + 1/phi^2 = 3 | TRINITY
+
+module tick_core;
+
+// ---------------------------------------------------------------------------
+// Coding 1 of 4 -- what a dispatch IS: the four results of stateOfDispatch
+// ---------------------------------------------------------------------------
+
+// stateOfDispatch answers the board with one of four names; here those
+// names are integers, in the order the doc above the TypeScript function
+// lists them. Before that function existed every finished dispatch became
+// awaitingReview whatever the Queen had decided, so work she had ACCEPTED
+// went on holding its files for the full 48-hour window: measured the
+// night it was found, #1111 was accepted at 15:26 with two criteria judged
+// and its files stayed reserved for a task that was already over.
+pub const DISPATCH_RUNNING: i32 = 0;
+pub const DISPATCH_ACCEPTED: i32 = 1;
+pub const DISPATCH_REJECTED: i32 = 2;
+pub const DISPATCH_AWAITING_REVIEW: i32 = 3;
+
+// The review column, as the caller has read it. The column holds one of
+// four words or nothing; recognising the word is text work at the
+// boundary, which hands this ring one of five codes -- a word the coding
+// does not name is handed over as NONE, so it can only ever hold work,
+// never release it. ESCALATE and WAIT have no branch in the function
+// below on purpose: they land exactly where NONE lands, and the comment
+// there says why that is correct rather than lazy.
+pub const REVIEW_NONE: i32 = 0;
+pub const REVIEW_ACCEPT: i32 = 1;
+pub const REVIEW_SENDBACK: i32 = 2;
+pub const REVIEW_ESCALATE: i32 = 3;
+pub const REVIEW_WAIT: i32 = 4;
+
+// What a dispatch IS to the policy, from its ending and its verdict.
+//
+//   accept    -> accepted, which is terminal and holds nothing at all
+//   sendBack  -> rejected: the same bee is expected back on those files
+//   escalate  -> awaitingReview: a person is needed, and the clock runs
+//   wait/none -> awaitingReview: not judged yet, so the hold stands
+//
+// The ending is asked first and alone: a dispatch still running is running
+// whatever the column holds, because the column describes an ending and
+// there is not one yet. Any review code other than ACCEPT and SENDBACK --
+// escalate, wait, none, or a word a future registry invents -- holds as
+// awaitingReview: a hold that lasts until a person looks is the safe
+// reading of every ending this table does not name.
+pub fn state_of_dispatch(finished: bool, review_state: i32) i32 {
+    if (!finished) {
+        return DISPATCH_RUNNING;
+    }
+    if (review_state == REVIEW_ACCEPT) {
+        return DISPATCH_ACCEPTED;
+    }
+    if (review_state == REVIEW_SENDBACK) {
+        return DISPATCH_REJECTED;
+    }
+    return DISPATCH_AWAITING_REVIEW;
+}
+
+// Whether a dispatch in this state still holds its issue's files.
+//
+// This is the half of stateOfDispatch that the starvation was made of.
+// Accepted holds nothing at all: the work is over and the Queen said yes.
+// Rejected holds, because the same bee is expected back on those files.
+// AwaitingReview holds, because a person is needed and the window runs.
+// Running holds because the bee is on the files right now. One call, so
+// the board and the round can never disagree about who owns what.
+pub fn state_of_dispatch_holds_slot(state: i32) bool {
+    if (state == DISPATCH_RUNNING) {
+        return true;
+    }
+    if (state == DISPATCH_REJECTED) {
+        return true;
+    }
+    if (state == DISPATCH_AWAITING_REVIEW) {
+        return true;
+    }
+    return false;
+}
+
+// Whether a dispatch in this state will never move again.
+//
+// Only accepted. Rejected waits for a bee, awaitingReview waits for a
+// person, running waits for the bee itself. A state called terminal while
+// it can still move is how one piece of work gets counted twice.
+pub fn state_of_dispatch_is_terminal(state: i32) bool {
+    return state == DISPATCH_ACCEPTED;
+}
+
+// ---------------------------------------------------------------------------
+// Coding 2 of 4 -- the boundary scan: where boundaryPathsOf is looking
+// ---------------------------------------------------------------------------
+
+// boundaryPathsOf walks an issue body line by line, inside the Boundary
+// section, taking the first token of each line that reads as a file. Where
+// the walk stands is a three-state machine, and the machine is the part
+// that must not drift between the Swift that also implements it and the
+// TypeScript that runs today: the section is the contract, and reading one
+// line past its end would claim files the issue never reserved.
+pub const BOUNDARY_BEFORE: i32 = 0;
+pub const BOUNDARY_INSIDE: i32 = 1;
+pub const BOUNDARY_DONE: i32 = 2;
+
+// Whether a heading line opens the boundary section.
+//
+// The section has two names, one in this file's language and one in the
+// repo's other language, and either opens it. Which words those are is
+// text matching the boundary does; one of the two is not even writable
+// under this file's ASCII law, which is the plainest proof that the
+// comparison cannot live here.
+pub fn boundary_paths_of_heading_opens(
+    is_primary_heading: bool,
+    is_secondary_heading: bool
+) bool {
+    if (is_primary_heading) {
+        return true;
+    }
+    if (is_secondary_heading) {
+        return true;
+    }
+    return false;
+}
+
+// Where the scan stands after one line.
+//
+// A heading met while inside ends the whole scan, not just the section:
+// everything after a second heading belongs to a section nobody asked for,
+// so the walk stops rather than skimming on. A heading met before the
+// section opens it or does not, by the match above. A line that is not a
+// heading changes nothing about where the scan is.
+pub fn boundary_paths_of_section_after_line(
+    section: i32,
+    line_is_heading: bool,
+    heading_opens: bool
+) i32 {
+    if (section == BOUNDARY_DONE) {
+        return BOUNDARY_DONE;
+    }
+    if (!line_is_heading) {
+        return section;
+    }
+    if (section == BOUNDARY_INSIDE) {
+        return BOUNDARY_DONE;
+    }
+    if (heading_opens) {
+        return BOUNDARY_INSIDE;
+    }
+    return BOUNDARY_BEFORE;
+}
+
+// Whether a line can carry a boundary path at all.
+//
+// Only lines inside the section, and only lines with a word in them: a
+// blank line inside the section is formatting, not a boundary that ended,
+// and a line outside the section is somebody else's prose.
+pub fn boundary_paths_of_line_can_contribute(
+    section: i32,
+    line_has_words: bool
+) bool {
+    if (section == BOUNDARY_INSIDE) {
+        return line_has_words;
+    }
+    return false;
+}
+
+// The longest tail after a dot that still reads as an extension. From the
+// scan's own rule: a token with no slash still counts as a file when it
+// ends in a dot and one to ten word characters (`main.swift` yes, a dot
+// followed by more than ten no). Ten because that already covers every
+// extension this repo has ever named, and a cap because "ends in dot
+// anything" would call a sentence a file.
+pub const PATH_EXTENSION_MAX_CHARS: i32 = 10;
+
+// Whether one cleaned token of a boundary line is a path.
+//
+// The scan takes the FIRST token of a line that passes this test and moves
+// to the next line: one path per line, because a line naming two files is
+// a line the issue wrote carelessly and guessing which half it meant is
+// not the scanner's job. The two measurements -- does the token contain a
+// slash, and how many word characters follow its final dot -- are made on
+// the cleaned token at the boundary; extension_chars is zero when there is
+// no such tail.
+pub fn boundary_paths_of_token_is_path(
+    has_slash: bool,
+    extension_chars: i32
+) bool {
+    if (has_slash) {
+        return true;
+    }
+    if (extension_chars <= 0) {
+        return false;
+    }
+    if (extension_chars > PATH_EXTENSION_MAX_CHARS) {
+        return false;
+    }
+    return true;
+}
+
+// What the count of paths means: whether the issue may be delegated.
+//
+// The consumer of boundaryPathsOf derives exactly this from nothing but
+// the length of what it returned -- a count above zero means the issue
+// reserved files and a bee may be sent onto them; empty means it did not.
+// The decision is declared here so the shape the io ring consumes is law
+// rather than habit; the io act itself, writing the flag to the store,
+// stays in the io ring where it belongs.
+pub fn boundary_paths_of_count_delegates(path_count: i32) bool {
+    return path_count > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Coding 3 of 4 -- the bee's own VERDICT block: what parseVerdictBlock reads
+// ---------------------------------------------------------------------------
+
+// The three words a criterion line may end with, as the bee was told to
+// write them. They arrive here as codes; the words are matched at the
+// boundary without regard to case, because a bee may write MET, Met or
+// met and all three are the same verdict.
+pub const CRITERION_MET: i32 = 0;
+pub const CRITERION_UNMET: i32 = 1;
+pub const CRITERION_COULD_NOT_CHECK: i32 = 2;
+
+// The longest criterion text kept, in characters. Longer lines are cut at
+// the boundary, not here: the cap is law, the cutting is text work.
+pub const CRITERION_MAX_CHARS: i32 = 300;
+
+// Whether a verdict satisfies its criterion.
+//
+// could-not-check is UNMET. An unverified criterion is not a satisfied
+// one, and this is the line that decides whether the swarm can close its
+// own work honestly -- everything else in the block is opinion about
+// wording, this one is the honesty itself.
+pub fn parse_verdict_block_verdict_is_met(verdict: i32) bool {
+    return verdict == CRITERION_MET;
+}
+
+// Whether the previous line can still take a continuation glued onto it.
+//
+// The join rule exists because of a wrapped criterion, measured on #1272:
+// read line by line, a bullet that ran onto a second line did not match,
+// and the loop broke, silently discarding the whole rest of the block --
+// the bee wrote nine criteria, marked every one met, and the review
+// counted three of nine judged and answered wait. Joining first, and only
+// then splitting on bullets, kept the original rule intact: a line that
+// follows a COMPLETE bullet still ends the block, because the bee was
+// told nothing follows it; only a line continuing an unfinished bullet is
+// glued on. A line with nothing before it is complete by definition --
+// there is nothing to glue onto.
+pub fn parse_verdict_block_previous_is_complete(
+    has_previous: bool,
+    previous_ends_with_verdict: bool
+) bool {
+    if (!has_previous) {
+        return true;
+    }
+    return previous_ends_with_verdict;
+}
+
+// Whether a line glues onto the one before it.
+//
+// A bullet never glues: it starts its own criterion. An empty line never
+// glues: it is formatting. Everything else glues onto an unfinished
+// bullet, and is left alone by a finished one -- which is the case that
+// ends the block, not a case of joining.
+pub fn parse_verdict_block_line_joins_previous(
+    line_is_bullet: bool,
+    line_has_words: bool,
+    previous_is_complete: bool
+) bool {
+    if (line_is_bullet) {
+        return false;
+    }
+    if (!line_has_words) {
+        return false;
+    }
+    if (previous_is_complete) {
+        return false;
+    }
+    return true;
+}
+
+// Whether a line that matched no criterion ends the whole block.
+//
+// A blank line inside the block is fine and the read continues past it;
+// anything else ends the block, because the bee was told nothing follows
+// it. Whether a line matched a criterion at all is decided at the
+// boundary, by matching text against the criterion shape; this function
+// only says what happens to the lines that did not match.
+pub fn parse_verdict_block_line_ends_block(
+    line_matches_criterion: bool,
+    line_is_blank: bool
+) bool {
+    if (line_matches_criterion) {
+        return false;
+    }
+    if (line_is_blank) {
+        return false;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Coding 4 of 4 -- what the block adds up to, for the caller that counts
+// ---------------------------------------------------------------------------
+
+// How many criteria the review is judged against.
+//
+// The contract promised in the dispatch row, or what parseVerdictBlock
+// actually read, whichever is MORE. A bee that wrote more lines than it
+// was given is judged on what it wrote: that is the case where the Queen
+// supplied none and the bee stated its own, which the brief asks for. The
+// other shape is the one that was measured and fixed -- judging on the
+// block alone made the check circular, and a bee that reported nothing
+// was judged against nothing, so three finished bees were escalated to a
+// person over reviews that had nothing in front of them.
+pub fn parse_verdict_block_total_criteria(promised: i32, judged: i32) i32 {
+    if (judged > promised) {
+        return judged;
+    }
+    return promised;
+}
