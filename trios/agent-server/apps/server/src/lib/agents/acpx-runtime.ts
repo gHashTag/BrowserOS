@@ -128,7 +128,7 @@ export class AcpxRuntime implements AgentRuntime {
    * `null` for never-used agents so the harness can fill in nulls
    * without throwing. Token bucketing for `last7d` lives outside the
    * session record (no per-message timestamps); a follow-up activity
-   * ledger will populate that field — for now we return zeros.
+   * ledger will populate that field - for now we return zeros.
    */
   async getRowSnapshot(input: {
     agent: AgentPromptInput['agent']
@@ -430,13 +430,13 @@ function userContentToText(content: AcpxUserContent): string {
  * consumers (history endpoint, listing's `lastUserMessage`) see only
  * the user's actual question. Two layers are added on the wire today:
  *
- *   1. <role>…</role>\n\n<user_request>…</user_request> from
+ *   1. <role>...</role>\n\n<user_request>...</user_request> from
  *      `buildBrowserosAcpPrompt` (outer).
  *   2. ## Browser Context + <selected_text> + <USER_QUERY> from
  *      `apps/server/src/agent/format-message.ts` (inner).
  *
- * Each step is independently defensive — anchors that don't match are
- * skipped — so partially-wrapped text (older persisted records,
+ * Each step is independently defensive - anchors that don't match are
+ * skipped - so partially-wrapped text (older persisted records,
  * messages without a selection, future schema drift) gets best-
  * effort cleaning without throwing. The function is idempotent;
  * applying it to already-clean text is a no-op.
@@ -452,7 +452,7 @@ export function unwrapBrowserosAcpUserMessage(raw: string): string {
   // Order matters: the outer envelope is added AFTER
   // `escapePromptTagText` runs over the inner formatUserMessage
   // payload (see buildBrowserosAcpPrompt). So once the outer
-  // <role>…</role>+<user_request>…</user_request> tags are stripped,
+  // <role>...</role>+<user_request>...</user_request> tags are stripped,
   // the inner content is still entity-escaped (`&lt;USER_QUERY&gt;`
   // not `<USER_QUERY>`). We decode entities BEFORE the inner-envelope
   // strips so their anchors actually match.
@@ -467,7 +467,7 @@ export function unwrapBrowserosAcpUserMessage(raw: string): string {
 }
 
 function stripOuterRoleEnvelope(value: string): string {
-  // Any `<role>…</role>\n\n<user_request>\n…\n</user_request>` envelope.
+  // Any `<role>...</role>\n\n<user_request>\n...\n</user_request>` envelope.
   // Adapter-agnostic so both the BrowserOS multi-line role block and the
   // openclaw single-line role block get unwrapped. TKT-774's exact-prefix
   // match only covered the BrowserOS form, so the openclaw envelope
@@ -496,7 +496,7 @@ function stripBrowserContextHeader(value: string): string {
 }
 
 function stripSelectedTextBlock(value: string): string {
-  // Optional `<selected_text [attrs]>…</selected_text>\n\n` block
+  // Optional `<selected_text [attrs]>...</selected_text>\n\n` block
   // emitted by `formatUserMessage` when the user has a selection.
   return value.replace(
     /<selected_text(?:[^>]*)>\n[\s\S]*?\n<\/selected_text>\n\n/,
@@ -506,7 +506,7 @@ function stripSelectedTextBlock(value: string): string {
 
 function unwrapUserQuery(value: string): string {
   // `formatUserMessage` always wraps the user's typed text in
-  // `<USER_QUERY>\n…\n</USER_QUERY>` — even when no browser context
+  // `<USER_QUERY>\n...\n</USER_QUERY>` - even when no browser context
   // or selection is present.
   const match = value.match(/^<USER_QUERY>\n([\s\S]*?)\n<\/USER_QUERY>$/)
   return match ? match[1] : value
@@ -517,7 +517,7 @@ function decodeBasicEntities(value: string): string {
   // `escapePromptTagText` so user-typed XML-like content (e.g.
   // `<USER_QUERY>` typed literally) renders as the user typed it.
   // Decode `&amp;` last to avoid double-decoding sequences like
-  // `&amp;lt;` → `&lt;` → `<`.
+  // `&amp;lt;` -> `&lt;` -> `<`.
   return value
     .replace(/&lt;/g, '<')
     .replace(/&gt;/g, '>')
@@ -543,8 +543,8 @@ function stringifyToolError(value: unknown): string {
 
 /**
  * Walk messages newest-to-oldest and return the first user-role text.
- * Returns null when the record has no user messages (rare — a session
- * always starts with one — but possible mid-load).
+ * Returns null when the record has no user messages (rare - a session
+ * always starts with one - but possible mid-load).
  */
 function extractLastUserMessage(record: AcpSessionRecord): string | null {
   for (let i = record.messages.length - 1; i >= 0; i -= 1) {
@@ -691,7 +691,7 @@ function createBrowserosAgentRegistry(input: {
           // Fall back to acpx's built-in `openclaw` adapter, which assumes
           // a host-side openclaw binary. BrowserOS doesn't install one on
           // the host, so this branch will fail at spawn time with a
-          // descriptive error — the harness should be wired with a
+          // descriptive error - the harness should be wired with a
           // gateway accessor.
           return registry.resolve(agentName)
         }
@@ -705,7 +705,7 @@ function createBrowserosAgentRegistry(input: {
         const runtime = getHermesRuntime()
         if (runtime)
           return runtime.buildExecArgv(runtime.getAcpExecSpec(input.commandEnv))
-        // No runtime registered (tests, dev fallback, non-darwin) →
+        // No runtime registered (tests, dev fallback, non-darwin) ->
         // host-process spawn of the bare hermes binary.
         return wrapCommandWithEnv('hermes acp', input.commandEnv)
       }
