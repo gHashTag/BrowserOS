@@ -1,7 +1,7 @@
 ---
 name: tri
 description: TRI status dashboard for trios. Build health, git state, server status, agent memory. No .sh scripts per L7 UNITY.
-argument-hint: [short] [full] [audit] [coverage] [lang:ru|en]
+argument-hint: "[short] [full] [audit] [coverage] [lang:ru|en]"
 allowed-tools: fs_read, fs_write, fs_edit, shell_execute, fs_list
 ---
 

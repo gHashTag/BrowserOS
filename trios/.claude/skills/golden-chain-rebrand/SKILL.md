@@ -1,3 +1,8 @@
+---
+name: golden-chain-rebrand
+description: GOLDEN CHAIN Rebrand Skill
+---
+
 # GOLDEN CHAIN Rebrand Skill
 ## Plan: Rebrand GOLDEN BRIDGE -> GOLDEN CHAIN + README Rewrite
 

@@ -1,3 +1,8 @@
+---
+name: golden-chain-brand
+description: Branding Skill - GOLDEN CHAIN
+---
+
 ## Branding Skill - GOLDEN CHAIN
 
 ### Why CHAIN not BRIDGE

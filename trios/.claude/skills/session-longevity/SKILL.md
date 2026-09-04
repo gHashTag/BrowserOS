@@ -1,3 +1,8 @@
+---
+name: session-longevity
+description: Session Longevity + Chat UI/UX Optimization
+---
+
 # Session Longevity + Chat UI/UX Optimization
 ## Problem
 Temporary sessions = lost context + wasted tokens. Agent dies every session end.

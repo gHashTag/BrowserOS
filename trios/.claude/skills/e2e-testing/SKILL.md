@@ -1,3 +1,8 @@
+---
+name: e2e-testing
+description: E2E Testing Skill for trios
+---
+
 ## E2E Testing Skill for trios
 
 ### Enable Accessibility (Required)

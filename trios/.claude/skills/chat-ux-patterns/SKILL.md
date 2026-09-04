@@ -1,3 +1,8 @@
+---
+name: chat-ux-patterns
+description: Chat UI/UX Best Practices
+---
+
 ## Chat UI/UX Best Practices
 
 ### 1. Message Bubble Design

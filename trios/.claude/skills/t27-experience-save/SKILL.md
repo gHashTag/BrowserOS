@@ -1,7 +1,7 @@
 ---
 name: t27-experience-save
 description: T27 experience save for trios - records an episode to .trinity/experience/ after a task lands.
-argument-hint: [task_id] [issue_url]
+argument-hint: "[task_id] [issue_url]"
 ---
 
 # T27 experience-save Skill (trios adaptation)

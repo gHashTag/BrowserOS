@@ -1,6 +1,6 @@
 ---
+name: experience-save
 description: Save learning and experience to persistent memory for trios
-description: Captures learnings from trios development for future reference and agent improvement.
 parameters:
   - name: ring
     type: string

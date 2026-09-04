@@ -1,7 +1,7 @@
 ---
 name: t27-wave-loop
 description: T27 recurring wave loop for trios - audit weak spots, research literature, decompose, implement, verify, commit, save experience, report, and propose three next-wave options.
-argument-hint: [domain] [context]
+argument-hint: "[domain] [context]"
 ---
 
 # T27 Wave Loop Skill (trios adaptation)
