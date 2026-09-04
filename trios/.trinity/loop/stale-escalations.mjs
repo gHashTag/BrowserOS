@@ -64,9 +64,41 @@ const sh = (c, opts = {}) =>
   execSync(c, { cwd: ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'], ...opts }).trim()
 const tryShell = (c, opts) => { try { return sh(c, opts) } catch { return null } }
 
-/** Strip railway's own chatter, which is not output of the command we ran. */
-const clean = (s) =>
-  s.split('\n').filter((l) => !/Using SSH|railway\.json|Migrate|Existing/.test(l)).join('\n').trim()
+/**
+ * Strip railway's own chatter, which is not output of the command we ran.
+ *
+ * THE DEFECT THIS FOUND (#1422): the first filter dropped any line merely
+ * CONTAINING one of the chatter words, and one of the words was `Migrate`. A
+ * single-line JSON answer carrying a review note that mentioned migration was
+ * therefore deleted in full, and the caller reported "unparseable answer"
+ * about a query that had worked perfectly. A filter that can eat evidence is
+ * worse than no filter: it turns a working system into an unexplainable one,
+ * and it fails silently by construction.
+ *
+ * Two guards, both load-bearing:
+ *   - every noise pattern is anchored to the start of its line, so a word is
+ *     chatter only when railway prints it at column zero, never when the
+ *     answer merely mentions it mid-sentence (the `\b` keeps a longer word
+ *     that merely starts like chatter, e.g. `Migrations`, out of the filter);
+ *   - a line that begins with `[` or `{` is the answer, not chatter, and is
+ *     never dropped, whatever it contains.
+ *
+ * Exported so the calibration suite can prove both directions without a
+ * network, a container or a database.
+ */
+const CHATTER = [/^Using SSH\b/, /^railway\.json\b/, /^Migrate\b/, /^Existing\b/]
+
+export function chatterOnly(out) {
+  return String(out ?? '')
+    .split('\n')
+    .filter((line) => {
+      const first = line.trimStart()[0]
+      if (first === '[' || first === '{') return true
+      return !CHATTER.some((p) => p.test(line))
+    })
+    .join('\n')
+    .trim()
+}
 
 /**
  * Run a node snippet inside the deployed service.
@@ -81,7 +113,7 @@ export function remote(js) {
   const out = tryShell(`railway ssh --service ${SVC} -- sh -c ${shq(script)}`, {
     cwd: path.join(ROOT, 'trios'),
   })
-  return out === null ? null : clean(out)
+  return out === null ? null : chatterOnly(out)
 }
 
 /**

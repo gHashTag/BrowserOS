@@ -26,6 +26,17 @@ import { execSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const DIR = path.dirname(fileURLToPath(import.meta.url))
+
+// The default ROOT below exists only on the machine that authored these tools.
+// Several cases read ROOT (their own modules recompute it at import time, from
+// this same environment), so when the author's directory is absent the suite
+// anchors itself to the checkout it lives in. A calibration run that fails for
+// WHERE it was run, rather than for what the instruments do, proves nothing -
+// and would hide a real regression behind four environmental reds.
+if (!process.env.TRIOS_ROOT && !fs.existsSync('/Users/playra/BrowserOS')) {
+  process.env.TRIOS_ROOT = path.resolve(DIR, '..', '..', '..')
+}
+
 const L = await import(path.join(DIR, 'loop.mjs'))
 const G = await import(path.join(DIR, 'brief-gate.mjs'))
 const JP = await import(path.join(DIR, 'judge-packet.mjs'))
@@ -89,6 +100,15 @@ check('a newline survives, where JSON.stringify would have broken it', () => {
 // Proves the negative first: a draft missing the thing must be REFUSED.
 console.log('\nbrief-gate - must refuse what it exists to refuse')
 
+// The good draft's promised identifier is assembled at runtime, in fragments:
+// brief-gate proves such an identifier fresh by grepping the tree, so a
+// literal name committed here makes the fixture refute itself. That is what
+// happened the day it landed - "a well-formed draft passes" went red on every
+// checkout containing it, the author's own ROOT included, because the grep
+// found the promise in the very file that planted it.
+const FRESH_ID = 'aFunction' + 'ThatIsNowhere'
+const FRESH_CRITERION = `- The tool exports a function named \`${FRESH_ID}\`; that identifier appears nowhere in the tree today.`
+
 const GOOD = `# A real defect, measured
 
 \`\`\`
@@ -109,7 +129,7 @@ $ wc -l x
 
 ## Success Criteria
 
-- The tool exports a function named \`aFunctionThatIsNowhere\`; that identifier appears nowhere in the tree today.
+- ${FRESH_CRITERION}
 
 ## Boundary
 
@@ -265,8 +285,8 @@ check('diffing from the fork point shows additions only, the tip shows phantom d
 console.log('\ncounting criteria - must demand an independent command')
 
 const countBrief = (tail) => GOOD.replace(
-  '- The tool exports a function named `aFunctionThatIsNowhere`; that identifier appears nowhere in the tree today.',
-  `- The row count equals the number of declarations; the bee quotes both numbers and the command that produced the second${tail}\n- The tool exports a function named \`aFunctionThatIsNowhere\`; that identifier appears nowhere in the tree today.`,
+  FRESH_CRITERION,
+  `- The row count equals the number of declarations; the bee quotes both numbers and the command that produced the second${tail}\n${FRESH_CRITERION}`,
 )
 
 check('a count criterion with no independence clause is flagged', () => {
@@ -324,8 +344,8 @@ check('a snapshot with no skip summary contributes no point, rather than a zero'
 console.log('\nbrief-gate - a criterion naming a command must demand its raw output')
 
 const cmdBrief = (tail) => GOOD.replace(
-  '- The tool exports a function named `aFunctionThatIsNowhere`; that identifier appears nowhere in the tree today.',
-  `- Running \`node trios/tools/x.mjs\` reports 3 findings${tail}\n- The tool exports a function named \`aFunctionThatIsNowhere\`; that identifier appears nowhere in the tree today.`,
+  FRESH_CRITERION,
+  `- Running \`node trios/tools/x.mjs\` reports 3 findings${tail}\n${FRESH_CRITERION}`,
 )
 
 check('a command criterion with no output demand is flagged', () => {
@@ -522,6 +542,44 @@ check('the parser probe is rebuilt when the parser is newer than the binary', ()
   if (!/mtimeMs/.test(src)) {
     throw new Error('a cached probe older than the parser would mask the very change this tool exists to notice')
   }
+})
+
+// ----------------------------------------------- chatter is not the answer
+// #1422: the remote helper stripped railway's chatter by dropping any line
+// CONTAINING one of four words, one of which was `Migrate`. A single-line JSON
+// answer carrying a review note that mentioned migration was deleted in full,
+// and the caller reported "unparseable answer" about a query that had worked
+// perfectly. A filter that can eat evidence is worse than no filter, so the
+// cases below prove the answer survives first, and only then that chatter
+// still goes.
+console.log('\nstale-escalations - cleaning the output must not remove the output')
+
+check('a JSON line containing "Migrate" survives cleaning byte for byte', () => {
+  const answer = '{"issue":1422,"note":"review: the Migrate step is fine","rows":1}'
+  eq(SE.chatterOnly(answer), answer, 'the answer must come back unchanged')
+})
+
+check('a leading "Using SSH key from file" line is removed and the JSON after it survives', () => {
+  const json = '[{"issue":1422,"criteria_source":"stated","n":4}]'
+  const out = SE.chatterOnly(`Using SSH key from file ~/.railway/ssh/id_ed25519\n${json}`)
+  eq(out, json, 'only the chatter is gone')
+})
+
+check('a prose line mentioning "Existing files" mid-sentence is kept, because the pattern is anchored', () => {
+  const line = 'the deploy log says Existing files were kept, once, in passing'
+  eq(SE.chatterOnly(line), line, 'a mid-sentence mention is not chatter')
+})
+
+check('chatter printed at column zero still goes, all four shapes', () => {
+  const json = '{"ok":true}'
+  const out = SE.chatterOnly([
+    'Using SSH key from file /root/.railway/ssh/id_ed25519',
+    'railway.json is not linked to a project',
+    'Migrate: 2 file(s) staged',
+    'Existing files kept as-is',
+    json,
+  ].join('\n'))
+  eq(out, json, 'chatter stripped, answer intact')
 })
 
 
