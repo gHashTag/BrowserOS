@@ -25,7 +25,8 @@ nxtscape-cli-access.json
 gclient.json
 .env
 .grove/
-AGENTS.md
+/AGENTS.md
+/UR-09/AGENTS.md
 **/resources/binaries/
 
 packages/browseros/build/tools/
