@@ -13,7 +13,7 @@ import type { UIMessage } from 'ai'
  * Two layers of validation can reject messages:
  *
  * 1. **AI SDK** (`validate-ui-messages.ts`):
- *    - `parts` array must be `.nonempty()` — rejects `parts: []`
+ *    - `parts` array must be `.nonempty()` - rejects `parts: []`
  *
  * 2. **Provider API** (e.g. Gemini `generateContent`, Anthropic, OpenAI):
  *    - Assistant messages with only empty-string text are rejected
@@ -26,12 +26,12 @@ export function hasMessageContent(message: UIMessage): boolean {
   if (message.parts.length === 0) return false
 
   // A message that contains any non-text part (tool invocation, reasoning,
-  // file, step-start, etc.) is always considered valid — those part types
+  // file, step-start, etc.) is always considered valid - those part types
   // carry meaning regardless of text content.
   const hasNonTextPart = message.parts.some((p) => p.type !== 'text')
   if (hasNonTextPart) return true
 
-  // All parts are text — at least one must have non-whitespace content.
+  // All parts are text - at least one must have non-whitespace content.
   return message.parts.some(
     (p) => p.type === 'text' && p.text.trim().length > 0,
   )
