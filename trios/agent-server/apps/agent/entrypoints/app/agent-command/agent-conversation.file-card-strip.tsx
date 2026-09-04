@@ -9,10 +9,10 @@
  * visual treatment.
  *
  * Click semantics:
- *  - Card  → opens FilePreviewSheet directly (preview + download).
- *  - View  → emits onOpenRail(turnId); the parent opens the rail
+ *  - Card  -> opens FilePreviewSheet directly (preview + download).
+ *  - View  -> emits onOpenRail(turnId); the parent opens the rail
  *            and scrolls to the matching turn group.
- *  - +N    → same as View (the user is asking to see what was
+ *  - +N    -> same as View (the user is asking to see what was
  *            overflowed).
  */
 
@@ -35,7 +35,7 @@ interface FileCardStripProps {
    * `onOpenRail` so the rail can scroll/expand the matching group.
    * Optional because the live `produced_files` event lands before
    * the harness has stamped a server-issued turn id on the
-   * optimistic turn — in that brief window, View falls back to
+   * optimistic turn - in that brief window, View falls back to
    * just opening the rail at the top.
    */
   turnId?: string | null
