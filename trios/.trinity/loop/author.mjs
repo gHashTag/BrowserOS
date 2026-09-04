@@ -41,6 +41,9 @@ import { fileURLToPath } from 'node:url'
 
 const DIR = path.dirname(fileURLToPath(import.meta.url))
 const L = await import(path.join(DIR, 'loop.mjs'))
+const G = await import(path.join(DIR, 'brief-gate.mjs'))
+const D = await import(path.join(DIR, 'disjoint.mjs'))
+const SE = await import(path.join(DIR, 'stale-escalations.mjs'))
 
 // IMPORT-SAFE. This module ran its production query and called process.exit at
 // import time, so importing it hit the live database and killed the importer -
@@ -116,6 +119,128 @@ export function overlongFiles() {
 // anywhere in the whole test corpus. That reports 9, and each of the 9 is a
 // module of 250+ lines that no test mentions by name. The difference between
 // 144 and 9 is the difference between a signal and a grep.
+/**
+ * Source files that break L3, with the characters they break it with.
+ *
+ * WHY THIS SIGNAL EXISTS. The backlog starved on 2026-09-04 with the swarm at
+ * zero bees of four: `author.mjs` found fourteen real deficits and could file
+ * against NONE of them, because every one already had an issue - and those
+ * issues were the ones parked at the retry ceiling. Two detectors is not enough
+ * variety to feed four workers; the pool empties and the loop looks broken when
+ * it has simply run out of things it knows how to notice.
+ *
+ * L3 is repository law - "Source files ASCII-only" - and it is broken in 86
+ * files by 2690 characters, almost all of them box drawing in comment rules
+ * (U+2500), em dashes and arrows. That makes it the right kind of fuel:
+ *
+ *   MEASURABLE   `LC_ALL=C grep -cP '[^\x00-\x7F]' <file>` is the whole test.
+ *   DISJOINT     one file per task, so N tasks really do give N workers - the
+ *                exact failure that left the fourth slot empty.
+ *   RENEWABLE    86 of them, filed a few at a time under the WIP limit.
+ *
+ * Deliberately narrow: only the server source tree, only files whose non-ASCII
+ * is confined to comments, because rewriting a user-facing string is a change of
+ * behaviour and not a cleanup. A file with non-ASCII in live code is skipped and
+ * said to be skipped.
+ */
+export function asciiOffenders() {
+  const listed = tryShell(`git ls-tree -r --name-only ${BASE} trios/agent-server/apps/server/src/`)
+  if (!listed) return []
+  const out = []
+  for (const rel of listed.split('\n').filter(Boolean)) {
+    if (!rel.endsWith('.ts') || rel.endsWith('.test.ts')) continue
+    const text = tryShell(`git show ${BASE}:${rel}`)
+    if (!text) continue
+    const lines = text.split('\n')
+    let inComment = 0
+    let bad = 0
+    let badInCode = 0
+    const chars = new Set()
+    for (const raw of lines) {
+      const line = raw.trim()
+      const isComment = line.startsWith('//') || line.startsWith('*') || line.startsWith('/*')
+      const n = [...raw].filter((ch) => ch.charCodeAt(0) > 127)
+      if (!n.length) continue
+      bad += n.length
+      for (const ch of n) chars.add(ch)
+      if (isComment) inComment += n.length
+      else badInCode += n.length
+    }
+    if (!bad) continue
+    // A string a person reads is not a comment rule. Skipped, and the skip is
+    // visible in the report rather than silent.
+    if (badInCode > 0) continue
+    out.push({
+      rel,
+      name: rel.slice(rel.lastIndexOf('/') + 1),
+      lines: lines.length,
+      bad,
+      chars: [...chars].slice(0, 8),
+    })
+  }
+  // Worst first: a file with 530 offending characters is a better first task
+  // than one with 2, and it is the one a reader is most likely to hit.
+  return out.sort((a, b) => b.bad - a.bad)
+}
+
+/** The brief for an L3 cleanup. One file, one mechanical test. */
+function asciiBrief(c) {
+  const codes = c.chars.map((ch) => `U+${ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`).join(', ')
+  return `# ${c.rel} breaks L3 with ${c.bad} non-ASCII characters, all of them in comments
+
+Law L3 of this repository reads "Everything is written in English - source,
+comments, documentation, issues, commit messages. Source files ASCII-only."
+
+\`${c.rel}\` carries ${c.bad} characters above U+007F across ${c.lines} lines.
+Every one of them is inside a comment; the codepoints present are ${codes}.
+Most are box drawing used to rule off a comment block, em dashes, and arrows.
+
+Measured on ${BASE} with:
+
+\`\`\`
+LC_ALL=C grep -cP '[^\\x00-\\x7F]' ${c.rel}
+\`\`\`
+
+## User Scenarios & Testing
+
+### User Story 1 - The file obeys the law it is governed by (P1)
+
+**Given** the file today, **When** the ASCII check runs over it, **Then** it
+reports zero offending characters.
+
+### User Story 2 - Nothing a person reads has changed (P1)
+
+**Given** the rewritten file, **When** it is compared with the original, **Then**
+only comment characters differ and no string, identifier or expression is
+touched.
+
+**Acceptance Scenarios**:
+1. **Given** the file after the change, **When** the grep above runs, **Then**
+   its output is 0.
+
+## Requirements
+
+- **FR-001**: Every character above U+007F MUST be replaced with an ASCII
+  equivalent: box drawing with \`-\`, an em or en dash with \`-\`, an arrow with
+  \`->\` or \`<-\`, an ellipsis with \`...\`, and a multiplication sign with \`x\`.
+- **FR-002**: No change may fall outside a comment. Strings, identifiers and
+  expressions MUST be byte-identical.
+- **FR-003**: The file MUST still typecheck and its existing tests MUST still
+  pass.
+
+## Success Criteria
+
+- \`LC_ALL=C grep -cP '[^\\x00-\\x7F]' ${c.rel}\` prints 0, and the raw output is quoted in the report. The command MUST NOT name or enumerate the specific items it counts.
+- \`bun run typecheck\` passes from \`trios/agent-server\`, and its raw stdout is quoted.
+- The report quotes \`git diff --stat\` for the branch, showing exactly one file changed.
+- The report quotes one before-and-after comment line, so a reader can see the substitution that was made.
+
+## Boundary
+
+\`${c.rel}\`
+`
+}
+
 export function untestedModules() {
   const listed = tryShell(`git ls-tree -r --name-only ${BASE} trios/agent-server/apps/server/tests/`)
   if (!listed) return []
@@ -336,6 +461,11 @@ if (!isMain) { /* imported for calibration or reuse: do nothing */ } else {
 const bySignal = [
   { kind: 'length', items: overlongFiles(), brief, title: (c) => `${c.rel} is ${c.lines} lines, and nothing has ever said what is inside it` },
   { kind: 'untested', items: untestedModules(), brief: untestedBrief, title: (c) => `${c.rel} exports ${c.exports.length === 1 ? 'one symbol' : c.exports.length + ' symbols'} and no test names any of them` },
+  // Third detector, added because two were not enough variety to feed four
+  // workers: the pool emptied and the swarm sat idle while the loop had simply
+  // run out of things it knew how to notice. One file per task, so N tasks
+  // really do give N workers.
+  { kind: 'ascii', items: asciiOffenders(), brief: asciiBrief, title: (c) => `${c.rel} breaks L3 with ${c.bad} non-ASCII characters, all of them in comments` },
 ]
 
 const interleaved = []
@@ -389,6 +519,28 @@ if (closedRecently !== null && Number(closedRecently) === 0 && oldestOpenH > STA
 }
 console.log(`drain: ${closedRecently ?? '?'} authored issue(s) closed in the last ${STALL_H} h, oldest open ${oldestOpenH.toFixed(1)} h\n`)
 
+/**
+ * The paths live dispatches already own.
+ *
+ * Read from the service, and an unreadable answer returns an EMPTY set rather
+ * than throwing - the author still files, it just cannot avoid a collision it
+ * could not see. Refusing to file because the fence could not be read would
+ * turn a transient network fault into a starved swarm, which is the louder
+ * failure and the wrong one here.
+ */
+function heldPaths() {
+  const js = "const {Pool}=require('pg');const p=new Pool({connectionString:process.env.DATABASE_URL});" +
+    "p.query(\"select owned_paths from queen_dispatch where owned_paths is not null and jsonb_array_length(owned_paths) > 0 and review_state is distinct from 'accept' and dispatched_at > now() - interval '7 days'\")" +
+    ".then(r=>{console.log(JSON.stringify(r.rows)); return p.end()}).catch(e=>{console.log('ERR '+e.message); process.exit(1)})"
+  let raw
+  try { raw = SE.remote(js) } catch { return [] }
+  const line = String(raw ?? '').split('\n').map((l) => l.trim()).find((l) => l.startsWith('['))
+  if (!line) return []
+  try {
+    return JSON.parse(line).flatMap((r) => (r.owned_paths || []).map(D.normalize)).filter(Boolean)
+  } catch { return [] }
+}
+
 const existingTitles = tryShell(`gh issue list --repo ${REPO} --state all --label ${LABEL} --limit 200 --json title -q '.[].title'`) || ''
 const already = (c) => existingTitles.split('\n').some((line) => line.includes(c.rel))
 
@@ -396,7 +548,25 @@ const fresh = interleaved.filter((s) => !already(s.c))
 interleaved.forEach((s) => console.log(`   ${already(s.c) ? '..' : '->'} ${s.kind.padEnd(9)} ${String(s.c.lines).padStart(5)}  ${s.c.rel}`))
 
 const room = Math.max(0, WIP - open)
-const take = fresh.slice(0, room)
+
+// FILING N TASKS DOES NOT GIVE YOU N WORKERS.
+//
+// `fresh.slice(0, room)` took candidates in the order they were measured and
+// never asked whether they could run side by side. Measured 2026-09-04: four
+// issues were filed, two of them named
+// `trios/agent-server/apps/server/src/api/services/queen-tick.ts`, and the
+// scheduler correctly refused the second with `fileConflict` - so the fourth
+// worker slot stayed empty while the backlog looked healthy.
+//
+// The conflict is a property of the WORK, so it is settled here, where the work
+// is created, rather than at dispatch. That is what Dependabot's grouping, Nx's
+// file-keyed task graph and Kubernetes anti-affinity all do: tell the scheduler
+// only about things that can actually coexist.
+const withPaths = fresh.map((s) => ({ ...s, paths: G.boundaryPathsOf(s.brief(s.c)) || [] }))
+const held = heldPaths()
+const { taken: take, setAside } = D.disjointBatch(withPaths, held, room)
+if (held.length) console.log(`\nthe swarm already holds ${held.length} path(s); a candidate touching one of them is not filed`)
+for (const s of setAside) console.log(`   x  ${s.kind.padEnd(9)} ${s.c.rel}  -  ${s.why}`)
 console.log(`\nnot yet filed: ${fresh.length}   would file ${take.length}`)
 
 if (!process.argv.includes('--file')) { console.log('\nreport only. re-run with --file to act.'); process.exit(0) }

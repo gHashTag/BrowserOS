@@ -33,6 +33,7 @@ const TR = await import(path.join(DIR, 'trend.mjs'))
 const CLK = await import(path.join(DIR, 'clocks.mjs'))
 const FLD = await import(path.join(DIR, 'fields.mjs'))
 const SE = await import(path.join(DIR, 'stale-escalations.mjs'))
+const D = await import(path.join(DIR, 'disjoint.mjs'))
 
 let pass = 0
 const failures = []
@@ -56,6 +57,17 @@ const eq = (got, want, what) => {
 const ROOT = process.env.TRIOS_ROOT || '/Users/playra/BrowserOS'
 const fsRequireJudge = () => JP
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'loop-selftest-'))
+
+// GENERATED PER RUN, and it has to be.
+//
+// The fixture used a fixed name, and once this file was committed that name
+// existed in the tree - five times - so brief-gate did exactly its job and
+// refused the draft for promising an identifier that is already there. The
+// fixture falsified its own premise by being saved.
+//
+// A fixture asserting "this appears nowhere" must mint a name that cannot have
+// been written down before it ran.
+const ABSENT_ID = `absentFn${process.pid}${Date.now().toString(36)}`
 
 // ---------------------------------------------------------------------- shq
 // The bug it exists to stop: execSync passes through the local /bin/sh, so a
@@ -109,7 +121,7 @@ $ wc -l x
 
 ## Success Criteria
 
-- The tool exports a function named \`aFunctionThatIsNowhere\`; that identifier appears nowhere in the tree today.
+- The tool exports a function named \`${ABSENT_ID}\`; that identifier appears nowhere in the tree today.
 
 ## Boundary
 
@@ -265,8 +277,8 @@ check('diffing from the fork point shows additions only, the tip shows phantom d
 console.log('\ncounting criteria - must demand an independent command')
 
 const countBrief = (tail) => GOOD.replace(
-  '- The tool exports a function named `aFunctionThatIsNowhere`; that identifier appears nowhere in the tree today.',
-  `- The row count equals the number of declarations; the bee quotes both numbers and the command that produced the second${tail}\n- The tool exports a function named \`aFunctionThatIsNowhere\`; that identifier appears nowhere in the tree today.`,
+  `- The tool exports a function named \`${ABSENT_ID}\`; that identifier appears nowhere in the tree today.`,
+  `- The row count equals the number of declarations; the bee quotes both numbers and the command that produced the second${tail}\n- The tool exports a function named \`${ABSENT_ID}\`; that identifier appears nowhere in the tree today.`,
 )
 
 check('a count criterion with no independence clause is flagged', () => {
@@ -324,8 +336,8 @@ check('a snapshot with no skip summary contributes no point, rather than a zero'
 console.log('\nbrief-gate - a criterion naming a command must demand its raw output')
 
 const cmdBrief = (tail) => GOOD.replace(
-  '- The tool exports a function named `aFunctionThatIsNowhere`; that identifier appears nowhere in the tree today.',
-  `- Running \`node trios/tools/x.mjs\` reports 3 findings${tail}\n- The tool exports a function named \`aFunctionThatIsNowhere\`; that identifier appears nowhere in the tree today.`,
+  `- The tool exports a function named \`${ABSENT_ID}\`; that identifier appears nowhere in the tree today.`,
+  `- Running \`node trios/tools/x.mjs\` reports 3 findings${tail}\n- The tool exports a function named \`${ABSENT_ID}\`; that identifier appears nowhere in the tree today.`,
 )
 
 check('a command criterion with no output demand is flagged', () => {
@@ -541,6 +553,156 @@ check('an expired lock is not a holder, and acquire agrees with lockHolder', () 
   }
   if (holder && !L.acquire('selftest-agreement').ok === false) {
     // acquire must refuse exactly when lockHolder reports someone.
+  }
+})
+
+
+// ---------------------------------------------------------------------------
+// disjoint: filing N tasks does not give you N workers.
+//
+// Four issues were filed on 2026-09-04 and two named the same file, so the
+// scheduler refused one with `fileConflict` and the fourth worker slot stayed
+// empty while the backlog looked healthy. These pin the comparison AND the
+// selection, because the comparison is the part that has been wrong before:
+// path ownership compared as raw strings is a recorded defect of this project.
+
+check('a directory conflicts with everything beneath it, both ways', () => {
+  if (!D.collides('rings/SR-00', 'rings/SR-00/Queen.swift')) throw new Error('a directory must conflict with its own file')
+  if (!D.collides('rings/SR-00/Queen.swift', 'rings/SR-00')) throw new Error('and in the other direction')
+})
+
+check('a string prefix that is not a directory does NOT conflict', () => {
+  // The recorded defect: `rings/SR-0` is a string prefix of `rings/SR-00/X` and
+  // is not a directory containing it.
+  if (D.collides('rings/SR-0', 'rings/SR-00/Queen.swift')) throw new Error('compared as strings, not as path components')
+})
+
+check('two different files in one directory do not conflict', () => {
+  if (D.collides('a/b/one.ts', 'a/b/two.ts')) throw new Error('siblings are not a conflict')
+})
+
+check('the same file conflicts with itself however it is written', () => {
+  if (!D.collides('./a/b.ts', 'a/b.ts')) throw new Error('a leading ./ is not a different file')
+  if (!D.collides('`a/b.ts`', 'a/b.ts')) throw new Error('markdown backticks are not part of the path')
+  if (!D.collides('a/b/', 'a/b/c.ts')) throw new Error('a trailing slash is not a different directory')
+})
+
+check('an empty path conflicts with nothing, rather than with everything', () => {
+  if (D.collides('', 'a/b.ts')) throw new Error('an empty path must not swallow the tree')
+})
+
+check('the batch drops the second candidate that names one file', () => {
+  const c = [
+    { id: 'A', paths: ['x/queen-tick.ts', 'x/a.test.ts'] },
+    { id: 'B', paths: ['x/queen-tick.ts', 'x/b.test.ts'] },
+    { id: 'C', paths: ['y/other.ts'] },
+  ]
+  const { taken, setAside } = D.disjointBatch(c, [], 10)
+  eq(taken.length, 2, 'two of the three can run side by side')
+  eq(setAside.length, 1, 'one set aside')
+  if (!/already spoken for/.test(setAside[0].why)) throw new Error('the reason must name the collision')
+  // The exact case measured: this is #1420 and #1421.
+  const ids = taken.map((t) => t.id).sort().join('')
+  if (ids !== 'AC' && ids !== 'BC') throw new Error(`took ${ids}, which is not a disjoint pair`)
+})
+
+check('a candidate colliding with what the swarm already holds is not filed', () => {
+  const { taken, setAside } = D.disjointBatch(
+    [{ id: 'A', paths: ['rings/SR-02/ChatViewModel.swift'] }],
+    ['rings/SR-02'],
+    10,
+  )
+  eq(taken.length, 0, 'held by a live dispatch')
+  if (!/spoken for/.test(setAside[0].why)) throw new Error('must say why')
+})
+
+check('a candidate with no boundary is set aside, not silently taken', () => {
+  const { taken, setAside } = D.disjointBatch([{ id: 'A', paths: [] }], [], 10)
+  eq(taken.length, 0, 'nothing can be reserved for it')
+  if (!/no boundary/.test(setAside[0].why)) throw new Error('must say why')
+})
+
+check('the room limit is honoured and the overflow says so', () => {
+  const c = [{ id: 'A', paths: ['a.ts'] }, { id: 'B', paths: ['b.ts'] }, { id: 'C', paths: ['c.ts'] }]
+  const { taken, setAside } = D.disjointBatch(c, [], 2)
+  eq(taken.length, 2, 'two filed')
+  eq(setAside.length, 1, 'one over the room')
+  if (!/over the room/.test(setAside[0].why)) throw new Error('must distinguish room from collision')
+})
+
+check('nothing is dropped without a reason', () => {
+  const c = [{ id: 'A', paths: ['a.ts'] }, { id: 'B', paths: ['a.ts'] }, { id: 'C', paths: [] }]
+  const { taken, setAside } = D.disjointBatch(c, [], 10)
+  eq(taken.length + setAside.length, 3, 'every candidate is accounted for')
+  if (setAside.some((s) => !s.why)) throw new Error('a selector that drops work silently is indistinguishable from a broken one')
+})
+
+
+// ---------------------------------------------------------------------------
+// brief-gate: a tree-level check is mechanical too, and the negatives still bite.
+
+const CLEANUP = `# A cleanup task that defines nothing new
+
+## User Scenarios & Testing
+
+### User Story 1 - The file obeys the law (P1)
+
+**Given** the file, **When** the check runs, **Then** it reports zero.
+
+**Acceptance Scenarios**:
+1. **Given** the file, **When** the grep runs, **Then** its output is 0.
+
+## Requirements
+
+- **FR-001**: Every offending character MUST be replaced.
+
+## Success Criteria
+
+- \`LC_ALL=C grep -cP '[^\\x00-\\x7F]' trios/tools/selftest-fixture.mjs\` prints 0, and the raw output is quoted. The command MUST NOT name or enumerate the specific items it counts.
+
+## Boundary
+
+\`trios/tools/selftest-fixture.mjs\`
+`
+
+check('a cleanup with a tree-level check and no new identifier is accepted', () => {
+  // It defines nothing, so the identifier rule can never be satisfied. Refusing
+  // it refused three real L3 cleanups on 2026-09-04 - a false refusal of the
+  // exact class this gate keeps committing.
+  const r = G.gate(draft('cleanup.md', CLEANUP))
+  if (r.problems.some((p) => /mechanically checkable/.test(p))) {
+    throw new Error(`refused a tree-level check: ${r.problems.join('; ')}`)
+  }
+})
+
+check('the command must name a path the Boundary actually reserves', () => {
+  // Replace ONLY the path inside the command, leaving the Boundary alone, so the
+  // draft claims a check over a file it never reserved.
+  const lines = CLEANUP.split('\n')
+  const i = lines.findIndex((l) => l.startsWith('- `LC_ALL'))
+  if (i < 0) throw new Error('the fixture no longer carries the command this case is about')
+  const bad = lines
+    .map((l, k) => (k === i ? l.replace('trios/tools/selftest-fixture.mjs', 'some/other/file.ts') : l))
+    .join('\n')
+  const r = G.gate(draft('cleanup-elsewhere.md', bad))
+  if (!r.problems.some((p) => /mechanically checkable/.test(p))) {
+    throw new Error('accepted a command pointing outside the boundary - the worker could satisfy it without touching its own files')
+  }
+})
+
+check('the command must state an exact expected output', () => {
+  const bad = CLEANUP.replace('prints 0,', 'is clean,')
+  const r = G.gate(draft('cleanup-vague.md', bad))
+  if (!r.problems.some((p) => /mechanically checkable/.test(p))) {
+    throw new Error('accepted a command with no expected output - "clean" is the bee\'s word again')
+  }
+})
+
+check('prose alone is still refused', () => {
+  const bad = CLEANUP.replace(/- `LC_ALL[^\n]*\n/, '- The file looks tidy afterwards.\n')
+  const r = G.gate(draft('cleanup-prose.md', bad))
+  if (!r.problems.some((p) => /mechanically checkable/.test(p))) {
+    throw new Error('accepted a criterion nobody can audit')
   }
 })
 

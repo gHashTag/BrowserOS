@@ -346,6 +346,12 @@ if (isMain) {
     'criteria, but the parser that produced that reading was fixed the same day ' +
     '(edbc05e11) and the shipping parser reads the criteria today'
   const { released } = release(stale.map((r) => r.issue), note)
+  // The ledger line is not decoration. `coverage.mjs` proves an act path by
+  // finding evidence it ran, and a tool that acts without recording it reads as
+  // NEVER ACTED - which is exactly how the reaper stayed unproven until the
+  // night the volume filled.
+  const L = await import(path.join(DIR, 'loop.mjs'))
+  L.append({ kind: 'stale-escalations', released, considered: rows.length, issues: stale.map((r) => r.issue) })
   console.log(`\nreleased ${released} of ${stale.length} back to the pool`)
   process.exit(released === stale.length ? 0 : 1)
 }

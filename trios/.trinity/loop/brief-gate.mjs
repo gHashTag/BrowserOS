@@ -127,10 +127,30 @@ export function gate(file) {
   // unauditable - the swarm's word is the only evidence they will ever have.
   // The Queen accepts on the bee's self-reported VERDICT block, so a brief with
   // no mechanical claim is a brief that can only ever be self-graded.
-  if (!promised.length) {
+  // A SECOND SHAPE THAT IS EQUALLY MECHANICAL, and refusing it was a false
+  // refusal of exactly the kind this gate keeps committing.
+  //
+  // A cleanup task defines no new identifier - there is nothing to name - yet
+  // "`LC_ALL=C grep -cP '[^\\x00-\\x7F]' <a path in the Boundary>` prints 0" is a
+  // property of the TREE, not of the report. It is harder to fake than an
+  // identifier, because the reader runs it against the branch rather than
+  // reading what the worker said about it.
+  //
+  // The demand stays strict: the command must state an EXACT expected output,
+  // and its subject must be a path the Boundary actually reserves - otherwise a
+  // worker could satisfy it by pointing at a file it never touched.
+  const boundaryPaths = (boundary || []).map((p) => String(p).trim())
+  const treeChecks = criteriaLines.filter((l) => {
+    if (!/`[^`]*\b(grep|wc|test|\[)\b[^`]*`/.test(l)) return false
+    if (!/\b(prints|outputs|reports|exits|is|equals)\s+`?[0-9]/i.test(l)) return false
+    return boundaryPaths.some((p) => p && l.includes(p))
+  })
+
+  if (!promised.length && !treeChecks.length) {
     problems.push('no mechanically checkable criterion: name an identifier the bee must define ' +
       '("defines a function named `x`; that identifier appears nowhere in the tree today"), ' +
-      'otherwise nothing but the bee\'s own word can ever confirm the work')
+      'or state a command over a path in the Boundary with its exact expected output ' +
+      '("`grep -c X path` prints 0"), otherwise nothing but the bee\'s own word can ever confirm the work')
   }
 
   for (const id of promised) {
