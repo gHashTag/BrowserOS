@@ -1,0 +1,802 @@
+{
+  "census": "t27-migration-census",
+  "issue": "gHashTag/trios#1350",
+  "scope": "the trios tree; every path is trios-root-relative and POSIX-style",
+  "rules": {
+    "copyExclusion": "A .t27 file whose path runs through a .claude/worktrees/ directory is a copy made by an agent worktree of the specs tree, not a distinct specification. Copies are excluded from the distinct count and reported separately as the copied count; the two numbers are never summed. The walk also skips .git and node_modules, which contain no specifications.",
+    "skippedDirectories": [
+      ".git",
+      "node_modules"
+    ],
+    "generatedArtifact": "A distinct spec <stem>.t27 has a generated artifact when a file named <stem>.<ext> exists under a directory named gen or generated within the spec's ring (the t27c output convention; under L0 generated files are artifacts, not hand-written source). A spec outside rings/ is scoped to its own directory. Artifact matches under .claude/worktrees/ are ignored, like all copies.",
+    "sourceFile": "A source file is a hand-written code file — extension .rs, .swift, .ts, .tsx, .js, .mjs, .c, .h, .zig or .v — inside the ring, excluding .t27 specs (counted separately), generation output under gen/ or generated/, worktree copies under .claude/worktrees/, and the .git and node_modules directories. Source lines use wc -l semantics: one line per newline, plus one for a file whose final line is unterminated.",
+    "ringRow": "One row per directory under rings/. A ring has a generated target when its subtree contains a directory named gen or generated.",
+    "ranking": "Rows are ranked by source lines descending, ties broken by ring name in ordinal order, so the largest un-migrated surface is the first row.",
+    "nonClaim": "This census counts and ranks. It does not claim that any file is, or is not, a duplicate of a rule a .t27 already states; that judgement belongs to a human. No file-to-spec pairing is attempted or implied anywhere in this output."
+  },
+  "specCounts": {
+    "naiveFindCount": 70,
+    "distinctCount": 70,
+    "copiedCount": 0,
+    "neverSummed": true,
+    "withGeneratedArtifact": 68,
+    "withoutGeneratedArtifact": 2
+  },
+  "specs": [
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/access_control.t27",
+      "lines": 229,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/access_control.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/adaptive_retry.t27",
+      "lines": 141,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/adaptive_retry.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/adaptive_routing.t27",
+      "lines": 280,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/adaptive_routing.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/anomaly_detector.t27",
+      "lines": 378,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/anomaly_detector.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/api_documenter.t27",
+      "lines": 378,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/api_documenter.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/area_optimization.t27",
+      "lines": 226,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/area_optimization.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/auto_config.t27",
+      "lines": 403,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/auto_config.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/bandwidth_allocator.t27",
+      "lines": 356,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/bandwidth_allocator.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/byte_utils.t27",
+      "lines": 78,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/byte_utils.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/cache_management.t27",
+      "lines": 346,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/cache_management.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/compression_engine.t27",
+      "lines": 320,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/compression_engine.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/congestion_control.t27",
+      "lines": 262,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/congestion_control.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/crc16.t27",
+      "lines": 90,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/crc16.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/cross_layer_optimizer.t27",
+      "lines": 315,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/cross_layer_optimizer.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/docs_generator.t27",
+      "lines": 387,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/docs_generator.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/energy_aware_routing.t27",
+      "lines": 333,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/energy_aware_routing.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/etx.t27",
+      "lines": 134,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/etx.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/failure_predictor.t27",
+      "lines": 326,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/failure_predictor.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/fault_detection.t27",
+      "lines": 255,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/fault_detection.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/flow_control.t27",
+      "lines": 269,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/flow_control.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/fpga_synthesis_report.t27",
+      "lines": 184,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/fpga_synthesis_report.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/frame_buffer.t27",
+      "lines": 81,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/frame_buffer.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/hardware_validation.t27",
+      "lines": 202,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/hardware_validation.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/health_dashboard.t27",
+      "lines": 349,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/health_dashboard.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/health_monitoring.t27",
+      "lines": 309,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/health_monitoring.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/hello.t27",
+      "lines": 163,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/hello.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/integration_framework.t27",
+      "lines": 544,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/integration_framework.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/integration_tests.t27",
+      "lines": 243,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/integration_tests.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/key_management.t27",
+      "lines": 300,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/key_management.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/link_quality_monitor.t27",
+      "lines": 181,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/link_quality_monitor.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/link_statistics.t27",
+      "lines": 52,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/link_statistics.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/lite_crypto.t27",
+      "lines": 156,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/lite_crypto.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/load_predictor.t27",
+      "lines": 305,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/load_predictor.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/local_processing.t27",
+      "lines": 310,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/local_processing.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/m3_multihop.t27",
+      "lines": 409,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/m3_multihop.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/mesh_node_sim.t27",
+      "lines": 164,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/mesh_node_sim.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/mesh_protocol_stack.t27",
+      "lines": 216,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/mesh_protocol_stack.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/mesh_routing.t27",
+      "lines": 327,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/mesh_routing.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/multipath_router.t27",
+      "lines": 128,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/multipath_router.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/multipath_routing.t27",
+      "lines": 378,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/multipath_routing.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/network_analytics.t27",
+      "lines": 270,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/network_analytics.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/network_coding.t27",
+      "lines": 297,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/network_coding.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/network_metrics.t27",
+      "lines": 78,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/network_metrics.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/network_orchestrator.t27",
+      "lines": 347,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/network_orchestrator.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/network_simulator.t27",
+      "lines": 358,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/network_simulator.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/olsr_routing.t27",
+      "lines": 276,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/olsr_routing.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/packet_loss_injection.t27",
+      "lines": 167,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/packet_loss_injection.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/packet_queue.t27",
+      "lines": 118,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/packet_queue.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/pattern_predictor.t27",
+      "lines": 422,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/pattern_predictor.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/performance_benchmarks.t27",
+      "lines": 194,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/performance_benchmarks.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/performance_profiler.t27",
+      "lines": 355,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/performance_profiler.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/power_monitoring.t27",
+      "lines": 250,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/power_monitoring.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/production_deployment.t27",
+      "lines": 227,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/production_deployment.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/production_scenarios.t27",
+      "lines": 208,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/production_scenarios.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/quarantine_manager.t27",
+      "lines": 316,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/quarantine_manager.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/redundancy_management.t27",
+      "lines": 338,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/redundancy_management.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/resource_scheduler.t27",
+      "lines": 388,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/resource_scheduler.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/self_healing.t27",
+      "lines": 292,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/self_healing.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/swarm_coordinator.t27",
+      "lines": 347,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/swarm_coordinator.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/test_framework.t27",
+      "lines": 398,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/test_framework.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/test_validator.t27",
+      "lines": 370,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/test_validator.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/timer.t27",
+      "lines": 98,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/timer.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/timing_closure.t27",
+      "lines": 217,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/timing_closure.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/topology_visualizer.t27",
+      "lines": 418,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/topology_visualizer.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/traffic_animator.t27",
+      "lines": 462,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/traffic_animator.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/transport_tx_fsm.t27",
+      "lines": 241,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/transport_tx_fsm.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/trust_manager.t27",
+      "lines": 325,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/trust_manager.rs"
+      ]
+    },
+    {
+      "path": "rings/RUST-13/trios-mesh/specs/wire.t27",
+      "lines": 120,
+      "ring": "RUST-13",
+      "generatedArtifact": true,
+      "artifacts": [
+        "rings/RUST-13/trios-mesh/gen/rust/wire.rs"
+      ]
+    },
+    {
+      "path": "rings/T27-00/queen_core.t27",
+      "lines": 209,
+      "ring": "T27-00",
+      "generatedArtifact": false,
+      "artifacts": []
+    },
+    {
+      "path": "rings/T27-01/a2a.t27",
+      "lines": 223,
+      "ring": "T27-01",
+      "generatedArtifact": false,
+      "artifacts": []
+    }
+  ],
+  "ringSurface": [
+    {
+      "ring": "SR-02",
+      "sourceFiles": 19,
+      "sourceLines": 23103,
+      "specFiles": 0,
+      "generatedTarget": false
+    },
+    {
+      "ring": "SR-00",
+      "sourceFiles": 106,
+      "sourceLines": 22041,
+      "specFiles": 0,
+      "generatedTarget": false
+    },
+    {
+      "ring": "SR-01",
+      "sourceFiles": 30,
+      "sourceLines": 8252,
+      "specFiles": 0,
+      "generatedTarget": false
+    },
+    {
+      "ring": "RUST-13",
+      "sourceFiles": 21,
+      "sourceLines": 7136,
+      "specFiles": 68,
+      "generatedTarget": true
+    },
+    {
+      "ring": "RUST-04",
+      "sourceFiles": 7,
+      "sourceLines": 1716,
+      "specFiles": 0,
+      "generatedTarget": false
+    },
+    {
+      "ring": "RUST-05",
+      "sourceFiles": 1,
+      "sourceLines": 1626,
+      "specFiles": 0,
+      "generatedTarget": false
+    },
+    {
+      "ring": "RUST-12",
+      "sourceFiles": 1,
+      "sourceLines": 1448,
+      "specFiles": 0,
+      "generatedTarget": false
+    },
+    {
+      "ring": "RUST-14",
+      "sourceFiles": 1,
+      "sourceLines": 1315,
+      "specFiles": 0,
+      "generatedTarget": false
+    },
+    {
+      "ring": "RUST-02",
+      "sourceFiles": 1,
+      "sourceLines": 1275,
+      "specFiles": 0,
+      "generatedTarget": false
+    },
+    {
+      "ring": "RUST-08",
+      "sourceFiles": 2,
+      "sourceLines": 1160,
+      "specFiles": 0,
+      "generatedTarget": false
+    },
+    {
+      "ring": "RUST-01",
+      "sourceFiles": 1,
+      "sourceLines": 555,
+      "specFiles": 0,
+      "generatedTarget": false
+    },
+    {
+      "ring": "RUST-06",
+      "sourceFiles": 1,
+      "sourceLines": 434,
+      "specFiles": 0,
+      "generatedTarget": false
+    },
+    {
+      "ring": "RUST-10",
+      "sourceFiles": 1,
+      "sourceLines": 394,
+      "specFiles": 0,
+      "generatedTarget": false
+    },
+    {
+      "ring": "RUST-07",
+      "sourceFiles": 1,
+      "sourceLines": 281,
+      "specFiles": 0,
+      "generatedTarget": false
+    },
+    {
+      "ring": "RUST-03",
+      "sourceFiles": 1,
+      "sourceLines": 246,
+      "specFiles": 0,
+      "generatedTarget": false
+    },
+    {
+      "ring": "RUST-09",
+      "sourceFiles": 1,
+      "sourceLines": 222,
+      "specFiles": 0,
+      "generatedTarget": false
+    },
+    {
+      "ring": "RUST-11",
+      "sourceFiles": 1,
+      "sourceLines": 158,
+      "specFiles": 0,
+      "generatedTarget": false
+    },
+    {
+      "ring": "RUST-00",
+      "sourceFiles": 1,
+      "sourceLines": 132,
+      "specFiles": 0,
+      "generatedTarget": false
+    },
+    {
+      "ring": "RUST-99",
+      "sourceFiles": 1,
+      "sourceLines": 123,
+      "specFiles": 0,
+      "generatedTarget": false
+    },
+    {
+      "ring": "T27-00",
+      "sourceFiles": 0,
+      "sourceLines": 0,
+      "specFiles": 1,
+      "generatedTarget": false
+    },
+    {
+      "ring": "T27-01",
+      "sourceFiles": 0,
+      "sourceLines": 0,
+      "specFiles": 1,
+      "generatedTarget": false
+    }
+  ]
+}
