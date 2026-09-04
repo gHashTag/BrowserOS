@@ -10,7 +10,7 @@
  * is expected to call `useInvalidateAgentOutputs(agentId)` whenever
  * an assistant turn completes, so the rail picks up the new
  * `produced_files` rows the server attributed during that turn.
- * No SSE channel here — invalidation off the existing chat-stream
+ * No SSE channel here - invalidation off the existing chat-stream
  * completion is enough for v1.
  */
 
@@ -105,12 +105,12 @@ export function useAgentTurnFiles(
  * for one agent across any baseUrl. Call after an assistant turn
  * completes so the rail (and the inline file-card strip) pick up
  * the new attributed rows. Cheap when the queries aren't mounted
- * — react-query just marks the cached value stale.
+ * - react-query just marks the cached value stale.
  *
  * Implementation note: react-query's `invalidateQueries({ queryKey })`
  * does positional partial-match, so passing `undefined` as the
- * baseUrl placeholder does NOT match a cached `[…, baseUrl, …]`
- * key — the cache stayed stale. Use a predicate so we ignore the
+ * baseUrl placeholder does NOT match a cached `[..., baseUrl, ...]`
+ * key - the cache stayed stale. Use a predicate so we ignore the
  * baseUrl position entirely.
  */
 export function useInvalidateAgentOutputs() {
@@ -149,7 +149,7 @@ export function useInvalidateAgentOutputs() {
 /**
  * Tiny mutation wrapper so the Outputs rail's "Refresh" button can
  * surface an `isPending` indicator while the new query is in flight.
- * No body — just triggers `refetch` on the rail's query for this
+ * No body - just triggers `refetch` on the rail's query for this
  * agent and resolves when it settles.
  */
 export function useRefreshAgentOutputs(agentId: string) {
