@@ -1829,6 +1829,19 @@ check('close-done and land agree about what landed, because it is one rule', () 
   if (/const landed = baseTree && mergedTree/.test(code)) throw new Error('the second copy of the rule must be gone, not merely bypassed')
 })
 
+check('merge-tree prose is not a conflicting path', async () => {
+  const { baseMovedSince } = await import('./land.mjs')
+  const code = codeOf('land.mjs')
+  // `--name-only` interleaves "Auto-merging X" and "CONFLICT (add/add): ..."
+  // with the paths. Counting them reported six conflicting paths for three
+  // files - the kind of inflated number that makes a report stop being read.
+  if (!/\^\(Auto-merging\|CONFLICT \)/.test(code)) throw new Error('the commentary lines must be filtered out')
+  if (!/a\.indexOf\(p\) === i/.test(code)) throw new Error('and a path named twice is one file')
+  // A base that has not moved says nothing rather than saying zero.
+  if (baseMovedSince('queen-1', [], () => 'abc') !== null) throw new Error('no paths, no claim')
+  if (baseMovedSince('queen-1', ['a.ts'], () => '0') !== null) throw new Error('zero commits is not a finding')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
