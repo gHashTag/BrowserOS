@@ -1,4 +1,5 @@
 import type { LanguageModelV2ToolResultOutput } from '@ai-sdk/provider'
+import { TIMEOUTS } from '@browseros/shared/constants/timeouts'
 import type { ToolApprovalConfig } from '@browseros/shared/constants/tool-approval'
 import { type ToolSet, tool } from 'ai'
 import { logger } from '../lib/logger'
@@ -65,7 +66,7 @@ export function buildBrowserToolSet(
             def,
             params,
             ctx,
-            AbortSignal.timeout(120_000),
+            AbortSignal.timeout(TIMEOUTS.TOOL_CALL),
           )
 
           metrics.log('tool_executed', {
