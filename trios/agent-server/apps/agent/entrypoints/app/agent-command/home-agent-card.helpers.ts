@@ -3,7 +3,7 @@ import type { HarnessAgent } from '@/entrypoints/app/agents/agent-harness-types'
 /**
  * Order for the /home Recent agents grid.
  *
- * 1. Active turn first — agents mid-turn float to the top so the
+ * 1. Active turn first - agents mid-turn float to the top so the
  *    Resume affordance is the first thing the user sees on /home.
  * 2. The protected gateway-side `main` agent stays pinned-to-top in
  *    the never-used group on a fresh install (mirrors the rail).
@@ -23,7 +23,7 @@ export function orderHomeAgents(agents: HarnessAgent[]): HarnessAgent[] {
 
     // Recency wins outright. Never-used agents (`lastUsedAt == null`)
     // both fall to the same `-Infinity` bucket and the seed/id rules
-    // below decide their order — but a used agent always beats any
+    // below decide their order - but a used agent always beats any
     // never-used agent regardless of id.
     const aValue = a.lastUsedAt ?? Number.NEGATIVE_INFINITY
     const bValue = b.lastUsedAt ?? Number.NEGATIVE_INFINITY
