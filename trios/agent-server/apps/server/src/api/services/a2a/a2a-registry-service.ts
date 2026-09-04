@@ -82,7 +82,7 @@ export class A2aRegistryService {
 
   /// Whether agent registrations survive this process, and why not when they do not.
   ///
-  /// The fallback to memory is deliberate — a registry that refuses to start
+  /// The fallback to memory is deliberate - a registry that refuses to start
   /// because a database is unreachable is worse than one that keeps working
   /// locally. But it is also silent: a wrong DSN and no DSN at all produce the
   /// same running server, and the only difference is one `warn` line emitted
