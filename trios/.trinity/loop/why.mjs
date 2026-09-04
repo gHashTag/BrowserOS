@@ -101,10 +101,20 @@ export function checks(s) {
             remedy: 'tri mix   - a swarm at full load doing one cheap thing is still a swarm doing one cheap thing',
           }
         }
+        // A LEADING INDICATOR BELONGS IN THE ALL-CLEAR, not after it. The
+        // landing pipeline being stuck does not make a busy swarm idle today;
+        // it makes it idle in an hour, once every accepted issue is holding a
+        // boundary that nothing will release. Say so while there is still time.
+        const landOut = sh(`node ${path.join(DIR, 'land.mjs')}`, { timeout: 240000 }) || ''
+        const stuck = landOut.match(/ALL (\d+) remaining branch\(es\) conflict/)
         return {
-          cause: `nothing is wrong - ${running} of ${WORKERS} workers are busy`,
-          evidence: `last tick ${tick.decidedAt ?? '?'}` + (top ? `, backlog led by ${top[0]} at ${Math.round(share * 100)}%` : ''),
-          remedy: 'tri verdicts - load is not health; tri mix - health is not value',
+          cause: `nothing is wrong RIGHT NOW - ${running} of ${WORKERS} workers are busy`,
+          evidence: `last tick ${tick.decidedAt ?? '?'}` +
+            (top ? `, backlog led by ${top[0]} at ${Math.round(share * 100)}%` : '') +
+            (stuck ? `. AHEAD: all ${stuck[1]} remaining accepted branches conflict, so nothing can land and close-done will close nothing` : ''),
+          remedy: stuck
+            ? 'tri land   - the pipeline is stuck behind conflicts and will starve the swarm once these boundaries are all that is left'
+            : 'tri verdicts - load is not health; tri mix - health is not value',
         }
       },
     },
@@ -163,6 +173,42 @@ export function checks(s) {
           evidence: `#${rows[0].issue}: ${String(rows[0].outcome).slice(0, 160)}`,
           remedy: 'read the outcome above; it is the actual error. A Permission denied under .git means a root-owned reflog - tri push-work --push now repairs that',
         }
+      },
+    },
+    {
+      name: 'the landing pipeline is moving',
+      test: () => {
+        // CAUSE THIRTEEN, added the round after I created it.
+        //
+        // close-done was changed to close only work that has LANDED - the repair
+        // for 169 issues closed while their code sat outside the base. That
+        // makes `land` load-bearing: if landing stops, nothing closes, every
+        // accepted issue keeps holding its boundary, and the swarm starves
+        // behind a wall of its own finished work. The failure is silent, because
+        // refusing to close is the CORRECT behaviour of a healthy close-done.
+        //
+        // Read-only: it asks land for a survey and never lands anything itself.
+        let rows
+        try { rows = null } catch { rows = null }
+        const out = sh(`node ${path.join(DIR, 'land.mjs')}`, { timeout: 240000 })
+        if (!out) return null
+        const m = out.match(/ALL (\d+) remaining branch\(es\) conflict/)
+        if (m) {
+          return {
+            cause: `the landing pipeline is stuck: all ${m[1]} accepted branch(es) left conflict, so nothing can land and close-done will close nothing`,
+            evidence: (out.match(/^ {2}CONFL[^\n]*$/m) || ['see tri land'])[0].trim().slice(0, 150),
+            remedy: 'tri land   - these need a rebase or an honest closure as superseded; a conflict is for a person',
+          }
+        }
+        const l = out.match(/(\d+) landable, showing the next (\d+)/)
+        if (l && Number(l[1]) > 30) {
+          return {
+            cause: `${l[1]} accepted branches are still outside the base, and close-done cannot close any of them until they land`,
+            evidence: `land reports ${l[1]} landable`,
+            remedy: 'tri land --land   - it lands a bounded batch per run',
+          }
+        }
+        return null
       },
     },
     {
@@ -280,7 +326,20 @@ if (isMain) {
       console.log('')
       continue
     }
-    if (all) console.log(`  ok  ${c.name}${hit ? ' (also true)' : ''}`)
+    // A CHECK THAT FIRED IS NOT `ok`.
+    //
+    // Under --all this printed "ok  the landing pipeline is moving (also true)"
+    // for a check that had just detected a stalled pipeline. The word ok is the
+    // first thing an eye lands on, and putting it in front of a finding is how
+    // a diagnostic gets skimmed past. A later cause is still a cause; it just is
+    // not the FIRST one.
+    if (all && hit) {
+      console.log(`  ALSO  ${c.name}`)
+      console.log(`        ${hit.cause}`)
+      console.log(`        do: ${hit.remedy}`)
+    } else if (all) {
+      console.log(`  ok    ${c.name}`)
+    }
   }
 
   if (!found) {

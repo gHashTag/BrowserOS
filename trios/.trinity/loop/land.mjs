@@ -192,14 +192,40 @@ if (isMain) {
   if (held.length > 6) console.log(`  ...   and ${held.length - 6} more`)
 
   console.log('')
-  const batch = landable.slice(0, BATCH)
-  for (const r of batch) {
+  // FILL THE BATCH WITH CLEAN ONES, rather than taking the first N and hoping.
+  //
+  // `slice(0, BATCH)` took the newest five whatever their state, and the
+  // conflicting branches sit at the HEAD of a newest-first list - so a batch of
+  // five landed ONE while four conflicts were re-checked every run. Measured:
+  // the rate fell to 1 per batch with 35 clean branches waiting behind 10 stuck
+  // ones.
+  //
+  // Fourth instance this round of one bad item blocking a batch, after a
+  // rejected ref taking down a push, a timed-out step reported as failed, and a
+  // conflict read as a computation failure. The shape is always the same: work
+  // that CAN proceed is held hostage by work that cannot.
+  //
+  // Bounded scan: it looks at up to four batches' worth of candidates to find
+  // one batch of clean ones, so a wall of conflicts cannot turn this into a
+  // full survey every run.
+  const batch = []
+  const skipped = []
+  for (const r of landable.slice(0, BATCH * 4)) {
+    if (batch.length >= BATCH) break
     const m = mergesCleanly(r.branch)
-    r.clean = m.clean
-    r.why = m.clean ? r.why : m.why
-    console.log(`  ${m.clean ? 'land  ' : 'CONFL '}${r.branch.padEnd(16)} ${r.why}`)
+    if (m.clean) { r.clean = true; batch.push(r) } else { r.clean = false; r.why = m.why; skipped.push(r) }
   }
+  for (const r of skipped) console.log(`  CONFL ${r.branch.padEnd(16)} ${r.why.slice(0, 96)}`)
+  for (const r of batch) console.log(`  land  ${r.branch.padEnd(16)} ${r.why}`)
+  if (skipped.length) console.log(`  (${skipped.length} conflicting branch(es) skipped over, not counted against the batch)`)
 
+  if (!batch.length && landable.length) {
+    console.log('')
+    console.log(`ALL ${landable.length} remaining branch(es) conflict. Nothing here can be landed by merging.`)
+    console.log('A conflict is reported for a person, never resolved by guessing - these need a')
+    console.log('rebase, or an honest closure as superseded. Meanwhile close-done refuses to')
+    console.log('close anything that has not landed, so this is where the pipeline stops.')
+  }
   console.log(`\n${landable.length} landable, showing the next ${batch.length} (batch ${BATCH}).`)
   console.log('A closed issue whose code is not in the branch is a false statement about the repository.')
 
