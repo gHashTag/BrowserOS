@@ -188,7 +188,7 @@ export interface BrowserOSChatHistoryAttachment {
   mediaType: string
   // Images carry the full data: URL so the client can render directly.
   // Files (text / pdf / etc) currently round-trip via inline text in the
-  // message body and don't reach this field — kept on the type for v2.
+  // message body and don't reach this field - kept on the type for v2.
   dataUrl?: string
   name?: string
 }
@@ -240,7 +240,7 @@ const MAIN_SESSION_KEY_PATTERN = /^agent:([^:]+):main$/
 
 /**
  * Extract the agent id from a main-session key (e.g. `agent:research:main`
- * → `research`). Returns null when the key isn't a top-level main session,
+ * -> `research`). Returns null when the key isn't a top-level main session,
  * which signals the caller to use the per-session fetch path.
  */
 function extractAgentIdFromMainSessionKey(sessionKey: string): string | null {
@@ -324,7 +324,7 @@ function decodeCompoundCursor(encoded: string | undefined): CompoundCursor {
       return out
     }
   } catch {
-    // Malformed cursors are treated as "first page" — preferable to
+    // Malformed cursors are treated as "first page" - preferable to
     // erroring out the entire history fetch on a bad client cursor.
   }
   return {}
@@ -482,7 +482,7 @@ export class OpenClawService {
       return
     }
     if (inner.type === 'text_delta') {
-      // Heartbeat — keep the existing `working` row fresh; preserve
+      // Heartbeat - keep the existing `working` row fresh; preserve
       // the last-known currentTool by passing it through.
       const prev = this.clawSession.getState(agentId)
       this.clawSession.transition(agentId, 'working', {
@@ -492,7 +492,7 @@ export class OpenClawService {
     }
   }
 
-  // ── Lifecycle ────────────────────────────────────────────────────────
+  // -- Lifecycle --------------------------------------------------------
 
   /** Warm the VM and gateway image so later setup/start avoids registry work. */
   async prewarm(onLog?: (msg: string) => void): Promise<void> {
@@ -751,7 +751,7 @@ export class OpenClawService {
     logger.info('OpenClaw shutdown complete')
   }
 
-  // ── Status ───────────────────────────────────────────────────────────
+  // -- Status -----------------------------------------------------------
 
   async getStatus(): Promise<OpenClawStatusResponse> {
     const isSetUp = existsSync(this.getStateConfigPath())
@@ -800,7 +800,7 @@ export class OpenClawService {
     }
   }
 
-  // ── Agent Management (via CLI) ──────────────────────────────────────
+  // -- Agent Management (via CLI) --------------------------------------
 
   async createAgent(input: {
     name: string
@@ -889,7 +889,7 @@ export class OpenClawService {
     return this.runControlPlaneCall(() => this.cliClient.listAgents())
   }
 
-  // ── Dashboard ──────────────────────────────────────────────────────
+  // -- Dashboard ------------------------------------------------------
 
   /**
    * Reports the live status of every agent the in-memory `ClawSession`
@@ -920,7 +920,7 @@ export class OpenClawService {
     }
   }
 
-  // ── Session History (HTTP) ───────────────────────────────────────────
+  // -- Session History (HTTP) -------------------------------------------
 
   async getSessionHistory(
     sessionKey: string,
@@ -951,7 +951,7 @@ export class OpenClawService {
    * should resume on the next page. A session with `null` in the
    * cursor is exhausted and skipped.
    *
-   * Sub-session fetches that fail are logged and dropped — partial
+   * Sub-session fetches that fail are logged and dropped - partial
    * timelines are preferable to a hard failure that hides the main
    * session.
    */
@@ -1088,7 +1088,7 @@ export class OpenClawService {
     )
   }
 
-  // ── Provider Keys ────────────────────────────────────────────────────
+  // -- Provider Keys ----------------------------------------------------
   async updateProviderKeys(input: {
     providerType: string
     providerName?: string
@@ -1118,7 +1118,7 @@ export class OpenClawService {
     }
   }
 
-  // ── CLI-backed Providers ─────────────────────────────────────────────
+  // -- CLI-backed Providers ---------------------------------------------
 
   async getCliProviderAuthStatus(
     provider: OpenClawCliProvider,
@@ -1129,14 +1129,14 @@ export class OpenClawService {
     return provider.parseAuthStatus(stdout, exitCode)
   }
 
-  // ── Logs ─────────────────────────────────────────────────────────────
+  // -- Logs -------------------------------------------------------------
 
   async getLogs(tail = 100): Promise<string[]> {
     logger.debug('Fetching OpenClaw container logs', { tail })
     return this.runtime.getGatewayLogs(tail)
   }
 
-  // ── Auto-start on BrowserOS boot ────────────────────────────────────
+  // -- Auto-start on BrowserOS boot ------------------------------------
 
   async tryAutoStart(): Promise<void> {
     return this.withLifecycleLock('auto-start', async () => {
@@ -1181,7 +1181,7 @@ export class OpenClawService {
     })
   }
 
-  // ── Internal ─────────────────────────────────────────────────────────
+  // -- Internal ---------------------------------------------------------
 
   // CLI-provider short-circuit: skip env writes and custom-provider merges,
   // just build the `<id>/<model>` ref that OpenClaw's own plugin routes to.
@@ -1206,7 +1206,7 @@ export class OpenClawService {
     onLog?: (msg: string) => void,
   ): Promise<void> {
     // Test mocks may swap `this.runtime` for a partial stub without
-    // execInContainer. Skip silently — production ContainerRuntime always
+    // execInContainer. Skip silently - production ContainerRuntime always
     // provides it.
     if (typeof this.runtime.execInContainer !== 'function') return
     for (const provider of OPENCLAW_CLI_PROVIDERS) {
@@ -1218,7 +1218,7 @@ export class OpenClawService {
     provider: OpenClawCliProvider,
     onLog?: (msg: string) => void,
   ): Promise<void> {
-    // argv probe — no shell, no interpolation: `which` returns 0 if the
+    // argv probe - no shell, no interpolation: `which` returns 0 if the
     // binary is on PATH in the container, non-zero otherwise.
     const probe = await this.runtime.execInContainer(['which', provider.binary])
     if (probe === 0) {
@@ -1228,7 +1228,7 @@ export class OpenClawService {
       return
     }
 
-    // argv install — registry values flow straight through nerdctl exec,
+    // argv install - registry values flow straight through nerdctl exec,
     // never through a shell. Version is pinned in the provider registry.
     const lines: string[] = []
     const exitCode = await this.runtime.execInContainer(
@@ -1514,7 +1514,7 @@ export class OpenClawService {
         // instead of having them stripped at the gateway. Without this,
         // image_url content parts are silently dropped even if the model
         // and provider both support vision. Per-model `input` still gates
-        // which models see images — this just turns the global pipeline on.
+        // which models see images - this just turns the global pipeline on.
         path: 'tools.media.image.enabled',
         value: true,
       },
