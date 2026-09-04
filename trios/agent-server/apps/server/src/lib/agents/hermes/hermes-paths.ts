@@ -7,7 +7,7 @@
  *
  * Hermes per-agent state lives under the BrowserOS-managed VM state
  * directory (so it's reachable inside the Lima VM via the existing
- * vm/ → /mnt/browseros/vm bind mount). The Hermes container then bind-
+ * vm/ -> /mnt/browseros/vm bind mount). The Hermes container then bind-
  * mounts the guest-side path (/mnt/browseros/vm/hermes/harness) into
  * /data/agents/harness, so `HERMES_HOME` ends up pointing at a path
  * the container can actually open.
@@ -53,7 +53,7 @@ export function getHermesAgentHomeHostDir(input: {
  * which is bind-mounted into the container at /data/agents/harness/<id>/home/.
  *
  * Idempotent: writes always overwrite (last-write-wins). The provider
- * id, env var name, and credentials must be supplied by the caller —
+ * id, env var name, and credentials must be supplied by the caller -
  * Hermes agents always carry their own config; there is no
  * `~/.hermes/` fallback.
  */
@@ -72,7 +72,7 @@ export async function writeHermesPerAgentProvider(input: {
   })
   await mkdir(home, { recursive: true })
 
-  // Hermes' `provider: custom` requires a `base_url` — without one the
+  // Hermes' `provider: custom` requires a `base_url` - without one the
   // model loader rejects with `unknown provider 'custom'`. Callers that
   // use a named Hermes provider (e.g. anthropic, openrouter) can omit
   // baseUrl and Hermes resolves the URL itself.
