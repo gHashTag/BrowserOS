@@ -15,14 +15,14 @@ interface PinToggleProps {
 }
 
 /**
- * Trailing star toggle. The button is *always rendered* — only its
- * opacity changes between pinned/unpinned/hover states — so the title
+ * Trailing star toggle. The button is *always rendered* - only its
+ * opacity changes between pinned/unpinned/hover states - so the title
  * row's height is constant. Hiding the slot via `display: none` would
  * collapse the row's vertical metrics on hover and shift every card
  * below in the rail.
  *
  * Placement is trailing the title (after the status badge) so the
- * title itself flushes left regardless of pin state — leading the
+ * title itself flushes left regardless of pin state - leading the
  * row with the star would indent the title relative to the model /
  * preview / meta lines beneath it.
  */
