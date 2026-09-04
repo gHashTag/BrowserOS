@@ -23,11 +23,11 @@ interface AgentRowCardProps extends AgentRowCallbacks {
  * each handle their own micro-state (error-panel collapse, etc.) and
  * emit callbacks (delete, pin/unpin) for the page to act on.
  *
- * The whole card carries state — not just the tile — so the row's
+ * The whole card carries state - not just the tile - so the row's
  * border subtly tells the user what's going on at a glance:
- *   working → accent-orange border with a soft glow
- *   error   → destructive border
- *   idle    → muted border, lifts on hover
+ *   working -> accent-orange border with a soft glow
+ *   error   -> destructive border
+ *   idle    -> muted border, lifts on hover
  */
 export const AgentRowCard: FC<AgentRowCardProps> = ({
   data,
@@ -38,7 +38,7 @@ export const AgentRowCard: FC<AgentRowCardProps> = ({
   return (
     <div
       className={cn(
-        // Layout-stable hover. No translate, no shadow change — both
+        // Layout-stable hover. No translate, no shadow change - both
         // visibly perturb neighbouring rows. Only the border tint
         // shifts on hover, and the rail's vertical rhythm stays
         // exactly the same in every state.
