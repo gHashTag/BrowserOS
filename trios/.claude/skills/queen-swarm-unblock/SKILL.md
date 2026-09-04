@@ -1138,6 +1138,44 @@ Two lessons it learned about itself, both about ORDER:
 It timed out twice before every shell call was bounded. A step that can hang for
 ever hangs the whole chain.
 
+## A rate over a window that has not finished is not a rate
+
+The worst reporting error of this whole run, and it was mine.
+
+I measured a three-hour window and reported: **17% of dispatches accepted, 33%
+sent back, 28% answered wait, 50% got no judgement at all.** I called it the
+dominating defect of the system, wrote it into this skill, and offered it to the
+operator as the thing to work on next.
+
+The window was still in flight. Most of those rows simply had no verdict YET -
+`wait` and a null verdict are what a dispatch looks like while it is being
+judged, not what it looks like when judgement is done. Measured again once the
+same window had settled:
+
+| window | accepted |
+|---|---|
+| as I reported it, mid-flight | 17% |
+| the same window, judged | **80%** |
+| the following three hours | **96%** |
+
+The swarm was healthy and I called it broken. The fix is not subtle: **filter to
+work that has FINISHED, and print how many were excluded**, so a reader can see
+the denominator rather than trust it. `tri verdicts` does both and says in words
+that an unfinished window has no rate yet.
+
+### What survived the correction, and what did not
+
+The transcript evidence was real and is worth keeping: #1429 discussed all four
+of its criteria in prose - "Criterion 4 ... Met." - then wrote a VERDICT block
+of TWO lines, and got `wait`. #1427 the same; #1430 three of four. The accepted
+ones wrote exactly one line per criterion.
+
+So moving the block to the FRONT of the last message is still right - the only
+machine-read part of a 25-35 kB report sat where a turn that runs short loses it
+first. But its justification is "a wait costs six hours per occurrence", not
+"most work fails". Getting the reason right matters even when the fix is the
+same, because the reason is what decides the NEXT thing to build.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is

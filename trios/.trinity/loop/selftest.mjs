@@ -853,6 +853,36 @@ check('a dirty tree is kept whatever the disk says', () => {
   }
 })
 
+
+// ---------------------------------------------------------------------------
+// verdicts: a rate over a window that has not finished is not a rate.
+//
+// I reported "only 17% of dispatches are accepted, 50% get no verdict at all"
+// and built a whole argument on it, including what to work on next. The window
+// was still in flight: most of those rows simply had no verdict YET, and
+// `wait` and `(none)` were transient states rather than outcomes. Judged three
+// hours later the same window read 80% accepted; the following three hours read
+// 96%. The swarm was healthy and I called it broken.
+
+check('the verdict rate counts only work that has finished', () => {
+  const src = fs.readFileSync(path.join(DIR, 'queue.mjs'), 'utf8')
+  const fn = src.slice(src.indexOf('export function verdicts'), src.indexOf('if (isMain)'))
+  if (!/finished_at is not null/.test(fn)) {
+    throw new Error('an unfinished dispatch has no verdict yet and must not count against the rate')
+  }
+})
+
+check('it reports how many it excluded, so the denominator is visible', () => {
+  const src = fs.readFileSync(path.join(DIR, 'queue.mjs'), 'utf8')
+  if (!/finished_at is null/.test(src)) throw new Error('nothing counts the in-flight rows')
+  if (!/still RUNNING and are excluded/.test(src)) {
+    throw new Error('a reader cannot judge a rate without being told what was left out')
+  }
+  if (!/has no rate yet/.test(src)) {
+    throw new Error('the tool must say plainly that an unfinished window has no rate')
+  }
+})
+
 console.log(`\n${pass} passed, ${failures.length} failed`)
 fs.rmSync(tmp, { recursive: true, force: true })
 if (failures.length) {

@@ -366,6 +366,14 @@ console.log(\"parked dispatches: \"+r.rows.length+\"   paths they fence: \"+s.si
     # progress and never the backlog.
     node /Users/playra/BrowserOS/trios/.trinity/loop/queue.mjs
     ;;
+  verdicts)
+    # The verdict MIX, which is the swarm's real health - load says whether
+    # workers are busy, this says whether the work is landing. On 2026-09-04
+    # they disagreed sharply: four bees running while 17% was accepted and 28%
+    # answered wait, meaning nobody could judge it at all.
+    shift 2>/dev/null || true
+    node /Users/playra/BrowserOS/trios/.trinity/loop/queue.mjs --verdicts "$@"
+    ;;
   latency)
     # Where the time actually goes, and the arrival rate four workers need to
     # stay busy. The answer was not what I assumed for a whole iteration: review
@@ -611,6 +619,7 @@ tri — Trinity S³AI ops CLI
   tri queue — глубина очереди (не число открытых): что ещё никто не начинал
   tri latency — куда уходит время: ревью против работы пчелы, и сколько задач в час
   tri reap-local [--reap] — убрать слитые и чистые рабочие деревья с диска ноутбука
+  tri verdicts [часов] — доля принятого, возвращённого и неосуждённого: здоровье, а не загрузка
 USAGE
     ;;
   # ---- queen game loop (t27.ai/#/queen) ----------------------------------

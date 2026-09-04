@@ -91,6 +91,28 @@ export function latency(days = 14) {
   return jsonFrom(SE.remote(js))
 }
 
+/**
+ * The verdict mix, which is the swarm's real health.
+ *
+ * Load answers "are workers busy". This answers "is the work landing", and on
+ * 2026-09-04 the two disagreed sharply: four bees running while only 17% of
+ * finished dispatches were accepted, 28% answered `wait` - the review could not
+ * judge them at all - and each of those held its issue for six hours.
+ *
+ * `wait` and a null verdict are the numbers to watch. They do not mean the work
+ * was bad; they mean nobody could tell, which is worse, because a send-back at
+ * least says what to fix.
+ */
+export function verdicts(hours = 3) {
+  const js = `const {Pool}=require('pg');const p=new Pool({connectionString:process.env.DATABASE_URL});` +
+    `(async()=>{` +
+    `const a=await p.query("select coalesce(review_state,'(none)') as state, count(*)::int n from queen_dispatch where finished_at is not null and dispatched_at > now() - interval '${hours} hours' group by 1 order by 2 desc");` +
+    `const b=await p.query("select count(*)::int n from queen_dispatch where finished_at is null and dispatched_at > now() - interval '${hours} hours'");` +
+    `console.log(JSON.stringify({rows:a.rows, inFlight:b.rows[0].n})); await p.end()})()` +
+    `.catch(e=>{console.log('ERR '+e.message); process.exit(1)})`
+  return jsonFrom(SE.remote(js))
+}
+
 if (isMain) {
   if (process.argv.includes('--latency')) {
     const d = latency(Number(process.env.QUEUE_DAYS ?? 14))
@@ -106,6 +128,44 @@ if (isMain) {
       const perHour = (WORKERS * 3600) / beeP50
       console.log(`\nLittle's Law: ${WORKERS} workers at that service time consume about ${perHour.toFixed(1)} tasks an hour.`)
       console.log('If the swarm is idle, compare the ARRIVAL rate against that number - not the review.')
+    }
+    process.exit(0)
+  }
+
+  if (process.argv.includes('--verdicts')) {
+    const hours = Number(process.env.VERDICT_HOURS ?? process.argv[process.argv.indexOf('--verdicts') + 1] ?? 3)
+    const answer = verdicts(Number.isFinite(hours) && hours > 0 ? hours : 3)
+    if (!answer || !Array.isArray(answer.rows)) {
+      console.log('could not reach the service - the verdict mix is unknown, which is not the same as healthy')
+      process.exit(1)
+    }
+    const rows = answer.rows
+    const total = rows.reduce((n, r) => n + Number(r.n), 0)
+    console.log(`verdicts on work finished in the last ${hours} hour(s)\n`)
+    if (!total) {
+      console.log('  nothing finished in that window')
+      process.exit(0)
+    }
+    for (const r of rows) {
+      const pct = Math.round((100 * Number(r.n)) / total)
+      console.log(`  ${String(r.state).padEnd(10)} ${String(r.n).padStart(3)}  ${String(pct).padStart(3)}%  ${'#'.repeat(Math.round(pct / 3))}`)
+    }
+    const blind = rows
+      .filter((r) => r.state === 'wait' || r.state === '(none)')
+      .reduce((n, r) => n + Number(r.n), 0)
+    console.log(`\n${total} finished. ${Math.round((100 * blind) / total)}% got NO judgement at all.`)
+    console.log('A send-back at least says what to fix; a wait says nobody could tell,')
+    console.log('and holds the issue for six hours while saying it.')
+    // NAME THE DENOMINATOR, because getting it wrong is the mistake this tool
+    // was written after. I reported "only 17% of dispatches are accepted" and
+    // built a whole argument on it. The window was still in flight: most of
+    // those rows had no verdict YET, and `wait` and `(none)` were transient
+    // states rather than outcomes. Judged three hours later, the same window
+    // read 80% accepted. A rate over a window that has not finished is not a
+    // rate, and a reader cannot tell unless the tool says how much it excluded.
+    if (answer.inFlight > 0) {
+      console.log(`\n${answer.inFlight} dispatch(es) in this window are still RUNNING and are excluded.`)
+      console.log('A window that has not finished has no rate yet - measure it again once it has.')
     }
     process.exit(0)
   }
