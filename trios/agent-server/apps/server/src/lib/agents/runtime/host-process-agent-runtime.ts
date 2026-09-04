@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Abstract base for host-process agent runtimes (claude, codex). The
- * agent process runs from the user's host PATH — no container, no
+ * agent process runs from the user's host PATH - no container, no
  * Lima. This class owns binary discovery, version probing with
  * caching, and the smaller capability surface that host adapters
  * support.
@@ -29,7 +29,7 @@ export interface HostProcessAgentRuntimeDeps {
   binaryName: string
   /** Override the default `<binary> --version` probe argv. */
   versionProbeArgs?: ReadonlyArray<string>
-  /** Cache window for probe results in ms. Default 5 minutes — same
+  /** Cache window for probe results in ms. Default 5 minutes - same
    *  as today's adapter-health.ts. */
   probeCacheMs?: number
   /** Test seam: spawn the probe via this fn instead of `Bun.$`. */
@@ -56,7 +56,7 @@ export abstract class HostProcessAgentRuntime implements AgentRuntime {
 
   constructor(protected readonly deps: HostProcessAgentRuntimeDeps) {}
 
-  // ── Status surface ───────────────────────────────────────────────
+  // -- Status surface -----------------------------------------------
 
   getStatusSnapshot(): RuntimeStatusSnapshot {
     return {
@@ -81,7 +81,7 @@ export abstract class HostProcessAgentRuntime implements AgentRuntime {
     return ['reinstall-cli', 'check-auth']
   }
 
-  // ── Action dispatch ──────────────────────────────────────────────
+  // -- Action dispatch ----------------------------------------------
 
   async executeAction(
     action: RuntimeAction,
@@ -108,10 +108,10 @@ export abstract class HostProcessAgentRuntime implements AgentRuntime {
     }
   }
 
-  // ── ACP plane integration ────────────────────────────────────────
+  // -- ACP plane integration ----------------------------------------
 
   buildExecArgv(spec: ExecSpec): string {
-    // Host binary lives on $PATH — no limactl chain. Compose
+    // Host binary lives on $PATH - no limactl chain. Compose
     // `env KEY=val ... <argv...>` so adapters that inject env
     // (AGENT_HOME, CODEX_HOME) get them on the spawned process.
     const envParts = Object.entries(spec.env ?? {}).map(([k, v]) => `${k}=${v}`)
@@ -119,7 +119,7 @@ export abstract class HostProcessAgentRuntime implements AgentRuntime {
     return `${prefix}${spec.argv.join(' ')}`
   }
 
-  // ── Health probe ─────────────────────────────────────────────────
+  // -- Health probe -------------------------------------------------
 
   /**
    * Probe `<binary> --version` (override via deps.versionProbeArgs).
@@ -170,15 +170,15 @@ export abstract class HostProcessAgentRuntime implements AgentRuntime {
     }
   }
 
-  // ── Subclass hooks ───────────────────────────────────────────────
+  // -- Subclass hooks -----------------------------------------------
 
-  /** Subclass override — claude reads ~/.claude/auth.json, codex
+  /** Subclass override - claude reads ~/.claude/auth.json, codex
    *  reads <CODEX_HOME>/auth.json, etc. Default is a no-op. */
   protected async checkAuth(): Promise<void> {
     return
   }
 
-  /** Default reinstall-cli handler — throws an informative error
+  /** Default reinstall-cli handler - throws an informative error
    *  pointing at the upstream docs. Subclasses can override to
    *  trigger an in-app installer. */
   protected async handleReinstallCli(): Promise<void> {
@@ -188,7 +188,7 @@ export abstract class HostProcessAgentRuntime implements AgentRuntime {
     )
   }
 
-  // ── Internals ────────────────────────────────────────────────────
+  // -- Internals ----------------------------------------------------
 
   protected setState(next: RuntimeState, errorMessage?: string): void {
     if (next === this.state && !errorMessage) return
