@@ -34,6 +34,7 @@ const CLK = await import(path.join(DIR, 'clocks.mjs'))
 const FLD = await import(path.join(DIR, 'fields.mjs'))
 const SE = await import(path.join(DIR, 'stale-escalations.mjs'))
 const D = await import(path.join(DIR, 'disjoint.mjs'))
+const AB = await import(path.join(DIR, 'ab.mjs'))
 const A = await import(path.join(DIR, 'author.mjs'))
 
 let pass = 0
@@ -1316,6 +1317,59 @@ check('the denominator counts the READ, not the keep', () => {
   const atKeep = body.indexOf('out.push({')
   if (atRead < 0 || atKeep < 0) throw new Error('cannot locate the counter and the keep')
   if (atRead > atKeep) throw new Error('the counter must increment before the filters, or numerator equals denominator')
+})
+
+
+// ---------------------------------------------------------------------------
+// ab: two windows, one number, and whether the difference is bigger than noise.
+//
+// I compared percentages by eye all night and was wrong twice in ways that
+// changed what I recommended: the 17% that was a window still in flight, and the
+// verdict-first brief that looked like a regression at 94% -> 86% and is three
+// incomplete reports where 1.3 were expected.
+
+check('Wilson stays inside 0 and 1 where the normal approximation does not', () => {
+  const edge = AB.wilson(22, 22)
+  if (edge.high > 1 || edge.low < 0) throw new Error('an interval outside [0,1] is not an interval')
+  if (edge.low >= 1) throw new Error('a perfect sample still has uncertainty at n=22')
+  const none = AB.wilson(0, 5)
+  if (none.low < 0 || none.high > 1) throw new Error('zero hits must not produce a negative bound')
+  if (none.high <= 0) throw new Error('zero of five does not prove the rate is zero')
+})
+
+check('an empty sample is total ignorance, not zero', () => {
+  const e = AB.wilson(0, 0)
+  if (e.low !== 0 || e.high !== 1) throw new Error('n=0 must span the whole range - no observations is not evidence of a low rate')
+})
+
+check('overlapping intervals are NEVER reported as better or worse', () => {
+  // 94% of 177 against 86% of 22 - the real numbers. Eyeballed it is a
+  // regression; measured it is nothing.
+  const r = AB.compare(166, 177, 19, 22, 'before', 'after')
+  if (!r.overlap) throw new Error('these intervals do overlap; the test fixture is wrong')
+  if (/higher|LOWER/.test(r.verdict)) throw new Error('an overlap must not be dressed as a direction')
+  if (!/no detectable difference/.test(r.verdict)) throw new Error('it must say so plainly')
+})
+
+check('a real difference IS reported, with its direction', () => {
+  const r = AB.compare(10, 100, 90, 100, 'before', 'after')
+  if (r.overlap) throw new Error('10% against 90% at n=100 is not noise')
+  if (!/higher/.test(r.verdict)) throw new Error('a real difference must name its direction')
+})
+
+check('"not significant" comes with the sample size that would settle it', () => {
+  // Without it, "no detectable difference" reads as "no effect", and those are
+  // different claims.
+  const r = AB.compare(166, 177, 19, 22)
+  if (!Number.isFinite(r.needed) || r.needed < 2) throw new Error('it must say how many observations would be needed')
+  const out = AB.render(r)
+  if (!/observations in EACH window/.test(out)) throw new Error('and print it')
+})
+
+check('identical rates need no sample size, and say so', () => {
+  const r = AB.compare(50, 100, 25, 50)
+  if (Number.isFinite(r.needed)) throw new Error('no sample separates identical rates')
+  if (!/no sample size would separate them/.test(AB.render(r))) throw new Error('it must say that rather than print Infinity')
 })
 
 console.log(`\n${pass} passed, ${failures.length} failed`)

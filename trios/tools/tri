@@ -406,6 +406,18 @@ console.log(\"parked dispatches: \"+r.rows.length+\"   paths they fence: \"+s.si
     shift 2>/dev/null || true
     node /Users/playra/BrowserOS/trios/.trinity/loop/queue.mjs --mix "$@"
     ;;
+  ab)
+    # TWO WINDOWS, ONE NUMBER, and whether the difference is bigger than noise.
+    # I compared percentages by eye all night and was wrong twice in ways that
+    # changed what I recommended. Wilson score intervals, because the normal
+    # approximation runs outside [0,1] exactly at the small samples where the
+    # question gets asked. It NEVER reports better or worse from overlapping
+    # intervals - "no detectable difference" is a real answer.
+    #   tri ab <hitsA> <nA> <hitsB> <nB> [labelA] [labelB]
+    #   tri ab --verdict-first
+    shift 2>/dev/null || true
+    node /Users/playra/BrowserOS/trios/.trinity/loop/ab.mjs "$@"
+    ;;
   verdicts)
     # The verdict MIX, which is the swarm's real health - load says whether
     # workers are busy, this says whether the work is landing. On 2026-09-04
@@ -644,7 +656,7 @@ tri — Trinity S³AI ops CLI
   tri lease [--release] — аренда заявки с таймером простоя, потолок повторов 2
   tri heal [--dry] — все ремонты роя одной цепочкой в верном порядке
   tri author [--file] — завести задачу из измеренного дефицита, лимит 5 открытых
-  tri loop-selftest — поверка собственных приборов цикла (96 проверок, без сети)
+  tri loop-selftest — поверка собственных приборов цикла (109 проверок, без сети)
   tri judge-packet <N ...> | --unauditable — собрать пакет для судейского прочтения
   tri needs-you [--all] — что ждёт человека и сколько уже ждёт
   tri loop-coverage — у каких инструментов цикла боевая ветка ни разу не исполнялась
@@ -665,6 +677,7 @@ tri — Trinity S³AI ops CLI
   tri feed [--act] — только заправка: пуш, закрытие, заведение, без аудитов
   tri mix — каким ВИДОМ работы занят рой: загрузка и приёмка этого не покажут
   tri land [--land] — посадить принятую работу, что осталась на ветках вне базы
+  tri ab <a> <nA> <b> <nB> — отличается ли разница от шума, или это просто мало данных
 USAGE
     ;;
   # ---- queen game loop (t27.ai/#/queen) ----------------------------------
