@@ -29,7 +29,7 @@ interface CdpBackendConfig {
 
 // biome-ignore lint/correctness/noUnusedVariables: declaration merging adds ProtocolApi properties to the class
 interface CdpBackend extends ProtocolApi {}
-// biome-ignore lint/suspicious/noUnsafeDeclarationMerging: intentional — Object.assign fills these at runtime
+// biome-ignore lint/suspicious/noUnsafeDeclarationMerging: intentional - Object.assign fills these at runtime
 class CdpBackend implements ICdpBackend {
   private port: number
   private exitOnReconnectFailure: boolean
