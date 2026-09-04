@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  BROWSEROS_CREDITS_EXHAUSTED_CODE,
   isTerminalProviderError,
   ZAI_INSUFFICIENT_BALANCE_CODE,
 } from '../../src/lib/provider-error-classifier'
@@ -44,6 +45,27 @@ describe('isTerminalProviderError', () => {
       error: { code: 'insufficient_quota', message: 'You exceeded your current quota' },
     })
     expect(isTerminalProviderError({ statusCode: 429, responseBody })).toBe(true)
+  })
+
+  test('treats a BrowserOS CREDITS_EXHAUSTED 429 as terminal', () => {
+    // The gateway reuses HTTP 429 for a spent credit balance; retrying the
+    // identical request cannot succeed. Both fetch wrappers must agree on
+    // this via the shared classifier.
+    const responseBody = JSON.stringify({
+      error: {
+        code: BROWSEROS_CREDITS_EXHAUSTED_CODE,
+        message: 'Daily credits exhausted',
+      },
+    })
+    expect(isTerminalProviderError({ statusCode: 429, responseBody })).toBe(true)
+  })
+
+  test('keeps a transient overload 429 retryable', () => {
+    // A 429 that names no spent balance is a provider blip, not a dead request.
+    const responseBody = JSON.stringify({
+      error: { code: 'RATE_LIMITED', message: 'Too many requests, please slow down' },
+    })
+    expect(isTerminalProviderError({ statusCode: 429, responseBody })).toBe(false)
   })
 
   test('keeps a genuine rate limit retryable', () => {

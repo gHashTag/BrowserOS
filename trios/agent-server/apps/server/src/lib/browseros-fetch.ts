@@ -3,13 +3,15 @@
  * Copyright 2025 BrowserOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * Custom fetch for BrowserOS gateway requests.
- * Adds X-BrowserOS-ID header for credit tracking,
- * handles CREDITS_EXHAUSTED (429), and extracts OpenRouter-style error details.
+ * Custom fetch for BrowserOS gateway requests. Adds X-BrowserOS-ID header for
+ * credit tracking, routes terminal-error classification (e.g. CREDITS_EXHAUSTED
+ * 429s) through the shared provider-error classifier, and extracts
+ * OpenRouter-style error details.
  */
 
 import { APICallError } from '@ai-sdk/provider'
 import { logger } from './logger'
+import { isTerminalProviderError } from './provider-error-classifier'
 
 function resolveUrl(url: RequestInfo | URL): string {
   return typeof url === 'string' ? url : url.toString()
@@ -55,16 +57,12 @@ export function createBrowserOSFetch(browserosId: string): typeof fetch {
       const responseBody = await response.text()
       const error = parseErrorBody(responseBody)
 
-      if (statusCode === 429 && error?.code === 'CREDITS_EXHAUSTED') {
-        throw new APICallError({
-          message: error.message ?? 'Daily credits exhausted',
-          url: resolveUrl(url),
-          requestBodyValues: {},
-          statusCode,
-          responseBody,
-          isRetryable: false,
-        })
-      }
+      // The SDK derives isRetryable from the status alone, so a 429 that
+      // really means a spent balance would be retried three times. Both
+      // gateway fetch wrappers make that decision through the shared
+      // classifier, and override isRetryable only when the body proves the
+      // condition is permanent.
+      const terminal = isTerminalProviderError({ statusCode, responseBody })
 
       throw new APICallError({
         message: error
@@ -74,6 +72,7 @@ export function createBrowserOSFetch(browserosId: string): typeof fetch {
         requestBodyValues: {},
         statusCode,
         responseBody,
+        ...(terminal && { isRetryable: false }),
       })
     }
 
