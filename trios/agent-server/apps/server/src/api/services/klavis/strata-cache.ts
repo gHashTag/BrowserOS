@@ -11,7 +11,7 @@
  * metadata returned by `createStrata` so that subsequent chats with the
  * same `(browserosId, enabled-server-set)` skip the round-trip entirely.
  *
- * It does NOT cache live MCP client connections — only URL/id metadata.
+ * It does NOT cache live MCP client connections - only URL/id metadata.
  * Per-session MCP clients continue to be opened and closed by
  * `AiSdkAgent.create` / `dispose` exactly as before, which makes the
  * cache safe across concurrent chats by construction.
@@ -38,7 +38,7 @@ function normalizeServers(servers: readonly string[]): string {
 }
 
 function keyOf(browserosId: string, normalized: string): string {
-  // xxhash64 → 16 hex chars, fixed width. Birthday-bound collision risk
+  // xxhash64 -> 16 hex chars, fixed width. Birthday-bound collision risk
   // for our scale (<10k entries) is ~5e-15; we additionally verify
   // serverKey on read so collisions cannot affect correctness.
   const hash = Bun.hash(normalized).toString(16).padStart(16, '0')
@@ -69,7 +69,7 @@ export class KlavisStrataCache {
         logger.debug('Klavis strata cache hit', { key })
         return this.toResponse(resolved)
       }
-      // Stale/collision/rejected — evict, but only if we're the rightful
+      // Stale/collision/rejected - evict, but only if we're the rightful
       // evictor (a racing caller may have already replaced this slot).
       if (this.entries.get(key) === existing) {
         this.entries.delete(key)
