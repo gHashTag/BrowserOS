@@ -776,6 +776,36 @@ check('the latency report states both stages, so neither can be assumed', () => 
   if (!/Little/.test(src)) throw new Error('a depth without the rate it must sustain is a number nobody can act on')
 })
 
+
+check('a criterion demanding a green repository typecheck is refused', () => {
+  // I wrote exactly this into the template for every L3 cleanup. The repository
+  // typecheck has 42 pre-existing errors on a clean checkout, so around a dozen
+  // issues carried a criterion no honest work could satisfy - and a worker did
+  // the right thing, stashed its change, proved the failures were identical
+  // without it, and reported the criterion unmet. Excellent work, marked down by
+  // my sentence. Second time: #1377 SC-2 demanded output without the word `skip`
+  // from a suite named queen-skip-reason-parity.
+  const bad = CLEANUP.replace(
+    /- `LC_ALL[^\n]*\n/,
+    '- `bun run typecheck` passes from `trios/agent-server`, and its raw stdout is quoted.\n- `LC_ALL=C grep -cP \'[^\\x00-\\x7F]\' trios/tools/selftest-fixture.mjs` prints 0, and the raw output is quoted. The command MUST NOT name or enumerate the specific items it counts.\n',
+  )
+  const r = G.gate(draft('green-tree.md', bad))
+  if (!r.problems.some((p) => /green/.test(p))) {
+    throw new Error(`accepted a demand that the whole tree be green: ${r.problems.join('; ')}`)
+  }
+})
+
+check('the SCOPED form of the same demand is accepted', () => {
+  const ok = CLEANUP.replace(
+    /- `LC_ALL[^\n]*\n/,
+    '- `bun run typecheck 2>&1 | grep -c trios/tools/selftest-fixture.mjs` prints 0, and the raw output is quoted. The command MUST NOT name or enumerate the specific items it counts.\n',
+  )
+  const r = G.gate(draft('green-scoped.md', ok))
+  if (r.problems.some((p) => /green/.test(p))) {
+    throw new Error(`refused a demand scoped to its own boundary: ${r.problems.join('; ')}`)
+  }
+})
+
 console.log(`\n${pass} passed, ${failures.length} failed`)
 fs.rmSync(tmp, { recursive: true, force: true })
 if (failures.length) {
