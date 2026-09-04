@@ -28,11 +28,11 @@ export type { AgentHarnessStreamEvent }
 export const AGENT_QUERY_KEYS = {
   adapters: 'agent-harness-adapters',
   agents: 'agent-harness-agents',
-  /** Outputs-rail data for one agent — `[agentOutputs, baseUrl, agentId]`. */
+  /** Outputs-rail data for one agent - `[agentOutputs, baseUrl, agentId]`. */
   agentOutputs: 'agent-harness-agent-outputs',
-  /** Per-turn artifact-card files — `[agentTurnFiles, baseUrl, agentId, turnId]`. */
+  /** Per-turn artifact-card files - `[agentTurnFiles, baseUrl, agentId, turnId]`. */
   agentTurnFiles: 'agent-harness-agent-turn-files',
-  /** Single-file preview payload — `[filePreview, baseUrl, fileId]`. */
+  /** Single-file preview payload - `[filePreview, baseUrl, fileId]`. */
   filePreview: 'agent-harness-file-preview',
 } as const
 
@@ -103,7 +103,7 @@ export function useHarnessAgents(enabled = true) {
     // Poll every 5s so the per-agent liveness state (working / idle /
     // asleep / error) and last-used timestamps stay fresh without a
     // websocket. `refetchIntervalInBackground: false` lets a hidden
-    // tab go quiet — react-query's default, made explicit.
+    // tab go quiet - react-query's default, made explicit.
     refetchInterval: 5_000,
     refetchIntervalInBackground: false,
   })
@@ -243,7 +243,7 @@ export async function chatWithHarnessAgent(
 /**
  * Subscribe to an existing turn (the server's `ActiveTurnRegistry`
  * decoupled the turn lifecycle from POST /chat). `lastSeq` lets the
- * client resume after a disconnect — the server replays buffered
+ * client resume after a disconnect - the server replays buffered
  * frames with seq > lastSeq, then tails new ones.
  */
 export async function attachToHarnessTurn(
