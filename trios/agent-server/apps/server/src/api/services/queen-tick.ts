@@ -31,12 +31,19 @@
  * what a module does not do decays silently; the fix is to keep such claims
  * narrow enough that a reader notices.
  *
- * What the loop still does NOT do: send a bee back. The policy answers
- * `sendBack` with the unmet criteria named, and nothing yet reopens the worker
- * on them - such a verdict is recorded and the task waits.
+ * AND IT RE-OPENS WHAT WAS SENT BACK, up to a ceiling (#1362). The paragraph
+ * that used to close this header said the loop does not send a bee back - and
+ * it outlived its truth exactly the way the two claims above did, which is why
+ * it is replaced rather than amended. `redispatchSentBackWork` returns a
+ * sent-back issue to a bee while `send_backs` is under
+ * `SEND_BACK_RETRY_CEILING`, and escalates it once the ceiling is reached;
+ * `classifyParkedEscalations` names an escalation's cause where the evidence
+ * determines one. What this loop still does not do is act on an escalation:
+ * naming a kind is a label for the operator, and nothing here retries,
+ * abandons or closes work on the strength of it.
  */
 
-import { spawn } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { Pool } from 'pg'
 import { logger } from '../../lib/logger'
 import {
@@ -142,6 +149,43 @@ const ISSUE_PAGE_SIZE = 100
  * open items is not one this loop should be silently guessing about.
  */
 const ISSUE_PAGE_CAP = 5
+
+/**
+ * How many times an issue may be returned to a bee before it becomes a
+ * person's problem (#1362). The counter is `queen_dispatch.send_backs`.
+ *
+ * WHY TWO. The same number, for the same stated reason, as
+ * `QueenReviewDecision.maximumSendBacks` in the policy: the first return is
+ * the one that can teach - it names criteria the worker had not satisfied -
+ * and a bee that has failed the same named criteria twice is telling you
+ * about the criteria, not about itself. A third attempt is not information,
+ * it is the daily budget burning on one issue while the rest of the backlog
+ * waits, so at the ceiling the retry pass stops dispatching and escalates.
+ *
+ * It must not drift from the Swift constant: the review policy escalates on
+ * its own arm once `priorSendBacks` reaches 2, and a container ceiling higher
+ * than the policy's would grant attempts the policy has already refused to
+ * grant. `review-valves.test.ts` reads the Swift source and pins the two
+ * together, the way `tests/t27/ring00_parity.sh` pins the constants it cares
+ * about.
+ */
+export const SEND_BACK_RETRY_CEILING = 2
+
+/**
+ * How many bees may run at once, for the retry pass's own throttle.
+ *
+ * The number is `QueenDelegationPolicy.maximumConcurrentWorkers` in the
+ * policy, stated again here because `queend` exposes no question that answers
+ * it and the retry path cannot go through `kind: "choose"` - the policy
+ * deliberately holds an issue whose task is `rejected` ("the same bee is
+ * expected back"), so a send-back can never be re-chosen, only re-opened
+ * directly. Without a local copy of the limit, seven parked send-backs would
+ * become seven bees on top of a busy swarm in one round. The parity test in
+ * `review-valves.test.ts` reads the Swift source and fails if the two ever
+ * disagree, which is the honest substitute for one shared constant living in
+ * a language this file cannot import.
+ */
+export const MAXIMUM_CONCURRENT_WORKERS = 4
 
 /**
  * Open issues, read without a credential.
@@ -250,6 +294,26 @@ async function ensureQueenColumns(pool: Pool): Promise<void> {
       -- them, so the count accumulates across attempts instead of resetting
       -- with the bee it is counting.
       ADD COLUMN IF NOT EXISTS send_backs integer NOT NULL DEFAULT 0,
+      -- Whether THIS dispatch was a retry of a send-back rather than a first
+      -- attempt (#1362). A retry must be distinguishable in the record from a
+      -- first attempt, or the board cannot say whether an issue is new work
+      -- coming back or old work going round. recordDispatch does not name
+      -- this column, so the retry pass writes it after the dispatch lands -
+      -- the same arrangement that keeps send_backs accumulating across
+      -- attempts.
+      ADD COLUMN IF NOT EXISTS send_back_retry boolean NOT NULL DEFAULT false,
+      -- The cause of a parked escalation, classified - never guessed (#1362).
+      -- NULL means not yet classified; once set it stays, because a kind is a
+      -- statement about why a verdict was reached, and re-deriving it later
+      -- against a since-edited issue would answer a different question.
+      -- needs-a-person is the value for a cause that could not be determined,
+      -- and is the default the classifier falls back to.
+      ADD COLUMN IF NOT EXISTS escalation_kind text,
+      -- Which criterion, tool or path made an issue-unworkable escalation so,
+      -- in the classifier's own words. Kept beside the kind rather than folded
+      -- into review_note, which belongs to the review that raised the
+      -- escalation and can say something else.
+      ADD COLUMN IF NOT EXISTS escalation_reason text,
       -- The committed paths that fell outside the boundary this bee was given.
       ADD COLUMN IF NOT EXISTS strays jsonb NOT NULL DEFAULT '[]'::jsonb;
   `)
@@ -852,6 +916,44 @@ export async function runRound(
     })
   })
 
+  // THE SEND-BACK VALVE (#1362). Until this pass existed, a `sendBack` verdict
+  // was a full stop: the row sat parked with its issue held and nothing ever
+  // re-opened it, so an issue got exactly one attempt and its remaining work
+  // was stranded. Thirteen sat that way on 2026-09-03, the oldest four days.
+  //
+  // It runs BEFORE the choice, deliberately, so that a re-opened issue is on
+  // the board as `running` by the time the policy is asked what is new - a
+  // re-dispatch the choice does not know about would leave the board able to
+  // double-book the very files the retry just handed a bee. The whole pass,
+  // keys and fold included, lives in `reopenSentBackWork` below.
+  const { retry, reopened, keysInUse } = await reopenSentBackWork(
+    pool,
+    repo,
+    candidates,
+    candidateBodies,
+    specVerdicts,
+    [...registry.rows[0].tasks, ...containerTasks],
+    inFlight.rows,
+    owner,
+    repoName,
+    watch,
+  )
+  // Fold the re-opened work into the board the policy reasons about, the same
+  // way the dispatch loop folds its own starts.
+  containerTasks.push(...reopened)
+
+  // THE ESCALATION LEDGER (#1362). An escalation waits for a person, and no
+  // person is watching a Postgres column - the least this loop can do is say
+  // WHICH person-shaped question each one is, where the evidence determines
+  // it. Classification only writes the kind and the reason; nothing is
+  // re-dispatched, retried or closed on the strength of a kind.
+  const classifiedEscalations = await classifyParkedEscalations(pool)
+  if (classifiedEscalations.length > 0) {
+    logger.info('Queen classified parked escalations', {
+      classified: classifiedEscalations.map((c) => `#${c.issue}:${c.kind}`),
+    })
+  }
+
   const choice = await askQueend({
     kind: 'choose',
     candidates,
@@ -898,10 +1000,9 @@ export async function runRound(
   // requests, so withholding its key from the next bee would shrink the swarm
   // for nothing - the same mistake as counting it as a running worker, one
   // layer down.
-  let takenKeys = inFlight.rows
-    .filter((r) => r.finished_at == null)
-    .map((r) => r.key_index)
-    .filter((i): i is number => typeof i === 'number')
+  // keysInUse already carries the keys the send-back retries took (the helper
+  // adds them), so the loop starts from the full set.
+  let takenKeys = [...keysInUse]
 
   // `watch.held` first, and re-read on every pass: the heartbeat can refuse a
   // renewal in the minutes a single dispatch takes, and every write below this
@@ -972,7 +1073,15 @@ export async function runRound(
     })
   }
 
-  await report(pool, reviewed, started, choice, candidates.length)
+  await report(
+    pool,
+    reviewed,
+    retry,
+    classifiedEscalations,
+    started,
+    choice,
+    candidates.length,
+  )
   if (started.length > 0) {
     return { ran: true, choice, dispatch: started }
   }
@@ -995,6 +1104,13 @@ export function briefFor(
   issueBody: string,
   criteria: string[] = [],
   criteriaSource = 'none',
+  /**
+   * Present when this is a retry of a send-back rather than a first attempt
+   * (#1362), so the second bee is handed the first one's failure instead of a
+   * blind repeat: the criteria the previous attempt was returned for, and the
+   * send-back count the ceiling is measured against.
+   */
+  previous?: { unmet: string[]; sendBacks: number },
 ): string {
   // The boundary, in the words the Mac uses.
   //
@@ -1037,6 +1153,43 @@ export function briefFor(
     : '## The issue\n\nIts body could not be read. Say so rather than guessing ' +
       'at what it wanted.'
 
+  // Why this bee is here twice. A retry that is not told what the last
+  // attempt failed on is the same attempt with a new conversation id - the
+  // issue asked for exactly this and the second bee repeats the first one's
+  // blind spots. The unmet list is what the Queen's own review named when it
+  // returned the work, read back from the previous attempt's verdict block.
+  //
+  // When the previous verdict could not be re-read, that is SAID rather than
+  // papered over: the bee knows the count and the ceiling even when the list
+  // is missing, and an honest gap is one it can report around.
+  const again =
+    previous === undefined
+      ? []
+      : [
+          '## Why you are here again',
+          '',
+          'This is a retry, not a first attempt: a previous attempt at this',
+          "issue was returned by the Queen's review. This is send-back " +
+            `${previous.sendBacks} of ${SEND_BACK_RETRY_CEILING}, and at ` +
+            `${SEND_BACK_RETRY_CEILING} the issue becomes a person's problem ` +
+            'and no further bee is dispatched - so this attempt is the last',
+          'word a bee gets to say on it.',
+          '',
+          ...(previous.unmet.length > 0
+            ? [
+                "What was unmet last time, in the previous bee's own words:",
+                '',
+                ...previous.unmet.map((c, i) => `${i + 1}. ${c}`),
+              ]
+            : [
+                "The previous attempt's verdict block could not be re-read, so",
+                'no unmet criteria are named here. Judge the work against the',
+                'criteria below as if fresh, and say plainly if one of them',
+                'cannot be met.',
+              ]),
+          '',
+        ]
+
   return [
     `# ${repo}#${issue}`,
     '',
@@ -1048,6 +1201,7 @@ export function briefFor(
     `Your branch is queen-${issue} and this worktree is yours alone - no other`,
     'worker and no build reads or writes it while you have it.',
     '',
+    ...again,
     '## What you will be judged by',
     '',
     // Named here, in the brief, because the Queen judges the finished work
@@ -1408,6 +1562,508 @@ export function parseVerdictBlock(
 }
 
 /**
+ * The kinds a parked escalation can be sorted into (#1362).
+ *
+ * An escalation raised because every criterion was met but nothing was
+ * committed is not a question for a person at all - it is a defect in the
+ * bee's run, and the operator who reads "escalate" deserves to know that
+ * immediately rather than after opening the transcript. An escalation raised
+ * because the ISSUE cannot be satisfied is the opposite: no bee will ever fix
+ * it, and retrying is exactly the wrong answer. Everything else is a person's
+ * decision, and guessing a cause there is worse than admitting one is unknown
+ * - a wrong kind is acted on with more confidence than no kind at all.
+ */
+export const ESCALATION_KINDS = [
+  /** Every criterion met, no files committed: the run is the defect. */
+  'no-files-produced',
+  /** A criterion names an unavailable tool, or the boundary names no path a
+   *  bee can reach: no attempt can satisfy the issue as written. */
+  'issue-unworkable',
+  /** The cause was not determined. The default, and it keeps waiting. */
+  'needs-a-person',
+] as const
+export type EscalationKind = (typeof ESCALATION_KINDS)[number]
+
+/** What the classifier is allowed to look at, and nothing else. */
+export interface EscalationEvidence {
+  /** The bee's own verdict lines, as parsed from its transcript. */
+  verdicts: Array<{ criterion: string; met: boolean }>
+  /** How many files the finished branch committed. */
+  committedFiles: number
+  /** The criteria the dispatch was judged against, as recorded with it. */
+  criteria?: string[]
+  /** The boundary paths the issue declared. */
+  boundaryPaths?: string[]
+  /**
+   * Whether a tool named by a criterion exists in the worker container.
+   * Injectable so a test can decide the answer; the default actually asks
+   * the shell, because a kind assigned without checking is a guess.
+   */
+  toolAvailable?: (tool: string) => boolean
+  /**
+   * Whether a boundary path is one a bee can reach in its checkout. Relative
+   * paths are reachable (a bee may create files that do not exist yet - most
+   * boundaries NAME files the work is about to add); absolute paths elsewhere,
+   * and paths that escape the checkout, are not. Injectable for the same
+   * reason as `toolAvailable`.
+   */
+  pathReachable?: (path: string) => boolean
+}
+
+/**
+ * The first command-looking word of the first backtick span in a criterion,
+ * or nothing.
+ *
+ * Criteria in this repository quote their commands - "`bun test` exits 0",
+ * "`grep -c ... Makefile` prints `1`" - and the command is the first word of
+ * the span. Only the FIRST word, because "make check" names `make`, and a
+ * later word like `check` is an argument that `command -v` will not find and
+ * a false accusation would be built on. Only command-shaped words (lowercase,
+ * no dot, no slash) so a span that opens with a file or an option cannot be
+ * read as a tool.
+ */
+function commandNamedBy(criterion: string): string | null {
+  const spans = criterion.match(/`[^`]+`/g) ?? []
+  for (const span of spans) {
+    const first = span.slice(1, -1).trim().split(/\s+/)[0] ?? ''
+    if (/^[a-z][a-z0-9_-]+$/.test(first)) return first
+  }
+  return null
+}
+
+/** The default tool check: ask the shell, do not assume. */
+function shellHasTool(tool: string): boolean {
+  return (
+    spawnSync('sh', ['-c', `command -v ${JSON.stringify(tool)}`]).status === 0
+  )
+}
+
+/**
+ * The default reachability check: can a bee in its checkout create or edit a
+ * file at this path?
+ *
+ * Existence is deliberately NOT the test - a boundary that names a file the
+ * work is about to add is the ordinary case, and a checker that called every
+ * not-yet-existing path unreachable would condemn nearly every legitimate
+ * boundary. What a bee cannot reach is a path outside its checkout: absolute
+ * paths elsewhere, home-directory shortcuts, empty names, or anything that
+ * climbs out with `..` or is spelled with a glob or a variable.
+ */
+function reachableFromCheckout(path: string): boolean {
+  if (path.length === 0) return false
+  if (path.startsWith('/') || path.startsWith('~')) return false
+  const parts = path.split('/').filter((s) => s.length > 0)
+  if (parts.length === 0) return false
+  return parts.every(
+    (s) =>
+      s !== '.' &&
+      s !== '..' &&
+      !s.includes('*') &&
+      !s.includes('$') &&
+      !s.includes('"') &&
+      !s.includes("'"),
+  )
+}
+
+/**
+ * Say which kind of escalation this is, from the evidence, and say nothing
+ * specific when the evidence does not determine it (#1362).
+ *
+ * The two named kinds are the only ones assigned, and each needs POSITIVE
+ * evidence: every criterion met against zero committed files (the exact
+ * condition the review policy escalates on), a criterion naming a tool the
+ * container verifiably lacks, or a boundary whose every path a bee cannot
+ * reach. Anything short of that is `needs-a-person` - the default is the
+ * unknown, not the best guess, because the kinds exist to be acted on by an
+ * operator and a confident wrong label is the most expensive thing here.
+ *
+ * Pure on its inputs; the environment checks are parameters with honest
+ * defaults, so a test can decide what the container knows.
+ */
+export function classifyEscalation(evidence: EscalationEvidence): {
+  kind: EscalationKind
+  reason: string
+} {
+  const verdicts = evidence.verdicts ?? []
+  const everyCriterionMet = verdicts.length > 0 && verdicts.every((v) => v.met)
+  if (everyCriterionMet && evidence.committedFiles === 0) {
+    return {
+      kind: 'no-files-produced',
+      reason:
+        'every criterion was marked met but no files were committed - the ' +
+        "defect is in the bee's run, not a question for a person",
+    }
+  }
+  const toolAvailable = evidence.toolAvailable ?? shellHasTool
+  for (const criterion of evidence.criteria ?? []) {
+    const tool = commandNamedBy(criterion)
+    if (tool !== null && !toolAvailable(tool)) {
+      return {
+        kind: 'issue-unworkable',
+        reason:
+          `criterion "${criterion}" names \`${tool}\`, which is not ` +
+          'available in the worker container - the issue cannot be satisfied ' +
+          'as written',
+      }
+    }
+  }
+  const boundary = evidence.boundaryPaths ?? []
+  if (boundary.length > 0) {
+    const pathReachable = evidence.pathReachable ?? reachableFromCheckout
+    if (boundary.every((p) => !pathReachable(p))) {
+      return {
+        kind: 'issue-unworkable',
+        reason:
+          'the boundary names no path a bee can reach in its checkout: ' +
+          boundary.join(', '),
+      }
+    }
+  }
+  return {
+    kind: 'needs-a-person',
+    reason: 'the cause was not determined',
+  }
+}
+
+/** What one round's send-back pass did, for the report and the log. */
+export interface RetryRound {
+  /** Issues handed to a bee again, with what the dispatch answered. */
+  retried: Array<{
+    issue: number
+    started: boolean
+    conversationId?: string
+    keyIndex?: number
+  }>
+  /** Issues whose send-backs reached the ceiling and became escalations. */
+  ceilinged: number[]
+  /** Issues left alone because they are no longer open: the work is not
+   *  wanted, and neither a retry nor an escalation is. */
+  skippedClosed: number[]
+}
+
+/**
+ * Re-open the send-back valve (#1362): return parked `sendBack` verdicts to a
+ * bee, up to `SEND_BACK_RETRY_CEILING`, and escalate the ones past it.
+ *
+ * WHY THIS IS NOT A `choose` QUESTION. The policy holds an issue whose task
+ * is `rejected` on purpose - "the same bee is expected back" - so a sent-back
+ * issue can never be re-chosen, and before this pass the expectation was
+ * recorded and then nothing came: an issue got one attempt, and its remaining
+ * work was stranded. Seven sat that way on 2026-09-03. This pass re-opens
+ * them directly, which is why it carries its own copy of the worker limit
+ * rather than borrowing the policy's `canStartAnother`.
+ *
+ * WHAT KEEPS IT FROM LOOPING. `send_backs` - the counter the review
+ * increments on every return and that the dispatch upsert deliberately does
+ * not reset. Under the ceiling the issue is re-dispatched with fresh criteria
+ * and the previous unmet list; at the ceiling it is NOT re-dispatched and its
+ * state becomes an escalation whose recorded reason names the ceiling. A bee
+ * that cannot satisfy a criterion will not satisfy it on the fourth attempt
+ * either, and the ceiling is what stops the budget burning on one issue.
+ *
+ * WHAT IT NEVER DOES: touch an escalation. Only `review_state = 'sendBack'`
+ * rows are read, so a verdict that is waiting for a person keeps waiting -
+ * an escalation automatically retried is worse than one parked, if the cause
+ * was a person's decision.
+ *
+ * CRITERIA ARE RE-READ AT RETRY TIME from the issue body this round fetched,
+ * not from the previous dispatch row: an operator may have corrected the
+ * issue between attempts, and judging the second bee against criteria the
+ * first one was failed on is how a retry becomes unfixable by construction.
+ */
+export async function redispatchSentBackWork(
+  pool: Pool,
+  repo: string,
+  /** The issues GitHub says are open this round. */
+  candidates: number[],
+  /** Their bodies, fetched this round - the retry's criteria come from here. */
+  candidateBodies: Record<string, string>,
+  /** This round's spec verdicts, so criteria are parsed from the CURRENT body. */
+  specVerdicts: Record<string, SpecVerdict>,
+  /** Bees already running, so retries respect the worker limit. */
+  running: number = 0,
+  /** Provider keys already held by running bees. */
+  takenKeyIndices: number[] = [],
+  /** The lease watch: a round that has lost the lease dispatches nothing. */
+  watch?: LeaseWatch,
+): Promise<RetryRound> {
+  const round: RetryRound = { retried: [], ceilinged: [], skippedClosed: [] }
+  // Oldest first, so the issue stranded longest gets the next attempt before
+  // the budget does anything else with itself.
+  const parked = await pool.query(
+    `SELECT d.issue, d.send_backs, d.conversation_id,
+            (SELECT string_agg(t.text, '' ORDER BY t.seq)
+               FROM queen_transcript t
+              WHERE t.conversation_id = d.conversation_id AND t.kind = 'say')
+              AS said
+       FROM queen_dispatch d
+      WHERE d.started = true AND d.finished_at IS NOT NULL
+        AND d.review_state = 'sendBack'
+        AND d.outcome NOT LIKE 'reaped%'
+        AND d.dispatched_at > now() - interval '7 days'
+      ORDER BY d.finished_at`,
+  )
+  let inFlightBees = running
+  let taken = [...takenKeyIndices]
+  for (const row of parked.rows) {
+    const issue = Number(row.issue)
+    // The work is no longer wanted: no retry, and no escalation either - a
+    // closed issue does not become a person's problem by queueing behind
+    // eleven open ones.
+    if (!candidates.includes(issue)) {
+      round.skippedClosed.push(issue)
+      logger.info('Sent-back work skipped: the issue is no longer open', {
+        issue,
+      })
+      continue
+    }
+    const sendBacks = Number(row.send_backs ?? 0) || 0
+    if (sendBacks >= SEND_BACK_RETRY_CEILING) {
+      await pool.query(
+        // The WHERE re-checks the verdict it is replacing, so a row a second
+        // process has already moved on is left alone rather than stamped
+        // twice - and so this statement is idempotent on a re-run.
+        `UPDATE queen_dispatch
+            SET review_state = 'escalate',
+                review_note = $2,
+                reviewed_at = now()
+          WHERE issue = $1 AND review_state = 'sendBack'`,
+        [
+          issue,
+          `send-back retry ceiling of ${SEND_BACK_RETRY_CEILING} reached: ` +
+            `returned ${sendBacks} time(s) and not re-dispatched - a further ` +
+            `attempt would repeat a conversation that has not moved, so this ` +
+            `needs a person`,
+        ],
+      )
+      round.ceilinged.push(issue)
+      continue
+    }
+    if (watch && !watch.held) {
+      logger.warn(
+        'Queen lease moved before a send-back retry; not dispatched',
+        {
+          issue,
+        },
+      )
+      continue
+    }
+    if (inFlightBees >= MAXIMUM_CONCURRENT_WORKERS) {
+      logger.info('Sent-back work waits: the swarm is at its worker limit', {
+        issue,
+        running: inFlightBees,
+      })
+      continue
+    }
+    // Everything the second bee is told is re-read NOW: the criteria from the
+    // issue body this round fetched, the boundary re-parsed from the same
+    // body, and the previous unmet list from the previous attempt's own
+    // verdict block.
+    const body = candidateBodies[String(issue)] ?? ''
+    const spec = specVerdicts[String(issue)]
+    const criteria = spec?.criteria ?? []
+    const criteriaSource = spec?.criteriaSource ?? 'none'
+    const paths = boundaryPathsOf(body)
+    const unmet = parseVerdictBlock(String(row.said ?? ''))
+      .filter((v) => !v.met)
+      .map((v) => v.criterion)
+    const dispatch = await dispatchBee(
+      pool,
+      issue,
+      briefFor(issue, repo, paths, body, criteria, criteriaSource, {
+        unmet,
+        sendBacks,
+      }),
+      paths,
+      taken,
+      criteria,
+      criteriaSource,
+    )
+    round.retried.push({
+      issue,
+      started: dispatch.started,
+      conversationId: dispatch.conversationId,
+      keyIndex: dispatch.keyIndex,
+    })
+    // Mark the attempt as a retry, AFTER the dispatch row exists. The upsert
+    // in `recordDispatch` does not name this column - the same deliberate
+    // omission that keeps `send_backs` accumulating - so it survives as the
+    // one thing saying this row is a second attempt and not a first.
+    //
+    // Whether or not the dispatch STARTED: a refusal is still a retry
+    // attempt, recorded on this same row, and a first attempt that could not
+    // start must stay distinguishable from a retry that could not.
+    await pool.query(
+      `UPDATE queen_dispatch
+          SET send_back_retry = true,
+              escalation_kind = NULL,
+              escalation_reason = NULL
+        WHERE issue = $1`,
+      [issue],
+    )
+    if (!dispatch.started) break
+    inFlightBees += 1
+    if (typeof dispatch.keyIndex === 'number') {
+      taken = [...taken, dispatch.keyIndex]
+    }
+  }
+  return round
+}
+
+/**
+ * The send-back valve's share of one round, extracted from `runRound` whole:
+ * measure what is running, re-open what was sent back, and say what started.
+ *
+ * The extraction is not cosmetic. `runRound` grew past the complexity the
+ * linter holds it to the moment this pass landed in it inline, and the honest
+ * fix was to name the pass rather than to suppress the rule - a round that
+ * reads as six inline blocks is a round whose order nobody can check.
+ *
+ * Returns the retry round (for the report), a board task for every bee the
+ * pass started (the round folds them in the same way its own dispatch loop
+ * folds its starts), and the keys in use WITH the ones the retries took - so
+ * the dispatch loop that follows can never hand a retry's key to a second bee.
+ */
+async function reopenSentBackWork(
+  pool: Pool,
+  repo: string,
+  candidates: number[],
+  candidateBodies: Record<string, string>,
+  specVerdicts: Record<string, SpecVerdict>,
+  /** The board as the round has drawn it: the registry mirror plus its own dispatches. */
+  tasksOnBoard: Array<{ state?: string }>,
+  /** The round's own dispatch rows, for the keys still held by running bees. */
+  inFlight: Array<{ finished_at: unknown; key_index: unknown }>,
+  owner: string,
+  repoName: string,
+  watch: LeaseWatch,
+): Promise<{
+  retry: RetryRound
+  reopened: ReturnType<typeof boardTask>[]
+  keysInUse: number[]
+}> {
+  const running = tasksOnBoard.filter((t) => t.state === 'running').length
+  const heldKeys = inFlight
+    .filter((r) => r.finished_at == null)
+    .map((r) => r.key_index)
+    .filter((i): i is number => typeof i === 'number')
+  const retry = await redispatchSentBackWork(
+    pool,
+    repo,
+    candidates,
+    candidateBodies,
+    specVerdicts,
+    running,
+    heldKeys,
+    watch,
+  )
+  if (retry.retried.length > 0) {
+    logger.info('Queen re-opened sent-back work', {
+      issues: retry.retried.map((r) => r.issue),
+    })
+  }
+  if (retry.ceilinged.length > 0) {
+    logger.info('Sent-back work reached the retry ceiling and escalated', {
+      issues: retry.ceilinged,
+      ceiling: SEND_BACK_RETRY_CEILING,
+    })
+  }
+  const reopened: ReturnType<typeof boardTask>[] = []
+  for (const again of retry.retried) {
+    if (!again.started) continue
+    reopened.push(
+      boardTask(owner, repoName, {
+        conversationId: again.conversationId ?? null,
+        issue: again.issue,
+        ownedPaths: boundaryPathsOf(candidateBodies[String(again.issue)] ?? ''),
+        branch: `queen-${again.issue}`,
+        at: new Date().toISOString(),
+        title: 're-opened by this round after a send-back',
+      }),
+    )
+  }
+  return {
+    retry,
+    reopened,
+    keysInUse: [
+      ...heldKeys,
+      ...retry.retried
+        .filter((r) => r.started && typeof r.keyIndex === 'number')
+        .map((r) => r.keyIndex as number),
+    ],
+  }
+}
+
+/** One classified escalation. */
+export interface EscalationClassification {
+  issue: number
+  kind: EscalationKind
+  reason: string
+}
+
+/**
+ * Name the cause of every parked escalation that has none (#1362).
+ *
+ * An escalation waits for a person, and the queue was invisible: six sat on
+ * 2026-09-03, one of them the very issue about the stuck valve. This pass
+ * writes `escalation_kind` and `escalation_reason` on rows the review
+ * escalated and nobody ever looked at again, using `classifyEscalation` on
+ * the evidence the row and its transcript still hold.
+ *
+ * IT DISPATCHES NOTHING. Classification is a label for the operator; acting
+ * on a kind - retrying a run defect, closing an unworkable issue - is a
+ * separate decision, made by a person, on a queue they can finally see.
+ *
+ * The seven-day horizon matches the board's: past it a row is not on the
+ * board at all, and the reporter (`tools/parked-dispatch-report.mjs`) is the
+ * tool for those. Inside it, a branch's files are still measurable, which
+ * matters because `no-files-produced` leans on that count.
+ */
+export async function classifyParkedEscalations(
+  pool: Pool,
+): Promise<EscalationClassification[]> {
+  const parked = await pool.query(
+    `SELECT d.issue, d.conversation_id, d.criteria, d.owned_paths,
+            (SELECT string_agg(t.text, '' ORDER BY t.seq)
+               FROM queen_transcript t
+              WHERE t.conversation_id = d.conversation_id AND t.kind = 'say')
+              AS said
+       FROM queen_dispatch d
+      WHERE d.started = true AND d.finished_at IS NOT NULL
+        AND d.review_state = 'escalate'
+        AND d.escalation_kind IS NULL
+        AND d.outcome NOT LIKE 'reaped%'
+        AND d.dispatched_at > now() - interval '7 days'
+      ORDER BY d.finished_at`,
+  )
+  const classified: EscalationClassification[] = []
+  for (const row of parked.rows) {
+    const issue = Number(row.issue)
+    const verdicts = parseVerdictBlock(String(row.said ?? ''))
+    const files = await committedFiles(issue)
+    const answer = classifyEscalation({
+      verdicts,
+      committedFiles: files.length,
+      criteria: Array.isArray(row.criteria) ? (row.criteria as string[]) : [],
+      boundaryPaths: Array.isArray(row.owned_paths)
+        ? (row.owned_paths as string[])
+        : [],
+    })
+    await pool.query(
+      // The WHERE re-checks kind IS NULL, so two rounds overlapping cannot
+      // overwrite each other's classification and a re-run is a no-op.
+      `UPDATE queen_dispatch
+          SET escalation_kind = $2, escalation_reason = $3
+        WHERE issue = $1 AND review_state = 'escalate'
+          AND escalation_kind IS NULL`,
+      [issue, answer.kind, answer.reason.slice(0, 900)],
+    )
+    classified.push({ issue, kind: answer.kind, reason: answer.reason })
+  }
+  return classified
+}
+
+/**
  * One round, in sentences, for whoever is not reading the logs.
  *
  * The operator gives the direction and is told afterwards, so being told has to
@@ -1421,6 +2077,8 @@ export function parseVerdictBlock(
 async function report(
   pool: Pool,
   reviewed: ReviewRound,
+  retry: RetryRound,
+  classified: EscalationClassification[],
   started: Array<{ started?: boolean; issue?: number; detail?: string }>,
   choice: QueendChoice,
   candidates: number,
@@ -1430,6 +2088,34 @@ async function report(
   const accepted = reviewed.acted.filter((r) => r.endsWith(':accept'))
   const sentBack = reviewed.acted.filter((r) => r.endsWith(':sendBack'))
 
+  if (retry.retried.length > 0) {
+    lines.push(
+      `Re-opened ${retry.retried.length} sent-back issue(s) for another pass: ` +
+        retry.retried.map((r) => `#${r.issue}`).join(', ') +
+        '.',
+    )
+  }
+  if (retry.ceilinged.length > 0) {
+    lines.push(
+      `${retry.ceilinged.length} sent-back issue(s) reached the retry ceiling ` +
+        `of ${SEND_BACK_RETRY_CEILING} and now wait for you: ` +
+        retry.ceilinged.map((i) => `#${i}`).join(', ') +
+        '.',
+    )
+  }
+  if (classified.length > 0) {
+    const byKind: Record<string, number> = {}
+    for (const c of classified) {
+      byKind[c.kind] = (byKind[c.kind] ?? 0) + 1
+    }
+    lines.push(
+      `Classified ${classified.length} parked escalation(s): ` +
+        Object.entries(byKind)
+          .map(([kind, count]) => `${kind}=${count}`)
+          .join(', ') +
+        '.',
+    )
+  }
   if (started.length > 0) {
     lines.push(
       `Started ${started.length} bee(s): ` +
