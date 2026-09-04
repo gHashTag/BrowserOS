@@ -2,16 +2,22 @@
  * Public native research graph for t27.ai.
  *
  * The canonical graph is the evidence-backed file used by /queen/tree. This
- * route adds directionally-correct prerequisites/unlocks and a secret-free
- * view of paid worker-slot utilisation. It deliberately keeps graph state and
- * worker activity separate: "partial" means the repository has incomplete
+ * route adds directionally-correct prerequisites/unlocks, a secret-free
+ * view of paid worker-slot utilisation, and - since #1308 - the anonymous
+ * capacity factors behind that utilisation: how many credentials are
+ * connected and how many lanes each carries, read from the same dispatch
+ * authority that allocates against them. It deliberately keeps graph state
+ * and worker activity separate: "partial" means the repository has incomplete
  * evidence, not that a model is currently spending tokens on it.
  */
 
 import { Hono } from 'hono'
 import { Pool } from 'pg'
 import { logger } from '../../lib/logger'
-import { configuredWorkerCapacity } from '../services/queen-dispatch'
+import {
+  type WorkerCapacityBreakdown,
+  workerCapacityBreakdown,
+} from '../services/queen-dispatch'
 import {
   isTreeLoadFailure,
   loadTree as loadCanonicalTree,
@@ -33,7 +39,8 @@ interface QueenPublicResearchDeps {
   loadTree?: () => Promise<Tree | TreeLoadFailure | null>
   databaseUrl?: () => string | undefined
   createPool?: (url: string) => ResearchPool
-  workerCapacity?: () => number
+  /** The closed capacity authority; defaults to dispatch's own breakdown. */
+  workerCapacityBreakdown?: () => WorkerCapacityBreakdown
   publicOrigin?: (requestUrl: string) => string
 }
 
@@ -119,6 +126,9 @@ function projectTree(tree: Tree) {
 }
 
 function workerProjection(capacity: number, busyIndices: number[]) {
+  // The capacity arrives from the closed breakdown authority (#1308); the
+  // anonymous factor fields join it in the response without changing any of
+  // the contracts below.
   const safeCapacity = Math.max(0, Math.floor(capacity))
   // key_index identifies a credential, not a logical lane. With an explicit
   // multi-lane plan two rows may legitimately carry the same index; counting
@@ -149,7 +159,8 @@ export function createQueenPublicResearchRoute(
   const createPool =
     deps.createPool ??
     ((url: string) => new Pool({ connectionString: url }) as ResearchPool)
-  const workerCapacity = deps.workerCapacity ?? configuredWorkerCapacity
+  const capacityBreakdown =
+    deps.workerCapacityBreakdown ?? workerCapacityBreakdown
   const publicOrigin = deps.publicOrigin ?? configuredPublicOrigin
 
   return new Hono().get('/', async (c) => {
@@ -194,10 +205,17 @@ export function createQueenPublicResearchRoute(
     // container. Build copyable A2A links from Railway's trusted public domain
     // rather than leaking the internal scheme into the bootstrap contract.
     const origin = publicOrigin(c.req.url)
+    // One authority, one number: the projection's capacity IS the breakdown's
+    // effective capacity, so an operator reading "4" and the factors below it
+    // can never see two totals that disagree about the same configuration.
+    const breakdown = capacityBreakdown()
     return c.json({
       ...graph,
       runtime,
-      workers: workerProjection(workerCapacity(), busyIndices),
+      workers: {
+        ...workerProjection(breakdown.effectiveCapacity, busyIndices),
+        ...breakdown,
+      },
       agentBootstrap: {
         version: 'trinity-research-a2a/v1',
         mode: 'public-read-only',

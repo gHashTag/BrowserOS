@@ -54,7 +54,11 @@ const treeRoute = createQueenTreeRoute()
 // are pinned so the answer depends on the tree file and nothing else.
 const researchRoute = createQueenPublicResearchRoute({
   databaseUrl: () => undefined,
-  workerCapacity: () => 0,
+  workerCapacityBreakdown: () => ({
+    connectedCredentials: 0,
+    lanesPerCredential: 1,
+    effectiveCapacity: 0,
+  }),
 })
 
 const VALID_TREE = JSON.stringify(

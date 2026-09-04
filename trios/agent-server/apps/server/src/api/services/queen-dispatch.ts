@@ -203,14 +203,22 @@ export interface WorkerProvider {
  * one function - the count a dashboard shows and the index a bee takes are the
  * same list, never two different stories about one secret. First occurrence
  * wins, so the unsuffixed variable stays index 0 in every ordering.
+ *
+ * Values are TRIMMED before they are judged (#1308). ' key' and 'key' pasted
+ * into two boxes are one credential wearing its whitespace differently, and a
+ * value that is nothing but whitespace is the empty box one paste later. The
+ * trimmed value is also the one stored: a key that authenticates never needed
+ * its padding, and handing the trimmed form out keeps the count and the
+ * selection - which both read this list - from ever disagreeing.
  */
 function keysFor(envVar: string): string[] {
   const keys: string[] = []
   const seen = new Set<string>()
   const admit = (value: string | undefined) => {
-    if (!value || value.length === 0 || seen.has(value)) return
-    seen.add(value)
-    keys.push(value)
+    const trimmed = (value ?? '').trim()
+    if (trimmed.length === 0 || seen.has(trimmed)) return
+    seen.add(trimmed)
+    keys.push(trimmed)
   }
   admit(process.env[envVar])
   for (let i = 2; i <= 16; i++) {
@@ -241,16 +249,60 @@ function workerLanesFor(provider: string): number {
 }
 
 /**
+ * The closed, anonymous capacity breakdown every capacity number is made of
+ * (#1308).
+ *
+ * `workers.capacity` answering 4 does not say WHICH 4: two subscriptions at a
+ * lane each and one subscription at two lanes each are the same total with
+ * completely different operator implications - the first hides a disconnected
+ * paid subscription, the second promises parallelism a single rate limit
+ * cannot back. This is the ONE authority both `configuredWorkerCapacity` and
+ * the public research telemetry read, so the factorisation a dashboard shows
+ * and the ceiling dispatch allocates against are the same statement, never two
+ * different stories about one configuration.
+ *
+ * CLOSED means three integers and nothing else. No hashes, no key suffixes, no
+ * slot indexes, no provider variable names, no values: anything shaped like a
+ * credential is a disclosure, and a count cannot be inverted into one.
+ */
+export interface WorkerCapacityBreakdown {
+  connectedCredentials: number
+  lanesPerCredential: number
+  effectiveCapacity: number
+}
+
+export function workerCapacityBreakdown(): WorkerCapacityBreakdown {
+  for (const candidate of WORKER_PROVIDERS) {
+    const keys = keysFor(candidate.envVar)
+    if (keys.length > 0) {
+      const lanesPerCredential = workerLanesFor(candidate.provider)
+      return {
+        connectedCredentials: keys.length,
+        lanesPerCredential,
+        effectiveCapacity: keys.length * lanesPerCredential,
+      }
+    }
+  }
+  // Nothing is connected. The lanes factor keeps its safe default rather than
+  // zeroing, because it describes the bound the NEXT connected credential
+  // would run under; the total is still zero, from zero credentials alone.
+  return {
+    connectedCredentials: 0,
+    lanesPerCredential: configuredWorkerLanesPerCredential(),
+    effectiveCapacity: 0,
+  }
+}
+
+/**
  * Number of genuinely independent worker credentials available to the first
- * configured provider. The values never leave this module; the public research
- * projection uses only the count to show whether paid capacity is idle.
+ * configured provider, multiplied by that provider's lanes. The values never
+ * leave this module; the public research projection uses only the count to
+ * show whether paid capacity is idle. Delegates to the breakdown authority so
+ * the number allocated against and the number explained publicly can never
+ * diverge (#1308).
  */
 export function configuredWorkerCapacity(): number {
-  for (const candidate of WORKER_PROVIDERS) {
-    const count = keysFor(candidate.envVar).length
-    if (count > 0) return count * workerLanesFor(candidate.provider)
-  }
-  return 0
+  return workerCapacityBreakdown().effectiveCapacity
 }
 
 /**
