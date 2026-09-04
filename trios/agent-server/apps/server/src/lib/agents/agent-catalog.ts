@@ -65,7 +65,7 @@ export const AGENT_ADAPTER_CATALOG: AgentAdapterDescriptor[] = [
     // 'default' means "whatever the gateway-side agent record says".
     // OpenClaw's ACP bridge does not surface model selection as a session
     // config option (verified during the ACP spike), so per-session model
-    // switching through ACP is not available — the model lives in the
+    // switching through ACP is not available - the model lives in the
     // OpenClawService config and is set at agent-provisioning time via CLI.
     defaultModelId: 'default',
     defaultReasoningEffort: 'medium',
@@ -87,13 +87,13 @@ export const AGENT_ADAPTER_CATALOG: AgentAdapterDescriptor[] = [
   {
     id: 'hermes',
     name: 'Hermes',
-    // 'default' means whatever the user configured via `hermes setup` —
+    // 'default' means whatever the user configured via `hermes setup` -
     // Hermes' config.yaml is the source of truth for the model. ACP exposes
     // session/set_model but we don't surface it in Phase A.
     defaultModelId: 'default',
     defaultReasoningEffort: 'medium',
     modelControl: 'best-effort',
-    // Empty list signals "no per-session model picker" — like OpenClaw.
+    // Empty list signals "no per-session model picker" - like OpenClaw.
     // Phase A.5 may dynamically populate from session/new response.
     models: [],
     reasoningEfforts: [
