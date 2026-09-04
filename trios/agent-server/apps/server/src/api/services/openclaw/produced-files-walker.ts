@@ -79,7 +79,7 @@ async function walk(
   try {
     entries = await readdir(current, { withFileTypes: true })
   } catch {
-    // Workspace dir missing or unreadable — fresh agent that hasn't
+    // Workspace dir missing or unreadable - fresh agent that hasn't
     // written anything yet, or transient permissions issue. Treat as
     // "no files" rather than throwing.
     return true
@@ -90,7 +90,7 @@ async function walk(
     const absolute = join(current, entry.name)
 
     if (entry.isSymbolicLink()) {
-      // Skip symlinks — never follow, never record. Prevents an
+      // Skip symlinks - never follow, never record. Prevents an
       // agent from smuggling host-fs paths into the diff via a
       // symlink in its workspace.
       continue
@@ -108,7 +108,7 @@ async function walk(
     try {
       stats = await stat(absolute)
     } catch {
-      // Concurrent delete between readdir and stat — skip silently.
+      // Concurrent delete between readdir and stat - skip silently.
       continue
     }
     const relativePath = toPosix(relative(root, absolute))
