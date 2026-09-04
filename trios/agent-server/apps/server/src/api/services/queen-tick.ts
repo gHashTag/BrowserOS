@@ -1189,18 +1189,11 @@ export function briefFor(
     'by the operator. A failed push reads as a failed task; a commit is the',
     'deliverable.',
     '',
-    '## Your verdict, which the Queen reads',
-    '',
-    'End your LAST message with exactly this block and nothing after it:',
-    '',
-    '## VERDICT',
-    "- <the criterion, in the issue's own words>: met | unmet | could-not-check",
-    '- <the next one>: met | unmet | could-not-check',
-    '',
-    'One line per criterion in "What you will be judged by", in that order. A',
-    'criterion you could not check is could-not-check, never met - claiming met',
-    'for work you did not verify is the one failure nothing downstream can',
-    'catch, because the reviewer has only your word for it.',
+    // The template, one numbered slot per criterion (#1421). Emitted only when
+    // the task states criteria, so a task with none is unchanged: its bee
+    // states its own criteria first and still needs the standing generic
+    // request to answer them in.
+    ...verdictSection(criteria),
   ].join('\n')
 }
 
@@ -1238,6 +1231,92 @@ function criteriaBlock(criteria: string[], source: string): string[] {
         ]
       : []
   return [provenance, ...tail, '', ...criteria.map((c, i) => `${i + 1}. ${c}`)]
+}
+
+/**
+ * The VERDICT template the bee fills in, one numbered slot per criterion
+ * (#1421).
+ *
+ * Five dispatches on 2026-09-04 came back or escalated with the reviewer
+ * reporting "Finished work omitted N verdict lines", where N was exactly the
+ * number of criteria the reviewer called unmet. The workers had not refused
+ * to answer. The brief already numbered the criteria - but it never required
+ * the report to be numbered the same way, so a worker writing prose about
+ * its work satisfied the letter of the instruction and none of its purpose,
+ * and nothing checked before the turn ended.
+ *
+ * A template with one numbered slot per criterion closes the first half: a
+ * slot is either filled or visibly empty, the numbers are the ones the
+ * criteria already carry, and the brief says in words which reading an empty
+ * slot gets. The bee is also told to check itself before stopping - the one
+ * moment an omission is still free to fix. `missingVerdictSlots` below is
+ * the same check as a function, for whatever tells a bee that has already
+ * stopped.
+ *
+ * NUMBERED ONLY WHEN THERE ARE CRITERIA TO NUMBER. A task with none keeps
+ * the standing generic request, unchanged: its bee is asked by
+ * `criteriaBlock` to state its own criteria before working, and numbering
+ * slots here would number criteria nobody has written yet.
+ */
+function verdictSection(criteria: string[]): string[] {
+  // THE BLOCK GOES FIRST, and this is the measurement that moved it.
+  //
+  // Only 17% of dispatches in a three-hour window were accepted; 33% came back
+  // as sendBack and 28% as `wait`, which means the review could not judge them
+  // at all. Reading the transcripts settles why. #1429 discussed all four of
+  // its criteria in prose - "Criterion 4 ... **Met.**" - and then wrote a
+  // VERDICT block containing two lines. #1427 the same. #1430 wrote three of
+  // four. The accepted ones wrote exactly one line per criterion.
+  //
+  // The block was required to come LAST, after 25-35 kB of prose. So the ONLY
+  // machine-read part of the report sat in the position where a turn that runs
+  // short loses it first, and a worker treating it as a closing summary rather
+  // than the deliverable trims it exactly there.
+  //
+  // Putting it first costs nothing the worker knows: it has done the work and
+  // taken its measurements before it composes the message. What it changes is
+  // what survives when something is cut - prose, which nothing reads
+  // mechanically, instead of the verdict, on which every downstream decision
+  // depends.
+  const head = [
+    '## Your verdict, which the Queen reads',
+    '',
+    'BEGIN your LAST message with exactly this block, before anything else you',
+    'write. Not at the end - at the very top. Everything after it is prose for a',
+    'person; this block is the only part read by machine, and a report that runs',
+    'long loses whatever is last.',
+    '',
+    '## VERDICT',
+  ]
+  if (criteria.length === 0) {
+    return [
+      ...head,
+      "- <the criterion, in the issue's own words>: met | unmet | could-not-check",
+      '- <the next one>: met | unmet | could-not-check',
+      '',
+      'One line per criterion in "What you will be judged by", in that order. A',
+      'criterion you could not check is could-not-check, never met - claiming met',
+      'for work you did not verify is the one failure nothing downstream can',
+      'catch, because the reviewer has only your word for it.',
+    ]
+  }
+  return [
+    ...head,
+    ...criteria.map(
+      (_, i) =>
+        `- ${i + 1}. <criterion ${i + 1}, in the issue's own words>: ` +
+        'met | unmet | could-not-check',
+    ),
+    '',
+    'One numbered slot per criterion in "What you will be judged by", same',
+    'numbers, same order. A slot you leave out is read as unmet, so answer',
+    'every number - including one you could not check, which is',
+    'could-not-check, never met. Claiming met for work you did not verify is',
+    'the one failure nothing downstream can catch, because the reviewer has',
+    'only your word for it. Before you stop, re-read this block against your',
+    'last message and fill in every number you have not answered, while you',
+    'still can.',
+  ]
 }
 
 /**
@@ -1466,8 +1545,34 @@ async function reviewFinishedDispatches(pool: Pool): Promise<ReviewRound> {
 export function parseVerdictBlock(
   text: string,
 ): Array<{ criterion: string; met: boolean }> {
-  const at = text.lastIndexOf('## VERDICT')
-  if (at < 0) return []
+  // EVERY occurrence is tried, and the most complete one wins.
+  //
+  // This took `lastIndexOf`, which was right while the block was required to be
+  // last. The block is now required to be FIRST, and a report that quotes the
+  // words "## VERDICT" later - in a summary, in a quoted brief, in an
+  // explanation of this very rule - would otherwise hand the parser a heading
+  // with no bullets under it and yield nothing at all.
+  //
+  // Trying each and keeping the longest parse is stable under either
+  // convention, so a worker running an older brief is not punished for it.
+  const starts: number[] = []
+  for (let i = text.indexOf('## VERDICT'); i >= 0; i = text.indexOf('## VERDICT', i + 1)) {
+    starts.push(i)
+  }
+  if (!starts.length) return []
+  let best: Array<{ criterion: string; met: boolean }> = []
+  for (const start of starts) {
+    const found = parseVerdictFrom(text, start)
+    if (found.length > best.length) best = found
+  }
+  return best
+}
+
+/** One VERDICT block, read from a known offset. */
+function parseVerdictFrom(
+  text: string,
+  at: number,
+): Array<{ criterion: string; met: boolean }> {
   const out: Array<{ criterion: string; met: boolean }> = []
   // A WRAPPED CRITERION IS STILL ONE CRITERION.
   //
@@ -1516,6 +1621,44 @@ export function parseVerdictBlock(
     })
   }
   return out
+}
+
+/**
+ * Which numbered slots of the VERDICT template a report leaves unanswered
+ * (#1421).
+ *
+ * The second half of the same defect: the brief now hands the bee a template
+ * with numbered slots, and this is the check that names the numbers a given
+ * report did not fill. It reads the SAME block `parseVerdictBlock` reads -
+ * one parser, so a line this counts as answered is exactly a line the review
+ * counts as judged - and calls a slot covered only when a parsed verdict
+ * line carries its number.
+ *
+ * A NUMBER, NOT A POSITION. The old contract was order-based: the third
+ * verdict line was the third criterion whether or not it said so, which is
+ * how prose about the work came to satisfy the letter of the instruction
+ * while the reviewer counted "Finished work omitted N verdict lines". Under
+ * the numbered template, a report that answers in prose without numbers has
+ * covered nothing: every slot is missing, and the answer that follows is
+ * "fill these in", never a guess about which sentence meant which criterion.
+ *
+ * Not yet wired past this file: the path that would tell a still-running bee
+ * which numbers it owes lives in `queen-dispatch.ts`, outside this change's
+ * boundary. The brief tells the bee to run this check on itself before it
+ * stops; the wiring, when it arrives, calls this same function so the two
+ * can never disagree about what "missing" means.
+ */
+export function missingVerdictSlots(text: string, total: number): number[] {
+  const covered = new Set<number>()
+  for (const verdict of parseVerdictBlock(text)) {
+    const slot = verdict.criterion.match(/^(\d{1,3})\.\s/)
+    if (slot) covered.add(Number(slot[1]))
+  }
+  const missing: number[] = []
+  for (let i = 1; i <= total; i++) {
+    if (!covered.has(i)) missing.push(i)
+  }
+  return missing
 }
 
 /**
