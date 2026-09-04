@@ -73,7 +73,7 @@ export class ConsoleCollector {
   private readonly maxEntries = CONTENT_LIMITS.CONSOLE_BUFFER_MAX_ENTRIES
 
   constructor(cdp: CdpBackend) {
-    // Single handler per event type — O(1) routing via sessionToPage lookup
+    // Single handler per event type - O(1) routing via sessionToPage lookup
     cdp.onSessionEvent('Runtime.consoleAPICalled', (params, sessionId) => {
       const pageId = this.sessionToPage.get(sessionId)
       if (pageId === undefined) return
