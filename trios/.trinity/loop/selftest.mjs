@@ -806,6 +806,53 @@ check('the SCOPED form of the same demand is accepted', () => {
   }
 })
 
+
+// ---------------------------------------------------------------------------
+// reap-local: the laptop fills too, and the tool that frees it must never hang.
+
+check('a shell call in the local reaper is bounded', () => {
+  // Without a timeout it ran past 500 s twice and had to be killed, and there
+  // was no way to tell which of 33 worktrees was hanging. A step that can hang
+  // for ever hangs the whole chain, and this one runs first of eleven.
+  const src = fs.readFileSync(path.join(DIR, 'reap-local.mjs'), 'utf8')
+  if (!/timeout/.test(src.slice(src.indexOf('const sh ='), src.indexOf('const sh =') + 700))) {
+    throw new Error('every shell call must be bounded')
+  }
+})
+
+check('the cheap question is asked before the expensive one', () => {
+  // "Is this commit an ancestor" is two ref lookups; `git status` walks the
+  // working tree, and on a 2.4 GB checkout that is seconds. An unmerged tree is
+  // kept whatever its state, so its dirtiness is never worth asking.
+  const src = fs.readFileSync(path.join(DIR, 'reap-local.mjs'), 'utf8')
+  const fn = src.slice(src.indexOf('export function survey'), src.indexOf('if (isMain)'))
+  const ancestor = fn.indexOf('is-ancestor')
+  const status = fn.indexOf('git status --porcelain')
+  if (ancestor < 0 || status < 0) throw new Error('both questions must be asked')
+  if (ancestor > status) throw new Error('the expensive question is being asked first')
+})
+
+check('it never passes --force to git worktree remove', () => {
+  // The standing rule of this project. --force is what turns "this has
+  // something in it" into silence.
+  const src = fs.readFileSync(path.join(DIR, 'reap-local.mjs'), 'utf8')
+  if (/worktree remove[^\n]*--force/.test(src)) {
+    throw new Error('--force must never appear on a worktree removal')
+  }
+  if (!/left alone rather than forced/.test(src)) {
+    throw new Error('a refusal must say it chose not to force')
+  }
+})
+
+check('a dirty tree is kept whatever the disk says', () => {
+  const src = fs.readFileSync(path.join(DIR, 'reap-local.mjs'), 'utf8')
+  if (!/state = 'dirty'/.test(src)) throw new Error('dirtiness must be a state of its own')
+  const reap = src.slice(src.indexOf('const reapable ='))
+  if (/state === 'dirty'/.test(reap.slice(0, reap.indexOf('for (const r of reapable)')))) {
+    throw new Error('a dirty tree must never enter the reapable set')
+  }
+})
+
 console.log(`\n${pass} passed, ${failures.length} failed`)
 fs.rmSync(tmp, { recursive: true, force: true })
 if (failures.length) {
