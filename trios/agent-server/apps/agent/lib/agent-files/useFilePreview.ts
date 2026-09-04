@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
  * Single-file preview hook used by the inline artifact card and the
- * Outputs rail's preview Sheet. Always opt-in (`enabled`) — the
+ * Outputs rail's preview Sheet. Always opt-in (`enabled`) - the
  * preview is fetched only when the user clicks a row, never
  * eagerly.
  */
@@ -33,7 +33,7 @@ export function useFilePreview(fileId: string | null, enabled = true) {
       )
     },
     enabled: Boolean(baseUrl) && !urlLoading && enabled && Boolean(fileId),
-    // Previews are immutable for a given fileId — once loaded, never
+    // Previews are immutable for a given fileId - once loaded, never
     // refetch on focus / reconnect. They go stale only when the
     // underlying file is removed (rare in v1; no rename / delete).
     staleTime: Infinity,
