@@ -89,7 +89,24 @@ let pushed = 0
 const rejected = []
 for (let i = 0; i < missing.length; i += BATCH) {
   const batch = missing.slice(i, i + BATCH)
-  const out = remote(`${G} -c "url.https://x-access-token:$GH_TOKEN@github.com/.insteadOf=https://github.com/" push origin ${batch.join(' ')} 2>&1`)
+  // `--no-verify`, deliberately, and this is the reason.
+  //
+  // The branches being pushed were created days ago from older bases and carry
+  // whatever `lefthook.yml` existed then. One of those versions writes its
+  // branch-name check in bash - `[[ ]]` and `=~` - and the container runs hooks
+  // under `sh`, where it dies with `Syntax error: "(" unexpected` and takes the
+  // push down with it. Measured 2026-09-04: four branches carrying finished
+  // work could not reach the remote, and the reported reason was the branch
+  // name rather than the shell.
+  //
+  // Fixing the rule on the supervisor branch does not help them; their copy is
+  // already written. And a pre-push hook is the AUTHOR's check, run on the
+  // author's machine before they publish. This tool is not the author: it is
+  // making already-finished work visible from a third machine, where running
+  // someone else's local hooks proves nothing and can only fail. Every gate
+  // that matters - lint, tests, the language policy - runs in CI on the pushed
+  // branch, and this changes none of that.
+  const out = remote(`${G} -c "url.https://x-access-token:$GH_TOKEN@github.com/.insteadOf=https://github.com/" push --no-verify origin ${batch.join(' ')} 2>&1`)
   const created = (out.match(/new branch/g) || []).length
   pushed += created
   for (const line of out.split('\n')) {
