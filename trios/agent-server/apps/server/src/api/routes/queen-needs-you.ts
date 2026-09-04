@@ -65,6 +65,14 @@ const REPORT_LIMIT = 20
  * re-reads, which is how a six-hour floor elsewhere in this service could never
  * be reached (#109). `finished_at` is written once, when the bee stops.
  */
+// Both literals close with the backtick ALONE on its own line, and the LIMIT is
+// a bound parameter rather than an interpolation. That is the house convention
+// and `tests/api/sql-template-literals.test.ts` depends on it: the gate is
+// deliberately dumb - "a check simple enough to be obviously right beats one
+// that needs its own tests to be trusted" - so it reads a literal as running
+// until a lone closing backtick. Closing at the end of a SQL line made it
+// swallow the next 60 lines and report five offences in doc comments. The gate
+// is not wrong to be simple; this file was wrong to be the exception.
 const ESCALATIONS_SQL = `
   SELECT d.issue,
          d.review_note,
@@ -73,13 +81,15 @@ const ESCALATIONS_SQL = `
     FROM queen_dispatch d
    WHERE d.review_state = 'escalate'
      AND d.finished_at IS NOT NULL
-   ORDER BY d.finished_at ASC`
+   ORDER BY d.finished_at ASC
+`
 
 const REPORTS_SQL = `
   SELECT id, at, headline, needs_you
     FROM queen_report
    ORDER BY at DESC
-   LIMIT ${REPORT_LIMIT}`
+   LIMIT $1
+`
 
 export function createQueenNeedsYouRoute(deps: QueenNeedsYouDeps = {}) {
   const databaseUrl =
@@ -100,7 +110,7 @@ export function createQueenNeedsYouRoute(deps: QueenNeedsYouDeps = {}) {
       pool = createPool(url)
       const [escalations, reports] = await Promise.all([
         pool.query(ESCALATIONS_SQL),
-        pool.query(REPORTS_SQL),
+        pool.query(REPORTS_SQL, [REPORT_LIMIT]),
       ])
 
       const waiting = escalations.rows.map((row) => ({
