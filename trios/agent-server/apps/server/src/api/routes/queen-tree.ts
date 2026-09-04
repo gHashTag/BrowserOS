@@ -18,8 +18,12 @@
  * them, and each one is a place where somebody would otherwise have trusted the
  * wrong document.
  *
- * The data is generated, not typed: `.trinity/dashboard/tech-tree.json`, read
- * at request time so a regeneration shows up without a deploy.
+ * The data is a hand-maintained file: `.trinity/dashboard/tech-tree.json`,
+ * read at request time so an edit shows up without a deploy. Nothing in the
+ * repository generates it - a hand-edit is the normal way it changes, and a
+ * hand-edit is exactly what breaks it - so the loader, not either consumer,
+ * decides whether a given file is a tree, and says which of three ways it
+ * failed when it is not: absent, unparseable, or the wrong shape.
  */
 
 import { readFile } from 'node:fs/promises'
@@ -44,6 +48,42 @@ export interface Tree {
 }
 
 /**
+ * Why a load failed. A consumer that cannot tell these apart sends its reader
+ * hunting for a file that is sitting right there: the first loader returned
+ * `null` for a file that was absent AND for one that was truncated AND for one
+ * that parsed to the wrong shape, and the sentence asserted "missing FILE"
+ * every time. `unreadable` is the rare fourth case - a file that exists but
+ * cannot be read (permissions, a directory where the file should be) - which
+ * is not "not found" either. The detail carries only facts the loader
+ * established; where it could not establish one, the field says so.
+ */
+export type TreeLoadFailureKind =
+  | 'not-found'
+  | 'unparseable'
+  | 'wrong-shape'
+  | 'unreadable'
+
+export interface TreeLoadFailure {
+  /** The discriminator. A Tree never carries an `ok` field. */
+  readonly ok: false
+  /** Which of the failures occurred - the thing a consumer must not guess. */
+  readonly kind: TreeLoadFailureKind
+  /** Paths tried, parse position, first failing field - for the log and /queen/tree. */
+  readonly detail: Record<string, unknown>
+}
+
+/** What loadTree hands back: a usable tree, or the reason there is none. */
+export type TreeLoadResult = Tree | TreeLoadFailure
+
+export function isTreeLoadFailure(value: unknown): value is TreeLoadFailure {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { ok?: unknown }).ok === false
+  )
+}
+
+/**
  * Where the checkout is. In the container the repository is cloned into the
  * workspace volume; on a laptop the server runs from inside the checkout.
  * Both are tried rather than one being assumed, because a dashboard that is
@@ -63,17 +103,366 @@ function candidatePaths(): string[] {
   ]
 }
 
-export async function loadTree(): Promise<Tree | null> {
-  for (const path of candidatePaths()) {
+export async function loadTree(): Promise<TreeLoadResult> {
+  const tried = candidatePaths()
+  for (const path of tried) {
+    let raw: string
     try {
-      return JSON.parse(await readFile(path, 'utf8')) as Tree
-    } catch {
-      // Try the next one. A missing file here is the normal case for two of
-      // the three paths, so it is not worth a log line each.
+      raw = await readFile(path, 'utf8')
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      // Absent is the normal case for two of the three paths, so it is not
+      // worth a log line each. Anything else - permissions, a directory where
+      // the file should be - is a file that EXISTS and cannot be used, which
+      // must not be reported as "not found".
+      if (code === 'ENOENT') continue
+      return logTreeLoadFailure({
+        ok: false,
+        kind: 'unreadable',
+        detail: { path, readError: code ?? String(error) },
+      })
+    }
+
+    // The first candidate that exists is THE tree. A corrupt one is reported,
+    // not stepped over: falling through to a later candidate would hide the
+    // file the reader actually needs to fix.
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch (error) {
+      return logTreeLoadFailure({
+        ok: false,
+        kind: 'unparseable',
+        detail: {
+          path,
+          parseError: error instanceof Error ? error.message : String(error),
+          position: locateJsonError(raw),
+          length: raw.length,
+        },
+      })
+    }
+
+    const shape = firstShapeFailure(parsed)
+    if (shape) {
+      return logTreeLoadFailure({
+        ok: false,
+        kind: 'wrong-shape',
+        detail: { path, ...shape },
+      })
+    }
+
+    return parsed as Tree
+  }
+
+  return logTreeLoadFailure({
+    ok: false,
+    kind: 'not-found',
+    detail: { tried },
+  })
+}
+
+function logTreeLoadFailure(failure: TreeLoadFailure): TreeLoadFailure {
+  logger.warn('Technology tree unavailable', {
+    kind: failure.kind,
+    ...failure.detail,
+  })
+  return failure
+}
+
+const NODE_STATUSES = ['shipped', 'partial', 'blocked', 'planned', 'unknown']
+
+function typeOf(value: unknown): string {
+  if (value === undefined) return 'undefined'
+  if (value === null) return 'null'
+  if (Array.isArray(value)) return 'array'
+  return typeof value
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function requireString(
+  record: Record<string, unknown>,
+  at: string,
+  key: string,
+): { field: string; expected: string; found: string } | null {
+  if (typeof record[key] !== 'string') {
+    return {
+      field: `${at}.${key}`,
+      expected: 'string',
+      found: typeOf(record[key]),
     }
   }
-  logger.warn('Technology tree not found', { tried: candidatePaths() })
   return null
+}
+
+/**
+ * The first field the consumers read that is missing or mistyped, or null when
+ * the value can be handed to render() and projectTree() as a Tree.
+ *
+ * This lives in the loader - not in either consumer - so the two cannot
+ * disagree about what a valid tree is. It checks exactly the fields the
+ * consumers touch and no others: a schema library would either reject files
+ * the page renders happily or wave through fields the page crashes on. No
+ * schema library, no dependencies - a walk down the fields, naming the first
+ * one that would break a consumer.
+ */
+function firstShapeFailure(
+  value: unknown,
+): { field: string; expected: string; found: string } | null {
+  if (!isPlainObject(value)) {
+    return {
+      field: '(the whole file)',
+      expected: 'an object with nodes, edges, conflicts and staleSkills',
+      found: typeOf(value),
+    }
+  }
+  return (
+    nodesShapeFailure(value) ??
+    edgesShapeFailure(value) ??
+    conflictsShapeFailure(value) ??
+    staleSkillsShapeFailure(value)
+  )
+}
+
+function nodesShapeFailure(value: Record<string, unknown>) {
+  if (!Array.isArray(value.nodes)) {
+    return {
+      field: 'nodes',
+      expected: 'an array of nodes',
+      found: typeOf(value.nodes),
+    }
+  }
+  for (let index = 0; index < value.nodes.length; index++) {
+    const failure = nodeShapeFailure(value.nodes[index], `nodes[${index}]`)
+    if (failure) return failure
+  }
+  return null
+}
+
+function nodeShapeFailure(node: unknown, at: string) {
+  if (!isPlainObject(node)) {
+    return { field: at, expected: 'an object', found: typeOf(node) }
+  }
+  for (const key of ['id', 'label', 'layer'] as const) {
+    const failure = requireString(node, at, key)
+    if (failure) return failure
+  }
+  if (
+    typeof node.status !== 'string' ||
+    !(NODE_STATUSES as readonly string[]).includes(node.status)
+  ) {
+    return {
+      field: `${at}.status`,
+      expected: `one of ${NODE_STATUSES.join(', ')}`,
+      found: typeOf(node.status),
+    }
+  }
+  const evidence = requireString(node, at, 'evidence')
+  if (evidence) return evidence
+  for (const key of ['blockedBy', 'note'] as const) {
+    if (node[key] !== undefined && typeof node[key] !== 'string') {
+      return {
+        field: `${at}.${key}`,
+        expected: 'string when present',
+        found: typeOf(node[key]),
+      }
+    }
+  }
+  return null
+}
+
+function edgesShapeFailure(value: Record<string, unknown>) {
+  if (!Array.isArray(value.edges)) {
+    return {
+      field: 'edges',
+      expected: 'an array of {from, to}',
+      found: typeOf(value.edges),
+    }
+  }
+  for (let index = 0; index < value.edges.length; index++) {
+    const edge = value.edges[index]
+    const at = `edges[${index}]`
+    if (!isPlainObject(edge)) {
+      return { field: at, expected: 'an object', found: typeOf(edge) }
+    }
+    const from = requireString(edge, at, 'from')
+    if (from) return from
+    const to = requireString(edge, at, 'to')
+    if (to) return to
+  }
+  return null
+}
+
+function conflictsShapeFailure(value: Record<string, unknown>) {
+  if (!Array.isArray(value.conflicts)) {
+    return {
+      field: 'conflicts',
+      expected: 'an array of strings',
+      found: typeOf(value.conflicts),
+    }
+  }
+  for (let index = 0; index < value.conflicts.length; index++) {
+    if (typeof value.conflicts[index] !== 'string') {
+      return {
+        field: `conflicts[${index}]`,
+        expected: 'string',
+        found: typeOf(value.conflicts[index]),
+      }
+    }
+  }
+  return null
+}
+
+function staleSkillsShapeFailure(value: Record<string, unknown>) {
+  if (!Array.isArray(value.staleSkills)) {
+    return {
+      field: 'staleSkills',
+      expected: 'an array of {skill, staleClaim, shouldSay}',
+      found: typeOf(value.staleSkills),
+    }
+  }
+  for (let index = 0; index < value.staleSkills.length; index++) {
+    const skill = value.staleSkills[index]
+    const at = `staleSkills[${index}]`
+    if (!isPlainObject(skill)) {
+      return { field: at, expected: 'an object', found: typeOf(skill) }
+    }
+    for (const key of ['skill', 'staleClaim', 'shouldSay'] as const) {
+      const failure = requireString(skill, at, key)
+      if (failure) return failure
+    }
+  }
+  return null
+}
+
+/**
+ * WHERE a JSON parse failed, for an engine that reports only WHAT.
+ *
+ * JavaScriptCore throws `JSON Parse error: Expected ']'` with no offset
+ * attached, so a sentence that names the parse position has to establish the
+ * position itself. This walks the JSON grammar and stops at the first byte it
+ * cannot accept; that offset is the position. It runs only AFTER JSON.parse
+ * has refused the text - JSON.parse stays the authority on WHETHER the file
+ * parses, this only locates the error it reported. If the walk somehow
+ * completes on text JSON.parse refused, it returns null and the sentence says
+ * the position was not established rather than inventing one.
+ */
+function locateJsonError(text: string): number | null {
+  let i = 0
+  const end = text.length
+  const whitespace = ' \t\n\r'
+
+  const skipWhitespace = () => {
+    while (i < end && whitespace.includes(text[i])) i++
+  }
+
+  const scanString = (): boolean => {
+    // The opening quote is at i.
+    i++
+    while (i < end) {
+      const c = text[i]
+      if (c === '\\') {
+        i += 2
+        continue
+      }
+      if (c === '"') {
+        i++
+        return true
+      }
+      i++
+    }
+    return false // the file ended inside the string
+  }
+
+  const scanLiteral = (): boolean => {
+    for (const keyword of ['true', 'false', 'null']) {
+      if (text.startsWith(keyword, i)) {
+        i += keyword.length
+        return true
+      }
+    }
+    const number = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(
+      text.slice(i),
+    )
+    if (number && number[0].length > 0) {
+      i += number[0].length
+      return true
+    }
+    return false
+  }
+
+  const scanValue = (): boolean => {
+    skipWhitespace()
+    if (i >= end) return false
+    const c = text[i]
+    if (c === '{') return scanObject()
+    if (c === '[') return scanArray()
+    if (c === '"') return scanString()
+    return scanLiteral()
+  }
+
+  const scanArray = (): boolean => {
+    i++ // the opening bracket
+    skipWhitespace()
+    if (i < end && text[i] === ']') {
+      i++
+      return true
+    }
+    for (;;) {
+      if (!scanValue()) return false
+      skipWhitespace()
+      if (i >= end) return false
+      if (text[i] === ',') {
+        i++
+        continue
+      }
+      if (text[i] === ']') {
+        i++
+        return true
+      }
+      return false
+    }
+  }
+
+  const scanObject = (): boolean => {
+    i++ // the opening brace
+    skipWhitespace()
+    if (i < end && text[i] === '}') {
+      i++
+      return true
+    }
+    for (;;) {
+      skipWhitespace()
+      if (i >= end || text[i] !== '"') return false
+      if (!scanString()) return false
+      skipWhitespace()
+      if (i >= end || text[i] !== ':') return false
+      i++
+      if (!scanValue()) return false
+      skipWhitespace()
+      if (i >= end) return false
+      if (text[i] === ',') {
+        i++
+        continue
+      }
+      if (text[i] === '}') {
+        i++
+        return true
+      }
+      return false
+    }
+  }
+
+  try {
+    if (!scanValue()) return Math.min(i, end)
+    skipWhitespace()
+    return i < end ? i : null
+  } catch {
+    // A walk this deep blew the stack on the same text that blew JSON.parse's.
+    return null
+  }
 }
 
 const LAYERS = [
@@ -258,20 +647,57 @@ function render(tree: Tree): string {
 </div></body></html>`
 }
 
+/**
+ * The 503 page. One sentence per established cause - the reader of a broken
+ * dashboard is the person fixing the file, so the page tells them which state
+ * they are in rather than a cause the loader never checked.
+ */
+function failurePage(failure: TreeLoadFailure): string {
+  const lines: string[] = []
+  if (failure.kind === 'not-found') {
+    lines.push('No technology tree found. None of the expected files exist:')
+    for (const path of (failure.detail.tried as string[]) ?? []) {
+      lines.push(`  ${path}`)
+    }
+    lines.push('This is a missing FILE, not an empty project.')
+  } else if (failure.kind === 'unparseable') {
+    lines.push('The technology tree was found but could not be parsed as JSON:')
+    lines.push(`  path: ${failure.detail.path}`)
+    lines.push(`  parse error: ${failure.detail.parseError}`)
+    lines.push(`  parse position: ${describePosition(failure.detail)}`)
+  } else if (failure.kind === 'wrong-shape') {
+    lines.push(
+      'The technology tree was found and parsed, but it does not have the expected shape:',
+    )
+    lines.push(`  path: ${failure.detail.path}`)
+    lines.push(
+      `  first failing field: ${failure.detail.field} (expected ${failure.detail.expected}, found ${failure.detail.found})`,
+    )
+  } else {
+    lines.push('The technology tree was found but could not be read:')
+    lines.push(`  path: ${failure.detail.path}`)
+    lines.push(`  read error: ${failure.detail.readError}`)
+  }
+  return `<pre style="font-family:ui-monospace;padding:2rem;background:#000;color:#888">${lines.map(esc).join('\n')}</pre>`
+}
+
+function describePosition(detail: Record<string, unknown>): string {
+  const position = detail.position
+  if (typeof position !== 'number') {
+    // The engine refused the file and the walk could not place it. Say that
+    // rather than offering a number nobody established.
+    return 'not established by the parser'
+  }
+  const length = typeof detail.length === 'number' ? detail.length : NaN
+  return position === length ? `${position} (end of input)` : String(position)
+}
+
 export function createQueenTreeRoute() {
   return new Hono().get('/', async (c) => {
-    const tree = await loadTree()
-    if (!tree) {
-      // Say which file is missing rather than rendering an empty diagram. An
-      // empty tree and an unreadable one look identical, and only one of them
-      // is a fact about the project.
-      return c.html(
-        '<pre style="font-family:ui-monospace;padding:2rem;background:#000;color:#888">' +
-          'No technology tree found. Expected .trinity/dashboard/tech-tree.json\n' +
-          'in the checkout. This is a missing FILE, not an empty project.</pre>',
-        503,
-      )
+    const result = await loadTree()
+    if (isTreeLoadFailure(result)) {
+      return c.html(failurePage(result), 503)
     }
-    return c.html(render(tree), 200, { 'Cache-Control': 'no-store' })
+    return c.html(render(result), 200, { 'Cache-Control': 'no-store' })
   })
 }
