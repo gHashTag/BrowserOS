@@ -133,7 +133,7 @@ export const AgentTerminal: FC<AgentTerminalProps> = ({
   const [copied, setCopied] = useState(false)
 
   // Copy the current xterm selection to the browser clipboard. No-op
-  // if nothing is selected — users who want the whole buffer can
+  // if nothing is selected - users who want the whole buffer can
   // Cmd+A first. Uses the browser clipboard, not the container's, so
   // it works even when the running TUI has mouse tracking enabled
   // (Opt+drag forces a selection regardless, see terminal config).
@@ -145,7 +145,7 @@ export const AgentTerminal: FC<AgentTerminalProps> = ({
       setCopied(true)
       window.setTimeout(() => setCopied(false), 1500)
     } catch {
-      // clipboard permission denied or unavailable — swallow, user will retry
+      // clipboard permission denied or unavailable - swallow, user will retry
     }
   }
 
@@ -167,7 +167,7 @@ export const AgentTerminal: FC<AgentTerminalProps> = ({
     })
     terminalRef.current = terminal
 
-    // Cmd+A → select all, Cmd+C → copy selection via the browser
+    // Cmd+A -> select all, Cmd+C -> copy selection via the browser
     // clipboard. Return false so xterm doesn't also forward the keys
     // to the running program.
     terminal.attachCustomKeyEventHandler((event) => {
