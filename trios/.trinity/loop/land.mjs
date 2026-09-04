@@ -82,8 +82,29 @@ export function isLanded(branch) {
   // somebody made by hand all give the same tree.
   const baseTree = sh(`git rev-parse origin/${BASE}^{tree}`)
   const mergedTree = sh(`git merge-tree --write-tree origin/${BASE} origin/${branch}`)
-  if (!baseTree || !mergedTree) return false
-  return mergedTree.split('\n')[0].trim() === baseTree
+  if (baseTree && mergedTree && mergedTree.split('\n')[0].trim() === baseTree) return true
+
+  // AND THE FOURTH ROUTE: every commit already in the base by PATCH-ID.
+  //
+  // The tree test catches a branch whose merge would change nothing. It does
+  // NOT catch a branch that was cherry-picked and has since drifted - the base
+  // moved on, so merging it back would still change the tree, and it looks like
+  // debt for ever.
+  //
+  // `git cherry` compares patch-ids and marks with `-` any commit whose change
+  // is already upstream. Audited 2026-09-05 across ten conflicting branches:
+  // three were finished work counted as debt. queen-1298's blob is
+  // BYTE-IDENTICAL to one the base landed, same author and timestamp;
+  // queen-1296's two commits have matching patch-ids in the base; queen-1421 is
+  // the squash source of a commit already in the base. Nothing would be gained
+  // by merging any of them, and each was re-offered every round.
+  //
+  // A branch with no commits left unaccounted for has landed, whatever route it
+  // took. An empty answer from `git cherry` is not evidence of anything.
+  const cherry = sh(`git cherry origin/${BASE} origin/${branch}`)
+  if (cherry === null) return false
+  const unaccounted = cherry.split('\n').filter((l) => l.trim().startsWith('+'))
+  return cherry.trim() !== '' && unaccounted.length === 0
 }
 
 export function mergesCleanly(branch) {

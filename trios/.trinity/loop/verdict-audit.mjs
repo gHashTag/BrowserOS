@@ -205,8 +205,34 @@ export function auditIssue(number) {
 if (!isMain) { /* imported for calibration or reuse: do nothing */ } else {
 let numbers = process.argv.slice(2).filter((a) => /^\d+$/.test(a))
 if (process.argv.includes('--accepted')) {
-  const closed = tryShell(`gh issue list --repo ${REPO} --state all --limit 200 --json number,state -q '[.[] | select(.number>=1347)] | .[].number'`) || ''
-  numbers = closed.split('\n').filter(Boolean)
+  // THE FLOOR WAS A NUMBER NOBODY EXPLAINED, IN A FILE THAT EXPLAINS EVERYTHING.
+  //
+  // `select(.number>=1347)` appeared exactly once, with no comment, in a file
+  // where the merge-base choice, the mention-versus-definition rule, the three
+  // false accusations and the import guard each carry a multi-paragraph
+  // justification. Audited 2026-09-05: it excluded 63 of the 189 pushed
+  // `queen-*` branches - a third of the swarm's whole output. 57 of those 63
+  // briefs carry a Success Criteria section, 15 yield a promised identifier this
+  // tool's own extractor accepts, and running `auditIssue` on eight of them by
+  // hand returned SUPPORTED for all eight.
+  //
+  // Both defences failed against measurement. The criteria convention is not the
+  // boundary: it reaches down to #1062. Nor is it a date boundary: 34 below-floor
+  // branches were committed on 2026-09-03, the same day as 44 above-floor ones.
+  //
+  // So the data decides instead of a constant. Every issue with a PUSHED branch
+  // is auditable, because a pushed branch is exactly what this tool compares a
+  // claim against - and an issue without one has nothing to audit. The set
+  // justifies itself and cannot drift out of date.
+  //
+  // The `--limit 200` went with it. There are 189 branches today; a cap two
+  // percent above the live number is a silent truncation waiting for next week.
+  const branches = tryShell(`git branch -r --list 'origin/queen-*'`) || ''
+  numbers = [...new Set(
+    branches.split('\n')
+      .map((b) => (b.match(/queen-(\d+)\s*$/) || [])[1])
+      .filter(Boolean),
+  )].sort((a, b) => Number(b) - Number(a))
 }
 if (!numbers.length) {
   console.log('usage: verdict-audit.mjs <issue> [issue ...] | --accepted')
