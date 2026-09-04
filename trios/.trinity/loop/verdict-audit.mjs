@@ -30,6 +30,10 @@
 //   node verdict-audit.mjs --accepted        # every issue with an accept verdict
 
 import { execSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 // IMPORT-SAFE. This module ran its production query and called process.exit at
 // import time, so importing it hit the live database and killed the importer -
@@ -39,6 +43,7 @@ import { execSync } from 'node:child_process'
 const isMain = process.argv[1] && process.argv[1].endsWith('/verdict-audit.mjs')
 
 
+const DIR = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = process.env.TRIOS_ROOT || '/Users/playra/BrowserOS'
 const REPO = process.env.TRIOS_ISSUE_REPO || 'gHashTag/trios'
 
@@ -87,12 +92,42 @@ export function sectionOf(body, heading) {
   return (end < 0 ? rest : rest.slice(0, end)).join('\n')
 }
 
-/** The criteria of a brief: the bullets and numbered items under the heading. */
+/**
+ * The criteria of a brief: the bullets and numbered items under the heading,
+ * each one JOINED WITH ITS CONTINUATION LINES.
+ *
+ * A criterion is a sentence, and a sentence in a markdown bullet wraps. Reading
+ * only the first physical line loses whatever came after the wrap - which for
+ * #1396 and #1394 is the entire promise, because both open with a bolded label
+ * ("**SC-1 (new identifier, absent today).**") and put the identifier on the
+ * line below. Both audited as "states nothing checkable" while stating it
+ * plainly, one line further down.
+ */
 export function criteriaOf(body) {
-  return sectionOf(body, 'Success Criteria')
-    .split('\n')
-    .filter((l) => /^\s*(?:[-*]|\d+\.)\s/.test(l))
+  const out = []
+  for (const line of sectionOf(body, 'Success Criteria').split('\n')) {
+    if (/^\s*(?:[-*]|\d+\.)\s/.test(line)) { out.push(line); continue }
+    // A continuation is indented, non-empty, and not a bullet of its own.
+    if (out.length && /^\s+\S/.test(line)) out[out.length - 1] += ' ' + line.trim()
+  }
+  return out
 }
+
+/**
+ * Words that are backticked in a criterion and are not a promise.
+ *
+ * The extractor once harvested `node_modules` from a brief and accused a bee of
+ * failing to define it. The same shape came back the moment the absence
+ * vocabulary widened: #1399 reads "exists and is exported from a new file", and
+ * `export` came out as a promised identifier. A keyword is not something anyone
+ * undertakes to write.
+ */
+export const NOT_IDENTIFIERS = new Set([
+  'export', 'exports', 'import', 'default', 'function', 'const', 'let', 'var',
+  'class', 'interface', 'type', 'enum', 'return', 'async', 'await', 'true',
+  'false', 'null', 'undefined', 'string', 'number', 'boolean', 'object',
+  'node_modules', 'package', 'json', 'true0', 'main', 'origin',
+])
 
 export function promisedIdentifiers(body) {
   const out = new Set()
@@ -104,8 +139,18 @@ export function promisedIdentifiers(body) {
     // defining them. A criterion in these briefs is a bullet or a numbered
     // item; a paragraph is background.
     if (!/^\s*(?:[-*]|\d+\.)\s/.test(line)) continue
-    if (!/appears (nowhere|anywhere)|does not (exist|appear)|no such identifier/i.test(line)) continue
-    for (const m of line.matchAll(/`([A-Za-z_][A-Za-z0-9_]{2,})`/g)) out.add(m[1])
+    // THE ABSENCE PHRASE HAS MORE THAN ONE SPELLING, and the tool knew one.
+    //
+    // Sampled the unchecked briefs on 2026-09-05. They are not vague. #1399
+    // says "Verified absent today", #1396 says "(new identifier, absent
+    // today)", #1394 says "The tool defines a constant `X`" - every one of them
+    // the same promise as "appears nowhere in the tree today", written by a
+    // different hand. A vocabulary of one phrase is not a rule about briefs, it
+    // is a rule about the phrase.
+    if (!/appears (nowhere|anywhere)|does not (exist|appear)|no such identifier|(?:verified |confirmed )?absent(?: today| from the tree)?|not present (?:today|in the tree)|absent today/i.test(line)) continue
+    for (const m of line.matchAll(/`([A-Za-z_][A-Za-z0-9_]{2,})`/g)) {
+      if (!NOT_IDENTIFIERS.has(m[1]) && !NOT_IDENTIFIERS.has(m[1].toLowerCase())) out.add(m[1])
+    }
   }
   return [...out]
 }
@@ -134,6 +179,29 @@ export function promisedIdentifiers(body) {
  * CI and not for an auditor that must stay read-only. It counts as unchecked
  * rather than as passed.
  */
+
+/**
+ * WHEN a criterion is supposed to be true, which is not always "after".
+ *
+ * These briefs are written test-first, so many of them RECORD the red state as
+ * evidence that the defect is real: "`grep -c '[^ -~]' <file>` prints 13
+ * today", "the pre-edit run stays red, and that red result is the finding, not
+ * a failure". That is a BASELINE, not a target.
+ *
+ * Read as a target it inverts the audit completely. #1390's baseline was 13 at
+ * the fork point and 12 on the branch - the bee had removed one - and the audit
+ * called it a REGRESSION for no longer printing 13. The bee did the work and
+ * was convicted for it.
+ *
+ * So a criterion carrying a before-marker is checked at the FORK POINT and
+ * never counted against the branch.
+ */
+export function whenOf(line) {
+  return /\btoday\b|\bcurrently\b|before (?:the |any )?edit|pre-edit|before writing|on the current tree|as it stands|stays red|at the fork|is true now/i.test(line)
+    ? 'before'
+    : 'after'
+}
+
 export function promisedCommands(body) {
   const out = []
   for (const line of criteriaOf(body)) {
@@ -146,7 +214,7 @@ export function promisedCommands(body) {
     // pipeline this cannot reproduce read-only and is deliberately not matched.
     const GREP = "`(?:[A-Z_]+=\\S+\\s+)*grep\\s+(-[a-zA-Z]*c[a-zA-Z]*)\\s+(['\"])(.+?)\\2\\s+([^\\s`]+)`"
     const g = line.match(new RegExp(GREP + "[^.]*?at least\\s+`?(\\d+)`?", 'i'))
-    if (g) { out.push({ kind: 'grep', dialect: dialectOf(g[1]), pattern: g[3], path: g[4], atLeast: Number(g[5]), line }); continue }
+    if (g) { out.push({ kind: 'grep', dialect: dialectOf(g[1]), pattern: g[3], path: g[4], atLeast: Number(g[5]), when: whenOf(line), line }); continue }
 
     // The same command with a count and a QUALIFIER AFTER IT.
     //
@@ -161,21 +229,21 @@ export function promisedCommands(body) {
       const bound = /more|greater|higher/.test(qualifier) ? { atLeast: n }
         : /fewer|less/.test(qualifier) ? { atMost: n }
           : { exactly: n }
-      out.push({ kind: 'grep', dialect: dialectOf(x[1]), pattern: x[3], path: x[4], ...bound, line })
+      out.push({ kind: 'grep', dialect: dialectOf(x[1]), pattern: x[3], path: x[4], ...bound, when: whenOf(line), line })
       continue
     }
 
     // `test -f path` exits 0
     const f = line.match(/`test\s+-f\s+([^\s`]+)`[^.]*?exits\s+`?0`?/i)
-    if (f) { out.push({ kind: 'exists', path: f[1], line }); continue }
+    if (f) { out.push({ kind: 'exists', path: f[1], when: whenOf(line), line }); continue }
 
     // `path` exists and contains at least N non-empty lines
     const c = line.match(/`([^\s`]*\/[^\s`]+)`\s+exists[^.]*?at least\s+`?(\d+)`?\s+non-empty lines/i)
-    if (c) { out.push({ kind: 'lines', path: c[1], atLeast: Number(c[2]), line }); continue }
+    if (c) { out.push({ kind: 'lines', path: c[1], atLeast: Number(c[2]), when: whenOf(line), line }); continue }
 
     // `path` exists (plain)
     const e = line.match(/`([^\s`]*\/[^\s`]+)`\s+exists\b/i)
-    if (e) { out.push({ kind: 'exists', path: e[1], line }); continue }
+    if (e) { out.push({ kind: 'exists', path: e[1], when: whenOf(line), line }); continue }
   }
   return out
 }
@@ -326,12 +394,110 @@ export function boundaryPathsOf(body) {
   return paths
 }
 
-export function auditIssue(number) {
+
+// ------------------------------------------------------------------- the cache
+
+// WHY THE AUDIT REMEMBERS, AND EXACTLY WHAT IT REMEMBERS.
+//
+// Measured 2026-09-05: 0.92 seconds per branch, 207 branches, so a full pass is
+// about three minutes - against a per-step cap of five in the heal chain. It
+// fits today. It will not fit at four hundred branches, and the way it will
+// stop fitting is the way steps in this chain always stop: killed mid-way,
+// reported as "timed out part-way", with half an answer that looks like a whole
+// one.
+//
+// The dominant cost is `gh issue view`, not git, so the cache has to spare the
+// network call - which means it cannot key on the issue body, because reading
+// the body IS the expensive part. It keys on the branch tip and the fork point.
+//
+// THE TRADE, STATED PLAINLY: a brief edited while its branch stands still is
+// served from cache and not re-read. That is a real hole, and `--fresh` is the
+// way through it. It is the right trade only because briefs are written once
+// and branches move constantly; if that ever stops being true this is wrong.
+const CACHE = path.join(DIR, 'state', 'verdict-audit-cache.json')
+
+export function loadCache() {
+  try { return JSON.parse(fs.readFileSync(CACHE, 'utf8')) } catch { return {} }
+}
+
+export function saveCache(c) {
+  try {
+    fs.mkdirSync(path.dirname(CACHE), { recursive: true })
+    fs.writeFileSync(CACHE, JSON.stringify(c))
+  } catch { /* a cache that cannot be written is a slow audit, not a wrong one */ }
+}
+
+/**
+ * THE AUDITOR'S OWN VERSION IS PART OF THE KEY.
+ *
+ * The first cache keyed on the branch tip and the fork point only. Then the
+ * absence vocabulary widened, a fresh pass found 6 unsupported claims where
+ * there had been 2 - and the very next cached pass served the old 2 back,
+ * confidently, from verdicts a different program had reached.
+ *
+ * That is this round's whole lesson wearing a new hat: a measure that answers
+ * is not a measure that is right. So the key carries a digest of this file. Any
+ * edit to the rules invalidates every verdict reached under the old ones, with
+ * no discipline required from whoever makes the edit - which is the only kind
+ * of invalidation that survives being forgotten.
+ */
+let SELF_DIGEST = null
+export function selfDigest() {
+  if (SELF_DIGEST) return SELF_DIGEST
+  try {
+    const src = fs.readFileSync(fileURLToPath(import.meta.url), 'utf8')
+    SELF_DIGEST = createHash('sha256').update(src).digest('hex').slice(0, 12)
+  } catch {
+    // Unreadable source means an unknown ruleset, and an unknown ruleset must
+    // never match a remembered one.
+    SELF_DIGEST = `unknown-${Date.now()}`
+  }
+  return SELF_DIGEST
+}
+
+/** The key that decides whether a remembered verdict is still about this work. */
+export function cacheKey(head, base, digest = selfDigest()) {
+  return `${head || '-'}:${base || '-'}:${digest}`
+}
+
+
+/**
+ * Is this identifier anywhere in the tree at this ref?
+ *
+ * WHY THIS REPLACED A PATTERN THAT GUESSED AT DEFINITION SYNTAX.
+ *
+ * The old check scanned the added lines of the diff for a declaration shape.
+ * It produced false accusations in every round it survived - first three
+ * (`onReconnected`, a describe title, an identifier nobody promised), then
+ * three more on 2026-09-05:
+ *
+ *   #1389  `connectionFailed`             a Swift enum CASE
+ *   #1380  `pressCombo`, `dispatchDrag`   methods on an object literal
+ *   #1374  `isTerminalProviderError`      in a new file, reached by import
+ *
+ * Every one of them was really there, in 6 to 17 added lines. The bee did the
+ * work; the checker did not know that language's word for "define". Swift,
+ * TypeScript, markdown and shell all spell it differently and the list has no
+ * end.
+ *
+ * So stop guessing. The criterion says the identifier "appears nowhere in the
+ * tree today" - which makes ABSENCE the claim, and absence is checkable without
+ * knowing any language at all. Present on the branch and absent at the fork
+ * point is exactly the promise, measured rather than pattern-matched.
+ *
+ * The old pattern is kept, but only to STRENGTHEN a note: an identifier that
+ * also appears in a declaration-shaped line is better evidence than one that
+ * appears only in a comment. It no longer convicts anybody.
+ */
+export function inTree(ref, id, run = tryShell) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(id)) return false
+  const hit = run(`git grep -l -w -e ${id} ${ref} -- . | head -1`)
+  return Boolean(hit && hit.trim())
+}
+
+export function auditIssue(number, cache = null) {
   const branch = `origin/queen-${number}`
   const res = { number, branch, verdict: 'UNKNOWN', notes: [] }
-
-  const body = tryShell(`gh issue view ${number} --repo ${REPO} --json body -q .body`)
-  if (body === null) { res.verdict = 'NO ISSUE'; res.notes.push('issue body unreadable'); return res }
 
   const head = tryShell(`git rev-parse --verify --quiet ${branch}`)
   if (!head) {
@@ -339,6 +505,19 @@ export function auditIssue(number) {
     res.notes.push('no pushed branch - the work is not auditable from here')
     return res
   }
+
+  // The fork point is computed BEFORE the body is fetched, because it is cheap
+  // and it is half the cache key. Fetching the body first would spend the
+  // expensive call the cache exists to avoid.
+  const base = tryShell(`git merge-base origin/feat/queen-supervisor ${branch}`)
+    || tryShell('git rev-parse --verify --quiet origin/feat/queen-supervisor')
+  const key = cacheKey(head, base)
+  if (cache && cache[number] && cache[number].key === key) {
+    return { ...cache[number].result, cached: true }
+  }
+
+  const body = tryShell(`gh issue view ${number} --repo ${REPO} --json body -q .body`)
+  if (body === null) { res.verdict = 'NO ISSUE'; res.notes.push('issue body unreadable'); return res }
 
 
 // THE FORK POINT, NOT THE CURRENT TIP.
@@ -351,8 +530,6 @@ export function auditIssue(number) {
 // test file. Against the merge base: "1 file changed, 90 insertions", which is
 // what the bee actually did. A judge handed the first version would have
 // convicted an innocent worker.
-  const base = tryShell(`git merge-base origin/feat/queen-supervisor ${branch}`)
-    || tryShell('git rev-parse --verify --quiet origin/feat/queen-supervisor')
   const names = tryShell(`git diff --name-only ${base}..${branch}`) || ''
   const files = names.split('\n').filter(Boolean)
   res.files = files.length
@@ -415,18 +592,77 @@ export function auditIssue(number) {
     ]
     return patterns.some((p) => new RegExp(p, 'm').test(added))
   }
-  const missing = promised.filter((id) => !defines(id))
+  // Measured in the tree, not guessed from the diff.
+  const identifierChecks = promised.map((id) => {
+    const onBranch = inTree(branch, id)
+    const atBase = onBranch ? inTree(base, id) : false
+    return {
+      id,
+      onBranch,
+      atBase,
+      declared: defines(id),
+      transition: !onBranch ? 'unsupported' : atBase ? 'vacuous' : 'proven',
+    }
+  })
+  const missing = identifierChecks.filter((c) => !c.onBranch).map((c) => c.id)
+  const provenIds = identifierChecks.filter((c) => c.transition === 'proven')
+  const vacuousIds = identifierChecks.filter((c) => c.transition === 'vacuous')
   res.missingIdentifiers = missing
+  res.identifiers = identifierChecks
 
   // The command-criteria, run against the branch rather than read.
   const commands = promisedCommands(body)
-  const all = commands.map((c) => ({ ...c, ...runCommandCriterion(branch, c) }))
+  //
+  // FAIL_TO_PASS, which is the load-bearing idea in SWE-bench and the one thing
+  // this audit did not have. A criterion checked only AFTER the work is the
+  // PASS_TO_PASS half, and SWE-bench's own note on it is the whole argument:
+  // pass-to-pass alone can be satisfied by an EMPTY PATCH. An instance with no
+  // fail-to-pass transition is excluded from that benchmark entirely, because
+  // nothing about it demonstrates that the work did anything.
+  //
+  // So each criterion is run twice and the TRANSITION is the verdict:
+  //
+  //   fail -> pass   PROVEN       the branch caused it
+  //   pass -> pass   VACUOUS      true before the bee arrived; proves nothing
+  //   pass -> fail   REGRESSION   the branch broke what it used to satisfy
+  //   fail -> fail   UNSUPPORTED  claimed and not delivered
+  //
+  // Checked by hand first, on #1485: 3 non-ASCII lines at the fork point, 0 on
+  // the branch. That criterion has teeth. Whether the other 153 did was, until
+  // now, unknown - and "unknown" was being reported as "supported".
+  const all = commands.map((c) => {
+    // A BASELINE IS CHECKED WHERE IT CLAIMS TO BE TRUE, and nowhere else.
+    if (c.when === 'before') {
+      const at = runCommandCriterion(base, c)
+      // Its truth or falsehood is about the BRIEF's premise, never about the
+      // bee, so it is reported and never counted against the branch.
+      return { ...c, ok: true, transition: 'baseline', why: `baseline at the fork point: ${at.why}`, baselineHeld: at.ok }
+    }
+    const after = runCommandCriterion(branch, c)
+    const before = after.ok === null ? { ok: null } : runCommandCriterion(base, c)
+    const transition = after.ok === null ? 'unreadable'
+      : before.ok === null ? 'unknown-before'
+        : before.ok && after.ok ? 'vacuous'
+          : !before.ok && after.ok ? 'proven'
+            : before.ok && !after.ok ? 'regression'
+              : 'unsupported'
+    return { ...c, ...after, before: before.ok, transition }
+  })
   const ran = all.filter((r) => r.ok !== null)
   const unreadable = all.filter((r) => r.ok === null)
   const failedCommands = ran.filter((r) => !r.ok)
+  const proven = ran.filter((r) => r.transition === 'proven')
+  const baselines = ran.filter((r) => r.transition === 'baseline')
+  const brokenPremise = baselines.filter((r) => r.baselineHeld === false)
+  const vacuous = ran.filter((r) => r.transition === 'vacuous')
   res.commands = ran.length
   res.unreadable = unreadable.length
-  res.failedCommands = failedCommands.map((r) => r.why)
+  res.proven = proven.length
+  res.baselines = baselines.length
+  res.vacuous = vacuous.length
+  res.failedCommands = failedCommands.map((r) => (r.transition === 'regression'
+    ? `REGRESSION: ${r.why} - and it PASSED at the fork point`
+    : r.why))
 
   const boundary = boundaryPathsOf(body).map((p) => p.replace(/^trios\//, ''))
   const touched = files.map((f) => f.replace(/^trios\//, ''))
@@ -438,15 +674,38 @@ export function auditIssue(number) {
     if (missing.length) res.notes.push(`promised ${promised.length} new identifier(s); ${missing.length} never appear in the diff: ${missing.join(', ')}`)
     for (const why of res.failedCommands) res.notes.push(why)
   } else if (promised.length || ran.length) {
-    res.verdict = 'SUPPORTED'
+    // PROVEN outranks SUPPORTED, and the difference is the whole point. A
+    // verdict whose every criterion was already true at the fork point is
+    // reported as VACUOUS rather than quietly counted as a pass.
+    // ONE RULE FOR BOTH KINDS OF EVIDENCE.
+    //
+    // A verdict is SUPPORTED when something it claimed was false at the fork
+    // point and is true on the branch. Anything less is named for what it is:
+    // VACUOUS when every claim was already true before the bee arrived - which
+    // is not an accusation, it is the audit saying it cannot tell - and NO
+    // MECHANICAL CLAIM when nothing survives that is about the branch at all.
+    const aboutTheBranch = (ran.length - baselines.length) + promised.length
+    const anythingProven = proven.length + provenIds.length
+    res.verdict = aboutTheBranch === 0
+      ? 'NO MECHANICAL CLAIM'
+      : anythingProven === 0
+        ? 'VACUOUS CLAIM'
+        : 'SUPPORTED'
     const parts = []
-    if (promised.length) parts.push(`all ${promised.length} promised identifier(s) present in the diff`)
-    if (ran.length) parts.push(`${ran.length} command criterion(s) run against the branch and passed`)
+    if (provenIds.length) {
+      const declared = provenIds.filter((c) => c.declared).length
+      parts.push(`${provenIds.length} promised identifier(s) absent at the fork point and present on the branch` +
+        (declared ? `, ${declared} in a declaration` : ''))
+    }
+    if (vacuousIds.length) parts.push(`${vacuousIds.length} identifier(s) the brief called absent were already in the tree`)
+    if (proven.length) parts.push(`${proven.length} criterion(s) failed at the fork point and pass on the branch`)
+    if (vacuous.length) parts.push(`${vacuous.length} already true before the work`)
     res.notes.push(parts.join('; '))
   } else {
     res.verdict = 'NO MECHANICAL CLAIM'
     res.notes.push('the brief states nothing this can check without a judge')
   }
+  if (brokenPremise.length) res.notes.push(`${brokenPremise.length} baseline(s) did not hold at the fork point - the BRIEF's premise, not the bee's work`)
   if (unreadable.length) res.notes.push(`${unreadable.length} criterion(s) could not be reproduced and were not checked`)
   if (strays.length) res.notes.push(`${strays.length} file(s) outside the declared boundary`)
   return res
@@ -491,14 +750,31 @@ if (!numbers.length) {
   process.exit(1)
 }
 
+const FRESH = process.argv.includes('--fresh')
+const cache = FRESH ? {} : loadCache()
+let reused = 0
 const tally = {}
 for (const n of numbers) {
-  const r = auditIssue(n)
+  const r = auditIssue(n, cache)
+  if (r.cached) reused++
+  else {
+    const head = tryShell(`git rev-parse --verify --quiet origin/queen-${n}`)
+    const base = tryShell(`git merge-base origin/feat/queen-supervisor origin/queen-${n}`)
+      || tryShell('git rev-parse --verify --quiet origin/feat/queen-supervisor')
+    // Only a verdict about real work is worth remembering. NO ISSUE means the
+    // network or gh failed, and caching that would turn one bad minute into a
+    // permanent answer.
+    if (r.verdict !== 'NO ISSUE' && r.verdict !== 'UNKNOWN') {
+      cache[n] = { key: cacheKey(head, base), result: r }
+    }
+  }
   tally[r.verdict] = (tally[r.verdict] || 0) + 1
   const mark = { 'CLAIM UNSUPPORTED': '!!', SUPPORTED: 'ok', 'EMPTY DIFF': '!!', 'NO BRANCH': '??' }[r.verdict] || '  '
   console.log(`${mark} #${r.number}  ${r.verdict.padEnd(20)} files=${r.files ?? '-'}  ${r.notes.join('; ').slice(0, 90)}`)
 }
+if (!FRESH) saveCache(cache)
 console.log('\n' + Object.entries(tally).map(([k, v]) => `${k}: ${v}`).join('   '))
+if (reused) console.log(`${reused} of ${numbers.length} served from cache - branch tip and fork point unchanged; --fresh re-reads every brief`)
 
 // COVERAGE, which is the number that says whether this tool is worth running.
 //
@@ -506,9 +782,12 @@ console.log('\n' + Object.entries(tally).map(([k, v]) => `${k}: ${v}`).join('   
 // other two thirds as "no mechanical claim" is not measuring the swarm - it is
 // measuring its own vocabulary. Printing the fraction makes that visible
 // instead of leaving it to be inferred from two counts nobody adds up.
-const checkable = (tally.SUPPORTED || 0) + (tally['CLAIM UNSUPPORTED'] || 0)
+const checkable = (tally.SUPPORTED || 0) + (tally['CLAIM UNSUPPORTED'] || 0) + (tally['VACUOUS CLAIM'] || 0)
 const total = numbers.length
 console.log(`coverage: ${checkable}/${total} (${Math.round((100 * checkable) / total)}%) of accepted verdicts carry a claim this can check without a judge`)
+if (tally['VACUOUS CLAIM']) {
+  console.log(`${tally['VACUOUS CLAIM']} passed their own criteria at the FORK POINT too - satisfiable by an empty patch, which is why SWE-bench excludes such instances`)
+}
 if (tally['NO MECHANICAL CLAIM']) {
   console.log(`${tally['NO MECHANICAL CLAIM']} state nothing checkable - that is a property of how the BRIEF was written, not of the work`)
 }
