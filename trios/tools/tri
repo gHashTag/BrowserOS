@@ -350,6 +350,20 @@ console.log(\"parked dispatches: \"+r.rows.length+\"   paths they fence: \"+s.si
     # rings/SR-00/Queen.swift and is not a directory containing it.
     node /Users/playra/BrowserOS/trios/.trinity/loop/disjoint.mjs
     ;;
+  queue)
+    # Queue DEPTH, which is not the open count. Measured 2026-09-04: five
+    # authored issues open, four already dispatched, so the real queue was ONE
+    # while the author refused to file "at the WIP limit". Kanban limits work in
+    # progress and never the backlog.
+    node /Users/playra/BrowserOS/trios/.trinity/loop/queue.mjs
+    ;;
+  latency)
+    # Where the time actually goes, and the arrival rate four workers need to
+    # stay busy. The answer was not what I assumed for a whole iteration: review
+    # is p50 0.8s and the bee is p50 792s, so throughput is bounded by how much
+    # startable work exists, never by the reviewer.
+    node /Users/playra/BrowserOS/trios/.trinity/loop/queue.mjs --latency
+    ;;
   loop-selftest)
     # Calibrate the loop's own instruments. Each case proves the NEGATIVE first:
     # a checker never shown failing has not been tested. No network, no
@@ -570,7 +584,7 @@ tri — Trinity S³AI ops CLI
   tri lease [--release] — аренда заявки с таймером простоя, потолок повторов 2
   tri heal [--dry] — все ремонты роя одной цепочкой в верном порядке
   tri author [--file] — завести задачу из измеренного дефицита, лимит 5 открытых
-  tri loop-selftest — поверка собственных приборов цикла (57 проверок, без сети)
+  tri loop-selftest — поверка собственных приборов цикла (60 проверок, без сети)
   tri judge-packet <N ...> | --unauditable — собрать пакет для судейского прочтения
   tri needs-you [--all] — что ждёт человека и сколько уже ждёт
   tri loop-coverage — у каких инструментов цикла боевая ветка ни разу не исполнялась
@@ -583,6 +597,8 @@ tri — Trinity S³AI ops CLI
   tri unpark [--release] — снять потолок повторов, потраченный на молчание, а не на работу
   tri stale-escalations [--release] — отпустить эскалацию, чья причина больше не воспроизводится
   tri holds — что рой держит сейчас и не заявлены ли два диспатча на один файл
+  tri queue — глубина очереди (не число открытых): что ещё никто не начинал
+  tri latency — куда уходит время: ревью против работы пчелы, и сколько задач в час
 USAGE
     ;;
   # ---- queen game loop (t27.ai/#/queen) ----------------------------------

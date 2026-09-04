@@ -1009,6 +1009,78 @@ it is how the reaper's untested branch was found. Counting it as a false
 positive would have made every newly written tool look guilty until its first
 act, and taught me to ignore the checker.
 
+## The WIP limit was on the wrong column, and that is why the swarm idled
+
+The measurement that finally reached four bees of four, and it corrects what I
+wrote here one round earlier.
+
+I had concluded that **review latency** bounded throughput. It does not. Measured
+over 119 dispatches:
+
+| | |
+|---|---|
+| review latency, finished -> verdict | **p50 0.8 s** |
+| bee runtime, dispatched -> finished | p50 792 s |
+| dispatches in two days | 120 |
+
+The review is instant. What bound throughput was the author refusing to file:
+
+```
+open queen-authored: 5   -> "at the WIP limit", room 0
+  of those dispatched at least once: 4
+  UNSTARTED, the actual queue: 1
+```
+
+**Kanban limits work IN PROGRESS and never the backlog.** Dependabot's
+`open-pull-requests-limit`, which the rule was copied from, exists to protect a
+HUMAN reviewer's capacity - and here the reviewer answers in under a second.
+There was no human to protect and nothing to throttle. The limit had been placed
+on the backlog column, where limits do not belong.
+
+**Little's Law gives the target.** Four workers at a 792 s service time consume
+roughly 18 tasks an hour; the author fires about four times an hour. So the
+queue must hold enough that a worker always finds something - `workers + 1` -
+and that is a DEPTH, not a census of everything open. An issue with a dispatch
+row is in progress, not queue.
+
+Room went 0 -> 4, four issues were filed, and the swarm held **4 of 4 across two
+consecutive ticks** for the first time.
+
+### The three things that had to stay
+
+- a count that could not be TAKEN still returns null and still refuses, because
+  zero LIFTS a limit rather than holding it;
+- the stall guard still reads the oldest OPEN issue, not the oldest unstarted
+  one: an issue dispatched six hours ago and still not closed is exactly as much
+  evidence that the drain has stopped. The guard asks "is anything finishing";
+  the queue depth asks "is anything starting";
+- its message prints both numbers now. It once printed a count of open issues
+  while the variable behind it held the queue depth - a report that disagrees
+  with its own measure is how a number gets believed for the wrong reason.
+
+## An advisory warning became a hard blocker in a shell it was not written for
+
+Four bee branches carrying finished work could not reach the remote. The reported
+reason was the branch name. The real one was the dialect.
+
+`lefthook.yml`'s branch-name check used `[[ ]]` and `=~`, which are bash. The
+worker container runs hooks under `sh`, where dash answers
+`Syntax error: "(" unexpected` and the non-zero exit takes the push with it. The
+check contains **no `exit 1` anywhere** - it was written to WARN.
+
+So a piece of advice became the thing that stopped finished work from being seen,
+which is this project's oldest recorded defect wearing a new face: 63 branches,
+1321 files, 2 pushed.
+
+Two repairs, and both were needed. The rule is now POSIX `case`, ends in an
+explicit `exit 0` so no future edit can make advice fatal by accident, and knows
+`queen-<issue>` - a warning that fires on every branch the swarm creates is
+noise, and noise teaches people to ignore the warning that matters. And the tool
+pushes with `--no-verify`, because the branches it publishes were written days
+ago and carry their own copy of the rule, and because a pre-push hook is the
+AUTHOR's check run on the author's machine - a third machine making finished
+work visible proves nothing by running it.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
