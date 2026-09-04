@@ -1170,8 +1170,15 @@ check('close-done demands LANDED, not merely pushed', () => {
   // the remote" is what manufactured 169 closed issues whose code was outside
   // the base.
   const src = fs.readFileSync(path.join(DIR, 'close-done.mjs'), 'utf8')
-  if (!/merge-tree --write-tree/.test(src)) {
-    throw new Error('it must ask whether merging would change the base at all')
+  // The rule moved into land.mjs so there is exactly one of it. The demand is
+  // unchanged and is now asserted where it lives: close-done must ASK, and the
+  // answer must still include "would merging change the base at all".
+  if (!/LAND\.isLanded/.test(src)) {
+    throw new Error('it must ask the landing rule rather than close on "pushed"')
+  }
+  const land = fs.readFileSync(path.join(DIR, 'land.mjs'), 'utf8')
+  if (!/merge-tree --write-tree/.test(land)) {
+    throw new Error('the rule it asks must still ask whether merging would change the base at all')
   }
   if (!/NOT in/.test(src)) throw new Error('the refusal must say the work is not in the base')
   if (!/false statement/.test(src)) throw new Error('and why that matters')
@@ -1451,8 +1458,13 @@ check('landed knows the fourth route: patch-id equivalence', () => {
 check('an unreadable cherry answer is not evidence of landing', () => {
   const code = codeOf('land.mjs')
   const fn = code.slice(code.indexOf('export function isLanded'), code.indexOf('export function mergesCleanly'))
-  if (!/cherry === null\) return false/.test(fn)) throw new Error('unreadable is not landed')
+  // The route now falls through to closedInBase rather than returning, so the
+  // assertion is about what an unreadable answer may NOT do: it may not become
+  // a "yes" from this route.
+  if (!/cherry !== null/.test(fn)) throw new Error('an unreadable cherry answer must not be read by this route at all')
+  if (/cherry === null[\s\S]{0,40}return true/.test(fn)) throw new Error('unreadable is never landed')
   if (!/cherry\.trim\(\) !== ''/.test(fn)) throw new Error('an EMPTY answer must not read as "no unaccounted commits"')
+  if (!/closedInBase\(branch\)/.test(fn)) throw new Error('the fifth route is a different question, asked separately')
 })
 
 check('a section is read from its heading, not from the first mention of it', async () => {
@@ -1780,6 +1792,41 @@ check('the audits do not pay for the freeing steps', () => {
   if (!/REPORT_DEADLINE_MS/.test(code)) throw new Error('the reporting phase needs a budget of its own')
   if (!/reportsOnly/.test(code)) throw new Error('the line between freeing and reporting must be data, not prose')
   if (!/reportPhaseStartedAt/.test(code)) throw new Error('the report budget starts when the report phase does, not when the chain did')
+})
+
+check('a carried change is landed, and a mention of it is not', async () => {
+  const { closedInBase } = await import('./land.mjs')
+  // Every content route compares bytes. A carry is re-cut onto a fresh base and
+  // squash-merged, so it has a new tree and a new patch-id and nothing
+  // byte-shaped can connect it back. Three of the nine branches jamming the
+  // pipeline on 2026-09-05 were finished work in exactly this state.
+  const msg = (s) => () => s
+  if (!closedInBase('queen-1310', msg('feat: something\n\nCloses #1310\n'))) throw new Error('Closes is L1 of this repo and must count')
+  if (!closedInBase('queen-1310', msg('feat(queen): explain idle paid slots (#1310)\n'))) throw new Error('a squash subject records the issue')
+  // The real shape: the issue, then the pull request that merged it. Demanding
+  // (#N) at the very end of the line rejected the exact case this exists for.
+  if (!closedInBase('queen-1310', msg('feat(queen): explain idle paid slots (#1310) (#330)\n'))) {
+    throw new Error('a trailing chain of references is still a subject')
+  }
+  if (!closedInBase('queen-1308', msg('feat(queen): carry #1308 onto the supervisor base\n'))) throw new Error('a carry says so in words')
+  // ...and the mentions that must NOT count.
+  if (closedInBase('queen-1421', msg('unlike (#1421), this one does something else\n'))) {
+    throw new Error('a parenthetical mid-sentence is not a squash subject')
+  }
+  if (closedInBase('queen-1310', msg('this is unrelated to #1310 and does not close it\n'))) {
+    throw new Error('a bare mention closes nothing')
+  }
+  if (closedInBase('queen-131', msg('Closes #1310\n'))) throw new Error('#131 is not #1310')
+  if (closedInBase('not-a-queen-branch', msg('Closes #1310\n'))) throw new Error('only a queen-N branch has an issue number')
+})
+
+check('close-done and land agree about what landed, because it is one rule', () => {
+  const code = codeOf('close-done.mjs')
+  // This file carried its own copy of the tree test while land.mjs grew four
+  // more routes it never learned. Nine branches conflicted, four were finished
+  // work, and close-done went on refusing to close their issues.
+  if (!/LAND\.isLanded/.test(code)) throw new Error('the landing rule lives in land.mjs and is asked, not re-implemented')
+  if (/const landed = baseTree && mergedTree/.test(code)) throw new Error('the second copy of the rule must be gone, not merely bypassed')
 })
 
 check('the harness can fail an async check', async () => {

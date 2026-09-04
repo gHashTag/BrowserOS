@@ -30,6 +30,7 @@ import { fileURLToPath } from 'node:url'
 
 const DIR = path.dirname(fileURLToPath(import.meta.url))
 const L = await import(path.join(DIR, 'loop.mjs'))
+const LAND = await import(path.join(DIR, 'land.mjs'))
 const { shq } = L
 
 // IMPORT-SAFE. This module ran its production query and called process.exit at
@@ -130,9 +131,16 @@ for (const r of rows) {
   // change the base AT ALL? Ancestry says no for ever after a squash, and a
   // three-dot diff measures from the divergence point rather than from what the
   // base holds now. Comparing the merged tree with the base tree is route-blind.
-  const baseTree = tryShell(`git rev-parse ${BASE}^{tree}`)
-  const mergedTree = tryShell(`git merge-tree --write-tree ${BASE} ${branch}`)
-  const landed = baseTree && mergedTree && mergedTree.split('\n')[0].trim() === baseTree
+  // ONE RULE, IN ONE PLACE. This file carried its own copy of the tree test for
+  // weeks while `land.mjs` grew four more routes it never learned: ancestry, a
+  // drifted cherry-pick found by patch-id, and - the one that jammed the
+  // pipeline on 2026-09-05 - a change re-cut onto a fresh base and squash-merged
+  // under a different branch, which no comparison of bytes can see at all.
+  //
+  // Nine branches conflicted, four of them finished work. `land.mjs` learned to
+  // recognise them and this file went on refusing to close their issues, because
+  // a rule transcribed twice is two rules that agree until somebody edits one.
+  const landed = LAND.isLanded(String(branch).replace(/^origin\//, ''))
   if (!landed) {
     plan.push({ n, skip: `work is on ${r.branch || `queen-${n}`} but NOT in ${BASE} - run \`tri land --land\` first; closing now would be a false statement` })
     continue
