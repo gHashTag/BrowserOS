@@ -14,9 +14,12 @@
  * word for what the swarm IS, and `skipSummary`, counts by fixed category for
  * why the last round started nothing. The stored reasons name their issue, its
  * paths and its holders, which is what an operator needs behind the dashboard
- * and is wrong to publish - so only the category counts leave this file, and
- * the category set is closed, which keeps the projection bounded however many
- * candidates a round passed over.
+ * and is wrong to publish in full - so what leaves this file is the category
+ * count plus the bare issue number behind it, capped by SKIP_ISSUE_LIST_CAP so
+ * the projection stays bounded however many candidates a round passed over.
+ * A count nobody can act on was the defect this projection shipped with: the
+ * count said two issues lacked a boundary and could not say which two. The
+ * number alone is inert - paths, holders, titles and prose never leave.
  */
 
 import { Hono } from 'hono'
@@ -103,14 +106,41 @@ const SKIP_CATEGORIES = [
 type SkipCategory = (typeof SKIP_CATEGORIES)[number]
 
 /**
+ * How many issue numbers one `skipSummary` category may list.
+ *
+ * Named because it is a contract, not an implementation detail: the payload
+ * reports it (`lastTick.skipIssueListCap`) so a reader can tell a truncated
+ * list from a complete one, and the remainder past the cap is reported as
+ * `more` on the same entry. A literal at the call site could drift from the
+ * number the payload claims.
+ */
+export const SKIP_ISSUE_LIST_CAP = 25
+
+/**
+ * What one `skipSummary` category carries.
+ *
+ * `count` is every reason filed under the category, `issues` the bare numbers
+ * of at most SKIP_ISSUE_LIST_CAP of them in the order the round examined
+ * them, and `more` every counted entry not listed - truncated by the cap or
+ * never numbered at all. For every category `issues.length + more === count`,
+ * so a reader never has to guess which of the two a missing number is.
+ */
+interface SkipReasonSummary {
+  count: number
+  issues: number[]
+  more: number
+}
+
+/**
  * One stored skip reason, filed under a category.
  *
  * The reasons are `queend`'s sentences (queen-core/Sources/queend/main.swift)
  * and the matchers pin their stable wording, never their payloads: a reason
- * names its issue, its paths and its holders after that wording, and none of
- * it is echoed here. ` held by ` is matched first because it is the only
- * reason whose free text - file paths - could contain one of the shorter
- * markers; the fixed-template reasons cannot contain a path.
+ * names its issue, its paths and its holders after that wording, and of all
+ * of it only the leading issue number is ever echoed - paths and holders stay
+ * behind. ` held by ` is matched first because it is the only reason whose
+ * free text - file paths - could contain one of the shorter markers; the
+ * fixed-template reasons cannot contain a path.
  */
 function classifySkipReason(line: string): SkipCategory {
   if (line.includes(' held by ')) return 'fileConflict'
@@ -127,28 +157,47 @@ function classifySkipReason(line: string): SkipCategory {
 /**
  * The public aggregate of one tick's skip reasons.
  *
- * Only non-zero categories appear, in the fixed order above, so two reads of
- * the same tick serialize identically and the object never grows past the
- * closed category set. Every entry is filed exactly once - unrecognized
- * sentences under `other` rather than dropped - so the counts always sum to
- * `skippedCount`. An absent skip array summarises to `{}`: an older tick
- * stays a valid response, just with nothing to say.
+ * Every entry is filed exactly once - unrecognized sentences under `other`
+ * rather than dropped - so the counts always sum to `skippedCount`. Only
+ * non-zero categories appear, in the fixed order above, so two reads of the
+ * same tick serialize identically and the object never grows past the closed
+ * category set. An absent skip array summarises to `{}`: an older tick stays
+ * a valid response, just with nothing to say.
+ *
+ * Each category carries the issue numbers behind its count, taken from the
+ * leading `#<number>` of `queend`'s per-issue template and nothing else: the
+ * payload after the colon can hold other `#` tokens (a file conflict names
+ * its holders, `gHashTag/trios#1188`), and a holder is not the skipped issue.
+ * At most SKIP_ISSUE_LIST_CAP numbers leave per category; everything counted
+ * but not listed is `more`, which keeps `issues.length + more === count` true
+ * for every category - truncated by the cap or never numbered at all.
  */
 function summarizeSkips(
   skipped: unknown[],
-): Partial<Record<SkipCategory, number>> {
-  const counts = new Map<SkipCategory, number>()
+): Partial<Record<SkipCategory, SkipReasonSummary>> {
+  const filed = new Map<SkipCategory, { count: number; issues: number[] }>()
   for (const entry of skipped) {
     // jsonb holds whatever was put in it; a non-string reason is counted,
     // never trusted to carry meaning.
     const line = typeof entry === 'string' ? entry : String(entry)
     const category = classifySkipReason(line)
-    counts.set(category, (counts.get(category) ?? 0) + 1)
+    const bucket = filed.get(category) ?? { count: 0, issues: [] }
+    bucket.count += 1
+    const leading = line.match(/^#(\d+)/)
+    if (leading && bucket.issues.length < SKIP_ISSUE_LIST_CAP) {
+      bucket.issues.push(Number(leading[1]))
+    }
+    filed.set(category, bucket)
   }
-  const summary: Partial<Record<SkipCategory, number>> = {}
+  const summary: Partial<Record<SkipCategory, SkipReasonSummary>> = {}
   for (const category of SKIP_CATEGORIES) {
-    const count = counts.get(category)
-    if (count) summary[category] = count
+    const bucket = filed.get(category)
+    if (!bucket) continue
+    summary[category] = {
+      count: bucket.count,
+      issues: bucket.issues,
+      more: bucket.count - bucket.issues.length,
+    }
   }
   return summary
 }
@@ -163,11 +212,14 @@ function summarizeSkips(
  *
  *   working             a dispatch has not finished; the table itself vouches
  *                       for the work, so nothing else is consulted
- *   waiting_for_review  nothing running, but a finished dispatch still has no
- *                       verdict - the Queen has not judged her bee
- *   healthy_idle        nothing running, nothing owed, the scheduler enabled
- *                       and a readable tick explaining the quiet: the latest
- *                       round explicitly found no eligible candidate
+ *   waiting_for_review  nothing running, the tick did not measure an empty
+ *                       backlog, and a finished dispatch still has no verdict
+ *                       - the Queen has not judged her bee
+ *   healthy_idle        nothing running, the scheduler enabled, and either
+ *                       a readable tick that explicitly found no eligible
+ *                       candidate or one whose refusal is `nothing to choose`
+ *                       - the latest round examined the backlog and could
+ *                       start none of it
  *   unavailable         nothing running and nothing owed, but the scheduler is
  *                       disabled or no readable tick exists, so this page
  *                       cannot say WHY the swarm is quiet and refuses to dress
@@ -180,35 +232,53 @@ type SwarmState =
   | 'unavailable'
 
 /**
- * The one closed word for what the swarm is, from aggregate facts alone.
+ * The one closed word for what the swarm is.
  *
- * Nothing but the counts, the scheduler interval and the presence of a
- * readable tick decision feeds it - never a stored sentence, never a skip
- * reason. The order below is the contract, and it is the order of how
- * directly each fact speaks about the present:
+ * The facts feeding it are the counts, the scheduler interval, and the same
+ * tick decision `lastTick.refusal` quotes - so the state and the refusal are
+ * two readings of one record and cannot disagree: a tick that refused with
+ * `nothing to choose` measured the backlog empty, and no state may then name
+ * a review as the reason the swarm is quiet. The order below is the contract,
+ * and it is the order of how directly each fact speaks about the present:
  *
  *   1. `working` - an unfinished dispatch is observable now; a disabled
  *      scheduler or a missing tick says nothing against work the table
  *      itself vouches for.
- *   2. `waiting_for_review` - a finished dispatch with no verdict outranks
- *      the idle reading: a swarm that looks empty but owes a review is not
+ *   2. `healthy_idle` - the scheduler is enabled and the latest readable
+ *      decision refused with `nothing to choose`: the round examined every
+ *      candidate and could start none, so the quiet belongs to the backlog
+ *      and the tick measured it. A verdict still owed is a real debt -
+ *      `dispatches.unreviewed` keeps reporting it - but it is not why the
+ *      swarm is quiet, and naming it the cause sends an operator to review
+ *      work that unblocks nothing. That is an unmeasured cause, and this
+ *      repository has a skill about those.
+ *   3. `waiting_for_review` - nothing running, the tick has not measured the
+ *      backlog empty, and a finished dispatch with no verdict is the most
+ *      direct fact left: a swarm that looks empty but owes a review is not
  *      idle, and the backlog is what an operator must act on.
- *   3. `unavailable` - with the swarm empty and nothing owed, quiet is only
+ *   4. `unavailable` - with the swarm empty and nothing owed, quiet is only
  *      healthy if this page can say why; a disabled scheduler, an unreadable
  *      tick, or a tick that says it chose work while no dispatch is observable
  *      means nobody vouches for the present snapshot.
- *   4. `healthy_idle` - the scheduler is enabled, the table says the queue is
- *      empty, and the latest readable decision explicitly found no eligible
- *      candidate. That is health, not failure.
+ *   5. `healthy_idle` - the scheduler is enabled, the table says the queue is
+ *      empty, and the latest readable decision found no eligible candidate by
+ *      any other refusal. That is health, not failure.
  */
 function classifySwarmState(facts: {
   running: number
   unreviewed: number
   schedulerEnabled: boolean
   trustworthyTick: boolean
+  refusal: string | null
   decisionFoundNoEligibleCandidate: boolean
 }): SwarmState {
   if (facts.running > 0) return 'working'
+  if (
+    facts.schedulerEnabled &&
+    facts.trustworthyTick &&
+    facts.refusal === 'nothing to choose'
+  )
+    return 'healthy_idle'
   if (facts.unreviewed > 0) return 'waiting_for_review'
   if (
     !facts.schedulerEnabled ||
@@ -274,6 +344,11 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
       const countRow = counts.rows[0] ?? {}
       const latestRow = latest.rowCount ? latest.rows[0] : null
       const schedulerEnabled = intervalSeconds > 0
+      // Read once, quoted twice: `lastTick.refusal` and the swarmState
+      // classification must be two readings of the same tick decision, or
+      // the state could name a cause the tick never measured.
+      const refusal =
+        typeof decision?.refusal === 'string' ? decision.refusal : null
 
       return c.json({
         status: 'ok',
@@ -285,6 +360,7 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
           // quiet, so it vouches for nothing - `lastTick` still reports the
           // row itself, exactly as it always has.
           trustworthyTick: decision != null,
+          refusal,
           // There is a real window between recordTick(allowed: true) and
           // recordDispatch. Calling that empty snapshot healthy would conceal
           // a failed dispatch write. Only an explicit no-choice decision can
@@ -302,10 +378,12 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
           ? {
               decidedAt: tickRow.decided_at,
               allowed: decision?.allowed === true,
-              refusal:
-                typeof decision?.refusal === 'string' ? decision.refusal : null,
+              refusal,
               skippedCount: skipped.length,
               skipSummary: summarizeSkips(skipped),
+              // Reported, not assumed: an issues list cut by the cap is only
+              // knowably truncated because the cap travels beside it.
+              skipIssueListCap: SKIP_ISSUE_LIST_CAP,
             }
           : null,
         dispatches: {
