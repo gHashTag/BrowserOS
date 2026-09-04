@@ -39,6 +39,7 @@
 import { spawn } from 'node:child_process'
 import { Pool } from 'pg'
 import { logger } from '../../lib/logger'
+import { outstandingEscalations } from '../routes/queen-needs-you'
 import {
   committedFiles,
   dispatchBee,
@@ -1580,7 +1581,20 @@ async function report(
       [
         headline.slice(0, 200),
         lines.join('\n').slice(0, 4000),
-        escalated.length > 0,
+        // OUTSTANDING, not new. This read `escalated.length > 0` - the
+        // escalations raised in THIS round - so a round that raised none wrote
+        // `needs_you = false` while six were still waiting. Measured
+        // 2026-09-04: of the 40 most recent reports, ZERO carried the flag
+        // against six outstanding escalations. The one boolean whose whole job
+        // is to say a person is needed was false whenever the need was not
+        // brand new.
+        //
+        // The count comes from the same function `/queen/needs-you` answers
+        // with, so the flag and the page cannot drift into disagreeing about
+        // what "waiting on you" means.
+        (await outstandingEscalations(pool).catch(() =>
+          escalated.length > 0 ? 1 : 0,
+        )) > 0,
       ],
     )
     .catch(() => {
