@@ -1888,6 +1888,40 @@ check('the kind of work is read from the title, and unknown is a real bucket', a
   if (classify(undefined) !== 'other') throw new Error('a title this cannot read is other, never a guess')
 })
 
+check('a deletion is not work, and a modification still is', async () => {
+  const { holdsWork } = await import('./reap-local.mjs')
+  // Two workflow worktrees were spared as "somebody's unfinished thought" on
+  // 1983 changes each, every one a deletion, holding 4.4 GB of nothing while
+  // the laptop sat at 98% and dispatches died part-way through checkout.
+  if (holdsWork(' D a.ts\n D b.ts\n').work) throw new Error('deletions of files HEAD still has hold nothing')
+  if (holdsWork('D  a.ts\n').work) throw new Error('a staged deletion is still a deletion')
+  if (!holdsWork(' M a.ts\n').work) throw new Error('a modification is a thought')
+  if (!holdsWork('?? new.ts\n').work) throw new Error('an untracked file is work nobody else has')
+  if (!holdsWork(' D a.ts\n M b.ts\n').work) throw new Error('one modification among deletions is still work')
+  if (holdsWork('').work) throw new Error('a clean tree holds nothing')
+  const mixed = holdsWork(' D a.ts\n M b.ts\n')
+  if (mixed.deletions !== 1 || mixed.other !== 1) throw new Error('both counts are reported so the refusal can be argued with')
+})
+
+check('a deletions-only tree is restored and removed, never forced', () => {
+  const code = codeOf('reap-local.mjs')
+  if (/worktree remove[^\n]*--force/.test(code)) throw new Error('--force is not used on a worktree in this project, ever')
+  if (!/git checkout -- \./.test(code)) throw new Error('restore from HEAD is what makes the removal ordinary')
+  if (!/deletionsOnly/.test(code)) throw new Error('only a tree whose every change is a deletion may be restored this way')
+  // and the restore must be gated on the removal having refused first
+  const i = code.indexOf('git worktree remove')
+  const j = code.indexOf('git checkout -- .')
+  if (!(i > -1 && j > i)) throw new Error('try the ordinary removal before touching the tree at all')
+})
+
+check('the reaper does not promise megabytes it cannot return', () => {
+  const code = codeOf('reap-local.mjs')
+  // du walks a worktree as if it owned every byte. Three trees reported as
+  // holding 6938 MB were removed and free space moved by about 600.
+  if (!/UPPER BOUND/.test(code)) throw new Error('the du figure must be labelled as the upper bound it is')
+  if (/freeing about \$\{freed\} MB/.test(code)) throw new Error('"freeing about N MB" was a promise the tool could not keep')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
