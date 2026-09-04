@@ -188,7 +188,53 @@ export function mergesCleanly(branch) {
   // With --write-tree the first line is the tree oid; conflicted paths follow.
   const lines = out.split('\n').filter(Boolean)
   if (lines.length <= 1) return { clean: true }
-  return { clean: false, why: `${lines.length - 1} conflicting path(s): ${lines.slice(1, 4).join(', ')}` }
+  // `merge-tree --name-only` interleaves PROSE with paths: "Auto-merging X" and
+  // "CONFLICT (add/add): Merge conflict in X" are commentary about the same file
+  // the line above names. Counting them made every conflict look twice as wide
+  // as it is - "6 conflicting path(s)" for three files, which is the kind of
+  // inflated number that makes a report stop being read.
+  const paths = lines.slice(1)
+    .filter((p) => !/^(Auto-merging|CONFLICT )/.test(p))
+    .filter((p, i, a) => a.indexOf(p) === i)
+  const moved = baseMovedSince(branch, paths)
+  const since = moved
+    ? ` | the base moved on these since the fork: ${moved.commits} commit(s), ${moved.stat} - a rebase would replay OLD code over new; re-file what survives against today's base`
+    : ''
+  return { clean: false, why: `${paths.length} conflicting file(s): ${paths.slice(0, 3).join(', ')}${since}` }
+}
+
+
+/**
+ * HAS THE BASE MOVED ON PAST THIS BRANCH, or merely diverged from it?
+ *
+ * A conflict says two sides touched the same lines. It does NOT say which side
+ * is behind, and the advice that follows depends entirely on that.
+ *
+ * Measured 2026-09-05 on #1302, "expose Queen billing mode and quota authority
+ * in public research status". Rebasing it would have replayed a 205-line file
+ * over a base that had since gained `WorkerCapacityBreakdown` (#1308's landed
+ * work) and tree-load-failure handling - deleting both - and would have
+ * REINTRODUCED a non-ASCII ellipsis into a path redaction the base already does
+ * in ASCII, breaking L3 in the same stroke.
+ *
+ * That branch is not waiting for a rebase. It is superseded in part, and what
+ * survives is a small delta that belongs on today's base as new work. Telling a
+ * person "needs a rebase" would have been advice toward destroying finished
+ * code.
+ *
+ * So the report says how far the base has travelled on the conflicting files
+ * since the fork point. It is a measurement, not a verdict: the person still
+ * decides, but now with the number that decides it.
+ */
+export function baseMovedSince(branch, paths, run = sh) {
+  const fork = run(`git merge-base origin/${BASE} origin/${branch}`)
+  if (!fork || !paths.length) return null
+  const quoted = paths.map((p) => JSON.stringify(p)).join(' ')
+  const commits = run(`git rev-list --count ${fork}..origin/${BASE} -- ${quoted}`)
+  const stat = run(`git diff --shortstat ${fork}..origin/${BASE} -- ${quoted}`)
+  const n = Number(commits)
+  if (!Number.isFinite(n) || n === 0) return null
+  return { commits: n, stat: (stat || '').trim() }
 }
 
 export async function survey() {
@@ -300,7 +346,11 @@ if (isMain) {
     const m = mergesCleanly(r.branch)
     if (m.clean) { r.clean = true; batch.push(r) } else { r.clean = false; r.why = m.why; skipped.push(r) }
   }
-  for (const r of skipped) console.log(`  CONFL ${r.branch.padEnd(16)} ${r.why.slice(0, 96)}`)
+  for (const r of skipped) {
+    // The whole reason, not the first 96 characters of it. The truncation hid
+    // exactly the half that says what to DO about the conflict.
+    console.log(`  CONFL ${r.branch.padEnd(16)} ${r.why}`)
+  }
   for (const r of batch) console.log(`  land  ${r.branch.padEnd(16)} ${r.why}`)
   if (skipped.length) console.log(`  (${skipped.length} conflicting branch(es) skipped over, not counted against the batch)`)
 
