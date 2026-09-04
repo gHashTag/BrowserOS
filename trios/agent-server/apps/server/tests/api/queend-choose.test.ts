@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'bun:test'
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync } from 'node:fs'
+import {
+  containerQueendPath,
+  DOCKERFILE_PATH as DOCKERFILE,
+  productionQueendFallback,
+  QUEEN_TICK_PATH as TICK,
+  resolveQueendPath,
+} from '../__helpers__/queend-path'
 
 /**
  * The chooser, driven as the round drives it: a real `queend`, a real board.
@@ -22,16 +28,15 @@ import { join } from 'node:path'
  * it tests the thing that actually runs.
  *
  * BUILD PRECONDITION. The broad API suite intentionally does not build Swift,
- * so behavioral cases retain `skipIf`. Exact-artifact verification sets
+ * so behavioral cases retain `skipIf`. The binary is resolved by the shared
+ * helper in `tests/__helpers__/queend-path.ts` - the same resolution
+ * production uses - so pointing the environment at a real queend runs these
+ * cases on any machine that has one. Exact-artifact verification sets
  * `TRIOS_REQUIRE_QUEEND_TESTS=1`; in that mode the first test fails rather than
  * reporting a quiet green when the release binary is absent.
  */
 
-const BIN = join(
-  import.meta.dir,
-  '../../../../queen-core/.build/release/queend',
-)
-const DOCKERFILE = join(import.meta.dir, '../../../../Dockerfile')
+const BIN = resolveQueendPath()
 const present = existsSync(BIN)
 const required = process.env.TRIOS_REQUIRE_QUEEND_TESTS === '1'
 
@@ -86,10 +91,13 @@ const board = (numbers: number[], tasks: Array<ReturnType<typeof task>>) => ({
 
 describe('queend chooses the next bee', () => {
   // Runs everywhere. If the binary moves, this fails rather than letting the
-  // suite above quietly stop testing anything.
+  // suite above quietly stop testing anything. Both sides are derived - the
+  // Dockerfile's COPY destination against the fallback production returns -
+  // so neither can pass by comparing a literal against a substring of
+  // itself: an image that installs queend anywhere else, or not at all,
+  // turns this red.
   it('is where the container expects it', () => {
-    expect(readFileSync(DOCKERFILE, 'utf8')).toContain('queend')
-    expect(BIN.endsWith('/queend')).toBe(true)
+    expect(containerQueendPath(DOCKERFILE)).toBe(productionQueendFallback(TICK))
     if (required) expect(present).toBe(true)
   })
 

@@ -7,6 +7,7 @@ import {
   createQueenKanbanRoute,
   publicBoardProjection,
 } from '../../src/api/routes/queen-kanban'
+import { resolveQueendPath } from '../__helpers__/queend-path'
 
 /**
  * The board, held against the policy it claims to speak for.
@@ -53,10 +54,10 @@ import {
  * path cannot drift unnoticed, and the pure-TypeScript assertions always run.
  */
 
-const BIN = join(
-  import.meta.dir,
-  '../../../../queen-core/.build/release/queend',
-)
+// Resolved by the shared helper - the same resolution production uses - so
+// this suite drives whatever binary the operator or the container provides
+// rather than a path restated relative to this file.
+const BIN = resolveQueendPath()
 const SWIFT_POLICY = join(
   import.meta.dir,
   '../../../../../rings/SR-00/QueenDelegation.swift',
