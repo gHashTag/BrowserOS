@@ -165,7 +165,7 @@ export function useAgentConversation(
       const last = prev[prev.length - 1]
       if (!last) return prev
       // Replace, don't merge: the server's diff is authoritative for
-      // the just-completed turn — duplicate events shouldn't grow the
+      // the just-completed turn - duplicate events shouldn't grow the
       // list, and a re-attribution should overwrite an earlier one.
       return [...prev.slice(0, -1), { ...last, producedFiles: files }]
     })
@@ -249,13 +249,13 @@ export function useAgentConversation(
   // turn for this agent and reattach to it. This catches three
   // cases at once: the chat resilience flow (tab close/reopen),
   // navigation between agents, AND queue drain (the server starts a
-  // new turn from a queued message → activeTurnId flips → attach).
+  // new turn from a queued message -> activeTurnId flips -> attach).
   useEffect(() => {
     let cancelled = false
     const abortController = new AbortController()
     // Reference the dep inside the body so biome's exhaustive-deps
     // rule sees it consumed; the value is just an "any non-null
-    // active turn id" trigger — the actual id we attach to comes
+    // active turn id" trigger - the actual id we attach to comes
     // from the fresh fetchActiveHarnessTurn call below.
     void activeTurnIdDep
 
@@ -263,7 +263,7 @@ export function useAgentConversation(
       // Track whether *we* started a stream in this run. When the
       // early-return paths fire (no active turn, or a `send()` /
       // earlier resume already owns `streamAbortRef`), the finally
-      // block must NOT touch streaming/turnIdRef/lastSeqRef —
+      // block must NOT touch streaming/turnIdRef/lastSeqRef -
       // otherwise we clobber the in-flight stream's state and the
       // Stop button drops out mid-turn while events keep arriving.
       let weStartedStream = false
@@ -275,7 +275,7 @@ export function useAgentConversation(
         // Stage a placeholder turn so the streamed events have a row
         // to render into. The server now persists the kicking-off
         // prompt on the active turn, so we render it as the user
-        // bubble immediately — no empty-bubble flicker when a queued
+        // bubble immediately - no empty-bubble flicker when a queued
         // message starts running.
         setTurns((prev) => [
           ...prev,
@@ -313,7 +313,7 @@ export function useAgentConversation(
         // Resume is best-effort; transient errors fall back to the
         // user starting a new turn manually.
       } finally {
-        // Always release `streamAbortRef` if we owned it — even when
+        // Always release `streamAbortRef` if we owned it - even when
         // the effect was cancelled mid-stream (a listing poll
         // captured the next queue-drain turn id, for example). If we
         // don't, the next effect run hits `if (streamAbortRef.current)
@@ -349,7 +349,7 @@ export function useAgentConversation(
   /**
    * Send the chat request and follow the 409-active-turn redirect
    * once. Pulled out of `send` to keep its cognitive complexity in
-   * check — the retry adds a branch that biome counts heavily.
+   * check - the retry adds a branch that biome counts heavily.
    */
   const openSendStream = async (
     targetAgentId: string,
@@ -462,7 +462,7 @@ export function useAgentConversation(
       if (streamAbortRef.current === abortController) {
         streamAbortRef.current = null
       }
-      // Capture before nulling — the invalidation needs the turn id so
+      // Capture before nulling - the invalidation needs the turn id so
       // useAgentTurnFiles consumers also flush, not just the agent-wide
       // rail query.
       const finishedTurnId = turnIdRef.current
@@ -476,7 +476,7 @@ export function useAgentConversation(
 
   /**
    * Stop button. The fetch abort only detaches *this* SSE subscriber
-   * now — the underlying turn would otherwise keep running on the
+   * now - the underlying turn would otherwise keep running on the
    * server. So we explicitly cancel via the new endpoint, then unwind
    * the local stream.
    */
@@ -490,7 +490,7 @@ export function useAgentConversation(
         reason: 'user pressed stop',
       })
     } catch {
-      // Best-effort — UI already aborted.
+      // Best-effort - UI already aborted.
     }
   }
 
