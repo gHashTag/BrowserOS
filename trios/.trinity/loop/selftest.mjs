@@ -1229,6 +1229,49 @@ check('the all-clear names what is coming, not just what is fine', () => {
   if (!/AHEAD:/.test(src)) throw new Error('a leading indicator belongs inside the all-clear')
 })
 
+
+// ---------------------------------------------------------------------------
+// untested, widened: the valuable detector must be as large as the cheap one.
+
+check('the untested detector scans more than one directory', () => {
+  // A detector confined to one directory runs dry, and then the CHEAPEST
+  // detector is the only one filing. Measured 2026-09-05: apps/agent has 457 ts
+  // files and 18 tests against apps/server's 447 and 161 - the same size and a
+  // ninth of the tests. Pointing the detector only at apps/server was not a
+  // judgement about where tests matter; it was where I happened to start.
+  const code = codeOf('author.mjs')
+  if (!/AUTHOR_UNTESTED_ROOTS/.test(code)) throw new Error('the roots must be a list, and configurable')
+  if (!/apps\/agent/.test(code)) throw new Error('the largest untested area must be in range')
+})
+
+check('it refuses a module with too many exports to test honestly', () => {
+  // Widening produced "prompt-input.tsx exports 40 symbols and no test names any
+  // of them". A brief demanding all forty be exercised or excused is one no
+  // honest work can satisfy - the same defect as the typecheck criterion, this
+  // time arriving from the SIZE of the task rather than from its wording.
+  const code = codeOf('author.mjs')
+  if (!/UNTESTED_MAX_EXPORTS/.test(code)) throw new Error('a task has to be finishable')
+  if (!/exports\.length > UNTESTED_MAX_EXPORTS/.test(code)) throw new Error('the cap must actually filter')
+})
+
+check('the test goes where THAT app keeps its tests', () => {
+  // Sending an apps/agent test to apps/server/tests would put it in a suite that
+  // does not run it and a directory its imports cannot reach.
+  const code = codeOf('author.mjs')
+  if (!/startsWith\('trios\/agent-server\/apps\/server\/'\)/.test(code)) {
+    throw new Error('the path must branch on where the subject lives')
+  }
+})
+
+check('a generated file is refused by BOTH detectors', () => {
+  const code = codeOf('author.mjs')
+  const fn = code.slice(code.indexOf('export function untestedModules'))
+  const body = fn.slice(0, fn.indexOf('\n}\n'))
+  if (!/isGenerated/.test(body)) {
+    throw new Error('a test written against generated output tests the generator, and L0 forbids editing it')
+  }
+})
+
 console.log(`\n${pass} passed, ${failures.length} failed`)
 fs.rmSync(tmp, { recursive: true, force: true })
 if (failures.length) {

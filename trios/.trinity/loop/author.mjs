@@ -89,6 +89,8 @@ const THRESHOLD = Number(process.env.AUTHOR_LINE_THRESHOLD ?? 900)
 // still meaningful - a 20-line helper is not owed a suite - and it is now set by
 // what deserves a test rather than by what was easy to leave alone.
 const UNTESTED_MIN_LINES = Number(process.env.AUTHOR_UNTESTED_MIN ?? 120)
+// Above this an issue is a project, not a task. See the note at the filter.
+const UNTESTED_MAX_EXPORTS = Number(process.env.AUTHOR_UNTESTED_MAX_EXPORTS ?? 12)
 
 const sh = (c) => execSync(c, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
 const tryShell = (c) => { try { return sh(c) } catch { return null } }
@@ -305,9 +307,24 @@ touched.
 }
 
 export function untestedModules() {
-  const listed = tryShell(`git ls-tree -r --name-only ${BASE} trios/agent-server/apps/server/tests/`)
+  // WIDENED, for the same reason the L3 detector was: a detector confined to one
+  // directory runs dry, and then the cheapest detector is the only one filing.
+  //
+  // Measured 2026-09-05:
+  //
+  //   apps/server   447 ts files, 161 tests
+  //   apps/agent    457 ts files,  18 tests
+  //   apps/eval     115 ts files,  27 tests
+  //
+  // `apps/agent` is the same size as the server and has a ninth of the tests.
+  // Keeping the detector pointed only at `apps/server` was not a judgement about
+  // where tests matter; it was where I happened to start.
+  //
+  // The corpus of EXISTING tests is gathered from the whole tree, because a
+  // symbol named by a test in another app is still a symbol somebody named.
+  const listed = tryShell(`git ls-tree -r --name-only ${BASE} trios/agent-server/`)
   if (!listed) return []
-  const testFiles = listed.split('\n').filter((f) => f.endsWith('.test.ts'))
+  const testFiles = listed.split('\n').filter((f) => /\.test\.tsx?$/.test(f))
   let corpus = ''
   for (const t of testFiles) {
     const body = tryShell(`git show ${BASE}:${t}`)
@@ -318,16 +335,38 @@ export function untestedModules() {
   if (corpus.length < 10000) return []
 
   const out = []
-  const srcList = tryShell(`git ls-tree -r --name-only ${BASE} trios/agent-server/apps/server/src/`)
+  const roots = (process.env.AUTHOR_UNTESTED_ROOTS ||
+    'trios/agent-server/apps/server/src trios/agent-server/apps/agent trios/agent-server/apps/eval/src trios/agent-server/packages/shared trios/agent-server/apps/trios-mcp-bridge/src')
+    .split(/\s+/).filter(Boolean)
+  const srcList = roots.map((r) => tryShell(`git ls-tree -r --name-only ${BASE} ${r}/`) || '').join('\n')
+  const seenSrc = new Set()
   for (const rel of (srcList || '').split('\n').filter(Boolean)) {
-    if (!rel.endsWith('.ts') || rel.endsWith('.test.ts')) continue
+    if (seenSrc.has(rel)) continue
+    seenSrc.add(rel)
+    if (!/\.tsx?$/.test(rel) || /\.test\.tsx?$/.test(rel)) continue
     const text = tryShell(`git show ${BASE}:${rel}`)
     if (!text) continue
+    // The same refusal the L3 detector carries: L0 says a generated file is an
+    // artifact and is not edited, and a test written against one would be a test
+    // of the generator's output rather than of anybody's code.
+    if (isGenerated(rel, text)) continue
     const lines = text.split('\n').length
     if (lines < UNTESTED_MIN_LINES) continue
     const exports = [...text.matchAll(/export (?:async )?(?:function|const|class) ([A-Za-z_][A-Za-z0-9_]*)/g)].map((m) => m[1])
     if (!exports.length) continue
     if (exports.some((id) => new RegExp('\\b' + id + '\\b').test(corpus))) continue
+    // AN UPPER BOUND ON EXPORTS, because a task has to be finishable.
+    //
+    // Widening this detector to the whole tree immediately produced
+    // `prompt-input.tsx exports 40 symbols and no test names any of them`. A
+    // brief demanding all forty be exercised or excused is a brief no honest
+    // work can satisfy - the same defect as the typecheck criterion that had to
+    // be rewritten across twelve issues, arriving from the size of the task
+    // rather than from the wording.
+    //
+    // A module with that many exports is a barrel or a component library, not a
+    // unit. It is skipped, and the skip is visible in the report.
+    if (exports.length > UNTESTED_MAX_EXPORTS) continue
     out.push({ rel, name: rel.slice(rel.lastIndexOf('/') + 1), lines, exports })
   }
   return out.sort((a, b) => b.lines - a.lines)
@@ -428,7 +467,13 @@ const testIdent = (name) => name.replace(/\.ts$/, '').split(/[-.]/).map((p, i) =
 
 function untestedBrief(c) {
   const id = testIdent(c.name)
-  const testPath = `trios/agent-server/apps/server/tests/api/${c.name.replace(/\.ts$/, '')}.test.ts`
+  // THE TEST GOES WHERE THAT APP KEEPS ITS TESTS. Sending an apps/agent test to
+  // apps/server/tests would put it in a suite that does not run it and a
+  // directory its imports cannot reach.
+  const base = c.name.replace(/\.tsx?$/, '')
+  const testPath = c.rel.startsWith('trios/agent-server/apps/server/')
+    ? `trios/agent-server/apps/server/tests/api/${base}.test.ts`
+    : `${c.rel.replace(/\/[^/]+$/, '')}/${base}.test.ts`
   const shown = c.exports.slice(0, 6)
   return `# ${c.rel} exports ${c.exports.length === 1 ? 'one symbol' : c.exports.length + ' symbols'} and no test names any of them
 
