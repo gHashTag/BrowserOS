@@ -59,9 +59,42 @@ const SOURCES = [
   {
     label: 'deployed supervisor',
     files: () => {
+      // EVERY FILE THAT TOUCHES A CLOCK, not two named ones.
+      //
+      // This listed queen-tick.ts and QueenDelegation.swift by hand. Measured
+      // 2026-09-05: NINETEEN files under apps/server/src mention reviewed_at,
+      // finished_at, dispatched_at or updated_at. Seventeen of them were never
+      // read, and the guard reported "8 clocks, 8 on fields nothing rewrites"
+      // every single round - a clean answer about 11% of the question.
+      //
+      // Third guard found narrowed after three detectors, and hidden the same
+      // way: the number it produced was never zero.
       const out = []
-      for (const rel of ['trios/agent-server/apps/server/src/api/services/queen-tick.ts',
-                         'trios/agent-server/queen-core/Sources/QueenPolicy/QueenDelegation.swift']) {
+      const listed = (() => {
+        try {
+          return execSync(
+            `git grep -lE "reviewed_at|finished_at|dispatched_at|updated_at|created_at" ${BASE} -- ` +
+            `trios/agent-server/apps/server/src trios/agent-server/queen-core/Sources trios/rings/SR-00`,
+            { cwd: ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 },
+          ).trim().split('\n').map((l) => l.replace(/^[^:]*:/, '')).filter(Boolean)
+        } catch { return [] }
+      })()
+      // UNION, NOT REPLACEMENT - and this was a real regression before it was a
+      // comment. The widened grep looks for SQL column names, and
+      // QueenDelegation.swift carries the same decisions under Swift property
+      // names, so switching to the grep silently DROPPED a source that had been
+      // read since the guard was written: 8 measurements became 7.
+      //
+      // Widening a scope must never narrow it somewhere else. The named files
+      // stay named, and the search adds to them.
+      const NAMED = [
+        'trios/agent-server/apps/server/src/api/services/queen-tick.ts',
+        'trios/agent-server/queen-core/Sources/QueenPolicy/QueenDelegation.swift',
+      ]
+      // Dedupe: overlapping pathspecs list the same file twice, and a guard that
+      // reports one finding as two is a guard nobody can count with.
+      const rels = [...new Set([...NAMED, ...listed])]
+      for (const rel of rels) {
         try {
           out.push({ name: rel.split('/').pop(), text: execSync(`git show ${BASE}:${rel}`, { cwd: ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 }) })
         } catch { out.push({ name: rel.split('/').pop(), text: null }) }

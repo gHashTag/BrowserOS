@@ -70,11 +70,15 @@ export function selectedColumns(sql) {
   }
   pieces.push(cur)
 
+  // QUOTED IDENTIFIERS ARE IDENTIFIERS. Postgres spells a camelCase column
+  // `"messageCount"`, and this only ever matched the bare form - so
+  // `... as "messageCount"` yielded no column at all. Kept from an attempt to
+  // widen this guard past one file: the widening was reverted, this was right.
   const cols = new Set()
   for (const piece of pieces) {
-    const alias = piece.match(/\bAS\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*$/i)
+    const alias = piece.match(/\bAS\s+"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*$/i)
     if (alias) { cols.add(alias[1].toLowerCase()); continue }
-    const plain = piece.trim().match(/([a-zA-Z_][a-zA-Z0-9_]*)\s*$/)
+    const plain = piece.trim().match(/"?([a-zA-Z_][a-zA-Z0-9_]*)"?\s*$/)
     if (plain) cols.add(plain[1].toLowerCase())
   }
   return cols
