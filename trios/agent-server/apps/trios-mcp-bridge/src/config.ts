@@ -2,7 +2,7 @@
  * @license AGPL-3.0-or-later
  * Copyright 2026 TRIOS
  *
- * TRIOS MCP Bridge — Configuration
+ * TRIOS MCP Bridge - Configuration
  */
 
 export interface BridgeConfig {
@@ -22,7 +22,7 @@ export interface BridgeConfig {
   logLevel: string
   /** trios-mcp-rag binary path (default: "trios-mcp-rag") */
   triosRagCliPath: string
-  /** PostgreSQL DSN for trios-mcp-rag (default: null — uses RAG binary fallback or env) */
+  /** PostgreSQL DSN for trios-mcp-rag (default: null - uses RAG binary fallback or env) */
   databaseUrl: string | null
   /** Railway MCP server URL (default: null) */
   railwayMcpUrl: string | null
