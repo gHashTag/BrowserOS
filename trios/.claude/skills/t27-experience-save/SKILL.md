@@ -32,6 +32,9 @@ Required context (gather from t27-queen or the diff):
 2. Append a markdown summary to `.trinity/experience.md`.
 3. Write a JSON episode to `.trinity/experience/YYYY-MM-DD_hh-mm-ss_{task_id}.json`.
 4. Append `experience.saved` event to `.trinity/events/akashic-log.jsonl`.
+5. Check that the episode actually reached git: run `node trios/tools/experience-episode-gate.mjs` from the repository root (the same as `node tools/experience-episode-gate.mjs` from `trios/`). It verifies that new `.json` episodes are not swallowed by `.gitignore` and that every artifact named in `.trinity/queue/done.json` is tracked by git. If the gate lists your episode as UNTRACKED, report that as the result; do not work around it and do not edit the queue.
+
+Why the gate probes a file path and not the directory: `git check-ignore --no-index -v -- trios/.trinity/experience/` still prints a matching pattern and exits 0 after the `.gitignore` fix, because the directory itself still matches `.trinity/experience/**` even though `*.json` files inside are re-included. A directory probe answers "ignored" under both the old rule and the corrected rule, so it cannot tell them apart. The gate passes `--no-index` for the same reason: without it, tracked files in the index make `git check-ignore` answer "not ignored" while the rule still swallows new files.
 
 ## Episode Markdown Template
 
