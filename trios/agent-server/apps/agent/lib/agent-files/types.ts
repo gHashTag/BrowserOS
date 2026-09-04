@@ -9,8 +9,8 @@
  * discriminated union from `apps/server/src/api/services/openclaw/file-preview.ts`.
  *
  * The schema mirror is deliberate (vs sharing a workspace package)
- * because the server keeps the on-disk row shape — `agentDefinitionId`,
- * `sessionKey` — out of the wire payload. Dropping those columns at the
+ * because the server keeps the on-disk row shape - `agentDefinitionId`,
+ * `sessionKey` - out of the wire payload. Dropping those columns at the
  * type boundary keeps the client honest about what it can refer to.
  */
 
