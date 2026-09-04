@@ -15,7 +15,7 @@ import type { ToolRegistry } from '../../../tools/tool-registry'
 
 // True when the tool's zod input schema is a ZodObject with a `windowId`
 // field. Schema-driven so any future tool that takes a windowId
-// participates automatically — no per-tool allowlist.
+// participates automatically - no per-tool allowlist.
 function inputHasWindowIdField(tool: ToolDefinition): boolean {
   const input = tool.input
   if (!(input instanceof z.ZodObject)) return false
@@ -29,7 +29,7 @@ export function registerTools(
     observer?: ToolExecutionObserver
     // Default windowId from X-BrowserOS-Default-Window-Id. When set,
     // tool calls without an explicit args.windowId have this value
-    // injected — provided the tool's schema actually accepts one.
+    // injected - provided the tool's schema actually accepts one.
     defaultWindowId?: number
   },
 ): void {
@@ -43,7 +43,7 @@ export function registerTools(
       // supplied one via header, (b) the tool actually accepts a
       // windowId, and (c) the caller didn't explicitly set one. The
       // explicit-set check means an agent that *did* pick a windowId on
-      // purpose still wins — we only fill the gap.
+      // purpose still wins - we only fill the gap.
       if (
         ctx.defaultWindowId !== undefined &&
         acceptsWindowId &&
