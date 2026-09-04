@@ -751,6 +751,31 @@ check('the stall guard reports the same numbers it reads', () => {
   }
 })
 
+
+check('an unreadable queue is UNKNOWN, never empty', () => {
+  // The whole point of the measure is to tell the author how much room it has.
+  // A network fault reported as 0 would tell it there is room for everything.
+  const src = fs.readFileSync(path.join(DIR, 'queue.mjs'), 'utf8')
+  const fn = src.slice(src.indexOf('export function depth'), src.indexOf('export function latency'))
+  if (!/return null/.test(fn)) throw new Error('depth() must return null when it cannot tell')
+  if (/return \{ open: 0, inProgress: 0, queue: 0[^}]*\}\s*\n\s*\}/.test(fn.replace(/if \(!open\.length\)[^\n]*\n/, ''))) {
+    throw new Error('an unreachable service must not fall through to a zero queue')
+  }
+  if (!/is unknown, which is not the same as empty/.test(src)) {
+    throw new Error('the refusal must say what it does not know')
+  }
+})
+
+check('the latency report states both stages, so neither can be assumed', () => {
+  // I assumed review latency bounded throughput and wrote it into the skill for
+  // a whole iteration. It was p50 0.8 s. An assumption about which stage is slow
+  // costs one query to check.
+  const src = fs.readFileSync(path.join(DIR, 'queue.mjs'), 'utf8')
+  if (!/reviewed_at-finished_at/.test(src)) throw new Error('the review stage is not measured')
+  if (!/finished_at-dispatched_at/.test(src)) throw new Error('the worker stage is not measured')
+  if (!/Little/.test(src)) throw new Error('a depth without the rate it must sustain is a number nobody can act on')
+})
+
 console.log(`\n${pass} passed, ${failures.length} failed`)
 fs.rmSync(tmp, { recursive: true, force: true })
 if (failures.length) {
