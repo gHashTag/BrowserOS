@@ -1,11 +1,11 @@
 /**
- * Composer attachment helpers — validation, image compression, and the
+ * Composer attachment helpers - validation, image compression, and the
  * client-side payload shape sent to /agents/:id/chat.
  *
  * Image attachments travel as `data:` URLs (base64) so the gateway, which
  * runs on 127.0.0.1 over Lima virtiofs, can ingest them as standard
  * OpenAI-style content blocks. Non-image text-shaped files are read into
- * memory and travel as their extracted text body — the server inlines
+ * memory and travel as their extracted text body - the server inlines
  * them as a fenced `<attachment>` block on the user message.
  */
 
@@ -88,7 +88,7 @@ function makeId(): string {
 }
 
 /**
- * Read a `File` and produce the staged-attachment shape — validate type,
+ * Read a `File` and produce the staged-attachment shape - validate type,
  * compress if it's a large image, and pre-build the server payload.
  */
 export async function stageAttachment(
@@ -101,7 +101,7 @@ export async function stageAttachment(
       const compressed = await compressImageIfNeeded(file)
       const dataUrl = await readAsDataUrl(compressed)
       const encodedMediaType = compressed.type || mediaType
-      // Rough byte ceiling — `data:image/png;base64,...` doubles size with
+      // Rough byte ceiling - `data:image/png;base64,...` doubles size with
       // base64. Reject early so we never POST something the route will 400.
       if (dataUrl.length > MAX_IMAGE_BYTES * 2) {
         return {
