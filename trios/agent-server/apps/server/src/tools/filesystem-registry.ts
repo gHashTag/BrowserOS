@@ -19,6 +19,7 @@ import { createReadTool } from './filesystem/read'
 import type { FilesystemToolResult } from './filesystem/utils'
 import { createWriteTool } from './filesystem/write'
 import { defineToolWithCategory } from './framework'
+import type { ToolResponse } from './response'
 
 const defineFilesystemTool = defineToolWithCategory('data-modification')
 
@@ -45,6 +46,31 @@ async function runTool<TArgs extends Record<string, unknown>>(
   return result as FilesystemToolResult
 }
 
+/**
+ * The one place a FilesystemToolResult becomes a ToolResponse.
+ *
+ * ./filesystem/utils.ts turns every rejection into { text, isError: true };
+ * this helper keeps that flag instead of dropping it, so a failed call
+ * reaches the model as an error result rather than as a successful text
+ * that happens to contain an error message (issue #1367).
+ *
+ * Success output is byte-identical to what the handlers built inline
+ * before, including the image payloads filesystem_read and fs_read emit.
+ */
+function respondFilesystemResult(
+  response: ToolResponse,
+  result: FilesystemToolResult,
+): void {
+  if (result.isError) {
+    response.error(result.text)
+    return
+  }
+  response.text(result.text ?? '')
+  for (const image of result.images ?? []) {
+    response.image(image.data, image.mimeType)
+  }
+}
+
 export const filesystem_bash = defineFilesystemTool({
   name: 'filesystem_bash',
   description:
@@ -59,8 +85,7 @@ export const filesystem_bash = defineFilesystemTool({
   handler: async (args, ctx, response) => {
     const tool = createBashTool(getCwd(ctx))
     const result = await runTool(tool, args)
-    if (result.isError) response.error(result.text)
-    else response.text(result.text)
+    respondFilesystemResult(response, result)
   },
 })
 
@@ -81,7 +106,7 @@ export const filesystem_ls = defineFilesystemTool({
   handler: async (args, ctx, response) => {
     const tool = createLsTool(getCwd(ctx))
     const result = await runTool(tool, args)
-    response.text(result.text)
+    respondFilesystemResult(response, result)
   },
 })
 
@@ -104,14 +129,7 @@ export const filesystem_read = defineFilesystemTool({
   handler: async (args, ctx, response) => {
     const tool = createReadTool(getCwd(ctx))
     const result = await runTool(tool, args)
-    if (result.images?.length) {
-      response.text(result.text ?? '')
-      for (const img of result.images) {
-        response.image(img.data, img.mimeType)
-      }
-    } else {
-      response.text(result.text)
-    }
+    respondFilesystemResult(response, result)
   },
 })
 
@@ -128,7 +146,7 @@ export const filesystem_write = defineFilesystemTool({
   handler: async (args, ctx, response) => {
     const tool = createWriteTool(getCwd(ctx))
     const result = await runTool(tool, args)
-    response.text(result.text)
+    respondFilesystemResult(response, result)
   },
 })
 
@@ -146,8 +164,7 @@ export const filesystem_edit = defineFilesystemTool({
   handler: async (args, ctx, response) => {
     const tool = createEditTool(getCwd(ctx))
     const result = await runTool(tool, args)
-    if (result.isError) response.error(result.text)
-    else response.text(result.text)
+    respondFilesystemResult(response, result)
   },
 })
 
@@ -168,7 +185,7 @@ export const filesystem_find = defineFilesystemTool({
   handler: async (args, ctx, response) => {
     const tool = createFindTool(getCwd(ctx))
     const result = await runTool(tool, args)
-    response.text(result.text)
+    respondFilesystemResult(response, result)
   },
 })
 
@@ -207,7 +224,7 @@ export const filesystem_grep = defineFilesystemTool({
   handler: async (args, ctx, response) => {
     const tool = createGrepTool(getCwd(ctx))
     const result = await runTool(tool, args)
-    response.text(result.text)
+    respondFilesystemResult(response, result)
   },
 })
 
@@ -230,14 +247,7 @@ export const fs_read = defineFilesystemTool({
   handler: async (args, ctx, response) => {
     const tool = createReadTool(getCwd(ctx))
     const result = await runTool(tool, args)
-    if (result.images?.length) {
-      response.text(result.text ?? '')
-      for (const img of result.images) {
-        response.image(img.data, img.mimeType)
-      }
-    } else {
-      response.text(result.text)
-    }
+    respondFilesystemResult(response, result)
   },
 })
 
@@ -254,7 +264,7 @@ export const fs_write = defineFilesystemTool({
   handler: async (args, ctx, response) => {
     const tool = createWriteTool(getCwd(ctx))
     const result = await runTool(tool, args)
-    response.text(result.text)
+    respondFilesystemResult(response, result)
   },
 })
 
@@ -275,7 +285,7 @@ export const fs_list = defineFilesystemTool({
   handler: async (args, ctx, response) => {
     const tool = createLsTool(getCwd(ctx))
     const result = await runTool(tool, args)
-    response.text(result.text)
+    respondFilesystemResult(response, result)
   },
 })
 
@@ -293,8 +303,7 @@ export const shell_execute = defineFilesystemTool({
   handler: async (args, ctx, response) => {
     const tool = createBashTool(getCwd(ctx))
     const result = await runTool(tool, args)
-    if (result.isError) response.error(result.text)
-    else response.text(result.text)
+    respondFilesystemResult(response, result)
   },
 })
 
@@ -312,7 +321,6 @@ export const fs_edit = defineFilesystemTool({
   handler: async (args, ctx, response) => {
     const tool = createEditTool(getCwd(ctx))
     const result = await runTool(tool, args)
-    if (result.isError) response.error(result.text)
-    else response.text(result.text)
+    respondFilesystemResult(response, result)
   },
 })
