@@ -64,9 +64,31 @@ const sh = (c, opts = {}) =>
   execSync(c, { cwd: ROOT, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'], ...opts }).trim()
 const tryShell = (c, opts) => { try { return sh(c, opts) } catch { return null } }
 
-/** Strip railway's own chatter, which is not output of the command we ran. */
-const clean = (s) =>
-  s.split('\n').filter((l) => !/Using SSH|railway\.json|Migrate|Existing/.test(l)).join('\n').trim()
+/**
+ * Strip railway's own chatter, which is not output of the command we ran.
+ *
+ * ANCHORED, and never applied to a line that looks like data. The first version
+ * dropped any line CONTAINING `Migrate`, `Existing`, `Using SSH` or
+ * `railway.json` - so a single-line JSON answer carrying a review note that
+ * mentioned migration was deleted in full, and the caller reported "unparseable
+ * answer" about a query that had worked perfectly. A noise filter that can eat
+ * evidence is worse than no filter: it turns a working system into an
+ * unexplainable one.
+ *
+ * Two rules now. A line that begins with `[` or `{` is an answer and is never
+ * dropped; anything else must match the chatter from its START to count as
+ * chatter.
+ */
+export const clean = (s) =>
+  s
+    .split('\n')
+    .filter((l) => {
+      const t = l.trim()
+      if (t.startsWith('[') || t.startsWith('{')) return true
+      return !/^(Using SSH|warning: Config as Code|\s*→ Migrate|\s*Existing files keep working|.*railway\.json \/ railway\.toml)/.test(l)
+    })
+    .join('\n')
+    .trim()
 
 /**
  * Run a node snippet inside the deployed service.
