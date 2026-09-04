@@ -39,7 +39,7 @@
 //     today's tree is the finding itself, not a failure of this tool.
 //
 // Usage:  node trios/tools/shell-safety-reach-audit.mjs
-// Env:    CLADE_AUDIT_SRC — alternative copy of the audit source
+// Env:    CLADE_AUDIT_SRC - alternative copy of the audit source
 //         (relative values resolve against the current directory).
 
 import { readFileSync, readdirSync } from "node:fs";
@@ -540,7 +540,7 @@ export function shellSafetyReach(auditSrcFromEnvironment) {
 // source path is taken from the environment here so that the extraction
 // can be proved by substitution (CLADE_AUDIT_SRC).
 try {
-  shellSafetyReach(process.env.CLAUDE_AUDIT_SRC);
+  shellSafetyReach(process.env.CLADE_AUDIT_SRC);
 } catch (err) {
   console.error(`shell-safety-reach-audit: ${err.message}`);
   process.exitCode = 2;
