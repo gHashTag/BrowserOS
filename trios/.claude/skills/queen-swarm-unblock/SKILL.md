@@ -1389,6 +1389,42 @@ An **outcome treated as an exception**:
 - `git merge-tree` exits non-zero **on conflict**, which is its answer - reading
   it as a failure made every real conflict say "the merge could not be computed".
 
+## Close what LANDED, not what was pushed
+
+The root of the 169. `close-done` closed an issue when its branch existed on the
+remote - so the pipeline was **push, then lie**. It now asks the only question
+that survives a squash (would merging change the base at all?) and refuses
+otherwise, naming the command that fixes it.
+
+The chain and the fast feed both run **push -> land -> close**, each step the
+precondition of the next.
+
+### The deadlock I built in the same hour
+
+`land` took only a CLOSED issue. `close-done` was changed to close only LANDED
+work. So an issue the Queen had **accepted but not yet closed** could move in
+neither direction: land refused it for being open, close refused it for not
+having landed.
+
+Two rules, each defensible alone, that together said **never** - and the result
+would have looked exactly like a healthy quiet pipeline. Nothing errors, nothing
+warns, the counts simply stop moving.
+
+**"Closed" was only ever a proxy for "the Queen accepted this".** Ask the thing
+itself: a dispatch whose `review_state` is `accept` is accepted, whatever the
+forge says about the issue. Landable went 49 -> 68 the moment the proxy was
+dropped.
+
+> When two guards each refuse for a good reason, check what is left that can
+> still pass. A proxy is where deadlocks come from, because a proxy is true
+> *most* of the time and nobody notices the gap it leaves.
+
+### A test that pins a rule must be re-aimed when the rule is wrong
+
+One selftest case read *"it never lands an OPEN issue"* and failed the moment
+that rule was corrected - it was pinning the deadlock. Re-aim it deliberately,
+in the same change, or a test becomes an argument for keeping the bug.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
