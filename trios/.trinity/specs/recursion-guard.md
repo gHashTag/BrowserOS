@@ -6,7 +6,7 @@ priority: P0
 status: active
 claim_id: RECURSION-001
 task_id: RECURSION-001
-issue: "#T27-EPIC-001"
+issue: "T27-EPIC-001"
 ---
 
 # Spec: RecursionGuard - Prevent Recursive Self-Launch of trios
@@ -91,5 +91,5 @@ Any change to this spec or `BR-OUTPUT/RecursionGuard.swift` must pass:
 2. t27-creator implementation.
 3. t27-verifier L1-L7 verdict.
 4. `/t27-tri-pipeline seal`.
-5. Land with `Closes #T27-EPIC-001`.
+5. Land with the internal label `T27-EPIC-001` in the commit message. The label is not an issue number: GitHub closing keywords work only against numeric references, so it must never carry a leading `#` or sit next to a closing keyword; `node trios/tools/spec-issue-ref-gate.mjs` must exit 0.
 6. `/t27-experience-save`.

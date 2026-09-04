@@ -2,7 +2,7 @@
 
 Task: `MEMORY-CONTROLS-001`
 
-Issue: `#T27-EPIC-001`
+Issue: T27-EPIC-001
 
 ## Problem
 

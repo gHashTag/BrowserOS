@@ -43,7 +43,7 @@ Task: `SESSION-RECOVERY-002`
 
 ## L1-L7 law compliance
 
-- L1 TRACEABILITY: commits reference `Closes #T27-EPIC-001`.
+- L1 TRACEABILITY: commits reference the internal label `T27-EPIC-001` (never a leading `#`, never after a closing keyword; GitHub honors those only for numeric issue references).
 - L2 GENERATION: spec is SSOT; code changes reviewed by Agent V.
 - L3 PURITY: ASCII-only identifiers, English docs.
 - L4 TESTABILITY: all build/e2e/tests pass.
