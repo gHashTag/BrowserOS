@@ -386,6 +386,15 @@ console.log(\"parked dispatches: \"+r.rows.length+\"   paths they fence: \"+s.si
     # progress and never the backlog.
     node /Users/playra/BrowserOS/trios/.trinity/loop/queue.mjs
     ;;
+  mix)
+    # WHAT KIND of work the swarm is doing. Load says whether workers are busy;
+    # acceptance says whether it lands; neither says whether it was worth doing.
+    # On 2026-09-04 both looked perfect while all FORTY of the last authored
+    # issues were the same thing - replacing box-drawing characters in comments.
+    # Exits 3 when one kind is more than four fifths of the backlog.
+    shift 2>/dev/null || true
+    node /Users/playra/BrowserOS/trios/.trinity/loop/queue.mjs --mix "$@"
+    ;;
   verdicts)
     # The verdict MIX, which is the swarm's real health - load says whether
     # workers are busy, this says whether the work is landing. On 2026-09-04
@@ -643,6 +652,7 @@ tri — Trinity S³AI ops CLI
   tri verdicts [часов] — доля принятого, возвращённого и неосуждённого: здоровье, а не загрузка
   tri why [--all] — почему рой стоит: причина, улика и что с этим делать
   tri feed [--act] — только заправка: пуш, закрытие, заведение, без аудитов
+  tri mix — каким ВИДОМ работы занят рой: загрузка и приёмка этого не покажут
 USAGE
     ;;
   # ---- queen game loop (t27.ai/#/queen) ----------------------------------
