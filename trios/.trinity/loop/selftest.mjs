@@ -1614,6 +1614,93 @@ check('a BRE pattern is read as BRE, and an unreadable one is not a conviction',
   if (r.ok !== null) throw new Error('a pattern this cannot read is unchecked, never failed')
 })
 
+check('a criterion true before the work proves nothing', async () => {
+  const { runCommandCriterion } = await import('./verdict-audit.mjs')
+  // FAIL_TO_PASS. SWE-bench excludes an instance with no fail-to-pass
+  // transition because pass-to-pass alone is satisfiable by an EMPTY PATCH -
+  // and this audit had only the pass-to-pass half for its whole life.
+  const c = { kind: 'grep', dialect: 'bre', pattern: 'x', path: 'a', atLeast: 1 }
+  const already = () => 'x is here\n'
+  const before = runCommandCriterion('base', c, already)
+  const after = runCommandCriterion('branch', c, already)
+  if (!before.ok || !after.ok) throw new Error('both sides pass; this is the vacuous case')
+  // and the transition the audit derives from that pair must not read as proof
+  const transition = before.ok && after.ok ? 'vacuous' : 'proven'
+  if (transition !== 'vacuous') throw new Error('pass -> pass is vacuous, never proven')
+})
+
+check('the four transitions are distinguished', async () => {
+  const { runCommandCriterion } = await import('./verdict-audit.mjs')
+  const c = { kind: 'grep', dialect: 'bre', pattern: 'ok', path: 'a', atLeast: 1 }
+  const has = () => 'ok\n'
+  const lacks = () => 'nothing\n'
+  const t = (b, a) => {
+    const before = runCommandCriterion('base', c, b)
+    const after = runCommandCriterion('branch', c, a)
+    return before.ok && after.ok ? 'vacuous'
+      : !before.ok && after.ok ? 'proven'
+        : before.ok && !after.ok ? 'regression' : 'unsupported'
+  }
+  if (t(lacks, has) !== 'proven') throw new Error('fail -> pass is the only thing that proves the work did something')
+  if (t(has, has) !== 'vacuous') throw new Error('pass -> pass')
+  if (t(has, lacks) !== 'regression') throw new Error('pass -> fail is worse than unsupported and must be named')
+  if (t(lacks, lacks) !== 'unsupported') throw new Error('fail -> fail')
+})
+
+check('a criterion the branch cannot answer is never asked of the fork point', () => {
+  const code = codeOf('verdict-audit.mjs')
+  // Running an unreadable pattern twice produces two nulls and a wasted git
+  // call per criterion across two hundred branches.
+  if (!/after\.ok === null \? \{ ok: null \}/.test(code)) {
+    throw new Error('an unreadable criterion has no before-state worth computing')
+  }
+})
+
+check('the audit cache is keyed on the work, and never remembers a failure to read', async () => {
+  const { cacheKey } = await import('./verdict-audit.mjs')
+  // Both halves matter. The branch tip alone would serve a stale verdict after
+  // the base moved and changed the fork point the criteria are measured from.
+  if (cacheKey('aaa', 'bbb') === cacheKey('aaa', 'ccc')) throw new Error('the fork point is part of the question')
+  if (cacheKey('aaa', 'bbb') === cacheKey('zzz', 'bbb')) throw new Error('the branch tip is another part')
+  // And the rules themselves. Widening the absence vocabulary took the fresh
+  // count from 2 unsupported claims to 6, and the next cached pass served the
+  // old 2 back - verdicts a different program had reached.
+  if (cacheKey('a', 'b', 'v1') === cacheKey('a', 'b', 'v2')) {
+    throw new Error('a verdict reached under different rules is not this verdict')
+  }
+  const code = codeOf('verdict-audit.mjs')
+  if (!/verdict !== 'NO ISSUE'/.test(code)) {
+    throw new Error('NO ISSUE is a network failure; caching it turns one bad minute into a permanent answer')
+  }
+  if (!/--fresh/.test(code)) throw new Error('a cache with no way past it is a cache that will be wrong one day with no recourse')
+})
+
+check('the fork point is computed before the expensive call', () => {
+  const code = codeOf('verdict-audit.mjs')
+  const fn = code.slice(code.indexOf('export function auditIssue'))
+  const base = fn.indexOf('git merge-base')
+  const body = fn.indexOf('gh issue view')
+  if (base < 0 || body < 0) throw new Error('both calls must still be there')
+  if (base > body) throw new Error('gh issue view is the dominant cost and the cache exists to avoid it; the key must be built first')
+})
+
+check('an identifier is measured in the tree, never guessed from the diff', async () => {
+  const { inTree } = await import('./verdict-audit.mjs')
+  // Four false accusations came from guessing at definition syntax: a Swift
+  // enum case, two methods on an object literal, and a function in a new file
+  // reached by import. All four identifiers were really there.
+  const run = (cmd) => (cmd.includes('connectionFailed') ? 'trios/rings/SR-00/Transport.swift' : null)
+  if (!inTree('branch', 'connectionFailed', run)) throw new Error('a Swift enum case is in the tree like anything else')
+  if (inTree('branch', 'neverWritten', run)) throw new Error('absent is absent')
+  if (inTree('branch', 'not-an-identifier', run)) throw new Error('only an identifier may be looked up as one')
+})
+
+check('a verdict resting on nothing that changed is named vacuous, not supported', () => {
+  const code = codeOf('verdict-audit.mjs')
+  if (!/anythingProven === 0/.test(code)) throw new Error('one rule must cover identifiers and commands alike')
+  if (!/VACUOUS CLAIM/.test(code)) throw new Error('pass-to-pass with no fail-to-pass has a name')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
