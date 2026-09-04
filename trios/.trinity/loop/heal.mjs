@@ -81,6 +81,12 @@ if (!DRY) {
 // repairs a chain in the first place. So authoring is the last link, and the
 // audit sits between: work is checked before more is asked for.
 const STEPS = [
+  // The LAPTOP fills too, and for a year nothing reaped it. `git worktree add`
+  // failed mid-checkout on 2026-09-04 with "No space left on device" at 100%
+  // full, while reap.mjs reported the container volume healthy - which it was.
+  // Landing eight PRs in a night is eight 205 MB checkouts, one of them 2.4 GB
+  // with node_modules, none removed after merging.
+  { name: 'reap-local', file: 'reap-local.mjs', act: '--reap', dryArgs: '', why: 'free the disk this loop runs on' },
   { name: 'reap', file: 'reap.mjs', act: '--reap', why: 'free the volume before anything else' },
   { name: 'lease', file: 'lease.mjs', act: '--release', why: 'release idle path fences' },
   { name: 'push-work', file: 'push-work.mjs', act: '--push', why: 'make finished work visible' },
@@ -118,6 +124,9 @@ const STEPS = [
 // One line per step, taken from the step's own output rather than invented, so
 // the summary cannot claim more than the step reported.
 const SUMMARY = [
+  [/removed (\d+) of (\d+), freeing about (\d+) MB/, (m) => `${m[1]} merged worktree(s) removed, ${m[3]} MB freed`],
+  [/(\d+) worktree\(s\): 0 merged and clean/, (m) => `${m[1]} worktrees, none removable`],
+  [/(\d+) worktree\(s\): (\d+) merged and clean/, (m) => `${m[1]} worktrees, ${m[2]} merged and clean`],
   [/reclaimed ([\d.-]+) G/, (m) => `reclaimed ${m[1]} G`],
   [/below the high-water mark/, () => 'volume below the threshold, nothing reaped'],
   [/release (\d+)\s+quarantine (\d+)\s+hold (\d+)/, (m) => `released ${m[1]}, quarantined ${m[2]}, held ${m[3]}`],

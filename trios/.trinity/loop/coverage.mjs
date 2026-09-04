@@ -60,6 +60,7 @@ const ACTS = {
   'unpark.mjs': { kinds: ['unpark'], note: 'releases a retry ceiling reached without any criterion being judged' },
   'disjoint.mjs': { kinds: [], note: 'a selector: it decides which candidates can run side by side and files nothing itself' },
   'queue.mjs': { kinds: [], note: 'a measure: queue depth and where the time goes; it changes nothing' },
+  'reap-local.mjs': { kinds: ['reap-local'], note: 'frees the disk the loop itself runs on; never uses --force' },
   'clocks.mjs': { kinds: [], note: 'a guard: it reports which fields decisions are keyed on and changes nothing' },
   'fields.mjs': { kinds: [], note: 'a guard: it compares reads against selects and changes nothing' },
   'fp-check.mjs': { kinds: [], note: 'a guard: it runs the other checkers against known-good input' },

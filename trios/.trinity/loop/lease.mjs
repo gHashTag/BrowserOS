@@ -50,6 +50,25 @@ const CEILING = Number(process.env.LEASE_CEILING ?? 2)      // QueenRetryPolicy.
 const MIN_IDLE_H = Number(process.env.LEASE_MIN_IDLE_H ?? 1) // do not disturb a fresh verdict
 const SVC = 'trios-agent-server'
 
+/**
+ * The railway invocation, with the project named EXPLICITLY.
+ *
+ * `railway ssh --service X` resolves the project from whatever directory it is
+ * run in, by walking up until it finds a linked one. That works from a shell a
+ * person is sitting in and does not work from a launchd timer: measured
+ * 2026-09-04, every railway-calling step of the chain failed with
+ * `Must provide project when setting service or environment`, while the
+ * read-only steps passed - so the timer reported a mostly-healthy chain that
+ * had pushed nothing, closed nothing and released nothing for hours, and the
+ * swarm sat idle between the runs I happened to trigger by hand.
+ *
+ * Naming the project removes the dependency on where the process happens to be
+ * standing. The id is public - it is in every build URL this repository has
+ * ever printed - and carries no credential.
+ */
+export const RAILWAY = `railway ssh --project 564d9ebd-7aa8-44fe-93ec-e0b03c87158d --environment production`
+
+
 function remote(js) {
   // The payload is quoted twice - once for `bun -e`, once for `sh -c` - so a
   // newline survives as a literal backslash-n and bun rejects it as an invalid
@@ -58,7 +77,7 @@ function remote(js) {
   // comment would swallow the rest of the program.
   const oneLine = js.replace(/\s*\n\s*/g, ' ').trim()
   const script = `cd /app/apps/server && bun -e ${shq(oneLine)}`
-  const out = execSync(`railway ssh --service ${SVC} -- sh -c ${shq(script)}`, {
+  const out = execSync(`${RAILWAY} --service ${SVC} -- sh -c ${shq(script)}`, {
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 280000,
   })
   return out.split('\n').filter((l) => !/Using SSH|railway\.json|Migrate|Existing/.test(l)).join('\n').trim()

@@ -350,6 +350,15 @@ console.log(\"parked dispatches: \"+r.rows.length+\"   paths they fence: \"+s.si
     # rings/SR-00/Queen.swift and is not a directory containing it.
     node /Users/playra/BrowserOS/trios/.trinity/loop/disjoint.mjs
     ;;
+  reap-local)
+    # The LAPTOP fills too. `git worktree add` failed mid-checkout on
+    # 2026-09-04 with "No space left on device" at 100% full, while reap.mjs
+    # reported the container volume healthy - which it was. Removes only
+    # worktrees whose HEAD is already in the base AND whose tree is clean;
+    # never --force, and a dirty tree is somebody's unfinished thought.
+    shift 2>/dev/null || true
+    node /Users/playra/BrowserOS/trios/.trinity/loop/reap-local.mjs "$@"
+    ;;
   queue)
     # Queue DEPTH, which is not the open count. Measured 2026-09-04: five
     # authored issues open, four already dispatched, so the real queue was ONE
@@ -572,6 +581,8 @@ tri — Trinity S³AI ops CLI
   tri game-ship BRANCH TITLE MSGFILE BODYFILE -- PATHSPEC... — add по pathspec, commit, push, PR, squash-merge, dispatch паблишера (без watch и без prove)
   tri game-close TASK_ID "msg" — закрытие цикла: task done, аномалии --heal, closed_at, iterate, dash, release, коммит скилла (отчёт и CONTEXT.md правятся руками ДО)
   tri game-spike [--no-build] — замер движков на текущем checkout: canvas2D vs Babylon, rAF p50/p95/p99, пропуски vsync, brotli чанков (GPU через ANGLE/Metal)
+  tri game-local [--build|--stop] — «запусти локально»: vite preview собранного сайта на 127.0.0.1:4173 и открыть #/queen в браузере по умолчанию (не в панели приложения: там страница скрыта и движок стоит)
+  tri game-models [list|pull <slug>] — модели поля (public/queen/models) с размерами и лицензией; pull тянет пак Kenney по slug только после слова пользователя, печатая источник и размер
   --- continuous loop (trios) ---
   tri iter / iter-dash / iter-log [N] / iter-anchors — состояние цикла, дашборд, журнал
   tri iter-render [--work f.json] — замерить рой, обновить опоры, перерисовать дашборд
@@ -584,7 +595,7 @@ tri — Trinity S³AI ops CLI
   tri lease [--release] — аренда заявки с таймером простоя, потолок повторов 2
   tri heal [--dry] — все ремонты роя одной цепочкой в верном порядке
   tri author [--file] — завести задачу из измеренного дефицита, лимит 5 открытых
-  tri loop-selftest — поверка собственных приборов цикла (60 проверок, без сети)
+  tri loop-selftest — поверка собственных приборов цикла (68 проверок, без сети)
   tri judge-packet <N ...> | --unauditable — собрать пакет для судейского прочтения
   tri needs-you [--all] — что ждёт человека и сколько уже ждёт
   tri loop-coverage — у каких инструментов цикла боевая ветка ни разу не исполнялась
@@ -599,6 +610,7 @@ tri — Trinity S³AI ops CLI
   tri holds — что рой держит сейчас и не заявлены ли два диспатча на один файл
   tri queue — глубина очереди (не число открытых): что ещё никто не начинал
   tri latency — куда уходит время: ревью против работы пчелы, и сколько задач в час
+  tri reap-local [--reap] — убрать слитые и чистые рабочие деревья с диска ноутбука
 USAGE
     ;;
   # ---- queen game loop (t27.ai/#/queen) ----------------------------------
@@ -631,6 +643,8 @@ USAGE
     echo "$f"; sed -n "1,${2:-60}p" "$f"
     ;;
   game-wire)    shift; exec python3 "$HOME/skills/queen-game-loop/scripts/wire.py" "$@" ;;
+  game-models)  shift; exec bash "$HOME/skills/queen-game-loop/scripts/models.sh" "$@" ;;
+  game-local)   shift; exec bash "$HOME/skills/queen-game-loop/scripts/local.sh" "$@" ;;
   game-spike)   shift; exec bash "$HOME/skills/queen-game-loop/scripts/spike.sh" "$@" ;;
   game-close)   shift; exec bash "$HOME/skills/queen-game-loop/scripts/close.sh" "$@" ;;
   game-ship)    shift; exec bash "$HOME/skills/queen-game-loop/scripts/ship.sh" "$@" ;;

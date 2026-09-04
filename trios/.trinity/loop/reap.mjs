@@ -54,12 +54,31 @@ const HIGH = Number(process.env.REAP_HIGH ?? 55)   // start reaping at this % us
 const LOW = Number(process.env.REAP_LOW ?? 30)     // stop once down to this
 const KEEP_NEWEST = Number(process.env.REAP_KEEP ?? 6) // never touch the newest N
 const SVC = 'trios-agent-server'
+
+/**
+ * The railway invocation, with the project named EXPLICITLY.
+ *
+ * `railway ssh --service X` resolves the project from whatever directory it is
+ * run in, by walking up until it finds a linked one. That works from a shell a
+ * person is sitting in and does not work from a launchd timer: measured
+ * 2026-09-04, every railway-calling step of the chain failed with
+ * `Must provide project when setting service or environment`, while the
+ * read-only steps passed - so the timer reported a mostly-healthy chain that
+ * had pushed nothing, closed nothing and released nothing for hours, and the
+ * swarm sat idle between the runs I happened to trigger by hand.
+ *
+ * Naming the project removes the dependency on where the process happens to be
+ * standing. The id is public - it is in every build URL this repository has
+ * ever printed - and carries no credential.
+ */
+export const RAILWAY = `railway ssh --project 564d9ebd-7aa8-44fe-93ec-e0b03c87158d --environment production`
+
 const WT = '/workspace/BrowserOS/.worktrees'
 const GIT = 'git -c safe.directory=* -C /workspace/BrowserOS'
 
 function remote(script) {
   const out = execSync(
-    `railway ssh --service ${SVC} -- sh -c ${shq(script)}`,
+    `${RAILWAY} --service ${SVC} -- sh -c ${shq(script)}`,
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 280000 },
   )
   // railway prints connection chatter on the same stream; drop it.
