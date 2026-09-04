@@ -63,7 +63,7 @@ export class AiSdkAgent {
     private toolContext: ToolContext,
   ) {}
 
-  /** Tool names registered on this agent — used to sanitize messages during session rebuilds. */
+  /** Tool names registered on this agent - used to sanitize messages during session rebuilds. */
   get toolNames(): Set<string> {
     return this._toolNames
   }
@@ -123,7 +123,7 @@ export class AiSdkAgent {
     }
 
     // Get Klavis tools from shared background handle (no per-session connection).
-    // Only expose when user has enabled servers — matches old per-session gating.
+    // Only expose when user has enabled servers - matches old per-session gating.
     const klavisTools =
       config.klavisRef?.handle &&
       config.browserContext?.enabledMcpServers?.length
@@ -181,7 +181,7 @@ export class AiSdkAgent {
       }
     }
 
-    // Add filesystem tools — skip in chat mode (read-only) and when no workspace is selected
+    // Add filesystem tools - skip in chat mode (read-only) and when no workspace is selected
     const filesystemTools =
       !config.resolvedConfig.chatMode && config.resolvedConfig.workingDir
         ? buildFilesystemToolSet(config.resolvedConfig.workingDir)
@@ -256,7 +256,7 @@ export class AiSdkAgent {
         ),
       })
 
-    // Codex requires store=false — tell the SDK to inline content
+    // Codex requires store=false - tell the SDK to inline content
     // instead of using item_reference (which fails with store=false)
     const isChatGPTPro =
       config.resolvedConfig.provider === LLM_PROVIDERS.CHATGPT_PRO
