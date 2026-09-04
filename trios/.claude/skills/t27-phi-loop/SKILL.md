@@ -31,7 +31,7 @@ The PHI LOOP is a 9-phase development methodology for trios canon files (`BR-OUT
 ### Road B (balanced) - Fix + test + experience save
 - Standard canon development.
 - Full PHI LOOP phases 1-9.
-- Seal with `cargo run --bin clade-build` + `cargo run --bin clade-e2e`.
+- Seal with `make check` (dev build + every logic suite, from `agent-safe-build`) + `cargo run --bin clade-e2e`.
 
 ### Road B-clade (Canary) - Safe experimentation
 - Agent experiments in `.worktrees/staging` (canary branch).

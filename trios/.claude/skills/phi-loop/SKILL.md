@@ -25,7 +25,7 @@ Clade phases added for self-improving agent safety.
 
 1. **Issue** - Define problem or requirement (GitHub issue #N)
 2. **Spec** - Write agent instruction or skill spec in `.claude/`
-3. **TDD** - Define test criteria: `cargo run --bin clade-build` + e2e + UI anomaly checklist
+3. **TDD** - Define test criteria: `make check` (dev build + every logic suite, from `agent-safe-build`) + e2e + UI anomaly checklist
 4. **Code/Impl** - Implement in Swift or Rust according to spec
 5. **Gen** - Not applicable for trios (Swift/Rust is canonical source)
 6. **Seal** - Tri-cell seal (build + health + screenshot) via `/clade-seal`
@@ -43,7 +43,7 @@ Clade phases added for self-improving agent safety.
 ### Road B (balanced) - Fix + test + experience save
 - Standard ring development
 - Full PHI LOOP phases 1-9
-- Seal with `cargo run --bin clade-build` + `cargo run --bin clade-e2e`
+- Seal with `make check` (dev build + every logic suite, from `agent-safe-build`) + `cargo run --bin clade-e2e`
 
 ### Road B-clade (Canary) - Safe experimentation
 - Agent experiments in `.worktrees/staging` (canary branch)
@@ -59,7 +59,7 @@ Clade phases added for self-improving agent safety.
 
 ## trios-Specific Verification
 
-- **Build**: `cargo run --bin clade-build` must produce `trios_app` without errors
+- **Build**: `make release` must produce `trios_app` without errors. Production build on purpose — `make release` replaces `trios.app` and is only run when asked (`agent-safe-build`); routine verification uses `make check`
 - **E2E**: `cargo run --bin clade-e2e` must show server OK + app running
 - **UI**: Screenshot must pass anomaly checklist (no duplicate headers, tabs visible, glassmorphism active)
 - **A2A**: `curl -s http://127.0.0.1:9105/health` must return `{"status":"ok"}`

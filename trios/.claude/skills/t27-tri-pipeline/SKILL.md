@@ -15,10 +15,10 @@ Adapted from `/Users/playra/t27/.claude/skills/tri-pipeline.md`. Replaces t27's 
 Run the canonical build for the requested variant.
 
 ```bash
-# prod
-./build.sh
+# prod - production build on purpose: make release replaces trios.app, only when asked (agent-safe-build)
+make release
 
-# staging
+# staging - TRIOS_VARIANT stays on the same line: a bare clade-build defaults to prod
 TRIOS_VARIANT=staging cargo run --bin clade-build
 ```
 
