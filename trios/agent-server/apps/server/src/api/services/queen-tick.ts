@@ -376,14 +376,56 @@ const isoSeconds = (value: unknown): string =>
  *   escalate  -> awaitingReview: a person is needed, and the 48-hour clock runs
  *   wait/none -> awaitingReview: not judged yet, so the hold stands
  */
+/**
+ * The lease on a send-back, and why `rejected` cannot be permanent.
+ *
+ * `QueenDelegationPolicy.claimOnIssue` counts `rejected` as a LIVE claim, and
+ * says why in its own comment: "the same bee is expected to return to those
+ * files". Nothing returns. The header of this file states it plainly - a
+ * send-back verdict is recorded and the task waits - so `rejected` is a promise
+ * the system does not keep, and the issue is held for as long as it stands.
+ *
+ * Measured in production 2026-09-04: 18 of 28 open issues were skipped as
+ * `claimed`, and every one of the send-backs among them was holding ITSELF.
+ * An issue blocked by its own failed attempt can never be retried.
+ *
+ * The repair needs no new policy, because the policy already has the right
+ * state. `failed` is free in `claimOnIssue`, over the comment "A failure is the
+ * state that most obviously means 'do this again'". So a send-back that has sat
+ * past the idle floor, and still has attempts left under
+ * `QueenRetryPolicy.maximumRealAttempts`, is reported as `failed` rather than
+ * `rejected` - which is what it is: an attempt that did not land.
+ *
+ * WHAT IS DELIBERATELY NOT CHANGED.
+ *   - `escalate` and `wait` still map to `awaitingReview`. An escalation wants
+ *     a person, and a wait is re-read by the reviewer each round, so neither is
+ *     the false promise this fixes.
+ *   - The ceiling is not a new number. Past it the claim stands, and a person
+ *     decides - the same quarantine a message queue gives an item whose
+ *     delivery count is exhausted.
+ *   - `idle` defaults to 0, so every existing caller and test keeps today's
+ *     behaviour until it passes the new argument.
+ */
+export const SEND_BACK_IDLE_FLOOR_MS = 60 * 60 * 1000
+
 export function stateOfDispatch(
   finished: boolean,
   reviewState: unknown,
-): 'running' | 'accepted' | 'rejected' | 'awaitingReview' {
+  lease: { idleMs?: number; sendBacks?: number; ceiling?: number } = {},
+): 'running' | 'accepted' | 'rejected' | 'awaitingReview' | 'failed' {
   if (!finished) return 'running'
   const verdict = String(reviewState ?? '')
   if (verdict === 'accept') return 'accepted'
-  if (verdict === 'sendBack') return 'rejected'
+  if (verdict === 'sendBack') {
+    const idleMs = lease.idleMs ?? 0
+    const sendBacks = lease.sendBacks ?? 0
+    // Read from QueenRetryPolicy.maximumRealAttempts rather than restated, so
+    // there is one ceiling and not two that agree until someone edits one.
+    const ceiling = lease.ceiling ?? 2
+    if (idleMs >= SEND_BACK_IDLE_FLOOR_MS && sendBacks < ceiling)
+      return 'failed'
+    return 'rejected'
+  }
   return 'awaitingReview'
 }
 
@@ -797,8 +839,13 @@ export async function runRound(
   // is why the boundary is stored at dispatch - a task holding no paths holds
   // nothing against anyone.
   const inFlight = await pool.query(
+    // `reviewed_at` and `send_backs` are the lease's two inputs and were not
+    // selected here before. Without them the ceiling check reads 0 for every
+    // row, so `0 < 2` always holds and a send-back would be released no matter
+    // how many attempts it had already burned - the unbounded retry the ceiling
+    // exists to prevent.
     `SELECT issue, branch, owned_paths, conversation_id, dispatched_at,
-            key_index, finished_at, review_state,
+            key_index, finished_at, review_state, reviewed_at, send_backs,
             provider, model, input_tokens, output_tokens
        FROM queen_dispatch
       WHERE started = true
@@ -838,7 +885,15 @@ export async function runRound(
       title: finished
         ? 'finished by the cloud tick, waiting for a verdict'
         : 'dispatched by the cloud tick',
-      state: stateOfDispatch(finished, row.review_state),
+      state: stateOfDispatch(finished, row.review_state, {
+        // The lease clock runs from the verdict, or from the finish if no
+        // verdict was ever recorded. Dating it from dispatch would expire a
+        // long task's claim the moment its turn ended.
+        idleMs: finished
+          ? Date.now() - Date.parse(String(row.reviewed_at ?? row.finished_at))
+          : 0,
+        sendBacks: Number(row.send_backs ?? 0),
+      }),
       // The price, so the daily cap can see the work it exists to govern.
       // `estimatedCostUSD` returns nil unless BOTH provider and model are
       // present, so a record missing either contributes nothing to the sum and
