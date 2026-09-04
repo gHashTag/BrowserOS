@@ -138,10 +138,10 @@ export const gitbutler_vision_context = defineTool({
     response.text('Retrieving GitButler repository context...')
 
     // Placeholder response - in real implementation would call:
-    // 1. GitButler vision tool (screenshot UI) → get PNG → decode to files
-    // 2. GitButler branch tool → get current branch, list branches
-    // 3. GitButler changes tool → get file changes, commits
-    // 4. GitButler staging tool → get/list, stage/unstage files
+    // 1. GitButler vision tool (screenshot UI) -> get PNG -> decode to files
+    // 2. GitButler branch tool -> get current branch, list branches
+    // 3. GitButler changes tool -> get file changes, commits
+    // 4. GitButler staging tool -> get/list, stage/unstage files
 
     response.data({
       repository_info: {
