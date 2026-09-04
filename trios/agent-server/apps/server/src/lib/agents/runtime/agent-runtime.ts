@@ -21,27 +21,27 @@ import type {
 export interface AgentRuntime {
   readonly descriptor: RuntimeDescriptor
 
-  // ── Status surface (Plane B feed) ────────────────────────────────
+  // -- Status surface (Plane B feed) --------------------------------
   getStatusSnapshot(): RuntimeStatusSnapshot
   subscribe(listener: StateListener): Unsubscribe
   getCapabilities(): ReadonlyArray<RuntimeCapability>
 
-  // ── Action dispatch (Plane B control) ────────────────────────────
+  // -- Action dispatch (Plane B control) ----------------------------
   executeAction(
     action: RuntimeAction,
     options?: { onLog?: (msg: string) => void },
   ): Promise<void>
 
-  // ── ACP plane integration ────────────────────────────────────────
+  // -- ACP plane integration ----------------------------------------
   /**
    * Build the shell-command string acpx-core spawns to run `spec`
    * against this runtime. For container kinds, this is the
-   * `limactl shell <vm> -- nerdctl exec -i …` chain; for host kinds,
+   * `limactl shell <vm> -- nerdctl exec -i ...` chain; for host kinds,
    * it's `env KEY=VAL <binary> <argv...>`.
    */
   buildExecArgv(spec: ExecSpec): string
 
-  // ── Filesystem ───────────────────────────────────────────────────
+  // -- Filesystem ---------------------------------------------------
   /** Per-agent home dir on host. Both kinds expose this; container
    *  kinds also expose `toContainerPath` for in-container translation. */
   getPerAgentHomeDir(agentId: string): string
