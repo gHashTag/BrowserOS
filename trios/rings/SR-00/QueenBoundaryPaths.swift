@@ -86,13 +86,25 @@ public enum QueenBoundaryPaths {
     ///
     /// An empty boundary means nothing can be outside it - a task with no
     /// declared paths is not a task that owns everything.
+    ///
+    /// Both halves are reduced by the SAME rule before they are compared,
+    /// because both arrive in more than one spelling. Git reports a write from
+    /// the repository root - `trios/docs/x.md` - while an issue boundary is
+    /// written by a human, who may spell the same path either
+    /// repository-relative (`trios/docs/x.md`) or project-relative
+    /// (`docs/x.md`), and this issue itself (#1306) declares its boundary in
+    /// the repository-relative spelling. Reducing only the write measured one
+    /// spelling against the other and reported a bee that had committed
+    /// exactly the file it was given. `projectRelative` is the reduction both
+    /// sides go through, so a leading project component comes off each and an
+    /// interior directory named like the project stays significant on both.
     public static func strays(
         among writes: [String],
         ownedPaths: [String],
         root: String
     ) -> [String] {
         guard !ownedPaths.isEmpty else { return [] }
-        let owned = ownedPaths.map(normalize)
+        let owned = ownedPaths.map { normalize(projectRelative($0, root: root)) }
         var found: Set<String> = []
         for path in writes {
             let candidate = normalize(projectRelative(path, root: root))
