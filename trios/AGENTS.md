@@ -17,7 +17,7 @@
 | 2 | `CLAUDE.md` | AEL v2.0 + PHI LOOP + 7 Invariant Laws |
 | 3 | `AGENTS.md` | This file — agent alphabet and operational canon |
 | 4 | `.claude/agents/*.md` | Individual agent souls |
-| 5 | `.claude/skills/*.md` | Invocable skills |
+| 5 | `.claude/skills/*/SKILL.md` | Invocable skills |
 
 ---
 
@@ -34,9 +34,9 @@ Each agent is bound to a letter/register, has a domain, and lives in `.claude/ag
 | **E** | Heh הֵ | Experience / Mistakes / Episodes | Окно | `agent-E.md` |
 | **F** | Vav וָ | Formal Conformance / e2e | Гвоздь | `agent-F.md` |
 | **G** | Gimel (вар.) | Graph / Dependency tracking | Возврат | `agent-G.md` |
-| **H** | Heth חֵ | Human Interface / SwiftUI arch | Забор | `agent-H.md` |
+| **H** | Heth חֵ | Human Interface / SwiftUI arch | Забор | *(no soul file)* |
 | **I** | Yod יֹ | ISA / Swift internals | Рука | `agent-I.md` |
-| **J** | Yod‑extended | Jobs / Task Routing | Рука с захватом | `agent-J.md` |
+| **J** | Yod‑extended | Jobs / Task Routing | Рука с захватом | *(no soul file)* |
 | **K** | Kaph כַּ | Kernel / macOS system layer | Ладонь | `agent-K.md` |
 | **L** | Lamed לָ | Language / Swift syntax vNEXT | Посох | `agent-L.md` |
 | **M** | Mem מֵ | Metrics / Telemetry / Perf | Вода | `agent-M.md` |
