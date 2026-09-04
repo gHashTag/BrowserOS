@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 import { formatLocalDate, ROW_BAR_COUNT } from './agent-row.helpers'
 
 interface AgentSparklineProps {
-  /** 14 entries, oldest → newest. Today's bucket is the last index. */
+  /** 14 entries, oldest -> newest. Today's bucket is the last index. */
   turnsByDay: number[]
   /** Same length, same order. Failed turns counted separately. */
   failedByDay: number[]
