@@ -132,7 +132,7 @@ export class OrchestratorExecutorEvaluator implements AgentEvaluator {
     const { orchestratorConfig, executorConfig } =
       await resolveAgentConfig(agentConfig)
 
-    // Connect to Chrome via CDP — same per-worker offset used by app-manager.
+    // Connect to Chrome via CDP - same per-worker offset used by app-manager.
     const cdpPort = config.browseros.base_cdp_port + workerIndex
     const cdp = new CdpBackend({
       port: cdpPort,
@@ -224,7 +224,7 @@ export class OrchestratorExecutorEvaluator implements AgentEvaluator {
         },
       }
 
-      // Build executor factory — logs delegation events to capture
+      // Build executor factory - logs delegation events to capture
       let delegationCount = 0
       const executorFactory: ExecutorFactory = async (instruction, signal) => {
         delegationCount++
@@ -270,7 +270,7 @@ export class OrchestratorExecutorEvaluator implements AgentEvaluator {
         return result
       }
 
-      // Create orchestrator with factory (synchronous — no async init needed)
+      // Create orchestrator with factory (synchronous - no async init needed)
       const agent = OrchestratorAgent.create(orchestratorConfig, {
         executorFactory,
       })
