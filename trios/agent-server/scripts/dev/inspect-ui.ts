@@ -6,7 +6,7 @@ const REQUEST_TIMEOUT_MS = 30_000
 const EXTENSION_ID =
   process.env.BROWSEROS_EXTENSION_ID || 'bflpfmnmnokmjhmgnolecpppdbdophmk'
 
-// ─── CDP WebSocket Client ────────────────────────────────────────────
+// --- CDP WebSocket Client --------------------------------------------
 
 type CDPResponse = {
   id: number
@@ -110,7 +110,7 @@ class CDPClient {
   }
 }
 
-// ─── Target resolution ───────────────────────────────────────────────
+// --- Target resolution -----------------------------------------------
 
 type TargetInfo = {
   targetId: string
@@ -137,7 +137,7 @@ function resolveTarget(targets: TargetInfo[], query: string): TargetInfo {
   return match
 }
 
-// ─── Session helpers ─────────────────────────────────────────────────
+// --- Session helpers -------------------------------------------------
 
 async function attachSession(
   cdp: CDPClient,
@@ -170,7 +170,7 @@ async function detachSession(cdp: CDPClient, sessionId: string): Promise<void> {
   }
 }
 
-// ─── Snapshot: AX tree ───────────────────────────────────────────────
+// --- Snapshot: AX tree -----------------------------------------------
 
 const INTERACTIVE_ROLES = new Set([
   'button',
@@ -283,7 +283,7 @@ function extractProps(node: AXNode): string {
   return parts.length > 0 ? `(${parts.join(', ')})` : ''
 }
 
-// ─── Element center: 3-tier fallback ─────────────────────────────────
+// --- Element center: 3-tier fallback ---------------------------------
 
 function quadCenter(q: number[]): { x: number; y: number } {
   const x = ((q[0] ?? 0) + (q[2] ?? 0) + (q[4] ?? 0) + (q[6] ?? 0)) / 4
@@ -358,7 +358,7 @@ async function getElementCenter(
   return { x: rect.x + rect.w / 2, y: rect.y + rect.h / 2 }
 }
 
-// ─── Commands ────────────────────────────────────────────────────────
+// --- Commands --------------------------------------------------------
 
 async function cmdTargets(cdp: CDPClient): Promise<void> {
   const targets = await getTargets(cdp)
@@ -628,7 +628,7 @@ async function cmdEval(
   }
 }
 
-// ─── press_key ────────────────────────────────────────────────────────
+// --- press_key --------------------------------------------------------
 
 const KEY_MAP: Record<string, { code: string; keyCode: number | undefined }> = {
   Backspace: { code: 'Backspace', keyCode: 8 },
@@ -802,7 +802,7 @@ async function cmdPressKey(
   }
 }
 
-// ─── scroll ───────────────────────────────────────────────────────────
+// --- scroll -----------------------------------------------------------
 
 async function cmdScroll(
   cdp: CDPClient,
@@ -854,7 +854,7 @@ async function cmdScroll(
   }
 }
 
-// ─── wait_for ─────────────────────────────────────────────────────────
+// --- wait_for ---------------------------------------------------------
 
 async function cmdWaitFor(
   cdp: CDPClient,
@@ -906,7 +906,7 @@ async function cmdWaitFor(
   }
 }
 
-// ─── hover ────────────────────────────────────────────────────────────
+// --- hover ------------------------------------------------------------
 
 async function cmdHover(
   cdp: CDPClient,
@@ -948,7 +948,7 @@ async function cmdHover(
   }
 }
 
-// ─── select_option ────────────────────────────────────────────────────
+// --- select_option ----------------------------------------------------
 
 async function cmdSelectOption(
   cdp: CDPClient,
@@ -1050,7 +1050,7 @@ async function cmdOpenSidepanel(cdp: CDPClient): Promise<void> {
   }
 }
 
-// ─── Help ────────────────────────────────────────────────────────────
+// --- Help ------------------------------------------------------------
 
 function printHelp(): void {
   console.log(`Usage: bun scripts/dev/inspect-ui.ts <command> [args...]
@@ -1092,7 +1092,7 @@ Examples:
   bun scripts/dev/inspect-ui.ts open-sidepanel`)
 }
 
-// ─── Main ────────────────────────────────────────────────────────────
+// --- Main ------------------------------------------------------------
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2)
