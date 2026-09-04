@@ -1472,6 +1472,40 @@ just removed. **Each time the code was right and the test was reading prose.**
 There is a `codeOf` helper now that strips comments, and every such scan goes
 through it - the class is closed rather than fixed a fourth time.
 
+## A quota can hold a ratio; it cannot invent work
+
+The backlog was 80% comment cleanup again, a round after the quota was added.
+The quota was doing its job - the valuable detector simply had 25 findings
+against the cheap one's 111.
+
+```
+apps/server   447 ts files, 161 tests
+apps/agent    457 ts files,  18 tests
+apps/eval     115 ts files,  27 tests
+```
+
+**`apps/agent` is the same size as the server and has a ninth of the tests.**
+Pointing the untested detector only at `apps/server` was never a judgement about
+where tests matter - it was where I happened to start, and it stayed there
+because the number it produced was never zero. Widened: **25 -> 153**, now larger
+than the cheap detector, and the mix went 100/0 to 60/40.
+
+> A detector that still returns findings is not a detector that is looking
+> everywhere. Zero is the only signal that forces the question, and it never
+> comes.
+
+### And an upper bound, because a task has to be finishable
+
+Widening immediately produced *"prompt-input.tsx exports 40 symbols and no test
+names any of them"*. A brief demanding all forty be exercised or excused is one
+no honest work can satisfy - **the same defect as the typecheck criterion,
+arriving this time from the SIZE of the task rather than from its wording.**
+
+Capped at 12 exports; #1489 withdrawn with that reason. Two details that would
+have bitten later: the test now goes where *that app* keeps its tests, and
+generated files are refused here too - a test written against generated output
+tests the generator, and L0 forbids editing it.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
