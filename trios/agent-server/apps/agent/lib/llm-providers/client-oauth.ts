@@ -46,7 +46,7 @@ export async function requestDeviceCode(
 
   const res = await authFetch(auth.deviceCodeEndpoint, params, auth.contentType)
 
-  // WAF captcha detected — open the site for user to solve, then retry
+  // WAF captcha detected - open the site for user to solve, then retry
   const ct = res.headers.get('content-type') ?? ''
   if (!ct.includes('application/json')) {
     const baseUrl = new URL(auth.deviceCodeEndpoint).origin
@@ -88,7 +88,7 @@ export function startTokenPolling(
     try {
       const res = await authFetch(auth.tokenEndpoint, params, auth.contentType)
 
-      // WAF returned HTML — retry later
+      // WAF returned HTML - retry later
       const ct = res.headers.get('content-type') ?? ''
       if (!ct.includes('application/json')) {
         setTimeout(poll, (interval + safetyMargin) * 1000)
