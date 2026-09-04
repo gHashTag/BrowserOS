@@ -72,7 +72,7 @@ export interface AgentDefinitionWithActivity extends AgentDefinition {
   /** Cumulative + 7-day rolling token usage; null when no record. */
   tokens: AgentRowSnapshot['tokens']
   /**
-   * Last 14 days of completed turns, oldest → newest. Zero-filled in
+   * Last 14 days of completed turns, oldest -> newest. Zero-filled in
    * this release until the activity ledger ships in a follow-up.
    */
   turnsByDay: number[]
@@ -139,7 +139,7 @@ export interface OpenClawProvisioner {
    * openclaw-adapter agents so the chat panel sees autonomous
    * (cron / hook / channel) turns alongside user-typed turns. Without
    * this, history reads come from AcpxRuntime's local session record
-   * which only contains user-initiated turns — autonomous activity
+   * which only contains user-initiated turns - autonomous activity
    * fires correctly but stays invisible to the panel.
    */
   getAgentHistory?(agentId: string): Promise<AgentHistoryPage>
@@ -212,7 +212,7 @@ export class AgentHarnessService {
   private explicitProducedFilesStore: ProducedFilesStore | null = null
   private cachedProducedFilesStore: ProducedFilesStore | null = null
   private inFlightReconcile: Promise<void> | null = null
-  // In-memory liveness tracker. Lost on server restart (acceptable —
+  // In-memory liveness tracker. Lost on server restart (acceptable -
   // `lastUsedAt` survives via the acpx session record's `lastUsedAt`,
   // and an idle/asleep agent post-restart will read fine from the
   // record's timestamp without ever flipping to `working`).
@@ -286,8 +286,8 @@ export class AgentHarnessService {
   /**
    * Same shape as `listAgents()` but every record is enriched with the
    * current liveness state and `lastUsedAt`. Liveness is read from the
-   * in-memory activity tracker — which only knows about turns that
-   * went through this process — falling back to a timestamp-derived
+   * in-memory activity tracker - which only knows about turns that
+   * went through this process - falling back to a timestamp-derived
    * `idle`/`asleep` from the acpx session record's `lastUsedAt`.
    */
   async listAgentsWithActivity(): Promise<AgentDefinitionWithActivity[]> {
@@ -356,7 +356,7 @@ export class AgentHarnessService {
           const snapshot = await this.fetchRowSnapshot(agent)
           if (snapshot) out.set(agent.id, snapshot)
         } catch {
-          // No record yet — treat as never-used.
+          // No record yet - treat as never-used.
         }
       }),
     )
@@ -431,7 +431,7 @@ export class AgentHarnessService {
         lastError: outcome.error,
       })
     } else {
-      // Successful turn — drop the in-memory entry. Liveness will be
+      // Successful turn - drop the in-memory entry. Liveness will be
       // derived from the session record's `lastUsedAt` on next read.
       this.activity.delete(agentId)
     }
@@ -529,7 +529,7 @@ export class AgentHarnessService {
 
   private ensureGatewayReconciled(): Promise<void> {
     // Dedupe concurrent listAgents calls into a single in-flight reconcile,
-    // but never memoize the result — agents can be added to the gateway
+    // but never memoize the result - agents can be added to the gateway
     // between list calls (e.g. via the legacy /claw/agents create path or
     // out-of-band CLI), and the harness needs to pick those up on the
     // next read. Reconcile is one cheap CLI call and is idempotent.
@@ -638,8 +638,8 @@ export class AgentHarnessService {
   /**
    * Pulls every gateway-side OpenClaw agent into the harness store as a
    * harness record (idempotent, safe to call repeatedly). This lets
-   * legacy gateway-only agents — including the always-present `main`
-   * sandbox and any orphans from rolled-back dual-creates — surface
+   * legacy gateway-only agents - including the always-present `main`
+   * sandbox and any orphans from rolled-back dual-creates - surface
    * through the unified `/agents/*` API and route through the harness
    * chat path. After this runs, the rail dedup in the UI keeps a
    * single entry per agent (the harness one wins).
@@ -757,13 +757,13 @@ export class AgentHarnessService {
     return this.runtime.getHistory({ agent, sessionId: 'main' })
   }
 
-  // ── Produced files (Files rail / inline artifact card) ───────────
+  // -- Produced files (Files rail / inline artifact card) -----------
 
   /**
    * Outputs-rail data for one agent. Returns groups of files keyed
    * by the assistant turn that produced them, newest first. Empty
    * array when the agent hasn't produced anything yet, or when the
-   * adapter doesn't track outputs (claude / codex — see Phase 2
+   * adapter doesn't track outputs (claude / codex - see Phase 2
    * commit).
    */
   async listAgentFiles(
@@ -804,7 +804,7 @@ export class AgentHarnessService {
   /**
    * Build a preview payload for a single file. Returns null when the
    * file id is unknown OR the on-disk path no longer exists. The
-   * route layer maps null → 404.
+   * route layer maps null -> 404.
    */
   async previewProducedFile(fileId: string): Promise<FilePreview | null> {
     const store = this.tryGetProducedFilesStore()
@@ -856,7 +856,7 @@ export class AgentHarnessService {
    * stream is a *subscription* (replays from seq 0). Closing the stream
    * just unsubscribes; the turn keeps running until terminal or
    * cancelled. Throws `TurnAlreadyActiveError` if the agent is already
-   * mid-turn — the route layer maps that to 409.
+   * mid-turn - the route layer maps that to 409.
    */
   async startTurn(input: {
     agentId: string
@@ -878,14 +878,14 @@ export class AgentHarnessService {
     this.emitTurnLifecycle(agent, { type: 'turn_started' })
 
     // Kick off the runtime call in the background. The per-turn
-    // AbortController — NOT the HTTP request signal — is what cancels
+    // AbortController - NOT the HTTP request signal - is what cancels
     // the runtime call. This is the core decoupling that lets turns
     // outlive their initiating HTTP request.
     void this.runDetachedTurn(turn.turnId, agent, input)
 
     const frames = this.turnRegistry.subscribe(turn.turnId, { fromSeq: -1 })
     if (!frames) {
-      // Should be impossible — register just put it in the registry —
+      // Should be impossible - register just put it in the registry -
       // but keep the type narrow.
       throw new Error('Turn registration race')
     }
@@ -920,7 +920,7 @@ export class AgentHarnessService {
   }
 
   /**
-   * Cancel an active turn. Idempotent — returns true on the first
+   * Cancel an active turn. Idempotent - returns true on the first
    * successful cancel, false if the turn doesn't exist or already
    * finished.
    */
@@ -940,7 +940,7 @@ export class AgentHarnessService {
    * Back-compat wrapper for the old `send` signature. Returns a stream
    * of `AgentStreamEvent` (not `TurnFrame`), so legacy callers/tests
    * keep working. Internally goes through the registry so liveness and
-   * resilience semantics still apply. Drops `signal` — turns now own
+   * resilience semantics still apply. Drops `signal` - turns now own
    * their own AbortController.
    */
   async send(input: {
@@ -963,7 +963,7 @@ export class AgentHarnessService {
   /**
    * Background pump: drives the runtime call, fans events into the
    * registry, and retires the turn on terminal/error/cancel. Never
-   * throws to its caller — all failures land as `error` frames.
+   * throws to its caller - all failures land as `error` frames.
    */
   private async runDetachedTurn(
     turnId: string,
@@ -980,7 +980,7 @@ export class AgentHarnessService {
 
     // Bracket openclaw turns with a workspace snapshot so any file the
     // agent produces during the turn is attributable back to it (rail
-    // + inline artifact UX). Adapter-gated for v1 — Claude / Codex
+    // + inline artifact UX). Adapter-gated for v1 - Claude / Codex
     // write to the user's host filesystem and don't need this; their
     // outputs are already visible via the user's own tools.
     const isOpenclaw = agent.adapter === 'openclaw'
@@ -1025,7 +1025,7 @@ export class AgentHarnessService {
         }
       }
       // Synthesize a terminal `done` if the upstream finished without
-      // emitting one (defensive — runtime is supposed to, but our
+      // emitting one (defensive - runtime is supposed to, but our
       // resilience contract requires every subscriber to see a
       // terminal frame).
       const refreshed = this.turnRegistry.get(turnId)
@@ -1055,7 +1055,7 @@ export class AgentHarnessService {
       // Attribute any files the agent produced during this turn. We
       // run on success, error, AND inside `finally` so an upstream
       // failure mid-turn that still managed to write files doesn't
-      // lose them. We skip only when the user explicitly cancelled —
+      // lose them. We skip only when the user explicitly cancelled -
       // in that case the side effects shouldn't be surfaced as
       // "outputs you asked for."
       if (
@@ -1129,7 +1129,7 @@ export class AgentHarnessService {
 
   /**
    * Lazily resolve the produced-files store. Returns `null` if the
-   * SQLite handle isn't initialised yet — keeps the harness usable in
+   * SQLite handle isn't initialised yet - keeps the harness usable in
    * tests + during early server boot, where chat turns are unlikely
    * but allowed.
    */
@@ -1151,7 +1151,7 @@ export class AgentHarnessService {
   /**
    * Diff the workspace, persist new/modified files, and emit a
    * `produced_files` event so subscribers can render the inline
-   * artifact card. Tolerant of all errors — a failure here must
+   * artifact card. Tolerant of all errors - a failure here must
    * never block the rest of the turn-end bookkeeping.
    */
   private async attributeTurnFiles(input: {
@@ -1304,11 +1304,11 @@ export class TurnAlreadyActiveError extends Error {
   }
 }
 
-// ── Files API DTO ────────────────────────────────────────────────
+// -- Files API DTO ------------------------------------------------
 
 /**
  * Wire shape for one produced-file entry returned by the rail and
- * inline-card endpoints. Trimmed from the on-disk row — clients
+ * inline-card endpoints. Trimmed from the on-disk row - clients
  * never see `agentDefinitionId` or `sessionKey`.
  */
 export interface ProducedFileEntry {
