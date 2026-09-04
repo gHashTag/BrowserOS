@@ -179,11 +179,14 @@ export function checks(s) {
     {
       name: 'the LAPTOP disk has room',
       test: () => {
-        const used = RL.diskUsedPercent()
+        // The path the worktrees live on, not `/`. On macOS the root is a
+        // sealed system snapshot that reads 55% while the data volume - where
+        // every checkout actually is - was at 97%.
+        const used = RL.diskUsedPercent(ROOT)
         if (used === null || used < 92) return null
         return {
           cause: `the disk this loop runs on is ${used}% full - a worktree checkout fails part-way and the dispatch dies at 0 s`,
-          evidence: sh('df -h / | tail -1') || '',
+          evidence: sh(`df -h ${JSON.stringify(ROOT)} | tail -1`) || '',
           remedy: 'tri reap-local --reap',
         }
       },

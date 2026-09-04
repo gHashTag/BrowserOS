@@ -55,9 +55,26 @@ const sh = (c, cwd = ROOT, timeout = Number(process.env.REAP_LOCAL_TIMEOUT_MS ??
   } catch { return null }
 }
 
-/** Percent of the root filesystem in use, or null if it cannot be read. */
-export function diskUsedPercent() {
-  const out = sh('df -P / | tail -1')
+/**
+ * Percent in use of the filesystem the WORKTREES actually live on.
+ *
+ * It asked `df -P /` and was wrong on this machine every time it ran.
+ *
+ * On macOS the root is a sealed read-only system snapshot; everything a person
+ * writes lives on `/System/Volumes/Data`. Measured 2026-09-05, minutes apart:
+ *
+ *   df -P /              55%     the snapshot
+ *   df -P /private/tmp   97%     393 Gi of 460 on the data volume
+ *
+ * So this reported a comfortable 57% all night while the disk that matters was
+ * nearly full - and the `git worktree add` that failed with "No space left on
+ * device" happened while it said there was room. A guard pointed at the wrong
+ * filesystem is worse than no guard, because it answers.
+ *
+ * Ask about the path we care about, and let df resolve which filesystem that is.
+ */
+export function diskUsedPercent(target = ROOT) {
+  const out = sh(`df -P ${JSON.stringify(target)} | tail -1`)
   if (!out) return null
   const m = out.match(/(\d+)%/)
   return m ? Number(m[1]) : null
