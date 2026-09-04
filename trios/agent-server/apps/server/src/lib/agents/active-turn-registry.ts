@@ -115,8 +115,8 @@ export class RingBuffer {
  * catch up.
  *
  * Lifecycle:
- *   register → run pump that pushes frames → complete/cancel → retain
- *   for `retainAfterDoneMs` so a brief reconnect can still attach →
+ *   register -> run pump that pushes frames -> complete/cancel -> retain
+ *   for `retainAfterDoneMs` so a brief reconnect can still attach ->
  *   sweep evicts after retain window.
  */
 export class TurnRegistry {
@@ -259,7 +259,7 @@ export class TurnRegistry {
   /**
    * Subscribe to a turn from `fromSeq` (exclusive). Returns a
    * ReadableStream of TurnFrames that completes when the turn does.
-   * Cancelling the stream just unregisters the subscriber — the turn
+   * Cancelling the stream just unregisters the subscriber - the turn
    * keeps running.
    */
   subscribe(
@@ -317,7 +317,7 @@ export class TurnRegistry {
               try {
                 controller.close()
               } catch {
-                // Already closed — fine.
+                // Already closed - fine.
               }
             },
             { once: true },
@@ -343,7 +343,7 @@ export class TurnRegistry {
             try {
               controller.error(err)
             } catch {
-              // Already errored — fine.
+              // Already errored - fine.
             }
           } finally {
             turn.subscribers.delete(subscriber)
@@ -360,7 +360,7 @@ export class TurnRegistry {
 
   /**
    * Periodic eviction of turns that have been terminal past
-   * `retainAfterDoneMs`. Lazy — only runs while the registry has
+   * `retainAfterDoneMs`. Lazy - only runs while the registry has
    * entries.
    */
   sweep(now: number = Date.now()): void {
