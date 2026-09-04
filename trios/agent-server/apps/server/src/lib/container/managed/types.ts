@@ -8,7 +8,7 @@
  * focused on behaviour.
  */
 
-/** Subset of `NodeJS.Platform` — kept loose so a future Linux add
+/** Subset of `NodeJS.Platform` - kept loose so a future Linux add
  *  doesn't require touching the abstraction. */
 export type Platform = NodeJS.Platform
 
@@ -23,7 +23,7 @@ export type ContainerState =
   | 'errored'
 
 /** Subset of the state machine that callers should treat as "may
- *  resolve to running on its own with time" — `execProcess` and
+ *  resolve to running on its own with time" - `execProcess` and
  *  friends wait through these. Callers checking `isReady()` use this. */
 export const TRANSIENT_STATES: ReadonlySet<ContainerState> = new Set([
   'installing',
@@ -49,7 +49,7 @@ export interface ContainerDescriptor {
 }
 
 /**
- * Mount root the container exposes. `kind` is informational —
+ * Mount root the container exposes. `kind` is informational -
  * `'shared'` mounts are bind-mounted once and used by every agent;
  * `'per-agent'` mounts are bind-mounted per agent and the harness's
  * agent-delete flow is expected to clean them up. Both are
@@ -71,7 +71,7 @@ export interface ContainerStatusSnapshot {
 
 /** What the caller wants to run inside the container. */
 export interface ExecSpec {
-  /** Argv inside the container — first element is the executable. */
+  /** Argv inside the container - first element is the executable. */
   argv: readonly [string, ...string[]]
   env?: Record<string, string>
 }
@@ -82,11 +82,11 @@ export interface ExecResult {
   stderr: string
 }
 
-/** Reset granularity — see the architecture doc / team brief. */
+/** Reset granularity - see the architecture doc / team brief. */
 export type ResetLevel = 'soft' | 'wipe-agent' | 'hard'
 
 export interface ResetOptions {
-  /** Required for `level === 'wipe-agent'` — agent id whose home dir
+  /** Required for `level === 'wipe-agent'` - agent id whose home dir
    *  should be removed. Ignored for soft/hard. */
   agentId?: string
   onLog?: (msg: string) => void
