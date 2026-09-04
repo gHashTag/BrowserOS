@@ -90,6 +90,14 @@ const STEPS = [
   { name: 'reap', file: 'reap.mjs', act: '--reap', why: 'free the volume before anything else' },
   { name: 'lease', file: 'lease.mjs', act: '--release', why: 'release idle path fences' },
   { name: 'push-work', file: 'push-work.mjs', act: '--push', why: 'make finished work visible' },
+  // BETWEEN THE PUSH AND THE CLOSE, because that is where the gap was.
+  //
+  // close-done used to close on "the branch exists on the remote", and on that
+  // basis 169 issues were closed while their code sat outside the base. It now
+  // demands LANDED, so without this step nothing would ever close again. The
+  // order is push -> land -> close, and each step is the precondition of the
+  // next.
+  { name: 'land', file: 'land.mjs', act: '--land', dryArgs: '', why: 'put accepted work into the branch it was accepted for' },
   { name: 'close-done', file: 'close-done.mjs', act: '--close', why: 'clear accepted issues from the pool' },
   // An escalation raised by a defect that has SINCE BEEN FIXED is never
   // re-examined by anything else. Three tasks sat 91 hours on the reason "no
@@ -142,6 +150,9 @@ const SUMMARY = [
   [/release (\d+)\s+quarantine (\d+)\s+hold (\d+)/, (m) => `released ${m[1]}, quarantined ${m[2]}, held ${m[3]}`],
   [/pushed (\d+)/, (m) => `pushed ${m[1]}`],
   [/not pushed: 0/, () => 'every branch with work is already on the remote'],
+  [/landed (\d+) of (\d+) clean/, (m) => `${m[1]} accepted branch(es) landed`],
+  [/REFUSING to continue/, () => 'REFUSED - the landed count did not move; the measure is wrong'],
+  [/(\d+) landable, showing/, (m) => `${m[1]} accepted branches still outside the base`],
   [/closed (\d+)\s+failed (\d+)/, (m) => `closed ${m[1]}, failed ${m[2]}`],
   [/closable 0/, () => 'nothing closable'],
   [/released (\d+) of (\d+) back to the pool/, (m) => `${m[1]} escalation(s) retired - the cause no longer reproduces`],

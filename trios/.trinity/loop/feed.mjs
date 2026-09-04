@@ -39,6 +39,9 @@ const L = await import(path.join(DIR, 'loop.mjs'))
 
 export const STEPS = [
   { name: 'push-work', file: 'push-work.mjs', act: '--push', why: 'a branch nobody can see cannot be closed against' },
+  // Between the push and the close: close-done now demands LANDED rather than
+  // pushed, so without this nothing would ever close again.
+  { name: 'land', file: 'land.mjs', act: '--land', why: 'put accepted work into the branch' },
   { name: 'close-done', file: 'close-done.mjs', act: '--close', why: 'an open accepted issue holds its boundary' },
   { name: 'author', file: 'author.mjs', act: '--file', why: 'refill to the queue depth' },
 ]
@@ -47,6 +50,8 @@ export const STEPS = [
 export const SUMMARY = [
   [/pushed (\d+)/, (m) => `pushed ${m[1]}`],
   [/not pushed: 0/, () => 'every branch with work is already on the remote'],
+  [/landed (\d+) of (\d+) clean/, (m) => `${m[1]} accepted branch(es) landed`],
+  [/(\d+) landable, showing/, (m) => `${m[1]} accepted branches still outside the base`],
   [/closed (\d+)\s+failed (\d+)/, (m) => `closed ${m[1]}, failed ${m[2]}`],
   [/closable 0/, () => 'nothing closable'],
   [/filed (\d+)/, (m) => `filed ${m[1]}`],

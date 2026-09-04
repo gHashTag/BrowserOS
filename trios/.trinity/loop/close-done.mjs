@@ -116,6 +116,27 @@ for (const r of rows) {
   const forkPoint = tryShell(`git merge-base ${BASE} ${branch}`) || BASE
   const files = (tryShell(`git diff --name-only ${forkPoint}..${branch}`) || '').split('\n').filter(Boolean)
   if (!files.length) { plan.push({ n, skip: 'branch is empty' }); continue }
+  // LANDED, NOT MERELY PUSHED. This is the root of the largest gap in the
+  // whole run.
+  //
+  // The rule above was "the branch exists on the remote", and on that basis 169
+  // issues were closed while their code sat outside the branch: 174 queen
+  // branches on the remote, FIVE contained in the base, and every one of the
+  // others carrying a real diff. A closed issue whose code is not in the branch
+  // is a false statement about the repository, and closing on "pushed" is what
+  // manufactures it.
+  //
+  // The test is the only one that survives a squash merge: would merging this
+  // change the base AT ALL? Ancestry says no for ever after a squash, and a
+  // three-dot diff measures from the divergence point rather than from what the
+  // base holds now. Comparing the merged tree with the base tree is route-blind.
+  const baseTree = tryShell(`git rev-parse ${BASE}^{tree}`)
+  const mergedTree = tryShell(`git merge-tree --write-tree ${BASE} ${branch}`)
+  const landed = baseTree && mergedTree && mergedTree.split('\n')[0].trim() === baseTree
+  if (!landed) {
+    plan.push({ n, skip: `work is on ${r.branch || `queen-${n}`} but NOT in ${BASE} - run \`tri land --land\` first; closing now would be a false statement` })
+    continue
+  }
   const subject = tryShell(`git log -1 --format=%s ${branch}`) || ''
   plan.push({ n, branch: r.branch || `queen-${n}`, sha: head.slice(0, 9), files: files.length, subject, title })
 }

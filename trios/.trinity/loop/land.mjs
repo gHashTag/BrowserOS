@@ -106,16 +106,39 @@ export function mergesCleanly(branch) {
   return { clean: false, why: `${lines.length - 1} conflicting path(s): ${lines.slice(1, 4).join(', ')}` }
 }
 
-export function survey() {
+export async function survey() {
   const listed = sh(`git branch -r --list 'origin/queen-*'`)
   // (the caller fetches; survey itself stays cheap so it can be called twice)
   if (listed === null) return null
   const branches = listed.split('\n').map((l) => l.trim().replace(/^origin\//, '')).filter(Boolean)
 
+  // ACCEPTED, NOT MERELY CLOSED - and getting this wrong created a deadlock
+  // that lasted exactly one run.
+  //
+  // The first version landed only a CLOSED issue. close-done was changed in the
+  // same hour to close only LANDED work. So an issue the Queen had accepted but
+  // which was still open could never move: land refused it for being open, and
+  // close refused it for not having landed. Two correct-looking rules that
+  // together said "never".
+  //
+  // "Closed" was only ever a proxy for "the Queen accepted this". Ask the thing
+  // itself: a dispatch whose review_state is accept is accepted, whatever the
+  // issue's state on the forge happens to be. Closed still counts, because work
+  // closed by hand is accepted too.
   const closed = new Set(
     (sh(`gh issue list --repo ${REPO} --state closed --limit 400 --json number -q '.[].number'`) || '')
       .split('\n').filter(Boolean),
   )
+  const accepted = new Set()
+  try {
+    const SE = await import(path.join(DIR, 'stale-escalations.mjs'))
+    const js = "const {Pool}=require('pg');const p=new Pool({connectionString:process.env.DATABASE_URL});" +
+      "p.query(\"select distinct issue from queen_dispatch where review_state = 'accept'\")" +
+      ".then(r=>{console.log(JSON.stringify(r.rows)); return p.end()}).catch(e=>{console.log('ERR '+e.message); process.exit(1)})"
+    const out = SE.remote(js)
+    const line = String(out ?? '').split('\n').map((l) => l.trim()).find((l) => l.startsWith('['))
+    if (line) for (const r of JSON.parse(line)) accepted.add(String(r.issue))
+  } catch { /* the forge answer alone still works, just more narrowly */ }
 
   const out = []
   for (const b of branches) {
@@ -139,13 +162,13 @@ export function survey() {
     const rec = { branch: b, issue, files, state: 'hold', why: '' }
     if (!files) { rec.why = 'no diff against the base - nothing to land'; out.push(rec); continue }
     if (!issue) { rec.why = 'the branch name carries no issue number'; out.push(rec); continue }
-    if (!closed.has(issue)) {
-      rec.why = `#${issue} is still open - an open issue is unfinished work, whatever its branch looks like`
+    if (!closed.has(issue) && !accepted.has(issue)) {
+      rec.why = `#${issue} is neither accepted by the Queen nor closed - unfinished work, whatever its branch looks like`
       out.push(rec)
       continue
     }
     rec.state = 'LANDABLE'
-    rec.why = `#${issue} closed, ${files} file(s)`
+    rec.why = `#${issue} ${closed.has(issue) ? 'closed' : 'accepted'}, ${files} file(s)`
     out.push(rec)
   }
   // Newest first: the most recent work is the most likely to apply cleanly, and
@@ -156,7 +179,7 @@ export function survey() {
 if (isMain) {
   const doLand = process.argv.includes('--land')
   sh(`git fetch --quiet origin ${BASE}`)
-  const rows = survey()
+  const rows = await survey()
   if (!rows) {
     console.log('could not survey the branches')
     process.exit(1)
@@ -219,7 +242,7 @@ if (isMain) {
   // very first run - measuring the new world against the old one - which is the
   // same class of error it exists to catch, arriving from the other direction.
   sh(`git fetch --quiet origin ${BASE}`)
-  const after = survey()
+  const after = await survey()
   const stillLandable = after ? after.filter((r) => r.state === 'LANDABLE').length : null
   console.log(`\nlanded ${landed} of ${batch.filter((x) => x.clean).length} clean in this batch`)
   if (stillLandable === null) {
