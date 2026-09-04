@@ -2076,6 +2076,32 @@ Two more things a split must get right:
 - **Print the mix.** Simpson's paradox is real: the overall rate can move
   opposite to every group if the proportions change underneath it.
 
+## A deletion is not work, and du is not free space
+
+Two lessons from a reaper that could not act while the disk it guards sat at 98%.
+
+**A worktree whose entire dirty set is deletions holds nothing.** `reap-local`
+spares any tree with uncommitted changes, because a dirty tree is somebody's
+unfinished thought. Two workflow worktrees were spared on 1983 and 1984 changes
+each, every one a DELETION of a file their own HEAD still contained. An addition
+or a modification is a thought; a deletion is the shape of one already saved.
+
+**And `git worktree remove` still refuses a dirty tree.** `--force` is not the
+answer and is not used on a worktree in this project. `git checkout -- .` is: it
+restores exactly what git already holds, and then the removal is ordinary.
+
+```bash
+git -C "$TREE" status --porcelain | grep -vcE '^([ D])D |^D[ D] '   # 0 = safe
+git -C "$TREE" checkout -- .
+git worktree remove "$TREE"                                        # no --force
+```
+
+**`du -sh` on a worktree is an upper bound, not free space.** The reaper reported
+three candidates as "holding 6938 MB"; removing them returned about 600. A git
+worktree shares its object store with the main checkout, so most of what du
+counts is on disk once. A tool that overstates what it recovers is one nobody
+believes about the disk being full either.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
