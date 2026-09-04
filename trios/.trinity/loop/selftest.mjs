@@ -1048,6 +1048,74 @@ check('a monoculture is an ERROR, not a note', () => {
   if (!/load is not value/.test(src)) throw new Error('it must say what the number means')
 })
 
+
+// ---------------------------------------------------------------------------
+// land: work that was finished, accepted, closed - and never entered the branch.
+//
+// 174 queen branches on the remote, FIVE contained in the base, and all 169
+// others carrying a real diff. The Queen accepted the work and close-done closed
+// the issues on the strength of a branch EXISTING. A closed issue whose code is
+// not in the branch is a false statement about the repository, and the loop had
+// been making 169 of them.
+
+check('merged is asked by comparing TREES, not ancestry or a three-dot diff', () => {
+  // Two wrong answers came first. `merge-base --is-ancestor` is right for a real
+  // merge and permanently wrong after a SQUASH, because a squash writes a new
+  // commit and the source is never an ancestor - so this tool landed the same
+  // five branches four times, opening twenty pull requests and merging fifteen
+  // commits that changed zero files. And `git diff BASE...branch` is three-dot:
+  // it measures from the divergence point, so it shows the branch's changes
+  // whether or not they are already in the base.
+  const src = fs.readFileSync(path.join(DIR, 'land.mjs'), 'utf8')
+  const fn = src.slice(src.indexOf('export function isLanded'), src.indexOf('export function mergesCleanly'))
+  if (!/merge-tree --write-tree/.test(fn)) throw new Error('the exact question is whether merging would change the base at all')
+  if (!/\^\{tree\}/.test(fn)) throw new Error('it must compare the resulting tree with the base tree')
+  if (/diff --shortstat[^\n]*\.\.\./.test(fn)) throw new Error('a three-dot diff cannot answer this')
+})
+
+check('a count that does not move after a successful act STOPS the tool', () => {
+  // The tell I missed four times: "landed 5 of 5" then "146 still waiting", on
+  // three consecutive runs. Confident output is not evidence that the world
+  // changed.
+  const src = fs.readFileSync(path.join(DIR, 'land.mjs'), 'utf8')
+  if (!/REFUSING to continue/.test(src)) throw new Error('it must refuse, not warn')
+  if (!/process\.exit\(4\)/.test(src)) throw new Error('a stalled count must not exit 0')
+  if (!/Fix the measure, not the batch/.test(src)) throw new Error('it must say which of the two is wrong')
+})
+
+check('it re-measures against a FRESH view of the remote', () => {
+  // The stall guard caught this on its first run: it compared the new world
+  // against a local ref that had not been told about the merges.
+  const src = fs.readFileSync(path.join(DIR, 'land.mjs'), 'utf8')
+  const tail = src.slice(src.indexOf('DID THE NUMBER ACTUALLY MOVE'))
+  if (!/git fetch/.test(tail)) throw new Error('re-measuring against a stale ref proves nothing')
+})
+
+check('a conflict is an ANSWER and names its paths', () => {
+  // git merge-tree exits non-zero on conflict, and reading that as a failure
+  // made every real conflict report "could not be computed" - the third time
+  // this round an outcome was treated as an exception.
+  const src = fs.readFileSync(path.join(DIR, 'land.mjs'), 'utf8')
+  const fn = src.slice(src.indexOf('export function mergesCleanly'), src.indexOf('export function survey'))
+  if (!/catch \(e\)/.test(fn)) throw new Error('a non-zero exit here is the answer, not a fault')
+  if (!/e\.stdout/.test(fn)) throw new Error('the conflicting paths are on stdout')
+  if (!/conflicting path/.test(fn)) throw new Error('it must name them')
+})
+
+check('it never lands an OPEN issue, and never forces or deletes', () => {
+  const src = fs.readFileSync(path.join(DIR, 'land.mjs'), 'utf8')
+  if (!/is still open - an open issue is unfinished work/.test(src)) {
+    throw new Error('an open issue is unfinished work whatever its branch looks like')
+  }
+  // EXECUTABLE lines only. The first version matched the COMMENT that says
+  // "No --delete-branch", which is the second time tonight one of my checks
+  // read prose as code - the same shape as counting "evidence:" in a printing
+  // block and blaming the code for the imbalance.
+  const code = src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
+  if (/--force/.test(code)) throw new Error('never force')
+  if (/--delete-branch/.test(code)) throw new Error('the branch is the evidence that the work happened')
+})
+
 console.log(`\n${pass} passed, ${failures.length} failed`)
 fs.rmSync(tmp, { recursive: true, force: true })
 if (failures.length) {
