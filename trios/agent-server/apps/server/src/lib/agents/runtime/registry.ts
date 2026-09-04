@@ -37,7 +37,7 @@ export function getAgentRuntimeRegistry(): AgentRuntimeRegistry {
   return globalRegistry
 }
 
-/** Test-only — production code never calls this. */
+/** Test-only - production code never calls this. */
 export function resetAgentRuntimeRegistry(): void {
   globalRegistry = null
 }
