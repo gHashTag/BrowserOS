@@ -85,11 +85,28 @@ export function checks(s) {
     },
     {
       name: 'the workers are actually idle',
-      test: () => (running >= WORKERS ? {
-        cause: `nothing is wrong - ${running} of ${WORKERS} workers are busy`,
-        evidence: `last tick ${tick.decidedAt ?? '?'}`,
-        remedy: 'tri verdicts - load is not health; check what the work is worth',
-      } : null),
+      test: () => {
+        if (running < WORKERS) return null
+        // FULL LOAD IS NOT AN ALL-CLEAR, and saying it is was how a day of
+        // cosmetic work passed unremarked. 4 of 4 running, 100% accepted, and
+        // all forty of the last authored issues were the same character
+        // replacement. So this reports the MIX before it reports health.
+        const m = Q.mix(Number(process.env.MIX_LIMIT ?? 30))
+        const top = m?.counts?.[0]
+        const share = top && m.total ? top[1] / m.total : 0
+        if (share > 0.8) {
+          return {
+            cause: `${running} of ${WORKERS} workers are busy, and ${Math.round(share * 100)}% of the backlog is one kind: "${top[0]}"`,
+            evidence: (m.counts || []).map(([k, n]) => `${k}=${n}`).join('  '),
+            remedy: 'tri mix   - a swarm at full load doing one cheap thing is still a swarm doing one cheap thing',
+          }
+        }
+        return {
+          cause: `nothing is wrong - ${running} of ${WORKERS} workers are busy`,
+          evidence: `last tick ${tick.decidedAt ?? '?'}` + (top ? `, backlog led by ${top[0]} at ${Math.round(share * 100)}%` : ''),
+          remedy: 'tri verdicts - load is not health; tri mix - health is not value',
+        }
+      },
     },
     {
       name: 'the loop lock is free',
