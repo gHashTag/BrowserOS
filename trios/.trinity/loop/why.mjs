@@ -31,6 +31,7 @@ import { fileURLToPath } from 'node:url'
 
 const DIR = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = process.env.TRIOS_ROOT || '/Users/playra/BrowserOS'
+const REPO = process.env.TRIOS_ISSUE_REPO || 'gHashTag/trios'
 const STATUS = process.env.QUEEN_STATUS_URL || 'https://trios-agent-server-production.up.railway.app/queen/status'
 const WORKERS = Number(process.env.QUEEN_WORKERS ?? 4)
 const isMain = process.argv[1] && process.argv[1].endsWith('/why.mjs')
@@ -38,6 +39,7 @@ const isMain = process.argv[1] && process.argv[1].endsWith('/why.mjs')
 const L = await import(path.join(DIR, 'loop.mjs'))
 const Q = await import(path.join(DIR, 'queue.mjs'))
 const RL = await import(path.join(DIR, 'reap-local.mjs'))
+const SE = await import(path.join(DIR, 'stale-escalations.mjs'))
 
 const sh = (c, opts = {}) => {
   try {
@@ -116,6 +118,37 @@ export function checks(s) {
       },
     },
     {
+      name: 'recent dispatches actually started',
+      test: () => {
+        // THE ROW SAYS WHY, AND NOTHING WAS READING IT.
+        //
+        // A dispatch that dies at 0 s records its reason in `outcome`, and the
+        // tick simply chooses the same issue again next round. Measured
+        // 2026-09-04: `chosen=1470` in two consecutive rounds, one worker of
+        // four, and the row read "git fetch failed: ... Permission denied" -
+        // 112 reflog files left owned by root by my own push tool, which the
+        // worker user could not append to. Every new bee died instantly and no
+        // count in the skip summary said so.
+        const js = "const {Pool}=require('pg');const p=new Pool({connectionString:process.env.DATABASE_URL});" +
+          "p.query(\"select issue, outcome from queen_dispatch where dispatched_at > now() - interval '30 minutes' " +
+          "and finished_at is not null and extract(epoch from (finished_at - dispatched_at)) < 5 " +
+          "and coalesce(outcome,'') <> '' order by dispatched_at desc limit 5\")" +
+          ".then(r=>{console.log(JSON.stringify(r.rows)); return p.end()}).catch(e=>{console.log('ERR '+e.message); process.exit(1)})"
+        let rows
+        try {
+          const out = SE.remote(js)
+          const line = String(out ?? '').split('\n').map((l) => l.trim()).find((l) => l.startsWith('['))
+          rows = line ? JSON.parse(line) : null
+        } catch { rows = null }
+        if (!Array.isArray(rows) || rows.length < 2) return null
+        return {
+          cause: `${rows.length} dispatch(es) in the last half hour died within 5 seconds of starting - the workers cannot begin at all`,
+          evidence: `#${rows[0].issue}: ${String(rows[0].outcome).slice(0, 160)}`,
+          remedy: 'read the outcome above; it is the actual error. A Permission denied under .git means a root-owned reflog - tri push-work --push now repairs that',
+        }
+      },
+    },
+    {
       name: 'the queue has work nobody has started',
       test: () => {
         const q = Q.depth()
@@ -166,10 +199,29 @@ export function checks(s) {
       test: () => {
         const bad = Number(skips.missingBoundary ?? 0) + Number(skips.incompleteSpec ?? 0)
         if (bad < 3) return null
+        // A KNOWN, PERMANENT, CORRECT SKIP IS NOT A CAUSE.
+        //
+        // #380 and #957 each say in their own body that no worker can start
+        // them - #380 calls itself "a record of a plan whose deadline passed",
+        // #957 has a section headed "Why this cannot be a bee's task". The
+        // scheduler is right to skip them and will be right to skip them for
+        // ever. Reporting that as the reason the swarm is idle is the same
+        // mistake fp-check made counting NEVER ACTED as a false accusation: a
+        // true statement, filed under the wrong heading, teaching the reader to
+        // ignore the tool.
+        //
+        // The label makes the fact machine-readable. Prose cannot be relied on;
+        // a label can.
+        const declared = Number(sh(
+          `gh issue list --repo ${REPO} --state open --label not-a-task --limit 100 --json number -q 'length'`,
+        ) ?? 0)
+        const real = bad - declared
+        if (real < 3) return null
         return {
-          cause: `${bad} open issues are not delegatable - no Boundary section, or no criteria to judge them by`,
-          evidence: `missingBoundary ${skips.missingBoundary ?? 0}, incompleteSpec ${skips.incompleteSpec ?? 0}`,
-          remedy: 'give them a ## Boundary and a ## Success Criteria, or close them',
+          cause: `${real} open issues are not delegatable - no Boundary section, or no criteria to judge them by`,
+          evidence: `missingBoundary ${skips.missingBoundary ?? 0}, incompleteSpec ${skips.incompleteSpec ?? 0}` +
+            (declared ? `, of which ${declared} carry not-a-task and are correctly skipped for ever` : ''),
+          remedy: 'give them a ## Boundary and a ## Success Criteria, or label them not-a-task, or close them',
         }
       },
     },
