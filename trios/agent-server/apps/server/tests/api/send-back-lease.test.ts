@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import {
   SEND_BACK_IDLE_FLOOR_MS,
   stateOfDispatch,
+  WAIT_FROZEN_FLOOR_MS,
 } from '../../src/api/services/queen-tick'
 
 // The defect these cover, in one sentence: `claimOnIssue` counts `rejected` as
@@ -75,20 +76,73 @@ describe('stateOfDispatch: the send-back lease', () => {
     ).toBe('rejected')
   })
 
-  it('never releases an escalation or a wait, whatever the clock says', () => {
-    // An escalation wants a person and a wait is re-read by the reviewer each
-    // round. Neither is the false promise this lease repairs, and releasing
-    // them would retry work that nobody judged.
-    for (const verdict of ['escalate', 'wait', null]) {
-      expect(
-        stateOfDispatch(true, verdict, { idleMs: 1000 * HOUR, sendBacks: 0 }),
-      ).toBe('awaitingReview')
-    }
+  it('never releases an escalation, whatever the clock says', () => {
+    // This assertion once covered `wait` and `null` as well, and the wait valve
+    // below deliberately changed that: a wait whose transcript is frozen can
+    // never become anything else, so past a long floor it is released. The
+    // assertion was narrowed rather than deleted, because the rule it still
+    // states is the one that matters most here - an escalation asks for a
+    // PERSON, and no timer is a person.
+    expect(
+      stateOfDispatch(true, 'escalate', { idleMs: 1000 * HOUR, sendBacks: 0 }),
+    ).toBe('awaitingReview')
   })
 
   it('never releases anything that has not finished', () => {
     expect(
       stateOfDispatch(false, 'sendBack', { idleMs: 1000 * HOUR, sendBacks: 0 }),
     ).toBe('running')
+  })
+})
+
+// The wait valve. Same defect, third state: `wait` means "not judged yet" and
+// the transcript of a finished bee never changes, so it can never become
+// anything else. Six hours rather than one, because a wait CAN resolve by
+// itself on a later sweep and only a frozen one should be released.
+describe('stateOfDispatch: the wait valve', () => {
+  it('holds a wait that is younger than the frozen floor', () => {
+    expect(
+      stateOfDispatch(true, 'wait', {
+        idleMs: WAIT_FROZEN_FLOOR_MS - 1,
+        sendBacks: 0,
+      }),
+    ).toBe('awaitingReview')
+  })
+
+  it('releases a wait that has outlasted the floor with attempts left', () => {
+    expect(
+      stateOfDispatch(true, 'wait', {
+        idleMs: WAIT_FROZEN_FLOOR_MS,
+        sendBacks: 0,
+      }),
+    ).toBe('failed')
+  })
+
+  it('treats a missing verdict the same way, since it is the same condition', () => {
+    expect(
+      stateOfDispatch(true, null, {
+        idleMs: WAIT_FROZEN_FLOOR_MS,
+        sendBacks: 0,
+      }),
+    ).toBe('failed')
+    expect(stateOfDispatch(true, null, { idleMs: 0, sendBacks: 0 })).toBe(
+      'awaitingReview',
+    )
+  })
+
+  it('holds it at the ceiling however long it sits', () => {
+    expect(
+      stateOfDispatch(true, 'wait', { idleMs: 1000 * HOUR, sendBacks: 2 }),
+    ).toBe('awaitingReview')
+  })
+
+  it('NEVER releases an escalation - it asks for a person, and a timer is not one', () => {
+    expect(
+      stateOfDispatch(true, 'escalate', { idleMs: 1000 * HOUR, sendBacks: 0 }),
+    ).toBe('awaitingReview')
+  })
+
+  it('is a longer clock than the send-back floor, and the test would fail if inverted', () => {
+    expect(WAIT_FROZEN_FLOOR_MS).toBeGreaterThan(SEND_BACK_IDLE_FLOOR_MS)
   })
 })

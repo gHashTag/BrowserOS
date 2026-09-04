@@ -408,6 +408,26 @@ const isoSeconds = (value: unknown): string =>
  */
 export const SEND_BACK_IDLE_FLOOR_MS = 60 * 60 * 1000
 
+/**
+ * The same defect in the third state, with a much longer floor.
+ *
+ * `wait` means "not judged yet", and the sweep deliberately re-reads wait rows
+ * so a torn or unparsed verdict gets another look. Its own comment states the
+ * limit of that: "an unchanged transcript yields the same wait". The transcript
+ * of a FINISHED bee never changes, so re-reading is not re-judging - the same
+ * input gives the same answer every round, while the policy's reason reads
+ * "N of M criteria judged SO FAR" and there is no later.
+ *
+ * Measured 2026-09-04: #1361 and #1362 sat in `wait` for hours, holding their
+ * boundaries and counted in `claimed` against every candidate touching them.
+ *
+ * Six hours, not one. A wait CAN resolve by itself - a transcript merely slow
+ * to flush will parse on a later sweep - so the clock must be long enough that
+ * only a genuinely frozen one is released. A send-back gets no second look at
+ * all, which is why its floor is an hour.
+ */
+export const WAIT_FROZEN_FLOOR_MS = 6 * 60 * 60 * 1000
+
 export function stateOfDispatch(
   finished: boolean,
   reviewState: unknown,
@@ -416,15 +436,22 @@ export function stateOfDispatch(
   if (!finished) return 'running'
   const verdict = String(reviewState ?? '')
   if (verdict === 'accept') return 'accepted'
+  const idleMs = lease.idleMs ?? 0
+  const sendBacks = lease.sendBacks ?? 0
+  // Read from QueenRetryPolicy.maximumRealAttempts rather than restated, so
+  // there is one ceiling and not two that agree until someone edits one.
+  const ceiling = lease.ceiling ?? 2
+
   if (verdict === 'sendBack') {
-    const idleMs = lease.idleMs ?? 0
-    const sendBacks = lease.sendBacks ?? 0
-    // Read from QueenRetryPolicy.maximumRealAttempts rather than restated, so
-    // there is one ceiling and not two that agree until someone edits one.
-    const ceiling = lease.ceiling ?? 2
     if (idleMs >= SEND_BACK_IDLE_FLOOR_MS && sendBacks < ceiling)
       return 'failed'
     return 'rejected'
+  }
+  // A wait that has outlasted the frozen floor was never judged and never will
+  // be, because nothing about its input can change. `escalate` is deliberately
+  // excluded: it asks for a person, and a timer is not a person.
+  if (verdict === '' || verdict === 'wait') {
+    if (idleMs >= WAIT_FROZEN_FLOOR_MS && sendBacks < ceiling) return 'failed'
   }
   return 'awaitingReview'
 }
