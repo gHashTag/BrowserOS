@@ -913,12 +913,20 @@ export async function runRound(
         ? 'finished by the cloud tick, waiting for a verdict'
         : 'dispatched by the cloud tick',
       state: stateOfDispatch(finished, row.review_state, {
-        // The lease clock runs from the verdict, or from the finish if no
-        // verdict was ever recorded. Dating it from dispatch would expire a
-        // long task's claim the moment its turn ended.
-        idleMs: finished
-          ? Date.now() - Date.parse(String(row.reviewed_at ?? row.finished_at))
-          : 0,
+        // THE CLOCK MUST BE ONE NOTHING TOUCHES.
+        //
+        // This read `reviewed_at ?? finished_at` and the wait valve could
+        // therefore never fire. `reviewFinishedDispatches` re-reads every
+        // `wait` row each round and UPDATEs it in place - its own comment says
+        // so - which refreshes `reviewed_at` every five minutes. Measured in
+        // production 2026-09-04: #1327 and #1329 had been frozen for 18.4
+        // hours and reported 0.06 hours of idle, because the sweep had touched
+        // them a moment earlier. A six-hour floor against a clock reset every
+        // five minutes is a floor that cannot be reached.
+        //
+        // `finished_at` is written once, when the bee stops, and never again.
+        // It is the only honest measure of how long a verdict has stood.
+        idleMs: finished ? Date.now() - Date.parse(String(row.finished_at)) : 0,
         sendBacks: Number(row.send_backs ?? 0),
       }),
       // The price, so the daily cap can see the work it exists to govern.
