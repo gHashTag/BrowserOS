@@ -50,6 +50,7 @@ import {
   createQueenPublicBoardRoute,
 } from './routes/queen-kanban'
 import { createQueenLeaseRoute } from './routes/queen-lease'
+import { createQueenNeedsYouRoute } from './routes/queen-needs-you'
 import { createQueenPublicActivityRoute } from './routes/queen-public-activity'
 import { createQueenPublicHardwareRoute } from './routes/queen-public-hardware'
 import { createQueenPublicResearchRoute } from './routes/queen-public-research'
@@ -346,6 +347,12 @@ export async function createHttpServer(config: HttpServerConfig) {
     // repository, so there is nothing here a reader could not get from git.
     .route('/queen/tree', createQueenTreeRoute())
     .route('/queen/kanban', createQueenKanbanRoute())
+    // Deliberately NOT on the public-read list above. It carries issue numbers
+    // and worker-written reasons - nothing secret, but operator information -
+    // so it sits behind the trusted-origin catch-all with /queen/board rather
+    // than being served to any origin. The five escalations it exists to
+    // surface are for the operator, not for a public page.
+    .route('/queen/needs-you', createQueenNeedsYouRoute())
     .route('/queen/board', queenBoardRoutes)
     .route('/queen/roadmap', createQueenRoadmapRoute())
     .route('/queen/roadmap/data', queenRoadmapDataRoutes)
