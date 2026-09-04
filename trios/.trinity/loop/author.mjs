@@ -97,14 +97,21 @@ const tryShell = (c) => { try { return sh(c) } catch { return null } }
 
 // Where the swarm is allowed to work. Anything outside this is another agent's
 // ground or build output, and a brief naming it would be refused at dispatch.
-const OWNED = [
-  'trios/agent-server/apps/server/src/api/services',
-  'trios/agent-server/apps/server/src/api/routes',
-  'trios/agent-server/apps/server/src/agent',
-  'trios/agent-server/apps/server/src/tools',
-  'trios/agent-server/apps/server/src/browser',
-  'trios/agent-server/apps/server/src/lib',
-]
+// TWO NARROWINGS STACKED, and neither was visible because the number was never
+// zero.
+//
+// This was six hand-listed directories under apps/server/src - one app out of
+// five - and the listing below used `git ls-tree` WITHOUT `-r`, so only the top
+// level of each was ever read. Measured 2026-09-05: the detector saw 107 of the
+// 234 .ts files inside its OWN six directories, and none at all in the other
+// four apps.
+//
+// A detector that still returns findings is not a detector that is looking
+// everywhere. This is the third time that sentence has been the answer, after
+// the L3 corpus and the untested corpus.
+const OWNED = (process.env.AUTHOR_LENGTH_ROOTS ||
+  'trios/agent-server/apps/server/src trios/agent-server/apps/agent trios/agent-server/apps/eval/src trios/agent-server/packages/shared trios/agent-server/apps/trios-mcp-bridge/src trios/tools')
+  .split(/\s+/).filter(Boolean)
 
 // The tree the BEE gets, not the one this machine has.
 //
@@ -121,22 +128,33 @@ const BASE = process.env.AUTHOR_BASE || 'origin/feat/queen-supervisor'
 /** Files over the threshold on the branch a bee actually clones, biggest first. */
 export function overlongFiles() {
   const out = []
+  const seenLong = new Set()
+  let examined = 0
   for (const dir of OWNED) {
-    const listed = tryShell(`git ls-tree --name-only ${BASE} ${dir}/`)
+    // `-r`, without which only the top level of each directory is read. 127 of
+    // 234 files were invisible for want of one flag.
+    const listed = tryShell(`git ls-tree -r --name-only ${BASE} ${dir}/`)
     if (!listed) continue
     for (const rel of listed.split('\n').filter(Boolean)) {
+      if (seenLong.has(rel)) continue
+      seenLong.add(rel)
       const name = rel.slice(rel.lastIndexOf('/') + 1)
-      if (!name.endsWith('.ts') || name.endsWith('.test.ts')) continue
+      if (!/\.tsx?$/.test(name) || /\.test\.tsx?$/.test(name)) continue
       // `git show | wc -l` counts newlines; a file with no trailing newline
       // would read one short, which is why the brief quotes this exact command.
       const count = tryShell(`git show ${BASE}:${rel} | wc -l`)
       if (count === null) continue
+      examined++
       const lines = Number(count.trim())
       if (!Number.isFinite(lines) || lines <= THRESHOLD) continue
+      const body = tryShell(`git show ${BASE}:${rel}`)
+      if (body && isGenerated(rel, body)) continue
       out.push({ rel, name, lines })
     }
   }
-  return out.sort((a, b) => b.lines - a.lines)
+  const sorted = out.sort((a, b) => b.lines - a.lines)
+  sorted.examined = examined
+  return sorted
 }
 
 // SIGNAL 2: a module whose exports are named in no test at all.
@@ -195,6 +213,7 @@ export function isGenerated(rel, text) {
 }
 
 export function asciiOffenders() {
+  let examinedAscii = 0
   // WIDENED, because a detector with a finite corpus is a detector that stops.
   // The server tree ran down to 4 candidates across all three signals in a
   // night; the same law governs the whole repository, and the rest of it holds
@@ -215,6 +234,11 @@ export function asciiOffenders() {
     const text = tryShell(`git show ${BASE}:${rel}`)
     if (!text) continue
     if (isGenerated(rel, text)) continue
+    // Counted at the READ, not at the keep. Counting kept files gave
+    // "ascii=71/71 seen", a denominator that can never differ from its
+    // numerator and therefore says nothing at all - the exact failure the
+    // denominator was added to prevent.
+    examinedAscii++
     const lines = text.split('\n')
     let inComment = 0
     let bad = 0
@@ -244,7 +268,9 @@ export function asciiOffenders() {
   }
   // Worst first: a file with 530 offending characters is a better first task
   // than one with 2, and it is the one a reader is most likely to hit.
-  return out.sort((a, b) => b.bad - a.bad)
+  const sortedAscii = out.sort((a, b) => b.bad - a.bad)
+  sortedAscii.examined = examinedAscii
+  return sortedAscii
 }
 
 /** The brief for an L3 cleanup. One file, one mechanical test. */
@@ -335,6 +361,7 @@ export function untestedModules() {
   if (corpus.length < 10000) return []
 
   const out = []
+  let examinedUntested = 0
   const roots = (process.env.AUTHOR_UNTESTED_ROOTS ||
     'trios/agent-server/apps/server/src trios/agent-server/apps/agent trios/agent-server/apps/eval/src trios/agent-server/packages/shared trios/agent-server/apps/trios-mcp-bridge/src')
     .split(/\s+/).filter(Boolean)
@@ -346,6 +373,7 @@ export function untestedModules() {
     if (!/\.tsx?$/.test(rel) || /\.test\.tsx?$/.test(rel)) continue
     const text = tryShell(`git show ${BASE}:${rel}`)
     if (!text) continue
+    examinedUntested++
     // The same refusal the L3 detector carries: L0 says a generated file is an
     // artifact and is not edited, and a test written against one would be a test
     // of the generator's output rather than of anybody's code.
@@ -369,7 +397,9 @@ export function untestedModules() {
     if (exports.length > UNTESTED_MAX_EXPORTS) continue
     out.push({ rel, name: rel.slice(rel.lastIndexOf('/') + 1), lines, exports })
   }
-  return out.sort((a, b) => b.lines - a.lines)
+  const sortedUntested = out.sort((a, b) => b.lines - a.lines)
+  sortedUntested.examined = examinedUntested
+  return sortedUntested
 }
 
 const ident = (name) => 'split' + name.replace(/\.ts$/, '').split(/[-.]/).map((p) => p[0].toUpperCase() + p.slice(1)).join('')
@@ -627,7 +657,20 @@ for (let i = 0; ; i++) {
 const q = unstartedAuthored()
 const open = q === null ? null : q.queue
 
-console.log(`signals: ${bySignal.map((s) => `${s.kind}=${s.items.length}`).join('  ')}`)
+// REPORT THE DENOMINATOR.
+//
+// Every one of the three detectors was found narrowed, and each time the tell
+// was missing because the number it produced was never zero: the L3 corpus was
+// one directory of five, the untested corpus was one app of five, and the length
+// detector read only the top level of its own six directories - 107 of 234
+// files - for want of a `-r`.
+//
+// A count of findings cannot show that. A count of findings against the number
+// of files LOOKED AT can, and costs one number per detector.
+console.log(`signals: ${bySignal.map((s) => {
+  const seen = s.items.examined
+  return `${s.kind}=${s.items.length}${seen !== undefined ? `/${seen} seen` : ''}`
+}).join('  ')}`)
 console.log(`queue depth target ${WIP} - counted on UNSTARTED issues, not open ones`)
 if (open === null) {
   console.error(`could not measure the ${LABEL} queue - refusing to file, because a failed count would read as zero and lift the limit`)

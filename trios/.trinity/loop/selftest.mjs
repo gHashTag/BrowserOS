@@ -1272,6 +1272,52 @@ check('a generated file is refused by BOTH detectors', () => {
   }
 })
 
+
+// ---------------------------------------------------------------------------
+// every detector reports its DENOMINATOR.
+//
+// All three were found narrowed, one per round, and each time the tell was
+// missing for the same reason: the number they produced was never zero. The L3
+// corpus was one directory of five; the untested corpus was one app of five; and
+// the length detector read only the TOP LEVEL of its own six directories - 107
+// of 234 files - for want of a `-r`.
+//
+// A count of findings cannot show that. A count of findings against the number
+// of files LOOKED AT can, and costs one number per detector.
+
+check('the length detector recurses', () => {
+  const code = codeOf('author.mjs')
+  const fn = code.slice(code.indexOf('export function overlongFiles'))
+  const body = fn.slice(0, fn.indexOf('\n}\n'))
+  if (!/ls-tree -r --name-only/.test(body)) {
+    throw new Error('without -r only the top level of each directory is read - 127 of 234 files were invisible for want of one flag')
+  }
+})
+
+check('every detector reports how many files it LOOKED AT', () => {
+  const code = codeOf('author.mjs')
+  for (const fnName of ['overlongFiles', 'untestedModules', 'asciiOffenders']) {
+    const fn = code.slice(code.indexOf(`export function ${fnName}`))
+    const body = fn.slice(0, fn.indexOf('\n}\n'))
+    if (!/\.examined = /.test(body)) throw new Error(`${fnName} does not report its denominator`)
+  }
+  if (!/seen/.test(code)) throw new Error('the signals line must print it')
+})
+
+check('the denominator counts the READ, not the keep', () => {
+  // Counting kept files gave "ascii=71/71 seen" - a denominator that can never
+  // differ from its numerator, and therefore says nothing at all. That is the
+  // exact failure the denominator was added to prevent, committed inside the
+  // fix for it.
+  const code = codeOf('author.mjs')
+  const fn = code.slice(code.indexOf('export function asciiOffenders'))
+  const body = fn.slice(0, fn.indexOf('\n}\n'))
+  const atRead = body.indexOf('examinedAscii++')
+  const atKeep = body.indexOf('out.push({')
+  if (atRead < 0 || atKeep < 0) throw new Error('cannot locate the counter and the keep')
+  if (atRead > atKeep) throw new Error('the counter must increment before the filters, or numerator equals denominator')
+})
+
 console.log(`\n${pass} passed, ${failures.length} failed`)
 fs.rmSync(tmp, { recursive: true, force: true })
 if (failures.length) {
