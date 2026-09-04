@@ -2,11 +2,11 @@
   "nodes": [
     {
       "id": "mvp-architecture-doc",
-      "label": "Queen+T27 MVP Architecture - the roadmap, outside the repository",
+      "label": "Queen+T27 MVP Architecture - the roadmap, tracked in the repository",
       "layer": "seed",
       "status": "partial",
-      "evidence": "/Users/playra/Downloads/Queen_T27_MVP_Architecture.md, 91776 bytes, mtime 2026-08-23. `git log --all -- '**/Queen_T27_MVP_Architecture.md'` returns nothing and no copy exists under trios/. Referenced from STATUS.md:9, RELEASE-BLOCKER.md:13, rings/SR-00/QueenMissionContract.swift:5 and its Linux twin.",
-      "note": "The single source of truth for what gets built next is an unversioned file in ~/Downloads. Nothing in the repo can diff against it, no gate can read it, and a second copy on another machine would drift in silence. Every number on the status board descends from it."
+      "evidence": "trios/docs/architecture/Queen_T27_MVP_Architecture.md, 91776 bytes, tracked since commit 6d1d50656 (2026-09-01): `git ls-files --error-unmatch trios/docs/architecture/Queen_T27_MVP_Architecture.md` exits 0, and `node trios/tools/roadmap-source-gate.mjs` re-derives the byte count and both DoD lists from it and exits 0 against the committed index. Until that commit the only copy was a local file dated 2026-08-23, and this node's evidence from that day described that copy.",
+      "note": "The single source of truth for what gets built next is a tracked file, so the repository can diff against it: node trios/tools/roadmap-source-gate.mjs measures the document and fails when the index drifts from it. Every number on the status board descends from it."
     },
     {
       "id": "mvp-dod-and-epics",

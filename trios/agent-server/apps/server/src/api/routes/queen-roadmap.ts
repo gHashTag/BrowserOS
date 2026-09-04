@@ -19,11 +19,14 @@
  * has been busy all day - so the page shows the two columns side by side and
  * names the gap instead.
  *
- * AND THE ROADMAP IS NOT IN THE REPOSITORY. Its source is an unversioned file
- * in ~/Downloads that four documents and one Swift file cite as authoritative.
- * `.trinity/dashboard/roadmap.json` is an extracted INDEX - ids, titles, gates -
- * versioned so a gate and a page can read it. The prose is not copied: two
- * copies of a 91 KB document drift in silence, and the file remains the author.
+ * The roadmap document is in the repository, tracked since commit 6d1d50656
+ * (2026-09-01) at `trios/docs/architecture/Queen_T27_MVP_Architecture.md`.
+ * `.trinity/dashboard/roadmap.json` is an extracted INDEX of it - ids, titles,
+ * gates - versioned so a gate and a page can read it. The prose is not copied:
+ * the document remains the author and the index is the digest. Drift between
+ * the two is no longer silent: `node trios/tools/roadmap-source-gate.mjs`
+ * re-derives the byte count and both DoD lists from the document on disk and
+ * fails when the index disagrees with the document it indexes.
  */
 
 import { readFile } from 'node:fs/promises'
