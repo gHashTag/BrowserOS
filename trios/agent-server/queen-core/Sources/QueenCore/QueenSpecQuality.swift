@@ -143,9 +143,7 @@ public enum QueenSpecQuality {
             ),
             Check(
                 name: "success criteria",
-                met: (hasSection(body, ["Success Criteria", "Критерии", "Done when", "Готово когда"])
-                      || hasSection(body, ["Acceptance"]))
-                    && hasMeasurableOutcome(body),
+                met: hasSection(body, criteriaHeadings) && hasMeasurableOutcome(body),
                 remedy: "Add `## Success Criteria` with outcomes something can "
                     + "check: a number, a file, a command and its exit code, or a "
                     + "log line to grep for. Adjectives close tasks that were never "
