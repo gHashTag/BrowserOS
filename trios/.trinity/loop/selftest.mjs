@@ -51,6 +51,25 @@ function check(name, fn) {
   }
 }
 
+/**
+ * A source file with its comments removed.
+ *
+ * THREE TIMES IN ONE NIGHT a check of mine matched its own documentation: it
+ * counted "evidence:" inside a printing block, it found "--delete-branch" in a
+ * comment that said NOT to use it, and it found "also true" in a comment
+ * quoting the behaviour that had just been removed. Each time the code was
+ * right and the test was reading prose.
+ *
+ * A scan that asks "does this file contain X" must ask it of the CODE. Every
+ * such check goes through here now, so the class is closed rather than fixed
+ * three times.
+ */
+const codeOf = (file) =>
+  fs.readFileSync(path.join(DIR, file), 'utf8')
+    .split('\n')
+    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+    .join('\n')
+
 const eq = (got, want, what) => {
   if (got !== want) throw new Error(`${what}: got ${JSON.stringify(got)}, wanted ${JSON.stringify(want)}`)
 }
@@ -1115,7 +1134,7 @@ check('it never lands UNACCEPTED work, and never forces or deletes', () => {
   // "No --delete-branch", which is the second time tonight one of my checks
   // read prose as code - the same shape as counting "evidence:" in a printing
   // block and blaming the code for the imbalance.
-  const code = src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
+  const code = codeOf('land.mjs')
   if (/--force/.test(code)) throw new Error('never force')
   if (/--delete-branch/.test(code)) throw new Error('the branch is the evidence that the work happened')
 })
@@ -1164,6 +1183,50 @@ check('the chain runs push -> land -> close, in that order', () => {
     if (push < 0 || land < 0 || close < 0) throw new Error(`${f} is missing one of the three steps`)
     if (!(push < land && land < close)) throw new Error(`${f} has them out of order: push ${push}, land ${land}, close ${close}`)
   }
+})
+
+
+// ---------------------------------------------------------------------------
+// land and why: one bad item must not block a batch, and a finding is not ok.
+
+check('the batch is FILLED with clean candidates, not sliced off the top', () => {
+  // `slice(0, BATCH)` took the newest five whatever their state, and the
+  // conflicting branches sit at the HEAD of a newest-first list - so a batch of
+  // five landed ONE while 35 clean branches waited behind 10 stuck ones. Fourth
+  // instance this round of work that CAN proceed being held hostage by work
+  // that cannot.
+  const src = fs.readFileSync(path.join(DIR, 'land.mjs'), 'utf8')
+  if (/const batch = landable\.slice\(0, BATCH\)/.test(src)) {
+    throw new Error('taking the first N holds the clean ones hostage to the stuck ones')
+  }
+  if (!/if \(batch\.length >= BATCH\) break/.test(src)) throw new Error('it must fill to the batch size')
+  if (!/BATCH \* 4/.test(src)) throw new Error('and the scan must be bounded, or a wall of conflicts becomes a full survey every run')
+})
+
+check('when only conflicts remain, it says the pipeline stops here', () => {
+  const src = fs.readFileSync(path.join(DIR, 'land.mjs'), 'utf8')
+  if (!/ALL \$\{landable\.length\} remaining branch\(es\) conflict/.test(src)) {
+    throw new Error('a batch of zero must explain itself')
+  }
+  if (!/never resolved by guessing/.test(src)) throw new Error('a conflict is for a person')
+})
+
+check('a check that FIRED is never printed as ok', () => {
+  // Under --all this printed "ok  the landing pipeline is moving (also true)"
+  // for a check that had just detected a stalled pipeline. The word ok is the
+  // first thing an eye lands on.
+  const code = codeOf('why.mjs')
+  if (/also true/.test(code)) throw new Error('a finding must not be dressed as a pass')
+  if (!/ALSO/.test(code)) throw new Error('a later cause is still a cause and needs its own marker')
+})
+
+check('the all-clear names what is coming, not just what is fine', () => {
+  // A stuck landing pipeline does not make a busy swarm idle today; it makes it
+  // idle in an hour, once every accepted issue holds a boundary nothing will
+  // release.
+  const src = fs.readFileSync(path.join(DIR, 'why.mjs'), 'utf8')
+  if (!/nothing is wrong RIGHT NOW/.test(src)) throw new Error('an all-clear must be scoped to now')
+  if (!/AHEAD:/.test(src)) throw new Error('a leading indicator belongs inside the all-clear')
 })
 
 console.log(`\n${pass} passed, ${failures.length} failed`)
