@@ -1,0 +1,16 @@
+# Runtime, not instrument. Everything here is produced by a run and is only
+# meaningful on the machine that produced it.
+state.json
+ledger.jsonl
+loop.lock
+DASHBOARD.ansi
+DASHBOARD.txt
+heal.timer.log
+
+# Judging packets: assembled from a bee's branch and transcript, read once, and
+# large. They are reproducible from the branch at any time with judge-packet.
+packets/
+
+# Compiled artefacts, including the Swift criteria probe that stale-escalations
+# builds on demand. A binary in the tree is a binary that goes stale.
+state/

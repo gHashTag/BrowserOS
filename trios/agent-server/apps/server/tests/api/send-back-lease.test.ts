@@ -22,6 +22,21 @@ describe('stateOfDispatch: the send-back lease', () => {
     expect(stateOfDispatch(true, 'accept')).toBe('accepted')
     expect(stateOfDispatch(true, 'sendBack')).toBe('rejected')
     expect(stateOfDispatch(true, 'escalate')).toBe('awaitingReview')
+    // A verdict that says failed is a failure, not something awaiting review.
+    // Without this case it fell through to `awaitingReview`, which
+    // `claimOnIssue` counts as a LIVE claim - so writing `failed` to release an
+    // issue HELD it instead. Five issues and every worker slot, 2026-09-04.
+    expect(stateOfDispatch(true, 'failed')).toBe('failed')
+    expect(stateOfDispatch(true, 'cancelled')).toBe('failed')
+    // And it does not depend on the lease: a failure is a failure at zero idle
+    // and at the ceiling, because nothing about it is waiting for a clock.
+    expect(
+      stateOfDispatch(true, 'failed', { idleMs: 0, sendBacks: 9, ceiling: 2 }),
+    ).toBe('failed')
+    // The states that must NOT be swept up by it.
+    expect(stateOfDispatch(true, 'accept')).toBe('accepted')
+    expect(stateOfDispatch(true, 'sendBack')).toBe('rejected')
+    expect(stateOfDispatch(false, 'failed')).toBe('running')
     expect(stateOfDispatch(true, 'wait')).toBe('awaitingReview')
     expect(stateOfDispatch(true, null)).toBe('awaitingReview')
   })
