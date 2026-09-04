@@ -66,6 +66,66 @@ const sh = (c, opts = {}) => {
  * catches a squash, a cherry-pick, and a change somebody applied by hand - all
  * of which leave the branch looking unmerged for ever.
  */
+
+/**
+ * THE FIFTH ROUTE: the base's own history says it closed this issue.
+ *
+ * Every content-based route above compares BYTES - a tree, a patch-id, an
+ * ancestry. All four are blind to the one thing this loop does constantly:
+ * when a bee's branch goes stale, I re-cut its change against the current base
+ * and squash-merge THAT. The carry is a new commit with a new tree and a new
+ * patch-id, so nothing content-shaped can connect it back, and the bee's
+ * original branch becomes permanent debt - re-offered every round, conflicting
+ * every round, holding its issue open and its boundary fenced for ever.
+ *
+ * Measured 2026-09-05 on the nine branches that had jammed the pipeline:
+ * #1310 landed as PR #330, #1308 as PR #331, #1362 carries `Closes #1362` in a
+ * base commit. Three of nine were finished work that no content route could see.
+ *
+ * So read the message. L1 of this repository is "no code merged without
+ * `Closes #N`", which makes the message a load-bearing record rather than a
+ * courtesy - and the squash subject convention `(#N)` says the same thing.
+ *
+ * THE MATCHING IS DONE IN JAVASCRIPT, not in git's regex. Two rounds ago a BRE
+ * read as a JavaScript regex convicted a bee; the lesson is to keep the dialect
+ * somewhere it is known. git is asked the loose question and the boundary is
+ * checked here.
+ */
+export function closedInBase(branch, run = sh) {
+  const m = String(branch).match(/queen-(\d+)$/)
+  if (!m) return false
+  const n = m[1]
+  const raw = run(`git log origin/${BASE} --format=%B%x1e --grep=${JSON.stringify('#' + n)} -i`)
+  if (!raw) return false
+  const closes = new RegExp(`(?:closes|fixes|resolves)\\s+#${n}(?![0-9])`, 'i')
+  // `(#N)` is how a squash subject records the issue it came from, and it must
+  // END A LINE, which is what makes it a subject rather than a mention. The
+  // loose version would match "unlike (#1421), this does X" in any paragraph.
+  //
+  // In THIS repository issue numbers are four digits and pull-request numbers
+  // three, so `(#1310)` cannot be a PR reference - a repo-specific fact, stated
+  // because it is not a general one.
+  //
+  // ...ALLOWING THE REFERENCES THAT FOLLOW IT. A squash subject here reads
+  // `feat(queen): explain idle paid slots (#1310) (#330)` - the issue first,
+  // then the pull request that merged it. Demanding `(#N)` at the very end of
+  // the line rejected exactly the case this route was written for, which I
+  // discovered by tightening the rule and watching #1310 stop being recognised
+  // one minute later. A trailing CHAIN of parenthesised references is a
+  // subject; a parenthesis in the middle of a sentence is not.
+  const subject = new RegExp(`\\(#${n}\\)(?:\\s*\\(#\\d+\\))*\\s*$`, 'm')
+  // And the phrasing my own carry commits use, which is the case this route
+  // exists for: the change was re-cut onto a fresh base and merged under a
+  // different branch, saying so in words because no byte-comparison can.
+  const carried = new RegExp(`carr(?:y|ies|ied)\\s+(?:the\\s+)?#${n}(?![0-9])`, 'i')
+  for (const message of raw.split('\x1e')) {
+    if (closes.test(message)) return true
+    if (carried.test(message)) return true
+    if (Number(n) >= 1000 && subject.test(message)) return true
+  }
+  return false
+}
+
 export function isLanded(branch) {
   if (sh(`git merge-base --is-ancestor origin/${branch} origin/${BASE} && echo yes`) === 'yes') return true
   // THE EXACT QUESTION: would merging this change the base at all?
@@ -102,9 +162,13 @@ export function isLanded(branch) {
   // A branch with no commits left unaccounted for has landed, whatever route it
   // took. An empty answer from `git cherry` is not evidence of anything.
   const cherry = sh(`git cherry origin/${BASE} origin/${branch}`)
-  if (cherry === null) return false
-  const unaccounted = cherry.split('\n').filter((l) => l.trim().startsWith('+'))
-  return cherry.trim() !== '' && unaccounted.length === 0
+  if (cherry !== null) {
+    const unaccounted = cherry.split('\n').filter((l) => l.trim().startsWith('+'))
+    if (cherry.trim() !== '' && unaccounted.length === 0) return true
+  }
+
+  // ...and the route no comparison of bytes can reach.
+  return closedInBase(branch)
 }
 
 export function mergesCleanly(branch) {
