@@ -26,7 +26,7 @@ interface ClawChatProps {
    */
   stripOnlyTurns?: AgentConversationTurn[]
   /**
-   * Maps each assistant history message id → the produced-files
+   * Maps each assistant history message id -> the produced-files
    * group that came from its turn. Built by
    * `mapHistoryToProducedFilesGroups` upstream so the strip
    * renders directly under the matching message instead of
