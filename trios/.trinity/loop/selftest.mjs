@@ -1401,6 +1401,39 @@ check('the diagnosis checks the CONTAINER volume, not only this laptop', () => {
   }
 })
 
+
+// ---------------------------------------------------------------------------
+// the audit floor, and the fourth route to "already landed".
+
+check('the verdict audit takes its set from the DATA, not a constant', () => {
+  // `select(.number >= 1347)` appeared once, with no comment, in a file where
+  // every other decision carries a paragraph. It excluded 63 of the 189 pushed
+  // branches - a third of the swarm's output - and 15 of those yield a promised
+  // identifier this tool's own extractor accepts.
+  const code = codeOf('verdict-audit.mjs')
+  if (/select\(\.number>=\d+\)/.test(code)) throw new Error('an unexplained numeric floor decides what is audited')
+  if (!/git branch -r --list/.test(code)) throw new Error('the set must be every issue with a pushed branch')
+  if (/--limit 200/.test(code)) throw new Error('a cap two percent above the live number is a silent truncation waiting')
+})
+
+check('landed knows the fourth route: patch-id equivalence', () => {
+  // The tree test catches a branch whose merge changes nothing. It does NOT
+  // catch one that was cherry-picked and has since drifted - the base moved on,
+  // so merging it back still changes the tree and it looks like debt for ever.
+  // 46 of 67 "unmerged" branches were in this state.
+  const code = codeOf('land.mjs')
+  const fn = code.slice(code.indexOf('export function isLanded'), code.indexOf('export function mergesCleanly'))
+  if (!/git cherry/.test(fn)) throw new Error('patch-id equivalence is the only way to see a drifted cherry-pick')
+  if (!/startsWith\('\+'\)/.test(fn)) throw new Error('git cherry marks unaccounted commits with +; that is the test')
+})
+
+check('an unreadable cherry answer is not evidence of landing', () => {
+  const code = codeOf('land.mjs')
+  const fn = code.slice(code.indexOf('export function isLanded'), code.indexOf('export function mergesCleanly'))
+  if (!/cherry === null\) return false/.test(fn)) throw new Error('unreadable is not landed')
+  if (!/cherry\.trim\(\) !== ''/.test(fn)) throw new Error('an EMPTY answer must not read as "no unaccounted commits"')
+})
+
 console.log(`\n${pass} passed, ${failures.length} failed`)
 fs.rmSync(tmp, { recursive: true, force: true })
 if (failures.length) {
