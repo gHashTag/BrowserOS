@@ -125,8 +125,17 @@ export function effectiveTimeout(requested: number | undefined): {
 /// rather than presenting it as the whole. Counted in characters, which is what
 /// the window actually bounds - the decoded string held in memory, not the
 /// bytes that arrived.
+///
+/// `deadline` is the command's timeout, resolved by the timer in
+/// `createBashTool` - and never resolved on the happy path, so a command that
+/// finishes inside its timeout is read exactly as before. When the deadline
+/// does fire, the loop below stops at that instant and returns the tail
+/// collected so far: the stream itself ends only when every holder of the
+/// write end exits, and a grandchild the shell started holds it too
+/// (trios#1340).
 async function readBoundedTail(
   stream: ReadableStream<Uint8Array>,
+  deadline: Promise<void>,
 ): Promise<{ text: string; droppedChars: number }> {
   const reader = stream.getReader()
   const decoder = new TextDecoder()
@@ -135,8 +144,23 @@ async function readBoundedTail(
   let droppedChars = 0
 
   while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
+    // Each read is raced against the deadline, so the loop ends when the
+    // stream ends or when the timeout fires, whichever comes first.
+    const chunk = await Promise.race([
+      reader.read(),
+      // `null` is not a value `read()` can produce, so it unambiguously
+      // means the deadline won.
+      deadline.then(() => null),
+    ])
+    if (chunk === null) {
+      // Timed out mid-stream: stop reading, release this end of the pipe,
+      // and let the caller have the tail collected so far. The abandoned
+      // `read()` settles into a race that is already over.
+      void reader.cancel().catch(() => {})
+      break
+    }
+    if (chunk.done) break
+    const value = chunk.value
     // `stream: true` so a multi-byte character split across two chunks is not
     // decoded as two replacement characters.
     const piece = decoder.decode(value, { stream: true })
@@ -203,20 +227,40 @@ export function createBashTool(cwd: string) {
         })
 
         let timedOut = false
+        // Resolved by the timer below. Every wait on the child is raced
+        // against it, so the timeout bounds the call rather than only
+        // signalling it. `proc.kill()` reaches the shell, but a grandchild
+        // the shell started keeps the write end of the pipes open, and the
+        // reads would otherwise wait for that grandchild to exit - for a
+        // hung one, never (trios#1340). Raced here, a timed-out call
+        // returns with whatever output arrived before the deadline.
+        let onDeadline!: () => void
+        const deadline = new Promise<void>((resolve) => {
+          onDeadline = resolve
+        })
         const timer = setTimeout(() => {
           timedOut = true
           proc.kill()
+          onDeadline()
         }, timeoutMs)
 
         const [out, err] = await Promise.all([
-          readBoundedTail(proc.stdout as ReadableStream<Uint8Array>),
-          readBoundedTail(proc.stderr as ReadableStream<Uint8Array>),
+          readBoundedTail(proc.stdout as ReadableStream<Uint8Array>, deadline),
+          readBoundedTail(proc.stderr as ReadableStream<Uint8Array>, deadline),
         ])
         const stdoutText = out.text
         const stderrText = err.text
         const droppedChars = out.droppedChars + err.droppedChars
 
-        const exitCode = await proc.exited
+        // Raced as well: the exit wait follows the reads and must not be
+        // able to outlive the deadline any more than they can. On the
+        // happy path the deadline never resolves and this is plain
+        // `await proc.exited`; when the timeout fires, the raced value is
+        // unused - the timed-out branch below does not read an exit code.
+        const exitCode = await Promise.race([
+          proc.exited,
+          deadline.then(() => null),
+        ])
         clearTimeout(timer)
 
         if (timedOut) {
