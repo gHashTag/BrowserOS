@@ -15,16 +15,16 @@ interface AdapterIconProps {
 export const AdapterIcon: FC<AdapterIconProps> = ({ adapter, className }) => {
   switch (adapter) {
     case 'claude':
-      // Claude Code — text-based agent, sparkles to evoke the "AI assistant" feel.
+      // Claude Code - text-based agent, sparkles to evoke the "AI assistant" feel.
       return <Sparkles className={className} aria-label="Claude Code" />
     case 'codex':
-      // Codex — code-leaning, CPU mark.
+      // Codex - code-leaning, CPU mark.
       return <Cpu className={className} aria-label="Codex" />
     case 'openclaw':
-      // OpenClaw — bot/automation framing.
+      // OpenClaw - bot/automation framing.
       return <Bot className={className} aria-label="OpenClaw" />
     case 'hermes':
-      // Hermes — messenger god framing, wand evokes the agentic conjuring.
+      // Hermes - messenger god framing, wand evokes the agentic conjuring.
       return <Wand2 className={className} aria-label="Hermes" />
     default:
       return <Bot className={className} aria-label="Agent" />
