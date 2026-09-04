@@ -118,10 +118,26 @@ export function survey() {
         rec.why = 'its HEAD could not be resolved'
         return rec
       }
+      // Ancestry FIRST, then the diff - because a SQUASH merge never makes the
+      // source an ancestor. Without the second question a worktree whose work
+      // landed by squash looks unmerged for ever and is never reaped, which is
+      // how a disk fills up while every branch on it is already in the base.
       const contained = sh(`git merge-base --is-ancestor ${head} ${BASE} && echo yes`)
       if (contained !== 'yes') {
-        const ahead = sh(`git rev-list --count ${BASE}..${head}`)
-        rec.why = `${ahead ?? '?'} commit(s) not in ${BASE} - unmerged work lives here`
+        // The exact question, not the three-dot diff: would merging change the
+        // base at all? A squash writes a new commit and leaves the source
+        // looking unmerged for ever, and three-dot measures from the divergence
+        // point rather than from what the base holds now.
+        const baseTree = sh(`git rev-parse ${BASE}^{tree}`)
+        const mergedTree = sh(`git merge-tree --write-tree ${BASE} ${head}`)
+        const landed = baseTree && mergedTree && mergedTree.split('\n')[0].trim() === baseTree
+        if (!landed) {
+          const ahead = sh(`git rev-list --count ${BASE}..${head}`)
+          rec.why = `${ahead ?? '?'} commit(s) not in ${BASE} - unmerged work lives here`
+          return rec
+        }
+        rec.state = 'REAPABLE'
+        rec.why = `its diff against ${BASE} is empty - the work landed, by squash or otherwise`
         return rec
       }
 
