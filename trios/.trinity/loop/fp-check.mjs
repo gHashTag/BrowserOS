@@ -121,12 +121,25 @@ export function run(limit = 12) {
   // coverage, against the loop's own tools. Every act path has been exercised
   // at least once, so an "unproven" here means the ledger stopped recording
   // rather than that a tool stopped working.
-  const cov = COV.coverage().filter((r) => r.state === 'NEVER ACTED' || r.state === 'UNTRACKED')
+  // ONLY `UNTRACKED` belongs here. That state means a tool exists and nobody
+  // declared what it does - a bookkeeping error, and an accusation against a
+  // tool that is perfectly good.
+  //
+  // `NEVER ACTED` is a true statement about the world: the act path has not run
+  // yet. It is the single most valuable line coverage.mjs prints - it is how the
+  // reaper's untested branch was found - and it belongs in that report, not in
+  // this corpus. Counting it here made every newly written tool look like a
+  // false accusation for as long as its first act took to happen, which would
+  // have taught me to ignore this checker.
+  const cov = COV.coverage().filter((r) => r.state === 'UNTRACKED')
+  const unproven = COV.coverage().filter((r) => r.state === 'NEVER ACTED')
   results.push({
     checker: 'coverage',
     subject: 'the loop tools',
     ok: cov.length === 0,
-    why: cov.length ? cov.map((c) => `${c.file}: ${c.state}`).join(', ') : 'every act path has run at least once',
+    why: cov.length
+      ? cov.map((c) => `${c.file}: undeclared`).join(', ')
+      : `every tool is declared${unproven.length ? `; ${unproven.length} act path(s) still unproven, which coverage.mjs reports` : ''}`,
   })
 
   // trend, against the ledger it has been fed all night. "too few points" here

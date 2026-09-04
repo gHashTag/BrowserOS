@@ -51,6 +51,14 @@ const ACTS = {
   // UNTRACKED noise - and they were left as noise for four iterations, because
   // each was written after this map and nothing made me come back. The
   // false-positive corpus is what finally asked.
+  // Three tools that ACT on the swarm's own bookkeeping, added 2026-09-04.
+  // Declared the same round they were written - the four before them were left
+  // UNTRACKED for four iterations because each was written after this map and
+  // nothing made me come back. The false-positive corpus is what asks now, and
+  // it asked within the hour.
+  'stale-escalations.mjs': { kinds: ['stale-escalations'], note: 'releases an escalation whose stated cause no longer reproduces' },
+  'unpark.mjs': { kinds: ['unpark'], note: 'releases a retry ceiling reached without any criterion being judged' },
+  'disjoint.mjs': { kinds: [], note: 'a selector: it decides which candidates can run side by side and files nothing itself' },
   'clocks.mjs': { kinds: [], note: 'a guard: it reports which fields decisions are keyed on and changes nothing' },
   'fields.mjs': { kinds: [], note: 'a guard: it compares reads against selects and changes nothing' },
   'fp-check.mjs': { kinds: [], note: 'a guard: it runs the other checkers against known-good input' },

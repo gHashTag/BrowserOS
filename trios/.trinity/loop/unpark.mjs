@@ -212,6 +212,11 @@ if (isMain) {
     'the worker omitted from its VERDICT block, so no attempt on the work was ' +
     'ever assessed. send_backs reset to 0 for the same reason'
   const { released } = release(free.map((r) => r.issue), note)
+  // See stale-escalations.mjs: an act path with no ledger line cannot be
+  // proven, and coverage.mjs will keep reporting it as NEVER ACTED however
+  // often it runs.
+  const L = await import(path.join(DIR, 'loop.mjs'))
+  L.append({ kind: 'unpark', released, parked: rows.length, issues: free.map((r) => r.issue) })
   console.log(`\nreleased ${released} of ${free.length} back to the pool`)
   process.exit(released === free.length ? 0 : 1)
 }
