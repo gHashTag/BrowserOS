@@ -219,7 +219,36 @@ for (const s of STEPS) {
 console.log(`\n${DRY ? 'DRY RUN - ' : ''}heal complete: ` +
   results.map((r) => `${r.step}=${r.status}`).join(' '))
 
-L.append({ kind: DRY ? 'heal-dry' : 'heal', results })
-
+// A FAILURE OF THE STEP THAT UNBLOCKS EVERYTHING IS NOT A FAILURE LIKE THE
+// OTHERS.
+//
+// Measured 2026-09-05: the summary read
+//
+//   reap=FAILED lease=FAILED push-work=FAILED land=ok close-done=FAILED ...
+//
+// and nothing about that shouted. The container volume was 100% full, 71 MB of
+// 46 GB, sixty worktrees; every bee was dying at `git worktree add: unable to
+// write file`, and the issue just handed to the swarm never ran a line.
+//
+// The reaper had failed because `railway ssh` refused with "Your application is
+// not running or in a unexpected state" - the application being unhealthy
+// BECAUSE the volume was full. The tool that repairs the failure reaches through
+// the thing the failure breaks, so it needs retrying rather than believing.
+//
+// An audit that could not run costs a round. A reaper that could not run costs
+// the fleet, and the two must not print the same way.
+const CRITICAL = new Set(['reap', 'reap-local', 'lease', 'push-work', 'land', 'close-done', 'author'])
 const failed = results.filter((r) => r.status === 'FAILED')
+const criticalFailures = failed.filter((r) => CRITICAL.has(r.step))
+if (criticalFailures.length) {
+  console.log('')
+  console.log(`URGENT: ${criticalFailures.length} step(s) that FREE the swarm failed - ${criticalFailures.map((r) => r.step).join(', ')}.`)
+  console.log('These are not audits. While they fail the swarm is being starved, and the')
+  console.log('failure of `reap` in particular is circular: it reaches the volume through the')
+  console.log('container, which stops answering once the volume is full. Retry it.')
+  console.log('  tri why    - it checks the CONTAINER volume now, not just this laptop')
+}
+
+L.append({ kind: DRY ? 'heal-dry' : 'heal', critical: criticalFailures.map((r) => r.step), results })
+
 process.exit(failed.length ? 1 : 0)

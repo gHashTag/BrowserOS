@@ -34,6 +34,8 @@ const ROOT = process.env.TRIOS_ROOT || '/Users/playra/BrowserOS'
 const REPO = process.env.TRIOS_ISSUE_REPO || 'gHashTag/trios'
 const STATUS = process.env.QUEEN_STATUS_URL || 'https://trios-agent-server-production.up.railway.app/queen/status'
 const WORKERS = Number(process.env.QUEEN_WORKERS ?? 4)
+const PROJECT = process.env.QUEEN_PROJECT || '564d9ebd-7aa8-44fe-93ec-e0b03c87158d'
+const SERVICE = process.env.QUEEN_SERVICE || 'trios-agent-server'
 const isMain = process.argv[1] && process.argv[1].endsWith('/why.mjs')
 
 const L = await import(path.join(DIR, 'loop.mjs'))
@@ -133,7 +135,49 @@ export function checks(s) {
       },
     },
     {
-      name: 'the disk has room',
+      name: 'the CONTAINER volume has room',
+      test: () => {
+        // CAUSE FOURTEEN, and it is circular.
+        //
+        // Measured 2026-09-05: /workspace 100% used, 71 MB free of 46 GB, 60
+        // worktrees. Every bee died at `git worktree add` with "unable to write
+        // file docs/images/...", and #1493 - the issue I had just handed to the
+        // swarm - never ran a line.
+        //
+        // The reaper exists for exactly this and it had NOT run, because it
+        // reaches the volume through `railway ssh`, and railway refused with
+        // "Your application is not running or in a unexpected state" - the
+        // application being unhealthy BECAUSE the disk was full. The tool that
+        // repairs the failure depends on the thing the failure breaks.
+        //
+        // And this diagnostic checked the LAPTOP's disk, not the container's.
+        // The laptop was at 69% and reported healthy while the fleet was down.
+        const out = sh(
+          `${JSON.stringify(process.env.SHELL || '/bin/sh')} -c ` +
+          JSON.stringify(`cd ${ROOT}/trios && railway ssh --project ${PROJECT} --environment production --service ${SERVICE} -- sh -c 'df -P /workspace | tail -1' 2>&1`),
+          { timeout: 120000 },
+        )
+        if (!out) return null
+        if (/not running or in a unexpected state/i.test(out)) {
+          return {
+            cause: 'the container will not accept a connection - "not running or in a unexpected state", which is what a FULL VOLUME looks like from outside',
+            evidence: out.split('\n').slice(-2).join(' ').slice(0, 180),
+            remedy: 'tri reap --reap   - retry it; the reaper reaches the volume through the same channel, so it may need several attempts as the app recovers',
+          }
+        }
+        const m = out.match(/(\d+)%/)
+        if (!m) return null
+        const used = Number(m[1])
+        if (used < 90) return null
+        return {
+          cause: `the container volume is ${used}% full - every bee dies at "git worktree add: unable to write file"`,
+          evidence: out.trim().slice(0, 160),
+          remedy: 'tri reap --reap',
+        }
+      },
+    },
+    {
+      name: 'the LAPTOP disk has room',
       test: () => {
         const used = RL.diskUsedPercent()
         if (used === null || used < 92) return null

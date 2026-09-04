@@ -1372,6 +1372,35 @@ check('identical rates need no sample size, and say so', () => {
   if (!/no sample size would separate them/.test(AB.render(r))) throw new Error('it must say that rather than print Infinity')
 })
 
+
+// ---------------------------------------------------------------------------
+// the circular failure: the reaper reaches through the thing it repairs.
+
+check('the chain names a CRITICAL step failure separately', () => {
+  // The summary read "reap=FAILED lease=FAILED push-work=FAILED ..." while the
+  // container volume was 100% full and every bee was dying at git worktree add.
+  // Nothing about that line shouted. An audit that could not run costs a round;
+  // a reaper that could not run costs the fleet.
+  const code = codeOf('heal.mjs')
+  if (!/const CRITICAL = new Set/.test(code)) throw new Error('the steps that free the swarm must be distinguishable')
+  if (!/URGENT:/.test(code)) throw new Error('a critical failure must not print like an audit failure')
+  for (const step of ['reap', 'push-work', 'land', 'close-done', 'author']) {
+    if (!new RegExp(`'${step}'`).test(code.slice(code.indexOf('const CRITICAL')))) {
+      throw new Error(`${step} frees the swarm and must be in the critical set`)
+    }
+  }
+})
+
+check('the diagnosis checks the CONTAINER volume, not only this laptop', () => {
+  // The laptop was at 69% and reported healthy while the fleet was down on a
+  // volume at 100%.
+  const code = codeOf('why.mjs')
+  if (!/workspace/.test(code)) throw new Error('nothing looks at the container volume')
+  if (!/not running or in a unexpected state/.test(code)) {
+    throw new Error('a refused connection is what a full volume looks like from outside, and must be read as such')
+  }
+})
+
 console.log(`\n${pass} passed, ${failures.length} failed`)
 fs.rmSync(tmp, { recursive: true, force: true })
 if (failures.length) {
