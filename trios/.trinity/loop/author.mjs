@@ -56,7 +56,21 @@ const isMain = process.argv[1] && process.argv[1].endsWith('/author.mjs')
 const ROOT = process.env.TRIOS_ROOT || '/Users/playra/BrowserOS'
 const REPO = process.env.TRIOS_ISSUE_REPO || 'gHashTag/trios'
 const LABEL = 'queen-authored'
-const WIP = Number(process.env.AUTHOR_WIP ?? 5)
+// THE TARGET QUEUE DEPTH, and why it is not simply the worker count.
+//
+// Four workers at a p50 of 748 s drain about 4 tasks every 12.5 minutes, and
+// the chain that refills them fires every 10. A depth of 5 would be exactly
+// enough IF every run filed 5 - and no run does. The disjoint selector can only
+// file work whose boundary is free, so a round where finished dispatches still
+// hold their paths files two, or none.
+//
+// Measured 2026-09-04: queue 0, running 0, with nine authored issues in flight
+// holding paths. The depth was right for the average and wrong for the variance,
+// which is the same thing as being wrong.
+//
+// Two drains' worth plus one, so a lean round is absorbed by the buffer instead
+// of by the workers.
+const WIP = Number(process.env.AUTHOR_WIP ?? 9)
 const THRESHOLD = Number(process.env.AUTHOR_LINE_THRESHOLD ?? 900)
 const UNTESTED_MIN_LINES = Number(process.env.AUTHOR_UNTESTED_MIN ?? 250)
 
