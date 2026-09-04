@@ -1081,6 +1081,63 @@ ago and carry their own copy of the rule, and because a pre-push hook is the
 AUTHOR's check run on the author's machine - a third machine making finished
 work visible proves nothing by running it.
 
+## When the bees sleep, look at the machinery around the Queen, not at her
+
+Asked twice in one night why only one bee was running. Both times the Queen was
+behaving correctly and refusing correctly. Four causes, all outside her, all
+measured.
+
+**The chain was failing from its own timer while looking healthy.** Every
+railway-calling step - reap, lease, push-work, close-done - failed on every
+timer run with `Must provide project when setting service or environment`, while
+the read-only steps passed. So the summary read mostly `ok`, nothing was pushed,
+nothing closed, no fence released, and the swarm moved only when the chain was
+triggered by hand. `railway ssh --service X` resolves the project by walking up
+from wherever it runs until it finds a linked directory: fine from a shell a
+person sits in, useless from launchd. Name the project explicitly.
+
+**The refill was the LAST link.** `author` - the one step that decides whether
+four workers have anything to start - sat behind five read-only steps whose
+entire output is something for a person to read later. Everything that FREES the
+swarm must run before everything that only REPORTS on it.
+
+**The chain could outlive its own cadence.** Eleven steps at a 10-minute
+per-step timeout is 110 minutes worst case against a timer firing every 10. One
+run held the lock for 21 minutes - 6.5 of them assembling 31 judging packets -
+and every fire during it stood down. A chain that can outrun its cadence
+schedules its own outage. Give the CHAIN a deadline, skip rather than truncate,
+and name what was skipped.
+
+**Accepted work that is never closed strangles authoring.** `completed` reached
+21: twenty-one issues whose work the Queen had accepted, still open, still
+holding their boundaries - so the disjoint selector could find no free paths and
+the author filed almost nothing. The pipeline is push -> close -> release ->
+file, in that order, and skipping the first step disables the last.
+
+## The laptop fills too
+
+`git worktree add` failed mid-checkout with `No space left on device` at 100%
+full, while `reap.mjs` reported the container volume healthy - which it was.
+Eight PRs in a night is eight 205 MB checkouts, one of them 2.4 GB with
+node_modules, none removed after merging.
+
+`reap-local.mjs` removes a worktree only when its HEAD is already contained in
+the base AND the tree is clean. That rule is safe without knowing who created
+the tree: a merged, clean worktree holds nothing that is not already in the
+repository. Never `--force`; a dirty tree is somebody's unfinished thought.
+
+Two lessons it learned about itself, both about ORDER:
+
+- it priced every worktree with `du` before classifying any, spending its whole
+  budget measuring things it would never touch;
+- it asked `git status`, which walks the working tree, before
+  `merge-base --is-ancestor`, which is two ref lookups - and an unmerged tree is
+  kept whatever its state, so its dirtiness was never worth asking.
+
+**Ask the cheap question first, and only price what you might actually take.**
+It timed out twice before every shell call was bounded. A step that can hang for
+ever hangs the whole chain.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
