@@ -135,7 +135,7 @@ export class FileMessageQueue {
   /**
    * Re-attach a message to the head of an agent's queue. Used by the
    * drain pump when starting a turn fails so the message isn't
-   * silently dropped. Bypasses the length cap — `pushFront` is a
+   * silently dropped. Bypasses the length cap - `pushFront` is a
    * recovery primitive, not a regular append.
    */
   async pushFront(agentId: string, message: QueuedMessage): Promise<void> {
