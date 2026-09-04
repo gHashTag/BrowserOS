@@ -1686,6 +1686,132 @@ Then landing the four in sequence made the last two stale in the same minute -
 each landing.** That is the same defect these carries exist to rescue - work made
 stale by a base moving underneath it - committed while fixing it.
 
+## A guard pointed at the wrong filesystem is worse than no guard
+
+`reap-local.mjs` asked `df -P /` from the day it was written and reported a
+comfortable 55%. Every checkout it manages lives under `/private/tmp` and
+`/Users`, which on macOS are on `/System/Volumes/Data` - 97% full, 393 Gi of 460.
+`/` is a sealed read-only system snapshot. The two numbers have nothing to do
+with each other.
+
+So a `git worktree add` failed with "No space left on device" while the disk
+guard, on the same machine, in the same minute, said there was room. It did not
+fail to answer. It answered, confidently, about a filesystem nobody was writing
+to.
+
+Ask about the PATH you care about and let `df` resolve which filesystem that is:
+
+```bash
+df -P "$TARGET_DIR" | tail -1     # not df -P /
+```
+
+The general form: **a measurement whose subject is implicit will eventually have
+the wrong subject, and it will not tell you.** The same round found `tri why`
+checking the laptop's disk while diagnosing a container, and the audit floor
+`select(.number>=1347)` deciding what "every accepted verdict" meant.
+
+## The collector must not depend on the thing whose failure it collects for
+
+`/workspace` reached 100% - 71 MB free of 46 GB, sixty worktrees - and every
+dispatch died in its first second at `git worktree add`. A reaper existed and had
+not run, because it lived OUTSIDE the container and reaches the volume through
+`railway ssh`, which refuses while the application is unhealthy - which it was,
+BECAUSE the volume was full. A retry thirty seconds later happened to work.
+Nothing guaranteed it would.
+
+Every system that has met this answers the same way: kubelet garbage-collects on
+the NODE against high and low watermarks, not from the control plane; CI runners
+clean their own disks; ext4 reserves 5% so root can still act on a full
+filesystem. Put the collector inside, give it watermarks, and let it refuse with
+a number rather than die at a git command:
+
+    volume 97% full after reaping 4 worktree(s); 2 held uncommitted work and were kept
+
+Note what it will never remove: a worktree holding uncommitted work. The worker
+container carries no push credential by design, so unpublished work in a tree is
+the only copy of it. Unreadable status counts as dirty. No `--force`, ever.
+
+## `body.split(heading)[1]` is not the text after the heading
+
+It is the text BETWEEN the first and the second occurrence, because `split` cuts
+on every one.
+
+`verdict-audit` read `## Success Criteria` this way for its whole life. #1090 is
+a brief ABOUT brief shape, so its acceptance scenario contains the sentence
+"Given a body with a `## Boundary` but no `## Success Criteria`" - and `[1]`
+returned 931 characters of User Scenarios. The real criterion two sections below
+was the exact phrase the tool exists to find, and it was never read. The audit
+reported "the brief promised no new identifier" and meant it.
+
+A heading is a heading only at the start of a line. Anchor it, and end the
+section at the next one.
+
+## grep speaks three languages, and the flag bundle says which
+
+`grep -c '^  it(' <file>` is a valid criterion. In BRE - plain `grep` - the paren
+is an ordinary character. Handed to `new RegExp` it throws on an unclosed group,
+so the checker fell back to a literal substring search, counted 0, and accused a
+bee whose test file was full of exactly that.
+
+- `grep -P` is PCRE and reads like JavaScript.
+- `grep -E` is ERE and also reads like JavaScript.
+- plain `grep` is BRE, where `( ) { } | + ?` are LITERAL unless backslashed.
+
+And when the pattern still cannot be read: **unreadable is not failed.** A checker
+that convicts on its own inability to read the question is the worst failure mode
+available to it.
+
+## The number is not the whole criterion
+
+#1326 says ``grep -c 'commands_run' <file>`` prints `2` **or more**. Read as
+"exactly 2" it convicted a bee whose file had 3 - which is what the criterion
+asked for. `or more`, `or fewer`, `at least`, `at most`, or nothing at all: the
+words on either side of the number are the rest of the criterion, and reading
+only the number is how a checker becomes confidently wrong.
+
+While fixing it, one accusation survived and was worth keeping: #1290 asks for
+`no swift compiler` and the document says "No Swift compiler". grep is
+case-sensitive and so is the audit - but the note now says
+`0; 1 ignoring case, so this is a capitalisation mismatch`, which sends a reader
+to the one-character fix instead of to the bee.
+
+## A test harness that does not await cannot fail
+
+`check(name, fn)` called `fn()` inside a try/catch. For an ordinary function that
+is correct. For an `async` one it starts the work, returns a promise, and the
+catch sees nothing - so the case printed `ok`, the summary said `0 failed`, and
+the rejection arrived AFTER the tally as an unhandled crash.
+
+Eight checks written that same morning had all been reported passing without once
+running to completion. It surfaced only because a message I had edited no longer
+matched an assertion, and the crash landed after a green summary.
+
+If a suite mixes sync and async cases, collect the promises and await them before
+printing the count - and add the case that proves the harness can still fail.
+
+## zsh eats `$ref:path` in a verification command
+
+Checking the audit's answer by hand, I ran:
+
+```bash
+git show $b:trios/tools/x.mjs | grep -c ...     # prints 0. It is not 0.
+```
+
+In zsh `:t` is a history modifier meaning "tail", so `$b:t` expanded to the hash
+and `rios/tools/x.mjs` was left dangling. The measurement compared an empty
+string on both sides and agreed with itself. `:t :h :r :e :a :s :l :u :q :x :p :g`
+are all modifiers, which covers `trios/`, `apps/`, `src/`, `tests/`, `lib/`,
+`docs/` - most repository paths.
+
+```bash
+git show "${b}:trios/tools/x.mjs"               # braces, and quote it
+```
+
+The shipped tools are unaffected: `execSync` goes through `/bin/sh`, where `:` is
+just a colon. This is a hazard of the hand-check, which is the thing you reach for
+precisely when you distrust the tool - so it is the worst possible place to have
+a silent one.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
@@ -1693,7 +1819,11 @@ what it lacks. Three of the four causes above are silent, and all three produce 
 backlog that looks starved.
 
 And the wider one, which every section here is an instance of: **a stated cause
-is a hypothesis, not a fact.** The swarm blames the issue when the parser was
+is a hypothesis, not a fact.** Its sharpest form, from the round that measured a
+sealed snapshot instead of the disk and read a section that was not there: **a
+measure that answers is not a measure that is right, and the confident answer is
+the dangerous one - a broken tool that stayed silent would have been found in an
+hour.** The swarm blames the issue when the parser was
 broken; my checkers blame the worker when the checker was narrow; I blamed a bee
 on a judge's word without opening the diff. Re-measure before acting on any of
 them.
