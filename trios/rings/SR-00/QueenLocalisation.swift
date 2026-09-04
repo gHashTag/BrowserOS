@@ -23,9 +23,13 @@ import Foundation
 /// 3. **Parameter label in a signature.** The issue names the branch
 ///    (`startAfterChoosing`); the branch is a parameter of the function that
 ///    owns it. Signatures only — a call site says who calls, not who owns.
-/// 4. **Identifier mentioned exactly once.** A rare name with one home. Density
-///    never comes back: five measurements (#1173, #1175) showed it points where
-///    words are common — a big early function — not where the work is.
+/// 4. **Identifier mentioned exactly once.** A rare name with one home —
+///    counted only where it is written as its own token. A match that is a
+///    component of a longer dotted name (`characterCount` inside
+///    `queen.review.characterCount`) is a mention of the *dotted event*,
+///    which is rule 2's business, not of the bare identifier. Density never
+///    comes back: measurements (#1173, #1175) showed it points where words
+///    are common — a big early function — not where the work is.
 ///
 /// No rule answers → `nil`. A confidently wrong range is worse than no range:
 /// it sends the bee to read the wrong place with authority (#1175).
@@ -199,6 +203,19 @@ public enum QueenLocalisation {
     /// Newlines are preserved. Event names ("queen.review.verdicts") are
     /// evidence, not decoration (#1174) — this view exists so rule 2 can see
     /// them while every other rule keeps working on code only.
+    ///
+    /// String literals are *tracked*, not merely copied. A naive pass that
+    /// copies everything outside comments reads a `/*` inside a string literal
+    /// as the opening of a block comment, and everything after it is blanked.
+    /// Measured on 2026-09-04: `"No empty queen/* branch exists to exercise
+    /// the shipped "` (ChatViewModel.swift line 6864) swallowed lines 6864 to
+    /// the end of a 13 598-line file, and the literal view went blind over the
+    /// whole back half — rule 2 could no longer see a log line past it (#1165
+    /// lost its only clue), rule 4 could no longer count a mention past it,
+    /// and rule 1's corroboration scored every candidate there as zero, which
+    /// handed #1158 to whichever named function came first in file order. The
+    /// same pass also truncates at a `//` inside a literal (`"https://…"`),
+    /// which is this defect one line wide instead of six thousand.
     private static func maskComments(_ source: String) -> String {
         var output = [Character]()
         output.reserveCapacity(source.count)
@@ -206,6 +223,7 @@ public enum QueenLocalisation {
         let chars = Array(source)
         var i = 0
         var blockDepth = 0
+        var inString = false
 
         while i < chars.count {
             let c = chars[i]
@@ -224,6 +242,22 @@ public enum QueenLocalisation {
                     output.append(c == "\n" ? c : " ")
                     i += 1
                 }
+            } else if inString {
+                // Verbatim, so a `/*` or `//` inside the literal stays text.
+                // A backslash-newline continuation keeps its newline, keeping
+                // the line count of this view aligned with the code view.
+                if c == "\\", let escaped = next {
+                    output.append(c)
+                    output.append(escaped)
+                    i += 2
+                } else if c == "\"" {
+                    inString = false
+                    output.append(c)
+                    i += 1
+                } else {
+                    output.append(c)
+                    i += 1
+                }
             } else if c == "/", next == "/" {
                 while i < chars.count, chars[i] != "\n" {
                     output.append(" ")
@@ -233,6 +267,10 @@ public enum QueenLocalisation {
                 blockDepth = 1
                 output.append(" "); output.append(" ")
                 i += 2
+            } else if c == "\"" {
+                inString = true
+                output.append(c)
+                i += 1
             } else {
                 output.append(c)
                 i += 1
@@ -244,15 +282,17 @@ public enum QueenLocalisation {
 
     // MARK: - Identifier search
 
-    /// Returns the 0-based indices of every line containing at least one
-    /// identifier as a whole word.
+    /// Returns the 0-based indices of every line carrying a **standalone**
+    /// mention of at least one identifier. Rule 4 is the only caller: a
+    /// mention is its whole evidence, so what counts as one is decided here
+    /// and nowhere else.
     private static func allMentionLines(
         lines: [String],
         identifiers: [String]
     ) -> [Int] {
         var result = [Int]()
         for (idx, line) in lines.enumerated() {
-            if countMatchesOnLine(line, identifiers) > 0 {
+            if identifiers.contains(where: { standaloneMentionCount(on: line, of: $0) > 0 }) {
                 result.append(idx)
             }
         }
@@ -267,6 +307,41 @@ public enum QueenLocalisation {
             guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
             let fullRange = NSRange(location: 0, length: text.utf16.count)
             count += regex.numberOfMatches(in: text, range: fullRange)
+        }
+        return count
+    }
+
+    /// Counts whole-word, case-sensitive matches of one identifier on a line,
+    /// **skipping every match that is a component of a longer dotted name**.
+    ///
+    /// `\b` counts `.` as a boundary, so `\bcharacterCount\b` matches inside
+    /// `queen.review.characterCount`. That is not a mention of the identifier
+    /// `characterCount` — it is a mention of the dotted event, and rule 2 owns
+    /// those, whole and with the dots. Counting the fragment here is what let
+    /// a log line that had *moved* point #1156 at a function its issue never
+    /// names (re-measured 2026-09-04: `settleCharacterCountVerdicts`, a
+    /// confidently wrong range where the issue asked for
+    /// `handleWorkerFinished`). Silence beats that.
+    private static func standaloneMentionCount(on text: String, of identifier: String) -> Int {
+        let pattern = "\\b" + NSRegularExpression.escapedPattern(for: identifier) + "\\b"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return 0 }
+
+        let ns = text as NSString
+        var count = 0
+        regex.enumerateMatches(
+            in: text,
+            range: NSRange(location: 0, length: ns.length)
+        ) { match, _, _ in
+            guard let match else { return }
+            let end = NSMaxRange(match.range)
+            let before = match.range.location > 0
+                ? ns.substring(with: NSRange(location: match.range.location - 1, length: 1))
+                : ""
+            let after = end < ns.length
+                ? ns.substring(with: NSRange(location: end, length: 1))
+                : ""
+            if before == "." || after == "." { return }
+            count += 1
         }
         return count
     }
@@ -587,11 +662,12 @@ public enum QueenLocalisation {
     // MARK: - Rule 4: identifier mentioned exactly once
 
     /// An identifier mentioned exactly once in the whole file — strings
-    /// included, because a quoted log line is emitted at one place. This is
-    /// the only mention-based evidence that survived five measurements
-    /// (#1173, #1175); counting many mentions is what kept pointing at big
-    /// early functions. Several singles must agree on the declaration;
-    /// disagreement is silence.
+    /// included, because a quoted log line is emitted at one place, but only
+    /// where the identifier stands as its own token (`standaloneMentionCount`),
+    /// never as a fragment of a longer dotted name. This is the only
+    /// mention-based evidence that survived the measurements (#1173, #1175);
+    /// counting many mentions is what kept pointing at big early functions.
+    /// Several singles must agree on the declaration; disagreement is silence.
     private static func uniqueMentionDeclaration(
         in literalLines: [String],
         codeLines: [String],
@@ -647,7 +723,8 @@ public enum QueenLocalisation {
 
     /// One case of the #1173 measurement: the identifiers an issue body
     /// yields through `ChatViewModel.identifiers(from:)`, recorded from the
-    /// live bodies on 2026-08-19, and what the narrowing must answer.
+    /// live bodies and re-fetched 2026-09-04 (unchanged since 2026-08-19),
+    /// and what the narrowing must answer.
     struct MeasurementCase {
         public let issue: String
         public let identifiers: [String]
@@ -661,65 +738,81 @@ public enum QueenLocalisation {
         }
     }
 
-    /// The замер of #1173, repeated and recorded 2026-08-19 — bodies of the
+    /// The замер of #1173, repeated and recorded 2026-09-04 — bodies of the
     /// four issues fetched live, identifiers extracted exactly as
     /// `ChatViewModel.identifiers(from:)` does, `region` run against
-    /// `rings/SR-02/ChatViewModel.swift` (10 062 lines at recording; the
-    /// boundary file moves under concurrent work, so the functions are the
-    /// contract and the line numbers are the snapshot):
+    /// `rings/SR-02/ChatViewModel.swift` (13 598 lines at recording, against
+    /// 10 062 at the 2026-08-19 recording; the boundary file moves under
+    /// concurrent work, so the functions are the contract and the line
+    /// numbers are the snapshot):
     ///
-    /// | case | chose, before | chose, after | the human named |
-    /// |---|---|---|---|
-    /// | #1156 | silence | 4968-5101 `handleWorkerFinished` ✓ | `handleWorkerFinished` |
-    /// | #1158 | 6263-6439 `acceptanceBlockReasonDistinguishingEmptyAnswers` ✗ | 6644-6862 `autoAcceptIfUnambiguous` ✓ | `autoAcceptIfUnambiguous` |
-    /// | #1165 | silence | silence ✗ | `requestReviewerVerdicts` |
-    /// | #1166 | silence | 7606-7905 `chooseNextOpenIssue` ✓ | ветка `startAfterChoosing` |
+    /// | case | recorded 2026-08-19 | at HEAD, re-measured | after this change | the human named |
+    /// |---|---|---|---|---|
+    /// | #1156 | `handleWorkerFinished` ✓ | silence ✗ | silence ✗ | `handleWorkerFinished` |
+    /// | #1158 | `autoAcceptIfUnambiguous` ✓ | 6005-6304 `handleWorkerFinished` ✗ | 8251-8460 `autoAcceptIfUnambiguous` ✓ | `autoAcceptIfUnambiguous` |
+    /// | #1165 | silence ✗ | silence ✗ | silence ✗ / 7508-7807 with its clue ✓ | `requestReviewerVerdicts` |
+    /// | #1166 | `chooseNextOpenIssue` ✓ | 9976-10275 ✓ | 9976-10275 `chooseNextOpenIssue` ✓ | ветка `startAfterChoosing` |
     ///
-    /// **Before 0/4, after 3/4.** (The historic 1-in-4 of the issue title was
-    /// measured against delegation text the human had written by hand; with
-    /// today's bodies the old code scores 0/4 — #1158 confidently named the
-    /// guard's well-behaved neighbour, the neighbour trap of #1176.)
+    /// **1/4 at HEAD, 2/4 after this change** on the identifiers the caller
+    /// actually passes; 3/4 counting #1165 by the clue its body carries.
+    /// Recorded as found, not as wanted.
     ///
-    /// The three hits, and why each rule fires:
+    /// What moved, and what was broken:
     ///
-    /// - #1156 — rule 4: `characterCount` appears exactly once in the file,
-    ///   as the quoted log line `"queen.review.characterCount"` inside
-    ///   `handleWorkerFinished` (4922-…).
-    /// - #1158 — rule 1: both the guard and its neighbour are named, and the
-    ///   corroboration is measured, not assumed — the neighbour's body
-    ///   contains 0 mentions of the other identifiers,
-    ///   `autoAcceptIfUnambiguous`'s body contains 4 (`ProcessInfo` and
-    ///   `processInfo` on the quoted guard line, `awaitingReview` twice).
-    /// - #1166 — rule 3: `startAfterChoosing:` is a parameter of
+    /// - **The lexer, not the rules, cost #1158.** `maskComments` did not
+    ///   track string literals, so the `/*` inside `"No empty queen/* branch
+    ///   exists to exercise the shipped "` (line 6864) blanked the literal
+    ///   view from there to the end of the file. Every declaration past 6864
+    ///   scored 0 corroboration, the tie fell to whichever candidate came
+    ///   first in file order, and #1158 — whose guard and neighbour both sit
+    ///   past 6864 — answered `handleWorkerFinished`. Tracking literals
+    ///   restores the measurement: `autoAcceptIfUnambiguous` carries 2
+    ///   mentions of the other identifiers (`ProcessInfo` and `processInfo`
+    ///   on the quoted guard, line 8253), the neighbour 0.
+    /// - **#1156's hit is gone, and this file cannot bring it back.** Its
+    ///   body never names `handleWorkerFinished`; the 2026-08-19 hit rested
+    ///   on `characterCount` matching the tail of
+    ///   `"queen.review.characterCount"`, which then lived inside
+    ///   `handleWorkerFinished` and now lives inside
+    ///   `settleCharacterCountVerdicts` (12555-…). Following that evidence
+    ///   today hands back a confidently wrong range naming a function the
+    ///   issue never mentions — the very defect #1173 was filed over — so
+    ///   rule 4 now counts a mention only where the identifier stands as its
+    ///   own token, and #1156 is silent. A miss, recorded, not a guess
+    ///   dressed up as a hit.
+    /// - **#1165 is still the caller's to lose.** Its body names one clue,
+    ///   `queen.review.verdicts` — the log line emitted inside
+    ///   `requestReviewerVerdicts` — but the identifier filter in
+    ///   `ChatViewModel.identifiers(from:)` (#1178) rejects tokens with dots,
+    ///   so the clue never reaches `region` and the live answer is silence.
+    ///   Handed through directly, rule 2 lands 7508-7807 inside
+    ///   `requestReviewerVerdicts` — the fourth case below proves it. Letting
+    ///   dotted event names through that filter is work in
+    ///   `rings/SR-02/ChatViewModel.swift`, outside this task's boundary.
+    /// - **#1166 — rule 3:** `startAfterChoosing:` is a parameter of
     ///   `chooseNextOpenIssue`'s signature and of no other; `ownedPaths:`
-    ///   labels four signatures and is discarded as a common label.
+    ///   labels several signatures and is discarded as a common label.
     ///
-    /// #1165 stays silent **by the caller's hand, not this file's**: its body
-    /// names one clue, `queen.review.verdicts` — the log line emitted inside
-    /// `requestReviewerVerdicts` — but the identifier filter in
-    /// `ChatViewModel.identifiers(from:)` (#1178) rejects tokens with dots, so
-    /// the clue never reaches `region`. Handed through directly, rule 2 lands
-    /// 5941-6240 inside `requestReviewerVerdicts` — the fourth case below
-    /// proves it. Letting dotted event names through that filter is work in
-    /// `rings/SR-02/ChatViewModel.swift`, outside this task's boundary.
-    ///
-    /// #1117 is kept as a witness for the name rule: 5865-6164 inside
+    /// #1117 is kept as a second witness for the name rule: 7432-7731 inside
     /// `requestReviewerVerdicts`.
     ///
     /// Replay any time — the check criterion 4 stands on:
     ///
     ///     swiftc -O <driver>.swift rings/SR-00/QueenLocalisation.swift -o probe
-    ///     probe <chatvm.swift> <bodies-dir>   # or call replayMeasurement(in:)
+    ///     probe <chatvm.swift>   # or call replayMeasurement(in:)
     ///
     /// With the name preference (rule 1) removed, the replay goes red on
     /// #1158 and #1117 — nothing else can find a function the issue names —
-    /// and the live замер falls to 2/4. Proven from both sides 2026-08-19.
+    /// and the live замер falls to 1/4. Proven from both sides 2026-09-04.
     static func measurementCases() -> [MeasurementCase] {
         [
             MeasurementCase(
-                issue: "#1156",
+                issue: "#1156 — recorded miss: the human named "
+                    + "handleWorkerFinished, but the body names no symbol that "
+                    + "lives there (its log line moved), so silence is the "
+                    + "honest answer",
                 identifiers: ["ChatViewModel", "awaitingReview", "characterCount"],
-                expected: .declaration("handleWorkerFinished")
+                expected: .silence
             ),
             MeasurementCase(
                 issue: "#1158",
@@ -761,7 +854,9 @@ public enum QueenLocalisation {
     /// returns one verdict line per case: "ok …" or "FAIL …". This is the
     /// check the fourth criterion of #1173 stands on — remove the name
     /// preference (rule 1) and the #1158/#1117 lines go red, because nothing
-    /// else can find a function the issue names. Pure; no I/O.
+    /// else can find a function the issue names. Pure; no I/O. Re-verified
+    /// 2026-09-04 against the 13 598-line file: 6/6 ok as written, 4/6 with
+    /// rule 1 deleted.
     static func replayMeasurement(in source: String) -> [String] {
         let cleaned = source
             .replacingOccurrences(of: "\r\n", with: "\n")
