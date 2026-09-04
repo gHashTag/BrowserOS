@@ -937,6 +937,78 @@ the gate swallowed sixty lines and reported five offences, three inside doc
 comments. **Match the house convention rather than widening a gate that has just
 recovered from being blind.**
 
+## Filing N tasks does not give you N workers
+
+The measurement that closes the "the backlog is empty" story, and it was my own
+mistake that produced it.
+
+Four issues were filed to fill four worker slots. Two of them named
+`trios/agent-server/apps/server/src/api/services/queen-tick.ts` in their
+Boundary. Two bees may not write one file, so the scheduler refused one with
+`fileConflict` - correctly - and the fourth slot stayed empty while the backlog
+looked perfectly healthy.
+
+### The conflict belongs where the work is CREATED
+
+| system | what it does |
+|---|---|
+| Dependabot | **groups** updates that would open conflicting PRs, rather than opening them and letting the merge fail |
+| Nx, Turborepo | a task graph keyed on file inputs; two tasks run in parallel only when their input sets are disjoint |
+| Kubernetes | pod anti-affinity - the *scheduler* is told what must not land together, at admission |
+| Bazel | inputs and outputs are declared; the executor will not run two actions writing one output |
+
+Every one of them settles the conflict at admission, not on collision. The
+Queen's scheduler already refuses correctly; nothing upstream was choosing work
+that could coexist. `tri holds` shows what is held right now, and it found a
+real double claim the first time it ran: `rings/SR-02/ChatViewModel.swift` held
+by BOTH #1133 and #1240.
+
+**Paths compare component-wise, never as strings.** `rings/SR-0` is a string
+prefix of `rings/SR-00/Queen.swift` and is not a directory containing it. This
+project has already shipped that defect once.
+
+### Detector variety is a throughput input
+
+The pool emptied with the swarm at zero bees and it looked like a broken loop.
+It was not. `author.mjs` had found fourteen real deficits and could file against
+none of them - every one already had an issue, and those issues were the ones
+parked at the retry ceiling. Two detectors cannot feed four workers.
+
+The third was L3: repository law, broken in 86 server files by 2690 characters,
+almost all box drawing in comment rules. That is the right shape of fuel -
+**measurable** by one grep, **disjoint** at one file per task, and
+**renewable**. A file whose non-ASCII is in live code is skipped, because
+rewriting a user-facing string is a change of behaviour and not a cleanup.
+
+## My gates keep being narrow in the direction that refuses honest work
+
+Three real cleanups were refused because `brief-gate` knew exactly ONE shape of
+mechanical proof: an identifier the worker must define. A cleanup defines
+nothing new, so no honest draft could ever pass.
+
+A command over a path the Boundary reserves, with an exact expected output, is a
+property of the **tree** rather than of the report - and is harder to fake than
+an identifier, because the reader runs it against the branch instead of reading
+what the worker said. The demand stays strict: exact output, and the path must
+be one the Boundary actually holds.
+
+This is the fourth time a gate of mine has refused something good. The pattern
+is always the same: the rule encodes the ONE example I had in front of me when I
+wrote it.
+
+## Two ways a checker lies about itself
+
+**A fixture that swears an identifier appears nowhere falsifies its own premise
+the moment it is committed.** The selftest's fixed name existed five times in
+the tree once the file was saved, and `brief-gate` did exactly its job and
+refused the draft. It mints the name per run now.
+
+**A checker must not count a TRUE report as a false accusation.** `fp-check`
+flagged `NEVER ACTED`, which is the most valuable line `coverage.mjs` prints -
+it is how the reaper's untested branch was found. Counting it as a false
+positive would have made every newly written tool look guilty until its first
+act, and taught me to ignore the checker.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
