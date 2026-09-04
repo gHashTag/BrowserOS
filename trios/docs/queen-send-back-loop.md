@@ -176,13 +176,18 @@ all.
 **The fallback path must keep the same promise.** A return that cannot
 dispatch — every key busy, a worktree failure — is recorded with
 `started = false`, and that path of the `recordDispatch` upsert
-preserves `review_state`, so the next round retries it. If it sits past
-`SEND_BACK_IDLE_FLOOR_MS`, the valve maps it to `failed` and the GENERIC
-loop may choose it; that loop builds its brief from the issue body
-unless it checks. So the brief construction for any dispatch of an issue
-whose row still carries `review_state = 'sendBack'` with a non-empty
-`unmet_criteria` must be the return brief. FR-003 binds every path that
-dispatches an undischarged return, not only the happy one.
+preserves `review_state`. Such a row is invisible to the board: the
+round's board read takes `started = true` only, so to the chooser the
+issue is unclaimed and the GENERIC loop may take it the very next round,
+not after the floor. A due return held back by a full swarm sits the
+other way out: it stays on the board as `rejected`, and if the ceiling
+keeps the return step from it past `SEND_BACK_IDLE_FLOOR_MS`, the valve
+maps it to `failed` and the generic loop may take it too. Either way,
+that loop builds its brief from the issue body unless it checks. So the
+brief construction for any dispatch of an issue whose row still carries
+`review_state = 'sendBack'` with a non-empty `unmet_criteria` must be
+the return brief. FR-003 binds every path that dispatches an
+undischarged return, not only the happy one.
 
 ### 5. The ceiling is the policy's alone (FR-004, FR-005)
 
@@ -289,3 +294,32 @@ What was NOT run: any implementation of this specification — none
 exists. The two unmet criteria above are unmet in code, and this
 document, not a behaviour change, is the deliverable the issue's
 boundary permits.
+
+## Re-verified on the second pass
+
+The issue came back for a second pass, so every check above was run
+again on this checkout (2026-09-04, the same `/usr/local/bin/queend`,
+symlinked into `queen-core/.build/release/` where the suites resolve
+it):
+
+- The three suites at the same counts: `queen-round.test.ts` 22 pass,
+  0 fail; `send-back-lease.test.ts` 16 pass, 0 fail;
+  `queen-dispatch.test.ts` 50 pass, 0 fail.
+- The `review` probe still answers `sendBack`, `sendBack`, `escalate`
+  at `priorSendBacks` 0, 1, 2.
+- The `choose` probe still skips a `rejected` and an `awaitingReview`
+  task with the wording quoted above.
+- Every symbol the document names was re-read in the code and found
+  where it says it is: the discarded `unmet` list, the 900-character
+  note clip, the 300-character criterion clip, the sweep's `NULL` or
+  `'wait'` only, the single `send_backs` writer, the `recordDispatch`
+  arms that preserve or NULL `review_state`, `prepareWorktree`'s
+  reuse-and-count, and `claimOnIssue` counting `rejected` live.
+
+The second pass found one sentence to tighten, and tightened it: the
+fallback paragraph in rule 4 read as though the idle valve could see a
+`started = false` row, but the round's board read takes `started = true`
+only, so a failed return is invisible to the valve and reaches the
+generic loop the next round, while the floor binds only the due return
+held on the board under a full swarm. The paragraph now says which
+sitting case each clause is about.
