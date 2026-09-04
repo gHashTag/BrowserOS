@@ -54,7 +54,7 @@
 // ----------
 //   0   both directions of the set difference are empty (the lists agree)
 //   1   drift: the symmetric difference of the two lists is non-empty
-//   2   read or extraction failure — reported loudly on stderr, never as a
+//   2   read or extraction failure - reported loudly on stderr, never as a
 //       clean result, because an empty difference is the success signal and
 //       a failed extraction must not be able to counterfeit it
 //
@@ -113,7 +113,7 @@ function lineAt(text, index) {
 // plus the 1-based start line (the anchor line) and end line (the line of the
 // closing ']') of the declaration. Throws, naming the array, the source and
 // the anchor searched for, if the anchor or the closing bracket cannot be
-// found — a failed extraction must never look like an empty list.
+// found - a failed extraction must never look like an empty list.
 function extractStringArray(sourceText, anchor, label, sourcePath) {
   const anchorIndex = sourceText.indexOf(anchor);
   if (anchorIndex === -1) {
@@ -406,7 +406,7 @@ function main() {
   }
 
   // Extract everything before printing anything, so a failed extraction can
-  // never leave a partial report — let alone an empty difference — behind.
+  // never leave a partial report - let alone an empty difference - behind.
   let drift;
   let tableclothPrinciples;
   let improvePrinciples;
