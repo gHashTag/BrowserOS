@@ -1,0 +1,632 @@
+#!/usr/bin/env bash
+# tri — Trinity S³AI ops CLI. Дефолт (без аргументов) — прежнее поведение:
+# railway ssh → claude. Подкоманды работают локально и ускоряют цикл.
+set -uo pipefail
+REPO="$HOME/999-multibots-telegraf"
+KEY_HELP='ключ: railway variables list -s vibee-render -e production --kv | grep ^AGENT_KEYS= | cut -d= -f2- (взять первый ключ до ":")'
+
+case "${1:-}" in
+  ""|ssh)
+    # прежний путь — без изменений
+    railway link -p reasonable-perception -e production > /dev/null 2>&1
+    railway service link opencode > /dev/null 2>&1
+    exec railway ssh -- bash -lc 'claude --dangerously-skip-permissions'
+    ;;
+  status)
+    echo "== render health =="; curl -s -m 5 http://127.0.0.1:3333/health || echo "RENDER DOWN"
+    echo; echo "== player =="; curl -s -m 5 -o /dev/null -w "5174:%{http_code}\n" http://localhost:5174/ 2>/dev/null || echo "player down"
+    echo; echo "== feed stats =="; curl -s -m 8 https://vibee-render-production.up.railway.app/api/feed/stats 2>/dev/null | head -c 300
+    echo; echo "== loop state =="; cat "$REPO/loop/state.json" 2>/dev/null
+    echo; echo "== последние витки =="; tail -5 "$REPO/loop/LOOP_STATE.md" 2>/dev/null
+    ;;
+  regress)
+    bash "$REPO/loop/regression-check.sh"
+    ;;
+  morning)
+    cat "$REPO/loop/MORNING.md" 2>/dev/null || echo "нет MORNING.md — прогони morning-summary.ts"
+    ;;
+  loop)
+    tail -60 "$REPO/loop/LOOP_REPORT.md" 2>/dev/null
+    ;;
+  feed)
+    curl -s -m 8 "https://vibee-render-production.up.railway.app/api/feed?limit=${2:-5}" \
+      | python3 -c "import sys,json; d=json.load(sys.stdin); [print(t['id'], t.get('name','')[:50], '| ⭐', t.get('starsCount',0), '| 👁', t.get('viewsCount',0)) for t in d.get('templates',[])]" 2>/dev/null \
+      || echo "лента недоступна"
+    ;;
+  chat)
+    shift
+    KEY=$(railway variables list -s vibee-render -e production --kv 2>/dev/null | grep ^AGENT_KEYS= | cut -d= -f2- | cut -d, -f1 | cut -d: -f1)
+    if [ -z "$KEY" ] || [ -z "${1:-}" ]; then echo "нужен текст: tri chat \"вопрос\"; $KEY_HELP"; exit 1; fi
+    curl -sN -m 120 https://vibee-render-production.up.railway.app/api/agent/chat \
+      -H "X-Agent-Key: $KEY" -H 'Content-Type: application/json' \
+      -d "$(python3 -c 'import json,sys; print(json.dumps({"messages":[{"role":"user","content":sys.argv[1]}]}))' "$*")" \
+      | python3 -c "
+import sys, json
+for line in sys.stdin:
+    try: ev = json.loads(line)
+    except: continue
+    if ev.get('тип') == 'текст': print(ev['текст'], end='')
+    elif ev.get('тип') == 'результат': print(f\"  [{ev['имя']} · {ev['мс']}мс]\", file=sys.stderr)
+print()
+"
+    ;;
+  handover)
+    # Брифинг владельцу (волна 116): t27 развалилась на ДВЕ разные
+    # границы по измерению соседа 5d837a855 — mesh-корпус и rings-спеки.
+    cat <<'BRIEF'
+СВОДКА ДЛЯ ВЛАДЕЛЬЦА — три открытые границы (волна 116; t27 развалилась
+на две по измерению 5d837a855 — mesh-корпус и rings-спеки это РАЗНОЕ)
+
+ЗАКРЫТО ВЫХОДНЫМИ (вашими фиксами — обе подтверждены этим циклом):
+- LOCK-АНОМАЛИЯ: была бэктиком в `: "..."` комментарии (4d56070ef) —
+  `make check` в бэктиках исполнялся как подстановка команд. Плоский
+  make cassettes даёт вердикт за ~2 мин (было 26+ мин зависания).
+  Обходы (TRIOS_SKIP_LOCK и имена) — мёртвая история; удалять вам.
+- ПРОВАЙДЕРНЫЙ КЛЮЧ: пчела работает в контейнере без ключа (d26a4abfc)
+  через openai-compatible + loopback-репетицию (TRIOS_QUEEN_REHEARSAL,
+  никогда тихий фолбэк при живом ключе). Диспатч исполнялся 3×, параллельно.
+
+ОТКРЫТО:
+
+1a. ГЕНЕРАТОР T27 — MESH-КОРПУС (сабмодуль trios-mesh, ваш ~/t27):
+    13 несобирающихся спек, 11 причин в t27c: главный класс (9 спек) —
+    параметры-массивы без mut в эмите, один патч закрывает 6+.
+    Карта: wave-loop-098. Проверка после фикса: tri spec-diag.
+
+1b. T27 — RINGS-СПЕКИ (rings/T27-00|01|02): t27c ЗДЕСЬ НЕ блокер —
+    exit 0 + 121 строк Rust на decision core (измерено 5d837a855).
+    Отсутствует: спека T27-02 (Queen tick), сгенерированные .rs,
+    хостящий крейт. can_start_another задублирован в двух языках
+    (queen_core.t27:198 + QueenDelegation.swift:472) — сегодня
+    согласованы, это и есть риск расползания. Облачная пчела это
+    делать НЕ может (в образе нет Swift/Rust/t27c) — только локально.
+
+2. RELEASE-ПЕРЕСБОРКА: стор юзера — 0 отпечатков (приложение старее
+   фикса). Починка доказана живьём: fp 9d26541f, 8 воспроизведений
+   (tri regression). Одна пересборка двигает число.
+
+Также в полёте: фикс четырёх кассет (одна причина, aa3b6fc14) — после
+него плоский make cassettes должен позеленеть. MVP-архитектура теперь
+в репо (docs/architecture/, 6d1d50656) — доска цитирует внутреннюю копию.
+
+СЛОМАН ОРАКУЛ (найдено волной 120): Swift-e2e сьют (make test /
+make mutants) не собирается с 12b97dedc — шесть rings-файлов делают
+import QueenCore, а tests/swift/run_chat_sse_e2e.sh:91 гонит rings
+одним модулем. Все 22 мутанта нескорируемы; гейт честно FAIL-closed,
+зелёным не врёт. Лечение — научить скрипт модулю QueenCore (учесть
+дубль-копию QueenSpecQuality.swift в rings против queen-core).
+С ВОЛНЫ 125 СКРИПТ БЛОКИРОВАЛ И ЖИВОЙ ПРОТОКОЛ — ЦЕПОЧКА ВОССТАНОВЛЕНА
+циклом (волны 126-130): скрипт починен паттерном build.sh, сьют 972/972
+зелёный, 22-й мутант пойман, бандл пересобран (cp x x-баг build.sh
+исправлен), девятое live-verify: вердикт met, fp d3c1d66d (новый хеш —
+дерево двинулось; прежние 8 — 9d26541f). Осталось владельцу: сверка
+списков модуля 11 vs 15, флаг library-evolution, и пост-бандл шаг
+`swift test` падает (libQueenCore.a как input — утечка модульных
+флагов).
+BRIEF
+    ;;
+  mutants-logic-refresh)
+    # Волна 122: build.sh эмитит .trinity/build/QueenCore тулчейном,
+    # под которым его запустили; сюиты clade-e2e компилирует дефолтным.
+    # Рассинхрон (6.0.3 против 6.3.3) роняет mutants-logic на import.
+    # Здесь: пересобрать артефакт дефолтным тулчейном (вызов из
+    # build.sh:607-613) и прогнать гейт. DRY=1 — только печать.
+    T=/Users/playra/BrowserOS/trios; QC="$T/.trinity/build/QueenCore"
+    CORE=(rings/SR-00/QueenSpecQuality rings/SR-00/QueenIssueBoundary \
+      rings/SR-00/QueenBeeResult rings/SR-00/QueenBoundaryPaths \
+      rings/SR-00/QueenEpics rings/SR-00/QueenEvidencePolicy \
+      rings/SR-00/QueenLanguagePolicy rings/SR-00/QueenLocalisation \
+      rings/SR-00/QueenMergeGate rings/SR-00/QueenMissionContract \
+      rings/SR-00/QueenRetryPolicy rings/SR-00/QueenReviewDecision \
+      rings/SR-00/QueenSelfAudit rings/SR-00/QueenSkillMatch \
+      rings/SR-00/QueenT27Acceptance)
+    cd "$T" || exit 1
+    CUR=$(swift --version 2>/dev/null | head -1)
+    MOD=$(strings "$QC/QueenCore.swiftmodule" 2>/dev/null | grep -m1 -o 'Swift 6[0-9.]*' || echo unknown)
+    echo "toolchain: $CUR | module: ${MOD:-none}"
+    if [ "${DRY:-0}" = 1 ]; then echo "DRY: would swiftc -emit-module ${CORE[*]}"; exit 0; fi
+    FILES=(); for f in "${CORE[@]}"; do FILES+=("$T/$f.swift"); done
+    mkdir -p "$QC"
+    swiftc -parse-as-library -emit-module -emit-library -static \
+      -module-name QueenCore -emit-module-path "$QC/QueenCore.swiftmodule" \
+      -o "$QC/libQueenCore.a" "${FILES[@]}" 2>"$QC/err" \
+      || { echo "[FAIL] module rebuild failed:"; head -4 "$QC/err"; exit 1; }
+    echo "[OK] module rebuilt with the default toolchain"
+    make -C "$T" mutants-logic
+    ;;
+  spec-diag)
+    # Батч-диагноз несобирающихся спек (волна 099): gen-rust + rustc,
+    # класс ошибки на спеку. Перезапускать после генераторных фиксов t27.
+    T=/Users/playra/BrowserOS/trios; T27C="$T/.trinity/t27c-build/release/t27c"
+    L="${2:-$T/.trinity/wave-097-lowering.log}"
+    D=$(mktemp -d /tmp/tri_specdiag.XXXXXX)
+    for s in $(grep -oE "nocompile\] [a-z0-9_]+" "$L" 2>/dev/null | awk '{print $2}' | sort -u); do
+      F=$(find "$T/rings" -name "$s.t27" | head -1); [ -z "$F" ] && { echo "$s => спека не найдена"; continue; }
+      "$T27C" gen-rust "$F" > "$D/$s.txt" 2>/dev/null
+      E=$(rustc --edition 2021 --crate-type lib --emit=metadata --out-dir "$D" "$D/$s.txt" 2>&1 \
+        | grep -oE "error\[E[0-9]+\]|error: [a-z ]+" | sort | uniq -c | tr '\n' ' ')
+      echo "$s => ${E:-OK}"
+    done; rm -rf "$D"
+    ;;
+  regression)
+    # Живая регрессия цикла (волна 095): доска + локи + live-verify
+    # одной командой — обязательный минимум Queen-волны по протоколу.
+    tri board; echo; tri locks; echo
+    tri live-verify "${2:-}" "${3:-}" 2>&1 | tail -1
+    ;;
+  live-verify)
+    # Живой отпечаток одним запуском (рецепт волны 081): цепочка
+    # approve→delegate→verify через env-канал test-бандла, затем стор.
+    T=/Users/playra/BrowserOS/trios
+    ISSUE="${2:-gHashTag/trios#1286}"; CRIT="${3:-make check passes}"
+    pkill -f "trios-test.app/Contents" 2>/dev/null; sleep 1
+    ( cd "$T" && TRIOS_E2E_QUEEN_COMMAND="/approve $ISSUE;;/delegate $ISSUE queen-swift --paths docs --criteria $CRIT;;/verify $ISSUE $CRIT met" \
+        ./trios-test.app/Contents/MacOS/trios > /tmp/tri_live_verify.log 2>&1 ) &
+    echo "живой прогон пошёл (/tmp/tri_live_verify.log); стор через ~75с:"
+    sleep 75; pkill -f "trios-test.app/Contents" 2>/dev/null
+    python3 -c "
+import json
+try:
+    for t in json.load(open('$T/.trinity-test/state/queen_delegation.json')):
+        print(t['id'][:8], t['state'], 'verdicts:', t.get('criterionVerdicts'), 'fp:', (t.get('treeStateFingerprint') or 'NONE')[:20])
+except FileNotFoundError: print('стор не создан')"
+    ;;
+  selftest)
+    echo "tri: ок"; command -v railway >/dev/null && echo "railway: ок" || echo "railway: НЕТ"
+    command -v python3 >/dev/null && echo "python3: ок"
+    [ -d "$REPO/loop" ] && echo "loop-каталог: ок" || echo "loop-каталог: НЕТ"
+    ;;
+  anomalies|anom)
+    # Шаг 0 витка: что сломалось на проде, пока меня не было.
+    node "$REPO/.claude/loop-opus/anomalies.mjs"
+    ;;
+  verify)
+    # Не затёрла ли прошлую правку чужим мержем (страховка непрерывного цикла).
+    node "$REPO/.claude/loop-opus/verify-landed.mjs"
+    ;;
+  providers|prov)
+    # Живой статус провайдеров через детектор аномалий (маршрут /api/providers/status
+    # за авторизацией и голым curl отдаёт 401; anomalies.mjs берёт его правильно).
+    node "$REPO/.claude/loop-opus/anomalies.mjs" 2>/dev/null \
+      | sed -n '/Провайдеры/,/Конвейер/p' | sed '$d'
+    echo "  (FAL/ElevenLabs — ждут владельца; GLM работает)"
+    ;;
+  lesson)
+    # Быстро записать урок в оснастку цикла: tri lesson "заголовок" "тело"
+    shift
+    L="$REPO/.claude/loop-opus/LESSONS.md"
+    if [ -z "${1:-}" ]; then echo "нужен заголовок: tri lesson \"заголовок\" [тело]"; exit 1; fi
+    { printf '\n## %s\n\n' "$1"; [ -n "${2:-}" ] && printf '%s\n' "$2"; } >> "$L"
+    echo "записано в $L"
+    ;;
+  dash)
+    # Пересобрать и показать продакшн-дашборд (замер запуском, не память).
+    node "$REPO/scripts/dashboard.cjs" 2>/dev/null | tail -40 \
+      || cat "$REPO/docs/dashboard/STATUS.md" 2>/dev/null
+    ;;
+  board)
+    # Дашборд trios: последняя итерация + живые замеры STATUS.md
+    T=/Users/playra/BrowserOS/trios
+    tail -1 "$T/.trinity/dashboard/iterations.jsonl" 2>/dev/null | python3 -c 'import json,sys
+try:
+    d=json.load(sys.stdin)
+    print("итерация", d["iteration"], ":", d["title"])
+    print("gate:", d.get("gate","?"))
+except Exception as e: print("iterations.jsonl не читается:", e)'
+    echo; sed -n '/## Measured here/,/## How to update/p' "$T/.trinity/dashboard/STATUS.md" 2>/dev/null | head -25
+    ;;
+  wave)
+    # Каркас следующей волны: trios/.trinity/wave-loop-NNN.md
+    T=/Users/playra/BrowserOS/trios
+    n=$(ls "$T/.trinity"/wave-loop-*.md 2>/dev/null | sed 's/.*loop-0*//;s/\.md//' | sort -n | tail -1)
+    next=$((10#${n:-0}+1)); f="$T/.trinity/wave-loop-$(printf '%03d' "$next").md"
+    printf '# T27 Wave Loop - Plan WAVE-%03d\n\nDomain: \n\n## Audit - weak spots\n\n| ID | Weak spot | Evidence |\n|----|-----------|----------|\n\n## Competitor research\n\n- \n\n## Plan\n\n## Report\n\n## Three options for the next wave\n\n1. \n2. \n3. \n' "$next" > "$f" && echo "$f"
+    ;;
+  locks)
+    # Кто держит общие локи триоса прямо сейчас
+    for d in /tmp/trios_harness.lock /tmp/trios_e2e.lock; do
+      if [ -e "$d/pid" ]; then o=$(cat "$d/pid" 2>/dev/null); echo "$d: pid=${o:-?} $(ps -p "$o" -o etime= 2>/dev/null || echo '(мёртв — лок можно вернуть)')"
+      elif [ -d "$d" ]; then echo "$d: занят, pid-файла нет"; else echo "$d: свободен"; fi
+    done
+    w=$(pgrep -f "Serialised against every other harness" 2>/dev/null | wc -l | tr -d ' ')
+    echo "ожидают лок кассет: $w процесс(ов)"
+    ;;
+  next)
+    # Три варианта сотрудничества из последней волны
+    T=/Users/playra/BrowserOS/trios
+    w=$(ls "$T/.trinity"/wave-loop-*.md 2>/dev/null | sort | tail -1)
+    echo "$w:"; sed -n '/[Oo]ptions for the next wave/,$p' "$w" 2>/dev/null || echo "нет волн"
+    ;;
+  # ---- continuous improvement loop (added 2026-09-04) -----------------------
+  # State, ledger and dashboard live in trios/.trinity/loop/. Every command
+  # here READS or appends; none of them mutates the swarm or the repository.
+  iter)
+    node /Users/playra/BrowserOS/trios/.trinity/loop/loop.mjs status
+    ;;
+  iter-dash)
+    node /Users/playra/BrowserOS/trios/.trinity/loop/loop.mjs dash
+    ;;
+  iter-log)
+    node /Users/playra/BrowserOS/trios/.trinity/loop/loop.mjs ledger "${2:-20}"
+    ;;
+  iter-anchors)
+    node /Users/playra/BrowserOS/trios/.trinity/loop/loop.mjs anchors
+    ;;
+  iter-render)
+    # Measure the swarm, update the anchors and redraw the dashboard, in the one
+    # order that makes the deltas true. Optional: --work <facts.json>.
+    shift 2>/dev/null || true
+    node /Users/playra/BrowserOS/trios/.trinity/loop/snapshot.mjs "$@"
+    ;;
+  iter-unlock)
+    # Only after checking `tri iter` says the lock is stale. Taking a HELD lock
+    # lets two cron fires write at once, which is the failure the lock exists for.
+    node /Users/playra/BrowserOS/trios/.trinity/loop/loop.mjs unlock
+    ;;
+  swarm)
+    # One line of live truth about the Queen. Measured, never remembered.
+    curl -sS -m 15 https://trios-agent-server-production.up.railway.app/queen/status \
+      | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const j=JSON.parse(s),t=j.lastTick||{},d=j.dispatches||{};
+console.log("running "+d.running+"  finished "+d.finished+"  |  "+(t.allowed?"DISPATCHED":t.refusal));
+console.log("skips "+t.skippedCount+"  "+JSON.stringify(t.skipSummary||{}));})' 2>/dev/null \
+      || echo "queen unreachable"
+    ;;
+  fence)
+    # Which paths parked dispatches hold, and therefore which boundaries a new
+    # issue must avoid. A parked dispatch never releases, so this is a fence.
+    railway ssh --service trios-agent-server -- sh -c 'cd /app/apps/server && bun -e "
+const {Pool}=require(\"pg\");const p=new Pool({connectionString:process.env.DATABASE_URL});
+p.query(\"select d.issue, d.review_state, d.owned_paths from queen_dispatch d where d.finished_at is not null and (d.review_state is null or d.review_state in (%A,%B,%C)) order by d.issue\".replace(\"%A\",\"'\''wait'\''\").replace(\"%B\",\"'\''sendBack'\''\").replace(\"%C\",\"'\''escalate'\''\")).then(r=>{
+const s=new Set();r.rows.forEach(x=>(x.owned_paths||[]).forEach(q=>s.add(q)));
+console.log(\"parked dispatches: \"+r.rows.length+\"   paths they fence: \"+s.size);
+[...s].sort().forEach(q=>console.log(\"  \"+q));process.exit(0)}).catch(e=>{console.log(\"ERR\",e.message);process.exit(1)})
+"' 2>&1 | grep -v "Using SSH\|railway.json\|Migrate\|Existing"
+    ;;
+  fp-check)
+    # Do the checkers accuse anything KNOWN GOOD? The corpus is real - briefs a
+    # worker actually satisfied, source the tree actually ships - because all
+    # six false accusations this loop shipped failed on real input while the
+    # synthetic fixtures agreed with the checker that wrote them.
+    node /Users/playra/BrowserOS/trios/.trinity/loop/fp-check.mjs "${2:-12}"
+    ;;
+  fields)
+    # Fields a decision reads that its query may never select. A field that
+    # never arrives is `undefined`, and `undefined ?? 0` is a number every
+    # assertion about it will pass - which is how a retry ceiling bounded
+    # nothing while reporting success.
+    node /Users/playra/BrowserOS/trios/.trinity/loop/fields.mjs "${2:-}"
+    ;;
+  clocks)
+    # Every clock a decision is keyed on, and whether anything rewrites it.
+    # A valve keyed on a field the review sweep overwrites could never fire and
+    # cost a six-hour swarm outage; this asks where else that class lives.
+    node /Users/playra/BrowserOS/trios/.trinity/loop/clocks.mjs
+    ;;
+  trend)
+    # A level is not a rate. claimed at 15 falling is a fence coming down;
+    # claimed at 15 rising is one being rebuilt, and the number cannot tell
+    # them apart. Reads the snapshot lines the loop already records.
+    node /Users/playra/BrowserOS/trios/.trinity/loop/trend.mjs "${2:-6}"
+    ;;
+  loop-coverage)
+    # Which loop tools have never actually DONE anything. The report path and
+    # the act path are different code; a tool that has only ever reported is a
+    # tool whose real work is unproven.
+    node /Users/playra/BrowserOS/trios/.trinity/loop/coverage.mjs
+    ;;
+  needs-you)
+    # The escalations addressed to a person that reach none. queen_report is
+    # written by the tick and read by no route; this is the missing reader.
+    shift 2>/dev/null || true
+    node /Users/playra/BrowserOS/trios/.trinity/loop/needs-you.mjs "$@"
+    ;;
+  judge-packet)
+    # Assemble what a judge needs for the briefs no mechanical check can reach.
+    # The tool assembles; the model judges. Nothing here decides anything.
+    shift 2>/dev/null || true
+    node /Users/playra/BrowserOS/trios/.trinity/loop/judge-packet.mjs "$@"
+    ;;
+  unpark)
+    # A retry ceiling reached without ANY criterion being judged. Measured
+    # 2026-09-04: in five parked dispatches the count of unmet criteria was
+    # exactly the count of verdict lines the worker omitted, so the whole retry
+    # budget went on the shape of a report and the work was never assessed.
+    # Releases only those; a criterion tested and failed keeps its count.
+    shift 2>/dev/null || true
+    node /Users/playra/BrowserOS/trios/.trinity/loop/unpark.mjs "$@"
+    ;;
+  stale-escalations)
+    # An escalation whose stated CAUSE no longer reproduces. Not a timer: a
+    # send-back is clock-released because its input can never change, while an
+    # escalation names a claim about the world that can be measured again. It
+    # asks the shipping Swift parser, never a copy, and never releases an issue
+    # whose body asks for a person in its own words.
+    shift 2>/dev/null || true
+    node /Users/playra/BrowserOS/trios/.trinity/loop/stale-escalations.mjs "$@"
+    ;;
+  holds)
+    # What the swarm currently holds, and whether any two dispatches claim one
+    # file. Paths compare COMPONENT-WISE: rings/SR-0 is a string prefix of
+    # rings/SR-00/Queen.swift and is not a directory containing it.
+    node /Users/playra/BrowserOS/trios/.trinity/loop/disjoint.mjs
+    ;;
+  loop-selftest)
+    # Calibrate the loop's own instruments. Each case proves the NEGATIVE first:
+    # a checker never shown failing has not been tested. No network, no
+    # container, no database - a calibration that needs production gets skipped.
+    node /Users/playra/BrowserOS/trios/.trinity/loop/selftest.mjs
+    ;;
+  author)
+    # Turn a measured deficit into a gated, filed brief. Under a WIP limit that
+    # refills only when one is closed, and every draft passes brief-gate first.
+    shift 2>/dev/null || true
+    node /Users/playra/BrowserOS/trios/.trinity/loop/author.mjs "$@"
+    ;;
+  heal)
+    # Every swarm repair, in the order that makes them true:
+    # reap -> lease -> push-work -> close-done. `tri heal --dry` reports only.
+    shift 2>/dev/null || true
+    node /Users/playra/BrowserOS/trios/.trinity/loop/heal.mjs "$@"
+    ;;
+  close-done)
+    # Close issues whose work the Queen accepted and cannot close herself.
+    # Refuses EPICs and anything whose branch is not on the remote.
+    shift 2>/dev/null || true
+    node /Users/playra/BrowserOS/trios/.trinity/loop/close-done.mjs "$@"
+    ;;
+  push-work)
+    # Push bee branches that carry work and are not yet on the remote. Never
+    # force-pushes: a branch whose remote history differs is reported, not fixed.
+    shift 2>/dev/null || true
+    node /Users/playra/BrowserOS/trios/.trinity/loop/push-work.mjs "$@"
+    ;;
+  lease)
+    # Claim lease with an idle timer, XAUTOCLAIM semantics, run from outside the
+    # supervisor. Reports by default; `tri lease --release` acts. Clears the
+    # PATH fence only - the claim itself is a separate mechanism, see the skill.
+    shift 2>/dev/null || true
+    node /Users/playra/BrowserOS/trios/.trinity/loop/lease.mjs "$@"
+    ;;
+  reap)
+    # Worktree garbage collection with kubelet-style hysteresis. Reports by
+    # default; `tri reap --reap` acts. Never uses --force: without it git
+    # refuses any tree holding uncommitted work, which is the safety.
+    shift 2>/dev/null || true
+    node /Users/playra/BrowserOS/trios/.trinity/loop/reap.mjs "$@"
+    ;;
+  verdict-audit)
+    # Check what a bee CLAIMED against the diff it actually pushed. Only
+    # possible since the branches were pushed on 2026-09-04.
+    shift 2>/dev/null || true
+    node /Users/playra/BrowserOS/trios/.trinity/loop/verdict-audit.mjs "$@"
+    ;;
+  brief-gate)
+    # Gate an issue draft before filing it. Ports the server's own boundary
+    # parser, so it fails exactly where the Queen would fail.
+    [ -z "${2:-}" ] && { echo "tri brief-gate <draft.md> [draft2.md ...]"; exit 1; }
+    shift
+    node /Users/playra/BrowserOS/trios/.trinity/loop/brief-gate.mjs "$@"
+    ;;
+  deploy-wait|live-wait)
+    # «Зелёная сборка не доказывает» — ждём, пока правка ДОЕДЕТ до живого
+    # render после merge. Опрашиваем путь, пока в ответе не появится маркер.
+    # Ключ (для закрытых маршрутов) тянем из Railway сам; для публичных путей
+    # (/health, /mcp) он не нужен.
+    #   tri deploy-wait <путь> <маркер> [попыток]
+    RENDER="https://vibee-render-production.up.railway.app"
+    PATHQ="${2:-/health}"; MARK="${3:-}"; TRIES="${4:-40}"
+    K=$(railway variables list -s vibee-render -e production --kv 2>/dev/null | grep '^RENDER_API_KEY=' | cut -d= -f2-)
+    for i in $(seq 1 "$TRIES"); do
+      body=$(curl -s -m 15 -H "X-Api-Key: $K" "$RENDER$PATHQ" 2>/dev/null)
+      if [ -z "$MARK" ] || printf '%s' "$body" | grep -qF "$MARK"; then
+        echo "✅ живой [$i]: $PATHQ → $(printf '%s' "$body" | head -c 140)"; exit 0
+      fi
+      echo "⏳ [$i/$TRIES] $PATHQ ещё без «$MARK»: $(printf '%s' "$body" | head -c 80)"
+      sleep 30
+    done
+    echo "❌ ТАЙМАУТ: «$MARK» не появился на $PATHQ за $TRIES попыток"; exit 1
+    ;;
+  # ---- job campaign (added 2026-08-28) -------------------------------------
+  # Everything below reads the mailbox and the CRM derived from it. None of it
+  # sends: sending is a deliberate act with a human in the loop.
+  jobs)
+    exec python3 "$HOME/job-search/crm/loop.py" status
+    ;;
+  jobs-run)
+    # One loop iteration. Refuses if any guard cannot prove itself first.
+    exec python3 "$HOME/job-search/crm/loop.py" run
+    ;;
+  jobs-guards)
+    # The gate in front of every outbound letter. Exit 1 means do not send.
+    exec python3 "$HOME/job-search/crm/loop.py" preflight
+    ;;
+  jobs-anomalies)
+    exec python3 "$HOME/job-search/crm/loop.py" anomalies
+    ;;
+  jobs-journal)
+    exec python3 "$HOME/job-search/crm/loop.py" journal "${2:-10}"
+    ;;
+  jobs-next)
+    exec python3 "$HOME/job-search/crm/jcrm.py" next
+    ;;
+  jobs-owed)
+    exec python3 "$HOME/job-search/crm/jcrm.py" owed
+    ;;
+  jobs-board)
+    exec python3 "$HOME/job-search/crm/jcrm.py" board
+    ;;
+  jobs-show)
+    [ -z "${2:-}" ] && { echo "tri jobs-show <кто>"; exit 1; }
+    exec python3 "$HOME/job-search/crm/jcrm.py" show "$2"
+    ;;
+  jobs-dash)
+    python3 "$HOME/job-search/crm/jcrm.py" sync > /dev/null || exit 1
+    python3 "$HOME/job-search/crm/jcrm.py" dashboard || exit 1
+    # The trailing test used to BE the exit status, so a successful rebuild
+    # without "open" reported failure and broke every `tri jobs-dash && ...`.
+    if [ "${2:-}" = "open" ]; then open "$HOME/job-search/crm/dashboard.html"; fi
+    exit 0
+    ;;
+  jobs-check)
+    # Four guards over one draft, in the order that matters: leakage, truth,
+    # duplicate signature, then voice. Any non-zero and the letter does not go.
+    [ -z "${2:-}" ] && { echo "tri jobs-check <draft.md>"; exit 1; }
+    python3 "$HOME/skills/_state/bin/letter_extract.py" "$2" > /dev/null || { echo "letter_extract: REFUSED"; python3 "$HOME/skills/_state/bin/letter_extract.py" "$2"; exit 1; }
+    python3 "$HOME/skills/_state/bin/letter_extract.py" "$2" | tail -n +2 > /tmp/tri-body.$$
+    python3 "$HOME/skills/claim-guard/scripts/claim_guard.py" /tmp/tri-body.$$ || { rm -f /tmp/tri-body.$$; exit 1; }
+    rm -f /tmp/tri-body.$$
+    python3 "$HOME/skills/business-voice/scripts/signature_guard.py" "$2" || exit 1
+    exec python3 "$HOME/skills/business-voice/scripts/tone_check.py" "$2"
+    ;;
+  jobs-lesson)
+    # Append a lesson to the skill that will be loaded next time, not to a note
+    # nobody opens. Two arguments: heading and body.
+    [ -z "${3:-}" ] && { echo 'tri jobs-lesson "заголовок" "текст"'; exit 1; }
+    f="$HOME/skills/correspondence-crm/LESSONS.md"
+    { echo; echo "## $(date '+%Y-%m-%d %H:%M') — $2"; echo; echo "$3"; } >> "$f"
+    echo "записано в $f"
+    ;;
+  jobs-drafts)
+    # Каждый черновик в один из: отправлен почтой, отправлен через hh,
+    # без адресата (портал), ждёт отправки. Actionable — только последний.
+    exec python3 "$HOME/job-search/crm/drafts.py" "${2:-report}"
+    ;;
+  jobs-leads)
+    # Потенциальные заказчики по теме, а не вакансии. Тиры по наличию связи.
+    exec python3 "$HOME/job-search/crm/leads.py" "${2:-all}"
+    ;;
+  # ---- telegram, read-only ---------------------------------------------
+  tg-dialogs)   exec tg dialogs -n "${2:-25}" ;;
+  tg-unread)    exec tg unread ;;
+  tg-msg)       [ -z "${2:-}" ] && { echo "tri tg-msg <chat|@user> [N]"; exit 1; }
+                exec tg messages "$2" -n "${3:-25}" ;;
+  tg-search)    [ -z "${2:-}" ] && { echo "tri tg-search <текст> [N]"; exit 1; }
+                exec tg search "$2" -n "${3:-25}" ;;
+  tg-who)       exec tg whoami ;;
+  help|-h|--help)
+    cat <<'USAGE'
+tri — Trinity S³AI ops CLI
+  tri              — railway ssh → claude (прежнее поведение)
+  tri status       — здоровье стека + лента + состояние лупа
+  tri regress      — регресс-чек лупа (15 проверок)
+  tri morning      — утренняя сводка loop/MORNING.md
+  tri loop         — хвост отчёта цикла
+  tri feed [N]     — последние N постов ленты со звёздами/просмотрами
+  tri chat "текст" — вопрос агенту (ключ тянется из Railway сам)
+  tri selftest     — проверка зависимостей
+  tri anomalies    — шаг 0: что сломалось на проде (провайдеры, лента, маршруты)
+  tri verify       — не затёрта ли прошлая правка чужим мержем
+  tri providers    — живой статус провайдеров (чем агент может работать)
+  tri lesson "H" "B" — быстро записать урок в loop-opus/LESSONS.md
+  tri dash         — пересобрать продакшн-дашборд STATUS.md
+  tri board        — дашборд trios: последняя итерация + замеры STATUS.md
+  tri wave         — каркас следующей волны wave-loop-NNN.md
+  tri locks        — кто держит локи кассет/e2e триоса сейчас
+  tri next         — три варианта из последней волны trios
+  tri deploy-wait <путь> <маркер> [N] — ждать, пока правка доедет до живого render
+  tri live-verify [issue] [crit] — живой отпечаток цепочкой за один запуск
+  tri regression [issue] [crit] — доска + локи + live-verify одной командой
+  tri spec-diag [log] — класс ошибки каждой несобирающейся спеки
+  tri jobs         — статус кампании одной строкой (guards/urgent/итерации)
+  tri jobs-run     — одна итерация цикла: preflight → sync → аномалии → дашборд
+  tri jobs-guards  — доказать guard'ы перед отправкой (exit 1 = не отправлять)
+  tri jobs-next    — что делать дальше, по убыванию отдачи
+  tri jobs-owed    — кто ждёт ответа, старейший долг первым
+  tri jobs-board   — воронка по стадиям
+  tri jobs-show X  — одна переписка целиком, обе стороны
+  tri jobs-dash [open] — пересобрать дашборд (и открыть)
+  tri jobs-check F — четыре guard'а: утечки, правда, дубль подписи, голос
+  tri jobs-anomalies / jobs-journal [N] — что не так / история итераций
+  tri jobs-drafts [report|actionable] — разбор черновиков: что ушло, что ждёт
+  tri jobs-leads [new|channels] — заказчики по теме: кому есть смысл писать
+  tri jobs-lesson "H" "B" — записать урок в correspondence-crm/LESSONS.md
+  tri tg-unread / tg-dialogs [N] — телеграм: непрочитанные / чаты (только чтение)
+  tri tg-msg <чат> [N] / tg-search <текст> [N] / tg-who
+  tri game            — луп игры t27.ai/#/queen: состояние (итерация, задачи, находки)
+  tri game-claim / game-release — замок цикла (exit 75 = другой прогон держит)
+  tri game-iterate    — новый цикл: счётчик + last_run
+  tri game-anomalies [--heal] — живые проверки: эндпоинты, апекс vs main, публикатор, чанк; --heal чинит
+  tri game-next       — верхняя открытая задача бэклога
+  tri game-task ID [--title|--status|--note|--force] / game-finding "T" [--severity] / game-gate ID [--result]
+  tri game-dash [open] — DASHBOARD.md + dashboard.html (дизайн Claude Code); последним в цикле
+  tri game-report [N] — последний отчёт цикла (первые N строк)
+  tri game-ingest J [--cycle N] — влить план воркфлоу из journal.jsonl в бэклог (идемпотентно)
+  tri game-lesson "H" "B" — записать урок в queen-game-loop/LESSONS.md
+  tri game-wire [board|status|hardware|activity|research] — что реально несут публичные эндпоинты (поля на N карточках)
+  tri game-prove MARKER [--minutes 9] — ждать, пока t27.ai отдаст Queen-чанк с маркером; exit 0 = доказано
+  tri game-gates [fast|full] [LOG] — цепочка гейтов Queen (full = + 5 headless-Chrome контрактов, ~8 мин); exit 0 = все зелёные
+  tri game-ship BRANCH TITLE MSGFILE BODYFILE -- PATHSPEC... — add по pathspec, commit, push, PR, squash-merge, dispatch паблишера (без watch и без prove)
+  tri game-close TASK_ID "msg" — закрытие цикла: task done, аномалии --heal, closed_at, iterate, dash, release, коммит скилла (отчёт и CONTEXT.md правятся руками ДО)
+  tri game-spike [--no-build] — замер движков на текущем checkout: canvas2D vs Babylon, rAF p50/p95/p99, пропуски vsync, brotli чанков (GPU через ANGLE/Metal)
+  --- continuous loop (trios) ---
+  tri iter / iter-dash / iter-log [N] / iter-anchors — состояние цикла, дашборд, журнал
+  tri iter-render [--work f.json] — замерить рой, обновить опоры, перерисовать дашборд
+  tri iter-unlock — снять замок цикла (только если `tri iter` говорит stale)
+  tri swarm — живое состояние Королевы одной строкой
+  tri fence — какие пути держат застрявшие задания (границы, которых избегать)
+  tri brief-gate <draft.md ...> — проверить черновик задачи парсером самой Королевы
+  tri verdict-audit <N ...> | --accepted — сверить заявленный вердикт пчелы с её диффом
+  tri reap [--reap] — сборка worktree по порогам 80/60, без --force
+  tri lease [--release] — аренда заявки с таймером простоя, потолок повторов 2
+  tri heal [--dry] — все ремонты роя одной цепочкой в верном порядке
+  tri author [--file] — завести задачу из измеренного дефицита, лимит 5 открытых
+  tri loop-selftest — поверка собственных приборов цикла (57 проверок, без сети)
+  tri judge-packet <N ...> | --unauditable — собрать пакет для судейского прочтения
+  tri needs-you [--all] — что ждёт человека и сколько уже ждёт
+  tri loop-coverage — у каких инструментов цикла боевая ветка ни разу не исполнялась
+  tri trend [часов] — скорость счётчиков, а не их уровень
+  tri clocks — на каких полях висят решения и не переписывает ли их кто-то
+  tri fields [файл] — читает ли код поля, которых запрос не выбирает
+  tri fp-check [N] — не обвиняют ли проверяльщики заведомо годное
+  tri push-work [--push] — отправить ветки пчёл, которых нет на удалённом
+  tri close-done [--close] — закрыть задачи с принятой работой (эпики не трогает)
+  tri unpark [--release] — снять потолок повторов, потраченный на молчание, а не на работу
+  tri stale-escalations [--release] — отпустить эскалацию, чья причина больше не воспроизводится
+  tri holds — что рой держит сейчас и не заявлены ли два диспатча на один файл
+USAGE
+    ;;
+  # ---- queen game loop (t27.ai/#/queen) ----------------------------------
+  game)         exec python3 "$HOME/skills/queen-game-loop/_state/loop.py" status ;;
+  game-claim)   exec python3 "$HOME/skills/queen-game-loop/_state/loop.py" claim ;;
+  game-release) exec python3 "$HOME/skills/queen-game-loop/_state/loop.py" release ;;
+  game-iterate) exec python3 "$HOME/skills/queen-game-loop/_state/loop.py" iterate --subject "Queen game — t27.ai/#/queen" ;;
+  game-task)    shift; exec python3 "$HOME/skills/queen-game-loop/_state/loop.py" task "$@" ;;
+  game-finding) shift; exec python3 "$HOME/skills/queen-game-loop/_state/loop.py" finding "$@" ;;
+  game-gate)    shift; exec python3 "$HOME/skills/queen-game-loop/_state/loop.py" gate "$@" ;;
+  game-verify)  exec python3 "$HOME/skills/queen-game-loop/_state/loop.py" verify ;;
+  game-next)    exec python3 "$HOME/skills/queen-game-loop/_state/dash.py" next ;;
+  game-anomalies)
+    # Live checks with a real exit code; --heal dispatches the publisher when the apex lags main.
+    exec python3 "$HOME/skills/queen-game-loop/scripts/anomalies.py" "${2:-}"
+    ;;
+  game-dash)
+    python3 "$HOME/skills/queen-game-loop/_state/loop.py" dashboard > /dev/null || exit 1
+    python3 "$HOME/skills/queen-game-loop/_state/dash.py" || exit 1
+    if [ "${2:-}" = "open" ]; then open "$HOME/skills/queen-game-loop/_state/dashboard.html"; fi
+    exit 0
+    ;;
+  game-ingest)
+    # Ingest a research workflow's plan (tasks, findings, variants) from its journal.jsonl; idempotent.
+    [ -z "${2:-}" ] && { echo "tri game-ingest <workflow journal.jsonl> [--cycle N]"; exit 1; }
+    shift; exec python3 "$HOME/skills/queen-game-loop/scripts/ingest_plan.py" "$@"
+    ;;
+  game-report)
+    f=$(ls "$HOME/skills/queen-game-loop/_state"/cycle-*.md 2>/dev/null | tail -1); [ -z "$f" ] && { echo "no cycle report yet"; exit 1; }
+    echo "$f"; sed -n "1,${2:-60}p" "$f"
+    ;;
+  game-wire)    shift; exec python3 "$HOME/skills/queen-game-loop/scripts/wire.py" "$@" ;;
+  game-spike)   shift; exec bash "$HOME/skills/queen-game-loop/scripts/spike.sh" "$@" ;;
+  game-close)   shift; exec bash "$HOME/skills/queen-game-loop/scripts/close.sh" "$@" ;;
+  game-ship)    shift; exec bash "$HOME/skills/queen-game-loop/scripts/ship.sh" "$@" ;;
+  game-gates)   shift; exec bash "$HOME/skills/queen-game-loop/scripts/gates.sh" "$@" ;;
+  game-prove)   shift; exec python3 "$HOME/skills/queen-game-loop/scripts/prove.py" "$@" ;;
+  game-lesson)
+    [ -z "${3:-}" ] && { echo 'tri game-lesson "заголовок" "текст"'; exit 1; }
+    f="$HOME/skills/queen-game-loop/LESSONS.md"
+    { echo; echo "## $(date '+%Y-%m-%d %H:%M') — $2"; echo; echo "$3"; } >> "$f"
+    echo "записано в $f"
+    ;;
+  *)
+    echo "неизвестная команда: $1 (tri help)"; exit 1
+    ;;
+esac
