@@ -540,7 +540,7 @@ export function shellSafetyReach(auditSrcFromEnvironment) {
 // source path is taken from the environment here so that the extraction
 // can be proved by substitution (CLADE_AUDIT_SRC).
 try {
-  shellSafetyReach(process.env.CLAUDE_AUDIT_SRC);
+  shellSafetyReach(process.env.CLADE_AUDIT_SRC);
 } catch (err) {
   console.error(`shell-safety-reach-audit: ${err.message}`);
   process.exitCode = 2;
