@@ -101,6 +101,19 @@ const STEPS = [
   // the stated cause and releases nothing whose cause still holds - and nothing
   // at all whose issue body asks for a person in its own words.
   { name: 'stale-escalations', file: 'stale-escalations.mjs', act: '--release', dryArgs: '', why: 'retire escalations whose stated cause no longer reproduces' },
+  // FUEL BEFORE READING MATTER, and this order was measured the hard way.
+  //
+  // `author` was the LAST link, behind five read-only steps. On 2026-09-04 one
+  // chain run took 18 minutes, 6.5 of them in judge-packet assembling 31
+  // transcripts - so the refill that keeps four workers busy waited behind work
+  // whose only output is something for a person to read later. Worse, the run
+  // outlived the 10-minute timer, and every fire after it found the lock held
+  // and stood down. The swarm sat at zero while the chain was busy being
+  // thorough.
+  //
+  // Everything above this line frees the swarm; everything below only reports.
+  // The refill belongs on the freeing side of that line.
+  { name: 'author', file: 'author.mjs', act: '--file', why: 'refill the backlog from a measured deficit' },
   // Reads only. A claim the diff does not support is a finding for a person,
   // never something this chain acts on by itself.
   // Two defect classes that each cost an outage, now checked every round rather
@@ -116,9 +129,6 @@ const STEPS = [
   // Queue what no mechanical check can reach for a judge to read. Assembles
   // only - the judgement is an explicit act, never something this performs.
   { name: 'judge-packet', file: 'judge-packet.mjs', act: '--unauditable', dryArgs: '--unauditable', why: 'queue the unauditable for judgement' },
-  // Last, and bounded by its own WIP limit: nothing is filed while five
-  // authored issues are still open.
-  { name: 'author', file: 'author.mjs', act: '--file', why: 'refill the backlog from a measured deficit' },
 ]
 
 // One line per step, taken from the step's own output rather than invented, so
@@ -148,15 +158,36 @@ const SUMMARY = [
   [/at the WIP limit|already has an issue/, () => 'at the WIP limit, nothing filed'],
 ]
 
+// A DEADLINE FOR THE WHOLE CHAIN, not just for each step.
+//
+// Each step had a 10-minute timeout and there are eleven of them, so the worst
+// case was 110 minutes against a timer that fires every 10. One slow run held
+// the lock for 18 minutes and starved the swarm for all of it, and nothing in
+// here noticed. A chain that can outlive its own cadence is a chain that
+// schedules its own outage.
+//
+// Steps are skipped, never truncated: a half-run step is worse than an unrun
+// one, and the summary names every step that did not get its turn.
+const DEADLINE_MS = Number(process.env.HEAL_DEADLINE_MS ?? 8 * 60 * 1000)
+const startedAt = Date.now()
+
 const results = []
 for (const s of STEPS) {
+  const left = DEADLINE_MS - (Date.now() - startedAt)
+  if (left <= 0) {
+    process.stdout.write(`\n--- ${s.name}  (${s.why})\n    SKIPPED - the chain is past its ${Math.round(DEADLINE_MS / 60000)} minute deadline\n`)
+    results.push({ step: s.name, status: 'skipped', summary: 'past the chain deadline' })
+    continue
+  }
   const args = DRY ? (s.dryArgs || '') : s.act
   process.stdout.write(`\n--- ${s.name}  (${s.why})\n`)
   let out = ''
   let status = 'ok'
   try {
     out = execSync(`node ${path.join(DIR, s.file)} ${args}`, {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 600000,
+      encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+      // Never longer than what remains of the chain's own deadline.
+      timeout: Math.max(30000, Math.min(300000, left)),
     })
   } catch (e) {
     // A step that exits non-zero is not automatically a failure: reap exits 1

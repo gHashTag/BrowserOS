@@ -32,6 +32,18 @@ const L = await import(path.join(DIR, 'loop.mjs'))
 const { shq } = L
 const isMain = process.argv[1] && process.argv[1].endsWith('/judge-packet.mjs')
 
+// A CAP, because this step is the one that outgrew the cadence.
+//
+// It assembles one packet per unauditable dispatch, each needing a transcript
+// query into the container. The corpus reached 31 and the step took 6.5
+// minutes - inside an 18-minute chain run that held the loop lock while the
+// swarm sat at zero, because every timer fire after it stood down.
+//
+// The packets are reproducible from the branch at any time, so assembling some
+// now and the rest next round costs nothing. Assembling all of them while four
+// workers wait costs the round.
+const MAX_PACKETS = Number(process.env.JUDGE_MAX_PACKETS ?? 8)
+
 const ROOT = process.env.TRIOS_ROOT || '/Users/playra/BrowserOS'
 const REPO = process.env.TRIOS_ISSUE_REPO || 'gHashTag/trios'
 const BASE = 'origin/feat/queen-supervisor'
@@ -211,6 +223,18 @@ if (isMain) {
         && /appears (nowhere|anywhere)|does not (exist|appear)/i.test(l)
         && /`[A-Za-z_][A-Za-z0-9_]{2,}`/.test(l))
       if (!mechanical) numbers.push(n)
+    }
+    // Newest first, then capped. A packet already on disk is not rebuilt, so
+    // the cap advances through the backlog a batch at a time instead of
+    // re-walking the same 31 transcripts every round.
+    const already = new Set(
+      fs.existsSync(OUT) ? fs.readdirSync(OUT).map((f) => f.replace('.md', '')) : [],
+    )
+    const fresh = numbers.filter((n) => !already.has(String(n)))
+    const total = numbers.length
+    numbers = (fresh.length ? fresh : numbers).slice(0, MAX_PACKETS)
+    if (total > numbers.length) {
+      console.log(`${total} unauditable, assembling ${numbers.length} this round (cap ${MAX_PACKETS}); the rest are reproducible from their branches at any time\n`)
     }
   }
 
