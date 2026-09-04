@@ -16,7 +16,7 @@ const CLAUDE_CLI_MODELS = [
 ] as const
 
 // `claude auth status` emits JSON on both the logged-in (exit 0) and
-// not-logged-in (exit 1) paths. The caller passes us stdout alone —
+// not-logged-in (exit 1) paths. The caller passes us stdout alone -
 // the exec layer separates stdout and stderr so no extraction or
 // stripping of nerdctl noise is needed.
 interface ClaudeAuthStatusPayload {
