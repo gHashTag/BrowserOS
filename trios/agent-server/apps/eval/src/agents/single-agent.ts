@@ -41,7 +41,7 @@ export class SingleAgentEvaluator implements AgentEvaluator {
       supportsImages,
     }
 
-    // Connect to Chrome via CDP — same per-worker offset used by app-manager.
+    // Connect to Chrome via CDP - same per-worker offset used by app-manager.
     const cdpPort = config.browseros.base_cdp_port + workerIndex
     const cdp = new CdpBackend({
       port: cdpPort,
@@ -90,7 +90,7 @@ export class SingleAgentEvaluator implements AgentEvaluator {
         async (signal) => {
           if (!agent) throw new Error('Agent was not initialized')
           // Format prompt with browser context so the agent knows what page it's on
-          // (same formatting as chat-service.ts → formatUserMessage)
+          // (same formatting as chat-service.ts -> formatUserMessage)
           const prompt = formatUserMessage(task.query, browserContext)
           const result = await agent.toolLoopAgent.generate({
             prompt,
