@@ -22,12 +22,12 @@ export interface AdapterHealth {
 
 /**
  * Reports adapter readiness for the `/adapters` route. Reads from the
- * `AgentRuntimeRegistry` — host-process runtimes self-cache their
+ * `AgentRuntimeRegistry` - host-process runtimes self-cache their
  * `<binary> --version` probe; container runtimes expose lifecycle
  * state via the same snapshot.
  *
  * OpenClaw still falls back to a permissive default until Phase 4
- * migrates it onto a runtime — its health currently comes from the
+ * migrates it onto a runtime - its health currently comes from the
  * gateway lifecycle snapshot the harness already exposes.
  */
 export class AdapterHealthChecker {
