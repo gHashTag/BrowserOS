@@ -1506,6 +1506,46 @@ have bitten later: the test now goes where *that app* keeps its tests, and
 generated files are refused here too - a test written against generated output
 tests the generator, and L0 forbids editing it.
 
+## Report the denominator, or a narrow scope is invisible
+
+Three detectors, three rounds, three narrowings - and every one hid for the same
+reason: **the number it produced was never zero.**
+
+| detector | what it actually covered |
+|---|---|
+| L3 / ascii | one directory of five apps |
+| untested | one app of five |
+| length | the **top level** of its own six directories |
+
+The last is the sharpest. `git ls-tree` without `-r` reads only the top level, so
+the detector saw **107 of the 234** `.ts` files inside the six directories it
+already claimed - 127 files invisible for want of one flag, in a tool that
+reported findings every single run.
+
+A count of findings cannot show that. A count of findings against the number of
+files **looked at** can, and costs one number per detector:
+
+```
+signals: length=11/830 seen  untested=145/830 seen  ascii=71/938 seen
+```
+
+### The denominator got the denominator wrong
+
+On its first attempt the counter sat *after* the filters, printing
+`ascii=71/71 seen` - a denominator that can never differ from its numerator and
+therefore says nothing at all. **The exact failure it was added to prevent,
+committed inside the fix for it.** Count at the READ, before any filter, and pin
+it with a case that asserts the order.
+
+### A self-inflicted alarm worth remembering
+
+Investigating this I ran `git ls-tree` from the loop directory, got zero files
+for the whole server tree, and for a minute believed 135 landings had damaged the
+branch. **`git ls-tree <ref> <path>` resolves the path relative to the CWD**, so
+from a subdirectory it silently returns nothing. The alarm was mine; the branch
+was fine. Every git command in these tools passes an explicit `cwd` for this
+reason - the one I typed by hand did not.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
