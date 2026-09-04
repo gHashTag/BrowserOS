@@ -66,7 +66,31 @@ function remote(script, timeout = 280000) {
   const out = execSync(`${RAILWAY} --service ${SVC} -- sh -c ${shq(script)}`, {
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout,
   })
-  return out.split('\n').filter((l) => !/Using SSH|railway\.json|Migrate|Existing/.test(l)).join('\n').trim()
+  return clean(out)
+}
+
+const clean = (out) =>
+  out.split('\n').filter((l) => !/Using SSH|railway\.json|Migrate|Existing/.test(l)).join('\n').trim()
+
+/**
+ * A push whose non-zero exit is an ANSWER, not an accident.
+ *
+ * `git push` exits non-zero when ANY ref is rejected, and this pushes a batch.
+ * So one branch whose remote history diverged made execSync throw, the script
+ * died before reaching the reporting below, and NONE of the other branches in
+ * that batch reached the remote. Measured 2026-09-04: a single non-fast-forward
+ * took the whole run down, and the swarm's finished work stayed invisible - the
+ * defect this tool exists to fix, committed by the tool.
+ *
+ * A partly-rejected push is a normal outcome that the code below already knows
+ * how to describe. It only needed the output rather than an exception.
+ */
+function push(script, timeout = 280000) {
+  try {
+    return remote(script, timeout)
+  } catch (e) {
+    return clean(String(e.stdout || '') + '\n' + String(e.stderr || ''))
+  }
 }
 
 // Every git call into the container needs `-c safe.directory=*`: the repo is
@@ -125,7 +149,7 @@ for (let i = 0; i < missing.length; i += BATCH) {
   // someone else's local hooks proves nothing and can only fail. Every gate
   // that matters - lint, tests, the language policy - runs in CI on the pushed
   // branch, and this changes none of that.
-  const out = remote(`${G} -c "url.https://x-access-token:$GH_TOKEN@github.com/.insteadOf=https://github.com/" push --no-verify origin ${batch.join(' ')} 2>&1`)
+  const out = push(`${G} -c "url.https://x-access-token:$GH_TOKEN@github.com/.insteadOf=https://github.com/" push --no-verify origin ${batch.join(' ')} 2>&1`)
   const created = (out.match(/new branch/g) || []).length
   pushed += created
   for (const line of out.split('\n')) {

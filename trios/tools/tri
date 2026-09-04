@@ -359,6 +359,26 @@ console.log(\"parked dispatches: \"+r.rows.length+\"   paths they fence: \"+s.si
     shift 2>/dev/null || true
     node /Users/playra/BrowserOS/trios/.trinity/loop/reap-local.mjs "$@"
     ;;
+  why)
+    # WHY IS THE SWARM IDLE. Asked four times in one night and answered by hand
+    # each time, differently: the chain failing from its own timer, the refill
+    # queued behind five audits, accepted work never closed so every boundary
+    # stayed held, a detector corpus run dry, a full disk, a stuck lock. None is
+    # guessable from "RUNNING 0", and several look identical from outside.
+    # Checks the causes in the order that makes them true and stops at the first
+    # that explains what is seen, with the evidence and the command to run.
+    shift 2>/dev/null || true
+    node /Users/playra/BrowserOS/trios/.trinity/loop/why.mjs "$@"
+    ;;
+  feed)
+    # Just the three steps that decide whether a worker has anything to start:
+    # push-work -> close-done -> author. The full chain takes 480s of its 600s
+    # cycle and the queue empties in 13 minutes, so the audits are worth running
+    # but not worth making the workers wait for. Takes the same lock, and stands
+    # down if the chain holds it.
+    shift 2>/dev/null || true
+    node /Users/playra/BrowserOS/trios/.trinity/loop/feed.mjs "$@"
+    ;;
   queue)
     # Queue DEPTH, which is not the open count. Measured 2026-09-04: five
     # authored issues open, four already dispatched, so the real queue was ONE
@@ -603,7 +623,7 @@ tri — Trinity S³AI ops CLI
   tri lease [--release] — аренда заявки с таймером простоя, потолок повторов 2
   tri heal [--dry] — все ремонты роя одной цепочкой в верном порядке
   tri author [--file] — завести задачу из измеренного дефицита, лимит 5 открытых
-  tri loop-selftest — поверка собственных приборов цикла (68 проверок, без сети)
+  tri loop-selftest — поверка собственных приборов цикла (74 проверки, без сети)
   tri judge-packet <N ...> | --unauditable — собрать пакет для судейского прочтения
   tri needs-you [--all] — что ждёт человека и сколько уже ждёт
   tri loop-coverage — у каких инструментов цикла боевая ветка ни разу не исполнялась
@@ -620,6 +640,8 @@ tri — Trinity S³AI ops CLI
   tri latency — куда уходит время: ревью против работы пчелы, и сколько задач в час
   tri reap-local [--reap] — убрать слитые и чистые рабочие деревья с диска ноутбука
   tri verdicts [часов] — доля принятого, возвращённого и неосуждённого: здоровье, а не загрузка
+  tri why [--all] — почему рой стоит: причина, улика и что с этим делать
+  tri feed [--act] — только заправка: пуш, закрытие, заведение, без аудитов
 USAGE
     ;;
   # ---- queen game loop (t27.ai/#/queen) ----------------------------------

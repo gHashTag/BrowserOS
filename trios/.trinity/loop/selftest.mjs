@@ -34,6 +34,7 @@ const CLK = await import(path.join(DIR, 'clocks.mjs'))
 const FLD = await import(path.join(DIR, 'fields.mjs'))
 const SE = await import(path.join(DIR, 'stale-escalations.mjs'))
 const D = await import(path.join(DIR, 'disjoint.mjs'))
+const A = await import(path.join(DIR, 'author.mjs'))
 
 let pass = 0
 const failures = []
@@ -880,6 +881,119 @@ check('it reports how many it excluded, so the denominator is visible', () => {
   }
   if (!/has no rate yet/.test(src)) {
     throw new Error('the tool must say plainly that an unfinished window has no rate')
+  }
+})
+
+
+// ---------------------------------------------------------------------------
+// author: a detector must refuse the files the repository GENERATES.
+//
+// Widening the L3 detector past the server tree brought `packages/cdp-protocol`
+// into range: 114 files carrying non-ASCII in comments, every one opening with
+// "AUTO-GENERATED from CDP protocol. DO NOT EDIT." Filing against them would
+// have been 114 tasks a correct worker must refuse, and L0 is explicit that a
+// diff changing a generated file is itself a defect.
+
+check('a file under a generated/ path is refused', () => {
+  if (!A.isGenerated('trios/agent-server/packages/cdp-protocol/src/generated/create-api.ts', 'x')) {
+    throw new Error('the path convention must be enough on its own')
+  }
+  if (!A.isGenerated('a/dist/x.ts', 'x')) throw new Error('dist is generated')
+  if (!A.isGenerated('a/node_modules/x.ts', 'x')) throw new Error('node_modules is not ours')
+})
+
+check('a file whose HEADER says it is generated is refused wherever it lives', () => {
+  const head = '// -- AUTO-GENERATED from CDP protocol. DO NOT EDIT. --\n\nexport const x = 1\n'
+  if (!A.isGenerated('trios/agent-server/apps/agent/anywhere.ts', head)) {
+    throw new Error('the marker must be enough on its own - a generator may write anywhere')
+  }
+  if (!A.isGenerated('a/b.ts', '/* @generated */\nexport const y = 2\n')) {
+    throw new Error('@generated is the other common marker')
+  }
+})
+
+check('the marker is only believed near the TOP of the file', () => {
+  // A file that MENTIONS generated code in a comment two hundred lines down is
+  // not itself generated, and refusing it would quietly shrink the corpus in a
+  // way nobody would notice.
+  const late = 'export const a = 1\n'.repeat(40) + '// this is AUTO-GENERATED elsewhere\n'
+  if (A.isGenerated('a/b.ts', late)) {
+    throw new Error('a mention far down the file is not a generator marker')
+  }
+})
+
+check('an ordinary hand-written file is NOT refused', () => {
+  if (A.isGenerated('trios/agent-server/apps/agent/real.ts', '// A comment.\nexport const z = 3\n')) {
+    throw new Error('refusing hand-written files would empty the corpus silently')
+  }
+})
+
+
+// ---------------------------------------------------------------------------
+// why / feed / push-work: the diagnosis, the fast refill, and the batch that
+// used to take itself down.
+
+check('the diagnosis stops at the FIRST cause that explains what is seen', () => {
+  // A diagnosis that lists six possibilities has not diagnosed anything. Asked
+  // four times in one night why the swarm was idle, the answer was different
+  // every time and none was guessable from "RUNNING 0".
+  const src = fs.readFileSync(path.join(DIR, 'why.mjs'), 'utf8')
+  if (!/if \(!all\) break/.test(src)) throw new Error('it must stop at the first hit unless asked for all')
+  if (!/remedy/.test(src)) throw new Error('a cause without a command to run is half an answer')
+})
+
+check('every cause carries evidence and a remedy', () => {
+  // Counted INSIDE the checks, not across the file: the printing block says
+  // "evidence:" too, so a whole-file count reported 13 against 12 and blamed
+  // the code for the test's own sloppiness.
+  const src = fs.readFileSync(path.join(DIR, 'why.mjs'), 'utf8')
+  const fn = src.slice(src.indexOf('export function checks'), src.indexOf('if (isMain)'))
+  const causes = [...fn.matchAll(/cause:/g)].length
+  const evidence = [...fn.matchAll(/evidence:/g)].length
+  const remedies = [...fn.matchAll(/remedy:/g)].length
+  if (causes !== evidence || causes !== remedies) {
+    throw new Error(`${causes} causes, ${evidence} evidence, ${remedies} remedies - each must have both`)
+  }
+})
+
+check('an unknown cause is reported as unknown, not as health', () => {
+  const src = fs.readFileSync(path.join(DIR, 'why.mjs'), 'utf8')
+  if (!/No known cause fires/.test(src)) throw new Error('silence must not read as "nothing is wrong"')
+  if (!/process\.exit\(2\)/.test(src)) throw new Error('an undiagnosed idle swarm must not exit 0')
+})
+
+check('the feed stands down when the chain holds the lock', () => {
+  // Two writers pushing and closing at once is the thing the lock exists to
+  // prevent, and the chain does this same work a minute later.
+  const src = fs.readFileSync(path.join(DIR, 'feed.mjs'), 'utf8')
+  if (!/standing down/.test(src)) throw new Error('it must stand down rather than race')
+  if (!/process\.exit\(0\)/.test(src.slice(src.indexOf('standing down')))) {
+    throw new Error('standing down is not an error')
+  }
+})
+
+check('a step killed by the timeout is not called a failure', () => {
+  // Calling it one sent me hunting a bug in close-done that did not exist. A
+  // half-run step is worse than an unrun one, but it is not a fault in the step.
+  const src = fs.readFileSync(path.join(DIR, 'feed.mjs'), 'utf8')
+  if (!/timed out/.test(src)) throw new Error('a timeout needs its own state')
+  if (!/e\.killed \|\| e\.signal === 'SIGTERM'/.test(src)) {
+    throw new Error('nothing distinguishes a kill from a non-zero exit')
+  }
+})
+
+check('one rejected ref does not take the whole push down', () => {
+  // `git push` exits non-zero when ANY ref is rejected, and this pushes a batch.
+  // A single non-fast-forward made execSync throw, the script died before
+  // reporting, and NONE of the other branches reached the remote - the defect
+  // this tool exists to fix, committed by the tool.
+  const src = fs.readFileSync(path.join(DIR, 'push-work.mjs'), 'utf8')
+  if (!/function push\(/.test(src)) throw new Error('the push needs a tolerant caller of its own')
+  if (!/catch \(e\)[\s\S]{0,200}e\.stdout/.test(src)) {
+    throw new Error('a rejected ref must yield its OUTPUT, which the reporting already knows how to read')
+  }
+  if (/worktree remove[^\n]*--force|push[^\n]*--force/.test(src)) {
+    throw new Error('and it must still never force')
   }
 })
 
