@@ -7,12 +7,12 @@
  * across the agent's main + sub-sessions) into the flat AgentHistoryPage
  * shape the chat panel consumes.
  *
- * Input: OpenClawSessionHistory.messages — each message has `content`
+ * Input: OpenClawSessionHistory.messages - each message has `content`
  *   that is either a string OR an array of typed blocks
  *   ({type: 'text'|'thinking'|'toolCall'|'toolResult'}). The HTTP endpoint
  *   returns the array form even though the type definition says string.
  *
- * Output: AgentHistoryEntry[] — flat text per entry, separate `reasoning`
+ * Output: AgentHistoryEntry[] - flat text per entry, separate `reasoning`
  *   and `toolCalls` fields the UI renders as collapsible sections.
  *
  * Tool result pairing: `toolCall` blocks emit on assistant messages;
@@ -42,13 +42,13 @@ const SUBAGENT_CONTEXT_PREFIX = /^\[Subagent Context\][\s\S]*$/
 // Emitted by OpenClaw's acp-cli ahead of the BrowserOS envelope. Three
 // prefix shapes (any combination, in this stack order):
 //
-//   1. `[media attached: <internal-path> (<mime>)]`        ← per attachment
-//   2. `[<weekday> <YYYY-MM-DD HH:MM> <TZ>]`               ← injectTimestamp
-//   3. `[Working directory: <path>]`                       ← acp-cli prefixCwd
+//   1. `[media attached: <internal-path> (<mime>)]`       <- per attachment
+//   2. `[<weekday> <YYYY-MM-DD HH:MM> <TZ>]`              <- injectTimestamp
+//   3. `[Working directory: <path>]`                      <- acp-cli prefixCwd
 //
 // Stacks #1 may appear multiple times (one per image). Stack #2 and #3
 // can render on the same line separated by a space. Each known prefix is
-// anchored on its content shape (not just `[…]`) to avoid clobbering
+// anchored on its content shape (not just `[...]`) to avoid clobbering
 // user-typed lines that happen to start with a bracket.
 const OPENCLAW_MEDIA_PREFIX_LINE = /^\[media attached:[^\]\n]*\]\n/
 const OPENCLAW_TIMESTAMP_PREFIX =
@@ -69,7 +69,7 @@ function stripOpenClawAcpCliEnvelope(value: string): string {
  * Strip OpenClaw + BrowserOS scaffolding from a "user" message before
  * showing it in the chat panel.
  *
- * BrowserOS-side envelope (`<role>…</role>\n\n<user_request>…</user_request>`)
+ * BrowserOS-side envelope (`<role>...</role>\n\n<user_request>...</user_request>`)
  * is delegated to `unwrapBrowserosAcpUserMessage`, which performs an
  * exact-string match against the same constants `buildBrowserosAcpPrompt`
  * uses to wrap. Matcher and wrapper live in the same repo, so the two
@@ -154,7 +154,7 @@ export function convertOpenClawHistoryToAgentHistory(
   raw: OpenClawSessionHistory,
 ): AgentHistoryPage {
   const items: AgentHistoryEntry[] = []
-  // Resolved tool calls keyed by toolCallId — used to attach `output`
+  // Resolved tool calls keyed by toolCallId - used to attach `output`
   // back to the assistant entry that issued the call once the tool
   // result arrives in a subsequent message.
   const pendingByToolCallId = new Map<string, PendingToolCall>()
