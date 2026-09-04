@@ -26,6 +26,21 @@ import { execSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const DIR = path.dirname(fileURLToPath(import.meta.url))
+
+// The default ROOT below exists only on the machine that authored these tools.
+// Several cases read ROOT (their own modules recompute it at import time, from
+// this same environment), so when the author's directory is absent the suite
+// anchors itself to the checkout it lives in. A calibration run that fails for
+// WHERE it was run, rather than for what the instruments do, proves nothing -
+// and would hide a real regression behind four environmental reds.
+//
+// Set BEFORE the imports below, deliberately: every module here reads
+// TRIOS_ROOT once, at import time, so a guard placed after them would anchor
+// this file and nothing else.
+if (!process.env.TRIOS_ROOT && !fs.existsSync('/Users/playra/BrowserOS')) {
+  process.env.TRIOS_ROOT = path.resolve(DIR, '..', '..', '..')
+}
+
 const L = await import(path.join(DIR, 'loop.mjs'))
 const G = await import(path.join(DIR, 'brief-gate.mjs'))
 const JP = await import(path.join(DIR, 'judge-packet.mjs'))
@@ -555,6 +570,51 @@ check('the parser probe is rebuilt when the parser is newer than the binary', ()
   if (!/mtimeMs/.test(src)) {
     throw new Error('a cached probe older than the parser would mask the very change this tool exists to notice')
   }
+})
+
+// ----------------------------------------------- chatter is not the answer
+// The first `clean` dropped any line merely CONTAINING one of four words, and
+// one of the words was `Migrate`. A single-line JSON answer carrying a review
+// note that mentioned migration was deleted in full, and the caller reported
+// "unparseable answer" about a query that had worked perfectly. It was fixed in
+// #112 by anchoring the patterns and exempting any line that opens with `[` or
+// `{` - and NOTHING was ever added that would go red if the anchoring were
+// undone. A filter that can eat evidence fails silently by construction, so it
+// is exactly the kind that has to be shown failing.
+//
+// Every fixture below is a shape railway actually prints; the noise strings are
+// the five the filter names, quoted rather than invented, because a case built
+// on a shape the filter was never written for proves nothing about production.
+console.log('\nstale-escalations - cleaning the output must not remove the output')
+
+// The arrow railway prints before `Migrate` is U+2192, written below as an
+// escape so this file stays ASCII while the fixture stays byte-exact (L3).
+const RAILWAY_NOISE = [
+  'Using SSH key from file /root/.railway/ssh/id_ed25519',
+  'warning: Config as Code',
+  '  \u2192 Migrate: 2 file(s) staged',
+  '  Existing files keep working',
+  '  railway.json / railway.toml',
+]
+
+check('a JSON line containing "Migrate" survives cleaning byte for byte', () => {
+  const answer = '{"issue":1422,"note":"review: the Migrate step is fine","rows":1}'
+  eq(SE.clean(answer), answer, 'the answer must come back unchanged')
+})
+
+check('a leading "Using SSH key from file" line is removed and the JSON after it survives', () => {
+  const json = '[{"issue":1422,"criteria_source":"stated","n":4}]'
+  eq(SE.clean(`Using SSH key from file ~/.railway/ssh/id_ed25519\n${json}`), json, 'only the chatter is gone')
+})
+
+check('a prose line that mentions chatter mid-sentence is kept, because the patterns are anchored', () => {
+  const line = 'the deploy log says Existing files keep working, once, in passing'
+  eq(SE.clean(line), line, 'a mid-sentence mention is not chatter')
+})
+
+check('all five real chatter shapes go, and the answer under them is intact', () => {
+  const json = '{"ok":true}'
+  eq(SE.clean(RAILWAY_NOISE.concat([json]).join('\n')), json, 'chatter stripped, answer intact')
 })
 
 
