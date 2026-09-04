@@ -15,7 +15,7 @@
  * (every supported type must have a mapping).
  *
  * Anything not listed is rejected at agent-create time with a clear
- * error — there is no `~/.hermes/` fallback.
+ * error - there is no `~/.hermes/` fallback.
  */
 import {
   HERMES_SUPPORTED_BROWSEROS_PROVIDER_TYPES,
@@ -31,7 +31,7 @@ export interface HermesProviderMapping {
   requiresBaseUrl: boolean
   /**
    * Used when `hermesProvider === 'custom'` and the input has no
-   * baseUrl — Hermes treats `provider: custom` as "call this URL
+   * baseUrl - Hermes treats `provider: custom` as "call this URL
    * directly", so `base_url` must always end up in config.yaml.
    */
   defaultBaseUrl?: string
@@ -48,7 +48,7 @@ const HERMES_PROVIDER_MAP: Record<
   },
   // Hermes (v2026.4.x) has no provider key named `"openai"`. Per the
   // upstream docs, `provider: custom` + `base_url` is the canonical
-  // shape for any OpenAI-compatible endpoint with an API key — Hermes
+  // shape for any OpenAI-compatible endpoint with an API key - Hermes
   // skips provider lookup and calls the URL directly. Used for both
   // pure OpenAI (default base URL) and openai-compatible (caller URL).
   openai: {
