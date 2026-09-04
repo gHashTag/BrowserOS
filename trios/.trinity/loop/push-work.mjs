@@ -156,6 +156,30 @@ for (let i = 0; i < missing.length; i += BATCH) {
     if (/rejected|error:/.test(line)) rejected.push(line.trim().slice(0, 100))
   }
 }
+// GIVE THE REPOSITORY BACK.
+//
+// This tool enters the container as ROOT. Every ref it updates leaves a reflog
+// file owned by root under `.git/logs/refs/remotes/origin/`, and the worker runs
+// as `bee`, which cannot append to them. Measured 2026-09-04: 112 such files,
+// and EVERY new bee died at 0 seconds with
+//
+//   git fetch failed: error: cannot update the ref
+//   'refs/remotes/origin/queen-1329': unable to append to
+//   '.git/logs/refs/remotes/origin/queen-1329': Permission denied
+//
+// The tick chose the same issue round after round, the dispatch died instantly
+// each time, and the swarm sat at one worker of four. My maintenance tool took
+// the fleet down.
+//
+// The owner is read from `.git` itself rather than assumed to be `bee`, so this
+// keeps working if the image ever changes user.
+const owner = remote(`stat -c '%u:%g' /workspace/BrowserOS/.git 2>/dev/null || echo ''`)
+if (owner && owner !== '0:0') {
+  remote(`chown -R ${owner} /workspace/BrowserOS/.git/logs /workspace/BrowserOS/.git/refs 2>&1 | head -2`)
+  const left = remote(`find /workspace/BrowserOS/.git -user root 2>/dev/null | wc -l`)
+  console.log(`gave the refs back to ${owner}; root-owned files left: ${String(left).trim()}`)
+}
+
 console.log(`\npushed ${pushed}`)
 if (rejected.length) {
   console.log('refused, and deliberately not forced:')
