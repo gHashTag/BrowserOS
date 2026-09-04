@@ -40,16 +40,37 @@ const A = await import(path.join(DIR, 'author.mjs'))
 let pass = 0
 const failures = []
 
+// AN ASYNC CHECK WAS NEVER AWAITED, SO IT COULD NOT FAIL.
+//
+// This called `fn()` inside a try/catch. For an ordinary function that is
+// correct. For an `async` one it starts the work, returns a promise, and the
+// catch sees nothing - so the case printed `ok`, the summary said `0 failed`,
+// and the rejection arrived afterwards as an unhandled error that crashed the
+// process AFTER the tally had already been believed.
+//
+// Found 2026-09-05, holding eight checks written the same day: every one of
+// them had been reported passing without ever being run to completion. A gate
+// that cannot fail is not a gate, and this file's whole job is to be one.
+const pending = []
+const settled = (name, e) => {
+  if (!e) { pass++; console.log(`  ok    ${name}`); return }
+  failures.push(`${name}: ${e.message}`)
+  console.log(`  FAIL  ${name}`)
+  console.log(`          ${String(e.message).slice(0, 140)}`)
+}
 function check(name, fn) {
+  let out
   try {
-    fn()
-    pass++
-    console.log(`  ok    ${name}`)
+    out = fn()
   } catch (e) {
-    failures.push(`${name}: ${e.message}`)
-    console.log(`  FAIL  ${name}`)
-    console.log(`          ${String(e.message).slice(0, 140)}`)
+    settled(name, e)
+    return
   }
+  if (out && typeof out.then === 'function') {
+    pending.push(out.then(() => settled(name), (e) => settled(name, e)))
+    return
+  }
+  settled(name)
 }
 
 /**
@@ -1434,6 +1455,177 @@ check('an unreadable cherry answer is not evidence of landing', () => {
   if (!/cherry\.trim\(\) !== ''/.test(fn)) throw new Error('an EMPTY answer must not read as "no unaccounted commits"')
 })
 
+check('a section is read from its heading, not from the first mention of it', async () => {
+  // #1090 is a brief ABOUT brief shape, so its acceptance scenario contains the
+  // sentence "Given an issue body with a `## Boundary` but no
+  // `## Success Criteria`". body.split(heading)[1] returns the text BETWEEN the
+  // first and second occurrence - 931 characters of User Scenarios - and the
+  // real criterion two sections below was never read. The audit said NO
+  // MECHANICAL CLAIM and meant it.
+  const { sectionOf, promisedIdentifiers } = await import('./verdict-audit.mjs')
+  const body = [
+    '## User Scenarios',
+    '1. **Given** a body with a `## Boundary` but no `## Success Criteria`,',
+    '   **Then** it is refused.',
+    '',
+    '## Success Criteria',
+    '',
+    '- `briefShape` appears nowhere in the tree today.',
+    '',
+    '## Boundary',
+    '- src/x.ts',
+  ].join('\n')
+  const sec = sectionOf(body, 'Success Criteria')
+  if (!sec.includes('briefShape')) throw new Error('the real section was skipped for a prose mention of its name')
+  if (sec.includes('refused')) throw new Error('the section ran past its own heading into another')
+  const ids = promisedIdentifiers(body)
+  if (!ids.includes('briefShape')) throw new Error('the promise this tool exists to find was invisible')
+})
+
+check('a section ends at the next heading', async () => {
+  const { sectionOf } = await import('./verdict-audit.mjs')
+  const body = '## Success Criteria\n- a\n\n## Boundary\n- src/x.ts\n'
+  const sec = sectionOf(body, 'Success Criteria')
+  if (sec.includes('src/x.ts')) throw new Error('the boundary bled into the criteria')
+})
+
+check('criteria that are commands are collected as commands', async () => {
+  const { promisedCommands } = await import('./verdict-audit.mjs')
+  const body = [
+    '## Success Criteria',
+    "- `test -f docs/a.md` exits `0`.",
+    "- `grep -c 'Dockerfile' docs/a.md` prints at least `1`.",
+    '- `docs/b.md` exists and contains at least 30 non-empty lines.',
+    '- `bun test apps/server/tests/api/x.test.ts` exits 0.',
+  ].join('\n')
+  const cs = promisedCommands(body)
+  const kinds = cs.map((c) => c.kind).sort().join(',')
+  if (kinds !== 'exists,grep,lines') throw new Error(`expected exists,grep,lines - got ${kinds}`)
+  const grep = cs.find((c) => c.kind === 'grep')
+  if (grep.pattern !== 'Dockerfile' || grep.atLeast !== 1) throw new Error('the pattern and the threshold must both survive')
+  if (cs.some((c) => /bun test/.test(c.path))) throw new Error('bun test needs a checkout and must count as unchecked, never as passed')
+})
+
+check('a command criterion is RUN, and a count below the threshold fails', async () => {
+  const { runCommandCriterion } = await import('./verdict-audit.mjs')
+  const read = () => 'no match here\nnor here\n'
+  const r = runCommandCriterion('b', { kind: 'grep', pattern: 'Dockerfile', path: 'docs/a.md', atLeast: 1 }, read)
+  if (r.ok) throw new Error('zero matches cannot satisfy "at least 1"')
+  if (!/= 0/.test(r.why)) throw new Error('the refusal must carry the number it counted')
+})
+
+check('the generous reading of a pattern wins, because an under-count is a false accusation', async () => {
+  const { runCommandCriterion } = await import('./verdict-audit.mjs')
+  // The criterion writes a POSIX basic regex. Read as a literal substring it
+  // matches nothing here; read as a regex it matches twice. Taking the smaller
+  // would convict a bee that did the work.
+  const read = () => 'alpha\nbeta\n'
+  const r = runCommandCriterion('b', { kind: 'grep', pattern: 'a.pha|b.ta', path: 'x', atLeast: 2 }, read)
+  if (!r.ok) throw new Error('the regex reading found 2; the audit must not prefer the literal 0')
+})
+
+check('a file the branch does not have fails with the path named', async () => {
+  const { runCommandCriterion } = await import('./verdict-audit.mjs')
+  const r = runCommandCriterion('b', { kind: 'exists', path: 'docs/gone.md' }, () => null)
+  if (r.ok) throw new Error('an absent file cannot satisfy an existence criterion')
+  if (!r.why.includes('docs/gone.md')) throw new Error('name the path or nobody can act on it')
+})
+
+check('every plausible root is tried before a path is called absent', async () => {
+  const { readFromBranch } = await import('./verdict-audit.mjs')
+  // A brief may write docs/x.md for a file that lives at trios/docs/x.md.
+  // Accusing on the auditor's guess about the root is the exact class of false
+  // accusation this file already carries three scars from.
+  const run = (cmd) => (cmd.includes('trios/docs/x.md') ? 'content' : null)
+  if (readFromBranch('b', 'docs/x.md', run) !== 'content') throw new Error('the trios/ prefix must be tried')
+  if (readFromBranch('b', 'docs/nope.md', run) !== null) throw new Error('absent under every root is absent')
+})
+
+check('an empty file is present, not missing', async () => {
+  const { runCommandCriterion } = await import('./verdict-audit.mjs')
+  const r = runCommandCriterion('b', { kind: 'exists', path: 'docs/empty.md' }, () => '')
+  if (!r.ok) throw new Error('an empty string is a file with no bytes, not an absent file')
+})
+
+check('an exact count is checked exactly, and the pipe form is refused', async () => {
+  const { promisedCommands, runCommandCriterion } = await import('./verdict-audit.mjs')
+  // The L3 cleanup brief is the one this swarm files most often, and its
+  // criterion is `LC_ALL=C grep -cP '...' <file>` prints 0. Verified against
+  // #1485 on 2026-09-05: 3 non-ASCII lines at the fork point, 0 on the branch,
+  // so the check has teeth rather than passing by construction.
+  const body = [
+    '## Success Criteria',
+    "- `LC_ALL=C grep -cP 'x' src/a.ts` prints 0, and the raw output is quoted.",
+    '- `bun run typecheck 2>&1 | grep -c src/a.ts` prints 0.',
+  ].join('\n')
+  const cs = promisedCommands(body)
+  if (cs.length !== 1) throw new Error(`a grep with no FILE argument cannot be reproduced read-only - got ${cs.length}`)
+  if (cs[0].exactly !== 0) throw new Error('"prints 0" is an exact threshold, not "at least 0"')
+  if (cs[0].path !== 'src/a.ts') throw new Error('the environment prefix and the flag bundle must not swallow the path')
+  if (!runCommandCriterion('b', cs[0], () => 'clean\n').ok) throw new Error('no match must satisfy "exactly 0"')
+  if (runCommandCriterion('b', cs[0], () => 'has x here\n').ok) throw new Error('a match must fail "exactly 0"')
+})
+
+check('an exact count takes the faithful reading, not the convenient one', async () => {
+  const { runCommandCriterion } = await import('./verdict-audit.mjs')
+  // For "at least N" the generous count protects an innocent bee. For "exactly
+  // 0" generosity runs the other way and waves a real violation through, which
+  // is the failure this whole file exists to avoid.
+  const c = { kind: 'grep', pattern: 'a.c', path: 'x', exactly: 0 }
+  const r = runCommandCriterion('b', c, () => 'abc\n')
+  if (r.ok) throw new Error('the regex matches; an exact-zero criterion must not fall back to the literal reading that does not')
+  if (!/as a regex/.test(r.why)) throw new Error('say which reading was used, or the number cannot be argued with')
+})
+
+check('the words around the number are part of the criterion', async () => {
+  const { promisedCommands, runCommandCriterion } = await import('./verdict-audit.mjs')
+  // #1326: "prints `2` or more". Read as "exactly 2" it convicted a bee whose
+  // file had 3 - which is what the criterion asked for.
+  const body = [
+    '## Success Criteria',
+    "- `grep -c 'x' docs/a.md` prints `2` or more.",
+    "- `grep -c 'y' docs/a.md` prints `2`.",
+    "- `grep -c 'z' docs/a.md` prints `2` or fewer.",
+  ].join('\n')
+  const [more, exact, fewer] = promisedCommands(body)
+  if (more.atLeast !== 2 || more.exactly !== undefined) throw new Error('"or more" is a lower bound, not an equality')
+  if (exact.exactly !== 2) throw new Error('a bare number is an equality')
+  if (fewer.atMost !== 2) throw new Error('"or fewer" is an upper bound')
+  const three = () => 'x\nx\nx\n'
+  if (!runCommandCriterion('b', more, three).ok) throw new Error('3 satisfies "2 or more"')
+  if (runCommandCriterion('b', { ...exact, pattern: 'x' }, three).ok) throw new Error('3 does not satisfy "exactly 2"')
+  if (runCommandCriterion('b', { ...fewer, pattern: 'x' }, three).ok) throw new Error('3 does not satisfy "2 or fewer"')
+})
+
+check('a BRE pattern is read as BRE, and an unreadable one is not a conviction', async () => {
+  const { breToJs, runCommandCriterion, dialectOf } = await import('./verdict-audit.mjs')
+  // #1324: `grep -c '^  it(' <file>`. In BRE the paren is an ordinary
+  // character; handed to new RegExp it throws, and falling back to a literal
+  // search counted 0 and accused a bee whose test file was full of them.
+  if (dialectOf('-c') !== 'bre' || dialectOf('-cP') !== 'pcre' || dialectOf('-cE') !== 'ere') {
+    throw new Error('the flag bundle says which language the pattern is in')
+  }
+  if (breToJs('^  it(') !== '^  it\\(') throw new Error('a bare paren is literal in BRE')
+  if (breToJs('a\\|b') !== 'a|b') throw new Error('a BACKSLASHED pipe is the alternation in BRE')
+  const c = { kind: 'grep', dialect: 'bre', pattern: '^  it(', path: 'x', atLeast: 1 }
+  if (!runCommandCriterion('b', c, () => '  it(\'works\', () => {})\n').ok) throw new Error('the bee wrote exactly what was asked for')
+  const bad = { kind: 'grep', dialect: 'pcre', pattern: '(?<', path: 'x', atLeast: 1 }
+  const r = runCommandCriterion('b', bad, () => 'anything\n')
+  if (r.ok !== null) throw new Error('a pattern this cannot read is unchecked, never failed')
+})
+
+check('the harness can fail an async check', async () => {
+  // Guarding the fix above: before it, this file reported 0 failures while an
+  // async case was rejecting into the void.
+  let caught = false
+  const inner = []
+  const fake = (n, f) => { const o = f(); if (o && o.then) inner.push(o.then(() => {}, () => { caught = true })) }
+  fake('x', async () => { throw new Error('boom') })
+  await Promise.all(inner)
+  if (!caught) throw new Error('an async rejection must be observable by the harness')
+})
+
+await Promise.all(pending)
 console.log(`\n${pass} passed, ${failures.length} failed`)
 fs.rmSync(tmp, { recursive: true, force: true })
 if (failures.length) {
