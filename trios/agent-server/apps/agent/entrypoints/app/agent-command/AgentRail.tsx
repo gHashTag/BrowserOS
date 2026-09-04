@@ -21,7 +21,7 @@ interface AgentRailProps {
  * button live in the shared top band above (so the rail header and
  * the chat header sit on a single aligned strip rather than as two
  * separately-sized headers per column). Sort matches `/agents`:
- * pinned-first → recency, so the rail doesn't reshuffle as turns
+ * pinned-first -> recency, so the rail doesn't reshuffle as turns
  * transition every 5 s.
  */
 export const AgentRail: FC<AgentRailProps> = ({
