@@ -39,10 +39,10 @@ export function useSyncRemoteIntegrations(): SyncStatus {
   const integrationCount = userMCPIntegrations?.integrations?.length ?? 0
 
   useEffect(() => {
-    // Still loading data — keep isSyncing: true
+    // Still loading data - keep isSyncing: true
     if (isIntegrationsLoading) return
 
-    // No integrations at all — nothing to sync, mark done
+    // No integrations at all - nothing to sync, mark done
     if (!integrationCount) {
       setSyncState({ isSyncing: false, hasSynced: true })
       return
