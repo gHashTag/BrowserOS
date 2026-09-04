@@ -1425,6 +1425,53 @@ One selftest case read *"it never lands an OPEN issue"* and failed the moment
 that rule was corrected - it was pinning the deadlock. Re-aim it deliberately,
 in the same change, or a test becomes an argument for keeping the bug.
 
+## Work that CAN proceed must never be held hostage by work that cannot
+
+Four times in one round, the same shape:
+
+| what happened | how it looked |
+|---|---|
+| `git push` exits non-zero when ANY ref is rejected | one diverged branch, and none of the batch reached the remote |
+| a step killed by my own timeout | reported as FAILED, sending me after a bug that did not exist |
+| `git merge-tree` exits non-zero **on conflict** | every real conflict said "the merge could not be computed" |
+| `slice(0, BATCH)` off a newest-first list | 35 clean branches waited behind 10 stuck ones, landing ONE per run |
+
+The first three are an **outcome treated as an exception**. The fourth is the
+same idea in a queue: take the first N and the blocked ones at the head consume
+every slot. Fill the batch with what can actually proceed, and bound the scan so
+a wall of conflicts does not become a full survey every run.
+
+## Cause thirteen, added the round after I created it
+
+`close-done` now closes only work that has LANDED. That makes landing
+**load-bearing**: if it stops, nothing closes, every accepted issue keeps holding
+its boundary, and the swarm starves behind a wall of its own finished work.
+
+**The failure is silent, because refusing to close is the CORRECT behaviour of a
+healthy `close-done`.** Every repair that makes a step depend on another step
+creates one of these, and it is worth adding the cause the same day.
+
+## Two ways a diagnostic lies while being right
+
+**A check that FIRED is never `ok`.** Under `--all` it printed
+`ok  the landing pipeline is moving (also true)` for a check that had just
+detected a stalled pipeline. The word `ok` is the first thing an eye lands on.
+
+**An all-clear must be scoped to NOW and name what is coming.** It said "nothing
+is wrong" while all ten remaining branches conflicted. That does not make a busy
+swarm idle today - it makes it idle in an hour. It reads *"nothing is wrong RIGHT
+NOW"* and carries an `AHEAD:` clause.
+
+## A scan that asks "does this file contain X" must ask it of the CODE
+
+Three times in one night a check of mine matched its own documentation: it
+counted `evidence:` inside a printing block, found `--delete-branch` in a comment
+saying not to use it, and found `also true` in a comment quoting the behaviour
+just removed. **Each time the code was right and the test was reading prose.**
+
+There is a `codeOf` helper now that strips comments, and every such scan goes
+through it - the class is closed rather than fixed a fourth time.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
