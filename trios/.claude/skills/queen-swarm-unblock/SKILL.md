@@ -1546,6 +1546,51 @@ from a subdirectory it silently returns nothing. The alarm was mine; the branch
 was fine. Every git command in these tools passes an explicit `cwd` for this
 reason - the one I typed by hand did not.
 
+## The change I argued for did nothing measurable
+
+I moved the VERDICT block to the front of the report on the strength of three
+transcripts, deployed it, and promised to measure once the sample was comparable.
+It is, and it does not support the change:
+
+```
+before   166/177   93.8%   95% 89.2% to 96.5%
+after     19/22    86.4%   95% 66.7% to 95.3%
+
+no detectable difference - the intervals overlap
+about 125 observations in EACH window would be needed to tell
+```
+
+Eyeballed, 94% -> 86% is a regression. Measured, it is **three incomplete reports
+where 1.3 were expected**, and the sample cannot distinguish a small improvement
+from a small regression at all.
+
+**I compared percentages by eye all night and was wrong twice in ways that
+changed what I recommended**: the "17% accepted" that was a window still in
+flight, and this. So `tri ab` exists, with Wilson score intervals - the ones that
+stay inside [0,1] at small n and near the edges, where the normal approximation
+runs outside the range exactly when the question is being asked.
+
+### What it refuses to say
+
+- **Never** better or worse from overlapping intervals. *"No detectable
+  difference"* is a real answer and the honest one far more often than a
+  dashboard suggests; treating it as a null result to be talked around is how a
+  change gets credit for noise.
+- *"Not significant"* always arrives with the sample size that would settle it,
+  because without that it reads as *"no effect"*, and those are different claims.
+
+### What I kept anyway, and why
+
+The block-first instruction is **not reverted**. The parser change that came with
+it - try every occurrence of the heading, keep the fullest parse - is strictly
+better than `lastIndexOf` under either convention, and the position itself costs
+nothing. But it gets **no credit**, and this section is here so it never quietly
+acquires any.
+
+> A story that explains three transcripts is a hypothesis, not a result. Ship it
+> if it is harmless, measure it before you believe it, and say plainly when the
+> measurement comes back empty.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
