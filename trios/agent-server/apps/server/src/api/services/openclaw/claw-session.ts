@@ -6,7 +6,7 @@
  * In-memory state machine tracking the live status of every OpenClaw agent
  * session. Acts as the single source of truth for "is agent X running?"
  *
- * Fed exclusively by Gateway WS events — the OpenClawObserver pipes chat
+ * Fed exclusively by Gateway WS events - the OpenClawObserver pipes chat
  * broadcast events into this state machine for real-time transitions. The
  * JSONL boot-seed was dropped along with `OpenClawJsonlReader`; consumers
  * see `unknown` for any agent that hasn't emitted an observer event yet.
