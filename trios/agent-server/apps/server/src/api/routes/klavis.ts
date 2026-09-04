@@ -188,7 +188,7 @@ export function createKlavisRoutes(deps: KlavisRouteDeps) {
 
         // The chat hot path keys its cache by the user's full enabled set,
         // so a single-server lookup here would always miss and immediately
-        // be cleared by invalidate() below — call createStrata directly
+        // be cleared by invalidate() below - call createStrata directly
         // to recover the strataId, mirroring the original removeServer flow.
         const strata = await klavisClient.createStrata(browserosId, [
           serverName,
