@@ -25,6 +25,7 @@ import {
   reduceToolOutputs,
   type StepWithUsage,
   slidingWindow,
+  toRawTokenBudget,
 } from './compaction/utils'
 
 export {
@@ -38,6 +39,7 @@ export {
   reduceToolOutputs,
   type StepWithUsage,
   slidingWindow,
+  toRawTokenBudget,
 } from './compaction/utils'
 
 export interface CompactionConfig {
@@ -132,6 +134,22 @@ async function compactMessages(
   config: ComputedConfig,
   state: CompactionState,
 ): Promise<ModelMessage[]> {
+  // config.triggerThreshold, config.maxSummarizationInput and
+  // config.minSummarizableTokens are budget-scale (raw estimate *
+  // safetyMultiplier + fixedOverhead), while slidingWindow() and
+  // estimateTokens() measure on the raw scale. Convert the budget-scale
+  // limits once, up front, so every limit handed to a raw-scale helper and
+  // every comparison in this function is like-for-like.
+  const triggerThresholdRaw = toRawTokenBudget(config.triggerThreshold, config)
+  const maxSummarizationInputRaw = toRawTokenBudget(
+    config.maxSummarizationInput,
+    config,
+  )
+  const minSummarizableRaw = toRawTokenBudget(
+    config.minSummarizableTokens,
+    config,
+  )
+
   const { splitIndex, turnStartIndex, isSplitTurn } = findSafeSplitPoint(
     messages,
     config.keepRecentTokens,
@@ -140,7 +158,7 @@ async function compactMessages(
 
   if (splitIndex === -1) {
     logger.info('Cannot find safe split point, using sliding window')
-    return slidingWindow(messages, config.triggerThreshold)
+    return slidingWindow(messages, triggerThresholdRaw)
   }
 
   const toKeep = messages.slice(splitIndex)
@@ -164,34 +182,35 @@ async function compactMessages(
 
   if (toSummarize.length > 0) {
     const summarizeTokens = estimateTokens(toSummarize)
-    if (summarizeTokens > config.maxSummarizationInput) {
+    if (summarizeTokens > maxSummarizationInputRaw) {
       logger.info('Capping summarization input, dropping oldest messages', {
-        excess: summarizeTokens - config.maxSummarizationInput,
-        maxSummarizationInput: config.maxSummarizationInput,
+        excess: summarizeTokens - maxSummarizationInputRaw,
+        rawLimit: maxSummarizationInputRaw,
       })
-      toSummarize = slidingWindow(toSummarize, config.maxSummarizationInput)
+      toSummarize = slidingWindow(toSummarize, maxSummarizationInputRaw)
     }
   }
 
   if (summarizedTurnPrefix.length > 0) {
     const prefixTokens = estimateTokens(summarizedTurnPrefix)
-    if (prefixTokens > config.maxSummarizationInput) {
+    if (prefixTokens > maxSummarizationInputRaw) {
       logger.info('Capping turn prefix input, dropping oldest messages', {
-        excess: prefixTokens - config.maxSummarizationInput,
-        maxSummarizationInput: config.maxSummarizationInput,
+        excess: prefixTokens - maxSummarizationInputRaw,
+        rawLimit: maxSummarizationInputRaw,
       })
       summarizedTurnPrefix = slidingWindow(
         summarizedTurnPrefix,
-        config.maxSummarizationInput,
+        maxSummarizationInputRaw,
       )
     }
   }
 
+  const allSummarized = [...toSummarize, ...summarizedTurnPrefix]
   const totalSummarizable =
     estimateTokens(toSummarize) + estimateTokens(summarizedTurnPrefix)
-  if (totalSummarizable < config.minSummarizableTokens) {
+  if (totalSummarizable < minSummarizableRaw) {
     logger.info('Too little content to summarize, using sliding window')
-    return slidingWindow(messages, config.triggerThreshold)
+    return slidingWindow(messages, triggerThresholdRaw)
   }
 
   const turnPrefixOutputBudget = Math.max(
@@ -258,11 +277,10 @@ async function compactMessages(
 
   if (!summary) {
     logger.warn('Summarization returned empty, using sliding window fallback')
-    return slidingWindow(messages, config.triggerThreshold)
+    return slidingWindow(messages, triggerThresholdRaw)
   }
 
-  const allSummarized = [...toSummarize, ...summarizedTurnPrefix]
-  const summaryTokens = Math.ceil(summary.length / 4)
+  const summaryTokens = estimateTokens([{ role: 'user', content: summary }])
   const originalTokens = estimateTokens(allSummarized)
   if (summaryTokens >= originalTokens) {
     logger.warn(
@@ -272,7 +290,7 @@ async function compactMessages(
         originalTokens,
       },
     )
-    return slidingWindow(messages, config.triggerThreshold)
+    return slidingWindow(messages, triggerThresholdRaw)
   }
 
   state.existingSummary = summary

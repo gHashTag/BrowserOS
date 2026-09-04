@@ -681,6 +681,37 @@ describe('compaction E2E — summarization & fallbacks', () => {
     expect(state.compactionCount).toBe(0)
   })
 
+  it('falls back when summary is inflated inside the old length/4 blind band (1.0x-1.333x)', async () => {
+    const contextWindow = 100_000
+    const prepareStep = createCompactionPrepareStep({ contextWindow })
+    const config = computeConfig(contextWindow)
+    const triggerAt = Math.floor(contextWindow * config.triggerRatio)
+
+    // History kept for summarization is 25 exchanges of ~4030 chars
+    // (~100,730 chars, ~33,600 raw tokens on the estimateTokens chars/3
+    // scale). The summary below is 1.14x that history in characters —
+    // inside the band where the retired Math.ceil(summary.length / 4)
+    // guard was blind: it estimated 28,750 tokens for a summary whose true
+    // estimateTokens() value is 38,334, accepted it and logged a positive
+    // compressionRatio while the context had grown. The guard must measure
+    // the summary with estimateTokens(), on the same scale as the original
+    // it is compared against, and reject it.
+    const model = createMock(async () => textResponse('y'.repeat(115_000), 200))
+
+    const messages = buildTextHeavyMessages(40, 2000)
+
+    const result = await prepareStep({
+      messages,
+      steps: [{ usage: { inputTokens: triggerAt + 1000 } }] as StepsStub,
+      model,
+      experimental_context: null,
+    })
+
+    const state = result.experimental_context as CompactionState
+    expect(state.compactionCount).toBe(0)
+    expect(state.existingSummary).toBeNull()
+  })
+
   it('falls back when summary is empty', async () => {
     const contextWindow = 10_000
     const prepareStep = createCompactionPrepareStep({ contextWindow })
