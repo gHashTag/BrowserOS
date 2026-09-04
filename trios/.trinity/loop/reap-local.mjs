@@ -73,6 +73,36 @@ const sh = (c, cwd = ROOT, timeout = Number(process.env.REAP_LOCAL_TIMEOUT_MS ??
  *
  * Ask about the path we care about, and let df resolve which filesystem that is.
  */
+
+/**
+ * Does this porcelain status hold WORK, or only the absence of it?
+ *
+ * A deletion is not work. A worktree whose entire dirty set is ` D path` lines
+ * has removed files that are still in its own HEAD commit - everything it
+ * contains is in git, and taking the tree destroys nothing that `git checkout`
+ * would not put straight back.
+ *
+ * Found 2026-09-05 with the laptop at 98% and dispatches dying part-way through
+ * checkout. Two workflow worktrees were being spared as "somebody's unfinished
+ * thought" on the strength of 1983 and 1984 changes each. Every one was a
+ * DELETION - the file-flicker this tree does mid-build - and between them they
+ * held 4.4 GB of nothing while the guard, correctly refusing to force, watched
+ * the disk fill.
+ *
+ * An addition or a modification is a thought. A deletion is the shape of one
+ * that was already saved.
+ */
+export function holdsWork(porcelain) {
+  const lines = String(porcelain || '').split('\n').filter((l) => l.trim())
+  if (!lines.length) return { work: false, deletions: 0, other: 0 }
+  // Porcelain v1: two status columns then a space then the path. A deletion is
+  // 'D' in either column and nothing else in the other.
+  const isDeletion = (l) => /^([ D])D /.test(l) || /^D[ D] /.test(l)
+  const deletions = lines.filter(isDeletion).length
+  const other = lines.length - deletions
+  return { work: other > 0, deletions, other }
+}
+
 export function diskUsedPercent(target = ROOT) {
   const out = sh(`df -P ${JSON.stringify(target)} | tail -1`)
   if (!out) return null
@@ -166,9 +196,19 @@ export function survey() {
         rec.why = 'its status could not be read, and unreadable is not removable'
         return rec
       }
-      if (dirty.length > 0) {
+      const held = holdsWork(dirty)
+      if (held.work) {
         rec.state = 'dirty'
-        rec.why = `${dirty.split('\n').length} uncommitted change(s) - somebody is mid-thought`
+        rec.why = `${held.other} uncommitted change(s) - somebody is mid-thought` +
+          (held.deletions ? ` (and ${held.deletions} deletion(s), which are not work)` : '')
+        return rec
+      }
+      if (held.deletions) {
+        rec.deletionsOnly = held.deletions
+        // Removable, and the reason is worth printing: this is the tree that
+        // looked like work and was not.
+        rec.why = `its HEAD is already contained in ${BASE}; its ${held.deletions} change(s) are all DELETIONS of files that HEAD still has`
+        rec.state = 'REAPABLE'
         return rec
       }
       rec.state = 'REAPABLE'
@@ -217,7 +257,23 @@ if (isMain) {
   let freed = 0
   for (const r of reapable) {
     // No `--force`, ever. A tree that refuses to go is a tree to look at.
-    const out = sh(`git worktree remove ${JSON.stringify(r.path)}`)
+    let out = sh(`git worktree remove ${JSON.stringify(r.path)}`)
+    if (out === null && r.deletionsOnly) {
+      // IT REFUSED BECAUSE THE TREE IS DIRTY, AND THE DIRT IS ONLY DELETIONS.
+      //
+      // `git worktree remove` will not take a tree with changes in it, which is
+      // right, and `--force` is not the answer, which is also right. But a tree
+      // whose every change is a deleted file that its own HEAD still contains
+      // has nothing to lose: restoring from HEAD puts back exactly what git
+      // already holds, and then the removal is an ordinary one.
+      //
+      // Two workflow worktrees sat in this state holding 4.4 GB while the disk
+      // was at 98% and dispatches were dying part-way through checkout. The
+      // guard was refusing correctly and the situation was still wrong.
+      const restored = sh('git checkout -- .', r.path)
+      if (restored !== null) out = sh(`git worktree remove ${JSON.stringify(r.path)}`)
+      if (out !== null) console.log(`  restored ${r.deletionsOnly} deleted file(s) from HEAD, then removed cleanly: ${r.path.replace('/Users/playra', '~')}`)
+    }
     if (out === null) {
       console.log(`  refused: ${r.path.replace('/Users/playra', '~')} - left alone rather than forced`)
       continue
@@ -226,8 +282,20 @@ if (isMain) {
     freed += r.mb ?? 0
   }
   sh('git worktree prune')
-  console.log(`\nremoved ${removed} of ${reapable.length}, freeing about ${freed} MB`)
-  const after = diskUsedPercent()
+  // THE MB FIGURE IS AN UPPER BOUND AND SAYS SO.
+  //
+  // `du -sh` walks a worktree as if it owned every byte. It does not: a git
+  // worktree shares its object store with the main checkout, and much of what du
+  // counts is already on disk once. Measured 2026-09-05 - three trees reported
+  // as holding 6938 MB were removed and the free space moved by about 600.
+  //
+  // Printing the du number as "freed" was a promise the tool could not keep, and
+  // a tool that overstates what it recovers is one nobody believes about the
+  // disk being full either.
+  const before = freed
+  const actual = diskUsedPercent()
+  console.log(`\nremoved ${removed} of ${reapable.length}; du counted ${before} MB in them, which is an UPPER BOUND - a worktree shares its object store with the main checkout, so the space actually returned is smaller`)
+  const after = actual === null ? diskUsedPercent() : actual
   if (after !== null) console.log(`disk now ${after}% used`)
 
   const L = await import(path.join(DIR, 'loop.mjs'))
