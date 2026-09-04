@@ -127,21 +127,32 @@ const STEPS = [
   // Two defect classes that each cost an outage, now checked every round rather
   // than when someone remembers - the argument that made this a chain at all.
   // Both read only; neither can change anything.
-  { name: 'clocks', file: 'clocks.mjs', act: '', dryArgs: '', why: 'no decision keyed on a field something rewrites' },
-  { name: 'fields', file: 'fields.mjs', act: '', dryArgs: '', why: 'no decision reading a field its query never selects' },
+  // ---- the line the file has always drawn in prose, now drawn in data. ----
+  // Everything above frees the swarm. Everything below only reports, and the
+  // two must not compete for the same budget.
+  { name: 'clocks', file: 'clocks.mjs', act: '', dryArgs: '', reportsOnly: true, why: 'no decision keyed on a field something rewrites' },
+  { name: 'fields', file: 'fields.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'no decision reading a field its query never selects' },
   // The checkers checking themselves, against material the WORLD calls good.
   // Six false accusations shipped in one night while the synthetic fixtures
   // agreed with the checkers that wrote them.
-  { name: 'fp-check', file: 'fp-check.mjs', act: '', dryArgs: '', why: 'no checker accuses anything known good' },
-  { name: 'verdict-audit', file: 'verdict-audit.mjs', act: '--accepted', dryArgs: '--accepted', why: 'check what the swarm claims against what it pushed' },
+  { name: 'fp-check', file: 'fp-check.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'no checker accuses anything known good' },
+  { name: 'verdict-audit', file: 'verdict-audit.mjs', reportsOnly: true, act: '--accepted', dryArgs: '--accepted', why: 'check what the swarm claims against what it pushed' },
   // Queue what no mechanical check can reach for a judge to read. Assembles
   // only - the judgement is an explicit act, never something this performs.
-  { name: 'judge-packet', file: 'judge-packet.mjs', act: '--unauditable', dryArgs: '--unauditable', why: 'queue the unauditable for judgement' },
+  // The audit says what each verdict is worth. This says whether the swarm's
+  // RECENT work is worth less than the baseline this same process established -
+  // the one question a per-verdict audit cannot answer, because it is about the
+  // distribution and not about any one branch.
+  { name: 'proven', file: 'proven.mjs', reportsOnly: true, act: '--record', dryArgs: '', why: 'is the recent work still proving anything' },
+  { name: 'judge-packet', file: 'judge-packet.mjs', reportsOnly: true, act: '--unauditable', dryArgs: '--unauditable', why: 'queue the unauditable for judgement' },
 ]
 
 // One line per step, taken from the step's own output rather than invented, so
 // the summary cannot claim more than the step reported.
 const SUMMARY = [
+  [/ACT NOW: the recent window proves LESS/, () => 'the recent window proves measurably less than the baseline - read the newest verdicts'],
+  [/WATCH: the recent rate is lower/, () => 'recent rate lower but inside the noise - watch, do not act'],
+  [/overall (\d+)\/(\d+) judged verdicts prove something/, (m) => `${m[1]} of ${m[2]} judged verdicts prove something`],
   [/removed (\d+) of (\d+), freeing about (\d+) MB/, (m) => `${m[1]} merged worktree(s) removed, ${m[3]} MB freed`],
   [/(\d+) worktree\(s\): 0 merged and clean/, (m) => `${m[1]} worktrees, none removable`],
   [/(\d+) worktree\(s\): (\d+) merged and clean/, (m) => `${m[1]} worktrees, ${m[2]} merged and clean`],
@@ -179,15 +190,34 @@ const SUMMARY = [
 //
 // Steps are skipped, never truncated: a half-run step is worse than an unrun
 // one, and the summary names every step that did not get its turn.
+// TWO BUDGETS, BECAUSE THEY ARE TWO JOBS.
+//
+// One deadline for the whole chain meant the audits paid for the freeing steps.
+// Measured 2026-09-05: reap, push-work, land, close-done and author consumed the
+// full eight minutes, and verdict-audit, proven and judge-packet were all
+// SKIPPED - not because they are slow (a warm audit is ten seconds) but because
+// nothing was left. The chain reported itself complete with a third of its
+// steps never run, which is the same shape as every defect in this directory: a
+// confident answer about work that did not happen.
+//
+// So the steps that FREE the swarm have the first budget, and the steps that
+// only REPORT have their own, starting when the first phase ends. A slow reap
+// can no longer silence the audit that would have found what the reap was for.
 const DEADLINE_MS = Number(process.env.HEAL_DEADLINE_MS ?? 8 * 60 * 1000)
+const REPORT_DEADLINE_MS = Number(process.env.HEAL_REPORT_DEADLINE_MS ?? 5 * 60 * 1000)
+let reportPhaseStartedAt = null
 const startedAt = Date.now()
 
 const results = []
 for (const s of STEPS) {
-  const left = DEADLINE_MS - (Date.now() - startedAt)
+  if (s.reportsOnly && reportPhaseStartedAt === null) reportPhaseStartedAt = Date.now()
+  const budget = s.reportsOnly ? REPORT_DEADLINE_MS : DEADLINE_MS
+  const since = s.reportsOnly ? reportPhaseStartedAt : startedAt
+  const left = budget - (Date.now() - since)
   if (left <= 0) {
-    process.stdout.write(`\n--- ${s.name}  (${s.why})\n    SKIPPED - the chain is past its ${Math.round(DEADLINE_MS / 60000)} minute deadline\n`)
-    results.push({ step: s.name, status: 'skipped', summary: 'past the chain deadline' })
+    const which = s.reportsOnly ? 'reporting' : 'swarm-freeing'
+    process.stdout.write(`\n--- ${s.name}  (${s.why})\n    SKIPPED - past the ${Math.round(budget / 60000)} minute ${which} deadline\n`)
+    results.push({ step: s.name, status: 'skipped', summary: `past the ${which} deadline` })
     continue
   }
   const args = DRY ? (s.dryArgs || '') : s.act
@@ -204,7 +234,14 @@ for (const s of STEPS) {
     // A step that exits non-zero is not automatically a failure: reap exits 1
     // to mean "would act", which is its report mode saying yes.
     out = String(e.stdout || '') + String(e.stderr || '')
-    status = /Error:|Traceback|not a function|ENOENT/.test(out) ? 'FAILED' : 'ok'
+    // EXIT 2 FROM coverage IS A FINDING, NOT A BREAKAGE.
+    //
+    // The tool exits 2 when the recent window proves measurably less than the
+    // baseline. That is the tool working, and calling it FAILED would bury the
+    // one thing it exists to say under a word this chain uses for "the step is
+    // broken". It gets its own status so both can be read.
+    status = /ACT NOW:/.test(out) ? 'FINDING'
+      : /Error:|Traceback|not a function|ENOENT/.test(out) ? 'FAILED' : 'ok'
   }
   let line = null
   for (const [re, fmt] of SUMMARY) {
@@ -238,6 +275,13 @@ console.log(`\n${DRY ? 'DRY RUN - ' : ''}heal complete: ` +
 // An audit that could not run costs a round. A reaper that could not run costs
 // the fleet, and the two must not print the same way.
 const CRITICAL = new Set(['reap', 'reap-local', 'lease', 'push-work', 'land', 'close-done', 'author'])
+// A FINDING is shown, loudly, and does not count as a broken step. The chain's
+// exit code is about whether the chain ran; the finding is about what it saw.
+const findings = results.filter((r) => r.status === 'FINDING')
+if (findings.length) {
+  console.log('')
+  for (const f of findings) console.log(`  FINDING  ${f.step}: ${f.summary}`)
+}
 const failed = results.filter((r) => r.status === 'FAILED')
 const criticalFailures = failed.filter((r) => CRITICAL.has(r.step))
 if (criticalFailures.length) {
