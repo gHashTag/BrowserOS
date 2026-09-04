@@ -1102,10 +1102,14 @@ check('a conflict is an ANSWER and names its paths', () => {
   if (!/conflicting path/.test(fn)) throw new Error('it must name them')
 })
 
-check('it never lands an OPEN issue, and never forces or deletes', () => {
+check('it never lands UNACCEPTED work, and never forces or deletes', () => {
+  // This case first read "never lands an OPEN issue" and failed the moment that
+  // rule was found wrong - it was pinning the deadlock. A test that pins a rule
+  // has to be RE-AIMED when the rule turns out to be mistaken, deliberately and
+  // in the same change, or it becomes an argument for keeping the bug.
   const src = fs.readFileSync(path.join(DIR, 'land.mjs'), 'utf8')
-  if (!/is still open - an open issue is unfinished work/.test(src)) {
-    throw new Error('an open issue is unfinished work whatever its branch looks like')
+  if (!/neither accepted by the Queen nor closed/.test(src)) {
+    throw new Error('work with no accepting verdict and no closed issue is unfinished, whatever its branch looks like')
   }
   // EXECUTABLE lines only. The first version matched the COMMENT that says
   // "No --delete-branch", which is the second time tonight one of my checks
@@ -1114,6 +1118,52 @@ check('it never lands an OPEN issue, and never forces or deletes', () => {
   const code = src.split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n')
   if (/--force/.test(code)) throw new Error('never force')
   if (/--delete-branch/.test(code)) throw new Error('the branch is the evidence that the work happened')
+})
+
+
+// ---------------------------------------------------------------------------
+// close-done and land: the pipeline, and the deadlock I built between them.
+
+check('close-done demands LANDED, not merely pushed', () => {
+  // The root of the largest gap in the run. Closing on "the branch exists on
+  // the remote" is what manufactured 169 closed issues whose code was outside
+  // the base.
+  const src = fs.readFileSync(path.join(DIR, 'close-done.mjs'), 'utf8')
+  if (!/merge-tree --write-tree/.test(src)) {
+    throw new Error('it must ask whether merging would change the base at all')
+  }
+  if (!/NOT in/.test(src)) throw new Error('the refusal must say the work is not in the base')
+  if (!/false statement/.test(src)) throw new Error('and why that matters')
+})
+
+check('land follows the Queen VERDICT, not the issue state', () => {
+  // TWO CORRECT-LOOKING RULES THAT TOGETHER SAID NEVER.
+  //
+  // land took only a CLOSED issue. close-done was changed in the same hour to
+  // close only LANDED work. So an issue the Queen had accepted but which was
+  // still open could not move in either direction: land refused it for being
+  // open, close refused it for not having landed. The deadlock lasted one run
+  // and would have looked exactly like a healthy quiet pipeline.
+  const src = fs.readFileSync(path.join(DIR, 'land.mjs'), 'utf8')
+  if (!/review_state = 'accept'/.test(src)) {
+    throw new Error('"closed" was only ever a proxy for "the Queen accepted this" - ask the thing itself')
+  }
+  if (!/closed\.has\(issue\) && !accepted\.has\(issue\)/.test(src)) {
+    throw new Error('either accepted OR closed must be enough, or the deadlock returns')
+  }
+})
+
+check('the chain runs push -> land -> close, in that order', () => {
+  // Each is the precondition of the next. Skipping the push disables the close;
+  // skipping the land now disables it too.
+  for (const f of ['heal.mjs', 'feed.mjs']) {
+    const src = fs.readFileSync(path.join(DIR, f), 'utf8')
+    const push = src.indexOf("name: 'push-work'")
+    const land = src.indexOf("name: 'land'")
+    const close = src.indexOf("name: 'close-done'")
+    if (push < 0 || land < 0 || close < 0) throw new Error(`${f} is missing one of the three steps`)
+    if (!(push < land && land < close)) throw new Error(`${f} has them out of order: push ${push}, land ${land}, close ${close}`)
+  }
 })
 
 console.log(`\n${pass} passed, ${failures.length} failed`)
