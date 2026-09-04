@@ -41,8 +41,8 @@ interface AgentActionsProps {
 /**
  * Single primary CTA per row: `Resume` (filled, accent-orange, with a
  * pulsing dot) when an active turn exists; otherwise `Chat` (outline).
- * Both navigate to the same place — the chat hook auto-attaches via
- * `/chat/active` when there's a live turn — but the row signals which
+ * Both navigate to the same place - the chat hook auto-attaches via
+ * `/chat/active` when there's a live turn - but the row signals which
  * action the user is actually taking.
  */
 export const AgentActions: FC<AgentActionsProps> = ({
