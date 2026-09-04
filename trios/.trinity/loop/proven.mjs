@@ -107,6 +107,66 @@ export function assess(recent, baseline, compare) {
   return { act, comparison: c, r, b }
 }
 
+
+/**
+ * Which detector filed this brief, read from the title it wrote.
+ *
+ * A PROXY, and worth naming as one: the kind is not stored anywhere, so it is
+ * recovered from the sentence `author.mjs` composes for each detector. Change a
+ * title template and this silently reclassifies everything filed after that -
+ * which is why 'other' is a real bucket rather than a dumping ground, and why
+ * the report prints its size.
+ */
+export function classify(title) {
+  const s = String(title || '')
+  if (/breaks L3 with \d+ non-ASCII/.test(s)) return 'ascii'
+  if (/exports (?:one symbol|\d+ symbols) and no test names any of them/.test(s)) return 'untested'
+  if (/is \d+ lines, and nothing has ever said what is inside it/.test(s)) return 'length'
+  return 'other'
+}
+
+/**
+ * Each kind of work against ALL THE OTHER KINDS, corrected for the fact that
+ * asking several questions at once makes a surprising answer likelier.
+ *
+ * TWO THINGS THIS GETS RIGHT ON PURPOSE.
+ *
+ * A group is compared with the REST, not with the overall rate. A group sitting
+ * inside its own baseline drags that baseline toward itself, which shrinks every
+ * difference and hides exactly the outlier the split was made to find.
+ *
+ * And the threshold is family-corrected. Four groups tested at 95% each carry a
+ * 19% chance that one comes back significant with nothing wrong anywhere. A
+ * split-by-category dashboard tested at the single-comparison threshold raises a
+ * false alarm about every fifth look, and then it gets muted, and then the real
+ * one is missed too.
+ *
+ * WHAT IT STILL CANNOT TELL YOU. Simpson's paradox: the overall rate can move
+ * in the opposite direction to every single group, if the MIX changes. So the
+ * mix is printed beside the rates rather than left to be assumed constant.
+ */
+export function bySource(results, titleOf, compare, z) {
+  const groups = new Map()
+  for (const r of results) {
+    const k = classify(titleOf(r.number))
+    if (!groups.has(k)) groups.set(k, [])
+    groups.get(k).push(r)
+  }
+  const out = []
+  for (const [kind, rows] of groups) {
+    const mine = rate(rows)
+    const rest = rate(results.filter((r) => !rows.includes(r)))
+    if (!mine.checkable || !rest.checkable) {
+      out.push({ kind, mine, rest, act: 'none', why: 'too little judged work on one side to compare' })
+      continue
+    }
+    const c = compare(rest.proven, rest.checkable, mine.proven, mine.checkable, 'rest', kind, z)
+    const fell = c.b.p < c.a.p
+    out.push({ kind, mine, rest, comparison: c, act: !c.overlap && fell ? 'now' : fell ? 'watch' : 'none' })
+  }
+  return out.sort((a, b) => b.mine.total - a.mine.total)
+}
+
 export function render(a) {
   const out = []
   const pct = (x) => `${(100 * x).toFixed(1)}%`
@@ -175,6 +235,27 @@ if (isMain) {
 
   const all = rate(results)
   console.log(`\n  overall ${all.proven}/${all.checkable} judged verdicts prove something; ${all.total - all.checkable} carry nothing this can check`)
+
+  if (process.argv.includes('--by-source')) {
+    const raw = tryShell(`gh issue list --repo ${process.env.TRIOS_ISSUE_REPO || 'gHashTag/trios'} --state all --label queen-authored --limit 500 --json number,title`)
+    let titles = new Map()
+    try { titles = new Map(JSON.parse(raw || '[]').map((r) => [String(r.number), r.title])) } catch { /* none */ }
+    const rows = bySource(results, (n) => titles.get(String(n)), AB.compare, AB.zForFamily(4))
+    console.log(`\n  by the kind of work that was filed  (Bonferroni z=${AB.zForFamily(4).toFixed(3)} for 4 comparisons)\n`)
+    const pct = (x) => `${(100 * x).toFixed(1)}%`
+    for (const g of rows) {
+      const mark = { now: '!!', watch: '..', none: 'ok' }[g.act]
+      const c = g.comparison
+      console.log(`  ${mark} ${g.kind.padEnd(9)} ${String(g.mine.proven).padStart(4)}/${String(g.mine.checkable).padEnd(4)} ` +
+        `${c ? pct(c.b.p).padStart(7) : '      -'}   vs the rest ${c ? pct(c.a.p) : '-'}   ${g.mine.total} verdict(s)`)
+    }
+    const flagged = rows.filter((g) => g.act === 'now')
+    console.log(flagged.length
+      ? `\n  ${flagged.map((g) => g.kind).join(', ')} proves measurably less than the rest, at a threshold corrected for asking four questions at once.`
+      : '\n  no kind of work proves measurably less than the others once the threshold is corrected for asking four questions at once.')
+    console.log('  The MIX is printed because Simpson\'s paradox is real: the overall rate can move')
+    console.log('  opposite to every group if the proportions change underneath it.')
+  }
 
   if (process.argv.includes('--record')) record(a)
 

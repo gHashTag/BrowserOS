@@ -1842,6 +1842,52 @@ check('merge-tree prose is not a conflicting path', async () => {
   if (baseMovedSince('queen-1', ['a.ts'], () => '0') !== null) throw new Error('zero commits is not a finding')
 })
 
+check('asking four questions at once needs a wider threshold', async () => {
+  const AB = await import('./ab.mjs')
+  // Four groups tested at 95% each carry a 19% chance one comes back
+  // significant with nothing wrong anywhere. A dashboard that does that gets
+  // muted, and then the real finding is missed too.
+  if (Math.abs(AB.probit(0.975) - 1.959964) > 1e-4) throw new Error('probit(0.975) is 1.96 by definition')
+  if (Math.abs(AB.probit(0.995) - 2.575829) > 1e-4) throw new Error('probit(0.995) is 2.5758')
+  if (!(AB.zForFamily(4) > AB.zForFamily(1))) throw new Error('more comparisons must mean a stricter threshold')
+  if (Math.abs(AB.zForFamily(1) - 1.96) > 1e-3) throw new Error('one comparison is the uncorrected case')
+  // and the correction must actually reach compare()
+  const loose = AB.compare(90, 100, 80, 100, 'a', 'b', AB.zForFamily(1))
+  const strict = AB.compare(90, 100, 80, 100, 'a', 'b', AB.zForFamily(4))
+  if (!(strict.a.high - strict.a.low > loose.a.high - loose.a.low)) {
+    throw new Error('the corrected interval must be wider, or the correction is decorative')
+  }
+})
+
+check('a group is compared with the rest, never with itself included', async () => {
+  const { bySource } = await import('./proven.mjs')
+  const AB = await import('./ab.mjs')
+  // A group inside its own baseline drags that baseline toward itself, which
+  // shrinks every difference and hides the outlier the split was made to find.
+  const rows = [
+    ...Array.from({ length: 10 }, (_, i) => ({ number: 100 + i, verdict: 'VACUOUS CLAIM' })),
+    ...Array.from({ length: 10 }, (_, i) => ({ number: 200 + i, verdict: 'SUPPORTED' })),
+  ]
+  const titleOf = (n) => (n < 200 ? 'x breaks L3 with 3 non-ASCII characters' : 'something a person wrote')
+  const out = bySource(rows, titleOf, AB.compare, AB.zForFamily(2))
+  const ascii = out.find((g) => g.kind === 'ascii')
+  if (ascii.mine.proven !== 0) throw new Error('the group is its own rows')
+  if (ascii.rest.proven !== 10 || ascii.rest.checkable !== 10) {
+    throw new Error(`the baseline must EXCLUDE the group - got ${ascii.rest.proven}/${ascii.rest.checkable}`)
+  }
+  if (ascii.act !== 'now') throw new Error('0% against 100% at n=10 each is not noise')
+})
+
+check('the kind of work is read from the title, and unknown is a real bucket', async () => {
+  const { classify } = await import('./proven.mjs')
+  if (classify('src/a.ts breaks L3 with 12 non-ASCII characters, all of them in comments') !== 'ascii') throw new Error('ascii')
+  if (classify('src/a.ts exports 4 symbols and no test names any of them') !== 'untested') throw new Error('untested')
+  if (classify('src/a.ts exports one symbol and no test names any of them') !== 'untested') throw new Error('the singular form too')
+  if (classify('src/a.ts is 900 lines, and nothing has ever said what is inside it') !== 'length') throw new Error('length')
+  if (classify('The Queen reads four success criteria and then tells the bee otherwise') !== 'other') throw new Error('hand-written work is its own group, not a dumping ground')
+  if (classify(undefined) !== 'other') throw new Error('a title this cannot read is other, never a guess')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
