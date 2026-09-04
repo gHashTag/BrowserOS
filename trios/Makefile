@@ -5618,7 +5618,12 @@ backlog-audit:
 # stops.  Verifying a restore against a checksum taken from the same file
 # before it was backed up, which is what this used to do, cannot fail: it
 # compares the copy with the thing it was copied from.  Same hole as `make
-# mutants` had, same fix (b4d1946fe).
+# mutants` had, same fix (b4d1946fe).  The restore itself is one function,
+# restore_one victim backup mutated_sha: before any cp it compares the live
+# file to mutated_sha - the sum of the state this recipe last wrote, taken
+# from the composed bytes and never re-read off disk - and on a mismatch it
+# prints [REFUSED] with both paths and restores nothing, so what a second
+# writer left survives us, with the backup kept as the only way back.
 .PHONY: check-selftest
 check-selftest:
 	@fail=0; \
@@ -5632,22 +5637,23 @@ check-selftest:
 	md_backup=$$(mktemp); \
 	cp "$$md_file" "$$md_backup"; \
 	md_sha=$$(shasum "$$md_file" | cut -d" " -f1); \
-	: "held_victim / held_md are the sha of the state this recipe last left on"; \
-	: "disk.  claim_* re-reads the file and refuses when it no longer holds it."; \
-	: "A held sha is never taken by reading the file back after writing to it:"; \
-	: "a writer that lands between the write and that read is measured INTO the"; \
-	: "expected state and then restored away.  Driven on #1266 - a poll loop beat"; \
-	: "the shasum every time.  So each mutation is composed in a temp file first"; \
-	: "and the sha comes from the bytes we are about to write, not from disk."; \
+	: "held_victim / held_md carry, per file, the mutated_sha of the state this"; \
+	: "recipe last left on disk.  claim_* re-reads the file and refuses when it"; \
+	: "no longer holds it.  A mutated_sha is never taken by reading the file"; \
+	: "back after writing to it:  a writer that lands between the write and"; \
+	: "that read is measured INTO the expected state and then restored away."; \
+	: "Driven on #1266 - a poll loop beat the shasum every time.  So each"; \
+	: "mutation is composed in a temp file first and the sha comes from the"; \
+	: "bytes we are about to write, not from disk."; \
 	vt=$$(mktemp); mt=$$(mktemp); \
 	held_victim=$$victim_sha; held_md=$$md_sha; \
 	lost_victim=0; lost_md=0; \
 	still_held() { [ "$$(shasum "$$1" 2>/dev/null | cut -d" " -f1)" = "$$2" ]; }; \
 	refuse() { \
-		echo "  [FAIL] $$1 changed while check-selftest held it."; \
-		echo "         Writing to it now would silently discard that change, so"; \
-		echo "         the file is left exactly as it stands; resolve by hand."; \
-		echo "         Pre-harness copy of the file: $$2"; \
+		echo "  [REFUSED] $$1 changed while check-selftest held it."; \
+		echo "            Writing to it now would silently discard that change, so"; \
+		echo "            the file is left exactly as it stands; resolve by hand."; \
+		echo "            Pre-harness copy of the file: $$2"; \
 		fail=1; \
 	}; \
 	claim_victim() { \
@@ -5671,31 +5677,54 @@ check-selftest:
 		  printf 'private func checkSelftestKeychainDoor() {\n'; \
 		  printf '    _ = SecItemAdd([:] as CFDictionary, nil)\n'; \
 		  printf '}\n'; } > "$$vt"; \
-		held_victim=$$(shasum "$$vt" | cut -d" " -f1); \
+		mutated_sha=$$(shasum "$$vt" | cut -d" " -f1); \
+		held_victim=$$mutated_sha; \
 		cp "$$vt" "$$victim"; \
 	}; \
 	empty_victim() { \
 		claim_victim || return 1; \
-		held_victim=$$(printf '' | shasum | cut -d" " -f1); \
+		mutated_sha=$$(printf '' | shasum | cut -d" " -f1); \
+		held_victim=$$mutated_sha; \
 		: > "$$victim"; \
 	}; \
 	mutate_md() { \
 		claim_md || return 1; \
 		{ cat "$$md_backup"; printf '\techo "$$PLANTED_BUG"\n'; } > "$$mt"; \
-		held_md=$$(shasum "$$mt" | cut -d" " -f1); \
+		mutated_sha=$$(shasum "$$mt" | cut -d" " -f1); \
+		held_md=$$mutated_sha; \
 		cp "$$mt" "$$md_file"; \
 	}; \
+	restore_one() { \
+		: "the restore trap, extracted for #1266 into one function of three"; \
+		: "arguments: 1=victim path, 2=backup path, 3=mutated_sha - the sum of"; \
+		: "the state this recipe last wrote to the victim.  The live file is"; \
+		: "compared to THAT sum, never to the backup: a backup always sums to"; \
+		: "itself, so a restore verified against the copy it restored from"; \
+		: "cannot fail, it can only prove that cp ran (#1266, b4d1946fe)."; \
+		mutated_sha=$$3; \
+		now_sha=$$(shasum "$$1" 2>/dev/null | cut -d" " -f1); \
+		if [ "$$now_sha" != "$$mutated_sha" ]; then \
+			echo "  [REFUSED] $$1 changed while check-selftest held it mutated."; \
+			echo "            Restoring $$2 over it would silently revert that write."; \
+			echo "            The file is left as the second writer left it; the"; \
+			echo "            backup is kept, because that path is the only way back."; \
+			echo "            victim: $$1"; \
+			echo "            backup: $$2"; \
+			return 1; \
+		fi; \
+		cp "$$2" "$$1" || { \
+			echo "  [FAIL] could not restore $$1 from $$2"; return 1; \
+		}; \
+	}; \
 	restore_victim() { \
-		claim_victim || return 1; \
-		cp "$$backup" "$$victim" || { \
-			echo "  [FAIL] could not restore $$victim from $$backup"; fail=1; return 1; \
+		restore_one "$$victim" "$$backup" "$$held_victim" || { \
+			lost_victim=1; fail=1; return 1; \
 		}; \
 		held_victim=$$victim_sha; \
 	}; \
 	restore_md() { \
-		claim_md || return 1; \
-		cp "$$md_backup" "$$md_file" || { \
-			echo "  [FAIL] could not restore $$md_file from $$md_backup"; fail=1; return 1; \
+		restore_one "$$md_file" "$$md_backup" "$$held_md" || { \
+			lost_md=1; fail=1; return 1; \
 		}; \
 		held_md=$$md_sha; \
 	}; \
