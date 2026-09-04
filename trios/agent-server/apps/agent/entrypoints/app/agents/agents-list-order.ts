@@ -9,7 +9,7 @@ import type { HarnessAgent } from './agent-harness-types'
  * has an obvious starting point even before the user has used it.
  *
  * NOT the same rule as the home grid (`orderHomeAgents`): home is
- * action-shaped — active-turn floats to the top — so users can
+ * action-shaped - active-turn floats to the top - so users can
  * resume what's running. The chat rail keeps recency stable so it
  * doesn't reshuffle as turns transition every 5s.
  */
