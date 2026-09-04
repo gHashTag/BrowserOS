@@ -1911,6 +1911,79 @@ Two more things about reading a brief:
   `node_modules` accusation returning by a different door. A keyword stop-list
   goes in at the same time as the widening, not after the first false positive.
 
+## Compare a ratio against its own variability, never against a threshold
+
+The obvious regression detector - "this run is lower than the last, shout" - is
+wrong twice over, and both failures are documented outside this project.
+
+**A control chart of an in-control process shows nothing amiss while a
+regression fit of the same points appears to trend.** Reading trend lines as
+regressions is a known source of phantom findings in flaky-test dashboards. A
+ratio wandering inside its own noise band is not a regression, and a tool that
+says it is gets muted within a week.
+
+**The denominator moves for reasons that are not quality.** Audit coverage rises
+when briefs happen to be written in a shape the auditor can read and falls when a
+batch of hand-written epics lands. Neither is the swarm doing better or worse.
+
+So ask what canary analysis asks: is the RECENT window different from the
+BASELINE this same process established? That controls for drift a static limit
+cannot. Answer with Wilson intervals, and refuse to say "worse" while they
+overlap.
+
+And use TWO TIERS, from the multi-window burn-rate pattern:
+
+    ACT NOW   the intervals are separated and recent is lower
+    WATCH     recent is lower but the intervals overlap - not yet distinguishable
+    (silence) recent is equal or better
+
+Collapsing those into one alert is how the one alert stops being read. A drop
+inside the noise is not nothing - it is the thing to look at twice next round -
+but it is not a finding and must not be printed as one.
+
+## One deadline for two jobs starves the cheap job
+
+`heal` had a single eight-minute budget over twelve steps. reap, push-work, land,
+close-done and author consumed all of it, and verdict-audit, proven and
+judge-packet were SKIPPED - not because they are slow (a warm audit is ten
+seconds) but because nothing was left. The chain then printed `heal complete`
+with a third of its steps never run.
+
+That is the house defect wearing a schedule: a confident answer about work that
+did not happen.
+
+The file had drawn the line in prose for weeks - "everything above this line
+frees the swarm; everything below only reports". Make it data. Give each phase
+its own budget, starting when that phase starts. A slow reap must not be able to
+silence the audit that would have found what the reap was for.
+
+## In a directory of single-purpose tools, the plausible name is taken
+
+I wrote a new tool called `coverage.mjs`. There already was one - the guard that
+asks which of the loop's own tools have never run their ACT path, the one that
+caught `reap` shipping a remote script that had never executed. I wrote straight
+over it.
+
+`fp-check` crashed within the minute on `COV.coverage is not a function`, and git
+had the original. Nothing was lost, and only because a guard imported the file by
+name and ran every round.
+
+Two habits follow. Check `git log -- <path>` before creating a file whose name
+you find obvious. And keep the guards importing each other by name: the
+dependency is what turned a silent deletion into a crash.
+
+## Editing a live CLI in place is not atomic
+
+A launchd timer ran `tri` while a script was rewriting it, and bash reported a
+syntax error on a line that was, and is, correct. It had read a truncated file -
+`open(path, 'w')` truncates first and writes second, and anything reading in that
+window sees half a program.
+
+Write a temp file in the same directory, copy the mode, and `os.replace` it.
+The rename is atomic; the truncate-then-write is not. This matters for any file a
+timer, cron or watchdog may execute - which in this project is `tri` and every
+tool the chain invokes.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
