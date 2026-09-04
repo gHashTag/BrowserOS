@@ -1324,6 +1324,71 @@ And the refusal: the verdict-first brief has **n=3 after the cut against n=67
 before**. That is not a measurement, and reporting it as one would be the same
 error as the 17% figure - a rate over a window that has not happened yet.
 
+## Finished, accepted, closed - and never in the branch
+
+The largest single gap found in this whole run, and every metric was blind to it.
+
+**174 queen branches on the remote. FIVE contained in `feat/queen-supervisor`.**
+The other 169 all carried a real diff; not one was empty against the base.
+
+The swarm ran at full load for a day, the Queen accepted the work, and
+`close-done` closed the issues on the strength of a branch **existing**. A closed
+issue whose code is not in the branch is a false statement about the repository,
+and the loop had been making 169 of them.
+
+This is the oldest defect in this project wearing its third face. First the work
+never left the container. Then it reached the remote and stopped there. Now it
+reaches the remote, the issue closes, and the code still stops there.
+
+`tri land` merges only a branch whose issue is CLOSED, only when `git merge-tree`
+says it applies cleanly, only into the supervisor branch, a bounded number per
+run, never forcing and never deleting - the branch is the evidence that the work
+happened.
+
+### "Merged" is three different questions, and I got two of them wrong
+
+| question | right for | wrong for |
+|---|---|---|
+| `merge-base --is-ancestor` | a real merge | **a squash**, for ever |
+| `git diff BASE...branch` | nothing here | three-dot measures from the divergence point |
+| merged tree == base tree | **everything** | - |
+
+A squash merge writes a NEW commit, so the source is never an ancestor. Asking
+ancestry made this tool land **the same five branches four times** - twenty pull
+requests, fifteen commits that changed zero files. The tell was there from the
+second run: *"landed 5 of 5"* then *"146 still waiting"*, unchanged. I read it on
+the fourth.
+
+Comparing the merged tree with the base tree is route-blind: real merge, squash,
+cherry-pick, or a change somebody applied by hand all give the same tree.
+
+### So the lesson is mechanical now
+
+**A count that does not move after a successful act stops the tool.**
+
+```
+REFUSING to continue: the count did not move after a successful merge.
+Fix the measure, not the batch.
+```
+
+That guard caught a real bug on its *first* run - it was re-measuring against a
+local ref that had not been told about the merges. Re-measure against a freshly
+fetched remote, or the comparison proves nothing.
+
+`reap-local` needed the same repair: a worktree whose work landed by squash
+looked unmerged for ever and was never reaped, which is how a disk fills while
+every branch on it is already in the base.
+
+### Three times in one hour, one shape
+
+An **outcome treated as an exception**:
+
+- `git push` exits non-zero when any ref is rejected - one diverged branch took
+  the whole batch down;
+- a step killed by my own timeout was reported as FAILED;
+- `git merge-tree` exits non-zero **on conflict**, which is its answer - reading
+  it as a failure made every real conflict say "the merge could not be computed".
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is

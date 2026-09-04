@@ -359,6 +359,17 @@ console.log(\"parked dispatches: \"+r.rows.length+\"   paths they fence: \"+s.si
     shift 2>/dev/null || true
     node /Users/playra/BrowserOS/trios/.trinity/loop/reap-local.mjs "$@"
     ;;
+  land)
+    # WORK THAT WAS FINISHED, ACCEPTED, CLOSED - AND NEVER IN THE BRANCH.
+    # Measured 2026-09-04: 174 queen branches on the remote, FIVE contained in
+    # the base, and all 169 others carrying a real diff. A closed issue whose
+    # code is not in the branch is a false statement about the repository.
+    # Merges only a closed issue's branch, only when merge-tree says it applies
+    # cleanly, only into feat/queen-supervisor, bounded per run, never forcing
+    # and never deleting - and it REFUSES to run again if the count did not move.
+    shift 2>/dev/null || true
+    node /Users/playra/BrowserOS/trios/.trinity/loop/land.mjs "$@"
+    ;;
   why)
     # WHY IS THE SWARM IDLE. Asked four times in one night and answered by hand
     # each time, differently: the chain failing from its own timer, the refill
@@ -633,7 +644,7 @@ tri — Trinity S³AI ops CLI
   tri lease [--release] — аренда заявки с таймером простоя, потолок повторов 2
   tri heal [--dry] — все ремонты роя одной цепочкой в верном порядке
   tri author [--file] — завести задачу из измеренного дефицита, лимит 5 открытых
-  tri loop-selftest — поверка собственных приборов цикла (74 проверки, без сети)
+  tri loop-selftest — поверка собственных приборов цикла (89 проверок, без сети)
   tri judge-packet <N ...> | --unauditable — собрать пакет для судейского прочтения
   tri needs-you [--all] — что ждёт человека и сколько уже ждёт
   tri loop-coverage — у каких инструментов цикла боевая ветка ни разу не исполнялась
@@ -653,6 +664,7 @@ tri — Trinity S³AI ops CLI
   tri why [--all] — почему рой стоит: причина, улика и что с этим делать
   tri feed [--act] — только заправка: пуш, закрытие, заведение, без аудитов
   tri mix — каким ВИДОМ работы занят рой: загрузка и приёмка этого не покажут
+  tri land [--land] — посадить принятую работу, что осталась на ветках вне базы
 USAGE
     ;;
   # ---- queen game loop (t27.ai/#/queen) ----------------------------------
