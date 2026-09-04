@@ -3,13 +3,13 @@ import type { StagedAttachment } from '@/lib/attachments'
 /**
  * Same-tab in-memory handoff between the `/home` composer and the
  * chat screen at `/home/agents/:agentId`. URL search params (`?q=`)
- * carry the text fine, but cannot carry binary attachments — a multi-
+ * carry the text fine, but cannot carry binary attachments - a multi-
  * megabyte image dataUrl would explode URL length limits and round-
  * trip badly. This module is the rich-data side channel for the same
  * navigation: the composer writes here, the chat screen reads here on
  * mount.
  *
- * Intentionally module-scope. Same render tree, same tab — no need
+ * Intentionally module-scope. Same render tree, same tab - no need
  * for sessionStorage (which would force JSON-serialising the dataUrls
  * and re-parsing on the read side). Cross-tab handoff is out of
  * scope: the user typing at home in tab A and switching to tab B's
@@ -74,7 +74,7 @@ export function consumePendingInitialMessage(
 
 /**
  * Non-mutating read for tests. Production code should never need this
- * — use `consume` and own the lifecycle.
+ * - use `consume` and own the lifecycle.
  */
 export function peekPendingInitialMessage(): PendingInitialMessage | null {
   return pending
