@@ -3,7 +3,7 @@
  * Copyright 2025 BrowserOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * PostgreSQL Agent Store — persistent A2A agent registry backend.
+ * PostgreSQL Agent Store - persistent A2A agent registry backend.
  */
 
 import { Pool, type QueryResult, type QueryResultRow } from 'pg'
