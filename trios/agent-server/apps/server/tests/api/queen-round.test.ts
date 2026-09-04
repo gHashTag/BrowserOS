@@ -14,6 +14,10 @@ import {
   runRound,
 } from '../../src/api/services/queen-tick'
 import { logger } from '../../src/lib/logger'
+import {
+  queendPathEnvVar,
+  resolveQueendPath,
+} from '../__helpers__/queend-path'
 
 /**
  * The round itself, driven against the real policy binary.
@@ -28,7 +32,9 @@ import { logger } from '../../src/lib/logger'
  * Queen's board, `conversation_id` included.
  *
  * WHAT IS REAL HERE AND WHAT IS NOT. The policy is real - `queend`, the same
- * binary the container runs, pointed at by TRIOS_QUEEND_PATH. The database is
+ * binary the container runs, resolved by the shared helper in
+ * `tests/__helpers__/queend-path.ts`, exactly as production resolves it. The
+ * database is
  * a recording fake, because the assertion is about which statements a round
  * issues. GitHub is stubbed at `fetch`, because a test that reaches the network
  * fails for reasons that have nothing to do with what it claims. The workspace
@@ -42,10 +48,12 @@ import { logger } from '../../src/lib/logger'
  * cannot drift unnoticed.
  */
 
-const BIN = join(
-  import.meta.dir,
-  '../../../../queen-core/.build/release/queend',
-)
+// Captured at module scope, BEFORE the beforeEach below wipes the
+// environment: what the operator pointed at is what the round must drive,
+// not whatever is left after the hook has run. Re-resolving after the hook
+// deleted the variable is the old defect in a new shape.
+const BIN = resolveQueendPath()
+const QUEEND_ENV = queendPathEnvVar()
 const present = existsSync(BIN)
 
 /** Every provider credential dispatch consults, so no bee is ever really run. */
@@ -114,14 +122,14 @@ const realFetch = globalThis.fetch
 beforeEach(() => {
   for (const key of [
     ...PROVIDER_KEYS,
-    'TRIOS_QUEEND_PATH',
+    QUEEND_ENV,
     'WORKSPACE_DIR',
     'TRIOS_GITHUB_REPO',
   ]) {
     saved[key] = process.env[key]
     delete process.env[key]
   }
-  process.env.TRIOS_QUEEND_PATH = BIN
+  process.env[QUEEND_ENV] = BIN
   // Named, because the round no longer guesses. It used to fall back to
   // `gHashTag/BrowserOS` - the monorepo this checkout happens to be, not the
   // issue tracker - and a supervisor that guesses which repository it serves
@@ -154,7 +162,10 @@ afterEach(() => {
 
 describe('queen round, lease lost', () => {
   it('drives the binary the container drives', () => {
-    expect(BIN).toContain('queen-core/.build/release/queend')
+    // The hook above points the round at BIN through the same variable
+    // production reads; the shared resolver must name that binary back, or
+    // the round is driving something other than what was resolved.
+    expect(resolveQueendPath()).toBe(BIN)
   })
 
   /**
