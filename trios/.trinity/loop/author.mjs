@@ -72,7 +72,23 @@ const LABEL = 'queen-authored'
 // of by the workers.
 const WIP = Number(process.env.AUTHOR_WIP ?? 9)
 const THRESHOLD = Number(process.env.AUTHOR_LINE_THRESHOLD ?? 900)
-const UNTESTED_MIN_LINES = Number(process.env.AUTHOR_UNTESTED_MIN ?? 250)
+// LOWERED FROM 250, because the bar was set where the fuel ran out.
+//
+// Measured 2026-09-04: all FORTY of the last authored issues were the same
+// thing - replacing box-drawing characters in comments. The swarm ran 4 of 4
+// with 100% acceptance and produced nothing but cosmetics. The interleaving
+// across signals was working; the other two signals were simply EXHAUSTED, every
+// one of their findings already carrying an issue, so the cheapest detector won
+// every slot by being the only one with anything fresh.
+//
+// That is Goodhart in miniature: I made "keep the workers busy" the target and
+// got busy workers on the cheapest possible work.
+//
+// A module of 120 lines whose exports no test names is worth a test. At 250 the
+// tree holds 9 such modules and all 9 are filed; at 120 it holds 25. The bar is
+// still meaningful - a 20-line helper is not owed a suite - and it is now set by
+// what deserves a test rather than by what was easy to leave alone.
+const UNTESTED_MIN_LINES = Number(process.env.AUTHOR_UNTESTED_MIN ?? 120)
 
 const sh = (c) => execSync(c, { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
 const tryShell = (c) => { try { return sh(c) } catch { return null } }
@@ -480,10 +496,10 @@ something to fail against.
 
 ## Success Criteria
 
-- \`${testPath}\` exists and runs under \`bun test\`.
-- Every one of the ${c.exports.length} exported symbols is either exercised by an assertion or listed in a comment with the dependency that prevented it; the count of each is printed in the bee's closing report and the two sum to ${c.exports.length}.
-- The passing run is quoted, and so is a failing run against a broken copy of the subject.
-- \`git diff --name-only\` shows the subject file unchanged.
+- \`bun test ${testPath}\` passes, and its raw stdout is quoted in the report, unedited and unsummarised.
+- Every one of the ${c.exports.length} exported symbols is either exercised by an assertion or listed in a comment with the dependency that prevented it; the report quotes \`grep -c 'it(' ${testPath}\` and its raw output, and the two counts sum to ${c.exports.length}. The command MUST NOT name or enumerate the specific items it counts.
+- A failing run against a deliberately broken copy of the subject is quoted, raw and unedited, alongside the passing one - a suite never shown failing has not been tested.
+- \`git diff --name-only\` is quoted raw and does not list \`${c.rel}\`.
 - The suite registers under a describe named \`${id}\`; that identifier appears nowhere in the tree today.
 
 ## Boundary
@@ -659,7 +675,25 @@ const room = Math.max(0, WIP - open)
 // only about things that can actually coexist.
 const withPaths = fresh.map((s) => ({ ...s, paths: G.boundaryPathsOf(s.brief(s.c)) || [] }))
 const held = heldPaths()
-const { taken: take, setAside } = D.disjointBatch(withPaths, held, room)
+// NO DETECTOR MAY TAKE MORE THAN HALF A ROUND.
+//
+// Insurance against the failure above returning by another route. A corpus of
+// 111 files and one of 25 are not equally urgent, and the larger one must not be
+// able to fill every slot simply by being larger. Half a round leaves the mix
+// visible in `tri mix` rather than requiring anyone to notice a monoculture
+// forty issues later.
+const QUOTA = Math.max(1, Math.ceil(room / 2))
+const perKind = new Map()
+const quotaFiltered = []
+const overQuota = []
+for (const s of withPaths) {
+  const n = perKind.get(s.kind) ?? 0
+  if (n >= QUOTA) { overQuota.push({ ...s, why: `${s.kind} already has ${QUOTA} of this round - one detector may not take them all` }); continue }
+  perKind.set(s.kind, n + 1)
+  quotaFiltered.push(s)
+}
+const { taken: take, setAside: collided } = D.disjointBatch(quotaFiltered, held, room)
+const setAside = [...collided, ...overQuota]
 if (held.length) console.log(`\nthe swarm already holds ${held.length} path(s); a candidate touching one of them is not filed`)
 for (const s of setAside) console.log(`   x  ${s.kind.padEnd(9)} ${s.c.rel}  -  ${s.why}`)
 console.log(`\nnot yet filed: ${fresh.length}   would file ${take.length}`)

@@ -997,6 +997,57 @@ check('one rejected ref does not take the whole push down', () => {
   }
 })
 
+
+// ---------------------------------------------------------------------------
+// mix and quota: load is not value, and a monoculture hides in every count.
+//
+// Measured 2026-09-04: 4 of 4 workers running, 100% acceptance, and ALL FORTY of
+// the last authored issues were the same thing - replacing box-drawing
+// characters in comments. Every metric agreed the swarm was healthy.
+//
+// The cause was not an exhausted corpus. The `untested` template had been
+// failing brief-gate the whole time - a count criterion with no independence
+// clause, and commands with no demand for raw stdout - so the only detector that
+// could file was the cheapest one. Fifth time one of my gates has refused honest
+// work, and the first time it silently shaped what the swarm did for a day.
+
+check('the untested brief passes the gate it must pass', () => {
+  const src = fs.readFileSync(path.join(DIR, 'author.mjs'), 'utf8')
+  const fn = src.slice(src.indexOf('function untestedBrief'))
+  const body = fn.slice(0, fn.indexOf('\n}\n'))
+  if (!/MUST NOT name or enumerate/.test(body)) {
+    throw new Error('a count criterion needs its independence clause, or the gate refuses the brief')
+  }
+  if (!/raw stdout|raw output|raw and unedited/.test(body)) {
+    throw new Error('a criterion naming a command must demand its raw output')
+  }
+})
+
+check('no detector may take more than half a round', () => {
+  const src = fs.readFileSync(path.join(DIR, 'author.mjs'), 'utf8')
+  if (!/const QUOTA = Math\.max\(1, Math\.ceil\(room \/ 2\)\)/.test(src)) {
+    throw new Error('a corpus of 111 must not be able to fill every slot by being larger than one of 25')
+  }
+  if (!/one detector may not take them all/.test(src)) {
+    throw new Error('a candidate dropped for the quota must say so, like every other exclusion')
+  }
+})
+
+check('the mix counts KINDS, not tasks', () => {
+  const src = fs.readFileSync(path.join(DIR, 'queue.mjs'), 'utf8')
+  const fn = src.slice(src.indexOf('export function mix'), src.indexOf('if (isMain)'))
+  if (!/KINDS/.test(fn)) throw new Error('counting tasks is what hid the monoculture')
+  if (!/other/.test(fn)) throw new Error('an unrecognised title must land somewhere visible, not be dropped')
+})
+
+check('a monoculture is an ERROR, not a note', () => {
+  const src = fs.readFileSync(path.join(DIR, 'queue.mjs'), 'utf8')
+  if (!/process\.exit\(3\)/.test(src)) {
+    throw new Error('four fifths of the backlog being one cheap thing must not exit 0')
+  }
+  if (!/load is not value/.test(src)) throw new Error('it must say what the number means')
+})
+
 console.log(`\n${pass} passed, ${failures.length} failed`)
 fs.rmSync(tmp, { recursive: true, force: true })
 if (failures.length) {

@@ -113,6 +113,40 @@ export function verdicts(hours = 3) {
   return jsonFrom(SE.remote(js))
 }
 
+/**
+ * WHAT KIND of work the swarm has been doing.
+ *
+ * Load says whether workers are busy. Acceptance says whether the work lands.
+ * Neither says whether it was worth doing, and on 2026-09-04 the two agreed
+ * perfectly while all FORTY of the last authored issues were the same thing:
+ * replacing box-drawing characters in comments. 4 of 4 running, 100% accepted,
+ * and nothing but cosmetics.
+ *
+ * That is Goodhart in miniature - "keep the workers busy" became the target and
+ * produced busy workers on the cheapest available work. A monoculture is
+ * invisible in every metric that counts tasks rather than kinds, so this counts
+ * kinds.
+ */
+export function mix(limit = 40) {
+  const raw = tryShell(
+    `gh issue list --repo ${REPO} --state all --label ${LABEL} --limit ${limit} --json title,state -q '.[] | .state + "\t" + .title'`,
+  )
+  if (raw === null) return null
+  const KINDS = [
+    [/breaks L3 with \d+ non-ASCII/, 'ascii cleanup'],
+    [/is \d+ lines, and nothing has ever said/, 'long file, undocumented'],
+    [/exports (?:one symbol|\d+ symbols) and no test/, 'untested module'],
+  ]
+  const counts = new Map()
+  for (const line of raw.split('\n').filter(Boolean)) {
+    const [, title = ''] = line.split('\t')
+    const hit = KINDS.find(([re]) => re.test(title))
+    const kind = hit ? hit[1] : 'other'
+    counts.set(kind, (counts.get(kind) ?? 0) + 1)
+  }
+  return { total: raw.split('\n').filter(Boolean).length, counts: [...counts.entries()].sort((a, b) => b[1] - a[1]) }
+}
+
 if (isMain) {
   if (process.argv.includes('--latency')) {
     const d = latency(Number(process.env.QUEUE_DAYS ?? 14))
@@ -167,6 +201,28 @@ if (isMain) {
       console.log(`\n${answer.inFlight} dispatch(es) in this window are still RUNNING and are excluded.`)
       console.log('A window that has not finished has no rate yet - measure it again once it has.')
     }
+    process.exit(0)
+  }
+
+  if (process.argv.includes('--mix')) {
+    const arg = Number(process.argv[process.argv.indexOf('--mix') + 1])
+    const m = mix(Number.isFinite(arg) && arg > 0 ? arg : Number(process.env.MIX_LIMIT ?? 40))
+    if (!m) {
+      console.log('could not list the authored issues - the mix is unknown, which is not the same as varied')
+      process.exit(1)
+    }
+    console.log(`the last ${m.total} authored issues, by KIND\n`)
+    for (const [kind, n] of m.counts) {
+      const pct = Math.round((100 * n) / m.total)
+      console.log(`  ${kind.padEnd(24)} ${String(n).padStart(3)}  ${String(pct).padStart(3)}%  ${'#'.repeat(Math.round(pct / 3))}`)
+    }
+    const top = m.counts[0]
+    if (top && top[1] / m.total > 0.8) {
+      console.log(`\n${Math.round((100 * top[1]) / m.total)}% of the backlog is "${top[0]}". A swarm at full load doing one`)
+      console.log('cheap thing is still a swarm doing one cheap thing - load is not value.')
+      process.exit(3)
+    }
+    console.log('\nNo single kind is more than four fifths of the backlog.')
     process.exit(0)
   }
 
