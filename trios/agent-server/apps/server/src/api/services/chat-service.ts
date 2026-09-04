@@ -194,7 +194,7 @@ export class ChatService {
       )
     }
 
-    // Detect MCP config change mid-conversation → rebuild session
+    // Detect MCP config change mid-conversation -> rebuild session
     if (session && session.mcpServerKey !== mcpServerKey) {
       logger.info('MCP servers changed mid-conversation, rebuilding session', {
         conversationId: request.conversationId,
@@ -252,7 +252,7 @@ export class ChatService {
       contextChanges.push(parts.join(' '))
     }
 
-    // Detect workspace change mid-conversation → rebuild session
+    // Detect workspace change mid-conversation -> rebuild session
     if (session && session.workingDir !== request.userWorkingDir) {
       logger.info('Workspace changed mid-conversation, rebuilding session', {
         conversationId: request.conversationId,
@@ -283,7 +283,7 @@ export class ChatService {
       }
     }
 
-    // Detect approval config change mid-conversation → rebuild session
+    // Detect approval config change mid-conversation -> rebuild session
     if (session && session.approvalConfigKey !== approvalConfigKey) {
       logger.info(
         'Approval config changed mid-conversation, rebuilding session',
@@ -441,7 +441,7 @@ export class ChatService {
     // round-trips clean to the client's useChat state and to any
     // future history reload. The wrapped form (browser context +
     // <selected_text> + <USER_QUERY>) is built as a transient prompt
-    // copy below — the LLM sees it, the user-visible state never
+    // copy below - the LLM sees it, the user-visible state never
     // does.
     session.agent.appendUserMessage(request.message)
     const promptUserText = contextPrefix + userContent
