@@ -11,6 +11,19 @@ const ignoredDirectories = new Set(['__fixtures__', '__helpers__'])
 const rootGroupExclusions = new Set(['server.integration.test.ts'])
 const testFilePattern = /\.(test|spec)\.[cm]?[jt]sx?$/
 
+/**
+ * Group names the runner resolves specially no matter what exists under
+ * tests/: "all" and "core" expand to other groups, "cdp" aliases the browser
+ * targets, and "root" means the test files directly under tests/. A directory
+ * carrying one of these names is still enumerated as a group, but the name
+ * resolves elsewhere, so that directory's tests are never executed.
+ *
+ * Exported so the test-group shadow audit and the tests read the one true
+ * list instead of copying it (a copy would reproduce the defect one level
+ * up: it would go stale when a name is reserved here later).
+ */
+export const reservedGroupNames = ['all', 'core', 'cdp', 'root']
+
 function compareGroupNames(left: string, right: string): number {
   const leftIndex = preferredDirectoryGroups.indexOf(left)
   const rightIndex = preferredDirectoryGroups.indexOf(right)
@@ -53,8 +66,8 @@ export function listAllGroups(): string[] {
 }
 
 function listAvailableGroupNames(): string[] {
-  return ['all', 'core', 'cdp', ...listAllGroups()].sort((left, right) =>
-    left.localeCompare(right),
+  return [...new Set([...reservedGroupNames, ...listAllGroups()])].sort(
+    (left, right) => left.localeCompare(right),
   )
 }
 
