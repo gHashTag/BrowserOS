@@ -122,7 +122,7 @@ export function mapHistoryItemToClawMessage(
 ): ClawChatMessage {
   const parts: ClawChatMessagePart[] = []
 
-  // Attachments first — they belong above the text in user messages and
+  // Attachments first - they belong above the text in user messages and
   // never appear on assistant messages today (assistant images come back
   // through tool results, which render via the Task collapsible).
   if (item.attachments && item.attachments.length > 0) {
@@ -137,11 +137,11 @@ export function mapHistoryItemToClawMessage(
     }
   }
 
-  // Reasoning, then tool calls, then text — the chronological order the
-  // agent produced them (think → act → answer).
+  // Reasoning, then tool calls, then text - the chronological order the
+  // agent produced them (think -> act -> answer).
   if (item.reasoning && item.reasoning.text.trim().length > 0) {
     // 0ms means thinking and the final answer were emitted in the same JSONL
-    // line (no tool calls between them) — there's no real elapsed wall-clock,
+    // line (no tool calls between them) - there's no real elapsed wall-clock,
     // so fall through to the "Thinking" trigger instead of "Thought for 0
     // seconds" / streaming shimmer. Real multi-line turns floor at 1s.
     const durationMs = item.reasoning.durationMs ?? 0
@@ -236,7 +236,7 @@ export function filterTurnsPersistedInHistory(
 }
 
 /**
- * Persisted turns that still carry `producedFiles` — once history
+ * Persisted turns that still carry `producedFiles` - once history
  * reloads, the assistant text is rendered by `ClawChatMessage` and
  * the optimistic turn is filtered out by
  * `filterTurnsPersistedInHistory`. The historical message has no
@@ -244,7 +244,7 @@ export function filterTurnsPersistedInHistory(
  * inline file-card strip would vanish on history reload.
  *
  * Returning these here lets the caller render a strip-only entry
- * after the corresponding history bubble — full message stays as
+ * after the corresponding history bubble - full message stays as
  * the persisted history pair, but the produced-files affordance
  * survives.
  */
@@ -324,12 +324,12 @@ function firstNonBlankLine(value: string): string {
  * that came from its turn. Match key is `group.turnPrompt` (first
  * non-blank line of the user prompt that initiated the turn) vs.
  * the first non-blank line of the user message that immediately
- * preceded this assistant message — the same shape the server
+ * preceded this assistant message - the same shape the server
  * emits when storing turnPrompt.
  *
  * Walks history forward (oldest-first per `flattenHistoryPages`)
  * and consumes groups in chronological order. A group can only
- * match once — if two turns share the same prompt the earlier
+ * match once - if two turns share the same prompt the earlier
  * one wins, and the later assistant message stays unassociated
  * (those land back in `tailStripGroups` at the conversation tail).
  */
