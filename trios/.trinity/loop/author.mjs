@@ -225,13 +225,14 @@ touched.
   \`->\` or \`<-\`, an ellipsis with \`...\`, and a multiplication sign with \`x\`.
 - **FR-002**: No change may fall outside a comment. Strings, identifiers and
   expressions MUST be byte-identical.
-- **FR-003**: The file MUST still typecheck and its existing tests MUST still
-  pass.
+- **FR-003**: The file MUST introduce no NEW typecheck error. The repository
+  typecheck is red today for 42 unrelated reasons; the demand is that this file
+  is not among them.
 
 ## Success Criteria
 
 - \`LC_ALL=C grep -cP '[^\\x00-\\x7F]' ${c.rel}\` prints 0, and the raw output is quoted in the report. The command MUST NOT name or enumerate the specific items it counts.
-- \`bun run typecheck\` passes from \`trios/agent-server\`, and its raw stdout is quoted.
+- \`bun run typecheck 2>&1 | grep -c ${c.rel}\` prints 0, and the raw output is quoted. The command MUST NOT name or enumerate the specific items it counts. (The repository typecheck does NOT pass today - 42 pre-existing errors on a clean checkout - so the demand is that THIS file contributes none, not that the tree is green.)
 - The report quotes \`git diff --stat\` for the branch, showing exactly one file changed.
 - The report quotes one before-and-after comment line, so a reader can see the substitution that was made.
 

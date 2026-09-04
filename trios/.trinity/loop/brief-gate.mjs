@@ -127,6 +127,41 @@ export function gate(file) {
   // unauditable - the swarm's word is the only evidence they will ever have.
   // The Queen accepts on the bee's self-reported VERDICT block, so a brief with
   // no mechanical claim is a brief that can only ever be self-graded.
+  // A CRITERION THAT DEMANDS A GREEN TREE MUST BE CHECKED AGAINST THE TREE.
+  //
+  // I wrote "`bun run typecheck` passes from `trios/agent-server`" into the
+  // template for every L3 cleanup. It does not pass, and has not: 42
+  // pre-existing errors on a clean checkout. So around a dozen issues carried a
+  // criterion no honest work could satisfy, and the workers did exactly the
+  // right thing - one stashed its change, re-ran, proved the failures were
+  // identical without it, and reported the criterion unmet. Excellent work,
+  // marked down by my sentence.
+  //
+  // This is the same defect as #1377 SC-2, which demanded output without the
+  // word `skip` from a suite named `queen-skip-reason-parity`. Twice now. So the
+  // gate refuses a whole-repository green demand and asks for the scoped form -
+  // does THIS file contribute an error - which is what the author actually
+  // wants to know and is satisfiable on a red tree.
+  const GREEN_TREE = [
+    [/`?(?:bun run |npm run |yarn )?typecheck`?\s+(?:passes|is clean|succeeds|exits 0)/i, 'the repository typecheck'],
+    [/`?(?:bun|npm|yarn) (?:run )?test`?\s+(?:passes|is green|succeeds)(?!\s+(?:for|from `?trios\/agent-server`? on))/i, 'the whole test suite'],
+    [/\ball tests? pass\b/i, 'every test in the tree'],
+  ]
+  for (const [re, what] of GREEN_TREE) {
+    for (const l of criteriaLines) {
+      if (!re.test(l)) continue
+      // A demand scoped to a path is fine: it is about this work, not the tree.
+      if (boundary && boundary.some((p) => l.includes(String(p).trim()))) continue
+      problems.push(
+        `a criterion demands ${what} be green. It is not, and a criterion that ` +
+        `cannot be met by correct work is worse than none - it teaches the ` +
+        `worker that the report is theatre. Scope it to a path in the Boundary ` +
+        `("...| grep -c <that path>` + '`' + ` prints 0")`,
+      )
+      break
+    }
+  }
+
   // A SECOND SHAPE THAT IS EQUALLY MECHANICAL, and refusing it was a false
   // refusal of exactly the kind this gate keeps committing.
   //

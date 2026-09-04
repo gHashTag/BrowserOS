@@ -496,7 +496,12 @@ export function boardTask(
      * being chosen twice, and `stillHoldsBoundary` expires its file claim after
      * 48 hours rather than never.
      */
-    state?: 'running' | 'accepted' | 'rejected' | 'awaitingReview'
+    // `failed` belongs here. `stateOfDispatch` gained that case so a verdict
+    // that SAYS failed stops being read as a live claim, and this parameter was
+    // not widened with it - so the one call site that passes the result did not
+    // typecheck. `bun test` does not typecheck, every test passed, and the
+    // error shipped. Two gates, and only one of them was run.
+    state?: 'running' | 'accepted' | 'rejected' | 'awaitingReview' | 'failed'
     provider?: string
     model?: string
     inputTokens?: number
