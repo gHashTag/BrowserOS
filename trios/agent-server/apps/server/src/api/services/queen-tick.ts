@@ -443,6 +443,21 @@ export function stateOfDispatch(
   // there is one ceiling and not two that agree until someone edits one.
   const ceiling = lease.ceiling ?? 2
 
+  // A verdict that SAYS failed is a failure. This case was missing, so
+  // `review_state = 'failed'` fell through to `awaitingReview` at the bottom -
+  // a LIVE claim in `QueenDelegationPolicy.claimOnIssue` - and the issue stayed
+  // held by the very row that recorded its release.
+  //
+  // Measured 2026-09-04: five dispatches were deliberately set to `failed` to
+  // return their issues to the pool (#1133, #1175, #1216, #1240, #1311). All
+  // five stayed in `claimed`, the tick kept refusing with "nothing to choose"
+  // against 22 candidates, and the swarm sat at zero bees of four. The write
+  // was correct; the reader had no case for it.
+  //
+  // The function already RETURNS 'failed' two lines below for a send-back that
+  // outlived its floor. It could produce the state and not recognise it.
+  if (verdict === 'failed' || verdict === 'cancelled') return 'failed'
+
   if (verdict === 'sendBack') {
     if (idleMs >= SEND_BACK_IDLE_FLOOR_MS && sendBacks < ceiling)
       return 'failed'
