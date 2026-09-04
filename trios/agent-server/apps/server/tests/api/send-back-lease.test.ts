@@ -146,3 +146,35 @@ describe('stateOfDispatch: the wait valve', () => {
     expect(WAIT_FROZEN_FLOOR_MS).toBeGreaterThan(SEND_BACK_IDLE_FLOOR_MS)
   })
 })
+
+// The clock the valve reads must be one nothing touches.
+//
+// The first deploy measured idle from `reviewed_at ?? finished_at`, and the
+// review sweep UPDATEs every wait row in place each round - so `reviewed_at`
+// was refreshed every five minutes and a six-hour floor could never be
+// reached. Measured in production: two dispatches frozen 18.4 hours reported
+// 0.06 hours of idle. These pin the property rather than the field name, so a
+// future edit that reintroduces a touched clock fails here.
+describe('the lease clock', () => {
+  it('releases on a long-frozen wait, which the touched clock made impossible', () => {
+    const eighteenHours = 18.4 * 60 * 60 * 1000
+    expect(
+      stateOfDispatch(true, 'wait', { idleMs: eighteenHours, sendBacks: 0 }),
+    ).toBe('failed')
+  })
+
+  it('is not fooled by a value just under the floor, so the floor still means something', () => {
+    expect(
+      stateOfDispatch(true, 'wait', {
+        idleMs: WAIT_FROZEN_FLOOR_MS - 60_000,
+        sendBacks: 0,
+      }),
+    ).toBe('awaitingReview')
+  })
+
+  it('still holds a wait at the retry ceiling however long it has been frozen', () => {
+    expect(
+      stateOfDispatch(true, 'wait', { idleMs: 1000 * HOUR, sendBacks: 2 }),
+    ).toBe('awaitingReview')
+  })
+})
