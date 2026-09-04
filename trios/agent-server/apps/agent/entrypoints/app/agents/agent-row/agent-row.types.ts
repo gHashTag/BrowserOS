@@ -20,7 +20,7 @@ export interface AgentAdapterHealth {
  * Everything an `AgentRowCard` needs to render. Mirrors the shape
  * `useHarnessAgents` exposes; the page assembles one entry per row in
  * `AgentList` and passes it down. Sub-components only see slices of
- * this object — no prop drilling beyond two levels.
+ * this object - no prop drilling beyond two levels.
  */
 export interface AgentRowData {
   agent: AgentListItem
@@ -33,7 +33,7 @@ export interface AgentRowData {
   cwd: string | null
   lastUserMessage: string | null
   tokens: AgentTokenUsage | null
-  /** 14 entries, oldest → newest. Today is the last index. */
+  /** 14 entries, oldest -> newest. Today is the last index. */
   turnsByDay: number[]
   /** Same length and ordering as `turnsByDay`. */
   failedByDay: number[]
