@@ -8,7 +8,7 @@
  * A "CLI provider" is a tool that runs inside the OpenClaw gateway
  * container (e.g. Claude Code CLI, Gemini CLI). OpenClaw spawns the
  * binary as a subprocess when the active model is prefixed with the
- * provider id — so our job is to install the tool and surface its
+ * provider id - so our job is to install the tool and surface its
  * auth status to the user. No Anthropic/OpenRouter-style API key.
  */
 
