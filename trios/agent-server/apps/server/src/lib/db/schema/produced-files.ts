@@ -21,7 +21,7 @@ import { agentDefinitions } from './agents'
  * write rows for any new or modified path. The rail UI groups by
  * `turn_id` and the inline artifact card renders one row per file.
  *
- * Schema is intentionally adapter-agnostic — V1 only enables the
+ * Schema is intentionally adapter-agnostic - V1 only enables the
  * watcher for the openclaw adapter, but V2 can plug Claude / Codex
  * into the same table without migrating.
  */
@@ -31,7 +31,7 @@ export const producedFiles = sqliteTable(
     /** Stable id; opaque file handle in download/preview URLs. */
     id: text('id').primaryKey(),
 
-    /** FK → agent_definitions.id; CASCADE so agent deletion sweeps. */
+    /** FK -> agent_definitions.id; CASCADE so agent deletion sweeps. */
     agentDefinitionId: text('agent_definition_id')
       .notNull()
       .references(() => agentDefinitions.id, { onDelete: 'cascade' }),
@@ -43,7 +43,7 @@ export const producedFiles = sqliteTable(
     turnId: text('turn_id').notNull(),
 
     /**
-     * The user prompt that initiated this turn — denormalised so the
+     * The user prompt that initiated this turn - denormalised so the
      * rail's "group by prompt" header doesn't have to join the JSONL
      * log. Capped at 280 chars in code; the column is unbounded.
      */
@@ -54,7 +54,7 @@ export const producedFiles = sqliteTable(
 
     size: integer('size').notNull(),
 
-    /** mtime in ms — used to detect re-modifications. */
+    /** mtime in ms - used to detect re-modifications. */
     mtimeMs: integer('mtime_ms').notNull(),
 
     /** Server clock when our watcher first saw it. */
@@ -69,7 +69,7 @@ export const producedFiles = sqliteTable(
       .default('diff'),
   },
   (table) => [
-    // One row per (agent, path) pair — re-modifications update in place,
+    // One row per (agent, path) pair - re-modifications update in place,
     // so a tool that overwrites `report.pdf` doesn't accumulate
     // duplicate rows. The most recent turn that touched the file owns
     // the row.
