@@ -1259,10 +1259,32 @@ function criteriaBlock(criteria: string[], source: string): string[] {
  * slots here would number criteria nobody has written yet.
  */
 function verdictSection(criteria: string[]): string[] {
+  // THE BLOCK GOES FIRST, and this is the measurement that moved it.
+  //
+  // Only 17% of dispatches in a three-hour window were accepted; 33% came back
+  // as sendBack and 28% as `wait`, which means the review could not judge them
+  // at all. Reading the transcripts settles why. #1429 discussed all four of
+  // its criteria in prose - "Criterion 4 ... **Met.**" - and then wrote a
+  // VERDICT block containing two lines. #1427 the same. #1430 wrote three of
+  // four. The accepted ones wrote exactly one line per criterion.
+  //
+  // The block was required to come LAST, after 25-35 kB of prose. So the ONLY
+  // machine-read part of the report sat in the position where a turn that runs
+  // short loses it first, and a worker treating it as a closing summary rather
+  // than the deliverable trims it exactly there.
+  //
+  // Putting it first costs nothing the worker knows: it has done the work and
+  // taken its measurements before it composes the message. What it changes is
+  // what survives when something is cut - prose, which nothing reads
+  // mechanically, instead of the verdict, on which every downstream decision
+  // depends.
   const head = [
     '## Your verdict, which the Queen reads',
     '',
-    'End your LAST message with exactly this block and nothing after it:',
+    'BEGIN your LAST message with exactly this block, before anything else you',
+    'write. Not at the end - at the very top. Everything after it is prose for a',
+    'person; this block is the only part read by machine, and a report that runs',
+    'long loses whatever is last.',
     '',
     '## VERDICT',
   ]
@@ -1523,8 +1545,34 @@ async function reviewFinishedDispatches(pool: Pool): Promise<ReviewRound> {
 export function parseVerdictBlock(
   text: string,
 ): Array<{ criterion: string; met: boolean }> {
-  const at = text.lastIndexOf('## VERDICT')
-  if (at < 0) return []
+  // EVERY occurrence is tried, and the most complete one wins.
+  //
+  // This took `lastIndexOf`, which was right while the block was required to be
+  // last. The block is now required to be FIRST, and a report that quotes the
+  // words "## VERDICT" later - in a summary, in a quoted brief, in an
+  // explanation of this very rule - would otherwise hand the parser a heading
+  // with no bullets under it and yield nothing at all.
+  //
+  // Trying each and keeping the longest parse is stable under either
+  // convention, so a worker running an older brief is not punished for it.
+  const starts: number[] = []
+  for (let i = text.indexOf('## VERDICT'); i >= 0; i = text.indexOf('## VERDICT', i + 1)) {
+    starts.push(i)
+  }
+  if (!starts.length) return []
+  let best: Array<{ criterion: string; met: boolean }> = []
+  for (const start of starts) {
+    const found = parseVerdictFrom(text, start)
+    if (found.length > best.length) best = found
+  }
+  return best
+}
+
+/** One VERDICT block, read from a known offset. */
+function parseVerdictFrom(
+  text: string,
+  at: number,
+): Array<{ criterion: string; met: boolean }> {
   const out: Array<{ criterion: string; met: boolean }> = []
   // A WRAPPED CRITERION IS STILL ONE CRITERION.
   //
