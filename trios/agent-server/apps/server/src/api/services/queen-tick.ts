@@ -1395,6 +1395,95 @@ async function boundaryStrays(
 }
 
 /**
+ * The criteria a bee never wrote a verdict line for.
+ *
+ * SILENCE IS NOT FAILURE. The review marks a criterion unmet when the VERDICT
+ * block carries no line for it, and that default is correct - an unanswered
+ * criterion is not a satisfied one. But it is a different FACT from a criterion
+ * the bee tested and reported unmet, and until #1420 nothing in the round could
+ * tell the two apart: a send-back that said "4 criterion(s) not met" was read
+ * by the worker as "I failed four things" when four things had merely never
+ * been mentioned. Measured 2026-09-04, from the six dispatches parked at the
+ * retry ceiling, the unmet count was the omitted count in every one - #1133,
+ * #1175, #1316, #1318, #1311 - and three of the six had escalated to a person
+ * without the work ever being assessed. The oldest had waited 91 hours.
+ *
+ * MATCHING. A bee quotes the criteria "in the issue's own words", but a quote
+ * is not a copy: backticks, punctuation and case all drift, and
+ * `parseVerdictBlock` slices a line's criterion at 300 characters, so a line
+ * quoting a long criterion holds only its beginning. Comparing punctuation and
+ * case exactly would mark a faithfully quoted criterion as omitted. Both sides
+ * are reduced to letters, digits and single spaces, and a criterion counts as
+ * judged when one side contains the other - containment in EITHER direction,
+ * because the 300-character slice means the promised text may contain the
+ * line's text and not the other way round. The containment guard exists
+ * because a one-word line would otherwise be contained by everything and mark
+ * every criterion judged; an exact match always counts, however short.
+ */
+export function unjudgedCriteria(
+  promised: string[],
+  judged: Array<{ criterion: string; met: boolean }>,
+): string[] {
+  const normalize = (text: string): string =>
+    text
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  const said = judged.map((v) => normalize(v.criterion))
+  return promised.filter((criterion) => {
+    const want = normalize(criterion)
+    if (want.length === 0) return false
+    return !said.some(
+      (line) =>
+        line === want ||
+        (Math.min(line.length, want.length) >= 12 &&
+          (line.includes(want) || want.includes(line))),
+    )
+  })
+}
+
+/**
+ * The send-back message, with silence and failure named as the two different
+ * things they are (#1420, FR-002).
+ *
+ * The opener and the closing instruction are taken from the policy's own note
+ * rather than restated here - the pass number ("for a third pass") is the
+ * policy's ordinal, and a second copy of it in TypeScript would be the second
+ * implementation of one rule this file is otherwise careful never to have. What
+ * is composed here is the middle: the unmet criteria under two distinct
+ * headings, so a worker reading the message can tell "you did not do this"
+ * from "you did not say whether you did this". The first heading is a verdict
+ * the bee wrote itself; the second is a default applied against it, and a
+ * worker must be able to see which is which to answer either.
+ */
+function sendBackMessage(
+  policyNote: string,
+  failed: string[],
+  unjudged: string[],
+): string {
+  const lines = policyNote.split('\n')
+  const opener = lines[0] ?? ''
+  const closer = lines[lines.length - 1] ?? ''
+  const list = (items: string[]): string[] =>
+    items.length === 0
+      ? ['  (none)']
+      : items.map((criterion, i) => `  ${i + 1}. ${criterion}`)
+  return [
+    opener,
+    '',
+    'Criteria that were tested and failed:',
+    ...list(failed),
+    '',
+    'Criteria you never wrote a verdict line for, judged unmet because you',
+    'said nothing:',
+    ...list(unjudged),
+    '',
+    closer,
+  ].join('\n')
+}
+
+/**
  * Read each finished turn's own verdict block and decide on it.
  *
  * The bee ends its last message with a VERDICT block: one line per acceptance
@@ -1405,6 +1494,25 @@ async function boundaryStrays(
  * `could-not-check` counts as UNMET. A criterion nobody verified has not been
  * satisfied, and treating "I could not tell" as "yes" is how work closes on
  * faith. The bee is told this in its brief so the accounting is not a surprise.
+ *
+ * A CRITERION THE BEE SAID NOTHING ABOUT COUNTS AS UNMET TOO - the correct
+ * default, for the same reason - but as a different fact (#1420). Once the bee
+ * has judged SOME of its criteria, the ones with no line are added to the
+ * question as unmet verdicts, so the policy itself decides sendBack or
+ * escalate on the complete picture; the tally records judged and unjudged
+ * separately, and the send-back message names them under two headings. A bee
+ * whose block is missing ENTIRELY is still read as a wait rather than a
+ * wall of omissions, because an absent block is the signature of a torn or
+ * slow transcript (#1335) and the frozen-wait valve already handles a verdict
+ * that can never change; a bee that judged half its criteria read the
+ * instruction and chose silence on the rest.
+ *
+ * THE RETRY BUDGET IS SPENT ON THE WORK (FR-003). An attempt whose unmet
+ * criteria are ALL unjudged - the bee attempted no criterion it was given - is
+ * returned without counting against `QueenRetryPolicy.maximumRealAttempts`,
+ * because a ceiling spent on silence is a ceiling that retires issues nobody
+ * ever worked. The count still advances when any unmet criterion was judged,
+ * and only then.
  *
  * Only an escalation reaches a person. accept releases the issue, sendBack
  * frees it to be dispatched again with the note, and wait leaves it alone.
@@ -1419,14 +1527,34 @@ async function boundaryStrays(
  * `sendBackNote` is given `priorSendBacks + 1`. The count now comes off the
  * row, so the fifth return says "sixth pass" and the third does not happen.
  */
+
+/** Judged and unjudged counts for one dispatch, as the round records them. */
+export interface ReviewTally {
+  issue: number
+  /** Criteria the bee wrote a verdict line for, whatever the verdict said. */
+  judged: number
+  /** Criteria the bee never wrote a verdict line for. */
+  unjudged: number
+}
+
 interface ReviewRound {
   /** `#1234:accept`, one per dispatch judged this round. */
   acted: string[]
   /** Issues whose commit reached outside the boundary, and where. */
   strays: Array<{ issue: number; paths: string[] }>
+  /** Judged and unjudged, per dispatch reviewed this round (#1420, FR-001). */
+  tally: ReviewTally[]
 }
 
-async function reviewFinishedDispatches(pool: Pool): Promise<ReviewRound> {
+/**
+ * EXPORTED FOR THE SUITE, as `runRound` is: the review is the half of the
+ * round the unjudged accounting lives in, and a test that cannot call it can
+ * only assert around it. The pool is the same recording fake the round's own
+ * suite drives, so what the assertions read is exactly what a round writes.
+ */
+export async function reviewFinishedDispatches(
+  pool: Pool,
+): Promise<ReviewRound> {
   // TWO THINGS ABOUT THIS QUERY, BOTH MEASURED ON 2026-09-03.
   //
   // The say rows are joined with NOTHING between them, not a newline. The
@@ -1460,6 +1588,7 @@ async function reviewFinishedDispatches(pool: Pool): Promise<ReviewRound> {
   )
   const acted: string[] = []
   const strayed: Array<{ issue: number; paths: string[] }> = []
+  const tally: ReviewTally[] = []
   for (const row of done.rows) {
     const said = String(row.said ?? '')
     const verdicts = parseVerdictBlock(said)
@@ -1475,6 +1604,12 @@ async function reviewFinishedDispatches(pool: Pool): Promise<ReviewRound> {
     const promised = Array.isArray(row.criteria)
       ? (row.criteria as string[])
       : []
+    // The half of the contract the bee never answered. #1420: the six
+    // dispatches parked at the retry ceiling that morning all had an unmet
+    // count that was exactly their omitted count - criteria that were never
+    // judged at all, indistinguishable in the record from criteria that were
+    // judged and failed.
+    const unjudged = unjudgedCriteria(promised, verdicts)
     // A bee that wrote MORE lines than it was given is judged on what it wrote:
     // that is the case where the Queen supplied none and the bee stated its
     // own, which the brief asks for.
@@ -1501,23 +1636,61 @@ async function reviewFinishedDispatches(pool: Pool): Promise<ReviewRound> {
     // is not - `priorSendBacks` decodes as Int and a string would make queend
     // refuse the whole question.
     const priorSendBacks = Number(row.send_backs ?? 0) || 0
+    // The criteria the bee judged as it wrote them, plus - once it has judged
+    // ANY - the ones it never wrote a line for, added as unmet so the POLICY
+    // decides on the complete picture rather than the review substituting a
+    // decision of its own. The omission is the correct default (an unanswered
+    // criterion is not a satisfied one), and sending the list through queend
+    // keeps sendBack-versus-escalate one rule in one place. A bee whose block
+    // is missing entirely is excluded: no verdicts at all is the torn-transcript
+    // signature the wait state exists for, and the frozen-wait valve releases
+    // it if the transcript never does arrive.
+    const questioned =
+      verdicts.length > 0
+        ? [
+            ...verdicts.map((v) => ({ criterion: v.criterion, met: v.met })),
+            ...unjudged.map((criterion) => ({ criterion, met: false })),
+          ]
+        : verdicts.map((v) => ({ criterion: v.criterion, met: v.met }))
     const answer = await askQueend({
       kind: 'review',
-      verdicts: verdicts.map((v) => ({ criterion: v.criterion, met: v.met })),
+      verdicts: questioned,
       totalCriteria,
       committedFiles: files.length,
       priorSendBacks,
     }).catch(() => null)
     const state = String(answer?.verdict ?? 'wait')
+    // Judged versus unjudged, recorded per dispatch (#1420, FR-001): "2 of 5
+    // judged" is a fact about the worker's reporting, not about the work, and
+    // the two belong in the record as separate numbers.
+    const failed = verdicts.filter((v) => !v.met).map((v) => v.criterion)
     logger.info('Queen reviewed her own work', {
       issue: row.issue,
       verdict: state,
       criteria: totalCriteria,
       judged: verdicts.length,
+      unjudged: unjudged.length,
       source: row.criteria_source ?? 'none',
       priorSendBacks,
       strays: strays.length,
     })
+    // The send-back message the worker reads, with the two lists under distinct
+    // headings (#1420, FR-002): what it tested and failed, and what it never
+    // wrote a verdict line for at all.
+    const note =
+      state === 'sendBack'
+        ? sendBackMessage(String(answer?.note ?? ''), failed, unjudged)
+        : String(answer?.note ?? answer?.refusal ?? '')
+    // Whether this attempt counts against the retry ceiling (#1420, FR-003).
+    //
+    // An attempt whose unmet criteria are ALL unjudged attempted no criterion
+    // it was given: the bee went quiet, not wrong, and `send_backs` measures
+    // how many times work has been judged and found wanting. Counting silence
+    // was how three of the six dispatches measured on 2026-09-04 reached
+    // maximumRealAttempts and escalated to a person without the work ever
+    // being assessed - the oldest after 91 hours. The attempt still comes back
+    // (the criteria are still unmet); it just does not spend the budget.
+    const countsAgainstTheIssue = !(failed.length === 0 && unjudged.length > 0)
     await pool.query(
       // The increment is part of the same statement that records the verdict,
       // because a count kept by a second write is a count that a crash between
@@ -1526,19 +1699,25 @@ async function reviewFinishedDispatches(pool: Pool): Promise<ReviewRound> {
       `UPDATE queen_dispatch
           SET review_state = $2, review_note = $3, reviewed_at = now(),
               strays = $4::jsonb,
-              send_backs = CASE WHEN $2::text = 'sendBack'
+              send_backs = CASE WHEN $2::text = 'sendBack' AND $5::boolean
                                 THEN send_backs + 1 ELSE send_backs END
         WHERE issue = $1`,
       [
         row.issue,
         state,
-        String(answer?.note ?? answer?.refusal ?? '').slice(0, 900),
+        note.slice(0, 900),
         JSON.stringify(strays),
+        countsAgainstTheIssue,
       ],
     )
     acted.push(`#${row.issue}:${state}`)
+    tally.push({
+      issue: row.issue as number,
+      judged: verdicts.length,
+      unjudged: unjudged.length,
+    })
   }
-  return { acted, strays: strayed }
+  return { acted, strays: strayed, tally }
 }
 
 /** The bee's own VERDICT block, or nothing. */
