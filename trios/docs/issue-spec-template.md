@@ -92,7 +92,7 @@ Every file this task may touch, one per line, backticked:
 ## Boundary
 
 `rings/SR-02/ChatViewModel.swift`
-`docs/queen-choice.md`
+`docs/queen-verdicts.md`
 ```
 
 This is the one that decides whether the task exists for the Queen at all. It
@@ -120,10 +120,22 @@ would let a thin task through and then blame the bee for the ambiguity.
 
 ## Checking one before you file it
 
+The checker is `queend`, the executable SwiftPM product of `agent-server/queen-core`.
+Nothing in `build.sh` or the `Makefile` builds it, and the image build at
+`agent-server/Dockerfile` is the only place that ships it. Build it in
+place, then pipe the issue body to it:
+
 ```bash
+cd agent-server/queen-core
+swift build -c release
 echo '{"kind":"spec","candidateBodies":{"1":"<the body>"}}' \
-  | .trinity/build/QueenCore/queend
+  | "$(swift build -c release --show-bin-path)/queend"
 ```
+
+Building it requires `swift`; a machine without the Swift toolchain
+cannot run this check. (An earlier revision of this section piped the
+spec into a build-output path that no build in this repository ever
+wrote, so the command failed on every machine that tried it.)
 
 It answers with what is missing and, for each gap, a sentence you can paste into
 the issue.

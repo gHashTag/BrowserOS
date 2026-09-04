@@ -38,7 +38,12 @@
   - `conversations: [Conversation]`
 
 ### ConversationManager
-- **Location**: `BR-OUTPUT/ConversationManager.swift`
+- **Location**: not in this tree - no source file for this component is
+  tracked on any branch (verified 2026-09-04). The multi-chat state it
+  describes lives in the `conversations` array of
+  `rings/SR-02/ChatViewModel.swift`; the per-window wrapper around it is
+  `BR-OUTPUT/BrowserOSChatViewModel.swift`. Keep this entry, and give it a
+  path here when the file lands.
 - **Purpose**: Multi-chat coordination
 - **Features**:
   - Create/delete conversations
@@ -46,7 +51,7 @@
   - Persist to disk
 
 ### A2AMessageRouter
-- **Location**: `rings/SR-02/A2AMessageRouter.swift`
+- **Location**: `BR-OUTPUT/A2AMessageRouter.swift`
 - **Purpose**: Route messages between UI and agent
 - **Tool Call Handling**:
   ```swift
@@ -55,7 +60,10 @@
   ```
 
 ### CDP Multi-Context Manager
-- **Location**: `BR-OUTPUT/CDPMultiContextManager.swift`
+- **Location**: not in this tree - no source file for this component is
+  tracked on any branch (verified 2026-09-04). The CDP endpoint the
+  design assumes (port 9102) appears today only in test configuration;
+  the parallel-context manager itself was never implemented.
 - **Purpose**: Parallel browser sessions
 - **Features**:
   - Multiple CDP contexts
@@ -93,7 +101,10 @@ struct ToolCall {
 - **Visual Feedback**: 300ms highlight
 
 ### HotkeyPreferences
-- **Location**: `BR-OUTPUT/HotkeyPreferences.swift`
+- **Location**: not in this tree - no source file for this component is
+  tracked on any branch (verified 2026-09-04). The shipped hotkey surface
+  is `BR-OUTPUT/HotkeyBar.swift` above; the preference pane below it is
+  design intent, not code.
 - **Features**:
   - Custom shortcuts
   - Conflict detection
@@ -119,7 +130,9 @@ struct ToolCall {
 
 ## iCloud Sync
 
-- **Manager**: `iCloudSyncManager.swift`
+- **Manager**: not in this tree - no iCloud sync manager is tracked on any
+  branch (verified 2026-09-04); nothing in the Swift sources mentions
+  iCloud or CloudKit. The two bullets below are design intent.
 - **Synced Data**: Conversations, macros, settings
 - **Conflict Resolution**: Last-write-wins
 
@@ -135,12 +148,16 @@ struct ToolCall {
 ## Extensibility
 
 ### Plugin API
-- **Location**: `BR-OUTPUT/PluginAPI.swift`
+- **Location**: not in this tree - no Plugin API source file is tracked on
+  any branch (verified 2026-09-04). The shipped piece is the template,
+  `PluginTemplate.swift`, listed below.
 - **Template**: `PluginTemplate.swift`
 - **Examples**: GitHub, Slack, Notion
 
 ### Macro System
-- **Recorder**: `MacroRecorder.swift`
+- **Recorder**: not in this tree - no macro recorder source file is
+  tracked on any branch (verified 2026-09-04); the only macro reference
+  in the sources is a hotkey stub in `BR-OUTPUT/ChatPanelView.swift`.
 - **Library**: Community macros
 - **Format**: JSON
 

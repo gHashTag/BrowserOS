@@ -27,7 +27,9 @@ When operating as the Trinity Agent (Queen), follow this 6-phase loop:
 - Identify required skills: `/phi-loop`, `/tri-pipeline`, `/experience-save`
 - Determine which agents to delegate to (see AGENTS.md alphabet)
 - Estimate complexity and dependencies
-- Select road from `.trinity/state/three-roads.json`:
+- Select one of the three roads below directly. (An earlier revision of
+  this line read the choice from a state file that has never been tracked
+  in this repository; the roads are law here, not a runtime artifact.)
   - **Road A** (fastest) — direct fix, minimal ceremony
   - **Road B** (balanced) — fix + test + experience save
   - **Road C** (deep) — spec-first, full PHI LOOP, agent spawn
@@ -222,7 +224,7 @@ claims to be synthesisable is checkable, and must be checked rather than read.
 | L3 | PURITY | **Everything is written in English** - source, comments, documentation, issues, commit messages. Source files ASCII-only. Extended from "English identifiers" by the operator on 2026-08-19; issues written before that date are in Russian, which is why `## Границы` and `## Boundary` both open a boundary section |
 | L4 | TESTABILITY | Every change must pass `./build.sh` + e2e flow + agent V verdict |
 | L5 | IDENTITY | φ² = φ + 1; φ² + φ⁻² = 3; sacred constants in UI (GoldenFloat) |
-| L6 | CEILING | `ProjectPaths.swift` + `TriosTheme.swift` are UI SSOT |
+| L6 | CEILING | `BR-OUTPUT/ProjectPaths.swift` + `BR-OUTPUT/TriosTheme.swift` are UI SSOT |
 | L7 | UNITY | No new `*.sh` on critical path; use `build.sh` or MCP tools |
 
 **Law Priority:** L1 > L2 > L3 > L4 > L5 > L6 > L7 (Asimov-style hierarchy)
