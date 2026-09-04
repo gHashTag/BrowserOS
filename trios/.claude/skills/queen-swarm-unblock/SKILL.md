@@ -1812,6 +1812,105 @@ just a colon. This is a hazard of the hand-check, which is the thing you reach f
 precisely when you distrust the tool - so it is the worst possible place to have
 a silent one.
 
+## A criterion that was already true proves nothing: FAIL_TO_PASS
+
+SWE-bench builds every instance around a test that FAILS before the patch and
+PASSES after, and **excludes any instance without that transition**. The reason
+is blunt and worth memorising: pass-to-pass alone is satisfiable by an EMPTY
+PATCH.
+
+`verdict-audit` had only the pass-to-pass half for its whole life. It ran each
+criterion against the branch, saw a pass, and printed SUPPORTED - with no idea
+whether the criterion had been true all along. One had been checked by hand
+(#1485: 3 non-ASCII lines at the fork point, 0 on the branch). The other 153 were
+unknown, and "unknown" was printing as "supported".
+
+Run every criterion twice. The TRANSITION is the verdict:
+
+| before | after | verdict | meaning |
+|---|---|---|---|
+| fail | pass | PROVEN | the branch caused it |
+| pass | pass | VACUOUS | true before the bee arrived |
+| pass | fail | REGRESSION | the branch broke what it satisfied |
+| fail | fail | UNSUPPORTED | claimed and not delivered |
+
+VACUOUS is not an accusation. It is the audit saying it cannot tell, which is a
+different and more useful thing than a false pass.
+
+## A baseline is not a target, and reading it as one convicts the worker
+
+These briefs are written test-first, so many RECORD the red state as evidence the
+defect is real:
+
+    `grep -c '[^ -~]' <file>` prints 13 today.
+    The pre-edit run stays red, and that red result is the finding, not a failure.
+
+Read as a target, #1390's 13 became a requirement. The bee removed one non-ASCII
+line, the file printed 12, and the audit reported a REGRESSION - convicting a bee
+for doing exactly the work.
+
+A criterion carrying a before-marker (`today`, `currently`, `pre-edit`,
+`before writing`, `as it stands`, `stays red`) is checked **at the fork point**
+and never counted against the branch. If it fails there, that is the BRIEF's
+premise being wrong, which is a note about the author, not a verdict on the
+worker.
+
+## Stop guessing at definition syntax; measure absence instead
+
+A checker that scanned added lines for a declaration SHAPE produced three false
+accusations in one round, was fixed with a wider pattern, and produced three more
+in the next:
+
+    #1389  connectionFailed             a Swift enum CASE
+    #1380  pressCombo, dispatchDrag     methods on an object literal
+    #1374  isTerminalProviderError      in a new file, reached by import
+
+All six identifiers were really there, in 6 to 17 added lines each. Swift,
+TypeScript, markdown and shell each spell "define" differently and the list has
+no end - so a wider pattern is not the fix, it is the next round's bug.
+
+The criterion says the identifier "appears nowhere in the tree today". **Absence
+is checkable without knowing any language.** Present on the branch and absent at
+the fork point is the whole promise, measured with `git grep -w`. Keep the
+declaration pattern only to STRENGTHEN a note - "1 in a declaration" is better
+evidence than a bare mention - and let it convict nobody.
+
+## A cache must key on the rules, not only on the work
+
+`verdict-audit` at 0.92 s per branch over 207 branches is 217 seconds, against a
+per-step cap of 300 in the heal chain. It fits today; it will not at four
+hundred, and the way it will stop fitting is the way steps here always do -
+killed mid-way, reported as "timed out part-way", half an answer that looks
+whole. So it caches on the branch tip and the fork point, and a warm pass is 10
+seconds.
+
+Then the absence vocabulary widened, a fresh pass found 6 unsupported claims
+where there had been 2, and **the very next cached pass served the old 2 back** -
+verdicts a different program had reached. The key now carries a digest of the
+auditor's own source, so any edit to the rules invalidates every verdict reached
+under the old ones. Invalidation that depends on someone remembering is
+invalidation that will be forgotten.
+
+The trade is stated where it lives: keying on the body would defeat the cache,
+because reading the body IS the expensive call. A brief edited while its branch
+stands still is served stale, and `--fresh` is the way through.
+
+## A vocabulary of one phrase is a rule about the phrase
+
+The absence check knew `appears nowhere`. Briefs also write "Verified absent
+today" and "(new identifier, absent today)" - the same promise in a different
+hand, and both audited as "states nothing checkable" while stating it plainly.
+
+Two more things about reading a brief:
+
+- **A criterion is a sentence, and sentences wrap.** #1396 and #1394 open with a
+  bolded label and put the identifier on the next physical line. A line-based
+  reader loses the entire promise. Join continuations before matching.
+- **Widening a vocabulary widens what it wrongly catches.** The moment the
+  absence phrases grew, `export` came out as a promised identifier - the
+  `node_modules` accusation returning by a different door. A keyword stop-list
+  goes in at the same time as the widening, not after the first false positive.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
