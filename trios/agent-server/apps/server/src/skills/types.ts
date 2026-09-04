@@ -1,4 +1,4 @@
-// agentskills.io spec — metadata is a string→string map for non-spec fields
+// agentskills.io spec - metadata is a string->string map for non-spec fields
 export type SkillMetadata = {
   'display-name'?: string
   enabled?: string
@@ -6,7 +6,7 @@ export type SkillMetadata = {
   [key: string]: string | undefined
 }
 
-// agentskills.io spec — only these fields allowed at top level
+// agentskills.io spec - only these fields allowed at top level
 export type SkillFrontmatter = {
   name: string
   description: string
