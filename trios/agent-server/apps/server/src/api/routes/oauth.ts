@@ -56,7 +56,7 @@ export function createOAuthRoutes(deps: OAuthRouteDeps) {
             ? error.message
             : 'Failed to start authentication.'
 
-        // Port conflict — clear actionable message
+        // Port conflict - clear actionable message
         const status =
           error instanceof Error && error.message.includes('callback port')
             ? 503
