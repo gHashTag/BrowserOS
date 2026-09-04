@@ -229,7 +229,15 @@ async function ensureQueenColumns(pool: Pool): Promise<void> {
   await pool.query(`
     ALTER TABLE queen_issues
       ADD COLUMN IF NOT EXISTS criteria jsonb NOT NULL DEFAULT '[]'::jsonb,
-      ADD COLUMN IF NOT EXISTS criteria_source text NOT NULL DEFAULT 'none';
+      ADD COLUMN IF NOT EXISTS criteria_source text NOT NULL DEFAULT 'none',
+      -- Whether this issue's boundary reaches beyond documentation (#1358):
+      -- true when at least one owned path is not a .md file. Stored BESIDE
+      -- delegatable and deliberately not consulted by it - the tick
+      -- records the distinction so an operator can see how much of the
+      -- backlog can only produce prose; whether the Queen may be steered by
+      -- it is a separate decision that has not been made. A boundary of one
+      -- .md file still delegates exactly as it did before.
+      ADD COLUMN IF NOT EXISTS boundary_reaches_source boolean NOT NULL DEFAULT false;
     ALTER TABLE queen_dispatch
       ADD COLUMN IF NOT EXISTS criteria jsonb NOT NULL DEFAULT '[]'::jsonb,
       ADD COLUMN IF NOT EXISTS criteria_source text NOT NULL DEFAULT 'none',
@@ -291,17 +299,19 @@ export async function rememberIssues(
   if (issues.length === 0) return
   for (const issue of issues) {
     const boundary = boundaryPathsOf(issue.body)
+    const reachesSource = boundaryReachesSource(boundary)
     const v = verdicts?.[String(issue.number)]
     await pool.query(
       `INSERT INTO queen_issues
          (number, title, state, owned_paths, seen_at, is_spec, delegatable,
-          missing, criteria, criteria_source)
-       VALUES ($1, $2, 'open', $3::jsonb, now(), $4, $5, $6::jsonb, $7::jsonb, $8)
+          boundary_reaches_source, missing, criteria, criteria_source)
+       VALUES ($1, $2, 'open', $3::jsonb, now(), $4, $5, $6, $7::jsonb, $8::jsonb, $9)
        ON CONFLICT (number) DO UPDATE
          SET title = EXCLUDED.title, state = 'open',
              owned_paths = EXCLUDED.owned_paths, seen_at = now(),
              is_spec = EXCLUDED.is_spec,
              delegatable = EXCLUDED.delegatable,
+             boundary_reaches_source = EXCLUDED.boundary_reaches_source,
              missing = EXCLUDED.missing,
              criteria = EXCLUDED.criteria,
              criteria_source = EXCLUDED.criteria_source`,
@@ -310,7 +320,14 @@ export async function rememberIssues(
         issue.title.slice(0, 300),
         JSON.stringify(boundary),
         v?.isSpec ?? false,
+        // NOT `... && boundaryReachesSource(boundary)` - see #1358. Making
+        // the distinction visible and acting on it are different decisions,
+        // and the second belongs to the operator: silently narrowing what
+        // the Queen will pick up would stop the swarm, which is the opposite
+        // of the intent. tests/api/boundary-reach.test.ts fails if this line
+        // ever narrows.
         v?.delegatable ?? boundary.length > 0,
+        reachesSource,
         JSON.stringify(v?.missing ?? []),
         JSON.stringify(v?.criteria ?? []),
         v?.criteriaSource ?? 'none',
@@ -560,8 +577,12 @@ export function boardTask(
  * nil into []. If a caller ever needs the difference, the flag goes back in
  * HERE and in `rememberIssues`, which currently JSON-stringifies the result
  * into `owned_paths` with no way to say "the issue never said".
+ *
+ * EXPORTED so `tests/api/boundary-reach.test.ts` can run it against the very
+ * same bodies as its twin in `trios/tools/doc-only-boundary-audit.mjs` and
+ * fail if the two parsers ever disagree about which paths an issue claims.
  */
-function boundaryPathsOf(body: string): string[] {
+export function boundaryPathsOf(body: string): string[] {
   const lines = body.split('\n')
   let inside = false
   const paths: string[] = []
@@ -584,6 +605,47 @@ function boundaryPathsOf(body: string): string[] {
     }
   }
   return paths
+}
+
+// The suffixes that make a boundary path count as documentation (#1358).
+// One array, one place to disagree with; the audit prints it at the top of
+// every run so a reader can.
+const DOC_FILE_SUFFIXES = ['.md']
+
+/// Whether one boundary path is documentation. The FILE NAME decides, not
+/// the directory: `trios/docs/x.md` is documentation and `docs/diagram.png`
+/// is not. Case-insensitive, so `README.MD` is documentation.
+function isDocumentationPath(path: string): boolean {
+  const name = path.slice(path.lastIndexOf('/') + 1)
+  return DOC_FILE_SUFFIXES.some((suffix) => name.toLowerCase().endsWith(suffix))
+}
+
+/**
+ * Whether a boundary reaches beyond documentation (#1358).
+ *
+ * TRUE when at least one path in it is not documentation. A boundary of one
+ * `.md` file has length 1, so `delegatable` as derived today calls it work -
+ * and an issue worked exactly as written changes no behaviour, which is how
+ * "there is no target queue depth" (#1333) was accepted and closed while the
+ * defect it names stayed in the code.
+ *
+ * THIS VALUE IS RECORDED, NOT ACTED ON. `delegatable` keeps its meaning and
+ * its value (`v?.delegatable ?? boundary.length > 0`): whether the Queen may
+ * be pointed away from prose-only tasks is the operator's decision, not this
+ * change's, and silently narrowing what she picks up would stop the swarm.
+ *
+ * The rule is a PINNED TWIN of the one `trios/tools/doc-only-boundary-audit.mjs`
+ * exports under the same name - not an import, and the reason is the
+ * deployment: the agent-server image is built from `agent-server/` alone
+ * (its Dockerfile copies `apps/server` and `packages/*` and nothing from the
+ * repository root), so a static import of that tool would die at boot with
+ * "module not found" and take the whole round with it. The twin cannot drift
+ * silently: `tests/api/boundary-reach.test.ts` imports the audit's export
+ * and fails unless both agree on every shape a boundary can take, and both
+ * parsers against the same bodies.
+ */
+export function boundaryReachesSource(paths: string[]): boolean {
+  return paths.some((path) => !isDocumentationPath(path))
 }
 
 /** One body per candidate, keyed as queend expects. */
