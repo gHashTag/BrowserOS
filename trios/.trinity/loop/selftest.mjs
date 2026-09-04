@@ -706,6 +706,51 @@ check('prose alone is still refused', () => {
   }
 })
 
+
+// ---------------------------------------------------------------------------
+// author: the limit belongs on the QUEUE, not on the backlog.
+//
+// Measured 2026-09-04: five authored issues open, the author refusing to file
+// with "at the WIP limit" - and FOUR of the five already dispatched and sitting
+// in sendBack or wait. The real queue was ONE, and the swarm ran at 14% of
+// capacity while its reviewer answered in 0.8 seconds.
+//
+// Kanban limits work in progress and never the backlog. Dependabot's
+// open-pull-requests-limit protects a HUMAN reviewer's capacity. Neither says
+// to cap the number of things waiting to be started.
+
+check('an issue with a dispatch is in progress, not queue', () => {
+  const src = fs.readFileSync(path.join(DIR, 'author.mjs'), 'utf8')
+  if (!/unstartedAuthored/.test(src)) throw new Error('the count must be of unstarted issues')
+  if (/const open = openAuthored\(\)/.test(src)) throw new Error('still counting the backlog column')
+  if (!/queen_dispatch where issue in/.test(src)) throw new Error('nothing asks which issues were ever dispatched')
+})
+
+check('a failed measurement still refuses to file', () => {
+  // The oldest rule here: a count that could not be taken must never read as
+  // zero, because zero LIFTS the limit rather than holding it.
+  const src = fs.readFileSync(path.join(DIR, 'author.mjs'), 'utf8')
+  const fn = src.slice(src.indexOf('function unstartedAuthored'), src.indexOf('// BOTH SIGNALS'))
+  const returns = [...fn.matchAll(/return\s+([^\n]+)/g)].map((m) => m[1].trim())
+  if (!returns.some((r) => r.startsWith('null'))) {
+    throw new Error('an unreadable count must return null, which refuses, not 0, which permits')
+  }
+  if (!/=== null.*refusing|refusing.*=== null/s.test(src)) {
+    throw new Error('nothing refuses on a null count')
+  }
+})
+
+check('the stall guard reports the same numbers it reads', () => {
+  // It once printed "${open} authored issue(s) open" while `open` had quietly
+  // become the queue depth - a report that disagrees with its own measure is
+  // how a number gets believed for the wrong reason.
+  const src = fs.readFileSync(path.join(DIR, 'author.mjs'), 'utf8')
+  const msg = src.slice(src.indexOf('STALLED:'), src.indexOf('STALLED:') + 400)
+  if (!/q\.open/.test(msg) || !/q\.queue/.test(msg)) {
+    throw new Error('the refusal must name both the open count and the queue depth')
+  }
+})
+
 console.log(`\n${pass} passed, ${failures.length} failed`)
 fs.rmSync(tmp, { recursive: true, force: true })
 if (failures.length) {

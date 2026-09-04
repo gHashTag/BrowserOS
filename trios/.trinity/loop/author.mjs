@@ -447,10 +447,51 @@ something to fail against.
 
 // ------------------------------------------------------------------ the gate
 
-function openAuthored() {
-  const raw = tryShell(`gh issue list --repo ${REPO} --state open --label ${LABEL} --limit 100 --json number -q 'length'`)
-  // A failed count must not read as zero, or the WIP limit silently lifts.
-  return raw === null ? null : Number(raw)
+/**
+ * The QUEUE: authored issues nobody has started yet.
+ *
+ * THE CATEGORY ERROR THIS FIXES. The limit was applied to OPEN issues, which is
+ * the backlog column. Kanban limits work IN PROGRESS and never the backlog, and
+ * Dependabot's `open-pull-requests-limit` - the model this was copied from -
+ * exists to protect a HUMAN reviewer's capacity. Measured here 2026-09-04: the
+ * review takes p50 0.8 seconds. There is no human to protect.
+ *
+ * The consequence was exact. Five authored issues were open, so the author
+ * refused to file: "at the WIP limit". Four of the five had already been
+ * dispatched and were sitting in sendBack or wait - work in progress, not queue.
+ * The real queue depth was ONE, and the swarm ran at 14% of capacity.
+ *
+ * Little's Law says what the target should be: with four workers and a measured
+ * p50 bee runtime of 792 s, keeping them busy needs arrivals at roughly 18 an
+ * hour, and the author fires about four times an hour. So the queue must hold
+ * enough for a worker to always find something - hence a depth of workers + 1,
+ * not a count of everything that happens to be open.
+ *
+ * An issue that has a dispatch row - running, sent back, waiting or escalated -
+ * is IN PROGRESS. It is not queue and must not be counted as queue.
+ *
+ * Returns null when it cannot tell, and null still refuses to file: a count that
+ * failed must never read as zero and lift the limit.
+ */
+function unstartedAuthored() {
+  const raw = tryShell(`gh issue list --repo ${REPO} --state open --label ${LABEL} --limit 100 --json number -q '.[].number'`)
+  if (raw === null) return null
+  const open = raw.split('\n').filter(Boolean)
+  if (!open.length) return { queue: 0, open: 0, inProgress: 0 }
+
+  const js = "const {Pool}=require('pg');const p=new Pool({connectionString:process.env.DATABASE_URL});" +
+    `p.query("select distinct issue from queen_dispatch where issue in (${open.join(',')})")` +
+    ".then(r=>{console.log(JSON.stringify(r.rows)); return p.end()}).catch(e=>{console.log('ERR '+e.message); process.exit(1)})"
+  let started
+  try {
+    const out = SE.remote(js)
+    const line = String(out ?? '').split('\n').map((l) => l.trim()).find((l) => l.startsWith('['))
+    if (!line) return null
+    started = new Set(JSON.parse(line).map((r) => String(r.issue)))
+  } catch { return null }
+
+  const queue = open.filter((n) => !started.has(n))
+  return { queue: queue.length, open: open.length, inProgress: open.length - queue.length, numbers: queue }
 }
 
 // BOTH SIGNALS, INTERLEAVED. Taking one signal to exhaustion and then stopping
@@ -475,15 +516,17 @@ for (let i = 0; ; i++) {
   interleaved.push(...round)
 }
 
-const open = openAuthored()
+const q = unstartedAuthored()
+const open = q === null ? null : q.queue
 
 console.log(`signals: ${bySignal.map((s) => `${s.kind}=${s.items.length}`).join('  ')}`)
-console.log(`WIP limit ${WIP} open '${LABEL}' issues`)
+console.log(`queue depth target ${WIP} - counted on UNSTARTED issues, not open ones`)
 if (open === null) {
-  console.error(`could not count open ${LABEL} issues - refusing to file, because a failed count would read as zero and lift the limit`)
+  console.error(`could not measure the ${LABEL} queue - refusing to file, because a failed count would read as zero and lift the limit`)
   process.exit(1)
 }
-console.log(`open ${LABEL} issues: ${open}   room: ${Math.max(0, WIP - open)}\n`)
+console.log(`${LABEL} issues: ${q.open} open, ${q.inProgress} already dispatched, ${q.queue} still QUEUE`)
+console.log(`queue depth target ${WIP}   room: ${Math.max(0, WIP - open)}\n`)
 
 // An issue already filed for the same subject must not be filed again. The
 // title carries the path, so the path is the key.
@@ -499,6 +542,11 @@ console.log(`open ${LABEL} issues: ${open}   room: ${Math.max(0, WIP - open)}\n`
 // This is the failure the Dependabot rule does not cover, because a human
 // merging PRs is a drain you can assume; an automated reviewer that has quietly
 // stopped is not.
+// The guard still reads the OLDEST OPEN issue rather than the oldest unstarted
+// one, and that is deliberate. An issue dispatched six hours ago and still not
+// closed is exactly as much evidence that the drain has stopped as one nobody
+// ever started; the question this asks is "is anything finishing", not "is
+// anything starting". The queue depth answers the second question, above.
 const STALL_H = Number(process.env.AUTHOR_STALL_H ?? 6)
 const closedRecently = tryShell(
   `gh issue list --repo ${REPO} --state closed --label ${LABEL} --limit 50 --search "closed:>=$(date -u -v-${STALL_H}H +%Y-%m-%dT%H:%M:%SZ)" --json number -q 'length'`,
@@ -510,11 +558,11 @@ const oldestOpenH = (() => {
 
 if (closedRecently !== null && Number(closedRecently) === 0 && oldestOpenH > STALL_H && open > 0) {
   console.error(
-    `STALLED: ${open} authored issue(s) open, the oldest for ${oldestOpenH.toFixed(1)} h, ` +
-    `and none closed in the last ${STALL_H} h. Filing more would be filing into a backlog ` +
-    `nobody is draining. Refusing.`,
+    `STALLED: ${q.open} authored issue(s) open (${q.queue} still queue, ${q.inProgress} dispatched), ` +
+    `the oldest for ${oldestOpenH.toFixed(1)} h, and none closed in the last ${STALL_H} h. ` +
+    `Filing more would be filing into a backlog nobody is draining. Refusing.`,
   )
-  L.append({ kind: 'author-stalled', open, oldestOpenH: Number(oldestOpenH.toFixed(1)), closedRecently: 0 })
+  L.append({ kind: 'author-stalled', open: q.open, queue: q.queue, inProgress: q.inProgress, oldestOpenH: Number(oldestOpenH.toFixed(1)), closedRecently: 0 })
   process.exit(3)
 }
 console.log(`drain: ${closedRecently ?? '?'} authored issue(s) closed in the last ${STALL_H} h, oldest open ${oldestOpenH.toFixed(1)} h\n`)
