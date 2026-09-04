@@ -3,7 +3,7 @@
  * Copyright 2025 BrowserOS
  * SPDX-License-Identifier: AGPL-3.0-or-later
  *
- * Shared types for the AgentRuntime layer. Pure types — no behaviour
+ * Shared types for the AgentRuntime layer. Pure types - no behaviour
  * lives here.
  */
 
