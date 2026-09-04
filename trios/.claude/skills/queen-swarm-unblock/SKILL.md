@@ -1984,6 +1984,98 @@ The rename is atomic; the truncate-then-write is not. This matters for any file 
 timer, cron or watchdog may execute - which in this project is `tri` and every
 tool the chain invokes.
 
+## A carry makes the original branch permanent debt, and no byte-comparison sees it
+
+`isLanded` had four routes - ancestry, an identical merged tree, a patch-id
+match, a hand-applied change. All four compare CONTENT, and all four are blind to
+the thing this loop does constantly: when a bee's branch goes stale I re-cut its
+change against the current base and squash-merge THAT. The carry is a new commit
+with a new tree and a new patch-id, so nothing content-shaped connects it back.
+
+The bee's original branch then becomes permanent debt: re-offered every round,
+conflicting every round, holding its boundary fenced for ever. Four of the nine
+branches that had jammed the pipeline were in exactly this state.
+
+**Read the message.** L1 here is "no code merged without `Closes #N`", which makes
+the commit message a load-bearing record rather than a courtesy:
+
+    Closes #1362                                       an explicit closure
+    feat(queen): explain idle paid slots (#1310) (#330)  a squash subject
+    Carries the #1421 work it belongs with               a carry saying so
+
+Two traps in the matching, both hit within a minute of each other:
+
+- **Tighten it and you break the case it was written for.** Requiring `(#N)` at
+  the end of the line - to reject "unlike (#1421), this does X" - rejected
+  `(#1310) (#330)`, which is the real shape: the issue, then the pull request
+  that merged it. A trailing CHAIN of references is a subject.
+- **Do the matching in JavaScript, not in git's regex.** The dialect belongs
+  somewhere it is known; ask git the loose question and check the boundary
+  yourself.
+
+## A rule transcribed twice is two rules that agree until someone edits one
+
+`close-done.mjs` carried its own copy of the landing test - the tree comparison
+and nothing else - while `land.mjs` grew four more routes it never learned. So
+`land` recognised four finished branches and `close-done` went on refusing to
+close their issues.
+
+That is L2 of this repository, inside the file that decides whether an issue may
+be closed. It asks `land.mjs` now. When you improve a rule, grep for its second
+copy before you finish.
+
+## A conflict does not say which side is behind
+
+`land` reported nine conflicts and one remedy: rebase, or close as superseded.
+Taking that advice on #1302 would have destroyed landed work.
+
+Replaying that 205-line branch onto today's base would have deleted
+`WorkerCapacityBreakdown` (#1308's carried work), deleted the tree-load-failure
+handling the base gained since, and REINTRODUCED a non-ASCII ellipsis into a path
+redaction the base already does in ASCII - breaking L3 in the same stroke.
+
+That branch was not waiting for a rebase. It was superseded in part, and what
+survived belonged on today's base as new work. So measure it:
+
+```bash
+git rev-list --count "$FORK..origin/$BASE" -- $CONFLICTING_PATHS
+git diff --shortstat "$FORK..origin/$BASE" -- $CONFLICTING_PATHS
+```
+
+A base that has moved far on the conflicting files means a rebase would replay
+OLD code over new. It is a measurement, not a verdict - the person still decides,
+now with the number that decides it.
+
+Two smaller things from the same report: `git merge-tree --name-only` interleaves
+PROSE with paths (`Auto-merging X`, `CONFLICT (add/add): ...`), and counting them
+doubled every conflict width printed; and truncating the reason to 96 characters
+had been cutting off exactly the half that says what to do.
+
+## Splitting a rate by category needs a correction, or the dashboard dies
+
+`tri proven` said 186 of 190 judged verdicts prove something. True, and it hides
+where the four live. Split by the detector that filed the brief, every
+machine-authored kind proves at 100% and all four unproven verdicts are in
+hand-written work.
+
+But a split is several tests at once. **Four groups at 95% each carry a 19%
+chance that one comes back significant with nothing wrong anywhere.** Tested at
+the single-comparison threshold, a category dashboard raises a false alarm about
+every fifth look, gets muted, and then misses the real one.
+
+Bonferroni - divide the family error rate by the number of comparisons - is the
+conservative choice and the right one here: a false alarm costs the tool's
+credibility, a missed small effect costs one round's attention. For four groups
+that is z=2.498 rather than 1.96.
+
+Two more things a split must get right:
+
+- **Compare each group with the REST, not with the overall.** A group inside its
+  own baseline drags that baseline toward itself, shrinking every difference and
+  hiding the outlier the split was made to find.
+- **Print the mix.** Simpson's paradox is real: the overall rate can move
+  opposite to every group if the proportions change underneath it.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
