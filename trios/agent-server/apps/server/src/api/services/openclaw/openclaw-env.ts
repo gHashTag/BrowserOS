@@ -12,7 +12,7 @@ const STATE_DIR_NAME = '.openclaw'
  * Path-traversal guard for `agent.name` before it gets joined into
  * the host workspace directory. The name is user-supplied at
  * agent-create time, and `path.join` happily resolves `..` /
- * absolute segments — so a name like `../../tmp` would point the
+ * absolute segments - so a name like `../../tmp` would point the
  * workspace at the user's home directory, the harness's pre-turn
  * snapshot would walk it, and `produced_files` rows would point at
  * arbitrary host paths that subsequent download / preview routes
@@ -20,7 +20,7 @@ const STATE_DIR_NAME = '.openclaw'
  *
  * Reject anything that isn't a flat, single-segment name composed
  * of safe filename characters. The check is intentionally
- * conservative — agent names are short slugs in practice.
+ * conservative - agent names are short slugs in practice.
  */
 export function isAgentWorkspaceNameSafe(name: string): boolean {
   if (typeof name !== 'string') return false
