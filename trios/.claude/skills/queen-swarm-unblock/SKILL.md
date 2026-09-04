@@ -1634,6 +1634,58 @@ Knowing when to revert and file is part of the loop, not a failure of it. Three
 patches in one hour, each removing some false accusations and leaving others, is
 the signal to stop patching.
 
+## Two guards asked the denominator question, and only one was narrow
+
+`coverage` came back clean - zero findings across a fan-out that had to refute
+every claim. Its scope is the loop's own tools and confining it there is exactly
+right. **A scope being narrow is not the same as a scope being wrong**, and after
+five narrowings in a row it was worth being told so by something other than my
+own expectation.
+
+`verdict-audit` carried `select(.number >= 1347)` - one line, no comment, in a
+224-line file where every other decision has a paragraph. It excluded **63 of the
+189 pushed branches**, a third of the swarm's output; 57 of those briefs carry a
+Success Criteria section, 15 yield a promised identifier the tool's own extractor
+accepts, and eight audited by hand all returned SUPPORTED. Both defences failed
+against measurement: the criteria convention reaches down to #1062, and 34
+below-floor branches were committed the same day as 44 above-floor ones.
+
+The set is the data now - every issue with a pushed branch, which is exactly what
+the tool compares a claim against. Scope 126 -> 189, SUPPORTED 47 -> 64, and one
+CLAIM UNSUPPORTED the floor had hidden.
+
+## Forty-six branches of "debt" were never debt
+
+The landing check knew three routes to *already in the base* and was missing the
+fourth: a branch that was **cherry-picked and has since drifted**. The base moved
+on, so merging it back would still change the tree, and it looked like debt for
+ever.
+
+`git cherry` compares patch-ids. One branch's blob was byte-identical to what the
+base had landed - same author, same timestamp. Another's two commits had matching
+patch-ids. A third was the squash source of a commit already in. Unmerged
+**67 -> 21**, landable **49 -> 8**.
+
+> "Merged" has at least four spellings: an ancestor, an identical tree, an
+> equivalent patch-id, and a change somebody applied by hand. Ask the one that is
+> route-blind.
+
+## A carry-forward is only valid against the base it was cut from
+
+Five conflicting branches were carried onto fresh branches - never rebased, never
+force-pushed, the originals untouched. Four survived three refuters each. The
+fifth was refuted by all three, and the reason was **not its content**: two base
+commits had landed while the fan-out ran, so the carry was built on a base that
+no longer existed.
+
+Then landing the four in sequence made the last two stale in the same minute -
+#330 and #331 touched `queen-public-status.ts`, which is exactly what #332 and
+#333 also touch.
+
+**Carries that touch the same file must land as one change, or be re-cut after
+each landing.** That is the same defect these carries exist to rescue - work made
+stale by a base moving underneath it - committed while fixing it.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
