@@ -1701,6 +1701,87 @@ check('a verdict resting on nothing that changed is named vacuous, not supported
   if (!/VACUOUS CLAIM/.test(code)) throw new Error('pass-to-pass with no fail-to-pass has a name')
 })
 
+check('the proven rate is measured over what could be judged, not over everything', async () => {
+  const { rate } = await import('./proven.mjs')
+  // A brief with nothing mechanical in it is evidence about the BRIEF. Counting
+  // it as a failure of the swarm makes both numbers unreadable.
+  const r = rate([
+    { verdict: 'SUPPORTED' }, { verdict: 'SUPPORTED' },
+    { verdict: 'VACUOUS CLAIM' }, { verdict: 'CLAIM UNSUPPORTED' },
+    { verdict: 'NO MECHANICAL CLAIM' }, { verdict: 'NO BRANCH' },
+  ])
+  if (r.checkable !== 4) throw new Error(`the denominator is the judged work - got ${r.checkable}`)
+  if (r.proven !== 2) throw new Error('only SUPPORTED proves anything')
+  if (r.total !== 6) throw new Error('the total is still reported, so the gap is visible')
+})
+
+check('a drop inside the noise is never called a regression', async () => {
+  const { assess } = await import('./proven.mjs')
+  const AB = await import('./ab.mjs')
+  const win = (proven, n) => Array.from({ length: n }, (_, i) => ({
+    number: 2000 - i, verdict: i < proven ? 'SUPPORTED' : 'VACUOUS CLAIM',
+  }))
+  // 18/20 against 95/100: lower, and nowhere near separable at n=20.
+  const a = assess(win(18, 20), win(95, 100), AB.compare)
+  if (a.act === 'now') throw new Error('overlapping intervals cannot license "act"')
+  if (a.act !== 'watch') throw new Error('a lower point estimate is still worth watching; the two tiers are different messages')
+})
+
+check('a separated drop does license acting', async () => {
+  const { assess } = await import('./proven.mjs')
+  const AB = await import('./ab.mjs')
+  const win = (proven, n) => Array.from({ length: n }, (_, i) => ({
+    number: 2000 - i, verdict: i < proven ? 'SUPPORTED' : 'VACUOUS CLAIM',
+  }))
+  const a = assess(win(10, 40), win(98, 100), AB.compare)
+  if (a.act !== 'now') throw new Error('25% against 98% on these samples is not noise')
+})
+
+check('a recent window that is BETTER never raises anything', async () => {
+  const { assess } = await import('./proven.mjs')
+  const AB = await import('./ab.mjs')
+  const win = (proven, n) => Array.from({ length: n }, (_, i) => ({
+    number: 2000 - i, verdict: i < proven ? 'SUPPORTED' : 'VACUOUS CLAIM',
+  }))
+  const a = assess(win(40, 40), win(50, 100), AB.compare)
+  if (a.act !== 'none') throw new Error('improving is not an incident')
+})
+
+check('an empty window is not a finding', async () => {
+  const { assess } = await import('./proven.mjs')
+  const AB = await import('./ab.mjs')
+  const a = assess([], [{ number: 1, verdict: 'SUPPORTED' }], AB.compare)
+  if (a.act !== 'none') throw new Error('nothing to compare is not evidence of anything')
+  if (!/not enough judged work/.test(a.why || '')) throw new Error('say why there is no answer')
+})
+
+check('the newest verdicts are the recent window', async () => {
+  const { split } = await import('./proven.mjs')
+  const rows = [{ number: 1 }, { number: 500 }, { number: 100 }, { number: 900 }]
+  const { recent, baseline } = split(rows, 2)
+  if (recent.map((r) => r.number).join(',') !== '900,500') throw new Error('recent means newest')
+  if (baseline.length !== 2) throw new Error('everything else is the baseline')
+})
+
+check('a finding from coverage is not a broken step', () => {
+  const code = codeOf('heal.mjs')
+  // The tool exits non-zero when it has something to say. Reporting that as
+  // FAILED buries the finding under the word this chain uses for "broken".
+  if (!/FINDING/.test(code)) throw new Error('a finding needs its own status')
+  if (!/ACT NOW:/.test(code)) throw new Error('the chain must read the tool\'s own words, not its exit code alone')
+})
+
+check('the audits do not pay for the freeing steps', () => {
+  const code = codeOf('heal.mjs')
+  // One deadline for the whole chain meant reap, push-work, land, close-done
+  // and author consumed all eight minutes and verdict-audit, proven and
+  // judge-packet were SKIPPED - the chain reporting itself complete with a
+  // third of its steps never run.
+  if (!/REPORT_DEADLINE_MS/.test(code)) throw new Error('the reporting phase needs a budget of its own')
+  if (!/reportsOnly/.test(code)) throw new Error('the line between freeing and reporting must be data, not prose')
+  if (!/reportPhaseStartedAt/.test(code)) throw new Error('the report budget starts when the report phase does, not when the chain did')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
