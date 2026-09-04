@@ -1176,6 +1176,106 @@ first. But its justification is "a wait costs six hours per occurrence", not
 "most work fails". Getting the reason right matters even when the fix is the
 same, because the reason is what decides the NEXT thing to build.
 
+## The catalogue: every reason the swarm stands still
+
+Asked four times in one night, answered by hand four times, differently each
+time. None of these is guessable from `RUNNING 0`, and several look identical
+from outside - a held boundary, an unclosed issue and an empty queue all present
+as "nothing to choose". `tri why` checks them in this order and stops at the
+first that explains what is seen.
+
+| # | cause | how it looks | what actually fixes it |
+|---|---|---|---|
+| 1 | the supervisor is unreachable | everything is unknown | `railway logs` |
+| 2 | the scheduler is off | no round ever starts | turn it on |
+| 3 | nothing is wrong - workers are busy | | `tri verdicts` - load is not health |
+| 4 | a run holds the loop lock | every timer fire stands down | check the pid; it expires at 45 min |
+| 5 | the disk is full | dispatches die at 0 s | `tri reap-local --reap` |
+| 6 | the queue is empty | "nothing to choose" | `tri feed --act` |
+| 7 | accepted work never closed | "nothing to choose" | `tri push-work --push && tri close-done --close` |
+| 8 | candidates all claimed | "nothing to choose" | `tri unpark && tri lease` |
+| 9 | boundaries collide | `fileConflict` | `tri holds`, and file disjoint work |
+| 10 | issues are not delegatable | `missingBoundary` | give them a Boundary and criteria |
+| 11 | the detectors have run dry | the author files nothing | widen a detector, or add one |
+| 12 | **the workers cannot BEGIN** | identical to a healthy idle swarm | read `outcome` on a dispatch that died in under 5 s |
+
+### The twelfth is the one no aggregate could ever show
+
+Asked a fifth time why the bees were idle, and this time I had broken them
+myself.
+
+```
+Queen tick decided  chosen=1470  refusal=null  candidates=34
+Queen tick decided  chosen=1470  refusal=null  candidates=34
+```
+
+The same issue chosen in consecutive rounds, one worker of four, and NOTHING in
+the skip summary wrong. The dispatch row said it plainly:
+
+```
+git fetch failed: error: cannot update the ref 'refs/remotes/origin/queen-1329':
+unable to append to '.git/logs/refs/remotes/origin/queen-1329': Permission denied
+```
+
+`push-work.mjs` enters the container as **root**. Every ref it updated left a
+reflog file owned by root, and the worker runs as `bee`, which cannot append to
+them. **112 such files.** Every new bee died at `git fetch`, instantly, for
+hours. The tick chose correctly, dispatched correctly, and recorded the failure
+that nothing was reading.
+
+**A worker that cannot BEGIN looks exactly like a healthy swarm with nothing to
+do.** No count distinguishes them. The only place the reason exists is the
+`outcome` column of the dispatch row, and reading it is now the twelfth check.
+
+The tool that maintains the fleet must give the repository back: ownership is
+restored after every push, read from `.git` itself rather than assumed.
+
+**A permanent, correct skip is not a cause.** #380 and #957 each declare in
+their own body that no worker can start them. They carry a `not-a-task` label -
+machine-readable in a way prose is not - and the diagnosis subtracts them.
+Reporting a true and permanent fact as the reason the swarm is idle is the same
+mistake `fp-check` made counting NEVER ACTED as a false accusation.
+
+**An undiagnosed idle swarm exits 2, not 0.** Silence must never read as health,
+and a cause this tool does not know is worth ADDING to it rather than diagnosing
+by hand a fifth time.
+
+## Feeding is not auditing, and must not queue behind it
+
+The chain takes 480 s of its 600 s cycle; four workers drain the queue in 13
+minutes. The audits are worth running and are not worth making the workers wait
+for. `tri feed` is the three steps that decide whether a worker has anything to
+start - push, close, author - on a cadence of their own, taking the same lock so
+the two never write at once.
+
+## A detector with a finite corpus is a detector that stops
+
+The L3 detector ran down to FOUR candidates across all three signals. It covered
+`apps/server/src`; the same law governs the whole repository. Widened to `apps`,
+`packages`, `scripts` and `tools` it went 44 -> 111 usable files, and the
+backlog from 4 to 71.
+
+**Generated files are refused, by path AND by the marker the generator writes.**
+`packages/cdp-protocol` alone is 114 files opening with "AUTO-GENERATED from CDP
+protocol. DO NOT EDIT." Filing against them would have been 114 tasks a correct
+worker must refuse, and L0 says a diff that changes a generated file is itself a
+defect. The marker is only believed near the TOP: a file that mentions generated
+code two hundred lines down is not generated, and refusing it would shrink the
+corpus in a way nobody would notice.
+
+## Two ways a batch takes itself down
+
+**A step killed by a timeout is not a step that failed.** Reporting it as FAILED
+sent me hunting a bug in `close-done` that did not exist. Being slower is not the
+failure; being cut off is - and what a half-run step did before the cut still
+stands.
+
+**`git push` exits non-zero when ANY ref is rejected, and push-work pushes a
+batch.** One branch whose remote history had diverged made `execSync` throw
+before the reporting the tool already had, so NONE of the other branches reached
+the remote. That is the exact defect the tool exists to fix, committed by the
+tool. A partly-rejected push is an outcome, not an exception.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
