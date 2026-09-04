@@ -1591,6 +1591,49 @@ acquires any.
 > if it is harmless, measure it before you believe it, and say plainly when the
 > measurement comes back empty.
 
+## Widening a scope must never narrow it somewhere else
+
+Three detectors were narrowed; the guards were too. `clocks.mjs` listed **two
+files by hand** while nineteen under `apps/server/src` alone mention a time
+column - a clean answer about a tenth of the question, every round.
+
+Widening it dropped a source. The search looks for SQL column names, and
+`QueenDelegation.swift` carries the same decisions under Swift property names, so
+switching from the named list to the search silently lost a file that had been
+read since the guard was written: **8 measurements became 7**. The named files
+stay named; the search **adds** to them.
+
+## When the method does not survive the wider corpus, say so and stop
+
+`fields.mjs` audits one file; sixteen write SQL. I widened it, and it produced
+false accusations against working code in four distinct ways:
+
+1. SQL declared as a **named constant** and consumed a hundred lines below - the
+   reads land in whichever region they fall into;
+2. **quoted identifiers**: `) as "messageCount"` yielded no column at all;
+3. a **subquery in the select list** whose own `SELECT` becomes a region start
+   and truncates the outer column list;
+4. **paren depth** that must be tracked inside the SQL literal, not across the
+   surrounding JavaScript.
+
+Its first accusation was against `queen-needs-you.ts`, claiming it failed to
+select four columns its query names explicitly. **I opened the file before
+believing it** - the only reason this is a reverted experiment rather than a
+published false accusation, and the discipline that should have saved #1419.
+
+Two of the four fixes were real and kept. The other two need the boundary to come
+from an actual SQL parse, which is **a task, not an improvisation** - filed as
+one, with the four failure modes named and an acceptance criterion pinning the
+file that exposed them.
+
+> An audit that quietly passes what it cannot resolve is the shape of the defect
+> it hunts. An audit that ACCUSES what it cannot resolve is worse: the first
+> wastes an opportunity, the second spends someone's afternoon.
+
+Knowing when to revert and file is part of the loop, not a failure of it. Three
+patches in one hour, each removing some false accusations and leaving others, is
+the signal to stop patching.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
