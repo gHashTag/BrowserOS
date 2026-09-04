@@ -534,7 +534,7 @@ export const useChatSession = (options?: ChatSessionOptions) => {
     syncExecutionHistory(messages, status)
   }, [messages, status, syncExecutionHistory])
 
-  // Save conversation only after streaming completes — not on every token
+  // Save conversation only after streaming completes - not on every token
   const previousStatusRef = useRef(status)
   // biome-ignore lint/correctness/useExhaustiveDependencies: only save when streaming finishes
   useEffect(() => {
@@ -697,7 +697,7 @@ export const useChatSession = (options?: ChatSessionOptions) => {
     })
 
     if (!isIntegrationsSyncedRef.current) {
-      // Queue the message — will be sent when sync completes
+      // Queue the message - will be sent when sync completes
       pendingMessageRef.current = params
       return
     }
