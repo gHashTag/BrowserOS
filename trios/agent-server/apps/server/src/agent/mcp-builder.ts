@@ -43,7 +43,7 @@ export interface McpClientBundle {
  * server is slow to boot gets retried instead of being dropped on the
  * first refusal. The worst case for one spec is bounded by
  * `MCP_CONNECT_MAX_ATTEMPTS * TIMEOUTS.MCP_CLIENT_CONNECT` because every
- * attempt — client creation plus the initial tools() fetch — must fit
+ * attempt - client creation plus the initial tools() fetch - must fit
  * inside a single `TIMEOUTS.MCP_CLIENT_CONNECT` budget.
  */
 export const MCP_CONNECT_MAX_ATTEMPTS = 3
