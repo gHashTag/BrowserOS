@@ -24,6 +24,8 @@
  */
 
 import { spawn } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
+import { statSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import type { Pool } from 'pg'
 import { logger } from '../../lib/logger'
@@ -513,9 +515,168 @@ export function workspaceRoot(): string {
  * treated as an error, because a round that crashed after cutting one must be
  * able to run again.
  */
+/**
+ * How full the volume this server writes to actually is.
+ *
+ * Returns null when it cannot be measured, and every caller treats that as
+ * UNKNOWN rather than as room - a guard that reads an unmeasurable disk as
+ * empty is a guard that disables itself exactly when the filesystem is unwell.
+ */
+export function volumeUsedPercent(dir = workspaceRoot()): number | null {
+  // `df -P`, NOT statfs arithmetic - and the difference is not academic.
+  //
+  // The first version computed `(blocks - bavail) / blocks` from statfs. On a
+  // Linux container that is exact. On an APFS shared container it is not:
+  // `statfs` reports the CONTAINER's size while df reports this volume's own
+  // usage, so a Mac at 57% measured 97% and the guard refused every dispatch in
+  // a unit test that merely cut a worktree in a temp directory.
+  //
+  // POSIX `df -P` gives one line, one capacity column, the same number the
+  // operating system shows a person and the same one the external reaper has
+  // been reading correctly all night. One subprocess per dispatch, and
+  // dispatches are minutes apart.
+  try {
+    const out = execFileSync('df', ['-P', dir], {
+      encoding: 'utf8',
+      timeout: 10_000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+    const line = out.trim().split('\n').pop() ?? ''
+    const m = line.match(/(\d+)%/)
+    return m ? Number(m[1]) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * GARBAGE COLLECTION BELONGS ON THE NODE.
+ *
+ * THE INCIDENT, 2026-09-05. `/workspace` reached 100% - 71 MB of 46 GB, sixty
+ * worktrees - and every dispatch died in its first second with
+ * `git worktree add failed: unable to write file docs/images/...`. An issue
+ * handed to the swarm never ran a line.
+ *
+ * A reaper existed and had not run, because it lived OUTSIDE: it reached the
+ * volume through `railway ssh`, and railway refuses a connection while the
+ * application is unhealthy - which it was, BECAUSE the volume was full. The tool
+ * that repairs the failure reached through the thing the failure breaks. A retry
+ * thirty seconds later happened to succeed; nothing guaranteed it would.
+ *
+ * Every system that has met this problem answers it the same way. kubelet
+ * garbage-collects images on the NODE against high and low watermarks, not from
+ * the control plane. CI runners clean their own disks, because a control plane
+ * cannot reach a wedged runner. ext4 reserves 5% so root can still act on a
+ * "full" filesystem. The common sentence: the collector must not depend on the
+ * thing whose failure it collects for.
+ *
+ * So the server reaps its own volume, on the same watermark model the external
+ * reaper uses - above HIGH, remove until LOW - and the external one becomes a
+ * fallback rather than the only hand.
+ *
+ * WHAT IT WILL NEVER REMOVE. A worktree holding uncommitted work. This container
+ * carries no push credential by design, so unpublished work in a tree is the
+ * ONLY copy of it, and `prepareWorktree` already refuses to clean a reused tree
+ * for exactly that reason. A dirty tree is somebody's unfinished turn; the disk
+ * is never worth it. Nor does it touch the newest few, which are likely to be
+ * running right now.
+ */
+export async function reapWorktrees(opts: {
+  high?: number
+  low?: number
+  keepNewest?: number
+  volumeUsed?: (dir: string) => number | null
+} = {}): Promise<{
+  before: number | null
+  after: number | null
+  removed: string[]
+  keptDirty: string[]
+  refused: string[]
+}> {
+  const high = opts.high ?? Number(process.env.QUEEN_VOLUME_HIGH ?? 80)
+  const low = opts.low ?? Number(process.env.QUEEN_VOLUME_LOW ?? 55)
+  const keepNewest = opts.keepNewest ?? Number(process.env.QUEEN_VOLUME_KEEP ?? 6)
+  const root = workspaceRoot()
+  const measure = opts.volumeUsed ?? volumeUsedPercent
+  const before = measure(root)
+  const result = {
+    before,
+    after: before,
+    removed: [] as string[],
+    keptDirty: [] as string[],
+    refused: [] as string[],
+  }
+  // Unknown is not room. Below the mark is not an emergency.
+  if (before === null || before < high) return result
+
+  const listed = await run('git', ['worktree', 'list', '--porcelain'], root)
+  const paths = listed.out
+    .split('\n')
+    .filter((l) => l.startsWith('worktree '))
+    .map((l) => l.slice(9))
+    .filter((p) => p.includes('/.worktrees/'))
+
+  // Oldest first: the newest are the ones most likely to be running.
+  const withAge: Array<{ path: string; mtime: number }> = []
+  for (const p of paths) {
+    try {
+      withAge.push({ path: p, mtime: statSync(p).mtimeMs })
+    } catch {
+      // A recorded worktree whose directory is gone: prune will clear it.
+      withAge.push({ path: p, mtime: 0 })
+    }
+  }
+  withAge.sort((a, b) => a.mtime - b.mtime)
+  const candidates = withAge.slice(0, Math.max(0, withAge.length - keepNewest))
+
+  for (const c of candidates) {
+    const now = measure(root)
+    if (now !== null && now <= low) break
+
+    const dirty = await run('git', ['status', '--porcelain'], c.path, 60_000)
+    // Unreadable is not clean. A tree whose state cannot be read might hold the
+    // only copy of a turn's work.
+    if (dirty.code !== 0 || dirty.out.trim().length > 0) {
+      result.keptDirty.push(c.path)
+      continue
+    }
+    // No `--force`, here or anywhere else in this project. A tree that refuses
+    // to go is a tree a person should look at.
+    const removedOne = await run(
+      'git',
+      ['worktree', 'remove', c.path],
+      root,
+      120_000,
+    )
+    if (removedOne.code === 0) result.removed.push(c.path)
+    else result.refused.push(c.path)
+  }
+
+  await run('git', ['worktree', 'prune'], root, 60_000)
+  result.after = measure(root)
+  return result
+}
+
 export async function prepareWorktree(
   issue: number,
+  deps: {
+    // INJECTED, and the test that forced it is the argument for it.
+    //
+    // The first version read the real filesystem unconditionally, so a unit test
+    // that cuts a worktree in a temp directory started passing or failing
+    // according to how full the DEVELOPER'S disk was. It failed on a machine at
+    // 57% because `statfs` on an APFS shared container reports the container's
+    // size, not this volume's usage - `(blocks - bavail) / blocks` came out at
+    // 97% where `df` says 57.
+    //
+    // In the Linux container this guard actually runs in, statfs is exact. On a
+    // developer's Mac it is not, and a guard whose behaviour depends on the host
+    // filesystem is a guard no test can pin. So the measurement is a dependency
+    // with a real default, like the pool and the clock everywhere else here.
+    volumeUsed?: (dir: string) => number | null
+  } = {},
 ): Promise<{ ok: boolean; path: string; detail: string }> {
+  const measure = deps.volumeUsed ?? volumeUsedPercent
   const root = workspaceRoot()
   const branch = `queen-${issue}`
   const path = `${root}/.worktrees/${branch}`
@@ -550,6 +711,38 @@ export async function prepareWorktree(
           ? 'reused an existing worktree (clean)'
           : `reused an existing worktree (${changed} uncommitted file(s) ` +
             'left by a previous attempt)',
+    }
+  }
+
+  // BEFORE THE FETCH, because a fetch onto a full volume fails the same way and
+  // the reason it reports is about refs rather than about space. The dispatch
+  // that exposed this died with "cannot update the ref ... unable to write file",
+  // which sent the reader looking at git rather than at df.
+  const used = measure(root)
+  const highMark = Number(process.env.QUEEN_VOLUME_HIGH ?? 80)
+  if (used !== null && used >= highMark) {
+    const gc = await reapWorktrees({ volumeUsed: measure })
+    logger.warn('Queen reaped worktrees before cutting a new one', {
+      before: gc.before,
+      after: gc.after,
+      removed: gc.removed.length,
+      keptDirty: gc.keptDirty.length,
+      refused: gc.refused.length,
+    })
+    const still = gc.after
+    if (still !== null && still >= 95) {
+      // REFUSE, and say what is true. Dying at `git worktree add` reports a git
+      // error for a disk problem, and every reader of that message has looked in
+      // the wrong place. A refusal that names the number is a refusal somebody
+      // can act on.
+      return {
+        ok: false,
+        path,
+        detail:
+          `volume ${still}% full after reaping ${gc.removed.length} worktree(s); ` +
+          `${gc.keptDirty.length} held uncommitted work and were kept. ` +
+          'Not cutting a worktree that would fail part-way',
+      }
     }
   }
 

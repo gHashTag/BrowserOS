@@ -265,7 +265,13 @@ describe('#1321 Wave A: a broken local ref must not block a fresh worktree', () 
       // FR-004, in the fixture itself: origin is a path, not a URL.
       expect(git(root, ['remote', 'get-url', 'origin'])).toBe(origin)
 
-      const prepared = await prepareWorktree(1321)
+      // The volume measurement is injected so this test does not depend on how
+      // full the developer's disk happens to be. It failed for exactly that
+      // reason once: `/private/tmp` lives on the macOS data volume, which was at
+      // 97%, and the new headroom guard correctly refused to cut a worktree that
+      // would have failed part-way. Correct behaviour, wrong thing for a unit
+      // test about stale refs to be measuring.
+      const prepared = await prepareWorktree(1321, { volumeUsed: () => 10 })
 
       // Scenario 1: preparation succeeds - the stale ref costs nothing.
       expect(prepared.ok).toBe(true)
