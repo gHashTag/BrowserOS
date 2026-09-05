@@ -2930,6 +2930,18 @@ not start. They stay zombies for the life of the container, the pid table fills,
 installs. Verify by asking, not by assuming: `cat /proc/1/comm` should name the
 init, not your application.
 
+**It held.** Measured a day later, with the swarm working:
+
+    PID1 tini
+    PIDS 161/1000
+    PROCS 15 ZOMBIES 0
+
+That is 310 finished dispatches through the new PID 1 with no accumulation,
+against 37 zombies of 50 processes before it - and the chain's last eight runs
+show push-work, land, close-done and author all at 0%. A fresh container starts
+near zero anyway, so the reading that matters is this one: zombies at zero while
+161 process slots are in use.
+
 **Awaiting your own child is not enough.** Any tool that runs a shell command
 inherits that shell's children when it exits, and in a container that inheritance
 lands on PID 1.
