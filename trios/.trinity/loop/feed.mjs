@@ -135,7 +135,14 @@ if (isMain) {
         ? `timed out part-way - what it did before that stands: ${summarise(out)}`
         : `FAILED\n${out.split('\n').slice(-4).join('\n')}`
     console.log(`    ${line}`)
-    results.push({ step: s.name, status, summary: line.slice(0, 120) })
+    results.push({
+      step: s.name,
+      status,
+      summary: line.slice(0, 120),
+      // Same reason as in heal.mjs: a failure whose evidence is only printed is
+      // a failure nobody can diagnose an hour later.
+      evidence: status === 'FAILED' ? out.trim().split('\n').slice(-6).join(' | ').slice(0, 400) : undefined,
+    })
   }
 
   const bad = results.filter((r) => r.status === 'FAILED')

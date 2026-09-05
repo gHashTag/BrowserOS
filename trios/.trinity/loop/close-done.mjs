@@ -25,6 +25,7 @@
 //   node close-done.mjs --close     # act
 
 import { execSync } from 'node:child_process'
+import * as CH from './channel.mjs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -71,10 +72,9 @@ const tryShell = (c) => { try { return sh(c) } catch { return null } }
 function remote(js) {
   const one = js.replace(/\s*\n\s*/g, ' ').trim()
   const script = `cd /app/apps/server && bun -e ${shq(one)}`
-  const out = execSync(`${RAILWAY} --service ${SVC} -- sh -c ${shq(script)}`, {
-    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 280000,
-  })
-  return out.split('\n').filter((l) => !/Using SSH|railway\.json|Migrate|Existing/.test(l)).join('\n').trim()
+  // One channel, one retry, in channel.mjs. 32 of this file's 70 runs failed
+  // while it carried its own copy without one.
+  return CH.remote(script, { service: SVC })
 }
 
 // Constants are inlined rather than passed as `$1`. With `shq` the local shell
