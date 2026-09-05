@@ -166,7 +166,20 @@ interface SkipReasonSummary {
  */
 function classifySkipReason(line: string): SkipCategory {
   if (line.includes(' held by ')) return 'fileConflict'
-  if (line.includes('a worker has it or is expected back')) return 'claimed'
+  // THE CLAIMED SENTENCE BECAME FOUR, AND THIS KEPT MATCHING THE ONE IT
+  // REPLACED. `main.swift` no longer writes its own words for a live claim: it
+  // appends `QueenDelegationPolicy.spokenForReport(states:).detail`, and that
+  // returns four sentences depending on the states behind the claim - none of
+  // which contains `a worker has it or is expected back`. So every live claim
+  // has been filed under `other`, which the public page cannot tell apart from
+  // the Queen having given no reason at all.
+  //
+  // Matched on the fixed part of each sentence, never on its payload: the
+  // state names are interpolated and would drift with the registry.
+  if (line.includes('a worker already has it')) return 'claimed'
+  if (line.includes('claimed, but no worker is attached yet')) return 'claimed'
+  if (line.includes('spoken for by a task with no recorded state')) return 'claimed'
+  if (line.includes('so it is finished or waiting on you')) return 'claimed'
   if (line.includes('the work already landed')) return 'completed'
   if (line.includes('no issue body was supplied')) return 'missingBoundary'
   if (line.includes('delegatable but')) return 'incompleteSpec'

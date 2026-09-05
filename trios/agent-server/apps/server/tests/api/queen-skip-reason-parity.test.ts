@@ -56,15 +56,30 @@ const QUALITY_SWIFT = join(
   import.meta.dir,
   '../../../../queen-core/Sources/QueenCore/QueenSpecQuality.swift',
 )
+// THE SENTENCES MOVED AND THIS LIST DID NOT FOLLOW THEM.
+//
+// `main.swift` no longer writes its own words for a live claim. It appends
+// `QueenDelegationPolicy.spokenForReport(states:).detail`, and those four
+// sentences live here. With only the two files above, this gate could see the
+// append site but not the words - so it reported the site as unclassifiable
+// whatever the route said, which is a true statement about its own reach
+// rather than about the wording. A gate that cannot read where a sentence
+// lives cannot tell drift from its own blind spot.
+const DELEGATION_SWIFT = join(
+  import.meta.dir,
+  '../../../../queen-core/Sources/QueenPolicy/QueenDelegation.swift',
+)
 
 // Read once, at module scope. A path that cannot be read throws here and
 // fails the whole file: this gate reports only success it has earned.
 const routeText = readFileSync(ROUTE, 'utf8')
 const mainSwiftText = readFileSync(MAIN_SWIFT, 'utf8')
 const qualitySwiftText = readFileSync(QUALITY_SWIFT, 'utf8')
+const delegationSwiftText = readFileSync(DELEGATION_SWIFT, 'utf8')
 
 /** The Swift sources that own the sentences, concatenated for the search. */
-const swiftSources = mainSwiftText + '\n' + qualitySwiftText
+const swiftSources =
+  mainSwiftText + '\n' + qualitySwiftText + '\n' + delegationSwiftText
 
 /** The body of classifySkipReason, cut out of the route source by braces. */
 function extractClassifierBody(source: string): string {
@@ -202,6 +217,54 @@ function siteSentence(site: AppendSite): string {
     .join('')
 }
 
+/**
+ * The sentences a policy function returns, for a site that appends a call
+ * instead of writing its own words.
+ *
+ * A SITE THAT APPENDS A CALL WAS BEING CALLED DRIFT. `main.swift:262` appends
+ * `QueenDelegationPolicy.spokenForReport(states:).detail`, so its own literals
+ * are `"#\(number): "` and nothing else - no marker, ever, whatever the route
+ * says. The check reported it as a site the public page can only file under
+ * `other`, which is a true statement about this gate's reach and reads as a
+ * statement about the wording. That is the same defect the gate exists to
+ * catch, in the gate.
+ *
+ * So the one call it can follow is named here and resolved from the source it
+ * lives in. NARROW ON PURPOSE: a site that appends a call this list does not
+ * know is reported as exactly that, and never as drift. Widening the list is a
+ * decision somebody makes on purpose; guessing is how a gate starts lying.
+ */
+const FOLLOWABLE_CALLS: Record<string, string> = {
+  spokenForReport: delegationSwiftText,
+}
+
+function calledSentences(site: AppendSite): string[] | null {
+  for (const [name, source] of Object.entries(FOLLOWABLE_CALLS)) {
+    if (!site.text.includes(name)) continue
+    const at = source.indexOf(`func ${name}(`)
+    if (at === -1) {
+      throw new Error(
+        `this gate claims it can follow ${name}, and that function is not in the source it was told to read`,
+      )
+    }
+    // Every `detail:` literal in the function body. The bodies interpolate
+    // state names, so only the fixed part of each sentence is compared - the
+    // same rule the route's matchers keep.
+    const body = source.slice(at)
+    const end = body.indexOf('\n    }')
+    const found = [
+      ...body.slice(0, end === -1 ? undefined : end).matchAll(
+        /detail:\s*"((?:[^"\\]|\\.)*)"/g,
+      ),
+    ].map((m) => m[1])
+    if (!found.length) {
+      throw new Error(`no detail sentence found in ${name} - this gate is checking nothing`)
+    }
+    return found
+  }
+  return null
+}
+
 const appendSites = extractAppendSites(mainSwiftText)
 
 describe('queen skip reason parity', () => {
@@ -225,7 +288,10 @@ describe('queen skip reason parity', () => {
     // What today's route yields. Each line is an assertion about the derived
     // value; QUEEND_SKIP_MARKERS itself is built only by the extraction.
     expect(QUEEND_SKIP_MARKERS).toContain(' held by ')
-    expect(QUEEND_SKIP_MARKERS).toContain('a worker has it or is expected back')
+    // A SAMPLE, and it has to be one the route still has. This pinned the
+    // single sentence a live claim used to write; the policy now returns four
+    // and the route matches all four, so the sample names one of them.
+    expect(QUEEND_SKIP_MARKERS).toContain('a worker already has it')
     expect(QUEEND_SKIP_MARKERS).toContain('the work already landed')
     expect(QUEEND_SKIP_MARKERS).toContain('no issue body was supplied')
     expect(QUEEND_SKIP_MARKERS).toContain('delegatable but')
@@ -250,10 +316,22 @@ describe('queen skip reason parity', () => {
     )
     expect(appendSites.length).toBeGreaterThan(0)
     const unclassified = appendSites
-      .map((site) => ({
-        line: site.line,
-        category: classifyWithMarkers(siteSentence(site)),
-      }))
+      .map((site) => {
+        // A site that appends a call is judged by every sentence that call can
+        // return: if any one of them would land in `other`, the public page has
+        // a reason it cannot name, and that is the same defect.
+        const called = calledSentences(site)
+        if (called) {
+          const worst = called.find(
+            (sentence) => classifyWithMarkers(sentence) === 'other',
+          )
+          return {
+            line: site.line,
+            category: worst === undefined ? 'classified' : 'other',
+          }
+        }
+        return { line: site.line, category: classifyWithMarkers(siteSentence(site)) }
+      })
       .filter((result) => result.category === 'other')
     expect(
       unclassified,
@@ -266,10 +344,8 @@ describe('queen skip reason parity', () => {
     // In memory only: no file on disk is written, moved, or truncated to run
     // this control.
     const reworded = swiftSources
-      .split('a worker has it or is expected back')
-      .join('a worker is on it or will come back')
-    expect(findMissingMarkers(reworded)).toEqual([
-      'a worker has it or is expected back',
-    ])
+      .split('the work already landed')
+      .join('the work has already gone in')
+    expect(findMissingMarkers(reworded)).toEqual(['the work already landed'])
   })
 })
