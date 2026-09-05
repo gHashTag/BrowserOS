@@ -240,8 +240,12 @@ for (const s of STEPS) {
     // baseline. That is the tool working, and calling it FAILED would bury the
     // one thing it exists to say under a word this chain uses for "the step is
     // broken". It gets its own status so both can be read.
-    status = /ACT NOW:/.test(out) ? 'FINDING'
-      : /Error:|Traceback|not a function|ENOENT/.test(out) ? 'FAILED' : 'ok'
+    // A STEP THAT COULD NOT REACH THE CONTAINER HAS NOT FAILED. The container
+    // was unreachable, once, for the whole run - and recording that as four
+    // separate step failures is what inflated every rate this loop has quoted.
+    status = /the channel was already found down in this run/.test(out) ? 'channel-down'
+      : /ACT NOW:/.test(out) ? 'FINDING'
+        : /Error:|Traceback|not a function|ENOENT/.test(out) ? 'FAILED' : 'ok'
   }
   let line = null
   for (const [re, fmt] of SUMMARY) {
@@ -264,7 +268,7 @@ for (const s of STEPS) {
     step: s.name,
     status,
     line: line || null,
-    evidence: (status === 'FAILED' || status === 'FINDING')
+    evidence: (status === 'FAILED' || status === 'FINDING' || status === 'channel-down')
       ? out.trim().split('\n').slice(-6).join(' | ').slice(0, 400)
       : undefined,
   })
