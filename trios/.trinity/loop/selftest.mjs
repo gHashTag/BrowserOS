@@ -2577,6 +2577,14 @@ check('the dashboard reads the gateway rate, it does not probe for it', async ()
     JSON.stringify({ ssh: { attached: false, kind: 'app-down' } }),
   ].join('\n')
   if (gatewayPercent(read) !== 33) throw new Error(`1 of 3 attached is 33% - got ${gatewayPercent(read)}`)
+  // A LIFETIME AVERAGE HIDES A FIX. Naming the client took the gateway from
+  // 7 of 22 to 4 of 4, and the cumulative number crawled from 35% to 39%.
+  const long = () => [
+    ...Array.from({ length: 20 }, () => JSON.stringify({ ssh: { attached: false } })),
+    ...Array.from({ length: 4 }, () => JSON.stringify({ ssh: { attached: true } })),
+  ].join('\n')
+  if (gatewayPercent(long) !== 33) throw new Error(`a 12-sample window over 20 down then 4 up is 4/12 = 33% - got ${gatewayPercent(long)}`)
+  if (gatewayPercent(long, 24) !== 17) throw new Error('the whole record is a different question, and it is 4 of 24')
   if (gatewayPercent(() => '') !== null) throw new Error('no samples is null, not zero: never measured and never answered are different')
   const code = codeOf('dash.mjs')
   if (/two-views\.mjs/.test(code)) throw new Error('it reads the record; running the probe would change what it measures')
