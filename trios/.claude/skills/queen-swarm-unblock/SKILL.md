@@ -2582,6 +2582,49 @@ that quietly skips things reads as a tool that found nothing to do. And **refuse
 entirely when the board cannot be read**: "nobody is running" and "I could not
 ask" are the same empty list, and here they lead to opposite acts.
 
+## No collection strategy wins against a duplication rate
+
+Three rounds went into the volume. I raised watermarks, put a collector inside
+the container, wrote a rescue for stranded work, then replaced pressure-based
+reaping with removal on completion. Every one of those fixed a real defect. Then
+I measured again, because the recommendation was to measure again:
+
+    35% used, +39 points per hour, full in 1.7 hours
+    9 worktrees, 3 redundant, the rest belonging to running bees
+
+The reapers were working. Something else filled it.
+
+    /home/bee/.bun   2493 MB   on overlay        (the image, 2 TB)
+    /workspace       46 GB     on /dev/zd29056   (the volume)
+
+**Different devices.** A hardlink cannot cross a filesystem boundary, so
+`bun install` cannot link a package into a worktree's node_modules and copies it
+instead - about 2.4 GB per worktree, every dispatch. `links=1` on a sample
+package file confirmed it, where a shared store would show more.
+
+Four bees installing four private copies of one dependency tree is 10 GB per
+generation on a 46 GB volume. **No collection strategy wins against a
+duplication rate like that.** Three rounds of reaper work moved the symptom and
+never the cause, and only the measurement found it.
+
+The check is two commands and should be the FIRST thing asked of any store that
+seems to grow faster than it should:
+
+```bash
+df -P "$CACHE_DIR" | tail -1        # which device is the cache on?
+df -P "$TARGET_DIR" | tail -1       # and the thing installing from it?
+stat -c 'links=%h %n' "$TARGET_DIR/node_modules/.../some-file.js"
+```
+
+`links=1` on a package that exists in a shared cache means every consumer holds
+its own copy.
+
+**And the shape, which is the transferable part:** when a resource keeps filling
+despite correct collection, stop improving the collector and measure the
+PRODUCTION rate. A collector can only ever be as good as the gap between
+creation and removal; if creation is 10 GB a generation, the argument is over
+before it starts.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
