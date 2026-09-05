@@ -93,7 +93,7 @@ export class OAuthCallbackServer {
       fetch: async (req) => {
         const url = new URL(req.url)
 
-        // /cancel — let other instances ask us to release the port
+        // /cancel - let other instances ask us to release the port
         if (url.pathname === '/cancel') {
           logger.info('OAuth callback server received cancel request')
           // Schedule stop after responding
