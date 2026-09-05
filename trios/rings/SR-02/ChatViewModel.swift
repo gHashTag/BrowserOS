@@ -297,6 +297,64 @@ final class ChatViewModel: ObservableObject {
     /// once rather than on every streamed delta.
     private var announcedConcerns: [UUID: Set<String>] = [:]
 
+    // MARK: - #1133: verdict requests vs acceptance decisions
+
+    /// Task IDs with a reviewer verdict request currently in flight (#1133).
+    ///
+    /// Populated for the whole window `requestReviewerVerdicts` is awaiting
+    /// the reviewer — from entry to settle — so every acceptance entry point
+    /// can refuse to decide inside that window. The measured defect this
+    /// closes: the acceptance command applied at 15:15:58, the reviewer's
+    /// verdicts landed at 15:16:04, and the decision made between the two
+    /// was made on nothing — after which the verdicts arrived and nothing
+    /// returned to them, and the task sat in `awaitingReview` forever. The
+    /// marker is in memory, not persisted: it describes a window in THIS
+    /// process, and a restarted process has no in-flight request to race.
+    private var verdictRequestsInFlight: Set<UUID> = []
+
+    /// Acceptance decisions currently parked inside the #1133 gate, keyed by
+    /// task ID. A task here has NOT yet decided: the decision entered while a
+    /// verdict request was in flight and is waiting for the answer. When the
+    /// request settles, the waiting decision reconciles on its own — it
+    /// proceeds with the verdicts in hand — so the entry is removed by the
+    /// wait itself, and `settleVerdictRequest` removing it is hygiene for a
+    /// decision that never woke.
+    private var acceptanceDecisionsWaitingForVerdicts: Set<UUID> = []
+
+    /// Acceptance decisions that completed WHILE a verdict request for the
+    /// same task was still in flight (#1133 criterion 2). This is the
+    /// wait-deadline path: the reviewer hung past every budget, the decision
+    /// had to move, and it moved without the answer. The entry survives
+    /// until the request settles — `settleVerdictRequest` then revisits the
+    /// decision with the verdicts that arrived after it, instead of letting
+    /// them land on a task nothing returns to.
+    private var acceptanceDecisionsRacedPastVerdicts: Set<UUID> = []
+
+    /// How long an acceptance decision waits for an in-flight verdict
+    /// request before deciding anyway (#1133). The reviewer transport
+    /// allows 120 s per request and `requestReviewerVerdicts` retries an
+    /// empty answer once, so an honest budget sits above both; a decision
+    /// that outlives it proceeds, is marked raced, and the revisit at settle
+    /// is what reconciles it. A var rather than a constant so the #1133
+    /// drill can compress the deadline and drive the raced path on purpose.
+    var verdictRequestWaitBudget: TimeInterval = 300
+
+    /// #1133 drill seam: a deterministic, delayable reviewer answer with no
+    /// network behind it. Production never sets this; the verdict-race drill
+    /// does, and restores whatever was there when its arms end. The seam sits
+    /// at the top of the real request path rather than inside a fake
+    /// transport so the drill drives the REAL machinery — marker, retry,
+    /// parse, record, seal, settle, revisit — with only the reviewer's bytes
+    /// replaced. A closure, not a string, so an arm can sleep inside it: the
+    /// whole point is that the answer arrives LATE, after the decision path
+    /// has already come knocking.
+    static var oneShotReviewerRequestOverride: (@Sendable (String) async -> String?)?
+
+    /// Once per process (#1133): the suite builds many ChatViewModels and the
+    /// drill plants real registry tasks; the second copy would re-race arms
+    /// whose journal records are already on the ring.
+    private static var verdictRaceDrillExecuted = false
+
     init(
         transport: ChatTransportProtocol,
         healthCheck: ChatHealthCheckProtocol,
@@ -551,6 +609,20 @@ final class ChatViewModel: ObservableObject {
             if ProjectPaths.variant == .test
                 || ProcessInfo.processInfo.environment["TRIOS_E2E_DRILL_1287"] == "1" {
                 runPollFailureDrill()
+            }
+            // #1133 criteria 1-4, driven the #1151 way and gated the #1170
+            // way: the acceptance-race drill replays the #1130 ordering —
+            // command, verdicts, transition — through the real request and
+            // decision paths with a delayed deterministic reviewer, and
+            // reads the outcome out of the registry and the journal. Runs on
+            // its own in the test variant so every suite run re-executes the
+            // proof; TRIOS_E2E_DRILL_1133=1 asks the same question in any
+            // other variant, at the operator's risk (it plants real registry
+            // tasks, which is why it refuses nowhere but runs by default
+            // nowhere that state is real).
+            if ProjectPaths.variant == .test
+                || ProcessInfo.processInfo.environment["TRIOS_E2E_DRILL_1133"] == "1" {
+                await runVerdictRaceDrill()
             }
             // #1170 criterion 4, driven the #1132 way: when
             // TRIOS_E2E_DRILL_1170=1, run the /brief preview drill once at
@@ -7435,6 +7507,14 @@ final class ChatViewModel: ObservableObject {
         diff: String,
         fileContents: [String: String] = [:]
     ) async -> Int {
+        // #1133: the request is now in flight. Every acceptance entry point
+        // refuses to decide inside this window — this marker is what the
+        // gate waits on. It clears through `settleVerdictRequest` at each
+        // exit, and the defer below is hygiene for a future exit that
+        // forgets to settle: a marker left set would park every later
+        // acceptance behind a request that already ended.
+        verdictRequestsInFlight.insert(task.id)
+        defer { verdictRequestsInFlight.remove(task.id) }
         var brief = QueenReviewVerdictRequest.brief(
             criteria: criteria,
             diff: diff,
@@ -7638,6 +7718,7 @@ final class ChatViewModel: ObservableObject {
                     "asked": String(criteria.count)
                 ]
             )
+            await settleVerdictRequest(for: task, recorded: 0)
             return 0
         }
 
@@ -7803,8 +7884,611 @@ final class ChatViewModel: ObservableObject {
         // Returning the count lets the caller decide whether a silent
         // reviewer deserves an explicit outcome instead of an indefinite
         // wait (#1144).
+        await settleVerdictRequest(for: task, recorded: recorded)
         return recorded
     }
+
+    /// Marks a verdict request finished and reconciles whatever raced it
+    /// (#1133).
+    ///
+    /// Called at every exit of `requestReviewerVerdicts`, with the number of
+    /// verdicts the request recorded. Two jobs, in this order on purpose:
+    ///
+    /// 1. The in-flight marker clears synchronously, BEFORE any await — a
+    ///    revisit that ran while the marker was still set would wait on
+    ///    itself.
+    /// 2. If an acceptance decision completed while this request was still
+    ///    in flight (`acceptanceDecisionsRacedPastVerdicts`), the decision
+    ///    is revisited NOW, with the verdicts that arrived after it: the
+    ///    auto-accept attempt and the act-on-review pass run again over the
+    ///    completed record. This is criterion 2's whole point — a verdict
+    ///    that lands after a decision must change the decision's subject,
+    ///    not fall on a task nothing returns to. A decision that is still
+    ///    WAITING (not raced) reconciles on its own when its wait observes
+    ///    the cleared marker, so it is not revisited here.
+    private func settleVerdictRequest(for task: DelegatedTask, recorded: Int) async {
+        verdictRequestsInFlight.remove(task.id)
+        acceptanceDecisionsWaitingForVerdicts.remove(task.id)
+        guard acceptanceDecisionsRacedPastVerdicts.remove(task.id) != nil else { return }
+        TriosLogBus.shared.warn(
+            .queen,
+            "queen.accept.raced_revisit",
+            "An acceptance decision raced this verdict request and decided "
+                + "before the answer arrived; revisiting it now that "
+                + "\(recorded) verdict(s) are recorded",
+            [
+                "issue": task.issue.slug,
+                "recorded": String(recorded)
+            ]
+        )
+        await autoAcceptIfUnambiguous(taskID: task.id)
+        await actOnCompletedReview(taskID: task.id)
+    }
+
+    /// Holds an acceptance decision until the task's in-flight verdict
+    /// request has finished (#1133 criterion 1).
+    ///
+    /// The measured race, from the journal of task #1130: the acceptance
+    /// command applied at 15:15:58, the reviewer's verdicts landed at
+    /// 15:16:04, and the transition to `awaitingReview` at 15:16:11. The
+    /// decision made in that six-second gap was made on nothing; the
+    /// verdicts then arrived and nothing returned to them. Every acceptance
+    /// entry point (`reviewDelegatedTask`, `autoAcceptIfUnambiguous`,
+    /// `actOnCompletedReview`) passes through here before deciding, and a
+    /// decision that arrives inside the request's window waits for the
+    /// window to close — the same function that waited is the one that
+    /// proceeds, with the verdicts in hand.
+    ///
+    /// No request in flight is the common case and returns immediately: a
+    /// task nobody is asking about is decided exactly as before, and a
+    /// human's `/accept` on a long-running bee is still refused by the state
+    /// guard rather than silently parked behind work that has not finished.
+    ///
+    /// The wait is bounded by `verdictRequestWaitBudget`. A request that
+    /// outlives it is a wedged reviewer, not a slow one, and the decision
+    /// proceeds past it — marked raced, so `settleVerdictRequest` revisits
+    /// it when the answer finally lands. That expiry is the only path that
+    /// still decides before the answer, and it is loud, logged, and
+    /// reconciled (#1133 criterion 2).
+    ///
+    /// `isAcceptance` separates the decisions that close work (accept,
+    /// auto-accept, act-on-review) from `/review ... reject`, which also
+    /// waits — deciding a rejection on a question still being answered is
+    /// the same defect with the sign flipped — but is not revisited by the
+    /// settle pass, which speaks only the acceptance paths.
+    private func gateAcceptanceDecisionOnVerdictRequest(
+        taskID: UUID,
+        isAcceptance: Bool
+    ) async {
+        guard verdictRequestsInFlight.contains(taskID) else { return }
+        // Only reached when a request is in flight, and a request can only
+        // be in flight for a task that exists — but the slug is for the
+        // journal, and a journal line that names a UUID nobody can read is
+        // a line nobody reads.
+        let issue = delegationRegistry.tasks.first(where: { $0.id == taskID })?.issue
+        let issueLabel = issue?.slug ?? taskID.uuidString
+        acceptanceDecisionsWaitingForVerdicts.insert(taskID)
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.accept.waiting_for_verdicts",
+            "Acceptance for \(issueLabel) is holding while the reviewer's "
+                + "verdict request is still in flight — the decision will be "
+                + "made on the answer, not ahead of it",
+            ["issue": issueLabel]
+        )
+        let startedAt = Date()
+        while Date().timeIntervalSince(startedAt) < verdictRequestWaitBudget {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            guard verdictRequestsInFlight.contains(taskID) else {
+                acceptanceDecisionsWaitingForVerdicts.remove(taskID)
+                // The request finished; the decision proceeds with the
+                // verdicts. One more bounded courtesy: when the decision
+                // arrived on a still-running task, the finish handler that
+                // owns this request settles the state synchronously right
+                // after it returns, so the reviewable state is moments
+                // away. Waiting for it here is what lets one wait cover the
+                // whole gap the #1130 journal shows — command at :58,
+                // verdicts at :04, transition at :11 — instead of refusing
+                // between :04 and :11 for a state that was already decided.
+                await waitBrieflyForReviewableState(taskID: taskID)
+                return
+            }
+        }
+        acceptanceDecisionsWaitingForVerdicts.remove(taskID)
+        if isAcceptance {
+            acceptanceDecisionsRacedPastVerdicts.insert(taskID)
+        }
+        TriosLogBus.shared.warn(
+            .queen,
+            "queen.accept.verdict_wait_expired",
+            "The verdict request for \(issueLabel) outlived the "
+                + "\(Int(verdictRequestWaitBudget))s wait budget; the decision "
+                + "proceeds on what is recorded and will be revisited when the "
+                + "answer lands (#1133)",
+            ["issue": issueLabel, "budget_s": String(Int(verdictRequestWaitBudget))]
+        )
+    }
+
+    /// The standing mutation check for #1133 criterion 1: a decision that
+    /// proceeds while its task's verdict request is STILL in flight, without
+    /// having gone through the raced-path marking, is a decision made on the
+    /// question's absence — the exact defect this issue closes. The gate's
+    /// wait is what keeps this silent; deleting the wait (the loop, or the
+    /// whole gate body) leaves the marker set and the raced set empty, and
+    /// this fires on every raced acceptance. The budget-expiry path is the
+    /// one legitimate way past a live marker, and it marks itself raced
+    /// first, so it never trips this. Acceptance-only on purpose: a reject
+    /// that outlives the budget is not marked raced (nothing revisits a
+    /// rejection) and must not be accused of the acceptance defect.
+    private func assertNoDecisionDuringInFlightRequest(
+        taskID: UUID,
+        isAcceptance: Bool
+    ) {
+        guard isAcceptance,
+              verdictRequestsInFlight.contains(taskID),
+              !acceptanceDecisionsRacedPastVerdicts.contains(taskID) else { return }
+        TriosLogBus.shared.warn(
+            .queen,
+            "queen.assertion.decided_during_request",
+            "An acceptance decision ran while the verdict request was still "
+                + "in flight, without the raced-path marking — the #1133 wait "
+                + "is not load-bearing anymore",
+            ["task_id": taskID.uuidString]
+        )
+    }
+
+    /// Drives the #1130 race end to end through the real decision paths
+    /// (#1133 criteria 1–4).
+    ///
+    /// The measured defect, from the journal of task #1130: the acceptance
+    /// command applied at 15:15:58, the reviewer's verdicts landed at
+    /// 15:16:04, the transition to `awaitingReview` at 15:16:11 — and the
+    /// decision made in the six-second gap was made on nothing, because the
+    /// answer nobody waited for arrived after the door had closed.
+    ///
+    /// Three arms, one run:
+    ///
+    /// - **Arm A — the race, gate present.** A task with two criteria, a
+    ///   reviewer that answers 1.2 s late through the real request path, and
+    ///   an `/accept` that lands while the request is in flight. Must wait
+    ///   (criterion 1), must decide on the recorded verdicts, and must reach
+    ///   `.accepted` in this same run (criterion 3).
+    /// - **Arm B — the race lost on purpose.** The wait budget compressed to
+    ///   0.9 s against a 2.0 s reviewer: the decision proceeds ahead of the
+    ///   answer, refuses on emptiness, and when the verdicts finally land the
+    ///   settle pass must REVISIT the decision rather than drop the verdicts
+    ///   on a task nothing returns to (criterion 2).
+    /// - **Arm C — the wait removed.** The same facts as Arm A with the wait
+    ///   set to zero: the decision fires instantly on a running task, the
+    ///   verdicts land afterwards on nobody, and the task ends
+    ///   `awaitingReview` holding two met verdicts no decision ever spent —
+    ///   the #1130 ending, reproduced (criterion 4: Arm A is the check; this
+    ///   arm documents what its removal does, so that Arm A's green is known
+    ///   to be the wait's doing and not luck).
+    ///
+    /// Runs in the test variant on every suite start (the standing proof the
+    /// other drills use) and anywhere on `TRIOS_E2E_DRILL_1133=1`. It plants
+    /// real tasks in the live registry — that is the point: the gate, the
+    /// registry, the transition table and the journal are the real ones —
+    /// with fake issue numbers far outside the real range, and drives every
+    /// plant to a terminal state so the live list is left as it was found.
+    /// Verdicts land in the journal as `queen.drill.1133.*`; a failed arm
+    /// trips `assertionFailure` so the suite goes red, not merely the log.
+    /// Drives the #1130 race end to end through the real decision paths
+    /// (#1133 criteria 1–4).
+    ///
+    /// The measured defect, from the journal of task #1130: the acceptance
+    /// command applied at 15:15:58, the reviewer's verdicts landed at
+    /// 15:16:04, the transition to `awaitingReview` at 15:16:11 — and the
+    /// decision made in the six-second gap was made on nothing, because the
+    /// answer nobody waited for arrived after the door had closed.
+    ///
+    /// Three arms, one run:
+    ///
+    /// - **Arm A — the race, gate present.** A task with two criteria, a
+    ///   reviewer that answers 1.2 s late through the real request path, and
+    ///   an `/accept` that lands while the request is in flight. Must wait
+    ///   (criterion 1), must decide on the recorded verdicts, and must reach
+    ///   `.accepted` in this same run (criterion 3).
+    /// - **Arm B — the race lost on purpose.** The wait budget compressed to
+    ///   0.9 s against a 2.0 s reviewer: the decision proceeds ahead of the
+    ///   answer, refuses on emptiness, and when the verdicts finally land the
+    ///   settle pass must REVISIT the decision rather than drop the verdicts
+    ///   on a task nothing returns to (criterion 2).
+    /// - **Arm C — the wait removed.** The same facts as Arm A with the wait
+    ///   set to zero: the decision fires instantly on a running task, the
+    ///   verdicts land afterwards on nobody, and the task ends
+    ///   `awaitingReview` holding two met verdicts no decision ever spent —
+    ///   the #1130 ending, reproduced (criterion 4: Arm A is the check; this
+    ///   arm documents what its removal does, so that Arm A's green is known
+    ///   to be the wait's doing and not luck).
+    ///
+    /// Runs in the test variant on every suite start (the standing proof the
+    /// other drills use) and anywhere on `TRIOS_E2E_DRILL_1133=1`. It plants
+    /// real tasks in the live registry — that is the point: the gate, the
+    /// registry, the transition table and the journal are the real ones —
+    /// with fake issue numbers far outside the real range, and drives every
+    /// plant to a terminal state so the live list is left as it was found.
+    /// Verdicts land in the journal as `queen.drill.1133.*`; a failed arm
+    /// trips `assertionFailure` so the suite goes red, not merely the log.
+    private func runVerdictRaceDrill() async {
+        guard !ChatViewModel.verdictRaceDrillExecuted else { return }
+        ChatViewModel.verdictRaceDrillExecuted = true
+
+        TriosLogBus.shared.info(
+            .queen,
+            "queen.drill.1133.start",
+            "Starting the verdict-race drill: the #1130 ordering, driven "
+                + "through the real decision paths",
+            [:]
+        )
+
+        let registry = delegationRegistry
+        // Time-derived fake issue numbers, far outside the real range: the
+        // one-live-task-per-issue guard never refuses a plant, and a real
+        // issue is never confused with a drill.
+        let stamp = Int(Date().timeIntervalSince1970) % 800_000
+        func fakeIssue(_ offset: Int) -> IssueReference {
+            IssueReference(
+                owner: "gHashTag", repo: "trios", number: 9_113_300_000 + stamp + offset
+            )
+        }
+
+        // Criteria with no verdict words of their own, so the parser's echo
+        // stripping cannot decide the line before the reviewer's keyword does.
+        let criteria = [
+            "The drill writes its evidence into the journal.",
+            "The drill answers inside its reviewer budget.",
+        ]
+        let reviewerAnswer =
+            "1. \(criteria[0]): met\n2. \(criteria[1]): met"
+
+        var passed = 0
+        var failed = 0
+        var facts: [String: String] = [:]
+        var planted: [IssueReference] = []
+        func arm(_ name: String, ok: Bool, _ detail: String) {
+            if ok { passed += 1 } else { failed += 1 }
+            facts[name] = (ok ? "" : "FAIL: ") + detail
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.drill.1133.\(name).\(ok ? "passed" : "failed")",
+                detail,
+                ["ok": String(ok)]
+            )
+        }
+        /// First journal record for an issue carrying the given event.
+        func firstRecord(_ issue: IssueReference, _ event: String) -> Int? {
+            let slug = issue.slug
+            return TriosLogBus.shared.recent(subsystems: [.queen])
+                .firstIndex { $0.event == event && $0.attributes["issue"] == slug }
+        }
+        /// The transition record for an issue, by the state it moved to.
+        func transitionRecord(_ issue: IssueReference, to target: String) -> Int? {
+            let slug = issue.slug
+            return TriosLogBus.shared.recent(subsystems: [.queen])
+                .firstIndex {
+                    $0.event == "queen.transition"
+                        && $0.attributes["issue"] == slug
+                        && $0.message.contains("-> \(target)")
+                }
+        }
+        func plant(_ issue: IssueReference, title: String) -> DelegatedTask? {
+            guard let task = registry.delegate(
+                issue: issue,
+                title: title,
+                worker: "queen-drill",
+                conversationId: UUID(),
+                ownedPaths: [],
+                acceptanceCriteria: criteria
+            ) else {
+                arm("plant", ok: false, registry.lastError ?? "delegate refused")
+                return nil
+            }
+            planted.append(issue)
+            _ = registry.transition(taskID: task.id, to: .running)
+            return task
+        }
+        /// Terminal states leave the live list; the plant is archived and the
+        /// registry reads exactly as it did before the drill ran.
+        func retire(_ issue: IssueReference) {
+            guard let task = registry.task(forIssue: issue) else { return }
+            switch task.state {
+            case .accepted: _ = registry.transition(taskID: task.id, to: .merged)
+            case .awaitingReview, .running, .queued, .rejected, .failed:
+                _ = registry.transition(taskID: task.id, to: .cancelled)
+            case .merged, .cancelled: break
+            }
+        }
+        /// A bail-out is a failed drill and must say so with the same voice
+        /// the ordinary finish uses: journal record, flush, assertion.
+        func bail(_ reason: String) async {
+            for issue in planted { retire(issue) }
+            TriosLogBus.shared.error(
+                .queen,
+                "queen.drill.1133.failed",
+                "The verdict-race drill bailed out: \(reason)",
+                facts
+            )
+            TriosLogBus.shared.flush()
+            assertionFailure("verdict-race drill bailed out (#1133): \(reason)")
+        }
+
+        let savedBudget = verdictRequestWaitBudget
+        let savedOverride = ChatViewModel.oneShotReviewerRequestOverride
+        let savedAutonomy = UserDefaults.standard.object(forKey: "TriosQueenAutonomy")
+        // The revisit in Arm B reaches acceptance through auto-accept, which
+        // answers to autonomy; pinned true for the arm's duration and
+        // restored after, so the arm does not depend on whatever the
+        // surrounding run happened to leave in defaults. An explicit
+        // TRIOS_QUEEN_AUTONOMY=0 in the environment still wins (that is the
+        // documented precedence) and the arm reports it instead of guessing.
+        let autonomyForcedOff =
+            ProcessInfo.processInfo.environment["TRIOS_QUEEN_AUTONOMY"] == "0"
+        defer {
+            verdictRequestWaitBudget = savedBudget
+            ChatViewModel.oneShotReviewerRequestOverride = savedOverride
+            if let savedAutonomy {
+                UserDefaults.standard.set(savedAutonomy, forKey: "TriosQueenAutonomy")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "TriosQueenAutonomy")
+            }
+        }
+
+        // ── Arm A: the race, gate present ────────────────────────────────
+        // Reviewer answers 1.2 s late; /accept lands 0.25 s into the
+        // request; the finish handler's transition lands 0.4 s after the
+        // answer — the #1130 shape with the gap intact.
+        let issueA = fakeIssue(0)
+        guard let taskA = plant(issueA, title: "drill: the race the gate closes") else {
+            await bail("the registry refused the Arm A plant")
+            return
+        }
+        ChatViewModel.oneShotReviewerRequestOverride = { _ in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            return reviewerAnswer
+        }
+        let requestA = Task {
+            await requestReviewerVerdicts(
+                for: taskA,
+                criteria: criteria,
+                diff: "(drill diff: one deliberate line of change)",
+                fileContents: [:]
+            )
+        }
+        let finisherA = Task {
+            _ = await requestA.value
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            _ = registry.transition(taskID: taskA.id, to: .awaitingReview)
+        }
+        try? await Task.sleep(nanoseconds: 250_000_000)
+        // Mid-flight evidence: at the moment the decision arrives, the task
+        // is still running and no verdict exists. Any decision made HERE is
+        // a decision on emptiness; the gate exists so that none is.
+        let midA = registry.task(forIssue: issueA)
+        let midFlightRunning = midA?.state == .running
+        let midFlightNoVerdicts = (midA?.criterionVerdicts.isEmpty ?? false)
+        let startA = Date()
+        await reviewDelegatedTask(
+            issue: issueA, decision: .accept, note: "drill acceptance"
+        )
+        let blockedSecondsA = Date().timeIntervalSince(startA)
+        _ = await finisherA.value
+        let endA = registry.task(forIssue: issueA)
+
+        let waitA = firstRecord(issueA, "queen.accept.waiting_for_verdicts")
+        let verdictsA = firstRecord(issueA, "queen.review.verdicts")
+        let refusedA = firstRecord(issueA, "queen.review.refused_state")
+        let blockedContractA = firstRecord(issueA, "queen.accept.blocked")
+        let acceptedA = transitionRecord(issueA, to: "accepted")
+
+        arm(
+            "a_held_the_decision",
+            midFlightRunning && midFlightNoVerdicts
+                && waitA != nil && verdictsA != nil && waitA! < verdictsA!
+                && blockedSecondsA >= 0.9,
+            "mid-flight: running=\(midFlightRunning), no verdicts="
+                + "\(midFlightNoVerdicts); wait logged before verdicts="
+                + "\(waitA != nil && verdictsA != nil && waitA! < verdictsA!); "
+                + "decision held \(String(format: "%.2f", blockedSecondsA))s"
+        )
+        arm(
+            "a_decided_on_the_answer",
+            refusedA == nil && blockedContractA == nil
+                && verdictsA != nil && acceptedA != nil
+                && verdictsA! < acceptedA!,
+            "no refusal on emptiness (refused=\(refusedA != nil), "
+                + "blocked=\(blockedContractA != nil)); accepted transition "
+                + "after the verdicts="
+                + "\(verdictsA != nil && acceptedA != nil && verdictsA! < acceptedA!)"
+        )
+        arm(
+            "a_accepted_same_run",
+            endA?.state == .accepted
+                && endA?.criterionVerdicts[criteria[0]] == .met
+                && endA?.criterionVerdicts[criteria[1]] == .met,
+            "state=\(endA?.state.rawValue ?? "nil"), verdicts="
+                + "\(endA?.criterionVerdicts[criteria[0]]?.rawValue ?? "nil")/"
+                + "\(endA?.criterionVerdicts[criteria[1]]?.rawValue ?? "nil")"
+        )
+        retire(issueA)
+
+        // ── Arm B: the race lost on purpose, verdicts after the decision ──
+        // The budget (0.9 s) is shorter than the reviewer (2.0 s): the
+        // decision proceeds ahead of the answer and refuses on emptiness —
+        // the defect's shape, produced deliberately so the revisit can be
+        // watched. When the verdicts land, the settle pass must run the
+        // decision again over them (criterion 2), not let them fall on a
+        // task nothing returns to.
+        let issueB = fakeIssue(1)
+        guard let taskB = plant(issueB, title: "drill: the revisit after the race") else {
+            await bail("the registry refused the Arm B plant")
+            return
+        }
+        _ = registry.transition(taskID: taskB.id, to: .awaitingReview)
+        verdictRequestWaitBudget = 0.9
+        ChatViewModel.oneShotReviewerRequestOverride = { _ in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            return reviewerAnswer
+        }
+        let requestB = Task {
+            await requestReviewerVerdicts(
+                for: taskB,
+                criteria: criteria,
+                diff: "(drill diff: one deliberate line of change)",
+                fileContents: [:]
+            )
+        }
+        try? await Task.sleep(nanoseconds: 250_000_000)
+        UserDefaults.standard.set(true, forKey: "TriosQueenAutonomy")
+        let startB = Date()
+        await reviewDelegatedTask(
+            issue: issueB, decision: .accept, note: "drill acceptance"
+        )
+        let blockedSecondsB = Date().timeIntervalSince(startB)
+        // The decision's own state, taken the instant it returned: refused,
+        // and refused on emptiness — the verdicts were still in flight.
+        let afterDecisionB = registry.task(forIssue: issueB)
+        // The request settles: verdicts recorded, then the revisit runs
+        // inside the settle pass, before the request returns.
+        _ = await requestB.value
+        let endB = registry.task(forIssue: issueB)
+
+        let expiredB = firstRecord(issueB, "queen.accept.verdict_wait_expired")
+        let refusedB = firstRecord(issueB, "queen.accept.blocked")
+        let verdictsB = firstRecord(issueB, "queen.review.verdicts")
+        let revisitB = firstRecord(issueB, "queen.accept.raced_revisit")
+
+        arm(
+            "b_decided_ahead_of_the_answer",
+            expiredB != nil && refusedB != nil && verdictsB != nil
+                && refusedB! < verdictsB!
+                && blockedSecondsB >= 0.85
+                && afterDecisionB?.criterionVerdicts.isEmpty == true,
+            "budget expired=\(expiredB != nil); refusal logged before the "
+                + "verdicts="
+                + "\(refusedB != nil && verdictsB != nil && refusedB! < verdictsB!); "
+                + "decision held \(String(format: "%.2f", blockedSecondsB))s; "
+                + "verdicts at decision time="
+                + "\(afterDecisionB?.criterionVerdicts.count ?? -1)"
+        )
+        arm(
+            "b_verdicts_revisited_the_decision",
+            verdictsB != nil && revisitB != nil && verdictsB! < revisitB!
+                && endB?.criterionVerdicts[criteria[0]] == .met
+                && endB?.criterionVerdicts[criteria[1]] == .met
+                && (autonomyForcedOff
+                    ? true
+                    : endB?.state == .accepted),
+            "revisit after the verdicts="
+                + "\(verdictsB != nil && revisitB != nil && verdictsB! < revisitB!); "
+                + "final state=\(endB?.state.rawValue ?? "nil"); "
+                + "autonomy_forced_off=\(autonomyForcedOff)"
+        )
+        retire(issueB)
+
+        // ── Arm C: the wait removed ──────────────────────────────────────
+        // Budget 0: the gate's wait is gone in everything but name. The
+        // decision fires on a running task and refuses instantly, the
+        // verdicts land afterwards on nobody, and the task ends exactly as
+        // #1130 ended — awaitingReview, holding two met verdicts no decision
+        // ever spent. This arm PASSES when that broken outcome appears: it
+        // is the demonstration half of criterion 4. Arm A is the check
+        // itself — same scenario, wait present, `.accepted` — and if anyone
+        // removes the wait from the gate, Arm A inherits this arm's outcome
+        // and fails the drill.
+        let issueC = fakeIssue(2)
+        guard let taskC = plant(issueC, title: "drill: the wait removed") else {
+            await bail("the registry refused the Arm C plant")
+            return
+        }
+        verdictRequestWaitBudget = 0.0
+        ChatViewModel.oneShotReviewerRequestOverride = { _ in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            return reviewerAnswer
+        }
+        let requestC = Task {
+            await requestReviewerVerdicts(
+                for: taskC,
+                criteria: criteria,
+                diff: "(drill diff: one deliberate line of change)",
+                fileContents: [:]
+            )
+        }
+        let finisherC = Task {
+            _ = await requestC.value
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            _ = registry.transition(taskID: taskC.id, to: .awaitingReview)
+        }
+        try? await Task.sleep(nanoseconds: 250_000_000)
+        let startC = Date()
+        await reviewDelegatedTask(
+            issue: issueC, decision: .accept, note: "drill acceptance"
+        )
+        let instantSecondsC = Date().timeIntervalSince(startC)
+        _ = await finisherC.value
+        // Room for any revisit that might exist to show itself; with the
+        // wait gone there is none that can reach the task after its
+        // transition, and the sleep proves that by waiting for it.
+        try? await Task.sleep(nanoseconds: 600_000_000)
+        let endC = registry.task(forIssue: issueC)
+        let refusedC = firstRecord(issueC, "queen.review.refused_state")
+        let verdictsC = firstRecord(issueC, "queen.review.verdicts")
+        let acceptedC = transitionRecord(issueC, to: "accepted")
+
+        arm(
+            "c_decided_instantly_on_emptiness",
+            instantSecondsC < 0.5 && refusedC != nil && verdictsC != nil
+                && refusedC! < verdictsC!,
+            "decision took \(String(format: "%.2f", instantSecondsC))s; "
+                + "refusal before the verdicts="
+                + "\(refusedC != nil && verdictsC != nil && refusedC! < verdictsC!)"
+        )
+        arm(
+            "c_stranded_with_met_verdicts",
+            endC?.state == .awaitingReview && acceptedC == nil
+                && endC?.criterionVerdicts[criteria[0]] == .met
+                && endC?.criterionVerdicts[criteria[1]] == .met,
+            "state=\(endC?.state.rawValue ?? "nil"); never accepted="
+                + "\(acceptedC == nil); verdicts left on it: "
+                + "\(endC?.criterionVerdicts[criteria[0]]?.rawValue ?? "nil")/"
+                + "\(endC?.criterionVerdicts[criteria[1]]?.rawValue ?? "nil")"
+        )
+        retire(issueC)
+
+        let drillPassed = failed == 0
+        TriosLogBus.shared.log(
+            drillPassed ? .info : .error,
+            subsystem: .queen,
+            event: drillPassed
+                ? "queen.drill.1133.passed"
+                : "queen.drill.1133.failed",
+            message: drillPassed
+                ? "The verdict-race drill passed \(passed) arm(s): the decision "
+                    + "waited for the answer, the late verdicts revisited the "
+                    + "raced decision, a met-criteria task reached accepted in "
+                    + "this run, and removing the wait stranded the task "
+                    + "exactly as #1130 was stranded (#1133)"
+                : "The verdict-race drill failed \(failed) of \(passed + failed) "
+                    + "arm(s) — the #1133 gate is not doing what the issue "
+                    + "requires",
+            attributes: facts
+        )
+        TriosLogBus.shared.flush()
+        if !drillPassed {
+            // A failed drill fails the suite, not just the journal: the
+            // drill runs in the test variant so every gate that runs the
+            // suite re-executes this proof, and a red log nobody gates on is
+            // the unverifiable run again (#1151 pass 3's lesson, applied).
+            assertionFailure(
+                "verdict-race drill failed (#1133): "
+                    + facts.filter { $0.value.hasPrefix("FAIL") }
+                        .map { "\($0.key)=\($0.value)" }
+                        .joined(separator: "; ")
+            )
+        }
+    }
+
 
     /// The acceptance block reason, augmented to distinguish criteria the
     /// reviewer was asked about but did not answer from criteria nobody
@@ -8013,6 +8697,12 @@ final class ChatViewModel: ObservableObject {
     /// tools. A fresh parser per call so the reviewer's stream cannot
     /// interfere with the main chat's parse state.
     private func sendOneShotReviewerRequest(_ prompt: String) async -> String? {
+        // #1133 drill seam (declared with the gate state): when the drill
+        // owns the reviewer's voice, no transport is consulted — the bytes
+        // are replaced, the path around them is real.
+        if let override = ChatViewModel.oneShotReviewerRequestOverride {
+            return await override(prompt)
+        }
         let configuration = await modelStore.runtimeConfiguration
 
         guard let body = try? ChatRequestBuilder(
@@ -8154,6 +8844,14 @@ final class ChatViewModel: ObservableObject {
     /// and should be tried first.
     private func actOnCompletedReview(taskID: UUID) async {
         let registry = delegationRegistry
+        // #1133: this decides over verdicts (send back, escalate), so it
+        // waits for an in-flight request exactly like acceptance does —
+        // acting on an answer that has not arrived yet is deciding on
+        // emptiness with consequences. The task is read only after the
+        // gate: a wait that ends in a stale copy is a wait the decision
+        // never had.
+        await gateAcceptanceDecisionOnVerdictRequest(taskID: taskID, isAcceptance: true)
+        assertNoDecisionDuringInFlightRequest(taskID: taskID, isAcceptance: true)
         guard let task = registry.tasks.first(where: { $0.id == taskID }),
               task.state == .awaitingReview else { return }
 
@@ -8264,7 +8962,7 @@ final class ChatViewModel: ObservableObject {
             return
         }
         let registry = delegationRegistry
-        guard let task = registry.tasks.first(where: { $0.id == taskID }) else {
+        guard var task = registry.tasks.first(where: { $0.id == taskID }) else {
             TriosLogBus.shared.info(
                 .queen, "queen.auto_accept.no_task",
                 "Auto-accept skipped: task not found in registry",
@@ -8272,6 +8970,14 @@ final class ChatViewModel: ObservableObject {
             )
             return
         }
+        // #1133: the Queen's own acceptance waits for the reviewer's answer
+        // exactly like a human's — a rubber stamp issued while the verdict
+        // request is still in flight is a stamp on nothing. The task is
+        // re-read after the gate so the wait's whole point — the verdicts —
+        // is what this decision spends.
+        await gateAcceptanceDecisionOnVerdictRequest(taskID: taskID, isAcceptance: true)
+        assertNoDecisionDuringInFlightRequest(taskID: taskID, isAcceptance: true)
+        task = registry.tasks.first(where: { $0.id == taskID }) ?? task
         guard QueenDelegationPolicy.qualifiesForAutoAccept(
             task,
             committedFiles: task.committedFiles ?? 0
@@ -10969,11 +11675,40 @@ final class ChatViewModel: ObservableObject {
         note: String
     ) async {
         let registry = delegationRegistry
-        guard let task = registry.task(forIssue: issue) else {
+        guard var task = registry.task(forIssue: issue) else {
             await postQueenNotice(SystemNoticeClassifier.warningMarker + "\(issue.slug) has no open task to review.")
             return
         }
+        // #1133: no decision while the reviewer's answer is still in
+        // flight. The measured race — command at 15:15:58, verdicts at
+        // 15:16:04 — had the decision land on nothing and the answer land
+        // on nobody. This gate applies to accept and reject alike: both
+        // decide over verdicts, and a rejection decided ahead of the answer
+        // is the same defect with the sign flipped.
+        await gateAcceptanceDecisionOnVerdictRequest(
+            taskID: task.id, isAcceptance: decision == .accept
+        )
+        assertNoDecisionDuringInFlightRequest(
+            taskID: task.id, isAcceptance: decision == .accept
+        )
+        // The gate may have waited, and everything the decision reads — the
+        // state, the verdicts, the fingerprints — must be read AFTER it, or
+        // the wait buys a freshness this function never spends.
+        task = registry.task(forIssue: issue) ?? task
         guard task.state == .awaitingReview else {
+            // Logged, not only said (#1133): this refusal is the exact
+            // record the probe run made at 15:15:58 and never explained —
+            // "Review command applied" with a state nobody could name
+            // afterwards. A refusal visible in the journal is a fact a run
+            // can be read against; one said only in the chat dies with the
+            // transcript.
+            TriosLogBus.shared.info(
+                .queen,
+                "queen.review.refused_state",
+                "\(issue.slug) is \(task.state.rawValue), not awaiting review — "
+                    + "nothing to decide yet",
+                ["issue": issue.slug, "state": task.state.rawValue]
+            )
             await postQueenNotice(
                 SystemNoticeClassifier.warningMarker
                     + "\(issue.slug) is \(task.state.rawValue), not awaiting review. Nothing to decide yet."
