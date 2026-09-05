@@ -310,17 +310,36 @@ for (const s of STEPS) {
     // A STEP THAT COULD NOT REACH THE CONTAINER HAS NOT FAILED. The container
     // was unreachable, once, for the whole run - and recording that as four
     // separate step failures is what inflated every rate this loop has quoted.
-    status = /THEY DISAGREE/.test(out) ? 'FINDING'
-      : /the channel was already found down in this run/.test(out) ? 'channel-down'
-      : /ACT NOW:/.test(out) ? 'FINDING'
-        : /Error:|Traceback|not a function|ENOENT/.test(out) ? 'FAILED' : 'ok'
+    // A STEP KILLED BY THIS CHAIN'S OWN TIMEOUT WAS BEING RECORDED AS `ok`.
+    //
+    // `feed.mjs` has had this arm since the day a step was cut off mid-run; this
+    // file never got one. `git log -S ETIMEDOUT -- heal.mjs` is empty. So a step
+    // that the chain itself SIGTERMed at its `timeout:` produced no output,
+    // matched none of the patterns below, and fell through to `ok`.
+    //
+    // MEASURED on this machine: heal.timer.log holds 62 `(no output)` lines -
+    // land 25, fp-check 22, author 5, reap-local 4, lease 2, judge-packet 2,
+    // verdict-audit 1, close-done 1 - and every one was recorded ok. That is 25
+    // of land's 36 ok records describing a step that produced not one byte.
+    // `feed.timer.log` holds zero, because feed classifies the kill.
+    //
+    // A step cut off part-way is not a step that succeeded and not a step that
+    // broke. What it did before the cut still stands, and saying so is the
+    // difference between a chain that reports work and one that reports minutes.
+    status = (e.killed || e.signal === 'SIGTERM' || e.code === 'ETIMEDOUT') ? 'timed out'
+      : /THEY DISAGREE/.test(out) ? 'FINDING'
+        : /the channel was already found down in this run/.test(out) ? 'channel-down'
+          : /ACT NOW:/.test(out) ? 'FINDING'
+            : /Error:|Traceback|not a function|ENOENT/.test(out) ? 'FAILED' : 'ok'
   }
   let line = null
   for (const [re, fmt] of SUMMARY) {
     const m = out.match(re)
     if (m) { line = fmt(m); break }
   }
-  console.log(`    ${status === 'FAILED' ? 'FAILED' : line || out.trim().split('\n').pop() || '(no output)'}`)
+  console.log(`    ${status === 'FAILED' ? 'FAILED'
+    : status === 'timed out' ? `timed out - what it did before the cut still stands: ${line || '(nothing recorded)'}`
+      : line || out.trim().split('\n').pop() || '(no output)'}`)
   if (status === 'FAILED') console.log(out.trim().split('\n').slice(-4).map((l) => '      ' + l).join('\n'))
   // THE EVIDENCE IS KEPT, NOT ONLY PRINTED.
   //
@@ -336,7 +355,7 @@ for (const s of STEPS) {
     step: s.name,
     status,
     line: line || null,
-    evidence: (status === 'FAILED' || status === 'FINDING' || status === 'channel-down')
+    evidence: (status === 'FAILED' || status === 'FINDING' || status === 'channel-down' || status === 'timed out')
       ? out.trim().split('\n').slice(-6).join(' | ').slice(0, 400)
       : undefined,
   })
@@ -369,7 +388,10 @@ const CRITICAL = new Set(['reap', 'reap-local', 'lease', 'push-work', 'land', 'c
 const findings = results.filter((r) => r.status === 'FINDING')
 if (findings.length) {
   console.log('')
-  for (const f of findings) console.log(`  FINDING  ${f.step}: ${f.summary}`)
+  // `summary` is only set on SKIPPED records; a FINDING carries `line`. This
+  // printed `undefined` for every finding it has ever announced - the one word
+  // the operator was meant to read.
+  for (const f of findings) console.log(`  FINDING  ${f.step}: ${f.line || f.evidence || '(no detail recorded)'}`)
 }
 const failed = results.filter((r) => r.status === 'FAILED')
 const criticalFailures = failed.filter((r) => CRITICAL.has(r.step))
