@@ -2703,6 +2703,71 @@ description says "bound how long duplicate installs sit on the volume", not
 because `codeOf` strips comments precisely so a test cannot pass by matching the
 paragraph that describes the code.
 
+## A command name silently shadowed a scheduled job for its whole life
+
+`ai.t27.trios-feed` runs `tri feed --act` every 300 seconds. The loop's feed step
+never once ran from it.
+
+    92 command label(s), 1 SHADOWED:
+      feed: first wins at line 37, unreachable at [390]
+
+A shell `case` takes the FIRST match, and `feed)` appeared twice in `tri` - a
+content feed at line 37 and the loop's own at line 390. The timer had been
+calling the content feed for its entire life. That is why the timer log filled
+with post titles, why the ledger held no `feed` entry, and why there were zero
+`feed-skipped` records: it never reached the lock check because it never reached
+the loop.
+
+Nothing in the system could see it. Not the shell, which is happy. Not the timer,
+which reported exit 0. Not the log, which filled with plausible output from the
+wrong program.
+
+**Scan for it mechanically.** The selftest now parses every `case` label in `tri`
+and fails on any an earlier one shadows - and fails too if it parses fewer than
+50 labels, so a scanner that stops seeing the file cannot pass as a clean result.
+
+This is the second time in a week a scheduled job reported success while doing
+something other than its job. Both were invisible for the same reason: **the
+thing that runs and the thing that checks were the same thing.**
+
+## Attempts bound how many times to ask; only a deadline bounds how long
+
+The first two real runs of the newly-reachable feed both recorded
+`share-modules: timed out`. Arithmetic, not luck: the app-down backoff waits 15
+seconds then 30, multiplied by four - 180 seconds of sleeping across three
+attempts - inside a caller that fires every 300 and caps a step at 300.
+
+A retry policy expressed only in attempts has no idea what it is costing. Give
+the channel a total budget and let it stop before a wait that would pass it. That
+is not giving up; it is refusing to spend the caller's whole allowance on
+waiting, so the caller reports what happened instead of being killed mid-sleep
+with nothing to say.
+
+Hand the budget DOWN from the caller that owns the clock - the feed passes 80% of
+its own kill timer - and leave the step room to report after the channel gives
+up.
+
+## The gateway everything depends on works 39% of the time
+
+The paired probe, 18 samples taken with both views at one moment:
+
+    both up                  7   39%
+    HTTP ok, ssh REFUSED    11   61%   app-down
+    both down                0
+    ssh up, HTTP down        0
+
+Every operation that frees the swarm - reap, lease, push-work, close-done,
+rescue, share-modules - reaches the container through that one gateway. It
+refuses about three times in five while the service answers HTTP perfectly.
+
+This is the explanation for the 46-71% step failure rates quoted for three
+rounds, and it is now a measured rate rather than an anecdote. It also explains
+why manual runs "work": a person retries until the window opens, and a timer does
+not.
+
+**When one dependency is shared by every critical path, measure its availability
+before tuning anything that sits on top of it.**
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
