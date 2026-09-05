@@ -134,6 +134,27 @@ export function gatewayPercent(read = (f) => fs.readFileSync(f, 'utf8'), window 
   return Math.round((100 * up) / recent.length)
 }
 
+/**
+ * How close the container is to running out of process slots.
+ *
+ * On 2026-09-05 the service CRASHED: `/health` 502, railway reporting the
+ * deployment Crashed, and the log full of `EAGAIN: resource temporarily
+ * unavailable` on posix_spawn. The container could not fork. A fresh one sits at
+ * 65 of 1000, so this accumulates - and a crash is the END of a process nobody
+ * was watching.
+ *
+ * Read from the paired record, which now asks while it is attached anyway.
+ */
+export function pidPercent(read = (f) => fs.readFileSync(f, 'utf8')) {
+  const rows = read(path.join(DIR, 'state', 'two-views.jsonl'))
+    .split('\n').filter(Boolean)
+    .map((l) => { try { return JSON.parse(l) } catch { return null } })
+    .filter((r) => r && r.ssh && r.ssh.pids && r.ssh.pids.max)
+  if (!rows.length) return null
+  const p = rows[rows.length - 1].ssh.pids
+  return Math.round((100 * p.used) / p.max)
+}
+
 /** Percent in use of the disk this loop runs on. */
 export function diskPercent(run = sh) {
   const out = run(`node ${path.join(DIR, 'reap-local.mjs')} 2>/dev/null | head -3`, 200000)
@@ -150,6 +171,7 @@ export function facts(deps = {}) {
     selftest: measure(() => (read ? selftestCases(read) : selftestCases())),
     disk: measure(() => diskPercent(run)),
     gateway: measure(() => (read ? gatewayPercent(read) : gatewayPercent())),
+    pids: measure(() => (read ? pidPercent(read) : pidPercent())),
     at: new Date().toISOString(),
   }
 }
@@ -188,6 +210,7 @@ export function rows(f, prev) {
     { k: 'selftest cases', v: f.selftest ?? null, prev: p.selftest ?? null, goodDown: false },
     { k: 'disk this loop runs on, percent', v: f.disk ?? null, prev: p.disk ?? null },
     { k: `ssh gateway answers, last ${GATEWAY_WINDOW}, percent`, v: f.gateway ?? null, prev: p.gateway ?? null, goodDown: false },
+    { k: 'container process slots used, percent', v: f.pids ?? null, prev: p.pids ?? null },
   ]
 }
 
