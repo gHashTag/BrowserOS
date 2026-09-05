@@ -210,6 +210,25 @@ export function ringParity(run = sh) {
   return { compared: Number(m[1]), agree: Number(m[1]) - Number(m[2]) - Number(m[3]) }
 }
 
+/**
+ * How far this checkout has drifted from the branch that ships.
+ *
+ * ON THE DASHBOARD BECAUSE EVERY OTHER NUMBER HERE IS SUSPECT IN PROPORTION TO
+ * IT. On 2026-09-06 `forked-files` reported "0 forked in history" against local
+ * HEAD and TWO against `origin/feat/queen-supervisor`; both readings were
+ * honest, and the one that went into a round report described a tree nobody
+ * deploys. The checkout was 367 commits behind. Nothing said so, because nothing
+ * was measuring it.
+ *
+ * A tool that reads the working tree is answering about this laptop. That is
+ * fine when it says which tree it read, and misleading when it does not - so
+ * the drift is printed beside the readings it qualifies.
+ */
+export function behindShipRef(run = sh, ref = process.env.TRIOS_SHIP_REF || 'origin/feat/queen-supervisor') {
+  const n = Number(String(run(`git -C ${JSON.stringify(path.join(DIR, '../../..'))} rev-list --count HEAD..${ref}`, 60000)).trim())
+  return Number.isFinite(n) ? n : null
+}
+
 export function facts(deps = {}) {
   const { run = sh, read } = deps
   return {
@@ -221,6 +240,7 @@ export function facts(deps = {}) {
     gateway: measure(() => (read ? gatewayPercent(read) : gatewayPercent())),
     pids: measure(() => (read ? pidPercent(read) : pidPercent())),
     parity: measure(() => ringParity(run)),
+    behind: measure(() => behindShipRef(run)),
     at: new Date().toISOString(),
   }
 }
@@ -276,6 +296,7 @@ export function rows(f, prev) {
     { k: `worst step, last 8 runs: ${f.worstStep?.step ?? '-'}, percent`, v: f.worstStep?.rate ?? null, prev: p.worstStep?.rate ?? null },
     { k: 'selftest cases', v: f.selftest ?? null, prev: p.selftest ?? null, goodDown: false },
     { k: 'ring T27-00 cases agreeing with the twin', v: f.parity?.agree ?? null, prev: p.parity?.agree ?? null, goodDown: false },
+    { k: 'commits this checkout is behind what ships', v: f.behind ?? null, prev: p.behind ?? null },
     { k: 'disk this loop runs on, percent', v: f.disk ?? null, prev: p.disk ?? null },
     { k: `ssh gateway answers, last ${GATEWAY_WINDOW}, percent`, v: f.gateway ?? null, prev: p.gateway ?? null, goodDown: false },
     { k: 'container process slots used, percent', v: f.pids ?? null, prev: p.pids ?? null },
