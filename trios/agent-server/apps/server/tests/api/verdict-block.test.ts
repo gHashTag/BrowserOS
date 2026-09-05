@@ -70,20 +70,55 @@ describe('the bee verdict block', () => {
     expect(parseVerdictBlock('I finished. It looks fine.')).toEqual([])
   })
 
-  // A bee that talks about its verdict earlier and writes the real block at the
-  // end must be read at the END. Otherwise a draft beats the final answer.
-  it('takes the last block when there are two', () => {
+  // TWO TESTS IN THIS SUITE ASSERTED OPPOSITE RULES, AND THIS WAS THE STALE ONE.
+  //
+  // It read: "a bee that talks about its verdict earlier and writes the real
+  // block at the end must be read at the END. Otherwise a draft beats the final
+  // answer." That was the law while the block was required LAST.
+  //
+  // The law changed, and `queen-verdict-position.test.ts` records why with the
+  // measurement behind it: the block sat after 25-35 kB of prose, 28% of
+  // dispatches answered `wait` because the review could not judge them at all,
+  // and the instruction now says BEGIN. The parser stopped using `lastIndexOf`
+  // and takes the FULLEST parse instead - position-agnostic on purpose, so a
+  // worker running an older brief is not punished for it.
+  //
+  // That test already pins the two-block case as "takes the fuller of two real
+  // blocks rather than the last". This one kept asserting the rule it replaced,
+  // and had been failing on the branch for days.
+  //
+  // The intent it was protecting still holds and is expressed the way the
+  // current rule provides it: a fuller block beats a thinner one wherever it
+  // sits. Ties go to the first, which is where the brief now asks for it.
+  it('takes the fuller block when there are two, wherever it sits', () => {
     const said = [
       '## VERDICT',
       '- Draft criterion: unmet',
       '',
-      'On reflection I fixed it.',
+      'On reflection I fixed it, and rewrote the block completely.',
+      '',
+      '## VERDICT',
+      '- Draft criterion: met',
+      '- Second criterion: met',
+    ].join('\n')
+    expect(parseVerdictBlock(said)).toEqual([
+      { criterion: 'Draft criterion', met: true },
+      { criterion: 'Second criterion', met: true },
+    ])
+  })
+
+  it('takes the first when two blocks are equally complete, which is where the brief asks for it', () => {
+    const said = [
+      '## VERDICT',
+      '- Draft criterion: unmet',
+      '',
+      'and later I quoted the heading while explaining the rule:',
       '',
       '## VERDICT',
       '- Draft criterion: met',
     ].join('\n')
     expect(parseVerdictBlock(said)).toEqual([
-      { criterion: 'Draft criterion', met: true },
+      { criterion: 'Draft criterion', met: false },
     ])
   })
 
