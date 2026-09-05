@@ -2760,6 +2760,22 @@ check('a finding prints the field it actually carries', () => {
   if (!/f\.line \|\| f\.evidence/.test(code)) throw new Error('print the field the record has')
 })
 
+check('a transcript travels base64, because it is full of newlines', () => {
+  const code = codeOf('judge-packet.mjs')
+  // The channel's output cleaning is line-based. Measured on #1373, whose
+  // transcript is 183,025 characters: the raw form returns intact at a 5 KB
+  // tail and `unreadable` at 17 KB and above, while the same query
+  // base64-encoded returns len=183025 and a 60,000-character tail. Nine of the
+  // 42 regenerated packets failed on this, and it would have read as a
+  // transcript problem rather than a transport one.
+  if (!/B64:/.test(code)) throw new Error('the payload must be encoded before it meets a line-based cleaner')
+  if (!/from\(line\.slice\(4\), 'base64'\)/.test(code)) throw new Error('and decoded on arrival')
+  // The true length must come from the database, not from the tail's length -
+  // a tail with no length reads as the whole thing.
+  if (!/length\(s\) as len/.test(code)) throw new Error('ask the database for the real length')
+  if (!/right\(s, \$\{MAX_SAID \+ 1000\}\)/.test(code)) throw new Error('and for only the tail the packet prints')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
