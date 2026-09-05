@@ -97,10 +97,30 @@ export function worstStep(run = sh) {
 }
 
 /** proven / checkable across every accepted verdict, from the warm cache. */
-export function provenCounts(run = sh) {
-  const out = run(`node ${path.join(DIR, 'proven.mjs')}`, 400000)
-  const m = out.match(/overall (\d+)\/(\d+) judged verdicts prove something; (\d+) carry nothing/)
-  return m ? { proven: Number(m[1]), judged: Number(m[2]), unjudgeable: Number(m[3]) } : null
+export function provenCounts(read = (f) => fs.readFileSync(f, 'utf8')) {
+  // READ THE RECORD, DO NOT RECOMPUTE IT.
+  //
+  // This ran `proven.mjs` with a 400-second cap. That was set when the swarm had
+  // about 200 pushed branches; it now has 311, the pass walks every one of them,
+  // and the dashboard printed `-` for two facts in two consecutive rounds -
+  // honestly, and for no reason except that drawing a dashboard had become a
+  // five-minute computation.
+  //
+  // The tool records its own reading with --record, exactly as the paired probe
+  // does. The dashboard reads that. A measurement that grows with the system
+  // does not belong on the path that draws the picture.
+  const rows = read(path.join(DIR, 'state', 'proven-history.jsonl'))
+    .split('\n').filter(Boolean)
+    .map((l) => { try { return JSON.parse(l) } catch { return null } })
+    .filter(Boolean)
+  if (!rows.length) return null
+  const last = rows[rows.length - 1]
+  const r = last.recent || {}
+  const b = last.baseline || {}
+  const proven = (r.proven || 0) + (b.proven || 0)
+  const judged = (r.checkable || 0) + (b.checkable || 0)
+  const total = (r.total || 0) + (b.total || 0)
+  return judged ? { proven, judged, unjudgeable: total - judged } : null
 }
 
 /** How many cases the gate actually contains. */
@@ -177,7 +197,7 @@ export function facts(deps = {}) {
   return {
     swarm: measure(() => swarmCounts(run)),
     worstStep: measure(() => worstStep(run)),
-    proven: measure(() => provenCounts(run)),
+    proven: measure(() => (read ? provenCounts(read) : provenCounts())),
     selftest: measure(() => (read ? selftestCases(read) : selftestCases())),
     disk: measure(() => diskPercent(run)),
     gateway: measure(() => (read ? gatewayPercent(read) : gatewayPercent())),
