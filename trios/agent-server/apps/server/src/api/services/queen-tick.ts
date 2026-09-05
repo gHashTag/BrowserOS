@@ -1499,8 +1499,14 @@ export function parseVerdictBlock(
  * Written even when the round did nothing. "Nothing happened and here is why"
  * is the most useful sentence this can produce, because it is the question
  * somebody actually opens the page with.
+ *
+ * EXPORTED FOR THE SUITE. The needs_you flag is the contract this table
+ * exists to keep, and the suite must drive the real insert rather than a
+ * transcription of it. The round-level tests skip on a machine without the
+ * queend binary, and a flag that is only ever checked where the binary exists
+ * is a flag nobody checked on this machine.
  */
-async function report(
+export async function report(
   pool: Pool,
   reviewed: ReviewRound,
   started: Array<{ started?: boolean; issue?: number; detail?: string }>,
@@ -1565,6 +1571,32 @@ async function report(
         ? `${started.length} bee(s) working`
         : (choice.refusal ?? 'nothing to do')
 
+  // The flag from what is OWED, not from what is NEW.
+  //
+  // Measured 2026-09-04: of the 40 most recent reports zero had needs_you
+  // true while six escalations were outstanding, because the flag was set
+  // from the escalations raised in THIS round - so a round that raised none
+  // wrote false while six waited. The one boolean whose whole job is to say
+  // "a person is needed" was false whenever the need was not brand new.
+  //
+  // The review sweep above has already written this round's escalations to
+  // review_state before this runs, so the count includes them; the
+  // raised-this-round half stays as the floor for the one case the count
+  // cannot cover, a count query that failed.
+  let outstandingEscalations = 0
+  try {
+    const owed = await pool.query(
+      `SELECT count(*) AS outstanding
+         FROM queen_dispatch
+        WHERE review_state = 'escalate'`,
+    )
+    outstandingEscalations = Number(owed.rows[0]?.outstanding ?? 0) || 0
+  } catch {
+    // Best-effort, like the insert below: a report must not take the round
+    // down with it, and the escalated-this-round half still carries a
+    // brand-new need.
+  }
+
   await pool
     .query(
       `INSERT INTO queen_report (headline, body, needs_you)
@@ -1572,7 +1604,7 @@ async function report(
       [
         headline.slice(0, 200),
         lines.join('\n').slice(0, 4000),
-        escalated.length > 0,
+        outstandingEscalations > 0 || escalated.length > 0,
       ],
     )
     .catch(() => {

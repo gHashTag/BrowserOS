@@ -50,6 +50,7 @@ import {
   createQueenPublicBoardRoute,
 } from './routes/queen-kanban'
 import { createQueenLeaseRoute } from './routes/queen-lease'
+import { createQueenNeedsYouRoute } from './routes/queen-needs-you'
 import { createQueenPublicActivityRoute } from './routes/queen-public-activity'
 import { createQueenPublicHardwareRoute } from './routes/queen-public-hardware'
 import { createQueenPublicResearchRoute } from './routes/queen-public-research'
@@ -319,13 +320,14 @@ export async function createHttpServer(config: HttpServerConfig) {
     )
 
   const app = new Hono<Env>()
-    // These five sanitized projections are the only routes a cross-origin
+    // These six sanitized projections are the only routes a cross-origin
     // browser may read, and they are registered BEFORE the global middleware
     // on purpose: trustedCorsMiddleware answers OPTIONS itself and returns,
     // so anything mounted after it never sees a preflight. See
     // publicReadCorsMiddleware for why this is a wildcard rather than a
     // TRUSTED_ORIGINS entry.
     .use('/queen/status', publicReadCorsMiddleware())
+    .use('/queen/needs-you', publicReadCorsMiddleware())
     .use('/queen/public-board', publicReadCorsMiddleware())
     .use('/queen/public-activity', publicReadCorsMiddleware())
     .use('/queen/public-hardware', publicReadCorsMiddleware())
@@ -333,6 +335,10 @@ export async function createHttpServer(config: HttpServerConfig) {
     .use('/*', trustedCorsMiddleware())
     .route('/health', createHealthRoute({ browser, stateBackend: a2aService }))
     .route('/queen/status', createQueenPublicStatusRoute())
+    // The reader for queen_report and the outstanding escalations - the
+    // "N waiting on you" message that used to be written to a table no route
+    // served. Sanitized like its siblings: issue number, state, age, reason.
+    .route('/queen/needs-you', createQueenNeedsYouRoute())
     .route('/queen/public-activity', createQueenPublicActivityRoute())
     .route('/queen/public-hardware', createQueenPublicHardwareRoute())
     .route('/queen/public-research', createQueenPublicResearchRoute())
