@@ -2102,6 +2102,65 @@ worktree shares its object store with the main checkout, so most of what du
 counts is on disk once. A tool that overstates what it recovers is one nobody
 believes about the disk being full either.
 
+## A stale branch is a specification of intent, not a patch
+
+Five branches jammed the landing pipeline for four rounds while I deferred the
+one question a person has to answer: rebase, or re-do the work?
+
+**Rebasing is the wrong default when the base has moved.** Replaying #1302 would
+have deleted #1308's landed code and reintroduced a non-ASCII ellipsis into a
+redaction the base already performs in ASCII, breaking L3 in the same stroke.
+
+**And a clean rebase would not have shown it.** A SEMANTIC CONFLICT carries no
+markers: git resolves the text correctly while the combined code is logically
+broken - upstream renames a function your commit still calls, the changes sit on
+different lines, nothing conflicts, everything is wrong. "It applied cleanly" is
+not evidence.
+
+So use the old diff as a statement of what was WANTED. Concretely: **the names
+the branch introduces that the repository still does not have.**
+
+    queen-1302   8 of 200 candidates absent   quotaAuthority, provider_quota, ...
+    queen-1303   4 of 243                     started_running, plantedSecret, ...
+    queen-1387  19 of 273                     specQualityHeadingParity, ...
+
+881 added lines across three branches reduce to 31 missing names, because most of
+what they carried had landed by another route. Each name becomes a criterion that
+is fail-to-pass BY CONSTRUCTION - it was measured absent from the base a moment
+earlier, so it cannot be satisfied by an empty patch.
+
+Do not parse for declarations. Six false accusations in this project came from a
+checker guessing at declaration syntax across Swift, TypeScript and markdown.
+Take every identifier-shaped token as a candidate and let the BASE TREE decide
+which are new; absence needs no knowledge of any language. Drop hex blobs - a
+fake sha in a fixture offered `fedcba9876` as a capability the repository lacks.
+
+## Three measures, two of them blind, and the one that answers
+
+The name measure shipped and immediately gave wrong advice. On #1484 it said
+"nothing here is a missing capability - close it as superseded". #1484 is an
+OPEN L3 cleanup whose defect is still in the tree.
+
+| measure | why it was blind on #1484 |
+|---|---|
+| names the branch adds that the base lacks | its ten names had reached the base by another route |
+| lines the branch removes that the base still has | the base REWROTE the file, so nothing matched textually |
+| **the issue's own criterion, run against the base** | **answered: 5 non-ASCII lines where 0 is required** |
+
+**Ask the issue its own question.** The brief already says what done means, in a
+command. Run it against the base rather than the branch. A criterion that fails
+there is the strongest available statement that the work remains, and it needs no
+similarity heuristic at all. It is the same extractor that checks a bee's claim,
+asked of a different ref - one rule, two questions.
+
+Exclude criteria marked as BASELINES: a baseline describes the fork point, and
+asking it of the base inverts its meaning.
+
+And delete the conclusion. "Close it as superseded" was a verdict drawn from one
+measure. Say what was measured and what was not: *no missing vocabulary is not
+the same as nothing left to do; a cleanup, a rename or a behaviour fix adds no
+name at all.* The tool measures; the person concludes.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
