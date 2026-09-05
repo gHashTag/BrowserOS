@@ -103,6 +103,23 @@ export function holdsWork(porcelain) {
   return { work: other > 0, deletions, other }
 }
 
+/**
+ * Did this commit's subject land in the base, allowing for the squash suffix?
+ *
+ * A GitHub squash writes the PR title as the subject and appends ` (#N)`, so
+ * `... looked at` lands as `... looked at (#317)`. That suffix is the ONLY
+ * difference tolerated: anything else after the subject is a different commit,
+ * and a subject that is merely a prefix of a base subject does not count. The
+ * first version of this rule demanded whole-line equality and duly called the
+ * landed branch `feat/detector-denominators` unmerged - it would have kept the
+ * one tree that proved the rule was needed.
+ */
+export function subjectLanded(baseSubjects, subject) {
+  const escaped = subject.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const squashed = new RegExp(`^${escaped} \\(#\\d+\\)$`)
+  return baseSubjects.some((line) => line === subject || squashed.test(line))
+}
+
 export function diskUsedPercent(target = ROOT) {
   const out = sh(`df -P ${JSON.stringify(target)} | tail -1`)
   if (!out) return null
@@ -169,6 +186,7 @@ export function survey() {
       // source an ancestor. Without the second question a worktree whose work
       // landed by squash looks unmerged for ever and is never reaped, which is
       // how a disk fills up while every branch on it is already in the base.
+      let mergedWhy = ''
       const contained = sh(`git merge-base --is-ancestor ${head} ${BASE} && echo yes`)
       if (contained !== 'yes') {
         // The exact question, not the three-dot diff: would merging change the
@@ -178,14 +196,51 @@ export function survey() {
         const baseTree = sh(`git rev-parse ${BASE}^{tree}`)
         const mergedTree = sh(`git merge-tree --write-tree ${BASE} ${head}`)
         const landed = baseTree && mergedTree && mergedTree.split('\n')[0].trim() === baseTree
-        if (!landed) {
-          const ahead = sh(`git rev-list --count ${BASE}..${head}`)
-          rec.why = `${ahead ?? '?'} commit(s) not in ${BASE} - unmerged work lives here`
-          return rec
+        // NOT A RETURN. Both squash paths used to answer REAPABLE here and skip
+        // the dirtiness question entirely, so the summary said "3 merged and
+        // CLEAN" about trees whose cleanliness had never been asked - and the
+        // removal then refused all three. Merged is half the question.
+        if (landed) mergedWhy = `its diff against ${BASE} is empty - the work landed, by squash or otherwise`
+
+        // AND THAT QUESTION EXPIRES. `merge-tree` asks whether merging this
+        // branch would change the base AS IT STANDS NOW, which stops being true
+        // the moment anyone edits the same files again - and in this loop the
+        // same files are edited every round. So a branch that landed by squash
+        // three rounds ago answers "unmerged" for ever, and its worktree is
+        // never reaped.
+        //
+        // Measured 2026-09-06: 31 local worktrees, this tool called 1 of them
+        // reapable, and EIGHT of the other thirty were my own trees whose work
+        // had landed as #119, #121, #123, #125, #127, #313, #314 and #320. They
+        // held 1.67 GB on a volume sitting at 125 MB free, and the loop that
+        // filled it was reporting the disk as an anomaly it could not act on.
+        //
+        // The durable question is not about the base's current tree but about
+        // this branch's own commits: is every one of them present in the base
+        // under its own subject? A squash keeps the subject - GitHub writes the
+        // PR title, and a single-commit PR's title is that commit's subject.
+        //
+        // WITH EXACTLY ONE PERMITTED DIFFERENCE, which the first version of this
+        // rule got wrong and which cost it its own best example. GitHub appends
+        // the PR number: `feat(loop): every detector reports how many files it
+        // looked at` lands as `... looked at (#317)`. Demanding whole-line
+        // equality therefore called a landed branch unmerged - the tool would
+        // have kept the very tree that proved it was needed. Nothing else is
+        // allowed to differ: a suffix that is not ` (#<digits>)` is a different
+        // commit, and one unlanded commit keeps the tree.
+        if (!mergedWhy) {
+          const subjects = (sh(`git log --format=%s ${BASE}..${head}`) || '').split('\n').filter(Boolean)
+          const missing = subjects.filter((s) => {
+            const found = sh(`git log ${BASE} --format=%s --fixed-strings --grep=${JSON.stringify(s)} -n 20`)
+            return !subjectLanded((found || '').split('\n'), s)
+          })
+          if (missing.length || !subjects.length) {
+            rec.why = `${subjects.length || '?'} commit(s) not in ${BASE}` +
+              (missing.length ? `, ${missing.length} whose subject is nowhere in it - unmerged work lives here` : ' - unmerged work lives here')
+            return rec
+          }
+          mergedWhy = `all ${subjects.length} of its commit(s) are in ${BASE} under their own subject - landed by squash`
         }
-        rec.state = 'REAPABLE'
-        rec.why = `its diff against ${BASE} is empty - the work landed, by squash or otherwise`
-        return rec
       }
 
       // Merged, so now dirtiness decides - and it wins. A tree with uncommitted
@@ -204,15 +259,23 @@ export function survey() {
         return rec
       }
       if (held.deletions) {
+        // NOT REAPABLE, WHATEVER I THINK OF DELETIONS.
+        //
+        // This called a deletions-only tree removable on the argument that a
+        // deletion of a file HEAD still has destroys nothing. True, and beside
+        // the point: `git worktree remove` refuses ANY modified tree, and the
+        // only way past it is `--force`, which this loop does not use. So the
+        // tool counted three trees as "merged and clean, holding 278 MB" and
+        // then removed none of them - a promise git was never going to keep.
+        // Restoring the files first would work and is a mutation of somebody
+        // else's tree, so it is named here and left to a human.
         rec.deletionsOnly = held.deletions
-        // Removable, and the reason is worth printing: this is the tree that
-        // looked like work and was not.
-        rec.why = `its HEAD is already contained in ${BASE}; its ${held.deletions} change(s) are all DELETIONS of files that HEAD still has`
-        rec.state = 'REAPABLE'
+        rec.state = 'restorable'
+        rec.why = `${mergedWhy}; but ${held.deletions} file(s) are deleted in the tree, and git refuses to remove it without --force - restore them (git -C <path> checkout -- .) and it becomes reapable`
         return rec
       }
       rec.state = 'REAPABLE'
-      rec.why = `its HEAD is already contained in ${BASE}`
+      rec.why = mergedWhy || `its HEAD is already contained in ${BASE}`
       return rec
     })
 }

@@ -2538,6 +2538,29 @@ check('the whole .git is given back, not two subdirectories', () => {
   if (!/root-owned files left/.test(code)) throw new Error('and it must report what it could not give back')
 })
 
+// A MERGED TEST THAT EXPIRES IS A DISK THAT FILLS.
+//
+// `merge-tree` asks whether merging a branch would change the base AS IT STANDS
+// NOW. That answer decays: the moment anyone edits the same files again - every
+// round, in this loop - a branch that landed by squash reads as unmerged for
+// ever and its worktree is never reaped. Measured 2026-09-06: 31 local
+// worktrees, 1 called reapable, and eight of the rest were this loop's own
+// trees whose work had landed as #119, #121, #123, #125, #127, #313, #314 and
+// #320 - 1.67 GB, on a volume then sitting at 125 MB free.
+check('a branch that landed by squash is recognised by its subject, PR number and all', async () => {
+  const { subjectLanded } = await import('./reap-local.mjs')
+  const s = 'feat(loop): every detector reports how many files it looked at'
+  if (!subjectLanded([`${s} (#317)`], s)) throw new Error('the squash suffix ` (#317)` hid a landed branch - this is the exact case that cost 1.67 GB')
+  if (!subjectLanded([s], s)) throw new Error('an unsquashed subject must still match')
+  if (subjectLanded([`${s} and then some`], s)) throw new Error('a longer subject is a different commit')
+  if (subjectLanded([`${s} (#317) extra`], s)) throw new Error('the PR suffix must end the line')
+  if (subjectLanded(['fix(x): unrelated'], s)) throw new Error('an unrelated subject matched')
+  if (subjectLanded([], s)) throw new Error('an empty base matched something')
+  // Regex metacharacters live in real subjects; a subject must never be a pattern.
+  const meta = 'fix(loop): a rate over a window (not) [yet] finished + more'
+  if (!subjectLanded([`${meta} (#123)`], meta)) throw new Error('a subject carrying regex metacharacters was not matched literally')
+})
+
 check('a worktree is removed on its lifetime, not on disk pressure', async () => {
   const { decide } = await import('./reap-finished.mjs')
   // An hour after the volume went 95% -> 32% it was back at 87%: 17 worktrees,
