@@ -2240,6 +2240,43 @@ check('a shut door is not a broken step', () => {
   if (!/channelDown/.test(fail)) throw new Error('and the report must count it separately from a real failure')
 })
 
+check('two views are sampled together, because a minute apart proves nothing', async () => {
+  const TV = await import('./two-views.mjs')
+  // At 01:15:53 the chain recorded three steps failing with "your application
+  // is not running"; /health answered ok a minute later. By then the world has
+  // moved, so the pair has to be taken at one moment.
+  const s = await TV.sample({ http: { ok: true }, ssh: { attached: false, kind: 'app-down' } })
+  if (!s.disagree) throw new Error('http ok with ssh refused is the disagreement this exists to catch')
+  const agree = await TV.sample({ http: { ok: true }, ssh: { attached: true, kind: 'ok' } })
+  if (agree.disagree) throw new Error('both up is agreement')
+  const bothDown = await TV.sample({ http: { ok: false }, ssh: { attached: false, kind: 'app-down' } })
+  if (bothDown.disagree) throw new Error('both down is agreement too - it is one story, not two')
+})
+
+check('the record counts four states, not two', async () => {
+  const { summarise } = await import('./two-views.mjs')
+  const t = summarise([
+    { http: { ok: true }, ssh: { attached: true } },
+    { http: { ok: true }, ssh: { attached: false, kind: 'app-down' } },
+    { http: { ok: false }, ssh: { attached: false, kind: 'app-down' } },
+    { http: { ok: false }, ssh: { attached: true } },
+  ])
+  if (t.bothUp !== 1 || t.httpOnly !== 1 || t.bothDown !== 1 || t.sshOnly !== 1) {
+    throw new Error('http-ok-ssh-refused and ssh-ok-http-down are different problems and must be counted apart')
+  }
+  if (t.kinds['app-down'] !== 2) throw new Error('the refusal kind is kept, so the next reader knows which problem it was')
+  if (t.n !== 4) throw new Error('the denominator is printed with every rate in this project')
+})
+
+check('asking does not change the chain verdict', () => {
+  const code = codeOf('two-views.mjs')
+  // The instrument must ask even when the breaker has decided not to, and must
+  // not leave the breaker reset behind it.
+  if (!/ignoreBreaker: true/.test(code)) throw new Error('this tool asks even when the chain has stopped asking')
+  if (!/if \(!before\) CH\.resetChannel\(\)/.test(code)) throw new Error('and must restore the verdict it found')
+  if (!/attempts: 1/.test(code)) throw new Error('a single attempt: the question is what the gateway says NOW')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
