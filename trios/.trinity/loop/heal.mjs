@@ -185,6 +185,12 @@ const STEPS = [
   // on the first run one of the seventeen was already being edited on one side
   // only - identical at HEAD, 45 lines apart on disk. Catching that before it
   // lands is the whole difference between a warning and a fork.
+  // WHAT THE DEPLOYMENT SERVES A STRANGER, every round. The source audit was
+  // correct and red for days while /queen/needs-you answered 200 to a hostile
+  // Origin with the escalations and their worker-written reasons. A guard added
+  // in source is not a guard in production until a deploy happens, and a guard
+  // removed is a hole immediately - only a live probe knows which is true now.
+  { name: 'exposure', file: 'exposure.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'what the live service serves to an origin it has never heard of' },
   { name: 'forked-files', file: 'forked-files.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'a file that exists twice must not start saying two things' },
   { name: 't27-parity', file: 't27-parity.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'the generated ring and the twin in production still answer the same' },
   { name: 'verdict-audit', file: 'verdict-audit.mjs', reportsOnly: true, act: '--accepted', dryArgs: '--accepted', why: 'check what the swarm claims against what it pushed' },
