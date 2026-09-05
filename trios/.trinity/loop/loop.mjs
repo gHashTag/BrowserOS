@@ -114,14 +114,58 @@ const alive = (pid) => { try { process.kill(pid, 0); return true } catch { retur
 // concurrent cron fire. Age is the only sound test. The window is deliberately
 // longer than the 15-minute cadence: after a crash it is better to skip two
 // fires than to let two of them write at once.
-export function acquire(holder) {
+//
+// ...AND THE EXCEPTION, WHICH DOES NOT WEAKEN ANY OF THAT.
+//
+// The paragraph above is right about a lock held by a TURN. It is not the only
+// kind of holder. `heal` and `feed` are single processes: they take the lock,
+// do their work and exit, all in one pid. For those, a pid that is gone means
+// the run is gone, and waiting the full 45 minutes starves the swarm for no
+// reason - which cost 8 minutes of an idle swarm on 2026-09-05 before the
+// process turned out to be alive after all.
+//
+// So liveness applies only where it is sound, and only when the holder SAYS it
+// is a single process. Two guards on top of that: a grace period, so a run that
+// has just started is never stolen from, and the default is the old behaviour,
+// so nothing that does not opt in can be affected. A wrongly-held lock costs a
+// wait; a wrongly-taken one costs two writers, which is what the lock exists to
+// prevent.
+const LOCK_LIVENESS_GRACE_MS = 2 * 60 * 1000
+
+export function pidAlive(pid, kill = process.kill) {
+  if (!pid || !Number.isInteger(pid)) return true
+  try { kill(pid, 0); return true } catch (e) { return e.code !== 'ESRCH' }
+}
+
+export function isStale(l, now = Date.now(), alive = pidAlive) {
+  if (!l) return true
+  const age = now - Date.parse(l.at)
+  if (!(age < LOCK_STALE_MS)) return true
+  if (!l.singleProcess) return false
+  if (age < LOCK_LIVENESS_GRACE_MS) return false
+  return !alive(l.pid)
+}
+
+export function acquire(holder, opts = {}) {
   if (fs.existsSync(LOCK)) {
     const l = readJSON(LOCK, null)
     const age = l ? Date.now() - Date.parse(l.at) : Infinity
-    if (l && age < LOCK_STALE_MS) return { ok: false, held: l, ageMs: age }
-    append({ kind: 'lock-reclaimed', note: l ? `held since ${l.at}, past the ${LOCK_STALE_MS / 60000}m window` : 'unreadable lock' })
+    if (!isStale(l)) return { ok: false, held: l, ageMs: age }
+    append({
+      kind: 'lock-reclaimed',
+      note: l
+        ? (l.singleProcess && age < LOCK_STALE_MS
+          ? `single-process holder ${l.holder} (pid ${l.pid}) is gone after ${Math.round(age / 1000)}s`
+          : `held since ${l.at}, past the ${LOCK_STALE_MS / 60000}m window`)
+        : 'unreadable lock',
+    })
   }
-  writeJSON(LOCK, { holder: holder || 'unnamed', pid: process.pid, at: new Date().toISOString() })
+  writeJSON(LOCK, {
+    holder: holder || 'unnamed',
+    pid: process.pid,
+    at: new Date().toISOString(),
+    singleProcess: Boolean(opts.singleProcess),
+  })
   return { ok: true }
 }
 
@@ -133,7 +177,7 @@ export function lockRecord() {
   const l = readJSON(LOCK, null)
   if (!l) return null
   const ageMs = Date.now() - Date.parse(l.at)
-  return { ...l, ageMs, expired: !(ageMs < LOCK_STALE_MS) }
+  return { ...l, ageMs, expired: isStale(l) }
 }
 
 /**

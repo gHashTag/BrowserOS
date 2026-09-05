@@ -83,7 +83,7 @@ if (isMain) {
     const state = L.lockHolder()
     const mine = process.env.LOOP_HOLDER && state && state.holder === process.env.LOOP_HOLDER
     if (!mine) {
-      const got = L.acquire('feed')
+      const got = L.acquire('feed', { singleProcess: true })
       if (!got.ok) {
         // Not an error. The chain holds it and does this same work.
         console.log(`the loop lock is held by ${got.held.holder} (${Math.round(got.ageMs / 60000)} min) - standing down; it feeds too`)
