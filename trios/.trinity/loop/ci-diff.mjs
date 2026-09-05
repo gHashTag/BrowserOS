@@ -84,6 +84,15 @@ export function render(r) {
   if (r.introduced.length) {
     out.push('', 'NEW - these appeared with the change and are the only ones that should stop anybody:')
     for (const f of r.introduced) out.push(`  !! ${f}`)
+    // AND "NEW" IS NOT YET "CAUSED BY". Measured on this tool's second day: a
+    // run whose only difference from the previous one was three integers in a
+    // test file reported `get_dom > scopes to a CSS selector` as new. Three
+    // integers cannot reach a browser-tool suite, so it was flake joining a
+    // family already flaking. The way to tell is another comparison whose diff
+    // is too small to explain the failure - never a re-run and a shrug.
+    out.push('', 'A NEW failure is not yet a CAUSED failure. Compare two runs whose diff is too')
+    out.push('small to explain it before deciding: flake looks exactly like this, and so does')
+    out.push('a real regression. Re-running until it passes decides nothing.')
   }
   if (r.fixed.length) {
     out.push('', 'FIXED - failing before, not failing now:')
