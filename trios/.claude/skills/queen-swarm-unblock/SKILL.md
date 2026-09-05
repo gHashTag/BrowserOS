@@ -3011,6 +3011,61 @@ number from 74% to 50%.
 Say the window in the label - `worst step, last 8 runs` - so nobody has to guess
 which question they are reading the answer to.
 
+## The fifth blind instrument accused forty-two workers of silence
+
+`judge-packet.mjs` assembles what a judge reads about a bee's work. It kept its
+own `railway` with no path, so under the timers it got the client that cannot
+attach, and `catch { return null }` turned the refusal into a verdict:
+
+    ## The bee said nothing that was recorded, so every quoted-run criterion is
+    ## UNVERIFIABLE by absence
+
+Isolated by PATH alone, container healthy, same minute:
+
+    transcriptOf(1351)                            79568 characters
+    the same call under PATH=/usr/local/bin:...   null
+
+**All 42 packets ever written carry that line. All 42 of those bees had a
+transcript** - 4,476,899 characters between them, from 7,933 to 292,942 each.
+Forty-two accusations of silence, produced by a tool that had never once
+succeeded in asking.
+
+A query that returned no rows and a channel that could not be reached were the
+same `null` and opposite facts. Whenever a fetch can fail, its failure needs its
+own value, and the rendering must say *the transcript could not be fetched* -
+never something about the subject.
+
+**And the guard for exactly this defect could not see it.** The check "the loop
+names the railway binary it runs" iterated `['channel.mjs',
+'stale-escalations.mjs']`. It scans the whole directory now, and found a sixth
+file on its first widened run. A guard scoped to a list cannot see the file
+somebody adds next; scope it to the directory and exclude only itself.
+
+Four unused copies of the same constant were deleted from other files. **An
+unused copy of a defect is how the next paste resurrects it** - which is exactly
+how this one got there.
+
+## A step the chain killed itself is not a step that succeeded
+
+`feed.mjs` classifies its own timeout kill. `heal.mjs` never had that arm -
+`git log -S ETIMEDOUT -- heal.mjs` is empty - so a step SIGTERMed at heal's own
+`timeout:` produced no output, matched no pattern, and fell through to `ok`.
+
+    heal.timer.log    62 lines reading `(no output)`, every one recorded ok
+    feed.timer.log    0
+
+Twenty-five of `land`'s thirty-six `ok` records describe a step that produced not
+one byte.
+
+**When two components do the same job, diff their vocabularies.** One had a
+branch the other never grew, and the missing branch was in the part that decides
+what the record says - so the record has been quietly wrong for as long as it has
+existed.
+
+The same round found the announcement line printing `${f.summary}` for FINDING
+records, where `summary` is set only on SKIPPED ones. Every finding it ever
+announced printed `undefined`: the one word the operator was meant to read.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
