@@ -2814,6 +2814,52 @@ check('a parity grid is exhaustive over the space it claims, and says which spac
 // over any red gate teaches everyone to ignore it, and refusing to merge over
 // any red gate leaves a live production defect waiting on somebody's flaky
 // browser test. Naming exactly which failures are NEW is the only way through.
+// WHAT THE DEPLOYMENT DOES, NOT WHAT THE BRANCH DECLARES.
+//
+// The source audit was correct, red, and being merged across:
+// `/queen/needs-you` was mounted with a comment saying it sat behind the
+// trusted-origin catch-all, and nothing was behind it. Production answered 200
+// to a hostile Origin with the escalations, their ages and the worker-written
+// reason text. A source audit says what the code declares; this says what the
+// deployed image serves, and the gap between them is where the defect lived.
+check('a probe knows a deliberate public shell from a breach', async () => {
+  const E = await import('./exposure.mjs')
+  // FIVE FALSE ACCUSATIONS ON ITS FIRST RUN. /queen/dashboard, /queen/feed,
+  // /queen/kanban, /queen/roadmap and /queen/tree are deliberate public shells,
+  // each carrying a written reason in the audit's allowlist. A probe that reads
+  // only the CORS calls reports the design as a breach.
+  const server = "app.use('/queen/status', publicReadCorsMiddleware())\n" +
+    ".route('/queen/status', s).route('/queen/kanban', k).route('/queen/needs-you', n)\n"
+  const audit = "const DEFAULT_ALLOWLIST = [\n  {\n    path: '/queen/kanban',\n    reason:\n      'shell only',\n  },\n]\n"
+  const d = E.declaredRoutes(server, audit)
+  if (!d.publicRead.has('/queen/kanban')) throw new Error('a shell with a written reason was not treated as public')
+  if (!d.publicRead.has('/queen/status')) throw new Error('a CORS-declared public route was not treated as public')
+  if (d.publicRead.has('/queen/needs-you')) throw new Error('an undeclared path was treated as public')
+  const r = E.classify([
+    { path: '/queen/status', code: 200 },
+    { path: '/queen/kanban', code: 200 },
+    { path: '/queen/needs-you', code: 200 },
+    { path: '/queen/board', code: 403 },
+  ], d.publicRead)
+  if (r.exposed.length !== 1 || r.exposed[0].path !== '/queen/needs-you')
+    throw new Error(`exposed was ${JSON.stringify(r.exposed.map((x) => x.path))}`)
+})
+
+check('a route that could not be reached is never a pass', async () => {
+  const E = await import('./exposure.mjs')
+  const r = E.classify([{ path: '/queen/x', code: null }], new Set())
+  if (r.unreachable.length !== 1) throw new Error('an unreachable probe was folded into a result')
+  if (r.exposed.length || r.asDeclared.length) throw new Error('an unreachable probe was counted as an answer')
+})
+
+check('the exposure probe never prints a body', () => {
+  // The thing being measured is exposure. A tool that dumps the payload to
+  // prove a leak has published it a second time.
+  const src = codeOf('exposure.mjs')
+  if (!/-o \/dev\/null/.test(src)) throw new Error('the probe is no longer discarding the response body')
+  if (/%\{http_code\}/.test(src) === false) throw new Error('the probe is not reading the status code')
+})
+
 check('a CI comparison names the new failures and never counts them', async () => {
   const C = await import('./ci-diff.mjs')
   const base = '(fail) a > one [1.20ms]\n(fail) b > two [3ms]\n'
