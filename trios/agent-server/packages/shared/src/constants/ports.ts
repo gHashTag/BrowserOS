@@ -40,7 +40,7 @@ export const DEV_PORTS = {
   extension: 9310,
 } as const
 
-// OAuth callback port — must match the redirect_uri registered with OpenAI's Codex client ID
+// OAuth callback port - must match the redirect_uri registered with OpenAI's Codex client ID
 export const OAUTH_CALLBACK_PORT = 1455
 
 export type Ports = typeof DEFAULT_PORTS
