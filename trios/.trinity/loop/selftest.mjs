@@ -1922,6 +1922,58 @@ check('the reaper does not promise megabytes it cannot return', () => {
   if (/freeing about \$\{freed\} MB/.test(code)) throw new Error('"freeing about N MB" was a promise the tool could not keep')
 })
 
+check('salvage proposes names, not tokens, and never a hex fixture', async () => {
+  const { candidates, NOISE } = await import('./salvage.mjs')
+  const c = candidates([
+    '+const quotaAuthority = readTelemetry()',
+    '+  const sha = "fedcba9876"',
+    '+export function quotaAuthority() {}',
+  ])
+  const ids = c.map((x) => x.id)
+  if (!ids.includes('quotaAuthority')) throw new Error('a name the branch introduces is the point')
+  if (c.find((x) => x.id === 'quotaAuthority').n !== 2) throw new Error('frequency orders the candidates')
+  if (ids.includes('fedcba9876')) throw new Error('a hex blob is a fixture, not a capability the repository lacks')
+  if (ids.includes('const') || ids.includes('export')) throw new Error('a keyword is not a contribution')
+  if (!NOISE.has('describe')) throw new Error('test scaffolding is noise too')
+})
+
+check('salvage measures absence in the tree, in any language', async () => {
+  const { inTree, surviving } = await import('./salvage.mjs')
+  // A Swift enum case, an object-literal method and a function reached by
+  // import are all "defined" differently and all present in the tree the same
+  // way. Absence needs no parser.
+  const run = (cmd) => (cmd.includes('connectionFailed') ? 'a/b/Transport.swift' : null)
+  if (!inTree('ref', 'connectionFailed', run)) throw new Error('present is present')
+  if (inTree('ref', 'neverWritten', run)) throw new Error('absent is absent')
+  if (inTree('ref', 'not-an-identifier', run)) throw new Error('only an identifier is looked up as one')
+  // No fork point means no comparison, and no answer is better than a wrong one.
+  if (surviving('nope', { run: () => null }) !== null) throw new Error('a branch with no fork point cannot be compared')
+})
+
+check('salvage refuses to call itself a patch', () => {
+  const code = codeOf('salvage.mjs')
+  // Rebasing #1302 would have deleted #1308's landed work and reintroduced a
+  // non-ASCII character into a file governed by L3 - and a clean rebase would
+  // not have shown either, because a semantic conflict carries no markers.
+  if (/git rebase|cherry-pick|git apply/.test(code)) throw new Error('this tool must never apply anything')
+  if (!/SPECIFICATION OF INTENT/.test(code)) throw new Error('the old branch is a statement of what was wanted, not a patch')
+  if (!/semantic conflict/i.test(code)) throw new Error('"it applied cleanly" is not evidence and the file must say so')
+})
+
+check('a generated brief is fail-to-pass by construction', async () => {
+  const { brief } = await import('./salvage.mjs')
+  const out = brief({
+    branch: 'queen-1', files: ['a/b.ts', 'a/b.test.ts'], addedLines: 10,
+    candidates: 20, examined: 20, missing: [{ id: 'thingOne', n: 3 }],
+  })
+  if (!/appears nowhere in the tree today/.test(out)) {
+    throw new Error('the criterion must assert absence, which is what makes it fail at the fork point')
+  }
+  if (!/## Boundary/.test(out) || !/## Success Criteria/.test(out)) throw new Error('the delegation gate demands both sections')
+  if (!/ASCII-only/.test(out)) throw new Error('L3 is the law the sibling branch broke; do not inherit it')
+  if (/copied from/.test(out) && !/not\s+copied from/.test(out)) throw new Error('the brief must forbid copying the old file')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.

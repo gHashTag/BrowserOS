@@ -72,6 +72,7 @@ const ACTS = {
   'loop.mjs': { kinds: [], note: 'the library the others import - it has no act path of its own' },
   'brief-gate.mjs': { kinds: [], note: 'a gate: it refuses or permits, and changes nothing' },
   'coverage.mjs': { kinds: [], note: 'this file' },
+  'salvage.mjs': { kinds: [], note: 'a reader: it measures what a stale branch would still add and writes a brief; it applies nothing and never rebases' },
   'proven.mjs': { kinds: [], note: 'a comparison: recent verdicts against the baseline this process established; it records a reading and changes nothing' },
   'selftest.mjs': { kinds: [], note: 'the calibration harness - proven by running, not by acting' },
 }
