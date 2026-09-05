@@ -2569,6 +2569,21 @@ check('the feed hands the channel the budget it is holding it to', () => {
   if (!/budget \* 0\.8/.test(code)) throw new Error('leave the step room to report after the channel gives up')
 })
 
+check('the dashboard reads the gateway rate, it does not probe for it', async () => {
+  const { gatewayPercent } = await import('./dash.mjs')
+  // Probing here would add a sample to the thing being measured. A dashboard
+  // that changes its own number by looking at it is not a dashboard.
+  const read = () => [
+    JSON.stringify({ ssh: { attached: true } }),
+    JSON.stringify({ ssh: { attached: false, kind: 'app-down' } }),
+    JSON.stringify({ ssh: { attached: false, kind: 'app-down' } }),
+  ].join('\n')
+  if (gatewayPercent(read) !== 33) throw new Error(`1 of 3 attached is 33% - got ${gatewayPercent(read)}`)
+  if (gatewayPercent(() => '') !== null) throw new Error('no samples is null, not zero: never measured and never answered are different')
+  const code = codeOf('dash.mjs')
+  if (/two-views\.mjs/.test(code)) throw new Error('it reads the record; running the probe would change what it measures')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.

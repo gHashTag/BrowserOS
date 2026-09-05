@@ -100,6 +100,27 @@ export function selftestCases(read = (f) => fs.readFileSync(f, 'utf8')) {
   return n || null
 }
 
+/**
+ * How often the one gateway every critical path shares actually answers.
+ *
+ * Read from the paired record rather than probed here: probing would add a
+ * sample to the thing being measured, and a dashboard that changes its own
+ * number by looking at it is not a dashboard.
+ *
+ * Eighteen samples on 2026-09-05 said 39% - HTTP answered every time and the
+ * ssh gateway refused eleven. Every operation that frees the swarm goes through
+ * it, so this belongs beside the swarm counts and not in a file nobody opens.
+ */
+export function gatewayPercent(read = (f) => fs.readFileSync(f, 'utf8')) {
+  const rows = read(path.join(DIR, 'state', 'two-views.jsonl'))
+    .split('\n').filter(Boolean)
+    .map((l) => { try { return JSON.parse(l) } catch { return null } })
+    .filter(Boolean)
+  if (!rows.length) return null
+  const up = rows.filter((r) => r.ssh && r.ssh.attached).length
+  return Math.round((100 * up) / rows.length)
+}
+
 /** Percent in use of the disk this loop runs on. */
 export function diskPercent(run = sh) {
   const out = run(`node ${path.join(DIR, 'reap-local.mjs')} 2>/dev/null | head -3`, 200000)
@@ -115,6 +136,7 @@ export function facts(deps = {}) {
     proven: measure(() => provenCounts(run)),
     selftest: measure(() => (read ? selftestCases(read) : selftestCases())),
     disk: measure(() => diskPercent(run)),
+    gateway: measure(() => (read ? gatewayPercent(read) : gatewayPercent())),
     at: new Date().toISOString(),
   }
 }
@@ -152,6 +174,7 @@ export function rows(f, prev) {
     { k: `worst step: ${f.worstStep?.step ?? '-'}, percent`, v: f.worstStep?.rate ?? null, prev: p.worstStep?.rate ?? null },
     { k: 'selftest cases', v: f.selftest ?? null, prev: p.selftest ?? null, goodDown: false },
     { k: 'disk this loop runs on, percent', v: f.disk ?? null, prev: p.disk ?? null },
+    { k: 'ssh gateway answers, percent', v: f.gateway ?? null, prev: p.gateway ?? null, goodDown: false },
   ]
 }
 
