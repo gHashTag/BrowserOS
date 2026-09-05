@@ -3358,3 +3358,79 @@ third time an assertion in this suite has been written against prose. `codeOf()`
 strips comment lines for exactly this reason; use it, and pair it with a check
 that the slice is non-empty, so a rename turns the guard off loudly instead of
 quietly.
+
+## The tree a number describes is part of the number
+
+Two rounds in a row I shipped a measurement of the wrong tree.
+
+`forked-files` asked `git show HEAD:` and answered *"0 forked in history, 1
+edited on one side only."* That went into a round report as a **correction to
+the audit's finding D1** — and was itself the thing needing correction. Asked
+against `origin/feat/queen-supervisor`, the branch production is built from, the
+answer is **two forked in history**, and one of them was a live rule the
+container had been getting wrong for weeks.
+
+Both readings were honest. One described this laptop, because **this checkout is
+367 commits behind that branch** — and nothing was measuring that either.
+
+So: name the ref, print the ref, print the drift. `commits this checkout is
+behind what ships` is now a dashboard fact, because every other number taken
+from a working tree is suspect in proportion to it. It sat at 367 through five
+rounds of measurements.
+
+## A rule with two copies, one of them fixed
+
+`QueenSkillMatch.swift` exists in `rings/SR-00/` (the app) and in
+`agent-server/queen-core/` (compiled into `queend`, which the container runs).
+Somebody found that lowercasing a path before matching made three literals in
+four rules dead and `rings/RUST-*` boundaries fall through to no skill, fixed it,
+and mirrored it to **one copy of two**. The deployed decision binary kept
+matching lowercased paths — the exact defect that had been diagnosed and closed.
+
+The doc comment carried the same drift in miniature: one copy said thirty-one
+skills, the other twenty-six. That number is the cheap tell; look for it.
+
+## When a sentence moves, three copies go stale at once
+
+The public status page files a skip reason by matching fixed wording that
+`queend` writes in Swift. `main.swift` stopped writing its own words for a live
+claim: it now appends `spokenForReport(states:).detail`, which returns **four**
+sentences, none containing the marker the route matched. Every live claim had
+been landing under `other`, which the page cannot tell apart from the Queen
+giving no reason at all.
+
+The repository already had a parity gate for exactly this, and it was **red on
+the base branch while pull requests merged across it**. Two of its four failures
+were about its own reach, not the wording:
+
+- it read **two** Swift files; the sentences had moved to a **third**;
+- its per-site check judged an append site by the literals **at** that site — and
+  that site appends a *call*, so its literals are `"#\(number): "` and nothing
+  else, no marker ever, whatever the route says. It reported that as drift. **A
+  gate that cannot read where a sentence lives cannot tell drift from its own
+  blind spot.**
+
+Fixing the route then broke the **third** copy — five fixtures still carried the
+sentence nothing writes. The gate's own comment had named all three copies in
+advance. When you change wording that crosses a language boundary, go and find
+the third copy before CI does.
+
+## "Is this red mine?" is a set difference
+
+A suite that is always red teaches everyone to ignore it; refusing to merge over
+any red gate leaves a live defect waiting on a flaky browser test. Neither habit
+survives contact with a real change. The only honest question is which failures
+are **new**, and that is `tri ci-diff`:
+
+- **names, never counts** — two runs failing twice each at different places is
+  exactly what a count calls "no change";
+- **an unreadable log is `unknown`**, never "0 new failures";
+- **it does not decide whether to merge.** It prints the three sets and stops.
+
+## And one rule I broke
+
+I force-pushed a pull-request branch to re-base it, using `--force-with-lease`.
+The standing constraint in this project is **never force-push**, with no
+exception for "it is only my own branch". The correct move was to open a second
+branch and close the first. Recorded here rather than quietly, because a rule
+that gets a private exception is not a rule.

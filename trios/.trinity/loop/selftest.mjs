@@ -2805,6 +2805,41 @@ check('a parity grid is exhaustive over the space it claims, and says which spac
 // the branch production is built from - the answer is TWO forked in history.
 // Both readings were honest; the one that went into a round report described a
 // tree nobody deploys, because this checkout is 367 commits behind that branch.
+// "IS THIS RED MINE?" IS A SET DIFFERENCE, AND DOING IT BY EYE IS HOW A REAL
+// REGRESSION GETS WAVED THROUGH.
+//
+// The suite on this branch has been red for days and PRs merge across it. On
+// 2026-09-06 a one-file change met that suite and answering "did I break it"
+// took four separate investigations. Both wrong habits are available: merging
+// over any red gate teaches everyone to ignore it, and refusing to merge over
+// any red gate leaves a live production defect waiting on somebody's flaky
+// browser test. Naming exactly which failures are NEW is the only way through.
+check('a CI comparison names the new failures and never counts them', async () => {
+  const C = await import('./ci-diff.mjs')
+  const base = '(fail) a > one [1.20ms]\n(fail) b > two [3ms]\n'
+  const head = '(fail) b > two [9.10ms]\n(fail) c > three [0.4ms]\n'
+  const r = C.compareRuns(base, head)
+  if (r.introduced.join() !== 'c > three') throw new Error(`new failures were ${JSON.stringify(r.introduced)}`)
+  if (r.fixed.join() !== 'a > one') throw new Error(`fixed were ${JSON.stringify(r.fixed)}`)
+  if (r.stillFailing.join() !== 'b > two') throw new Error(`carried over were ${JSON.stringify(r.stillFailing)}`)
+  // COUNTS WOULD HAVE CALLED THIS "no change". Two runs failing twice each, at
+  // completely different places, is exactly the shape a count cannot see.
+  if (C.failuresIn(base).size !== C.failuresIn(head).size) throw new Error('the fixture no longer makes the point')
+})
+
+check('a run that could not be read is never reported as passing', async () => {
+  const C = await import('./ci-diff.mjs')
+  const r = C.compareRuns(null, '(fail) x > y')
+  if (!r.unknown) throw new Error('an unreadable baseline was compared anyway')
+  if (!C.render(r).includes('NOTHING was compared')) throw new Error('the report does not say it compared nothing')
+})
+
+check('the timing suffix does not make every failure look new', async () => {
+  const C = await import('./ci-diff.mjs')
+  const r = C.compareRuns('(fail) same > case [1.00ms]', '(fail) same > case [88.40ms]')
+  if (r.introduced.length) throw new Error('a re-run of the same failure was reported as new')
+})
+
 check('the fork check compares at the shipping ref and says which ref that was', async () => {
   const F = await import('./forked-files.mjs')
   const seen = []
