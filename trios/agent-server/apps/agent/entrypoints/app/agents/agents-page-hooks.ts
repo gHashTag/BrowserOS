@@ -176,7 +176,7 @@ export function useOpenClawProviderSelection(input: {
 /**
  * Mirror of useOpenClawProviderSelection but for Hermes. Hermes only
  * needs the create-dialog flow (no setup dialog, no CLI providers), so
- * this hook is much smaller — it just filters the global provider list
+ * this hook is much smaller - it just filters the global provider list
  * to ones Hermes can drive and seeds the selected id when the dialog
  * opens.
  */
