@@ -172,6 +172,15 @@ const STEPS = [
   // Six false accusations shipped in one night while the synthetic fixtures
   // agreed with the checkers that wrote them.
   { name: 'fp-check', file: 'fp-check.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'no checker accuses anything known good' },
+  // THE RING AGAINST ITS TWIN, EVERY ROUND.
+  //
+  // L0's whole argument is that a rule transcribed into four languages is four
+  // rules that agree until someone edits one. `can_start_another` is in this
+  // tree three times today and they agree; nothing anywhere would have noticed
+  // when they stopped. Comparing them is cheap - 460 exhaustive cases, a few
+  // seconds - and it is the only thing standing between "they agree" and "they
+  // agreed when somebody last looked."
+  { name: 't27-parity', file: 't27-parity.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'the generated ring and the twin in production still answer the same' },
   { name: 'verdict-audit', file: 'verdict-audit.mjs', reportsOnly: true, act: '--accepted', dryArgs: '--accepted', why: 'check what the swarm claims against what it pushed' },
   // Queue what no mechanical check can reach for a judge to read. Assembles
   // only - the judgement is an explicit act, never something this performs.

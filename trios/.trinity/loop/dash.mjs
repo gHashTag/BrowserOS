@@ -27,6 +27,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import * as T27 from './t27-parity.mjs'
 
 const DIR = path.dirname(fileURLToPath(import.meta.url))
 const isMain = process.argv[1] && process.argv[1].endsWith('/dash.mjs')
@@ -192,6 +193,23 @@ export function diskPercent(run = sh) {
   return m ? Number(m[1] || m[2]) : null
 }
 
+/**
+ * How many ring-00 cases the generated artifact and the production twin agree on.
+ *
+ * On the dashboard because L0's entire argument is that transcribed rules agree
+ * until someone edits one, and until the transcriptions are gone this number is
+ * the only thing standing between "they agree" and "they agreed when somebody
+ * last looked". It is a COUNT of agreements, not a percentage: a percentage of a
+ * grid whose size can change reads the same whether the grid shrank or the
+ * agreement grew.
+ */
+export function ringParity(run = sh) {
+  const out = run(`node ${path.join(DIR, 't27-parity.mjs')}`, 300000)
+  const m = out.match(/(\d+) case\(s\) compared, (\d+) disagreement\(s\), (\d+) unanswered/)
+  if (!m) return null
+  return { compared: Number(m[1]), agree: Number(m[1]) - Number(m[2]) - Number(m[3]) }
+}
+
 export function facts(deps = {}) {
   const { run = sh, read } = deps
   return {
@@ -202,6 +220,7 @@ export function facts(deps = {}) {
     disk: measure(() => diskPercent(run)),
     gateway: measure(() => (read ? gatewayPercent(read) : gatewayPercent())),
     pids: measure(() => (read ? pidPercent(read) : pidPercent())),
+    parity: measure(() => ringParity(run)),
     at: new Date().toISOString(),
   }
 }
@@ -229,15 +248,34 @@ export function recordReading(f, file = READINGS) {
   } catch { /* a reading that cannot be stored is still a reading */ }
 }
 
+/**
+ * The swarm's capacity, ASKED rather than typed.
+ *
+ * `bees running (of 4)` had the ring's `MAX_CONCURRENT_WORKERS` written into it
+ * as prose. That made this file the fourth place in the tree holding that
+ * number - after the spec and two Swift copies - and `snapshot.mjs` the fifth.
+ * L0 exists to stop exactly this, and a loop that reports on the swarm's
+ * discipline while keeping its own copy of the swarm's constant has no standing
+ * to. It is read out of the generated artifact now.
+ *
+ * `(of ?)` when the artifact is absent, never `(of 4)`. An invented constant
+ * that happens to be right is the same defect wearing a correct answer.
+ */
+export function capacityLabel(read) {
+  const n = read ? read() : null
+  return `bees running (of ${n ?? '?'})`
+}
+
 export function rows(f, prev) {
   const p = prev || {}
   return [
-    { k: 'bees running (of 4)', v: f.swarm?.running ?? null, prev: p.swarm?.running ?? null, goodDown: false },
+    { k: capacityLabel(() => T27.ringConst('MAX_CONCURRENT_WORKERS')), v: f.swarm?.running ?? null, prev: p.swarm?.running ?? null, goodDown: false },
     { k: 'dispatches finished', v: f.swarm?.finished ?? null, prev: p.swarm?.finished ?? null, goodDown: false },
     { k: 'judged verdicts that prove', v: f.proven?.proven ?? null, prev: p.proven?.proven ?? null, goodDown: false },
     { k: 'briefs with nothing checkable', v: f.proven?.unjudgeable ?? null, prev: p.proven?.unjudgeable ?? null },
     { k: `worst step, last 8 runs: ${f.worstStep?.step ?? '-'}, percent`, v: f.worstStep?.rate ?? null, prev: p.worstStep?.rate ?? null },
     { k: 'selftest cases', v: f.selftest ?? null, prev: p.selftest ?? null, goodDown: false },
+    { k: 'ring T27-00 cases agreeing with the twin', v: f.parity?.agree ?? null, prev: p.parity?.agree ?? null, goodDown: false },
     { k: 'disk this loop runs on, percent', v: f.disk ?? null, prev: p.disk ?? null },
     { k: `ssh gateway answers, last ${GATEWAY_WINDOW}, percent`, v: f.gateway ?? null, prev: p.gateway ?? null, goodDown: false },
     { k: 'container process slots used, percent', v: f.pids ?? null, prev: p.pids ?? null },
