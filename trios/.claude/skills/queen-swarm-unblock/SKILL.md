@@ -2285,6 +2285,60 @@ exist once and will not be returned. Third time this project has met the same
 arithmetic. Report the du figure as the ceiling it is, and read the real answer
 from `df` before and after.
 
+## One outage is one fact, not one failure per step
+
+Across 62 chain runs: when `reap` - the first remote step - SUCCEEDED, the three
+steps after it failed 0%, 7% and 0% of the time. When `reap` FAILED, they failed
+96%, 96% and 66%.
+
+They do not cause each other. They share a condition that holds for the whole
+run - the container is not attachable - and `reap` is simply the first to find
+out.
+
+Two costs, and I had been paying both while quoting the numbers as findings:
+
+- **The chain kept knocking.** After the first step found the door shut, three
+  more knocked, each with its own retries and backoff, and the run spent minutes
+  learning the same thing four times. A process-wide breaker holds the run's
+  verdict; the rest inherit it. Per-process, because the next run must try again.
+- **The record was inflated fourfold.** "reap 71%, lease 68%, push-work 66%" is
+  ONE outage counted once per step. The honest quantity is that the channel was
+  down in 47 of 62 runs. Same problem, a quarter of the drama.
+
+A shut door is not a broken step. Record it as its own status, or the next reader
+goes looking at four tools that are all working.
+
+## Build the classifier from the record, not from the one failure you watched
+
+I saw `Operation timed out (os error 60)` once, by hand, and wrote a retry
+classifier from it - while holding a ledger with 174 recorded failures I had not
+read. When the evidence field started capturing reasons an hour later:
+
+    "Your application is not running or in a unexpected state"      x2
+    "Expected welcome message, received: ServerMessage { error }"   x2
+    "failed to load system trust settings: I/O error"               x1
+
+**None matched.** The retry I had shipped, against the failure rate this project
+had been chasing for two rounds, never fired for a real failure in this system.
+
+And they are three different problems, so one retry policy cannot be right:
+
+| kind | what it means | response |
+|---|---|---|
+| `app-down` | railway will not attach; the service is not in a state it accepts | retry with a LONGER wait |
+| `local` | the CLI on THIS machine could not read the system trust store | do not retry; nothing about the container is wrong |
+| `transport` | the connection dropped | retry soon |
+| `unknown` | unrecognised | print verbatim, never retry on a guess |
+
+**`/health` answered `ok` at the same moment railway said the application was not
+running.** Two views of one service, disagreeing. A green health check is not
+evidence the channel will connect, and neither one is "the truth" - they are
+answers to different questions.
+
+Pin the classifier's cases to the strings the record actually holds, verbatim, so
+whoever widens it next has to widen it against evidence rather than against a
+memory of one bad afternoon.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
