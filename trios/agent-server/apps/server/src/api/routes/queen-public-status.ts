@@ -21,6 +21,17 @@
  * count said two issues lacked a boundary and could not say which two. The
  * number alone is inert - paths, holders, titles and prose never leave.
  *
+ * The other half of `running: 0` is HOW BIG the swarm is at all, and
+ * `workers` answers it: no capacity configured, capacity all idle, or
+ * telemetry that says nothing. Its capacity comes from the same
+ * `configuredWorkerCapacity` authority `/queen/public-research` reads - one
+ * count of the provider environment, never a second parser of it - so the
+ * two public pages cannot tell two different stories about how many paid
+ * slots exist. Four numbers leave and nothing else: the count's source is
+ * the credential environment, and a provider's name, an environment-variable
+ * name or a key value has no business on a public page when the count alone
+ * says whether capacity is idle.
+ *
  * `queue` is the same answer for the paid slots themselves: `workers`-style
  * utilization says HOW MANY slots are busy, `queue.state` says why the rest
  * are not - no eligible work, a full hive, work in flight, or evidence this
@@ -414,6 +425,52 @@ function classifyQueueState(facts: {
 }
 
 /**
+ * The paid worker-slot reading of the dispatch counts.
+ *
+ * `active` is the started-unfinished count, not `running`: a dispatch that
+ * never got a turn is owed an ending by the table but holds no paid slot, so
+ * only `started = true AND finished_at IS NULL` spends capacity. Capacity is
+ * read through the same `configuredWorkerCapacity` authority
+ * `/queen/public-research` uses, never a second parser of the provider
+ * environment, so the two public pages can never disagree about how many
+ * slots exist.
+ *
+ * The clamp is total because a count can only arrive wrong: a non-numeric
+ * string, a negative, a float, the same row counted twice. Active above
+ * capacity would promise slots the swarm does not have and a negative idle
+ * would read as over-subscription, so every malformed value folds into the
+ * closed range `0 <= active <= capacity` with `idle = capacity - active` and
+ * an integer percentage from 0 through 100.
+ */
+function workerProjection(
+  capacity: number,
+  startedUnfinished: number,
+): {
+  capacity: number
+  active: number
+  idle: number
+  utilization: number
+} {
+  const safeCapacity =
+    Number.isFinite(capacity) && capacity > 0 ? Math.floor(capacity) : 0
+  const active = Math.min(
+    safeCapacity,
+    Math.floor(
+      Number.isFinite(startedUnfinished) && startedUnfinished > 0
+        ? startedUnfinished
+        : 0,
+    ),
+  )
+  return {
+    capacity: safeCapacity,
+    active,
+    idle: safeCapacity - active,
+    utilization:
+      safeCapacity > 0 ? Math.round((active / safeCapacity) * 100) : 0,
+  }
+}
+
+/**
  * The public queue projection: a closed state and when the evidence behind it
  * was observed, and not one byte more.
  *
@@ -476,7 +533,16 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
                 -- though both read identically without this column.
                 count(*) FILTER (
                   WHERE finished_at IS NOT NULL AND review_state IS NULL
-                ) AS unreviewed
+                ) AS unreviewed,
+                -- A paid slot is spent only by a dispatch that actually
+                -- started and has not finished. The running count above
+                -- counts every unfinished dispatch because the table owes
+                -- each one an ending; a row written before that rule, or
+                -- written wrong, can be unfinished without ever having
+                -- started, and such a row is owed an ending, not a slot.
+                count(*) FILTER (
+                  WHERE started = true AND finished_at IS NULL
+                ) AS started_running
            FROM queen_dispatch`,
       )
       const latest = await pool.query(
@@ -499,7 +565,14 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
       const latestRow = latest.rowCount ? latest.rows[0] : null
       const schedulerEnabled = intervalSeconds > 0
       const readAtMs = now()
-      const activeWorkers = asCount(countRow.running)
+      // Two readings of one table. `running` is every dispatch the table
+      // still owes an ending; the started-unfinished count is every dispatch
+      // holding a paid slot. Today's writer finishes a dispatch that never
+      // started (recordDispatch), so the two agree on every row it wrote - a
+      // row that predates that rule stays owed an ending without owing a
+      // slot, and each reading keeps its own meaning.
+      const running = asCount(countRow.running)
+      const startedUnfinished = asCount(countRow.started_running)
       const capacity = workerCapacity()
       const tickDecidedAtMs = decidedAtMs(tickRow?.decided_at)
       // Read once, quoted twice: `lastTick.refusal` and the swarmState
@@ -511,7 +584,7 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
       return c.json({
         status: 'ok',
         swarmState: classifySwarmState({
-          running: activeWorkers,
+          running,
           unreviewed: asCount(countRow.unreviewed),
           schedulerEnabled,
           // A decision that is not a readable object cannot explain the
@@ -526,12 +599,18 @@ export function createQueenPublicStatusRoute(deps: QueenPublicStatusDeps = {}) {
           // after accepted work finishes.
           decisionFoundNoEligibleCandidate: decision?.allowed === false,
         }),
-        // The queue reading of the same three rows. `running` is the active
-        // worker count: a dispatch that never started is written already
-        // finished, so an unfinished dispatch is a bee holding a paid slot.
+        // How many paid slots exist and how many are busy: the utilization
+        // half of the paid-slot story, with its denominator explained in the
+        // projection above.
+        workers: workerProjection(capacity, startedUnfinished),
+        // The queue reading of the same three rows, on the same
+        // started-unfinished count `workers.active` reports: the two
+        // projections are two readings of one number, so a hive that reads
+        // full reads full in both and a slot that reads idle reads idle in
+        // both - never one story about how many and another about why.
         queue: queueProjection(
           classifyQueueState({
-            activeWorkers,
+            activeWorkers: startedUnfinished,
             capacity,
             schedulerEnabled,
             tickDecidedAtMs,
