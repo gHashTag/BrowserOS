@@ -44,14 +44,27 @@ const HEALTH = process.env.TRIOS_HEALTH_URL || 'https://trios-agent-server-produ
  * "ok" here means the app answered and said so, nothing more.
  */
 export function httpView(run) {
+  // NO TEMP FILE, BECAUSE A FULL DISK WOULD HAVE READ AS A DEAD SERVICE.
+  //
+  // This wrote the body with `curl -o /tmp/two-views-body` and read it back.
+  // When the volume filled - it sat at 125 MB free on 2026-09-06 and a
+  // `mktemp -d` in this very session failed with ENOSPC - curl exits 23 on the
+  // write, execSync throws, and the sample is recorded as `reachable: false`.
+  // The instrument would have entered "the app is down" into a record whose
+  // whole purpose is to say which view of the service is telling the truth,
+  // and the cause would have been a disk on this laptop.
+  //
+  // The body comes back on stdout with the status code appended on its own
+  // final line, so there is nothing to write and nothing to run out of.
   const fetchIt = run || ((url) => execSync(
-    `curl -s -o /tmp/two-views-body -w '%{http_code}' --max-time 20 ${JSON.stringify(url)}`,
+    `curl -s -w '\\n%{http_code}' --max-time 20 ${JSON.stringify(url)}`,
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 30000 },
-  ).trim())
+  ))
   try {
-    const code = fetchIt(HEALTH)
-    let body = ''
-    try { body = fs.readFileSync('/tmp/two-views-body', 'utf8') } catch { /* code alone is enough */ }
+    const raw = String(fetchIt(HEALTH) ?? '')
+    const cut = raw.lastIndexOf('\n')
+    const code = (cut === -1 ? raw : raw.slice(cut + 1)).trim()
+    const body = cut === -1 ? '' : raw.slice(0, cut)
     const ok = code === '200' && /"status"\s*:\s*"ok"/.test(body)
     return { reachable: true, code, ok, body: body.slice(0, 200) }
   } catch (e) {

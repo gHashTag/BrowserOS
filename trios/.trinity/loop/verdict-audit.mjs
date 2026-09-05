@@ -432,20 +432,72 @@ export function runCommandCriterion(branch, c, read = readFromBranch) {
   return { ok: n >= c.atLeast, why: `grep -c '${c.pattern}' ${c.path} = ${n}, criterion asked for at least ${c.atLeast}${hint}` }
 }
 
-/** Files a brief named in its Boundary, by the server's own rule. */
-export function boundaryPathsOf(body) {
+/**
+ * The declared boundary of one brief, by the server's own rule.
+ *
+ * TWO HEADINGS OPEN A BOUNDARY, AND THIS KNEW ONE OF THEM.
+ *
+ * `CLAUDE.md` states the rule outright - "issues written before that date are
+ * in Russian, which is why `## Границы` and `## Boundary` both open a boundary
+ * section" - and both other implementations obey it: the server's own
+ * `boundaryPathsOf` in `queen-tick.ts:576` and this loop's `brief-gate.mjs:43`,
+ * which is a deliberate port of it. This function was the third copy and the
+ * only one that read English alone.
+ *
+ * The consequence was not a missing check. It was a FALSE ACCUSATION, because
+ * an unread boundary is an empty boundary and every file the bee touched then
+ * falls outside it. Measured over the whole corpus on 2026-09-06: of 380 pushed
+ * briefs, 373 head their boundary in English, 7 in Russian, and NOT ONE has no
+ * boundary at all. Those same 7 are exactly the 7 that carried the note
+ * "N file(s) outside the declared boundary" - #1111, #1133, #1173, #1175,
+ * #1176, #1240, #1244. Every one of them was innocent by construction, and the
+ * server had given each a boundary it was honouring.
+ *
+ * EMPTY IS NOT ABSENT, and here it is worse: absent is not even possible. The
+ * server's own comment says the flag was left out because "no caller in either
+ * language branches on the difference". A caller does now, so the difference is
+ * returned - `absent` and `unreadable` check nothing rather than convicting
+ * everything.
+ *
+ * ONE PATH PER LINE IS THE SERVER'S RULE AND IS KEPT DELIBERATELY. The inner
+ * `break` means a line naming two files reserves only the first, so the bee was
+ * given only the first. Diverging here would make the audit stricter than the
+ * boundary that was actually enforced. Measured: 1 brief in 380 (#1133) writes
+ * two paths on one boundary line, so this costs 0.26% of the corpus and is
+ * reported rather than silently widened.
+ */
+export function boundaryOf(body) {
   const paths = []
+  let heading = null
   let inside = false
-  for (const raw of body.split('\n')) {
+  let extra = 0
+  for (const raw of String(body || '').split('\n')) {
     const line = raw.trim()
-    if (line.startsWith('## ')) { if (inside) break; inside = line.startsWith('## Boundary'); continue }
+    if (line.startsWith('## ')) {
+      if (inside) break
+      inside = line.startsWith('## Boundary') || line.startsWith('## Границы')
+      if (inside) heading = line.slice(3).trim()
+      continue
+    }
     if (!inside || !line) continue
+    let took = false
     for (const token of line.split(/\s+/)) {
       const c = token.replace(/^[`"'(]+/, '').replace(/[`"'.,;:!?)]+$/, '')
-      if (c.includes('/') || /\.\w{1,10}$/.test(c)) { paths.push(c); break }
+      if (!(c.includes('/') || /\.\w{1,10}$/.test(c))) continue
+      // The server takes the first and stops. Everything after it on this line
+      // is counted, not taken, so the narrowing is visible.
+      if (took) { extra++; continue }
+      paths.push(c)
+      took = true
     }
   }
-  return paths
+  const reason = heading === null ? 'absent' : paths.length ? 'ok' : 'unreadable'
+  return { heading, paths, reason, extra }
+}
+
+/** Files a brief named in its Boundary. Kept for callers that want the list. */
+export function boundaryPathsOf(body) {
+  return boundaryOf(body).paths
 }
 
 
@@ -584,6 +636,19 @@ export function auditIssue(number, cache = null) {
 // test file. Against the merge base: "1 file changed, 90 insertions", which is
 // what the bee actually did. A judge handed the first version would have
 // convicted an innocent worker.
+// WHY THE STATUS AND NOT ONLY THE NAME. A file the branch CREATED outside its
+// boundary is a different event from one it edited, and the field has measured
+// which one matters. Auditing the eight most-cited agent benchmarks in 2026,
+// Berkeley's trustworthy-env found the harness resets the files named in the
+// upstream test patch but never the arbitrary files an agent creates - and a
+// ten-line `conftest.py`, a file nobody scoped, "resolves" all 500 instances of
+// SWE-bench Verified. The unscoped NEW file is the shape that breaks a harness;
+// the unscoped edit is usually just untidy.
+  const status = tryShell(`git diff --name-status ${base}..${branch}`) || ''
+  const created = new Set(status.split('\n')
+    .map((l) => l.match(/^A\s+(.+)$/))
+    .filter(Boolean)
+    .map((m) => m[1].trim()))
   const names = tryShell(`git diff --name-only ${base}..${branch}`) || ''
   const files = names.split('\n').filter(Boolean)
   res.files = files.length
@@ -718,10 +783,22 @@ export function auditIssue(number, cache = null) {
     ? `REGRESSION: ${r.why} - and it PASSED at the fork point`
     : r.why))
 
-  const boundary = boundaryPathsOf(body).map((p) => p.replace(/^trios\//, ''))
+  // A BOUNDARY THAT COULD NOT BE READ IS NOT AN EMPTY ONE.
+  //
+  // `strays` was computed unconditionally, so a brief this parser could not
+  // read produced "every file you touched is outside your boundary". That is
+  // the same shape as the judge packet accusing 42 bees of silence because the
+  // transcript query had failed: the instrument's own failure, printed as the
+  // subject's guilt. Only `ok` is checked.
+  const bound = boundaryOf(body)
+  const boundary = bound.paths.map((p) => p.replace(/^trios\//, ''))
   const touched = files.map((f) => f.replace(/^trios\//, ''))
-  const strays = touched.filter((f) => !boundary.some((b) => f === b || f.startsWith(b.replace(/\/$/, '') + '/')))
+  const strays = bound.reason === 'ok'
+    ? touched.filter((f) => !boundary.some((b) => f === b || f.startsWith(b.replace(/\/$/, '') + '/')))
+    : []
   res.strays = strays
+  res.boundary = bound.reason
+  res.strayCreations = strays.filter((f) => created.has(f) || created.has(`trios/${f}`))
 
   if ((promised.length && missing.length) || failedCommands.length) {
     res.verdict = 'CLAIM UNSUPPORTED'
@@ -761,7 +838,14 @@ export function auditIssue(number, cache = null) {
   }
   if (brokenPremise.length) res.notes.push(`${brokenPremise.length} baseline(s) did not hold at the fork point - the BRIEF's premise, not the bee's work`)
   if (unreadable.length) res.notes.push(`${unreadable.length} criterion(s) could not be reproduced and were not checked`)
-  if (strays.length) res.notes.push(`${strays.length} file(s) outside the declared boundary`)
+  if (strays.length) {
+    const made = res.strayCreations.length
+    res.notes.push(`${strays.length} file(s) outside the declared boundary` +
+      (made ? `, ${made} of them CREATED there: ${res.strayCreations.slice(0, 3).join(', ')}` : ''))
+  }
+  if (bound.reason === 'absent') res.notes.push('the brief declares no boundary, so nothing here can be called a stray')
+  if (bound.reason === 'unreadable') res.notes.push(`the "## ${bound.heading}" section names no path this can read - the boundary was NOT checked and no file here is accused`)
+  if (bound.extra) res.notes.push(`${bound.extra} path(s) share a boundary line with another and were never reserved - the server takes the first and stops`)
   return res
 }
 
@@ -769,6 +853,36 @@ export function auditIssue(number, cache = null) {
 
 if (!isMain) { /* imported for calibration or reuse: do nothing */ } else {
 let numbers = process.argv.slice(2).filter((a) => /^\d+$/.test(a))
+
+// --boundary: WHAT THIS BEE WAS ACTUALLY ALLOWED TO TOUCH.
+//
+// The audit prints one line per issue, which is right for a sweep and useless
+// the moment a line accuses somebody. Reading "24 file(s) outside the declared
+// boundary" the question is always the same and always took three git commands
+// by hand: what did the brief reserve, what did the server reserve out of it,
+// and which of the strays did the bee CREATE rather than edit. That last one is
+// the distinction that matters - Berkeley's 2026 benchmark audit found the
+// unscoped file an agent CREATES is what breaks a harness, because no reset
+// touches it, while an unscoped edit is usually just untidy. This prints all
+// three for one issue and convicts nobody the parser could not read.
+if (process.argv.includes('--boundary')) {
+  if (!numbers.length) { console.log('usage: verdict-audit.mjs --boundary <issue> [issue ...]'); process.exit(1) }
+  for (const n of numbers) {
+    const r = auditIssue(n, {})
+    const body = tryShell(`gh issue view ${n} --repo ${REPO} --json body -q .body`)
+    const b = body ? boundaryOf(body) : { reason: 'unreadable', heading: null, paths: [], extra: 0 }
+    console.log(`\n#${n}  ${r.verdict}   ${r.files ?? '-'} file(s) changed`)
+    console.log(`  heading   ${b.heading === null ? 'NONE - the brief opens no boundary section' : `## ${b.heading}`}`)
+    console.log(`  reserved  ${b.paths.length ? b.paths.join('\n            ') : '(nothing this parser could read)'}`)
+    if (b.extra) console.log(`  narrowed  ${b.extra} further path(s) share a line with one above and were never reserved`)
+    if (b.reason !== 'ok') { console.log('  strays    NOT CHECKED - an unread boundary is not an empty one'); continue }
+    const made = new Set(r.strayCreations || [])
+    if (!r.strays?.length) console.log('  strays    none - every file it touched was reserved')
+    for (const f of r.strays || []) console.log(`  ${made.has(f) ? 'CREATED  ' : 'edited   '} ${f}`)
+  }
+  process.exit(0)
+}
+
 if (process.argv.includes('--accepted')) {
   // THE FLOOR WAS A NUMBER NOBODY EXPLAINED, IN A FILE THAT EXPLAINS EVERYTHING.
   //
@@ -824,7 +938,16 @@ for (const n of numbers) {
   }
   tally[r.verdict] = (tally[r.verdict] || 0) + 1
   const mark = { 'CLAIM UNSUPPORTED': '!!', SUPPORTED: 'ok', 'EMPTY DIFF': '!!', 'NO BRANCH': '??' }[r.verdict] || '  '
-  console.log(`${mark} #${r.number}  ${r.verdict.padEnd(20)} files=${r.files ?? '-'}  ${r.notes.join('; ').slice(0, 90)}`)
+  // A LINE THAT PASSES CAN BE SUMMARISED; A LINE THAT ACCUSES CANNOT.
+  //
+  // Every note was cut at 90 characters, which is fine for "1 criterion failed
+  // at the fork point and passes on the branch" and useless for the ones that
+  // matter: `24 file(s) outside the declared bo` hid both the count's subject
+  // and, once the note grew a "CREATED there" clause, the whole finding. It
+  // also silently defeated a grep for the note's own text. Findings print whole.
+  const notes = r.notes.join('; ')
+  const full = r.verdict !== 'SUPPORTED' || r.strays?.length
+  console.log(`${mark} #${r.number}  ${r.verdict.padEnd(20)} files=${r.files ?? '-'}  ${full ? notes : notes.slice(0, 90)}`)
 }
 if (!FRESH) saveCache(cache)
 console.log('\n' + Object.entries(tally).map(([k, v]) => `${k}: ${v}`).join('   '))

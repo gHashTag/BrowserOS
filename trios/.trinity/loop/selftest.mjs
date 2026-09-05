@@ -288,6 +288,95 @@ check('a real criterion IS read as a promise', () => {
   if (!ids.includes('reallyPromised')) throw new Error(`missed the promise, got ${JSON.stringify(ids)}`)
 })
 
+// THE BOUNDARY THIS TOOL COULD NOT READ, IT CALLED EMPTY.
+//
+// `## Границы` opens a boundary section - CLAUDE.md says so, the server's
+// `boundaryPathsOf` (queen-tick.ts:576) obeys it and brief-gate.mjs:43 ports
+// it. This file was the third copy and read English alone, so seven briefs were
+// parsed as declaring no boundary and every file their bees touched was
+// reported as a stray. Measured over 380 pushed briefs: 373 English, 7 Russian,
+// ZERO with no boundary - so an empty parse is always this parser failing,
+// never the brief being silent.
+
+check('a Russian boundary heading is a boundary', () => {
+  const b = VA.boundaryOf('## Границы\n\n`rings/SR-00/QueenLocalisation.swift`\n')
+  if (b.reason !== 'ok') throw new Error(`read the section as ${b.reason}`)
+  if (!b.paths.includes('rings/SR-00/QueenLocalisation.swift')) throw new Error(`took ${JSON.stringify(b.paths)}`)
+})
+
+check('an English boundary heading still is', () => {
+  const b = VA.boundaryOf('## Boundary\n\n`apps/server/src/x.ts`\n')
+  if (b.reason !== 'ok' || b.paths.length !== 1) throw new Error(`${b.reason} ${JSON.stringify(b.paths)}`)
+})
+
+check('a boundary that names no readable path accuses nobody', () => {
+  const b = VA.boundaryOf('## Границы\n\nthe queen tab and nothing else\n')
+  if (b.reason !== 'unreadable') throw new Error(`reason was ${b.reason}`)
+  if (b.paths.length) throw new Error(`invented ${JSON.stringify(b.paths)}`)
+})
+
+check('no boundary section at all is reported as absent, not as empty', () => {
+  const b = VA.boundaryOf('## Success Criteria\n\n- something\n')
+  if (b.reason !== 'absent') throw new Error(`reason was ${b.reason}`)
+  if (b.heading !== null) throw new Error(`invented the heading ${b.heading}`)
+})
+
+check('a second path on one boundary line is counted, not taken - the server takes the first and stops', () => {
+  const b = VA.boundaryOf('## Границы\n\n`rings/SR-02/ChatViewModel.swift` и `main.swift`\n')
+  if (b.paths.length !== 1) throw new Error(`took ${b.paths.length}, diverging from the server`)
+  if (b.extra !== 1) throw new Error(`did not report the path the bee never got, extra=${b.extra}`)
+})
+
+check('the section ends at the next heading', () => {
+  const b = VA.boundaryOf('## Boundary\n\n`a/b.ts`\n\n## Notes\n\n`c/d.ts`\n')
+  if (b.paths.length !== 1) throw new Error(`swallowed the next section: ${JSON.stringify(b.paths)}`)
+})
+
+// THREE PARSERS, ONE RULE, AND NOBODY COMPARED THEM.
+//
+// The boundary rule is implemented three times - in the server (the one that is
+// enforced), in brief-gate (which must predict the server), and in
+// verdict-audit (which judges against it). Two agreed and the third did not,
+// and the way that surfaced was seven innocent bees carrying an accusation for
+// a day. Reading the three sources and asserting they name the same headings
+// costs nothing and fails the moment one drifts again.
+// AN IGNORE RULE ANCHORED TO A ROOT THE BUILD LEFT.
+//
+// `/*.o` keeps object files out of the repository root. The build moved into
+// `trios/`, one directory down, where a leading-slash pattern does not reach -
+// so the rule matched nothing the compiler wrote and nobody noticed until a bee
+// committed 24 `trios/*.o` files on queen-1133 and `git check-ignore` confirmed
+// they were never ignored. The rule looked present the whole time.
+check('build artifacts are ignored wherever the build runs, not only at the root', () => {
+  const root = process.env.TRIOS_ROOT || '/Users/playra/BrowserOS'
+  for (const p of ['trios/Probe.o', 'trios/Probe.d', 'trios/Probe.swiftdeps', 'Probe.o']) {
+    let out = ''
+    try {
+      out = execSync(`git check-ignore -v -- ${JSON.stringify(p)}`, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    } catch { /* exit 1 means NOT ignored, and out stays empty */ }
+    if (!out.trim()) throw new Error(`${p} is not ignored - a compile in that directory can be committed`)
+  }
+})
+
+check('all three boundary parsers know the same two headings', () => {
+  const sources = {
+    'the server (queen-tick.ts)': path.join(DIR, '../../agent-server/apps/server/src/api/services/queen-tick.ts'),
+    'brief-gate.mjs': path.join(DIR, 'brief-gate.mjs'),
+    'verdict-audit.mjs': path.join(DIR, 'verdict-audit.mjs'),
+  }
+  const missing = []
+  for (const [name, file] of Object.entries(sources)) {
+    let src
+    // A source that cannot be read is an UNKNOWN parser, never an agreeing one.
+    try { src = fs.readFileSync(file, 'utf8') } catch { missing.push(`${name}: unreadable at ${file}`); continue }
+    const line = src.split('\n').find((l) => /inside\s*=\s*line\.startsWith/.test(l))
+    if (!line) { missing.push(`${name}: no boundary heading test found`); continue }
+    if (!line.includes("'## Boundary'")) missing.push(`${name}: does not know '## Boundary'`)
+    if (!line.includes("'## Границы'")) missing.push(`${name}: does not know '## Границы'`)
+  }
+  if (missing.length) throw new Error(missing.join('; '))
+})
+
 // -------------------------------------------------- the fork point, not the tip
 // A branch is compared against where it FORKED. Comparing against the base's
 // current tip reports everything merged after the branch was cut as if the
@@ -2251,6 +2340,30 @@ check('two views are sampled together, because a minute apart proves nothing', a
   if (agree.disagree) throw new Error('both up is agreement')
   const bothDown = await TV.sample({ http: { ok: false }, ssh: { attached: false, kind: 'app-down' } })
   if (bothDown.disagree) throw new Error('both down is agreement too - it is one story, not two')
+})
+
+// THE HEALTH VIEW MUST NOT NEED A DISK TO SAY THE SERVICE IS UP.
+//
+// It wrote the response body to /tmp and read it back. On a full volume curl
+// exits 23 on that write, the call throws, and the sample enters the record as
+// `reachable: false` - this laptop's disk, printed as the service being down,
+// in the one instrument built to say which view is telling the truth.
+check('the health view parses one stream and never touches the filesystem', async () => {
+  const TV = await import('./two-views.mjs')
+  const up = TV.httpView(() => '{"status":"ok"}\n200')
+  if (!up.ok || up.code !== '200') throw new Error(`a healthy answer read as ${JSON.stringify(up)}`)
+  const wrongBody = TV.httpView(() => '{"status":"degraded"}\n200')
+  if (wrongBody.ok) throw new Error('200 with a body that does not say ok is not ok')
+  const down = TV.httpView(() => '\n503')
+  if (down.ok || down.code !== '503') throw new Error(`503 read as ${JSON.stringify(down)}`)
+  // codeOf, NOT the raw source. The comment inside httpView quotes the very
+  // command the guard forbids, so reading the file whole makes this case fail
+  // on its own explanation - the third time in this suite that an assertion has
+  // been written against prose rather than against code.
+  const src = codeOf('two-views.mjs')
+  const fn = src.slice(src.indexOf('export function httpView'), src.indexOf('export async function sshView'))
+  if (!fn) throw new Error('httpView was renamed or moved - this guard is now checking nothing')
+  if (/-o\s+\/tmp|readFileSync/.test(fn)) throw new Error('the health view is writing or reading a file again - a full disk will read as a dead service')
 })
 
 check('the record counts four states, not two', async () => {
