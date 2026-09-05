@@ -60,8 +60,28 @@ WORKDIR /app
 # git is not a convenience here: a bee's whole output is a branch and a push.
 # ca-certificates is what makes the Postgres TLS handshake and every provider
 # call possible.
+# tini is here because PID 1 in this container is an application, not an init.
+#
+# MEASURED 2026-09-05, on the running deployment, after it had crashed:
+#
+#   pid 1 is: bun
+#   50 processes, 37 zombies
+#   zombies whose parent is PID 1: 37   with another parent: 0
+#   top commands among them: git (21), esbuild (16)
+#
+# The bash tool spawns `sh -c <command>` and awaits it, so the direct child is
+# reaped. Its GRANDCHILDREN are not: when the shell exits, git and esbuild are
+# orphaned and reparented to PID 1, which must call wait() for them. bun does
+# not, so they stay zombies for the life of the container.
+#
+# The pid table fills, `posix_spawn` starts returning EAGAIN - the deployment
+# log carried `error="EAGAIN: resource temporarily unavailable"` for forty
+# minutes - and then the service crashes, which is how it was found.
+#
+# tini as PID 1 reaps orphans and forwards signals. It is what `docker run
+# --init` installs, and it is the standard answer to exactly this.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends git ca-certificates openssh-client \
+ && apt-get install -y --no-install-recommends git ca-certificates openssh-client tini \
  && rm -rf /var/lib/apt/lists/*
 
 # An unprivileged account for the agents' shell commands.
@@ -147,5 +167,8 @@ EXPOSE 8080
 # is not there. Not claiming to be a distribution build is the honest answer.
 
 # No --cdp-port on purpose. See the header.
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+# tini first, then the entrypoint, which ends in `exec "$@"` so the server still
+# becomes the process that receives signals - with an init above it to bury the
+# orphans it leaves behind.
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
 CMD ["bun", "apps/server/src/index.ts"]
