@@ -3501,3 +3501,69 @@ The tool was right and the sentence a reader takes from "1 NEW" was wrong. The
 way to tell is **another comparison whose diff is too small to explain the
 failure** — never a re-run and a shrug, because flake and a regression look
 identical from a single run.
+
+## A suite that contradicts itself has already lost the argument
+
+`verdict-block.test.ts` asserted **"takes the LAST block when there are two"**.
+`queen-verdict-position.test.ts`, in the same suite, asserts **"takes the FULLER
+of two real blocks rather than the last"**. Both carried reasoned comments. One
+had been red for days.
+
+The codebase settles it, with the measurement behind the change: the VERDICT
+block used to be required LAST, after 25-35 kB of prose, and over a three-hour
+window **28% of dispatches answered `wait`** — the review could not judge them at
+all, because the only machine-read part of the report sat where a turn that runs
+short loses it first. The instruction now says BEGIN and `parseVerdictBlock`
+takes the fullest parse, position-agnostic on purpose.
+
+**When two tests disagree, do not pick the one that makes the suite green.** Find
+which law the implementation and the brief actually follow, and rewrite the other
+to state it. The intent the stale one protected usually survives in the new
+form — here, "a draft must not beat the final answer" became "a fuller block
+beats a thinner one wherever it sits, and a tie goes to the first."
+
+## A gate that fails for want of a service is not a gate that is wrong
+
+`pg-migrate-live.test.ts` **fails rather than skips** when no PostgreSQL is
+reachable, and says why: *"a silent skip is how a gate comes to report a success
+it never earned."* The Tests workflow had no `services:` block, so it had never
+had a database. `TRIOS_PG_MIGRATE_GATE=offline` would have turned the suite green
+while making the only gate that asks PostgreSQL about PostgreSQL decorative for
+ever. **A green suite is not the objective; a suite whose red means something
+is.**
+
+### And the fix was necessary but not sufficient — say so
+
+With the service present the gate still failed. Rather than theorise, put a
+witness in the run:
+
+```
+REACHABLE as postgres on postgres
+MIGRATION CALL RETURNED
+TABLES AFTER MIGRATION: 11
+```
+
+**The migration works.** So the failure is neither connectivity nor the SQL — it
+is the test's own plumbing, and the evidence narrows it: the assertion capturing
+`logger.error` passes, while `runPgMigrations` logs a **warn** on its "no
+`DATABASE_URL`" early return. A silent skip is the only path that leaves that
+assertion green and the catalog empty.
+
+Handed over at that point. **Guessing at somebody else's test with a change that
+makes a suite green is the failure mode, not the fix.**
+
+A diagnostic in a shared workflow earns its place only while it is answering
+something — the migration probe came out in the same PR that added it; the
+two-line reachability witness stayed, because re-deriving that costs a round.
+
+## Two limits worth writing down
+
+**This checkout cannot run the server suite.** `agent-server/node_modules` holds
+14 top-level entries and not `pino`. Reproducing a server test locally is not
+available; CI is the only place it runs. Say that rather than reporting "could
+not reproduce" as if it were evidence.
+
+**A symlinked `node_modules` is the real tree.** Creating `@browseros/*` links
+inside a worktree whose `node_modules` is a symlink writes them into the shared
+checkout, pointing at a directory about to be deleted. Build the farm as a real
+directory of links instead — and check what you left behind.
