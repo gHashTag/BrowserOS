@@ -2907,6 +2907,53 @@ not at all. **After repairing an instrument, expect its whole vocabulary to be
 new, and re-derive the classifier from the first days of real output rather than
 from the years of artefact.**
 
+## PID 1 in a container must be an init, or the orphans stay forever
+
+The service crashed because it could not fork. Measured from `/proc` on the
+running deployment:
+
+    pid 1 is: bun
+    50 processes, 37 zombies
+    zombies whose parent is PID 1: 37   with another parent: 0
+    git (21), esbuild (16)
+
+The bash tool spawns `sh -c <command>` and does `await proc.exited`, so its
+direct child is reaped correctly. The GRANDCHILDREN are the problem: when the
+shell exits, `git` and `esbuild` are orphaned and reparented to PID 1 - and PID 1
+here was `bun`, an application, which never calls `wait()` for children it did
+not start. They stay zombies for the life of the container, the pid table fills,
+`posix_spawn` returns EAGAIN, and the service dies.
+
+    ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
+
+`tini` reaps orphans and forwards signals. It is what `docker run --init`
+installs. Verify by asking, not by assuming: `cat /proc/1/comm` should name the
+init, not your application.
+
+**Awaiting your own child is not enough.** Any tool that runs a shell command
+inherits that shell's children when it exits, and in a container that inheritance
+lands on PID 1.
+
+## A check whose tool is absent reports health
+
+The meter built to watch for that crash counted zombies with
+`ps -eo stat | grep -c '^Z'`. The image has no `ps`. The pipeline produced
+nothing, the count was 0, and it read as "no zombies" for a full round while
+there were 37.
+
+This is the fourth instance of one shape in a week:
+
+    df /              a sealed macOS snapshot at 55% while the real volume was 97%
+    tri feed          a shell case taking an earlier match, so a timer ran another program
+    railway           a client that could not attach, wrapping every failure in one string
+    ps -eo stat       absent, so its absence read as zero
+
+Every one answered confidently about the wrong thing, and none of them errored.
+**Before trusting a count of zero, prove the instrument can produce a non-zero.**
+Read `/proc` rather than `ps`; check `command -v` for anything you shell out to;
+and report the denominator beside the count, because 37 of 50 and 37 of 5000 are
+different facts and a bare 0 hides which one you are not seeing.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
