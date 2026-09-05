@@ -3434,3 +3434,70 @@ The standing constraint in this project is **never force-push**, with no
 exception for "it is only my own branch". The correct move was to open a second
 branch and close the first. Recorded here rather than quietly, because a rule
 that gets a private exception is not a rule.
+
+## A comment that claims a guard is not a guard
+
+`/queen/needs-you` was mounted with this beside it:
+
+```ts
+// Deliberately NOT on the public-read list above. It carries issue numbers
+// and worker-written reasons ... so it sits behind the trusted-origin
+// catch-all with /queen/board
+.route('/queen/needs-you', createQueenNeedsYouRoute())
+```
+
+**There is no catch-all at the mount level.** Every guarded sibling carries
+`.use('/*', requireTrustedAppOrigin())` *inside its own sub-app*; this one was a
+bare route factory, and `queen-needs-you.ts` contains zero occurrences of
+`requireTrustedAppOrigin`. Measured against the live service: **200 to a request
+with a hostile `Origin`**, returning the outstanding escalations with issue
+numbers, ages and worker-written reason text.
+
+The intention was written down and never implemented, and **the comment then
+read as evidence that it had been.** When a comment asserts a protection, go and
+find the mechanism; a sentence is not a middleware.
+
+Guard *inside the app that serves the data*, not with a path-prefix `.use`. A
+`.use('/queen/needs-you/*', …)` would have satisfied the audit while leaving the
+bare path to be argued about — green gate, open hole, worst of both.
+
+## A pinned count goes stale two ways and cannot tell them apart
+
+`route-guard.test.ts` pinned `totalMounts` 38, `guardedSubAppCount` 13,
+`publicReadCount` 5. All three were stale. One had moved because
+`/queen/public-agents` was added **on purpose**; another because a **hole had
+opened**. The pin reports both as the same red.
+
+That is the value of a restated list, and its whole danger: whoever updates it
+**has to look**, and looking is the only reason this was found. Never update a
+pin to make a suite green — update it because you established what moved.
+
+## What the deployment does is a different question from what the branch declares
+
+A source audit reads `server.ts`. `tri exposure` asks the running service what
+it hands an origin it has never heard of. The image is built from a branch that
+can be days behind, so **a guard added in source is not a guard in production
+until a deploy happens — and a guard removed is a hole immediately.**
+
+Rules it keeps, all of which cost something to learn:
+
+- **It never prints a body.** A tool that dumps the payload to prove a leak has
+  published it a second time. Status codes and path names only.
+- **No credential, cookie or token.** The question is what an *anonymous*
+  stranger gets; anything that authenticates answers a different one.
+- **The public list is read, not typed.** Its first run produced **five false
+  accusations** — the deliberate public shells, each with a written reason in
+  the audit's allowlist. A probe that reads only the CORS calls reports the
+  design as a breach.
+
+## "NEW in CI" is not "caused by you"
+
+`tri ci-diff` names which failures are new. On its second day a run whose only
+difference was **three integers in a test file** reported a browser-tool failure
+as new. Three integers cannot reach that suite: it was flake joining a family
+already flaking.
+
+The tool was right and the sentence a reader takes from "1 NEW" was wrong. The
+way to tell is **another comparison whose diff is too small to explain the
+failure** — never a re-run and a shrug, because flake and a regression look
+identical from a single run.
