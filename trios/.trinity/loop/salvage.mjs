@@ -97,6 +97,40 @@ export function inTree(ref, id, run = sh) {
   return Boolean(run(`git grep -l -w -e ${id} ${ref} -- . | head -1`))
 }
 
+
+/**
+ * Lines this branch REMOVED that the base still contains.
+ *
+ * The second dimension, and the one that stops this tool being confidently
+ * wrong. #1484 is an L3 cleanup of a test helper. It introduced ten names, every
+ * one of which the base has since acquired by another route, so the name measure
+ * said "no missing capability - close as superseded". The base's copy of that
+ * file still holds FIVE non-ASCII lines: the fix has not landed and the issue is
+ * genuinely open.
+ *
+ * A branch does two things - it adds and it removes - and a tool that only
+ * measures additions is blind to every cleanup, rename and deletion. What the
+ * branch took out and the base still has is exactly the work still to do.
+ *
+ * Matching is on the trimmed line, because indentation drifts and a line that
+ * moved two spaces is the same line. Short lines are ignored: they match
+ * everywhere and mean nothing.
+ */
+export function unappliedRemovals(branch, fork, files, run = sh) {
+  const out = []
+  for (const f of files) {
+    const removed = (run(`git diff ${fork}..origin/${branch} -- ${JSON.stringify(f)} | grep '^-' | grep -v '^---'`) || '')
+      .split('\n').map((l) => l.slice(1).trim()).filter((l) => l.length > 12)
+    if (!removed.length) continue
+    const inBase = run(`git show origin/${BASE}:${f}`)
+    if (inBase === null) continue
+    const haystack = new Set(inBase.split('\n').map((l) => l.trim()))
+    const still = removed.filter((l) => haystack.has(l))
+    if (still.length) out.push({ file: f, count: still.length, sample: still.slice(0, 3) })
+  }
+  return out
+}
+
 /**
  * What this branch would still add, expressed as names the base does not have.
  *
@@ -114,6 +148,20 @@ export function surviving(branch, opts = {}) {
   const all = candidates(added)
   const examined = all.slice(0, cap)
   const missing = examined.filter((c) => !inTree(`origin/${BASE}`, c.id, run))
+
+  // DID THIS BRANCH INTRODUCE ANY NAME AT ALL?
+  //
+  // #1484 is an L3 cleanup: it replaces non-ASCII characters inside comments.
+  // Every name in its diff was already in the base, and the first version of
+  // this tool concluded "nothing here is a missing capability - close it as
+  // superseded", which would have thrown away an unfinished fix.
+  //
+  // The change simply is not NAME-SHAPED, and a tool that reports absence of
+  // names has nothing to say about it. Telling those two apart is one question:
+  // was every candidate already present at the FORK POINT? If so the branch
+  // introduced no vocabulary, and this measurement is silent rather than
+  // reassuring.
+  const introduced = examined.filter((c) => !inTree(fork, c.id, run))
   return {
     branch,
     fork,
@@ -121,7 +169,9 @@ export function surviving(branch, opts = {}) {
     addedLines: added.length,
     candidates: all.length,
     examined: examined.length,
+    introduced: introduced.length,
     missing,
+    unapplied: unappliedRemovals(branch, fork, files, run),
   }
 }
 
@@ -200,6 +250,41 @@ ${s.files.map((f) => `\`${f}\``).join('\n')}
 `
 }
 
+
+/**
+ * THE ISSUE'S OWN CRITERION, ASKED OF THE BASE.
+ *
+ * The decisive question, and the two measures above are only proxies for it.
+ *
+ * #1484 is an L3 cleanup. Its ten new names are all in the base, so the name
+ * measure says superseded. The base REWROTE the file, so the removed lines do
+ * not match textually and the removal measure says nothing either. Both are
+ * blind, for good reasons, and both would have let an OPEN issue be closed while
+ * its defect stood - the base's copy of that file still holds five non-ASCII
+ * lines.
+ *
+ * The issue itself says what done means, in a command. Run it against the base.
+ * A criterion that FAILS on the base is the strongest statement available that
+ * the work remains, and it needs no similarity heuristic at all.
+ *
+ * This is the same extractor `verdict-audit` uses to check a bee's claim, asked
+ * of a different ref. One rule, two questions.
+ */
+export async function criteriaAgainstBase(issueNumber, deps = {}) {
+  const VA = deps.VA || await import(path.join(DIR, 'verdict-audit.mjs'))
+  const repo = process.env.TRIOS_ISSUE_REPO || 'gHashTag/trios'
+  const body = deps.body ?? sh(`gh issue view ${issueNumber} --repo ${repo} --json body -q .body`)
+  if (!body) return null
+  const commands = VA.promisedCommands(body).filter((c) => c.when !== 'before')
+  if (!commands.length) return { checked: 0, failing: [] }
+  const failing = []
+  for (const c of commands) {
+    const r = VA.runCommandCriterion(`origin/${BASE}`, c)
+    if (r.ok === false) failing.push(r.why)
+  }
+  return { checked: commands.length, failing }
+}
+
 export function render(s) {
   if (!s) return '  no fork point - this branch cannot be compared with the base'
   const out = []
@@ -209,9 +294,35 @@ export function render(s) {
     out.push(`    ${f}  ${Number(moved) ? `base moved ${moved} commit(s) since the fork` : 'base untouched since the fork'}`)
   }
   out.push('')
+  const removals = s.unapplied || []
+  const removalNote = () => {
+    if (!removals.length) return
+    const total = removals.reduce((a, r) => a + r.count, 0)
+    out.push('')
+    out.push(`  AND ${total} line(s) this branch REMOVED are still in the base:`)
+    for (const r of removals) {
+      out.push(`    ${r.file}  ${r.count} line(s), e.g. ${JSON.stringify(r.sample[0]).slice(0, 70)}`)
+    }
+    out.push('  A branch adds and removes. What it took out and the base still has is work')
+    out.push('  still to do, and no count of missing NAMES can see it.')
+  }
+  if (!s.introduced) {
+    out.push(`  this branch introduces NO new name: all ${s.examined} candidate(s) were already`)
+    out.push('  in the tree at its own fork point. It is a rename, a comment fix or an ASCII')
+    out.push('  cleanup - a change that is not name-shaped, and the NAME measure is blind to it.')
+    removalNote()
+    return out.join('\n')
+  }
   if (!s.missing.length) {
-    out.push(`  every one of the ${s.examined} name(s) this branch introduces is ALREADY in the base.`)
-    out.push('  Nothing here is a missing capability. Close it as superseded rather than rebasing it.')
+    out.push(`  this branch introduces ${s.introduced} name(s) and every one is ALREADY in the base.`)
+    out.push('  No missing VOCABULARY - which is not the same as nothing left to do. A cleanup,')
+    out.push('  a rename or a behaviour fix adds no name at all.')
+    removalNote()
+    if (!removals.length) {
+      out.push('')
+      out.push('  Nothing measured here survives. Superseded is the likely answer, but this tool')
+      out.push('  has checked two dimensions and not the behaviour; a reader still decides.')
+    }
     return out.join('\n')
   }
   out.push(`  ${s.missing.length} name(s) of ${s.examined} examined (${s.candidates} candidates) are absent from the base:`)
@@ -221,6 +332,8 @@ export function render(s) {
   out.push('  These are a SPECIFICATION OF INTENT, not a patch. Each is a criterion a brief')
   out.push('  can state and verdict-audit can run: absent at the fork point, present on the')
   out.push('  branch, which is a fail-to-pass check by construction.')
+  out.push('')
+  removalNote()
   out.push('')
   out.push('  A clean rebase would not have proved this branch correct either: a semantic')
   out.push('  conflict carries no markers, so "it applied" is not evidence.')
@@ -247,6 +360,8 @@ if (isMain) {
   const CAP = Number(process.env.SALVAGE_CAP || 400)
   for (const n of names) {
     const s = surviving(n, { cap: CAP })
+    const issue = (String(n).match(/(\d+)$/) || [])[1]
+    const own = issue ? await criteriaAgainstBase(issue) : null
     if (process.argv.includes('--brief')) {
       if (!s || !s.missing.length) {
         console.log(`# ${n}: nothing absent from the base - close as superseded rather than re-filing`)
@@ -257,5 +372,15 @@ if (isMain) {
     }
     console.log(`\n──── ${n}`)
     console.log(render(s))
+    if (own && own.checked) {
+      console.log('')
+      if (own.failing.length) {
+        console.log(`  THE ISSUE'S OWN CRITERION STILL FAILS ON THE BASE - ${own.failing.length} of ${own.checked}:`)
+        for (const w of own.failing) console.log(`    ${w}`)
+        console.log('  Whatever the measures above say, this work is not done.')
+      } else {
+        console.log(`  the issue's own ${own.checked} criterion(s) already PASS on the base - by its own definition it is done`)
+      }
+    }
   }
 }

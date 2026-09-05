@@ -1974,6 +1974,52 @@ check('a generated brief is fail-to-pass by construction', async () => {
   if (/copied from/.test(out) && !/not\s+copied from/.test(out)) throw new Error('the brief must forbid copying the old file')
 })
 
+check('a branch removes as well as adds, and the name measure cannot see it', async () => {
+  const { unappliedRemovals } = await import('./salvage.mjs')
+  // A tool that only counts additions is blind to every cleanup, rename and
+  // deletion. What the branch took out and the base still has is the work left.
+  const run = (cmd) => {
+    if (cmd.includes('git diff')) return '-  const stale = "this line is long enough"\n-  short\n'
+    if (cmd.includes('git show')) return 'unrelated\n  const stale = "this line is long enough"\n'
+    return null
+  }
+  const out = unappliedRemovals('queen-1', 'fork', ['a.ts'], run)
+  if (out.length !== 1 || out[0].count !== 1) throw new Error('a removed line the base still has is work still to do')
+  if (out[0].sample[0].includes('short')) throw new Error('a short line matches everywhere and means nothing')
+})
+
+check('salvage asks the issue its own question, and that answer outranks the heuristics', async () => {
+  const { criteriaAgainstBase } = await import('./salvage.mjs')
+  // #1484: ten new names all present in the base (name measure says superseded),
+  // the file rewritten so removed lines do not match (removal measure silent),
+  // and its own criterion failing on the base with five non-ASCII lines.
+  const VA = {
+    promisedCommands: () => [{ kind: 'grep', dialect: 'bre', pattern: 'x', path: 'a.ts', exactly: 0 }],
+    runCommandCriterion: () => ({ ok: false, why: 'grep = 5, criterion asked for exactly 0' }),
+  }
+  const r = await criteriaAgainstBase(1484, { VA, body: '## Success Criteria\n- anything' })
+  if (r.failing.length !== 1) throw new Error('a criterion failing on the base means the work is not done')
+  // A criterion marked as a BASELINE describes the fork point and must not be
+  // asked of the base as though it were a target.
+  const VB = {
+    promisedCommands: () => [{ kind: 'grep', when: 'before', pattern: 'x', path: 'a.ts', exactly: 13 }],
+    runCommandCriterion: () => ({ ok: false, why: 'should never be called' }),
+  }
+  const r2 = await criteriaAgainstBase(1, { VA: VB, body: 'x' })
+  if (r2.checked !== 0) throw new Error('a baseline is not a target and must not be asked of the base')
+})
+
+check('an unmeasurable branch says so instead of saying superseded', () => {
+  const code = codeOf('salvage.mjs')
+  // The first version concluded "close it as superseded" from a single blind
+  // measure, which would have thrown away an open L3 fix.
+  if (/Close it as superseded rather than rebasing/.test(code)) {
+    throw new Error('one blind measure must not license closing an issue')
+  }
+  if (!/not the same as nothing left to do/.test(code)) throw new Error('no missing vocabulary is not no work left')
+  if (!/a reader still decides/.test(code)) throw new Error('the tool measures; the person concludes')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
