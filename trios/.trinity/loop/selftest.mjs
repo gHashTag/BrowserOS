@@ -288,6 +288,95 @@ check('a real criterion IS read as a promise', () => {
   if (!ids.includes('reallyPromised')) throw new Error(`missed the promise, got ${JSON.stringify(ids)}`)
 })
 
+// THE BOUNDARY THIS TOOL COULD NOT READ, IT CALLED EMPTY.
+//
+// `## Границы` opens a boundary section - CLAUDE.md says so, the server's
+// `boundaryPathsOf` (queen-tick.ts:576) obeys it and brief-gate.mjs:43 ports
+// it. This file was the third copy and read English alone, so seven briefs were
+// parsed as declaring no boundary and every file their bees touched was
+// reported as a stray. Measured over 380 pushed briefs: 373 English, 7 Russian,
+// ZERO with no boundary - so an empty parse is always this parser failing,
+// never the brief being silent.
+
+check('a Russian boundary heading is a boundary', () => {
+  const b = VA.boundaryOf('## Границы\n\n`rings/SR-00/QueenLocalisation.swift`\n')
+  if (b.reason !== 'ok') throw new Error(`read the section as ${b.reason}`)
+  if (!b.paths.includes('rings/SR-00/QueenLocalisation.swift')) throw new Error(`took ${JSON.stringify(b.paths)}`)
+})
+
+check('an English boundary heading still is', () => {
+  const b = VA.boundaryOf('## Boundary\n\n`apps/server/src/x.ts`\n')
+  if (b.reason !== 'ok' || b.paths.length !== 1) throw new Error(`${b.reason} ${JSON.stringify(b.paths)}`)
+})
+
+check('a boundary that names no readable path accuses nobody', () => {
+  const b = VA.boundaryOf('## Границы\n\nthe queen tab and nothing else\n')
+  if (b.reason !== 'unreadable') throw new Error(`reason was ${b.reason}`)
+  if (b.paths.length) throw new Error(`invented ${JSON.stringify(b.paths)}`)
+})
+
+check('no boundary section at all is reported as absent, not as empty', () => {
+  const b = VA.boundaryOf('## Success Criteria\n\n- something\n')
+  if (b.reason !== 'absent') throw new Error(`reason was ${b.reason}`)
+  if (b.heading !== null) throw new Error(`invented the heading ${b.heading}`)
+})
+
+check('a second path on one boundary line is counted, not taken - the server takes the first and stops', () => {
+  const b = VA.boundaryOf('## Границы\n\n`rings/SR-02/ChatViewModel.swift` и `main.swift`\n')
+  if (b.paths.length !== 1) throw new Error(`took ${b.paths.length}, diverging from the server`)
+  if (b.extra !== 1) throw new Error(`did not report the path the bee never got, extra=${b.extra}`)
+})
+
+check('the section ends at the next heading', () => {
+  const b = VA.boundaryOf('## Boundary\n\n`a/b.ts`\n\n## Notes\n\n`c/d.ts`\n')
+  if (b.paths.length !== 1) throw new Error(`swallowed the next section: ${JSON.stringify(b.paths)}`)
+})
+
+// THREE PARSERS, ONE RULE, AND NOBODY COMPARED THEM.
+//
+// The boundary rule is implemented three times - in the server (the one that is
+// enforced), in brief-gate (which must predict the server), and in
+// verdict-audit (which judges against it). Two agreed and the third did not,
+// and the way that surfaced was seven innocent bees carrying an accusation for
+// a day. Reading the three sources and asserting they name the same headings
+// costs nothing and fails the moment one drifts again.
+// AN IGNORE RULE ANCHORED TO A ROOT THE BUILD LEFT.
+//
+// `/*.o` keeps object files out of the repository root. The build moved into
+// `trios/`, one directory down, where a leading-slash pattern does not reach -
+// so the rule matched nothing the compiler wrote and nobody noticed until a bee
+// committed 24 `trios/*.o` files on queen-1133 and `git check-ignore` confirmed
+// they were never ignored. The rule looked present the whole time.
+check('build artifacts are ignored wherever the build runs, not only at the root', () => {
+  const root = process.env.TRIOS_ROOT || '/Users/playra/BrowserOS'
+  for (const p of ['trios/Probe.o', 'trios/Probe.d', 'trios/Probe.swiftdeps', 'Probe.o']) {
+    let out = ''
+    try {
+      out = execSync(`git check-ignore -v -- ${JSON.stringify(p)}`, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    } catch { /* exit 1 means NOT ignored, and out stays empty */ }
+    if (!out.trim()) throw new Error(`${p} is not ignored - a compile in that directory can be committed`)
+  }
+})
+
+check('all three boundary parsers know the same two headings', () => {
+  const sources = {
+    'the server (queen-tick.ts)': path.join(DIR, '../../agent-server/apps/server/src/api/services/queen-tick.ts'),
+    'brief-gate.mjs': path.join(DIR, 'brief-gate.mjs'),
+    'verdict-audit.mjs': path.join(DIR, 'verdict-audit.mjs'),
+  }
+  const missing = []
+  for (const [name, file] of Object.entries(sources)) {
+    let src
+    // A source that cannot be read is an UNKNOWN parser, never an agreeing one.
+    try { src = fs.readFileSync(file, 'utf8') } catch { missing.push(`${name}: unreadable at ${file}`); continue }
+    const line = src.split('\n').find((l) => /inside\s*=\s*line\.startsWith/.test(l))
+    if (!line) { missing.push(`${name}: no boundary heading test found`); continue }
+    if (!line.includes("'## Boundary'")) missing.push(`${name}: does not know '## Boundary'`)
+    if (!line.includes("'## Границы'")) missing.push(`${name}: does not know '## Границы'`)
+  }
+  if (missing.length) throw new Error(missing.join('; '))
+})
+
 // -------------------------------------------------- the fork point, not the tip
 // A branch is compared against where it FORKED. Comparing against the base's
 // current tip reports everything merged after the branch was cut as if the
@@ -2253,6 +2342,30 @@ check('two views are sampled together, because a minute apart proves nothing', a
   if (bothDown.disagree) throw new Error('both down is agreement too - it is one story, not two')
 })
 
+// THE HEALTH VIEW MUST NOT NEED A DISK TO SAY THE SERVICE IS UP.
+//
+// It wrote the response body to /tmp and read it back. On a full volume curl
+// exits 23 on that write, the call throws, and the sample enters the record as
+// `reachable: false` - this laptop's disk, printed as the service being down,
+// in the one instrument built to say which view is telling the truth.
+check('the health view parses one stream and never touches the filesystem', async () => {
+  const TV = await import('./two-views.mjs')
+  const up = TV.httpView(() => '{"status":"ok"}\n200')
+  if (!up.ok || up.code !== '200') throw new Error(`a healthy answer read as ${JSON.stringify(up)}`)
+  const wrongBody = TV.httpView(() => '{"status":"degraded"}\n200')
+  if (wrongBody.ok) throw new Error('200 with a body that does not say ok is not ok')
+  const down = TV.httpView(() => '\n503')
+  if (down.ok || down.code !== '503') throw new Error(`503 read as ${JSON.stringify(down)}`)
+  // codeOf, NOT the raw source. The comment inside httpView quotes the very
+  // command the guard forbids, so reading the file whole makes this case fail
+  // on its own explanation - the third time in this suite that an assertion has
+  // been written against prose rather than against code.
+  const src = codeOf('two-views.mjs')
+  const fn = src.slice(src.indexOf('export function httpView'), src.indexOf('export async function sshView'))
+  if (!fn) throw new Error('httpView was renamed or moved - this guard is now checking nothing')
+  if (/-o\s+\/tmp|readFileSync/.test(fn)) throw new Error('the health view is writing or reading a file again - a full disk will read as a dead service')
+})
+
 check('the record counts four states, not two', async () => {
   const { summarise } = await import('./two-views.mjs')
   const t = summarise([
@@ -2425,6 +2538,29 @@ check('the whole .git is given back, not two subdirectories', () => {
   if (!/root-owned files left/.test(code)) throw new Error('and it must report what it could not give back')
 })
 
+// A MERGED TEST THAT EXPIRES IS A DISK THAT FILLS.
+//
+// `merge-tree` asks whether merging a branch would change the base AS IT STANDS
+// NOW. That answer decays: the moment anyone edits the same files again - every
+// round, in this loop - a branch that landed by squash reads as unmerged for
+// ever and its worktree is never reaped. Measured 2026-09-06: 31 local
+// worktrees, 1 called reapable, and eight of the rest were this loop's own
+// trees whose work had landed as #119, #121, #123, #125, #127, #313, #314 and
+// #320 - 1.67 GB, on a volume then sitting at 125 MB free.
+check('a branch that landed by squash is recognised by its subject, PR number and all', async () => {
+  const { subjectLanded } = await import('./reap-local.mjs')
+  const s = 'feat(loop): every detector reports how many files it looked at'
+  if (!subjectLanded([`${s} (#317)`], s)) throw new Error('the squash suffix ` (#317)` hid a landed branch - this is the exact case that cost 1.67 GB')
+  if (!subjectLanded([s], s)) throw new Error('an unsquashed subject must still match')
+  if (subjectLanded([`${s} and then some`], s)) throw new Error('a longer subject is a different commit')
+  if (subjectLanded([`${s} (#317) extra`], s)) throw new Error('the PR suffix must end the line')
+  if (subjectLanded(['fix(x): unrelated'], s)) throw new Error('an unrelated subject matched')
+  if (subjectLanded([], s)) throw new Error('an empty base matched something')
+  // Regex metacharacters live in real subjects; a subject must never be a pattern.
+  const meta = 'fix(loop): a rate over a window (not) [yet] finished + more'
+  if (!subjectLanded([`${meta} (#123)`], meta)) throw new Error('a subject carrying regex metacharacters was not matched literally')
+})
+
 check('a worktree is removed on its lifetime, not on disk pressure', async () => {
   const { decide } = await import('./reap-finished.mjs')
   // An hour after the volume went 95% -> 32% it was back at 87%: 17 worktrees,
@@ -2565,6 +2701,33 @@ check('the feed hands the channel the budget it is holding it to', () => {
   // would overrun and the step finishes with an answer.
   if (!/CHANNEL_DEADLINE_MS/.test(code)) throw new Error('the step budget must reach the channel, not only the kill timer')
   if (!/budget \* 0\.8/.test(code)) throw new Error('leave the step room to report after the channel gives up')
+})
+
+// THE FRAME WAS BROKEN BY THE CONTENT IT WAS DRAWN AROUND.
+//
+// `pad` only ever pads, so any row wider than the box ran straight through the
+// right border. The subject row had learned this and fixed it with a `.slice()`
+// for itself alone - which is why the lesson never reached the four sections
+// written after it, and every WORK row of the last dashboard overflowed. It is
+// fixed in `row` now, so no future section can reintroduce it.
+check('no dashboard row can break the box, however long its content', () => {
+  const long = 'x'.repeat(400)
+  // Rendered into the scratch directory, NEVER over the round's real dashboard.
+  const out = { text: path.join(tmp, 'dash.txt'), ansi: path.join(tmp, 'dash.ansi') }
+  L.renderDashboard({
+    swarm: [{ k: long, v: 1, prev: null }],
+    work: [{ state: 'done', title: long, note: long }],
+    anomalies: [long],
+    next: [long],
+  }, out)
+  const lines = fs.readFileSync(out.text, 'utf8').split('\n').filter(Boolean)
+  const widths = new Set(lines.map((l) => [...l].length))
+  if (widths.size !== 1) throw new Error(`the box has ${widths.size} different widths: ${[...widths].join(', ')}`)
+  for (const l of lines) {
+    if (!/^[│├╭╰]/.test(l) || !/[│┤╮╯]$/.test(l)) throw new Error(`a row lost its border: ${l.slice(0, 90)}`)
+  }
+  // And a cut row must SAY it was cut, rather than reading as a complete thought.
+  if (!lines.some((l) => l.includes('…'))) throw new Error('content 400 characters wide was truncated silently')
 })
 
 check('the dashboard reads the gateway rate, it does not probe for it', async () => {

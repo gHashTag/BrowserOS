@@ -72,7 +72,14 @@ Sources/*
 amp
 OF
 
-# Swift direct-compile artifacts produced at repo root by build.sh / swiftc
-/*.d
-/*.o
-/*.swiftdeps
+# Swift direct-compile artifacts from build.sh / swiftc.
+#
+# These were anchored to the repository root with a leading slash, for a tree
+# where the build ran there. It runs in trios/ now, so `/*.o` stopped matching
+# anything the compiler writes and the rule has been quietly inapplicable ever
+# since. Found 2026-09-06 by the verdict audit: queen-1133 committed 24 object
+# files as trios/*.o - one directory below the anchor - and `git check-ignore`
+# agreed they were not ignored. Unanchored, so it holds wherever the build runs.
+*.d
+*.o
+*.swiftdeps
