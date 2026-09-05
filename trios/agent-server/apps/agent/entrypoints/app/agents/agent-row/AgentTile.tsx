@@ -13,7 +13,7 @@ export interface AgentTileProps {
 
 /**
  * Adapter glyph + a single liveness dot. Adapter health is no longer
- * surfaced here — it lives as an inline pill inside `AgentSummaryChips`
+ * surfaced here - it lives as an inline pill inside `AgentSummaryChips`
  * so the user isn't asked to disambiguate two dots on the same tile.
  */
 export const AgentTile: FC<AgentTileProps> = ({
