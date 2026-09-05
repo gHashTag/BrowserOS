@@ -2226,6 +2226,65 @@ Keep the last few lines of any step that fails. Printing is for whoever is
 watching; the record is for whoever asks later, and at three in the morning
 nobody is watching.
 
+## Numbers are measured, prose is written
+
+Every instrument here measures something and refuses to guess. The dashboard did
+not: it took whatever numbers its caller handed it, and its caller was me, at
+three in the morning, typing from memory.
+
+Iteration #46 says "dispatches finished 258". The last measurement had said 255.
+Nothing was wrong with the swarm - the number was invented, in the one artifact
+whose whole job is to say what is true, and it went out in a report.
+
+So the dashboard asks the same tools everything else asks (`tri facts`). Two
+rules follow, and they are the whole discipline:
+
+- **A fact that cannot be taken is `null` and renders as `-`,** with a line
+  naming which ones. Never filled in from memory. A missing measurement that
+  silently became 0 would be worse than the typed number.
+- **The delta comes from the last recorded reading,** not from what you remember
+  the last one being. Then the change column is a measurement too.
+
+The prose stays hand-written: what was done, what went wrong, what to do next are
+judgements. Only the numbers are mechanical.
+
+**And a non-zero exit is often the answer.** The first version printed `-` for
+two facts it had already measured, because `failures.mjs` exits 2 when a step is
+failing badly - that is the tool working - and `reap-local` exits 1 to mean
+"would act". `execSync` throws on both. Only a signal or a timeout means the
+measurement was not taken. Reading a deliberate exit code as a failure is the
+same defect as inventing a number, only quieter.
+
+## Excluding a hypothesis is a result
+
+The four channel steps had been failing 46 to 71% of the time and I had a story
+about why. Testing it excluded three explanations rather than confirming one:
+
+    per-call flakiness   10 of 10 single attempts succeeded, median 4.0 s
+    a few long outages   failures fall in 19 of 23 hours, not in a window
+    container restarts   the process had been up 3.9 hours; failures span it
+
+What survives is narrower and better founded: a chain run is all-ok or
+all-failed, which is the shape of "the channel was unreachable for that whole
+run", and 94% of the failures are in `heal` rather than `feed` - the same tools,
+the same channel, a different caller.
+
+That is not a conclusion and must not be written as one. The evidence field will
+carry the reason the next time it fails, and one clean run after the fix is one
+data point, not a trend. Say "three hypotheses excluded, one measurement
+pending" and stop there; a story that fits the data is not the same as the data.
+
+## du is an upper bound, twice over
+
+Freed two dead workflow worktrees and 2.2 GB of bun modules. `du` promised 4.8 GB
+and the disk moved 0.8.
+
+A git worktree shares its object store with the main checkout, and **bun
+hardlinks packages from a shared install cache** - so `du -sh` counts bytes that
+exist once and will not be returned. Third time this project has met the same
+arithmetic. Report the du figure as the ceiling it is, and read the real answer
+from `df` before and after.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
