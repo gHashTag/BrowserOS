@@ -2803,6 +2803,34 @@ Two habits from it:
 - **Name the binary in the code**, next to wherever the project id and service
   name already live. A bare command name is a dependency on somebody's profile.
 
+## Before measuring a change, measure when the change took effect
+
+I named the railway binary, then tested whether it helped by splitting the
+paired record at 07:30 UTC. The result looked like a refutation: 35% before, 33%
+after.
+
+`channel.mjs` was modified at **08:13 UTC**. Both "after" failures were at 08:08
+and 08:14 - one before the edit existed, one from a run already in flight. The
+window was chosen from memory of roughly when I had been working, not from the
+file's mtime.
+
+Split at the real boundary:
+
+    before 08:14 (old binary)   7 of 22 attached   32%
+    after  08:14 (named path)   4 of 4            100%
+
+and the first fully clean feed run in the loop's history followed immediately -
+push-work, land, close-done, share-modules, author, all ok.
+
+**The cutoff is a measurement too.** `stat -f %Sm` on the file, or the commit
+timestamp, or the deploy time - never "around when I did it". This project has
+made the same error before, in the other direction: an acceptance rate of 17%
+measured over a window still in flight, which read 80% once judged.
+
+The tell is cheap: if a before/after split shows almost no change, check the
+boundary before believing it. A fix that does nothing and a fix measured on the
+wrong window look identical.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
