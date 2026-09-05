@@ -2040,6 +2040,35 @@ check('land no longer advises a rebase it knows is usually wrong', () => {
   if (!/semantic conflict/.test(code)) throw new Error('and say why "it applied cleanly" is not evidence')
 })
 
+check('a dropped connection is retried, not fatal', async () => {
+  const { isChannelFailure } = await import('./push-work.mjs')
+  // This step is the ONLY way a bee's work leaves the container. It threw on
+  // one timeout and three ACCEPTED pieces of work - 9 to 15 minutes of a bee
+  // each - stayed invisible until a retry pushed thirteen branches.
+  for (const s of [
+    'Operation timed out (os error 60)',
+    'Connection reset by peer',
+    'client error (SendRequest)',
+    'connect ETIMEDOUT 1.2.3.4:443',
+    '502 Bad Gateway',
+  ]) if (!isChannelFailure(s)) throw new Error(`a channel failure must be recognised: ${s}`)
+  // ...and a real git answer must NOT be retried, because it is an answer.
+  for (const s of [
+    '! [rejected] queen-1 -> queen-1 (non-fast-forward)',
+    'error: failed to push some refs',
+    'fatal: not a git repository',
+  ]) if (isChannelFailure(s)) throw new Error(`a git answer is not a channel failure: ${s}`)
+})
+
+check('push-work distinguishes "could not look" from "nothing to push"', () => {
+  const code = codeOf('push-work.mjs')
+  // Both runs end without pushing anything and only one of them is fine. The
+  // chain reads this step's words, so the words have to be different.
+  if (!/COULD NOT REACH THE CONTAINER/.test(code)) throw new Error('the failure must name itself')
+  if (!/NOT "nothing to push"/.test(code)) throw new Error('and say what it is not')
+  if (!/e\.channel/.test(code)) throw new Error('a channel failure needs its own kind, not a string match at the top level')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
