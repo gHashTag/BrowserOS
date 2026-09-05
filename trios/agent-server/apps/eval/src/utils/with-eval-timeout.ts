@@ -1,7 +1,7 @@
 /**
  * Shared timeout wrapper for eval agent execution.
  * Handles AbortController creation, setTimeout scheduling, catch/finally logic,
- * and post-execution safety check — deduplicating ~25 lines per evaluator.
+ * and post-execution safety check - deduplicating ~25 lines per evaluator.
  */
 
 import type { CaptureContext } from '../capture/context'
