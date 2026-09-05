@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { tool } from 'ai'
 import { z } from 'zod'
@@ -69,6 +70,40 @@ const ENV_ALLOWLIST = [
   'DEVELOPER_DIR',
 ] as const
 
+/**
+ * BUN'S CACHE MUST SHARE A FILESYSTEM WITH THE WORKTREES.
+ *
+ * A hardlink cannot cross a filesystem boundary. Measured on the live container
+ * 2026-09-05:
+ *
+ *   /home/bee/.bun   2493 MB   on `overlay`      (the image, 2 TB)
+ *   /workspace       46 GB     on /dev/zd29056   (the volume)
+ *
+ * Different devices, so `bun install` cannot link a package into a worktree's
+ * node_modules and copies it instead - about 2.4 GB per worktree, every
+ * dispatch. A sample confirmed it: `links=1` on a package file inside a
+ * worktree, where a shared store would show more.
+ *
+ * That is what refills a 46 GB volume at 39 points per hour while the reapers
+ * work correctly. Four bees installing four private copies of one dependency
+ * tree is 10 GB per generation, and no collection strategy wins against a
+ * duplication rate like that - which is why three rounds of tuning reapers
+ * moved the symptom and never the cause.
+ *
+ * Put the cache on the volume and the copies become links: one store, and each
+ * worktree's node_modules costs almost nothing.
+ *
+ * Set explicitly rather than passed through the allowlist, because it is not a
+ * configuration choice - it is a fact about where this deployment's filesystems
+ * are. `TRIOS_BUN_CACHE_DIR` overrides it, and a machine with no /workspace - a
+ * laptop, CI - is left exactly as it was.
+ */
+export function bunCacheDir(exists: (p: string) => boolean = existsSync): string | undefined {
+  const override = process.env.TRIOS_BUN_CACHE_DIR
+  if (override) return override
+  return exists('/workspace') ? '/workspace/.bun-cache' : undefined
+}
+
 function spawnEnv(): Record<string, string | undefined> {
   if (process.env.TRIOS_BASH_ENV_ALLOWLIST === '0') {
     return { ...process.env }
@@ -77,6 +112,8 @@ function spawnEnv(): Record<string, string | undefined> {
   for (const key of ENV_ALLOWLIST) {
     if (process.env[key] !== undefined) scrubbed[key] = process.env[key]
   }
+  const cache = bunCacheDir()
+  if (cache) scrubbed.BUN_INSTALL_CACHE_DIR = cache
   return scrubbed
 }
 
