@@ -2339,6 +2339,50 @@ Pin the classifier's cases to the strings the record actually holds, verbatim, s
 whoever widens it next has to widen it against evidence rather than against a
 memory of one bad afternoon.
 
+## Two statements about a service, taken a minute apart, are two anecdotes
+
+The chain recorded three steps failing with "Your application is not running or
+in a unexpected state" from `railway ssh`. Asked a minute later, `GET /health`
+answered `{"status":"ok"}`.
+
+I wrote that up as a finding. It was not one. **A minute apart proves nothing** -
+by then the world has moved, and the whole discipline here is the difference
+between an anecdote and a measurement. Sample both at the same moment or you have
+not observed a disagreement at all.
+
+And when you do sample them together, count **four states, not two**:
+
+    both up                    agreement
+    both down                  agreement - one story, not two
+    HTTP ok, ssh REFUSED       a green health check is not evidence the channel
+                               will connect. This project read it as one.
+    ssh attached, HTTP down    the opposite failure, a different investigation
+
+Neither view is the truth. HTTP asks whether the app can serve a request; the ssh
+gateway asks whether the platform will attach a shell to the deployment, which
+also depends on the deployment's state and on what the gateway believes about it.
+Picking one and calling it health is the mistake available here.
+
+**Measuring must not change what it measures.** The instrument asks even when the
+run's breaker has already decided the channel is down - that is its job - and
+then restores the verdict it found. A probe that resets state behind it produces
+a system that behaves differently while observed.
+
+## An unpaid claim is reported as unpaid
+
+I said the breaker would turn one outage into one `channel-down` instead of four
+FAILED, and recommended reading the rates next round as the test. Next round
+came: no chain run had happened since it merged, the column read zero, and the
+rates were unchanged.
+
+That is neither evidence for the claim nor against it. Writing it up as though
+the unchanged numbers meant something - either way - would have been the same
+defect as inventing a number, with more words around it.
+
+Say "not yet testable, and here is why", pay the claim when the data arrives, and
+spend the round on something the data can answer now. A loop that always has a
+result at the end of the hour will eventually manufacture one.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
