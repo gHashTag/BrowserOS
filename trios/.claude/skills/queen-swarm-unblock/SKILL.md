@@ -3106,6 +3106,44 @@ as the whole thing, and the sentence a packet prints about its omitted middle
 depends on knowing the difference - so ask the database for `length(s)` and do
 not infer it from what arrived.
 
+## The tap is closed: farm at creation, not after the write
+
+Every dispatch used to run `bun install` and write about 2.5 GB of its own
+node_modules. The loop reclaimed it afterwards - which bounded the damage and
+never stopped it. Six worktrees were carrying 15.4 GB of the same packages.
+
+**Proven by intervention before a line of the fix existed**, on a scratch
+worktree in the live container:
+
+    bare checkout                              159 MB
+    with the farm built, before any install    159 MB
+    after `bun install --frozen-lockfile`      159 MB
+      "Checked 2250 installs across 2424 packages (no changes) [580.00ms]"
+    its test suite through the farm            8 tests, 0 fail
+
+`prepareWorktree` builds the farm when the worktree is cut. Every dispatch since
+records it:
+
+    cut from feat/queen-supervisor; linked 7 node_modules into the store for 34c6c111d6bc
+
+Three guards make it safe to leave running: it does nothing unless a store
+already exists for that exact lockfile hash, so a worktree whose dependencies
+differ installs normally and the first tree of a new lockfile donates its
+install; it never fails a dispatch, because a bee that installs its own copy is
+slower and correct; and the workspace's own packages are linked back to the
+worktree rather than to the store.
+
+**The loop's `share-modules` stays as the backstop** - for trees cut before the
+change, and for any store that appears after a tree was created. A tap and a mop
+are not alternatives.
+
+**And this was recorded in these notes as REFUTED four rounds ago** - "a
+pre-built farm cannot survive bun install", 159M becoming 2562M. That was a bug
+in my own farm builder, not a fact about bun: a POSIX glob that does not match
+dotfiles left out `.bun`, 2242 entries and 2.37 GB. A refutation deserves the
+same scepticism as a confirmation, and this one cost four rounds of treating the
+problem as unfixable.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
