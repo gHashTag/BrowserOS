@@ -30,7 +30,7 @@
  * blocked list above.
  */
 import { describe, expect, it, mock } from 'bun:test'
-import { type FC, createElement } from 'react'
+import { createElement, type FC } from 'react'
 import { renderToString } from 'react-dom/server'
 import type { NudgeData } from './getMessageSegments'
 
