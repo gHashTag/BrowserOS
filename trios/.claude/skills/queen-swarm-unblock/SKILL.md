@@ -2500,6 +2500,54 @@ This project has met the same shape before - a config file of zero-length keys
 that looked configured - and it will meet it again. Any time a read can fail, the
 failure needs its own value, and the refusal has to name which of the two it hit.
 
+## A fix scoped to the symptom leaves the rest of the mechanism armed
+
+`push-work` runs `git push` inside the container as root, and root leaves what it
+writes owned by root. The first outage showed 112 root-owned REFLOGS killing
+every bee at `git fetch` with Permission denied, so the fix chowned `logs` and
+`refs` back.
+
+A push also writes OBJECTS, and creates the fan-out directories that hold them.
+Measured a week later:
+
+    131 root-owned entries under .git
+     53 of them DIRECTORIES in objects/
+        objects/be   mode 755  root:root
+        objects      mode 775  bee:bee
+
+A bee runs as uid 999 and cannot create a file in a directory it does not own.
+Fifty-three doors were shut, silently, waiting for the next fetch. The fix had
+been incomplete since the day it was written, in the part nobody looked at
+because it had not broken yet.
+
+Give back the whole `.git`. Proven on a live push: root-owned files went from 272
+to 0.
+
+**Fix the mechanism, not the symptom you happened to observe.** "Root wrote here"
+is the mechanism; "reflogs were unwritable" was one of its outputs.
+
+## Ask the question that can come back "no"
+
+`rescue` found 52 stranded paths and I said the test was whether it happens
+again: a second occurrence would mean the bees systematically fail to commit, and
+the fix would belong upstream of the tool I had just built.
+
+It came back `total=0`.
+
+So the stranding was a CONSEQUENCE of the volume outage, not a habit: the volume
+fills, bees die part-way through `git worktree add`, their partial work is left
+uncommitted, the trees holding it cannot be reclaimed, and the volume fills
+further. A cycle, broken at two points.
+
+The value was in the question being answerable the wrong way. A test whose only
+possible outcome is "my tool is still needed" is not a test.
+
+And the one path it did find was a **submodule**, whose `M` means the checked-out
+commit differs from the one the superproject records. Committing that moves the
+repository's dependency - a real change, made blind, by a tool for preserving
+files somebody wrote. Read the exclusion from `.gitmodules`: a hard-coded path is
+a second copy of a fact the repository already states.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
