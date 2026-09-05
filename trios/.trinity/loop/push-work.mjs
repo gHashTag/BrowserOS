@@ -25,6 +25,7 @@
 //   node push-work.mjs --push    # act
 
 import { execSync } from 'node:child_process'
+import * as CH from './channel.mjs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -80,32 +81,12 @@ const BATCH = Number(process.env.PUSH_BATCH ?? 12)
  * transient without changing anything. "It worked when I tried again" is not a
  * diagnosis; it is the observation that a retry belongs in the code.
  */
-export function isChannelFailure(text) {
-  return /Operation timed out|os error 60|Connection reset|connection error|SendRequest|client error|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|502 Bad Gateway|503 Service/i.test(String(text || ''))
-}
+// The classifier lives in channel.mjs so the four steps that share the channel
+// share its definition too. Re-exported because this file's own tests name it.
+export const isChannelFailure = CH.isChannelFailure
 
 function remote(script, timeout = 280000, attempts = 3) {
-  let last = ''
-  for (let i = 0; i < attempts; i++) {
-    try {
-      return clean(execSync(`${RAILWAY} --service ${SVC} -- sh -c ${shq(script)}`, {
-        encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout,
-      }))
-    } catch (e) {
-      last = String(e.stdout || '') + '\n' + String(e.stderr || '') + '\n' + String(e.message || '')
-      if (!isChannelFailure(last)) throw e
-      // A dropped connection says nothing about the branches. Wait and ask again.
-      if (i < attempts - 1) {
-        console.error(`  channel to the container failed (${(last.match(/os error \d+|Operation timed out|Connection reset|SendRequest/i) || ['unknown'])[0]}) - retrying in ${(i + 1) * 15}s`)
-        execSync(`sleep ${(i + 1) * 15}`)
-      }
-    }
-  }
-  // Out of attempts. This is loud and non-zero, because a step that cannot
-  // reach the container has not "found nothing to push" - it has not looked.
-  const err = new Error(`could not reach the container after ${attempts} attempts: ${clean(last).slice(0, 200)}`)
-  err.channel = true
-  throw err
+  return CH.remote(script, { service: SVC, timeout, attempts })
 }
 
 const clean = (out) =>

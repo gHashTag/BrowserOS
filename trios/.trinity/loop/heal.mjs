@@ -250,7 +250,24 @@ for (const s of STEPS) {
   }
   console.log(`    ${status === 'FAILED' ? 'FAILED' : line || out.trim().split('\n').pop() || '(no output)'}`)
   if (status === 'FAILED') console.log(out.trim().split('\n').slice(-4).map((l) => '      ' + l).join('\n'))
-  results.push({ step: s.name, status, line: line || null })
+  // THE EVIDENCE IS KEPT, NOT ONLY PRINTED.
+  //
+  // `line` is set only when a SUMMARY pattern matches, and no pattern matches a
+  // failure - so the ledger recorded `line: null` for every failed step and the
+  // reason went to a terminal nobody was watching.
+  //
+  // Measured 2026-09-05 over the whole ledger: push-work, the ONE step that gets
+  // a bee's work out of the container, ran 66 times and 47 were not ok. Every
+  // one of the 46 FAILED entries carries an empty summary, so what went wrong on
+  // any of them cannot now be known. The console had it. The record did not.
+  results.push({
+    step: s.name,
+    status,
+    line: line || null,
+    evidence: (status === 'FAILED' || status === 'FINDING')
+      ? out.trim().split('\n').slice(-6).join(' | ').slice(0, 400)
+      : undefined,
+  })
 }
 
 console.log(`\n${DRY ? 'DRY RUN - ' : ''}heal complete: ` +

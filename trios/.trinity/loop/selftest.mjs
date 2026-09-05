@@ -2069,6 +2069,69 @@ check('push-work distinguishes "could not look" from "nothing to push"', () => {
   if (!/e\.channel/.test(code)) throw new Error('a channel failure needs its own kind, not a string match at the top level')
 })
 
+check('a failed step records WHY, not only that it failed', () => {
+  // push-work ran 66 times in the ledger and 47 were not ok. All 46 FAILED
+  // entries carry an empty summary, because `line` is set only when a SUMMARY
+  // pattern matches and no pattern matches a failure. The console had the
+  // reason. The record did not, and it cannot be recovered.
+  for (const f of ['heal.mjs', 'feed.mjs']) {
+    const code = codeOf(f)
+    if (!/evidence:/.test(code)) throw new Error(`${f} must keep the failing output, not only print it`)
+    if (!/slice\(-6\)/.test(code)) throw new Error(`${f} must keep the last lines, where the reason lives`)
+  }
+})
+
+check('the four steps that free the swarm share one channel, with one retry', async () => {
+  const CH = await import('./channel.mjs')
+  // Asked of the whole ledger for the first time on 2026-09-05: reap 45 of 63
+  // failed, lease 43 of 63, push-work 46 of 70, close-done 32 of 70. All four
+  // reach the container through railway ssh and each carried its own copy of
+  // the call. None retried.
+  for (const f of ['reap.mjs', 'lease.mjs', 'close-done.mjs', 'push-work.mjs']) {
+    const code = codeOf(f)
+    if (!/CH\.remote/.test(code)) throw new Error(`${f} must ask the shared channel, not carry a fifth copy`)
+    if (/execSync\(`\$\{RAILWAY\}/.test(code)) throw new Error(`${f} still has its own copy of the call`)
+  }
+  // A channel failure is retried; an ANSWER is not.
+  if (!CH.isChannelFailure('Operation timed out (os error 60)')) throw new Error('a dropped connection is a channel failure')
+  if (CH.isChannelFailure('! [rejected] queen-1 -> queen-1 (non-fast-forward)')) {
+    throw new Error('a rejected ref is the command answering, and retrying an answer is as wrong as crashing on a drop')
+  }
+})
+
+check('the channel tells "found nothing" from "never looked"', async () => {
+  const CH = await import('./channel.mjs')
+  let slept = 0
+  const drop = () => { const e = new Error('Operation timed out (os error 60)'); e.stderr = ''; throw e }
+  try {
+    CH.remote('x', { run: drop, sleep: () => { slept++ }, onRetry: () => {}, attempts: 3 })
+    throw new Error('a channel that never connected must not return quietly')
+  } catch (e) {
+    if (!e.channel) throw new Error('the failure must be marked, so a caller can tell it from an empty answer')
+    if (slept !== 2) throw new Error(`three attempts means two waits - got ${slept}`)
+  }
+  // And an answer comes straight back, unretried.
+  let calls = 0
+  const answer = () => { calls++; const e = new Error('error: failed to push some refs'); e.stdout = 'x'; throw e }
+  try { CH.remote('x', { run: answer, sleep: () => {}, onRetry: () => {} }) } catch { /* expected */ }
+  if (calls !== 1) throw new Error(`an answer must not be retried - it was asked ${calls} times`)
+})
+
+check('failures.mjs counts runs beside failures', async () => {
+  const { tally } = await import('./failures.mjs')
+  // 0 of 0 and 0 of 66 are different states and a bare failure count cannot
+  // tell them apart. A step that has never run is not healthy.
+  const rows = [
+    { at: '2026-09-05T00:00:00Z', results: [{ step: 'a', status: 'FAILED', evidence: 'boom' }, { step: 'b', status: 'ok' }] },
+    { at: '2026-09-05T01:00:00Z', results: [{ step: 'a', status: 'ok' }] },
+  ]
+  const t = tally(rows)
+  const a = t.find((r) => r.step === 'a')
+  if (a.runs !== 2 || a.failed !== 1) throw new Error('runs and failures are both reported')
+  if (a.evidence[0].text !== 'boom') throw new Error('the recorded reason must be readable back')
+  if (t.find((r) => r.step === 'b').failed !== 0) throw new Error('an ok step has no failures')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.

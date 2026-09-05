@@ -27,6 +27,7 @@
 //   node reap.mjs --reap       # reap if usage is at or above HIGH
 
 import { execSync } from 'node:child_process'
+import * as CH from './channel.mjs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -77,12 +78,9 @@ const WT = '/workspace/BrowserOS/.worktrees'
 const GIT = 'git -c safe.directory=* -C /workspace/BrowserOS'
 
 function remote(script) {
-  const out = execSync(
-    `${RAILWAY} --service ${SVC} -- sh -c ${shq(script)}`,
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 280000 },
-  )
-  // railway prints connection chatter on the same stream; drop it.
-  return out.split('\n').filter((l) => !/Using SSH|railway\.json|Migrate|Existing/.test(l)).join('\n')
+  // One channel, one retry, in channel.mjs. This file used to carry its own
+  // copy with no retry at all, and 45 of its 63 runs failed.
+  return CH.remote(script, { service: SVC })
 }
 
 export function usage() {

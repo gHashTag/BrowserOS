@@ -31,6 +31,7 @@
 //   node lease.mjs --release        # act, recording prior values in the ledger
 
 import { execSync } from 'node:child_process'
+import * as CH from './channel.mjs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -77,10 +78,9 @@ function remote(js) {
   // comment would swallow the rest of the program.
   const oneLine = js.replace(/\s*\n\s*/g, ' ').trim()
   const script = `cd /app/apps/server && bun -e ${shq(oneLine)}`
-  const out = execSync(`${RAILWAY} --service ${SVC} -- sh -c ${shq(script)}`, {
-    encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 280000,
-  })
-  return out.split('\n').filter((l) => !/Using SSH|railway\.json|Migrate|Existing/.test(l)).join('\n').trim()
+  // One channel, one retry, in channel.mjs. 43 of this file's 63 runs failed
+  // while it carried its own copy without one.
+  return CH.remote(script, { service: SVC })
 }
 
 // NOTE ON `$1`. A placeholder cannot be used here. The payload travels inside a
