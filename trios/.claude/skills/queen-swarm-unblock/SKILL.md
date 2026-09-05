@@ -3233,3 +3233,128 @@ them.
 See also: `queen-briefing` (how to write an issue a bee can pass),
 `trios-live-forensics` (read the running system before changing code),
 `unmeasured-cause` (the defect class all four of these belong to).
+
+## One rule written three times, compared zero times
+
+The boundary rule - which paths an issue reserves for its bee - is implemented
+three times in this system:
+
+| where | knows `## Boundary` | knows `## Границы` |
+|---|---|---|
+| `agent-server/.../queen-tick.ts:576` (the one enforced) | yes | yes |
+| `.trinity/loop/brief-gate.mjs:43` (a declared port of it) | yes | yes |
+| `.trinity/loop/verdict-audit.mjs` (which judges against it) | yes | **no** |
+
+`CLAUDE.md` states the rule outright, in the sentence explaining why both
+headings exist. Two implementations obeyed it. The third read English alone, and
+nobody had ever put the three side by side.
+
+**What that cost.** An unread boundary is an empty boundary, so every file the
+bee touched fell outside it. Seven briefs carried the note "N file(s) outside the
+declared boundary" and every one of them was innocent by construction - the
+server had given each a boundary and each bee was honouring it.
+
+The corpus settles it: of **380 pushed briefs, 373 head their boundary in
+English, 7 in Russian, and NOT ONE has no boundary at all.** So an empty parse is
+always the parser failing, never the brief being silent - and the seven Russian
+ones were exactly the seven accused. Stray reports fell from 8 to 2 and both
+survivors were checked by hand.
+
+**The guard is cheap and nobody had written it.** Read all three sources, find
+the line that tests the heading, assert every one names the same two strings. A
+source that cannot be read is an unknown parser, never an agreeing one. Any rule
+with more than one implementation deserves this; it costs one calibration case.
+
+## Absent, unreadable, empty: three answers, not one
+
+This is the third round in which the same defect wore a different hat:
+
+- the judge packet accused 42 bees of silence when the transcript query had
+  failed - `no-rows` and `unreachable` returned the same empty string;
+- `boundaryPathsOf` returned `[]` for "no section" and for "a section this
+  cannot read", and the caller convicted on both;
+- `~/.trios/config.json` looks configured while holding zero-length keys.
+
+The server's own comment had already named the seam and declined to fix it:
+it left the `found` flag out because *"no caller in either language branches on
+the difference."* A caller does now. When a parser can fail, its result type has
+to be able to say so, and the caller must check nothing rather than accuse
+everything.
+
+## A checker whose truth expires
+
+`reap-local` decided a worktree was reapable by asking `merge-tree
+--write-tree`: **would merging this branch change the base as it stands now?**
+
+That is a correct question with a decaying answer. The moment anyone edits the
+same files again - every round, in this loop - a branch that landed by squash
+answers "unmerged" for ever. Measured: 31 local worktrees, one called reapable,
+and eight of the other thirty were this loop's own trees whose work had landed as
+#119, #121, #123, #125, #127, #313, #314 and #320. They held **1.67 GB on a
+volume sitting at 125 MB free**, while the loop that had filled it was reporting
+the disk as an anomaly with no owner, three rounds running.
+
+**Ask a question about the thing, not about the world around it.** Is every
+commit of this branch in the base under its own subject? That does not decay.
+GitHub's squash appends ` (#N)` and nothing else may differ; one unlanded commit
+keeps the tree. The first version of the rule demanded whole-line equality and
+duly called `feat/detector-denominators` unmerged - it would have kept the very
+tree that proved it was needed.
+
+Two more defects fell out of the same file:
+
+- **Merged is half the question.** Both squash paths returned REAPABLE before
+  dirtiness was ever asked, so the summary said "3 merged and CLEAN" about trees
+  whose cleanliness nobody had measured.
+- **Never advertise what the underlying command will refuse.** A deletions-only
+  tree was called removable on the argument that deleting a file HEAD still has
+  destroys nothing. True, and beside the point: `git worktree remove` refuses any
+  modified tree and the only way past is `--force`, which this loop does not use.
+  The tool counted 278 MB it could not return and removed none of it.
+
+## A created stray is not an edited stray
+
+Auditing the eight most-cited agent benchmarks in 2026, Berkeley's
+`trustworthy-env` found that the SWE-bench harness resets the files named in the
+upstream test patch but never the arbitrary files an agent **creates** - and a
+ten-line `conftest.py` nobody scoped "resolves" all 500 instances of SWE-bench
+Verified. The unscoped new file breaks a harness; the unscoped edit is usually
+untidy.
+
+Both surviving strays in this corpus are creations, and they are opposite cases:
+
+- `queen-1133` created **24 object files** in the repository. Real pollution -
+  and it exposed that `/*.o` in `.gitignore` is anchored to a root the build
+  left: the build runs in `trios/`, one directory below the anchor, so the rule
+  had matched nothing the compiler writes for as long as that has been true, and
+  `git check-ignore` agreed the files were never ignored.
+- `queen-1318` created a `bun.lock` beside the `package.json` it was told to
+  edit. That is the boundary-adjacent artifact PORTICO measured: holding scope
+  compliance at 1.00 with zero violations dropped task success to 0.21, and a
+  controlled-grant mechanism brought it back to 0.87 with compliance intact.
+  A stray checker with no grant path is a checker that will be turned off.
+
+`tri boundary <N>` prints all of it for one issue: the heading, what the server
+reserved out of the brief, what it narrowed away, and each stray marked CREATED
+or edited.
+
+## An instrument a full disk turns into a liar
+
+`two-views.mjs` exists to say which view of the service is telling the truth. Its
+HTTP side wrote the response body to `/tmp` with `curl -o` and read it back. On a
+full volume curl exits 23 on that write, the call throws, and the sample enters
+the record as `reachable: false` - **this laptop's disk, recorded as the service
+being down, in the one instrument built to distinguish exactly that.**
+
+It parses one stream now and touches no filesystem. Any probe that needs a
+resource in order to report on a different resource will eventually report the
+wrong one.
+
+## And the guard written against its own explanation
+
+The case forbidding `-o /tmp` in `httpView` failed on the shipped, correct code -
+because the comment inside `httpView` quotes the command it forbids. That is the
+third time an assertion in this suite has been written against prose. `codeOf()`
+strips comment lines for exactly this reason; use it, and pair it with a check
+that the slice is non-empty, so a rename turns the guard off loudly instead of
+quietly.
