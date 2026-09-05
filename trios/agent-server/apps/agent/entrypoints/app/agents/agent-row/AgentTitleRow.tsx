@@ -18,7 +18,7 @@ interface AgentTitleRowProps {
 /**
  * Title strip: name + status badge + (right-aligned) sparkline. The
  * pin toggle sits trailing the title so the title always flushes left
- * regardless of pin state — moving the star left of the title indents
+ * regardless of pin state - moving the star left of the title indents
  * the row's first line off-axis from the model/preview/meta lines
  * below it. When unpinned and not hovered, the toggle is removed from
  * layout entirely so it reserves no space at all.
