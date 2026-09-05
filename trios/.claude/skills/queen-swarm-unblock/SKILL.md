@@ -2670,12 +2670,11 @@ and could not win, because they addressed collection while the problem was
 production. When a resource keeps filling despite correct collection, the next
 measurement is of the creation rate - not a better collector.
 
-## Three negative results are a good night's work
+## Three negative results, and one of them was my own bug
 
 The claim was that one shared package store would collapse the volume growth. An
-hour later: 52% used, +133.6 points per hour, four fresh worktrees carrying 10 GB
-between them. Sharing after the fact is a mop - every dispatch still runs
-`bun install` and writes 2.5 GB.
+hour later: 52% used, +133.6 points per hour. Sharing after the fact is a mop -
+every dispatch still runs `bun install` and writes 2.5 GB.
 
 So three ways to close the tap were tried, each in a scratch worktree, each
 before a line of it entered the system:
@@ -2686,22 +2685,25 @@ before a line of it entered the system:
 | build the link farm BEFORE the install | 159M with the farm, then `bun install` wipes it and writes 2562M |
 | `--backend=symlink`, and a repo `bunfig.toml` | 41M on a single-package project, **2561M on this workspace** - and the bunfig was ignored entirely |
 
-Three refutations, each costing one scratch worktree and a few minutes. The first
-had already been written, tested and committed on a plausible story before an
-intervention test caught it.
+**The second one was wrong, and it was my bug that made it look right.**
 
-**A result that stops a wrong change is worth as much as one that ships a right
-one, and costs far less.** The temptation at four in the morning is to have
-something to show; three measured "no"s and one honest mitigation is a better
-night than one confident fix built on an untested mechanism.
+`for e in "$src"/*` does not match dotfiles in POSIX sh. The store root has
+sixteen entries; that glob linked fourteen. The two it missed were `.bin` and
+`.bun` - bun's entire isolated store, 2242 entries and 2.37 GB. bun could not
+see the tree as satisfied, so it rebuilt everything, and I recorded "a pre-built
+farm cannot survive bun install" as a measured refutation.
 
-**And name a mitigation as one.** What survives here is sharing after the fact,
-moved from the 10-25 minute chain onto the 300-second timer - which bounds the
-accumulation to about what two bees produce, and removes nothing. The step's own
-description says "bound how long duplicate installs sit on the volume", not
-"fix". The selftest asserts on that string rather than on the comment above it,
-because `codeOf` strips comments precisely so a test cannot pass by matching the
-paragraph that describes the code.
+With the dotfiles linked, on a live farmed worktree:
+
+    Checked 2250 installs across 2424 packages (no changes) [948.00ms]
+    after install: 159M
+
+**A negative result is only as good as the instrument that produced it.** The
+discipline of testing before shipping is right and it saved two genuinely wrong
+changes - but a refutation deserves the same scepticism as a confirmation, and
+the tell here was available: the farm had 14 entries and the store had 16, a
+number I printed in the file's own header and never compared.
+
 
 ## A command name silently shadowed a scheduled job for its whole life
 
@@ -2767,6 +2769,39 @@ not.
 
 **When one dependency is shared by every critical path, measure its availability
 before tuning anything that sits on top of it.**
+
+## Check which binary you are running before believing anything about the service
+
+For three rounds this loop quoted step-failure rates of 46-71%, built a retry
+policy, a circuit breaker and a total budget on top of them, and measured a
+"gateway availability" of 39%.
+
+    /bin/zsh -lc 'command -v railway'   /usr/local/bin/railway   4.5.4 (Jun 2025)
+    an interactive shell                nvm's railway            5.49.2
+
+Both launchd plists run `/bin/zsh -lc`, and the login profile puts
+/usr/local/bin ahead of the nvm bin. The decisive check took one command:
+
+    LC_ALL=C grep -ac "Expected welcome message" <each binary>
+    -> 1 in 4.5.4, 0 in 5.49.2
+
+That string wraps EVERY app-down refusal in the record. Every launchd sample was
+refused by a client that cannot attach; every successful attach in the entire
+history came from a hand run with the newer binary.
+
+It was not the container, not Railway, not the network, and not something to
+tune. It was a PATH, and it was invisible because **the hand test and the
+scheduled run were different programs** - the oldest trap there is, and the one
+this loop walked into while carefully measuring everything downstream of it.
+
+Two habits from it:
+
+- **When a scheduled job behaves differently from your hand test, compare the
+  programs before comparing the environments.** `command -v` under the job's own
+  launcher, and the version, and if the failure has a distinctive string, grep
+  the binaries for it.
+- **Name the binary in the code**, next to wherever the project id and service
+  name already live. A bare command name is a dependency on somebody's profile.
 
 ## The rule that comes out of all of them
 
