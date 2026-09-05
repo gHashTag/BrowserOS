@@ -233,7 +233,21 @@ const rule = () => `├${'─'.repeat(W - 1)}┤`
 const top = (t) => `╭─ ${t} ${'─'.repeat(Math.max(0, W - 4 - strip(t).length))}╮`
 const bottom = () => `╰${'─'.repeat(W - 1)}╯`
 
+// AN UNMEASURED VALUE HAS NO DELTA, and pretending otherwise invented two
+// numbers at once.
+//
+// `dash.mjs` returns null for a fact it could not take, and the renderer had
+// never been taught what that means. On 2026-09-05 the local disk hit 100%, the
+// verdict audit could not write its cache, and the dashboard printed
+// `judged verdicts that prove   null   -203` - the word "null" as a value and a
+// fabricated fall as its change, in the artifact built three rounds earlier for
+// the sole purpose of not making numbers up.
+export function isMeasured(v) {
+  return !(v === null || v === undefined || v === '' || Number.isNaN(Number(v)))
+}
+
 function delta(now, prev, goodDown) {
+  if (!isMeasured(now)) return dim('    ')
   if (prev === null || prev === undefined || Number.isNaN(Number(prev))) return dim(' new')
   const d = Number(now) - Number(prev)
   if (d === 0) return dim('   =')
@@ -253,7 +267,10 @@ export function renderDashboard(facts) {
   out.push(rule())
   out.push(row(bold('SWARM') + dim('   value, and how it moved since the last iteration')))
   for (const m of facts.swarm || []) {
-    out.push(row(`  ${pad(dim(m.k), 34)} ${pad(bold(String(m.v)), 10)} ${delta(m.v, m.prev, m.goodDown !== false)}`))
+    // `-` for a fact that could not be taken, never the word "null" and never a
+    // zero standing in for it.
+    const shown = isMeasured(m.v) ? String(m.v) : '-'
+    out.push(row(`  ${pad(dim(m.k), 34)} ${pad(bold(shown), 10)} ${delta(m.v, m.prev, m.goodDown !== false)}`))
   }
   out.push(rule())
   out.push(row(bold('WORK THIS ITERATION')))
