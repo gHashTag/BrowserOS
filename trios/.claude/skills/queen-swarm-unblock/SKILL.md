@@ -2831,6 +2831,40 @@ The tell is cheap: if a before/after split shows almost no change, check the
 boundary before believing it. A fix that does nothing and a fix measured on the
 wrong window look identical.
 
+## Pin a capability, not a path
+
+Naming the railway binary fixed the loop and introduced a slower defect:
+`$HOME/.nvm/versions/node/v22.22.0/bin/railway` hardcodes a node version nobody
+will remember to update. An adversarial reader found it within the hour.
+
+Search the candidates and take the first that reports the version you need:
+
+```bash
+"$c" --version   # major >= 5 wins; 4.5.4 is rejected for BEING 4.5.4
+```
+
+**Reject by the property that matters.** The old client's problem was never its
+location - it was that it cannot attach, and its version says so. A path is a
+proxy for that, and proxies rot.
+
+And when nothing qualifies, say so loudly and fall back. A loop that silently
+picks a client which cannot attach is what cost this project three rounds of
+measuring the wrong thing.
+
+## Fixing the thing makes the steps slower, and the budgets were tuned on failure
+
+`share-modules` was put on the 300-second timer when the channel refused three
+times in five - the step did nothing, quickly. With a working client it does real
+work, and its first two working runs both recorded `share-modules: timed out`.
+
+Nothing regressed. A step that had been failing fast started succeeding slowly,
+and every deadline in the chain had been calibrated against the fast failure.
+
+**When a shared dependency starts working, re-examine every timeout that was set
+while it did not.** The previous round's own design note predicted this in as
+many words - "expect the first working runs to hit a deadline for an entirely new
+reason" - which is worth more than the fix it accompanied.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
