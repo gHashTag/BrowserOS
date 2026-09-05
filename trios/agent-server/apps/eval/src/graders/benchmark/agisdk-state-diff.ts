@@ -127,7 +127,7 @@ export class AgisdkStateDiffGrader implements Grader {
   }
 
   private extractStartUrl(input: GraderInput): string | null {
-    // Derive from task_id: "dashdish-10" → "https://evals-dashdish.vercel.app"
+    // Derive from task_id: "dashdish-10" -> "https://evals-dashdish.vercel.app"
     // Task IDs are "{site}-{number}" where site may contain hyphens (e.g. "fly-unified-5")
     const taskId = this.extractTaskId(input.task.query_id)
     const siteId = taskId.replace(/-\d+$/, '')
