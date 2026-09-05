@@ -2795,6 +2795,46 @@ check('the dashboard reads the proven record rather than recomputing it', async 
   if (/proven\.mjs'\)}`, 400000/.test(code)) throw new Error('a measurement that grows with the system must not sit on the drawing path')
 })
 
+check('a search over a directory is a criterion, with two guards', async () => {
+  const { promisedCommands } = await import('./verdict-audit.mjs')
+  // Briefs reach for a recursive search when the claim is "this is gone":
+  //   `grep -rn '#T27-EPIC-001' trios/.trinity/specs` prints nothing
+  //   `git grep -w agent-roster-audit -- .` returns 0 lines
+  const body = "## Success Criteria\n- After the edit, `grep -rn 'T27-EPIC-001' trios/.trinity/specs` prints nothing\n"
+  const cs = promisedCommands(body).filter((c) => c.kind === 'grep-tree')
+  if (cs.length !== 1) throw new Error(`the form must be recognised - got ${cs.length}`)
+  if (cs[0].pattern !== 'T27-EPIC-001' || cs[0].path !== 'trios/.trinity/specs') {
+    throw new Error(`pattern and path must come from the command - got ${cs[0].pattern}@${cs[0].path}`)
+  }
+  // GUARD ONE: a pattern under four characters is refused. #1397 yielded `gh`
+  // from an unbounded match; `gh` appears in most files here and would have
+  // convicted the bee of every one of them.
+  const short = "## Success Criteria\n- `grep -rn 'gh' trios` prints nothing\n"
+  if (promisedCommands(short).some((c) => c.kind === 'grep-tree')) {
+    throw new Error('a short pattern absent from a whole tree is not a claim any tree can satisfy')
+  }
+  // GUARD TWO: the assertion must be near its command, or the match walks past
+  // the closing backtick and takes a phrase belonging to a later sentence.
+  const far = "## Success Criteria\n- `grep -rn 'somethinglong' trios` does a great many other things over a long sentence that continues well past any reasonable distance and only then prints nothing\n"
+  if (promisedCommands(far).some((c) => c.kind === 'grep-tree')) {
+    throw new Error('an assertion forty characters away belongs to a different sentence')
+  }
+})
+
+check('the extractor is no longer the bottleneck - the briefs are', () => {
+  // Measured over 12 of the 35 unauditable briefs: ONE carried a tree-search
+  // criterion and it was a baseline, not a target. ELEVEN state no command at
+  // all. Widening the extractor further cannot help; those briefs need a judge
+  // or a rewrite.
+  //
+  // This check exists to stop the next round reaching for a sixth extractor
+  // form on the assumption that parsing is what is missing.
+  const code = codeOf('verdict-audit.mjs')
+  const forms = new Set((code.match(/kind: '(grep|exists|lines|grep-tree)'/g) || []))
+  if (forms.size < 4) throw new Error('the four forms that pay for themselves must stay')
+  if (forms.size > 6) throw new Error('11 of 12 unauditable briefs state no command at all; a new form is not the missing piece')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.

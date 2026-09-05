@@ -216,6 +216,46 @@ export function promisedCommands(body) {
     const g = line.match(new RegExp(GREP + "[^.]*?at least\\s+`?(\\d+)`?", 'i'))
     if (g) { out.push({ kind: 'grep', dialect: dialectOf(g[1]), pattern: g[3], path: g[4], atLeast: Number(g[5]), when: whenOf(line), line }); continue }
 
+    // A SEARCH OVER A DIRECTORY IS STILL A CHECKABLE CLAIM.
+    //
+    // Sampled the unauditable briefs on 2026-09-05. They are not vague:
+    //
+    //   `grep -rn '#T27-EPIC-001' trios/.trinity/specs` prints nothing
+    //   `git grep -w agent-roster-audit -- . | grep -v worktrees` returns 0 lines
+    //
+    // Both state exactly what done looks like, and the extractor could not read
+    // either, because it only knew `grep -c <pattern> <file>`. Recursive search
+    // over a path is the form a brief reaches for when the claim is about the
+    // whole tree - which is most of the time when the claim is "this is gone".
+    //
+    // The count is asked of git rather than of a file, and the boundary is
+    // decided here rather than in a shell: the dialect belongs where it is known.
+    // TWO GUARDS, BOTH LEARNED THE HARD WAY.
+    //
+    // The gap between the command and its assertion is bounded to 40 characters.
+    // Unbounded, the match walked past the backtick that closed one command and
+    // took the phrase belonging to a later sentence - #1397 yielded the pattern
+    // `gh`, which matches most files in this repository and would have convicted
+    // the bee of every one of them.
+    //
+    // And a pattern shorter than four characters is refused outright. A brief
+    // asserting that a SHORT string is absent from a whole tree is not a claim
+    // any tree can satisfy, so reading one is always a misparse.
+    const tree = line.match(
+      /`(git grep|grep)\s+(?:-[a-zA-Z]+\s+)*['"]?([^'"`\s]{4,})['"]?\s+(?:--\s+)?([^`\s|]+)[^`]*`.{0,40}?(prints nothing|returns 0 lines|returns no lines|finds nothing)/i,
+    )
+    if (tree) {
+      out.push({
+        kind: 'grep-tree',
+        pattern: tree[2],
+        path: tree[3] === '.' ? '' : tree[3],
+        exactly: 0,
+        when: whenOf(line),
+        line,
+      })
+      continue
+    }
+
     // The same command with a count and a QUALIFIER AFTER IT.
     //
     // #1326 says "prints `2` or more". Read as "exactly 2" it convicted a bee
@@ -319,6 +359,20 @@ export function patternRegex(c) {
 
 /** Run one command-criterion against a branch. Returns {ok, why}: ok===null means it could not be read. */
 export function runCommandCriterion(branch, c, read = readFromBranch) {
+  if (c.kind === 'grep-tree') {
+    // `git grep` over the ref, so the answer is about that commit and not about
+    // whatever the working tree happens to hold. A count of zero is the claim
+    // these briefs make, and git exits 1 when it finds nothing - which is the
+    // answer, not a failure.
+    const scope = c.path ? ` -- ${JSON.stringify(c.path)}` : ''
+    const raw = tryShell(`git grep -c -e ${JSON.stringify(c.pattern)} ${branch}${scope} | wc -l`)
+    if (raw === null) return { ok: false, why: `could not search ${branch} for ${c.pattern}` }
+    const n = Number(String(raw).trim()) || 0
+    return {
+      ok: n === 0,
+      why: `git grep ${JSON.stringify(c.pattern)}${c.path ? ` in ${c.path}` : ' across the tree'} matched ${n} file(s), criterion asked for none`,
+    }
+  }
   const text = read(branch, c.path)
   if (text === null) return { ok: false, why: `${c.path} does not exist on the branch` }
   if (c.kind === 'exists') return { ok: true, why: `${c.path} exists` }
