@@ -2954,6 +2954,51 @@ Read `/proc` rather than `ps`; check `command -v` for anything you shell out to;
 and report the denominator beside the count, because 37 of 50 and 37 of 5000 are
 different facts and a bare 0 hides which one you are not seeing.
 
+## Two overlapping outages make each look like it was not the cause
+
+Naming the railway client should have collapsed the step failure rates. Split at
+the fix:
+
+    reap 73% -> 70%   lease 60% -> 70%   push-work 57% -> 67%   author 4% -> 44%
+
+which reads as "the fix did nothing, and made one thing worse". Twelve of 147
+recorded failures even named the old client.
+
+**The window after the fix contained a three-hour service crash.** Split into the
+three periods that actually happened:
+
+    window          reap     lease   push-work  close-done   author
+    old client     61/83     50/83     57/100      41/100      4/96
+    crash window     6/6       6/6      22/22       16/22     16/22
+    after restore    1/2       1/2       1/7         0/7       0/7
+
+Both fixes worked. Neither could be seen while the other's window was mixed in -
+and a total outage dominates every rate it touches, so the crash buried the
+client fix completely.
+
+This is sharper than "split at when the fix landed": something else may have
+started between then and now. **Before reading a before/after, list every event
+in the window, not just the one you are testing.**
+
+## A rate on a dashboard must have a window, and the window needs a reason
+
+A lifetime rate over a record containing two resolved outages describes neither
+the past nor the present. The dashboard read `worst step: reap 74%` from exactly
+that.
+
+It reads the last eight chain runs now - about an hour. The size was chosen by
+measurement, not by which number flattered: push-work reads
+
+    0/5    2/8    6/12    14/20
+
+and that gradient IS the crash receding. Eight is short enough to describe now
+and long enough that a fresh incident still shows, which is the only reason to
+put a rate on a dashboard at all. Changing nothing but the question moved the
+number from 74% to 50%.
+
+Say the window in the label - `worst step, last 8 runs` - so nobody has to guess
+which question they are reading the answer to.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
