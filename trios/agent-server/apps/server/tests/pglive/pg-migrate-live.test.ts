@@ -12,6 +12,18 @@
  *   2. LIVE. Apply the whole block to a scratch database, TWICE, and read the
  *      catalog back. Only PostgreSQL knows whether PostgreSQL accepts this.
  *
+ * WHY THIS FILE HAS ITS OWN GROUP. It lived in tests/api and could not work
+ * there. `mock.module` is process-global in bun and every test file's module
+ * scope is evaluated in one run, so `queen-roadmap.test.ts` and
+ * `task-queue-service.test.ts` - both of which install a FakePool for `pg` at
+ * module scope - bound THIS file's `import { Pool } from 'pg'` to their fake.
+ * The migration then went nowhere and the catalog came back empty, which reads
+ * as a broken migration and is not one. Measured 2026-09-06: it passed alone
+ * and failed beside either of them, identically in both orders - which is what
+ * says the cause is module scope rather than execution order, and why no edit
+ * inside those files could repair it. A directory is a test GROUP here, and a
+ * group is its own bun process.
+ *
  * The live gate FAILS when no server is reachable. It does not skip. A silent
  * skip is how a gate comes to report a success it never earned - this codebase
  * has already shipped one gate that never found its compiler and said nothing.
@@ -26,7 +38,7 @@ import { userInfo } from 'node:os'
 import { Pool } from 'pg'
 import { MIGRATION_SQL, runPgMigrations } from '../../src/lib/db/pg-migrate'
 import { logger } from '../../src/lib/logger'
-import { factsFor } from './pg-migrate-sql-facts'
+import { factsFor } from '../api/pg-migrate-sql-facts'
 
 // ---------------------------------------------------------------------------
 // Gate 2: the same block, applied twice to a real PostgreSQL.

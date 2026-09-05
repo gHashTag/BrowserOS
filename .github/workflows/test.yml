@@ -94,6 +94,19 @@ jobs:
             command: (cd apps/server && bun run test:root)
             junit_path: test-results/server-root.xml
             needs_browser: false
+          # ITS OWN GROUP BECAUSE A GROUP IS ITS OWN PROCESS.
+          #
+          # `pg-migrate-live.test.ts` lived in tests/api and could not work
+          # there: `mock.module` is process-global in bun and every test file's
+          # module scope is evaluated in one run, so two api files that install
+          # a FakePool for `pg` bound the live gate's own import to their fake.
+          # Its migration then went nowhere and the catalog came back empty,
+          # which reads as a broken migration. It passed alone and failed beside
+          # either of them, identically in both orders.
+          - suite: server-pglive
+            command: (cd apps/server && bun run test:pglive)
+            junit_path: test-results/server-pglive.xml
+            needs_browser: false
           - suite: agent
             command: (cd apps/agent && bun run test)
             junit_path: test-results/agent.xml

@@ -3,7 +3,8 @@
  * Copyright 2025 BrowserOS
  */
 
-import { readdirSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it } from 'bun:test'
 import {
   buildTestCommand,
@@ -71,5 +72,67 @@ describe('test groups', () => {
       )
 
     expect(shadowed).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// A GROUP NOBODY RUNS IS A GROUP THAT PASSES BY DEFAULT.
+//
+// The runner discovers groups from the directories under tests/, and CI runs
+// them from a hand-written matrix in .github/workflows/test.yml. Nothing
+// compared the two, so adding a directory created a group whose tests NEVER
+// RAN and whose absence appeared nowhere - the same silent-skip shape this
+// repository has already found in a gate that could not locate its compiler
+// and in a route audit that reported a clean bill of health.
+//
+// Both sides are READ. A list typed here would be a third copy of the same
+// names and would go stale the same way.
+// ---------------------------------------------------------------------------
+describe('every test group has somewhere to run', () => {
+  const workflow = readFileSync(
+    resolve(import.meta.dir, '../../../../../.github/workflows/test.yml'),
+    'utf8',
+  )
+  const packageJson = JSON.parse(
+    readFileSync(resolve(import.meta.dir, '../package.json'), 'utf8'),
+  ) as { scripts: Record<string, string> }
+
+  const suites = new Set(
+    [...workflow.matchAll(/suite:\s*server-([a-z0-9-]+)/g)].map(
+      (match) => match[1],
+    ),
+  )
+
+  it('parsed suites out of the workflow at all', () => {
+    // A regex that matches nothing would make every assertion below vacuous:
+    // an empty set is a subset of everything.
+    expect(suites.size).toBeGreaterThan(3)
+  })
+
+  it('runs every group the runner can discover', () => {
+    const missing = listAllGroups().filter((group) => !suites.has(group))
+    expect(
+      missing,
+      'test groups with no server-<group> entry in .github/workflows/test.yml - their tests never run in CI',
+    ).toEqual([])
+  })
+
+  it('names no suite the runner cannot discover', () => {
+    const groups = new Set(listAllGroups())
+    const orphans = [...suites].filter((suite) => !groups.has(suite))
+    expect(
+      orphans,
+      'server-<suite> entries in the workflow with no matching test group - CI is running a name that resolves to nothing',
+    ).toEqual([])
+  })
+
+  it('gives every group a package script to run it', () => {
+    const withoutScript = listAllGroups().filter(
+      (group) => !packageJson.scripts[`test:${group}`],
+    )
+    expect(
+      withoutScript,
+      'groups with no test:<group> script - the workflow entry would fail at the shell',
+    ).toEqual([])
   })
 })
