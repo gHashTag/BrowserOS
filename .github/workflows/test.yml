@@ -171,6 +171,32 @@ jobs:
         working-directory: trios/agent-server/apps/server
         run: cp .env.example .env.development
 
+      # PROVE THE DATABASE IS REACHABLE FROM THE RUNNER, IN THE RUN'S OWN LOG.
+      #
+      # The service's container logs say PostgreSQL started. They say nothing
+      # about whether this job can reach it, and the difference matters: the
+      # live migration gate still failed after the service was added, and
+      # without this step there is no way to tell "the runner cannot connect"
+      # from "the migration does not create what it promises". Guessing between
+      # those two is how a fix gets shipped for the wrong cause.
+      #
+      # `|| true` because this step is a WITNESS, not a gate. The gate is the
+      # test; a probe that fails the job would hide the test's own verdict
+      # behind its own.
+      - name: Witness the database
+        run: |
+          echo "psql present: $(command -v psql || echo no)"
+          bun --eval '
+            const { Client } = require("pg")
+            const c = new Client({ connectionString: process.env.TRIOS_PG_TEST_URL })
+            c.connect()
+              .then(() => c.query("select current_user, current_database(), version()"))
+              .then((r) => { console.log("REACHABLE", JSON.stringify(r.rows[0]).slice(0, 200)); return c.end() })
+              .catch((e) => { console.log("NOT REACHABLE:", String(e.message).slice(0, 200)); process.exit(0) })
+          ' || true
+        env:
+          TRIOS_PG_TEST_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+
       - name: Run ${{ matrix.suite }} tests
         id: test
         env:
