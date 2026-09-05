@@ -136,13 +136,39 @@ const SVC = 'trios-agent-server'
  * facts, and rendering the second as the first is what wrote those 42 packets.
  */
 export function transcriptOf(number) {
-  const js = `const {Pool} = require('pg'); const p = new Pool({connectionString: process.env.DATABASE_URL}); p.query("select string_agg(t.text, '' order by t.seq) as said from queen_transcript t join queen_dispatch d on d.conversation_id = t.conversation_id where d.issue = ${number} and t.kind = 'say'").then(r => { console.log(JSON.stringify(r.rows[0] || {})); process.exit(0); }).catch(e => { console.log('ERR ' + e.message); process.exit(1); });`
+  // ASK FOR WHAT IS USED, NOT FOR EVERYTHING.
+  //
+  // The renderer shows `said.slice(-MAX_SAID)` - the tail - and the length. The
+  // first version fetched the whole transcript through the ssh channel and then
+  // threw most of it away. Nine of the 42 regenerated packets came back
+  // `unreadable` because of it: #1373's transcript is 183,025 characters and the
+  // answer never arrived intact, while the packet only ever needed the last few
+  // thousand.
+  //
+  // `right()` and `length()` are computed in the database, so the wire carries
+  // what the packet prints plus one integer. The length is kept separately
+  // BECAUSE it is what tells a judge the middle was omitted - a tail with no
+  // length reads as the whole thing.
+  const js = `const {Pool} = require('pg'); const p = new Pool({connectionString: process.env.DATABASE_URL}); p.query("select length(s) as len, right(s, ${MAX_SAID + 1000}) as said from (select string_agg(t.text, '' order by t.seq) as s from queen_transcript t join queen_dispatch d on d.conversation_id = t.conversation_id where d.issue = ${number} and t.kind = 'say') q").then(r => { console.log('B64:' + Buffer.from(JSON.stringify(r.rows[0] || {})).toString('base64')); process.exit(0); }).catch(e => { console.log('ERR ' + e.message); process.exit(1); });`
   try {
+    // BASE64 ON THE WIRE, because a transcript is full of newlines.
+    //
+    // The channel's output cleaning is line-based, and a 60 KB JSON string
+    // carrying a worker's entire transcript does not survive it. Measured on
+    // #1373 (183,025 characters): the raw form returns intact at a 5 KB tail
+    // and `unreadable` at 17 KB and above, while the SAME query base64-encoded
+    // returns len=183025 and a 60,000-character tail without trouble.
+    //
+    // That is nine of the 42 regenerated packets, and it would have looked like
+    // a transcript problem rather than a transport one.
     const out = CH.remote(`cd /app/apps/server && bun -e ${shq(js)}`, { service: SVC, timeout: 200000 })
-    const i = String(out).indexOf('{')
-    if (i < 0) return { said: null, reason: 'unreadable' }
-    const said = JSON.parse(String(out).slice(i)).said || null
-    return { said, reason: said ? 'ok' : 'no-rows' }
+    const line = String(out).split('\n').map((l) => l.trim()).find((l) => l.startsWith('B64:'))
+    if (!line) return { said: null, reason: 'unreadable' }
+    const row = JSON.parse(Buffer.from(line.slice(4), 'base64').toString('utf8'))
+    const said = row.said || null
+    // `len` is the TRUE length; `said` is its tail. Keeping them apart is what
+    // lets the packet say "the middle is omitted" honestly.
+    return { said, len: Number(row.len) || (said ? said.length : 0), reason: said ? 'ok' : 'no-rows' }
   } catch (e) {
     // A channel that could not be reached says NOTHING about what the bee said.
     return { said: null, reason: 'unreachable', detail: String(e.message || '').slice(0, 160) }
@@ -197,8 +223,8 @@ export function packet(number) {
     said,
     saidReason: t.reason,
     saidDetail: t.detail,
-    saidChars: said ? said.length : 0,
-    saidTruncated: Boolean(said && said.length > MAX_SAID),
+    saidChars: t.len || (said ? said.length : 0),
+    saidTruncated: Boolean(said && (t.len || said.length) > MAX_SAID),
     title: tryShell(`gh issue view ${number} --repo ${REPO} --json title -q .title`),
   }
 }
