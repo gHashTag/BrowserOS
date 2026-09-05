@@ -23,6 +23,38 @@ jobs:
     name: Tests / ${{ matrix.suite }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # A REAL POSTGRESQL, BECAUSE THE GATE THAT NEEDS ONE REFUSES TO SKIP.
+    #
+    # `pg-migrate-live.test.ts` applies MIGRATION_SQL to a scratch database
+    # twice and reads the catalog back, and its own comment says why it fails
+    # rather than skips when no server is reachable: "a silent skip is how a
+    # gate comes to report a success it never earned - this codebase has
+    # already shipped one gate that never found its compiler and said nothing."
+    #
+    # It was right and it was failing: two of the nine red assertions on this
+    # branch were this gate saying, correctly, that nothing had applied the
+    # migration. The escape hatch TRIOS_PG_MIGRATE_GATE=offline exists, and
+    # setting it here would have turned the suite green while making the only
+    # gate that asks PostgreSQL about PostgreSQL decorative forever.
+    #
+    # One service for the whole matrix rather than a separate job: a service
+    # container starts in parallel with the checkout and costs seconds, and a
+    # second job would duplicate the entire setup - bun, deps, the env file -
+    # which is a copy that goes stale, the defect this repository keeps finding.
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        # Without the health check the suite races the database's first boot and
+        # fails for a reason that has nothing to do with the migration.
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
     defaults:
       run:
         working-directory: trios/agent-server
@@ -146,6 +178,10 @@ jobs:
           BROWSEROS_TEST_HEADLESS: "true"
           BROWSEROS_TEST_EXTRA_ARGS: --no-sandbox --disable-dev-shm-usage
           BROWSEROS_JUNIT_PATH: ${{ github.workspace }}/trios/agent-server/${{ matrix.junit_path }}
+          # NEVER DATABASE_URL. The live gate creates and drops databases, and
+          # its own helper refuses anything that is not loopback for that
+          # reason. This is the service container above and nothing else.
+          TRIOS_PG_TEST_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
         run: |
           set +e
           mkdir -p test-results
