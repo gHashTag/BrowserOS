@@ -3673,3 +3673,50 @@ and the rule has no exception for that, as I learned the hard way two rounds
 ago. Push a **new branch name** and delete the old one. Deleting a branch you
 created minutes ago, with nothing pointing at it, loses nothing; rewriting a
 pushed history loses whatever somebody else already fetched.
+
+## "Flaky" is a measurement, and I used it as an excuse for three rounds
+
+Six assertions were failing. I called four of them "the flaky browser-tool
+family" in three consecutive round reports **without measuring it once**.
+
+Measured over twelve runs:
+
+```
+DETERMINISTIC - failed in every readable run (6):
+  12/12  navigation tools > new_hidden_page opens a hidden tab
+  12/12  navigation tools > show_page restores a hidden page to visible
+  12/12  window tools > create_hidden_window creates and closes a hidden window
+  12/12  probeGatewayReady > aborts the pending request …
+  12/12  #1321 Wave A … does not block preparing a fresh worktree
+  12/12  an existing worktree > says it is clean when it is
+
+UNSTABLE - failed in some:
+   1/12  get_dom > scopes to a CSS selector
+   1/12  input tools > select_option selects a dropdown value
+```
+
+**Not one of the six was flake.** The genuinely intermittent ones appeared once
+each in twelve. Calling a deterministic failure "flake" is how a real regression
+gets a permanent excuse — and **two of the six were my own**, from the module
+farm appending a second clause to `prepareWorktree`'s `detail` while two
+assertions still pinned it with `toBe`.
+
+### The rules that make the measurement honest
+
+- **The denominator is runs whose log could be READ.** A name missing from a
+  run can mean it passed, or that the job died first, or that the fetch failed.
+  Counting an unreadable run as a pass manufactures intermittency out of
+  network trouble.
+- **Print the commit count.** A window on a busy branch spans many commits, so
+  a test fixed halfway through looks unstable and is not. The rows at 5/6 and
+  4/6 after this round were exactly that — things I had just fixed.
+- **The tool does not say "flaky".** It says how often, over how many readable
+  runs, of how many commits. The word is a judgement; the frequency is a fact.
+
+### And pin the first clause, not the whole line
+
+When a detail string becomes a list of clauses, `toBe(whole)` breaks on every
+run and reads as somebody else's problem. `detail.split('; ')[0]` keeps the
+phrase pinned **exactly** — a reword is still caught — while letting the list
+grow. Verify against every observed form, including a reworded first clause,
+which must still fail.
