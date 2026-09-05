@@ -2703,6 +2703,66 @@ check('the feed hands the channel the budget it is holding it to', () => {
   if (!/budget \* 0\.8/.test(code)) throw new Error('leave the step room to report after the channel gives up')
 })
 
+// ---------------------------------------------------- the ring, not a fifth copy
+// L0: every rule below the interface is written once in `.t27` and generated,
+// because "a rule transcribed into Swift, Rust, Zig and Verilog is four rules
+// that agree until someone edits one." `MAX_CONCURRENT_WORKERS = 4` was in this
+// tree FIVE times - the spec, two Swift copies, and twice in this loop's own
+// tooling as prose inside the label `bees running (of 4)`. Two of the five were
+// mine, in the instrument that reports on the swarm's discipline.
+console.log('\nthe T27 ring - one source, and nothing may hold a second copy of it')
+
+check('the swarm capacity is read from the generated ring, never typed', async () => {
+  const T27 = await import('./t27-parity.mjs')
+  const D = await import('./dash.mjs')
+  const n = T27.ringConst('MAX_CONCURRENT_WORKERS')
+  if (n === null) throw new Error('the generated artifact is missing - run `tri t27-gen`')
+  if (D.capacityLabel(() => n) !== `bees running (of ${n})`) throw new Error('the label stopped asking the ring')
+  // AND THE NEGATIVE, which is the half that matters: with no artifact the
+  // label must say `?`. A fallback to 4 would be an invented constant wearing a
+  // correct answer, and would survive the spec changing.
+  const noFile = D.capacityLabel(() => T27.ringConst('MAX_CONCURRENT_WORKERS', '/nonexistent/queen_core.rs'))
+  if (noFile !== 'bees running (of ?)') throw new Error(`with no artifact the label said "${noFile}" - it invented a constant`)
+  const noConst = D.capacityLabel(() => T27.ringConst('NO_SUCH_CONSTANT_HERE'))
+  if (noConst !== 'bees running (of ?)') throw new Error(`an unknown constant produced "${noConst}"`)
+})
+
+check('nothing in the loop types the swarm capacity as prose', () => {
+  // The defect this replaced is a LITERAL in a label, so the guard has to read
+  // the code as text. codeOf strips comments, which is why the paragraphs above
+  // explaining `(of 4)` do not trip it.
+  const offenders = []
+  for (const f of fs.readdirSync(DIR).filter((n) => n.endsWith('.mjs') && n !== 'selftest.mjs')) {
+    if (/\(of 4\)/.test(codeOf(f))) offenders.push(f)
+  }
+  if (offenders.length) throw new Error(`${offenders.join(', ')} still write the ring's constant into a string`)
+})
+
+check('a parity grid is exhaustive over the space it claims, and says which space', async () => {
+  const P = await import('./t27-parity.mjs')
+  // 1 + 3 + 9 + 27 sequences over three failure kinds up to depth 3.
+  if (P.retryGrid(3).length !== 40) throw new Error(`the retry grid is ${P.retryGrid(3).length}, not the 40 sequences it claims`)
+  const rev = P.reviewGrid(4, 3, 2)
+  if (rev.length !== 420) throw new Error(`the review grid is ${rev.length}, not 420`)
+  // The invariants the grid is built on, asserted rather than trusted: a case
+  // with judged > total or unmet > judged is not a case the rule can meet, and
+  // filling the grid with impossible rows would inflate a coverage claim.
+  for (const r of rev) {
+    if (r.judged > r.total || r.unmet > r.judged) throw new Error(`the grid contains an impossible row: ${JSON.stringify(r)}`)
+  }
+})
+
+check('a parity check with a side missing is never agreement', async () => {
+  const P = await import('./t27-parity.mjs')
+  const r = P.compare([
+    { what: 'a', ring: 'accept', twin: 'accept' },
+    { what: 'b', ring: 'accept', twin: null, note: 'the twin is not built' },
+    { what: 'c', ring: 'accept', twin: 'sendBack' },
+  ])
+  if (r.disagreements.length !== 1) throw new Error('a real disagreement was not counted')
+  if (r.errors.length !== 1) throw new Error('an unanswered case was folded into agreement')
+})
+
 // THE FRAME WAS BROKEN BY THE CONTENT IT WAS DRAWN AROUND.
 //
 // `pad` only ever pads, so any row wider than the box ran straight through the

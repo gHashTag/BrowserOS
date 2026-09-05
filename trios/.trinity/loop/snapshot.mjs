@@ -19,6 +19,8 @@ import { fileURLToPath } from 'node:url'
 
 const DIR = path.dirname(fileURLToPath(import.meta.url))
 const L = await import(path.join(DIR, 'loop.mjs'))
+const D = await import(path.join(DIR, 'dash.mjs'))
+const T27 = await import(path.join(DIR, 't27-parity.mjs'))
 const QUEEN = 'https://trios-agent-server-production.up.railway.app/queen/status'
 
 async function live() {
@@ -68,7 +70,7 @@ const skipMetric = (key, label, v) =>
 const swarm = j.error
   ? [{ k: 'QUEEN UNREACHABLE', v: j.error.slice(0, 20), prev: null, goodDown: true }]
   : [
-      metric('swarm.running', 'bees running (of 4)', d.running ?? 0, false),
+      metric('swarm.running', D.capacityLabel(() => T27.ringConst('MAX_CONCURRENT_WORKERS')), d.running ?? 0, false),
       metric('swarm.finished', 'dispatches finished', d.finished ?? 0, false),
       skipMetric('skip.total', 'candidates skipped', t.skippedCount ?? 0),
       skipMetric('skip.fileConflict', '  fenced by parked paths', s.fileConflict ?? 0),
