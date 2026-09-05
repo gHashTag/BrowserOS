@@ -2798,6 +2798,28 @@ check('a parity grid is exhaustive over the space it claims, and says which spac
 // has made to one copy and not mirrored to the other. Reading only HEAD would
 // miss it until it shipped; reading only the working tree would call somebody's
 // unfinished thought a landed defect. The pair is what separates them.
+// THE REF A NUMBER DESCRIBES IS PART OF THE NUMBER.
+//
+// `forked-files` asked `git show HEAD:` and answered "0 forked in history, 1
+// edited on one side only". Asked again against `origin/feat/queen-supervisor` -
+// the branch production is built from - the answer is TWO forked in history.
+// Both readings were honest; the one that went into a round report described a
+// tree nobody deploys, because this checkout is 367 commits behind that branch.
+check('the fork check compares at the shipping ref and says which ref that was', async () => {
+  const F = await import('./forked-files.mjs')
+  const seen = []
+  F.classify({ name: 'X.swift', left: 'a/X.swift', rights: ['b/X.swift'] }, {
+    ref: 'origin/some-branch',
+    show: (p) => { seen.push(p); return 'same' },
+    read: () => 'same',
+  })
+  if (!seen.length) throw new Error('nothing was read at the ref')
+  // And the rendered output must NAME it - a reader must never have to guess.
+  const text = F.render([{ name: 'X.swift', left: 'a/X.swift', right: 'b/X.swift', state: 'LANDED', extraRights: 0 }], { ref: 'origin/some-branch', behind: 367 })
+  if (!text.includes('origin/some-branch')) throw new Error('the report does not name the ref it compared at')
+  if (!text.includes('367')) throw new Error('the report hides how far this checkout has drifted from that ref')
+})
+
 check('a landed fork and an edit in flight are different answers', async () => {
   const F = await import('./forked-files.mjs')
   const pair = { name: 'X.swift', left: 'a/X.swift', rights: ['b/X.swift'] }
