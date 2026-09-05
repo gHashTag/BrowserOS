@@ -2485,21 +2485,19 @@ check('the store is keyed by the lockfile, and workspace packages link home', as
   if (parseShared('SHARED trees=6 saved=14362').savedMb !== 14362) throw new Error('the saving is read back from the tool, not estimated')
 })
 
-check('sharing runs on the fast timer, because three taps were refuted', () => {
-  const code = codeOf('feed.mjs')
-  // Moving the cache onto the volume: bun copies whatever device it is on.
-  // Pre-building the farm: bun wipes it, 159M becomes 2562M. --backend=symlink:
-  // 41M on a single-package project, 2561M on this workspace. All measured.
-  if (!/share-modules/.test(code)) throw new Error('the only remedy left standing must run on the fast cycle')
-  // codeOf strips comments - which is why this asserts on the step's own `why`
-  // string rather than on the paragraph above it. The helper exists precisely so
-  // a test cannot pass by matching the comment that describes the code.
-  if (!/bound how long duplicate installs sit/.test(code)) {
-    throw new Error('the step must describe itself as bounding the accumulation, not removing it')
+check('the sharing step lives where its budget fits', () => {
+  const feed = codeOf('feed.mjs')
+  const heal = codeOf('heal.mjs')
+  // It went on the 300-second timer when the channel refused three times in
+  // five and the step therefore did nothing quickly. With the client named the
+  // channel works, the step does real work - walking every worktree with du,
+  // promoting a store, rebuilding farms - and its first two working runs both
+  // recorded `share-modules: timed out` against a 300-second cap.
+  if (/name: 'share-modules'/.test(feed)) throw new Error('a step that cannot finish in the cycle does not belong on the cycle')
+  if (!/name: 'share-modules'/.test(heal)) throw new Error('it must still run somewhere - heal has an eight-minute freeing phase')
+  if (!/one installed dependency tree, linked into every worktree/.test(heal)) {
+    throw new Error('heal must describe the step by what it does, not by the timer it used to be on')
   }
-  const i = code.indexOf('share-modules')
-  const j = code.indexOf("name: 'author'")
-  if (!(i > -1 && j > i)) throw new Error('share before author: the refill starts bees that install again')
 })
 
 check('no tri command is shadowed by an earlier one', () => {
@@ -2615,6 +2613,22 @@ check('the farm links dotfiles, which is where bun keeps everything', async () =
   const s = shareScript([{ name: 'queen-1', lock: 'abc' }])
   if (!/\.\[!\.\]\*/.test(s)) throw new Error('the glob must match dotfiles or .bun is never linked')
   if (!/\[ -e "\$e" \] \|\| continue/.test(s)) throw new Error('an unmatched dotfile glob expands to itself and must be skipped')
+})
+
+check('the railway client is chosen by version, not by a pinned path', async () => {
+  const CH = await import('./channel.mjs')
+  const { execSync } = await import('node:child_process')
+  // The first fix pinned $HOME/.nvm/versions/node/v22.22.0/bin/railway. An
+  // adversarial reader found the hazard at once: an nvm bump moves that
+  // directory and the loop loses its only working client, having hardcoded a
+  // version number nobody will remember to update.
+  const code = codeOf('channel.mjs')
+  if (/v22\.22\.0/.test(code)) throw new Error('a pinned node version in the path is a silent regression waiting for an nvm bump')
+  if (!/major >= 5/.test(code)) throw new Error('4.5.4 must be rejected by its VERSION, which is the property that matters')
+  if (!/^\//.test(CH.RAILWAY_BIN)) throw new Error(`an absolute path was expected - got ${CH.RAILWAY_BIN}`)
+  const v = execSync(`${JSON.stringify(CH.RAILWAY_BIN)} --version`, { encoding: 'utf8', timeout: 20000 })
+  const major = Number((String(v).match(/(\d+)\./) || [])[1])
+  if (!(major >= 5)) throw new Error(`the chosen client is ${String(v).trim()}, which cannot attach`)
 })
 
 check('the harness can fail an async check', async () => {

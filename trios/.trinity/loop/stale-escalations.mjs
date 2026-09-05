@@ -75,8 +75,8 @@ const SVC = process.env.QUEEN_SERVICE || 'trios-agent-server'
 // retry: the loop's launcher resolves a bare `railway` to a June-2025 4.5.4
 // that cannot attach, while an interactive shell finds 5.49.2. This file is the
 // second independent railway invocation in the loop, and it had the same bug.
-export { RAILWAY_BIN } from './channel.mjs'
-export const RAILWAY = `${process.env.TRIOS_RAILWAY_BIN || `${process.env.HOME || ''}/.nvm/versions/node/v22.22.0/bin/railway`} ssh --project 564d9ebd-7aa8-44fe-93ec-e0b03c87158d --environment production`
+import { RAILWAY_BIN as PICKED } from './channel.mjs'
+export const RAILWAY = `${PICKED} ssh --project 564d9ebd-7aa8-44fe-93ec-e0b03c87158d --environment production`
 
 const CORE = path.join(ROOT, 'trios/agent-server/queen-core/Sources/QueenCore')
 const BIN = path.join(DIR, 'state', 'criteria-probe')

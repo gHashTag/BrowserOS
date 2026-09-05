@@ -43,6 +43,19 @@ export const STEPS = [
   // pushed, so without this nothing would ever close again.
   { name: 'land', file: 'land.mjs', act: '--land', why: 'put accepted work into the branch' },
   { name: 'close-done', file: 'close-done.mjs', act: '--close', why: 'an open accepted issue holds its boundary' },
+  // SHARE-MODULES WAS HERE AND IS NOT ANY MORE.
+  //
+  // It was put on this 300-second timer when the channel refused three times in
+  // five and the step therefore did nothing quickly. With the client named, the
+  // channel works - and the step now does REAL work: it walks every container
+  // worktree with `du`, promotes a store and rebuilds farms. Its first two
+  // working runs both recorded `share-modules: timed out`, because a per-step
+  // cap of 300 seconds inside a 300-second cycle cannot hold it.
+  //
+  // The previous round predicted exactly this: "expect the first working runs to
+  // hit a deadline for an entirely new reason". It lives in `heal` now, whose
+  // swarm-freeing phase has eight minutes.
+  //
   // THE ONLY THING LEFT STANDING AFTER THREE REFUTATIONS.
   //
   // Every dispatch runs `bun install` and writes ~2.5 GB of node_modules into
@@ -58,7 +71,6 @@ export const STEPS = [
   // bounds the accumulation to roughly what two bees produce.
   //
   // It is a mop, not a tap, and it is named as one.
-  { name: 'share-modules', file: 'share-modules.mjs', act: '--share', why: 'bound how long duplicate installs sit on the volume' },
   { name: 'author', file: 'author.mjs', act: '--file', why: 'refill to the queue depth' },
 ]
 
