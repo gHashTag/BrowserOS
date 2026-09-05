@@ -2425,6 +2425,35 @@ check('the whole .git is given back, not two subdirectories', () => {
   if (!/root-owned files left/.test(code)) throw new Error('and it must report what it could not give back')
 })
 
+check('a worktree is removed on its lifetime, not on disk pressure', async () => {
+  const { decide } = await import('./reap-finished.mjs')
+  // An hour after the volume went 95% -> 32% it was back at 87%: 17 worktrees,
+  // only TWO belonging to a running bee. Fifteen were left by finished
+  // dispatches, eleven with their branch already on the remote.
+  const d = decide(
+    ['queen-1', 'queen-2', 'queen-3'],
+    ['queen-1'],
+    ['queen-1', 'queen-2'],
+  )
+  if (d.remove.join(',') !== 'queen-2') throw new Error(`only the finished AND published tree goes - got ${d.remove.join(',')}`)
+  const why = Object.fromEntries(d.keep.map((k) => [k.tree, k.why]))
+  if (!/still running/.test(why['queen-1'] || '')) throw new Error("a running bee's tree is its workspace")
+  if (!/exist nowhere else/.test(why['queen-3'] || '')) throw new Error('an unpushed branch is the only copy of its commits')
+  if (d.keep.length !== 2) throw new Error('every exclusion is returned with its reason; a silent omission reads as nothing to do')
+})
+
+check('reap-finished never forces and refuses on an unreadable board', async () => {
+  const { script } = await import('./reap-finished.mjs')
+  const code = codeOf('reap-finished.mjs')
+  if (/--force/.test(code)) throw new Error('this removes a checkout, never a commit, and never by force')
+  if (!/ACT.*\n?.*|boardRead/.test(code) || !/An unreadable board is not an empty one/.test(code)) {
+    throw new Error('nobody-running and could-not-ask lead to opposite acts and must be told apart')
+  }
+  const s = script([])
+  if (!/removed=0 refused=0 of 0/.test(s)) throw new Error('an empty list is a valid answer, not a malformed command')
+  if (!/worktree remove/.test(script(['queen-1']))) throw new Error('it removes by the ordinary route')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
