@@ -16,6 +16,7 @@
     "test:all": "bun run ./tests/__helpers__/run-test-group.ts all",
     "test:agent": "bun run ./tests/__helpers__/run-test-group.ts agent",
     "test:api": "bun run ./tests/__helpers__/run-test-group.ts api",
+    "test:pglive": "bun run ./tests/__helpers__/run-test-group.ts pglive",
     "test:browser": "bun run ./tests/__helpers__/run-test-group.ts browser",
     "test:cdp": "bun run test:browser",
     "test:core": "bun run ./tests/__helpers__/run-test-group.ts core",
