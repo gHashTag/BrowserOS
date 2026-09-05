@@ -18,7 +18,7 @@ export function isHermesSupportedProviderType(
  * AND it has an API key wired up. CLI-style providers (chatgpt-pro,
  * github-copilot, qwen-code) and other unsupported types (browseros,
  * ollama, lmstudio, bedrock, azure, google, moonshot) are filtered
- * out — Hermes can't drive them today.
+ * out - Hermes can't drive them today.
  */
 export function getHermesSupportedProviders(
   providers: LlmProviderConfig[],
