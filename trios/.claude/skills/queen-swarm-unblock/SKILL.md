@@ -2584,46 +2584,51 @@ ask" are the same empty list, and here they lead to opposite acts.
 
 ## No collection strategy wins against a duplication rate
 
-Three rounds went into the volume. I raised watermarks, put a collector inside
-the container, wrote a rescue for stranded work, then replaced pressure-based
-reaping with removal on completion. Every one of those fixed a real defect. Then
-I measured again, because the recommendation was to measure again:
+Three rounds went into the volume - watermarks, a collector inside the container,
+a rescue for stranded work, then removal on completion instead of on pressure.
+Every one fixed a real defect, and the volume still climbed at 39 points an hour
+with the reapers working correctly.
 
-    35% used, +39 points per hour, full in 1.7 hours
-    9 worktrees, 3 redundant, the rest belonging to running bees
+**When a resource keeps filling despite correct collection, stop improving the
+collector and measure the production rate.** A collector can only ever be as good
+as the gap between creation and removal; if creation is 10 GB a generation on a
+46 GB volume, the argument is over before it starts.
 
-The reapers were working. Something else filled it.
+The production here is `bun install` writing a private copy of the dependency
+tree into every worktree - about 2.4 GB each, four bees at a time.
 
-    /home/bee/.bun   2493 MB   on overlay        (the image, 2 TB)
-    /workspace       46 GB     on /dev/zd29056   (the volume)
+## Test the mechanism by intervention before shipping the fix
 
-**Different devices.** A hardlink cannot cross a filesystem boundary, so
-`bun install` cannot link a package into a worktree's node_modules and copies it
-instead - about 2.4 GB per worktree, every dispatch. `links=1` on a sample
-package file confirmed it, where a shared store would show more.
+I had an explanation for that duplication and it was wrong.
 
-Four bees installing four private copies of one dependency tree is 10 GB per
-generation on a 46 GB volume. **No collection strategy wins against a
-duplication rate like that.** Three rounds of reaper work moved the symptom and
-never the cause, and only the measurement found it.
+The bee's cache lives on `overlay` and the worktrees on the volume - different
+devices - and a hardlink cannot cross a filesystem boundary. It is a true fact,
+it explains the observation, and I wrote the fix, the test and the commit
+message on it.
 
-The check is two commands and should be the FIRST thing asked of any store that
-seems to grow faster than it should:
+Then I tested it instead of shipping it. The cache was moved onto the volume with
+a symlink - no deploy, reversible in one command - and three installs were run
+into three directories on that same volume:
 
-```bash
-df -P "$CACHE_DIR" | tail -1        # which device is the cache on?
-df -P "$TARGET_DIR" | tail -1       # and the thing installing from it?
-stat -c 'links=%h %n' "$TARGET_DIR/node_modules/.../some-file.js"
-```
+    A: links=1 ino=655375
+    B: links=1 ino=655389
+    C: links=1 ino=655404   (with --backend=hardlink)
+    cache entry: links=4 ino=988244
 
-`links=1` on a package that exists in a shared cache means every consumer holds
-its own copy.
+Different inodes, one link each. The cache hardlinks INTERNALLY, so the
+filesystem supports links perfectly well - `bun install` simply copies out of it
+into every node_modules, whatever device either is on. **The device boundary was
+never the cause.**
 
-**And the shape, which is the transferable part:** when a resource keeps filling
-despite correct collection, stop improving the collector and measure the
-PRODUCTION rate. A collector can only ever be as good as the gap between
-creation and removal; if creation is 10 GB a generation, the argument is over
-before it starts.
+The fix would have cost 2.5 GB of a 46 GB volume and returned nothing. It was
+reverted and the pull request closed.
+
+The habit that saved it is cheap and general: **when a fix can be simulated
+without deploying it, simulate it first.** A symlink, an environment variable, a
+scratch directory - anything that produces the predicted effect if the theory is
+right. A true fact that explains the observation is not the same as the cause,
+and the only thing that tells them apart is making the change and watching for
+the effect.
 
 ## The rule that comes out of all of them
 
