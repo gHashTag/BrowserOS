@@ -2101,6 +2101,10 @@ check('the four steps that free the swarm share one channel, with one retry', as
 
 check('the channel tells "found nothing" from "never looked"', async () => {
   const CH = await import('./channel.mjs')
+  // The breaker is per-PROCESS and this harness is one process, so each case
+  // starts from a channel that has not yet been found down. In production every
+  // run is a fresh process and gets the same clean start.
+  CH.resetChannel()
   let slept = 0
   const drop = () => { const e = new Error('Operation timed out (os error 60)'); e.stderr = ''; throw e }
   try {
@@ -2111,6 +2115,7 @@ check('the channel tells "found nothing" from "never looked"', async () => {
     if (slept !== 2) throw new Error(`three attempts means two waits - got ${slept}`)
   }
   // And an answer comes straight back, unretried.
+  CH.resetChannel()
   let calls = 0
   const answer = () => { calls++; const e = new Error('error: failed to push some refs'); e.stdout = 'x'; throw e }
   try { CH.remote('x', { run: answer, sleep: () => {}, onRetry: () => {} }) } catch { /* expected */ }
@@ -2194,6 +2199,7 @@ check('each kind gets the response it deserves', async () => {
 
 check('a local failure is never reported as the container being down', async () => {
   const CH = await import('./channel.mjs')
+  CH.resetChannel()
   let waited = 0
   const fail = () => { const e = new Error('IO error: failed to load system trust settings: I/O error.'); e.stderr = ''; throw e }
   try {
@@ -2203,6 +2209,35 @@ check('a local failure is never reported as the container being down', async () 
     if (waited !== 0) throw new Error('a local trust-store failure must not be retried at all')
     if (e.channelKind !== 'local') throw new Error('the kind travels with the error so the caller reports the right problem')
   }
+})
+
+check('one outage is one fact, not four failures', async () => {
+  const CH = await import('./channel.mjs')
+  // Across 62 heal runs: when reap succeeded the three steps after it failed
+  // 0%, 7% and 0%. When reap failed they failed 96%, 96% and 66%. They share a
+  // condition that holds for the whole run - and recording it once per step is
+  // what inflated every rate this loop has quoted.
+  CH.resetChannel()
+  let asked = 0
+  const shut = () => { asked++; const e = new Error('Your application is not running or in a unexpected state'); e.stderr = ''; throw e }
+  try { CH.remote('a', { run: shut, sleep: () => {}, onRetry: () => {}, attempts: 2 }) } catch { /* expected */ }
+  const afterFirst = asked
+  try {
+    CH.remote('b', { run: shut, sleep: () => {}, onRetry: () => {}, attempts: 2 })
+    throw new Error('the second step must not knock on a door already found shut')
+  } catch (e) {
+    if (!e.channelDown) throw new Error('the second step inherits the run verdict rather than rediscovering it')
+    if (asked !== afterFirst) throw new Error(`the container must not be asked again - asked ${asked - afterFirst} more times`)
+  }
+  CH.resetChannel()
+  if (CH.channelDown()) throw new Error('a fresh run starts from a channel that has not been found down')
+})
+
+check('a shut door is not a broken step', () => {
+  const heal = codeOf('heal.mjs')
+  const fail = codeOf('failures.mjs')
+  if (!/channel-down/.test(heal)) throw new Error('heal must record the condition, not four step failures')
+  if (!/channelDown/.test(fail)) throw new Error('and the report must count it separately from a real failure')
 })
 
 check('the harness can fail an async check', async () => {

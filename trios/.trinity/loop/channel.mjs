@@ -102,6 +102,35 @@ export function isChannelFailure(text) {
   return classifyFailure(text).retry
 }
 
+
+// ------------------------------------------------------------ the breaker
+
+// ONE OUTAGE IS ONE FACT, NOT FOUR FAILURES.
+//
+// Measured across 62 heal runs on 2026-09-05. When `reap` - the first remote
+// step - succeeded, the three that follow failed 0%, 7% and 0% of the time.
+// When `reap` failed, they failed 96%, 96% and 66%.
+//
+// They do not cause each other. They share a condition that holds for the whole
+// run: the container is not attachable. `reap` is simply the first to find out.
+//
+// Two consequences, and both were costing something:
+//
+//   The chain kept asking. After the first step established the door was shut,
+//   three more steps knocked - each up to three attempts with backoff - and the
+//   run spent minutes learning the same thing four times.
+//
+//   And the RECORD was inflated fourfold. Every rate this project has quoted -
+//   "reap 71%, lease 68%, push-work 66%" - is one outage counted once per step.
+//   The honest quantity is that the channel was down in 47 of 62 runs.
+//
+// So the first process-wide verdict stands for the run. It is per-process on
+// purpose: the next run must try again, because the outage is usually over.
+let DOWN = null
+
+export function channelDown() { return DOWN }
+export function resetChannel() { DOWN = null }
+
 /**
  * Run a script inside the container, retrying only a failing channel.
  *
@@ -118,6 +147,16 @@ export function remote(script, opts = {}) {
     sleep = (s) => execSync(`sleep ${s}`),
     run = (cmd, o) => execSync(cmd, o),
   } = opts
+
+  // The door was already found shut in this process. Do not knock again.
+  if (DOWN && !opts.ignoreBreaker) {
+    const err = new Error(`the channel was already found down in this run (${DOWN.kind}): ${DOWN.advice}`)
+    err.channel = true
+    err.channelDown = true
+    err.channelKind = DOWN.kind
+    err.channelAdvice = DOWN.advice
+    throw err
+  }
 
   let last = ''
   let kind = { kind: 'unknown', advice: '' }
@@ -143,6 +182,9 @@ export function remote(script, opts = {}) {
       }
     }
   }
+  // Exhausted. This is the run's verdict on the channel, and the steps that
+  // follow inherit it rather than rediscovering it.
+  DOWN = { kind: kind.kind, advice: kind.advice, at: new Date().toISOString() }
   const err = new Error(`could not reach the container after ${attempts} attempts (${kind.kind}): ${clean(last).slice(0, 200)}`)
   err.channel = true
   err.channelKind = kind.kind

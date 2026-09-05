@@ -46,7 +46,7 @@ export function tally(rows, sinceDays = null) {
     if (cutoff && r.at && new Date(r.at).getTime() < cutoff) continue
     for (const s of r.results) {
       if (!s || !s.step) continue
-      if (!out.has(s.step)) out.set(s.step, { step: s.step, runs: 0, failed: 0, skipped: 0, findings: 0, evidence: [] })
+      if (!out.has(s.step)) out.set(s.step, { step: s.step, runs: 0, failed: 0, skipped: 0, findings: 0, channelDown: 0, evidence: [] })
       const e = out.get(s.step)
       e.runs++
       if (s.status === 'FAILED') {
@@ -56,6 +56,7 @@ export function tally(rows, sinceDays = null) {
         // silently showing fewer examples than there were failures.
         if (s.evidence) e.evidence.push({ at: r.at, text: s.evidence })
       } else if (s.status === 'skipped') e.skipped++
+      else if (s.status === 'channel-down') e.channelDown++
       else if (s.status === 'FINDING') e.findings++
     }
   }
@@ -64,11 +65,11 @@ export function tally(rows, sinceDays = null) {
 
 export function render(rows) {
   const out = []
-  out.push('  step              runs  failed   rate   skipped  findings')
+  out.push('  step              runs  failed   rate   skipped  findings  chan-down')
   for (const r of rows) {
     const rate = r.runs ? `${Math.round((100 * r.failed) / r.runs)}%` : '-'
     const mark = r.runs && r.failed / r.runs >= 0.25 ? '!!' : r.failed ? '..' : 'ok'
-    out.push(`  ${mark} ${r.step.padEnd(16)} ${String(r.runs).padStart(4)} ${String(r.failed).padStart(6)} ${rate.padStart(6)} ${String(r.skipped).padStart(8)} ${String(r.findings).padStart(9)}`)
+    out.push(`  ${mark} ${r.step.padEnd(16)} ${String(r.runs).padStart(4)} ${String(r.failed).padStart(6)} ${rate.padStart(6)} ${String(r.skipped).padStart(8)} ${String(r.findings).padStart(9)} ${String(r.channelDown || 0).padStart(10)}`)
   }
   // WHAT KIND, not just how many. Three recorded reasons turned out to be three
   // different problems - the service refusing to be attached to, a local trust
