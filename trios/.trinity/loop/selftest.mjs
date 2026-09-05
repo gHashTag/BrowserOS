@@ -2374,6 +2374,22 @@ check('an unreadable board is not an empty one', async () => {
   if (!/still running/.test(code)) throw new Error('a tree whose bee is working is somebody mid-thought')
 })
 
+check('an unmeasured value has no delta and is not the word null', async () => {
+  const L = await import('./loop.mjs')
+  // The local disk hit 100%, the verdict audit could not write its cache, and
+  // the dashboard printed "judged verdicts that prove   null   -203" - the word
+  // null as a value and a fabricated fall as its change, in the artifact built
+  // for the sole purpose of not making numbers up.
+  if (L.isMeasured(null) || L.isMeasured(undefined) || L.isMeasured('')) {
+    throw new Error('a fact that could not be taken is not a measurement')
+  }
+  if (!L.isMeasured(0)) throw new Error('zero is a real answer and must survive')
+  if (!L.isMeasured(203)) throw new Error('and so is any number')
+  const code = codeOf('loop.mjs')
+  if (!/isMeasured\(m\.v\) \? String\(m\.v\) : '-'/.test(code)) throw new Error("the value column shows '-', never the word null")
+  if (!/if \(!isMeasured\(now\)\) return/.test(code)) throw new Error('no delta may be computed from a value that was never taken')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
