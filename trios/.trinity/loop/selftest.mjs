@@ -2502,6 +2502,29 @@ check('sharing runs on the fast timer, because three taps were refuted', () => {
   if (!(i > -1 && j > i)) throw new Error('share before author: the refill starts bees that install again')
 })
 
+check('no tri command is shadowed by an earlier one', () => {
+  // A shell `case` takes the FIRST match. `feed)` appeared twice in tri: a
+  // Vibee content feed at line 37 and the loop's own feed at line 390. The
+  // second was unreachable for its whole life, so `tri feed --act` - which a
+  // launchd timer had been running every 300 seconds - reached the content feed
+  // and the loop step never once ran from its timer.
+  //
+  // 92 labels, one collision, and nothing in the system could see it.
+  const src = fs.readFileSync(path.join(process.env.HOME || '', '.local/bin/tri'), 'utf8')
+  const seen = new Map()
+  const dup = []
+  src.split('\n').forEach((line, i) => {
+    const m = line.match(/^\s{0,4}([a-z0-9][a-z0-9|_-]*)\)\s*(#.*)?$/)
+    if (!m) return
+    for (const label of m[1].split('|')) {
+      if (seen.has(label)) dup.push(`${label} (first at ${seen.get(label)}, unreachable at ${i + 1})`)
+      else seen.set(label, i + 1)
+    }
+  })
+  if (dup.length) throw new Error(`shadowed command(s): ${dup.join('; ')}`)
+  if (seen.size < 50) throw new Error(`only ${seen.size} labels parsed - the scanner has stopped seeing the file`)
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
