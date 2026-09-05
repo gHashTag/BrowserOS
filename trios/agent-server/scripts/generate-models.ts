@@ -59,7 +59,7 @@ interface OutputProvider {
   models: OutputModel[]
 }
 
-// models.dev ID → BrowserOS provider ID
+// models.dev ID -> BrowserOS provider ID
 const PROVIDER_MAP: Record<string, string> = {
   anthropic: 'anthropic',
   openai: 'openai',
