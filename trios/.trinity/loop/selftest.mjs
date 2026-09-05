@@ -2788,6 +2788,49 @@ check('a parity grid is exhaustive over the space it claims, and says which spac
   }
 })
 
+// ONE FILE, TWO PATHS, AND NOTHING COMPARING THEM.
+//
+// `rings/SR-00` and `agent-server/queen-core/Sources` share seventeen Swift
+// files. The self-audit carried this as "a byte-identical fork of 16 SR-00
+// files, one diverged" - which reads like a tidying job and is wrong. Measured
+// 2026-09-06: at HEAD all seventeen are identical. The 45-line difference in
+// `QueenLocalisation.swift` is entirely in the WORKING TREE, an edit somebody
+// has made to one copy and not mirrored to the other. Reading only HEAD would
+// miss it until it shipped; reading only the working tree would call somebody's
+// unfinished thought a landed defect. The pair is what separates them.
+check('a landed fork and an edit in flight are different answers', async () => {
+  const F = await import('./forked-files.mjs')
+  const pair = { name: 'X.swift', left: 'a/X.swift', rights: ['b/X.swift'] }
+  const at = (head, now) => F.classify(pair, {
+    show: (p) => head[p],
+    read: (p) => now[p],
+  }).state
+
+  if (at({ 'a/X.swift': 'one', 'b/X.swift': 'two' }, { 'a/X.swift': 'one', 'b/X.swift': 'two' }) !== 'LANDED')
+    throw new Error('a difference already in history is a landed fork')
+  if (at({ 'a/X.swift': 'one', 'b/X.swift': 'one' }, { 'a/X.swift': 'edited', 'b/X.swift': 'one' }) !== 'in flight')
+    throw new Error('a difference only on disk is an unmirrored edit, not a fork')
+  if (at({ 'a/X.swift': 'one', 'b/X.swift': 'one' }, { 'a/X.swift': 'one', 'b/X.swift': 'one' }) !== 'identical')
+    throw new Error('two identical copies must read as identical')
+  // UNREADABLE IS NOT IDENTICAL - the failure mode this whole directory keeps
+  // hitting. A file with no HEAD state was never compared.
+  if (at({ 'a/X.swift': null, 'b/X.swift': 'one' }, { 'a/X.swift': 'one', 'b/X.swift': 'one' }) !== 'unknown')
+    throw new Error('a file git could not show was reported as agreement')
+})
+
+check('shared files are matched by name, because the two trees have different layouts', async () => {
+  const F = await import('./forked-files.mjs')
+  // SR-00 is flat; queen-core is split into QueenCore/QueenPolicy/queend. A
+  // path-based match finds nothing and reports a clean bill of health.
+  const shared = F.sharedNames(
+    ['trios/rings/SR-00/QueenRetryPolicy.swift', 'trios/rings/SR-00/OnlyHere.swift'],
+    ['trios/agent-server/queen-core/Sources/QueenCore/QueenRetryPolicy.swift'],
+  )
+  if (shared.length !== 1) throw new Error(`matched ${shared.length}, not the one file both trees hold`)
+  if (shared[0].rights[0] !== 'trios/agent-server/queen-core/Sources/QueenCore/QueenRetryPolicy.swift')
+    throw new Error('the right-hand path is wrong')
+})
+
 check('a parity check with a side missing is never agreement', async () => {
   const P = await import('./t27-parity.mjs')
   const r = P.compare([
