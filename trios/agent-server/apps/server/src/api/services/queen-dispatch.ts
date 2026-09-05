@@ -734,9 +734,12 @@ export async function farmNodeModules(
     if (m) return `; linked ${m[1]} node_modules into the store for ${m[2]}`
     const no = r.out.match(/NOFARM (.+)/)
     return no ? `; installed its own modules (${no[1].trim()})` : ''
-  } catch {
-    // An optimisation that throws is worse than one that does not run.
-    return ''
+  } catch (error) {
+    // An optimisation that throws is worse than one that does not run - but one
+    // that fails SILENTLY is how a gap survives. It says so and carries on.
+    return `; the module farm could not be built (${
+      error instanceof Error ? error.message.slice(0, 80) : 'unknown'
+    })`
   }
 }
 
@@ -786,14 +789,26 @@ export async function prepareWorktree(
     const changed = dirty.out
       .split('\n')
       .filter((l) => l.trim().length > 0).length
+    // A REUSED TREE NEEDS THE FARM AS MUCH AS A FRESH ONE.
+    //
+    // The farm was added after `git worktree add` and this path returns before
+    // reaching it, so every reused worktree kept whatever node_modules it had.
+    // Found the same day: #1627, cut after the change went live, lockfile hash
+    // matching an existing store, and still carrying 2,562 MB of its own
+    // packages - because its dispatch says "reused an existing worktree
+    // (clean)".
+    //
+    // One tree of fifteen, which is exactly how a gap like this hides: the
+    // aggregate looked fixed.
+    const reusedFarm = await farmNodeModules(path, root)
     return {
       ok: true,
       path,
       detail:
-        changed === 0
+        (changed === 0
           ? 'reused an existing worktree (clean)'
           : `reused an existing worktree (${changed} uncommitted file(s) ` +
-            'left by a previous attempt)',
+            'left by a previous attempt)') + reusedFarm,
     }
   }
 
