@@ -111,14 +111,27 @@ export function selftestCases(read = (f) => fs.readFileSync(f, 'utf8')) {
  * ssh gateway refused eleven. Every operation that frees the swarm goes through
  * it, so this belongs beside the swarm counts and not in a file nobody opens.
  */
-export function gatewayPercent(read = (f) => fs.readFileSync(f, 'utf8')) {
+export const GATEWAY_WINDOW = Number(process.env.TRIOS_GATEWAY_WINDOW || 12)
+
+export function gatewayPercent(read = (f) => fs.readFileSync(f, 'utf8'), window = GATEWAY_WINDOW) {
   const rows = read(path.join(DIR, 'state', 'two-views.jsonl'))
     .split('\n').filter(Boolean)
     .map((l) => { try { return JSON.parse(l) } catch { return null } })
     .filter(Boolean)
   if (!rows.length) return null
-  const up = rows.filter((r) => r.ssh && r.ssh.attached).length
-  return Math.round((100 * up) / rows.length)
+  // A LIFETIME AVERAGE HIDES A FIX FOR HOURS.
+  //
+  // Naming the railway client took the gateway from 7 of 22 to 4 of 4, and this
+  // number moved from 35% to 39% - because it was averaging over every sample
+  // the broken client ever produced. A dashboard whose job is to show the
+  // current state must not be dominated by a period that has ended.
+  //
+  // The window is short on purpose. It is the same discipline as splitting a
+  // before/after at the file's real mtime: the question is what is true now,
+  // and yesterday's samples answer a different one.
+  const recent = rows.slice(-window)
+  const up = recent.filter((r) => r.ssh && r.ssh.attached).length
+  return Math.round((100 * up) / recent.length)
 }
 
 /** Percent in use of the disk this loop runs on. */
@@ -174,7 +187,7 @@ export function rows(f, prev) {
     { k: `worst step: ${f.worstStep?.step ?? '-'}, percent`, v: f.worstStep?.rate ?? null, prev: p.worstStep?.rate ?? null },
     { k: 'selftest cases', v: f.selftest ?? null, prev: p.selftest ?? null, goodDown: false },
     { k: 'disk this loop runs on, percent', v: f.disk ?? null, prev: p.disk ?? null },
-    { k: 'ssh gateway answers, percent', v: f.gateway ?? null, prev: p.gateway ?? null, goodDown: false },
+    { k: `ssh gateway answers, last ${GATEWAY_WINDOW}, percent`, v: f.gateway ?? null, prev: p.gateway ?? null, goodDown: false },
   ]
 }
 
