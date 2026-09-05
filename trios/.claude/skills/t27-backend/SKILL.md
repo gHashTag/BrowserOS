@@ -130,16 +130,40 @@ the state from which they start to disagree.
   runtime image below carries no Swift", and it carries no Rust and no `t27c`
   either. T27 ring work is Mac work.
 
-## Verified toolchain (checked on this machine, 2026-08-19)
+## Verified toolchain (re-checked 2026-09-06 — the old block sent you into the
+## tree you may not write to, and named a binary that has never existed)
 
 ```bash
-cd /Users/playra/t27/bootstrap && cargo build --release   # binary: /Users/playra/t27/target/release/t27c
-t27c gen-rust    <file.t27>    # Rust
-t27c gen         <file.t27>    # Zig
-t27c gen-c       <file.t27>    # C
-t27c gen-verilog <file.t27>    # synthesisable Verilog
-t27c icarus-simulate <file.t27>
+# Build the compiler HERE. `CARGO_TARGET_DIR` is the whole point: the sources in
+# ~/t27 are readable, its build directory is not ours to fill (L0b).
+CARGO_TARGET_DIR=<trios>/.trinity/t27c-build cargo build --release \
+  --manifest-path ~/t27/bootstrap/Cargo.toml
+
+T27C=<trios>/.trinity/t27c-build/release/t27c   # the ONLY t27c on this machine
+$T27C gen-rust    <file.t27>    # Rust
+$T27C gen         <file.t27>    # Zig
+$T27C gen-c       <file.t27>    # C
+$T27C gen-verilog <file.t27>    # synthesisable Verilog
+$T27C icarus-simulate <file.t27>
 ```
+
+`make t27-rings`, `make chain`, `tri t27-gen` and `tri t27-parity` all do the
+build above for you.
+
+**What the previous version of this block said, and why it mattered.** It read
+`cd /Users/playra/t27/bootstrap && cargo build --release   # binary:
+/Users/playra/t27/target/release/t27c`, then invoked a bare `t27c`. Both halves
+are wrong on this machine: `which t27c` finds nothing, and a search of the whole
+filesystem on 2026-09-06 returned exactly one binary - the one built here. The
+documented path **has never existed**. Worse, the command writes into `~/t27`,
+which L0b says is another agent's tree.
+
+The Makefile had already learned this and recorded it at `Makefile:913`: the
+ring gate looked for that same path, found nothing, printed `[SKIP]`, exited 0,
+and `make check` counted it as passed - "both rings were unchecked the whole
+time." The instruction existed in two places, one of them right, and the wrong
+one was the one a reader meets first. Keep this block and the Makefile in
+agreement or delete this one.
 
 Open-source FPGA flow, all present, **no Vivado required**:
 

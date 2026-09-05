@@ -180,6 +180,12 @@ const STEPS = [
   // when they stopped. Comparing them is cheap - 460 exhaustive cases, a few
   // seconds - and it is the only thing standing between "they agree" and "they
   // agreed when somebody last looked."
+  // ONE FILE IN TWO PLACES, EVERY ROUND. Seventeen Swift files exist in both
+  // rings/SR-00 and agent-server/queen-core/Sources. Nothing compared them, and
+  // on the first run one of the seventeen was already being edited on one side
+  // only - identical at HEAD, 45 lines apart on disk. Catching that before it
+  // lands is the whole difference between a warning and a fork.
+  { name: 'forked-files', file: 'forked-files.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'a file that exists twice must not start saying two things' },
   { name: 't27-parity', file: 't27-parity.mjs', reportsOnly: true, act: '', dryArgs: '', why: 'the generated ring and the twin in production still answer the same' },
   { name: 'verdict-audit', file: 'verdict-audit.mjs', reportsOnly: true, act: '--accepted', dryArgs: '--accepted', why: 'check what the swarm claims against what it pushed' },
   // Queue what no mechanical check can reach for a judge to read. Assembles
