@@ -275,7 +275,19 @@ describe('#1321 Wave A: a broken local ref must not block a fresh worktree', () 
 
       // Scenario 1: preparation succeeds - the stale ref costs nothing.
       expect(prepared.ok).toBe(true)
-      expect(prepared.detail).toBe('cut from origin/dev')
+      // THE DETAIL IS A LIST OF CLAUSES NOW, AND THIS PIN PREDATES THE SECOND.
+      //
+      // `prepareWorktree` appends `; installed its own modules (…)` or
+      // `; linked N node_modules into the store for …` on both the fresh and
+      // the reuse path, because a worktree whose dependencies were not shared
+      // is the difference between a 159 MB tree and a 2.5 GB one and belongs in
+      // the record. This assertion was written when `detail` was one phrase, so
+      // it has failed on every run since - 12 of 12 measured, which is not
+      // flake, which is what it was being called.
+      //
+      // The first clause is still pinned exactly, so a reworded phrase is still
+      // caught; the rest of the list is allowed to grow.
+      expect(prepared.detail.split('; ')[0]).toBe('cut from origin/dev')
       // And it really cut a worktree: on its own branch, at the base ref.
       expect(git(root, ['worktree', 'list', '--porcelain'])).toContain(
         join(root, '.worktrees', 'queen-1321'),
