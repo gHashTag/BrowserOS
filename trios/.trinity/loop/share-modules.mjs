@@ -19,9 +19,16 @@
 // to that worktree's own sources.
 //
 // That is pnpm's arrangement, arrived at by hitting the same wall it was built
-// for. The store root has 14 top-level entries because bun hoists into `.bun`,
-// so the farm is fourteen symlinks per node_modules directory, seven
-// directories per worktree.
+// for. The store root has SIXTEEN top-level entries - fourteen ordinary ones
+// plus `.bun` and `.bin` - and the first version of this file linked fourteen,
+// because POSIX sh does not match a leading dot with a star. `.bun` is bun's
+// entire isolated store: 2242 entries, 2.37 GB, everything that matters.
+//
+// That one missing glob is why I recorded "a pre-built farm cannot survive
+// bun install" as a measured refutation. With the dotfiles linked, a live
+// farmed worktree answers `bun install --frozen-lockfile` with
+// "Checked 2250 installs across 2424 packages (no changes) [948.00ms]" and
+// stays at 159 MB. The tap can be closed; my own bug said it could not be.
 //
 // PROVEN BY INTERVENTION, not argued. Two worktrees rebuilt against one store:
 //
@@ -125,7 +132,22 @@ for pair in ${list}; do
     src="$S/$rel"
     rm -rf "$W/$rel"
     mkdir -p "$W/$rel"
-    for e in "$src"/*; do ln -s "$e" "$W/$rel/$(basename "$e")" 2>/dev/null || true; done
+    # DOTFILES TOO, AND THIS IS THE WHOLE FIX.
+    #
+    # POSIX sh does not match a leading dot with a star. The store root holds 16
+    # entries and this glob linked 14: .bun - bun's ENTIRE isolated store,
+    # 2242 entries and 2.37 GB - and .bin were silently left out. bun then
+    # cannot see the tree as satisfied and reinstalls everything.
+    #
+    # Measured A/B on one scratch worktree, one store, one bun, one command:
+    #   farm WITH dotfiles     bun install --frozen-lockfile -> "no changes"
+    #                          [168ms], tree stays 27M
+    #   farm WITHOUT dotfiles  same command -> "4460 packages installed"
+    #                          [6.10s], tree 27M -> 2254M
+    #
+    # So "a pre-built farm cannot survive bun install" was refuted by this bug,
+    # not by bun. The tap CAN be closed.
+    for e in "$src"/* "$src"/.[!.]*; do [ -e "$e" ] || continue; ln -s "$e" "$W/$rel/$(basename "$e")" 2>/dev/null || true; done
     # A bun workspace links its OWN packages by relative path inside
     # node_modules. Shared away they resolve against the store and find
     # nothing, so they are linked back to this worktree's sources.

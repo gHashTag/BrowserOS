@@ -33,7 +33,33 @@
 import { execSync } from 'node:child_process'
 
 export const PROJECT = process.env.TRIOS_RAILWAY_PROJECT || '564d9ebd-7aa8-44fe-93ec-e0b03c87158d'
-export const RAILWAY = `railway ssh --project ${PROJECT} --environment production`
+
+/**
+ * THE BINARY IS NAMED, BECAUSE THE LOOP AND I WERE RUNNING DIFFERENT PROGRAMS.
+ *
+ * This said `railway`, bare. Both launchd plists run `/bin/zsh -lc`, and the
+ * login profile puts /usr/local/bin ahead of the nvm bin:
+ *
+ *   /bin/zsh -lc 'command -v railway'   /usr/local/bin/railway   4.5.4 (Jun 2025)
+ *   my interactive shell                nvm's railway            5.49.2
+ *
+ * Only one of them can have produced the refusals in the record.
+ * `LC_ALL=C grep -ac "Expected welcome message"` is 1 in 4.5.4 and 0 in
+ * 5.49.2 - and that string wraps EVERY app-down failure in
+ * state/two-views.jsonl and ledger.jsonl.
+ *
+ * So the "gateway works 39% of the time" was wrong in a way that mattered: the
+ * gateway was not being asked. Every launchd sample was refused by a client
+ * that cannot attach; every attach in the whole record came from a hand run
+ * with the newer binary. Three rounds of step-failure rates, a retry policy, a
+ * breaker and a budget were all built on top of a PATH.
+ *
+ * Named the way PROJECT and SERVICE already are, so a machine with a different
+ * layout can say so without editing this file.
+ */
+export const RAILWAY_BIN = process.env.TRIOS_RAILWAY_BIN
+  || `${process.env.HOME || ''}/.nvm/versions/node/v22.22.0/bin/railway`
+export const RAILWAY = `${RAILWAY_BIN} ssh --project ${PROJECT} --environment production`
 export const SERVICE = process.env.TRIOS_RAILWAY_SERVICE || 'trios-agent-server'
 
 /** Quote a string for /bin/sh. execSync passes through the LOCAL shell. */

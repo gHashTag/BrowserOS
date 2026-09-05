@@ -2584,6 +2584,39 @@ check('the dashboard reads the gateway rate, it does not probe for it', async ()
   if (/two-views\.mjs/.test(code)) throw new Error('it reads the record; running the probe would change what it measures')
 })
 
+check('the loop names the railway binary it runs', async () => {
+  const CH = await import('./channel.mjs')
+  // Both launchd plists run `/bin/zsh -lc`, whose login profile puts
+  // /usr/local/bin ahead of the nvm bin. A bare `railway` there is 4.5.4 of
+  // June 2025, which cannot attach; my interactive shell finds 5.49.2.
+  //
+  //   LC_ALL=C grep -ac "Expected welcome message"   1 in 4.5.4, 0 in 5.49.2
+  //
+  // That string wraps EVERY app-down refusal in the record. The gateway was not
+  // working 39% of the time - it was not being asked.
+  if (!/^\//.test(CH.RAILWAY_BIN)) throw new Error(`the binary must be an absolute path, not a PATH lookup - got ${CH.RAILWAY_BIN}`)
+  if (!CH.RAILWAY.startsWith(CH.RAILWAY_BIN)) throw new Error('the command must use the named binary')
+  for (const f of ['channel.mjs', 'stale-escalations.mjs']) {
+    const code = codeOf(f)
+    if (/`railway ssh/.test(code)) throw new Error(`${f} still starts a command with a bare railway`)
+  }
+})
+
+check('the farm links dotfiles, which is where bun keeps everything', async () => {
+  const { shareScript } = await import('./share-modules.mjs')
+  // POSIX sh does not match a leading dot with `*`. The store root holds 16
+  // entries and the first glob linked 14: `.bun` - bun's entire isolated store,
+  // 2242 entries, 2.37 GB - and `.bin` were left out, so bun could not see the
+  // tree as satisfied and reinstalled everything.
+  //
+  // A/B, one worktree, one store, one command:
+  //   with dotfiles     "Checked 2244 installs ... (no changes)"  27M -> 27M
+  //   without dotfiles  "4460 packages installed"                 27M -> 2254M
+  const s = shareScript([{ name: 'queen-1', lock: 'abc' }])
+  if (!/\.\[!\.\]\*/.test(s)) throw new Error('the glob must match dotfiles or .bun is never linked')
+  if (!/\[ -e "\$e" \] \|\| continue/.test(s)) throw new Error('an unmatched dotfile glob expands to itself and must be skipped')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
