@@ -2639,6 +2639,35 @@ check('the railway client is chosen by version, not by a pinned path', async () 
   if (!(major >= 5)) throw new Error(`the chosen client is ${String(v).trim()}, which cannot attach`)
 })
 
+check('the real failure vocabulary is classified, not left unknown', async () => {
+  const CH = await import('./channel.mjs')
+  // Every failure this loop had recorded was wrapped in "Expected welcome
+  // message" - a string only the June-2025 client produces. With a working
+  // client the container's ACTUAL failures arrived and none were recognised.
+  const real = 'Connection to ssh.railway.com closed by remote host.'
+  const k = CH.classifyFailure(real)
+  if (k.kind === 'unknown') throw new Error('a connection the container closed is not an unrecognised failure')
+  if (!k.retry) throw new Error('a service that crashed and comes back is worth asking again')
+  // and a git answer is still not a channel failure
+  if (CH.isChannelFailure('! [rejected] queen-1 -> queen-1 (non-fast-forward)')) {
+    throw new Error('widening the vocabulary must not swallow an answer')
+  }
+})
+
+check('the container process pressure is measured, so the crash is a rising number', async () => {
+  const { pidPercent } = await import('./dash.mjs')
+  // The service crashed with EAGAIN on posix_spawn: it could not fork. A fresh
+  // container is at 65 of 1000, so the exhaustion accumulates unseen.
+  const read = () => [
+    JSON.stringify({ ssh: { attached: true, pids: { used: 100, max: 1000 } } }),
+    JSON.stringify({ ssh: { attached: true, pids: { used: 900, max: 1000 } } }),
+  ].join('\n')
+  if (pidPercent(read) !== 90) throw new Error(`the LATEST sample is the state - 900 of 1000 is 90%, got ${pidPercent(read)}`)
+  if (pidPercent(() => '') !== null) throw new Error('no sample is null, never zero: unmeasured and empty are different')
+  const noPids = () => JSON.stringify({ ssh: { attached: false } })
+  if (pidPercent(noPids) !== null) throw new Error('a refused attach carries no pid reading and must not be counted as one')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.

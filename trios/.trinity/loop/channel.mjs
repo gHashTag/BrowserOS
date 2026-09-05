@@ -156,6 +156,24 @@ export function classifyFailure(text) {
   if (/system trust settings|failed to load system trust|certificate store|keychain/i.test(s)) {
     return { kind: 'local', retry: false, advice: 'the railway CLI on THIS machine could not read the system trust store - nothing about the container is wrong' }
   }
+  // THE REAL VOCABULARY, WHICH ONLY APPEARED ONCE THE CLIENT WORKED.
+  //
+  // Every failure this loop had ever recorded was wrapped in "Expected welcome
+  // message" - a string that exists only in the June-2025 client that cannot
+  // attach. With a working client the container's actual failures arrived, and
+  // the classifier had never seen any of them:
+  //
+  //   "Connection to ssh.railway.com closed by remote host"   the container
+  //     accepted the connection and then died or refused - measured on
+  //     2026-09-05 while /health returned 502 and railway reported the service
+  //     CRASHED, with the deployment log full of
+  //     `EAGAIN: resource temporarily unavailable` on posix_spawn.
+  //
+  // It was classified `unknown` and therefore never retried, which is the
+  // conservative default and the wrong answer for a service that comes back.
+  if (/closed by remote host|Connection closed|channel .* closed|remote host/i.test(s)) {
+    return { kind: 'app-down', retry: true, waitMultiplier: 4, advice: 'the container accepted the connection and then closed it - it may be crashing or out of process slots' }
+  }
   if (/Operation timed out|os error 60|Connection reset|connection error|SendRequest|client error|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|502 Bad Gateway|503 Service|Temporary failure in name resolution|broken pipe/i.test(s)) {
     return { kind: 'transport', retry: true, waitMultiplier: 1, advice: 'the connection dropped; it usually comes straight back' }
   }

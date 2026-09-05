@@ -73,8 +73,29 @@ export async function sshView(deps = {}) {
   try {
     // ignoreBreaker: this instrument's whole job is to ask, even when the chain
     // has already decided not to.
-    const out = CH.remote('echo attached', { attempts: 1, ignoreBreaker: true, onRetry: () => {} })
-    return { attached: /attached/.test(String(out)), kind: 'ok', detail: String(out).slice(0, 120) }
+    // While we are attached, take the container's process pressure too.
+    //
+    // WHY HERE. On 2026-09-05 the service CRASHED with the deployment log full
+    // of `EAGAIN: resource temporarily unavailable` on posix_spawn - the
+    // container could not fork. A fresh container sits at 65 of 1000 pids with
+    // zero zombies, so the exhaustion accumulates and the crash is the END of a
+    // process nobody was watching. This probe already attaches every chain run;
+    // asking two more questions while it is there costs nothing and turns a
+    // sudden crash into a rising number.
+    const out = CH.remote(
+      'echo attached; echo PIDS $(cat /sys/fs/cgroup/pids.current 2>/dev/null || echo 0)/$(cat /sys/fs/cgroup/pids.max 2>/dev/null || echo 0); echo ZOMBIES $(ps -eo stat 2>/dev/null | grep -c "^Z" || echo 0)',
+      { attempts: 1, ignoreBreaker: true, onRetry: () => {} },
+    )
+    const s = String(out)
+    const pids = s.match(/PIDS (\d+)\/(\d+)/)
+    const zomb = s.match(/ZOMBIES (\d+)/)
+    return {
+      attached: /attached/.test(s),
+      kind: 'ok',
+      detail: s.replace(/\s+/g, ' ').slice(0, 120),
+      pids: pids ? { used: Number(pids[1]), max: Number(pids[2]) } : null,
+      zombies: zomb ? Number(zomb[1]) : null,
+    }
   } catch (e) {
     const text = `${e.stdout || ''}${e.stderr || ''}${e.message || ''}`
     const k = CH.classifyFailure(text)
