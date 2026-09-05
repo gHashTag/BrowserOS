@@ -128,9 +128,18 @@ if (isMain) {
     let out = ''
     let status = 'ok'
     try {
+      // THE STEP'S BUDGET IS TOLD TO THE CHANNEL, not just enforced on it.
+      //
+      // A step killed at its timeout reports "timed out part-way" and loses
+      // whatever it was about to say. The channel's app-down backoff sleeps 180
+      // seconds across three attempts; on a 300-second cycle that is most of the
+      // budget spent waiting. Given the number, the channel stops before the
+      // wait that would overrun and the step finishes with an answer.
+      const budget = Math.max(30000, Math.min(300000, left))
       out = execSync(`node ${path.join(DIR, s.file)} ${ACT ? s.act : ''}`, {
         encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: Math.max(30000, Math.min(300000, left)),
+        timeout: budget,
+        env: { ...process.env, CHANNEL_DEADLINE_MS: String(Math.round(budget * 0.8)) },
       })
     } catch (e) {
       out = String(e.stdout || '') + String(e.stderr || '')

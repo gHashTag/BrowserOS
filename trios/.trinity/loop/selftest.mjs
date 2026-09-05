@@ -2525,6 +2525,50 @@ check('no tri command is shadowed by an earlier one', () => {
   if (seen.size < 50) throw new Error(`only ${seen.size} labels parsed - the scanner has stopped seeing the file`)
 })
 
+check('a retry stops before it overruns its caller budget', async () => {
+  const CH = await import('./channel.mjs')
+  CH.resetChannel()
+  // The app-down backoff waits 15s then 30s, times four: 180 seconds of sleeping
+  // across three attempts. `feed` fires every 300 seconds and caps a step at
+  // 300, and its first two real runs both recorded `share-modules: timed out`.
+  let slept = 0
+  let asked = 0
+  let clock = 0
+  const drop = () => { asked++; const e = new Error('Your application is not running or in a unexpected state'); e.stderr = ''; throw e }
+  try {
+    CH.remote('x', {
+      run: drop,
+      sleep: (s) => { slept += s; clock += s * 1000 },
+      now: () => clock,
+      onRetry: () => {},
+      attempts: 3,
+      deadlineMs: 30000,
+    })
+    throw new Error('it must still fail')
+  } catch (e) {
+    if (!e.channel) throw new Error('an exhausted channel is still a channel failure')
+    if (slept * 1000 >= 30000) throw new Error(`it slept ${slept}s past a 30s budget`)
+    if (asked < 1) throw new Error('it must ask at least once before giving the budget as the reason')
+  }
+  // With no deadline the old behaviour is unchanged: attempts alone bound it.
+  CH.resetChannel()
+  let slept2 = 0
+  let clock2 = 0
+  try {
+    CH.remote('x', { run: drop, sleep: (s) => { slept2 += s; clock2 += s * 1000 }, now: () => clock2, onRetry: () => {}, attempts: 3 })
+  } catch { /* expected */ }
+  if (slept2 !== 180) throw new Error(`without a budget the app-down sequence sleeps 60+120=180s - got ${slept2}`)
+})
+
+check('the feed hands the channel the budget it is holding it to', () => {
+  const code = codeOf('feed.mjs')
+  // A step killed at its timeout reports "timed out part-way" and loses whatever
+  // it was about to say. Told the number, the channel stops before the wait that
+  // would overrun and the step finishes with an answer.
+  if (!/CHANNEL_DEADLINE_MS/.test(code)) throw new Error('the step budget must reach the channel, not only the kill timer')
+  if (!/budget \* 0\.8/.test(code)) throw new Error('leave the step room to report after the channel gives up')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
