@@ -2703,6 +2703,33 @@ check('the feed hands the channel the budget it is holding it to', () => {
   if (!/budget \* 0\.8/.test(code)) throw new Error('leave the step room to report after the channel gives up')
 })
 
+// THE FRAME WAS BROKEN BY THE CONTENT IT WAS DRAWN AROUND.
+//
+// `pad` only ever pads, so any row wider than the box ran straight through the
+// right border. The subject row had learned this and fixed it with a `.slice()`
+// for itself alone - which is why the lesson never reached the four sections
+// written after it, and every WORK row of the last dashboard overflowed. It is
+// fixed in `row` now, so no future section can reintroduce it.
+check('no dashboard row can break the box, however long its content', () => {
+  const long = 'x'.repeat(400)
+  // Rendered into the scratch directory, NEVER over the round's real dashboard.
+  const out = { text: path.join(tmp, 'dash.txt'), ansi: path.join(tmp, 'dash.ansi') }
+  L.renderDashboard({
+    swarm: [{ k: long, v: 1, prev: null }],
+    work: [{ state: 'done', title: long, note: long }],
+    anomalies: [long],
+    next: [long],
+  }, out)
+  const lines = fs.readFileSync(out.text, 'utf8').split('\n').filter(Boolean)
+  const widths = new Set(lines.map((l) => [...l].length))
+  if (widths.size !== 1) throw new Error(`the box has ${widths.size} different widths: ${[...widths].join(', ')}`)
+  for (const l of lines) {
+    if (!/^[│├╭╰]/.test(l) || !/[│┤╮╯]$/.test(l)) throw new Error(`a row lost its border: ${l.slice(0, 90)}`)
+  }
+  // And a cut row must SAY it was cut, rather than reading as a complete thought.
+  if (!lines.some((l) => l.includes('…'))) throw new Error('content 400 characters wide was truncated silently')
+})
+
 check('the dashboard reads the gateway rate, it does not probe for it', async () => {
   const { gatewayPercent } = await import('./dash.mjs')
   // Probing here would add a sample to the thing being measured. A dashboard

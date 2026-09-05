@@ -228,10 +228,44 @@ const yellow = sgr(33), cyan = sgr(36)
 const W = 76
 const strip = (t) => t.replace(new RegExp(ESC + '\\[[0-9;]*m', 'g'), '')
 const pad = (t, w) => t + ' '.repeat(Math.max(0, w - strip(t).length))
-const row = (t = '') => `│ ${pad(t, W - 3)}│`
-const rule = () => `├${'─'.repeat(W - 1)}┤`
-const top = (t) => `╭─ ${t} ${'─'.repeat(Math.max(0, W - 4 - strip(t).length))}╮`
-const bottom = () => `╰${'─'.repeat(W - 1)}╯`
+
+/**
+ * Cut to a VISIBLE width, colour codes not counted and never left dangling.
+ *
+ * `pad` only ever pads. Anything wider than the box therefore ran straight
+ * through the right border, and every row of the last dashboard's WORK section
+ * did: the frame was broken by the content it was drawn around. The subject row
+ * had already learned this and fixed it with a `.slice()` for itself alone,
+ * which is why the lesson did not reach the four sections written afterwards.
+ *
+ * Fixing it in `row` instead means no future section can reintroduce it, and
+ * the callers stop carrying magic numbers that have to agree with W by hand.
+ */
+const clip = (t, w) => {
+  if (strip(t).length <= w) return t
+  let visible = 0
+  let out = ''
+  for (let i = 0; i < t.length; i++) {
+    const esc = t.slice(i).match(new RegExp('^' + ESC + '\\[[0-9;]*m'))
+    if (esc) { out += esc[0]; i += esc[0].length - 1; continue }
+    if (visible >= w - 1) break
+    out += t[i]
+    visible++
+  }
+  // The ellipsis says the row was cut; the reset makes sure a colour opened
+  // before the cut cannot bleed into the border.
+  return `${out}…${ESC}[0m`
+}
+
+const row = (t = '') => `│ ${pad(clip(t, W - 3), W - 3)}│`
+// THE BOX WAS NEVER SQUARE. A `row` is 2 + (W-3) + 1 = W characters; the rules
+// were `'─'.repeat(W - 1)` between two corners, so every horizontal line was
+// W+1 - one character past the vertical borders it was supposed to meet. It has
+// looked like that in every dashboard this loop has drawn, and it was found by
+// the calibration case written for a different defect in the same function.
+const rule = () => `├${'─'.repeat(W - 2)}┤`
+const top = (t) => `╭─ ${t} ${'─'.repeat(Math.max(0, W - 5 - strip(t).length))}╮`
+const bottom = () => `╰${'─'.repeat(W - 2)}╯`
 
 // AN UNMEASURED VALUE HAS NO DELTA, and pretending otherwise invented two
 // numbers at once.
@@ -256,14 +290,12 @@ function delta(now, prev, goodDown) {
   return (good ? green : red)(pad(s, 4))
 }
 
-export function renderDashboard(facts) {
+export function renderDashboard(facts, to = {}) {
   const s = loadState()
   const out = []
   out.push(top(bold('TRIOS CONTINUOUS LOOP') + dim('   cron */15   job 23d6fe89')))
   out.push(row(`${dim('iteration')}  ${bold('#' + s.iteration)}    ${dim('started')} ${(s.startedAt || '-').slice(0, 19)}Z`))
-  // Truncate rather than overflow: a row wider than the box breaks every border
-  // below it, and the first iteration's subject did exactly that.
-  out.push(row(`${dim('subject')}    ${(s.title || '-').slice(0, W - 15)}`))
+  out.push(row(`${dim('subject')}    ${s.title || '-'}`))
   out.push(rule())
   out.push(row(bold('SWARM') + dim('   value, and how it moved since the last iteration')))
   for (const m of facts.swarm || []) {
@@ -276,22 +308,35 @@ export function renderDashboard(facts) {
   out.push(row(bold('WORK THIS ITERATION')))
   for (const t of facts.work || []) {
     const mark = { done: green('●'), blocked: red('●'), running: yellow('●') }[t.state] || dim('○')
-    out.push(row(`  ${mark} ${pad(t.title, 48)} ${dim((t.note || '').slice(0, 20))}`))
+    // The note is what the title is worth: a title long enough to crowd it out
+    // keeps the note, and `clip` in `row` decides where the line ends.
+    out.push(row(`  ${mark} ${pad(clip(t.title, W - 26), W - 26)} ${dim(clip(t.note || '', 20))}`))
   }
   if ((facts.anomalies || []).length) {
     out.push(rule())
     out.push(row(bold(red('ANOMALIES')) + dim('   found by this iteration, against its own work')))
-    for (const a of facts.anomalies) out.push(row(`  ${red('!')} ${a.slice(0, 68)}`))
+    for (const a of facts.anomalies) out.push(row(`  ${red('!')} ${a}`))
   }
   if ((facts.next || []).length) {
     out.push(rule())
-    out.push(row(bold('THREE WAYS TO CONTINUE')))
-    facts.next.forEach((n, i) => out.push(row(`  ${cyan(i + 1 + '.')} ${n.slice(0, 68)}`)))
+    // The heading counts what is actually there. It said THREE unconditionally,
+    // and a list of four printed under it - a caption contradicted by the rows
+    // directly beneath it, which is the smallest possible version of the defect
+    // this whole loop exists to hunt.
+    const n = facts.next.length
+    const word = { 1: 'ONE WAY', 2: 'TWO WAYS', 3: 'THREE WAYS', 4: 'FOUR WAYS', 5: 'FIVE WAYS' }[n] || `${n} WAYS`
+    out.push(row(bold(`${word} TO CONTINUE`)))
+    facts.next.forEach((n, i) => out.push(row(`  ${cyan(i + 1 + '.')} ${n}`)))
   }
   out.push(bottom())
   const text = out.join('\n')
-  fs.writeFileSync(DASH_ANSI, text + '\n')
-  fs.writeFileSync(DASH, strip(text) + '\n')
+  // The destinations are arguments so a calibration case can render a hostile
+  // fixture WITHOUT overwriting the round's real dashboard. A suite in this
+  // repository once truncated a shipped file to zero bytes by testing against
+  // the live artifact; the rule since then is that a test never writes where
+  // production reads.
+  fs.writeFileSync(to.ansi || DASH_ANSI, text + '\n')
+  fs.writeFileSync(to.text || DASH, strip(text) + '\n')
   return text
 }
 
