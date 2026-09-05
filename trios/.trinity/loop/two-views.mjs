@@ -1,0 +1,163 @@
+#!/usr/bin/env node
+// Two views of one service, sampled at the same moment.
+//
+// WHY THIS EXISTS. On 2026-09-05 at 01:15:53 the chain recorded three steps
+// failing with "Your application is not running or in a unexpected state" from
+// `railway ssh`. Asked a minute later, `GET /health` answered
+// `{"status":"ok"}`.
+//
+// Both are true statements about the same service, and neither is "the truth" -
+// they answer different questions. HTTP asks whether the app can serve a
+// request. The ssh gateway asks whether the platform will attach a shell to the
+// deployment, which also depends on the deployment's state, the runtime, and
+// whatever the gateway believes about it.
+//
+// The mistake available here is to pick one and call it health. A green health
+// check has been read, in this project, as evidence the channel will connect. It
+// is not. So both are sampled TOGETHER and the disagreement is recorded as its
+// own fact, because a disagreement observed a minute apart is not evidence of
+// anything - by then the world has moved.
+//
+// It records rather than concludes. Outages are intermittent and cannot be
+// summoned; the instrument that catches the next one is worth more than a story
+// about the last one.
+//
+// Usage:
+//   node two-views.mjs            # one sample, printed
+//   node two-views.mjs --record   # one sample, appended to the record
+//   node two-views.mjs --report   # what the record says so far
+
+import fs from 'node:fs'
+import path from 'node:path'
+import { execSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+
+const DIR = path.dirname(fileURLToPath(import.meta.url))
+const isMain = process.argv[1] && process.argv[1].endsWith('/two-views.mjs')
+const RECORD = path.join(DIR, 'state', 'two-views.jsonl')
+const HEALTH = process.env.TRIOS_HEALTH_URL || 'https://trios-agent-server-production.up.railway.app/health'
+
+/**
+ * The HTTP view: can the app serve a request?
+ *
+ * A non-200 and an unreachable host are different answers and both are kept.
+ * "ok" here means the app answered and said so, nothing more.
+ */
+export function httpView(run) {
+  const fetchIt = run || ((url) => execSync(
+    `curl -s -o /tmp/two-views-body -w '%{http_code}' --max-time 20 ${JSON.stringify(url)}`,
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 30000 },
+  ).trim())
+  try {
+    const code = fetchIt(HEALTH)
+    let body = ''
+    try { body = fs.readFileSync('/tmp/two-views-body', 'utf8') } catch { /* code alone is enough */ }
+    const ok = code === '200' && /"status"\s*:\s*"ok"/.test(body)
+    return { reachable: true, code, ok, body: body.slice(0, 200) }
+  } catch (e) {
+    return { reachable: false, code: null, ok: false, error: String(e.message || '').slice(0, 200) }
+  }
+}
+
+/**
+ * The gateway view: will the platform attach a shell to the deployment?
+ *
+ * Deliberately a SINGLE attempt with no retry. The question is what the gateway
+ * says right now, and a retry would answer a different question - whether it
+ * says the same thing fifteen seconds later, which is what the chain's breaker
+ * is for.
+ */
+export async function sshView(deps = {}) {
+  const CH = deps.CH || await import(path.join(DIR, 'channel.mjs'))
+  const before = CH.channelDown()
+  try {
+    // ignoreBreaker: this instrument's whole job is to ask, even when the chain
+    // has already decided not to.
+    const out = CH.remote('echo attached', { attempts: 1, ignoreBreaker: true, onRetry: () => {} })
+    return { attached: /attached/.test(String(out)), kind: 'ok', detail: String(out).slice(0, 120) }
+  } catch (e) {
+    const text = `${e.stdout || ''}${e.stderr || ''}${e.message || ''}`
+    const k = CH.classifyFailure(text)
+    return { attached: false, kind: k.kind, advice: k.advice, detail: text.replace(/\s+/g, ' ').slice(0, 200) }
+  } finally {
+    // Asking must not change the chain's verdict for this process.
+    if (!before) CH.resetChannel()
+  }
+}
+
+export async function sample(deps = {}) {
+  const http = deps.http || httpView(deps.fetchIt)
+  const ssh = deps.ssh || await sshView(deps)
+  return {
+    at: new Date().toISOString(),
+    http,
+    ssh,
+    // The fact this file exists for: the two views disagreeing at one moment.
+    disagree: http.ok !== ssh.attached,
+  }
+}
+
+export function append(s, file = RECORD) {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true })
+    fs.appendFileSync(file, JSON.stringify(s) + '\n')
+  } catch { /* a sample that cannot be stored is still a sample */ }
+}
+
+export function read(file = RECORD) {
+  try {
+    return fs.readFileSync(file, 'utf8').split('\n').filter(Boolean)
+      .map((l) => { try { return JSON.parse(l) } catch { return null } }).filter(Boolean)
+  } catch { return [] }
+}
+
+/**
+ * What the record says, with its denominator.
+ *
+ * Four states, not two. "Both up" and "both down" are agreement; the other two
+ * are the interesting ones, and they are different problems - HTTP down while
+ * ssh attaches is not the same failure as ssh refusing a service that answers.
+ */
+export function summarise(rows) {
+  const t = { n: rows.length, bothUp: 0, bothDown: 0, httpOnly: 0, sshOnly: 0, kinds: {} }
+  for (const r of rows) {
+    const h = r.http?.ok
+    const s = r.ssh?.attached
+    if (h && s) t.bothUp++
+    else if (!h && !s) t.bothDown++
+    else if (h && !s) t.httpOnly++
+    else t.sshOnly++
+    if (!s && r.ssh?.kind) t.kinds[r.ssh.kind] = (t.kinds[r.ssh.kind] || 0) + 1
+  }
+  return t
+}
+
+export function render(t) {
+  if (!t.n) return '  no samples yet - this records the next disagreement rather than explaining the last one'
+  const pct = (n) => `${Math.round((100 * n) / t.n)}%`
+  return [
+    `  ${t.n} sample(s)`,
+    `    both up                    ${String(t.bothUp).padStart(4)}  ${pct(t.bothUp)}`,
+    `    both down                  ${String(t.bothDown).padStart(4)}  ${pct(t.bothDown)}`,
+    `    HTTP ok, ssh REFUSED       ${String(t.httpOnly).padStart(4)}  ${pct(t.httpOnly)}   <- a green health check is not evidence the channel will connect`,
+    `    ssh attached, HTTP down    ${String(t.sshOnly).padStart(4)}  ${pct(t.sshOnly)}`,
+    Object.keys(t.kinds).length ? `    ssh refusal kinds: ${Object.entries(t.kinds).map(([k, v]) => `${k}=${v}`).join(', ')}` : '',
+  ].filter(Boolean).join('\n')
+}
+
+if (isMain) {
+  if (process.argv.includes('--report')) {
+    const rows = read()
+    console.log('two views of one service, sampled together\n')
+    console.log(render(summarise(rows)))
+    process.exit(0)
+  }
+  const s = await sample()
+  console.log(`http ${s.http.ok ? 'ok' : `NOT ok (${s.http.code ?? 'unreachable'})`}   ` +
+    `ssh ${s.ssh.attached ? 'attached' : `REFUSED (${s.ssh.kind})`}   ` +
+    `${s.disagree ? 'THEY DISAGREE' : 'they agree'}`)
+  if (!s.ssh.attached && s.ssh.detail) console.log(`  ssh said: ${s.ssh.detail.slice(0, 140)}`)
+  if (process.argv.includes('--record')) append(s)
+  // Exit 2 on a disagreement: it is the finding, not a failure of this tool.
+  process.exit(s.disagree ? 2 : 0)
+}

@@ -86,6 +86,13 @@ const STEPS = [
   // full, while reap.mjs reported the container volume healthy - which it was.
   // Landing eight PRs in a night is eight 205 MB checkouts, one of them 2.4 GB
   // with node_modules, none removed after merging.
+  // FIRST, because it records the state that explains everything after it.
+  //
+  // Three steps failed at 01:15:53 with "your application is not running", and
+  // `/health` answered ok a minute later. A minute is too late: by then the
+  // world has moved. Sampling both views together, before the remote steps run,
+  // is what turns the next outage into evidence instead of an anecdote.
+  { name: 'two-views', file: 'two-views.mjs', act: '--record', dryArgs: '', why: 'both views of the service, at the same moment' },
   { name: 'reap-local', file: 'reap-local.mjs', act: '--reap', dryArgs: '', why: 'free the disk this loop runs on' },
   { name: 'reap', file: 'reap.mjs', act: '--reap', why: 'free the volume before anything else' },
   { name: 'lease', file: 'lease.mjs', act: '--release', why: 'release idle path fences' },
@@ -150,6 +157,8 @@ const STEPS = [
 // One line per step, taken from the step's own output rather than invented, so
 // the summary cannot claim more than the step reported.
 const SUMMARY = [
+  [/THEY DISAGREE/, () => 'the two views of the service DISAGREE - a green health check is not evidence the channel will connect'],
+  [/http ok   ssh attached   they agree/, () => 'both views agree the service is up'],
   [/ACT NOW: the recent window proves LESS/, () => 'the recent window proves measurably less than the baseline - read the newest verdicts'],
   [/WATCH: the recent rate is lower/, () => 'recent rate lower but inside the noise - watch, do not act'],
   [/overall (\d+)\/(\d+) judged verdicts prove something/, (m) => `${m[1]} of ${m[2]} judged verdicts prove something`],
@@ -243,7 +252,8 @@ for (const s of STEPS) {
     // A STEP THAT COULD NOT REACH THE CONTAINER HAS NOT FAILED. The container
     // was unreachable, once, for the whole run - and recording that as four
     // separate step failures is what inflated every rate this loop has quoted.
-    status = /the channel was already found down in this run/.test(out) ? 'channel-down'
+    status = /THEY DISAGREE/.test(out) ? 'FINDING'
+      : /the channel was already found down in this run/.test(out) ? 'channel-down'
       : /ACT NOW:/.test(out) ? 'FINDING'
         : /Error:|Traceback|not a function|ENOENT/.test(out) ? 'FAILED' : 'ok'
   }
