@@ -2548,6 +2548,40 @@ repository's dependency - a real change, made blind, by a tool for preserving
 files somebody wrote. Read the exclusion from `.gitmodules`: a hard-coded path is
 a second copy of a fact the repository already states.
 
+## A watermark is what you use when the lifetime is unknown
+
+The volume went from 95% to 32%, and an hour later it was at 87%. Two rounds of
+fixes had addressed real defects and none of them addressed this one.
+
+Seventeen worktrees. **Two** belonged to a bee that was still running. Fifteen
+were left by dispatches that had FINISHED, eleven with their branch already on
+the remote - about 27 GB of pure redundancy waiting for a threshold to notice it.
+
+A worktree is created for a dispatch and stops being needed the moment that
+dispatch's work is published. That lifetime is known exactly. CI deletes a
+workspace when the job ends; a Kubernetes job's pod goes when the job completes;
+neither waits for disk pressure to remember. **Reaching for a watermark when the
+lifetime is known is the design error**, and every round spent tuning the
+watermark was a round spent on the wrong question.
+
+Remove on completion, and require all three:
+
+    the dispatch has FINISHED     a running bee's tree is its workspace
+    the branch is ON THE REMOTE   the work has somewhere else to exist
+    `git worktree remove` agrees  no --force, so anything uncommitted survives
+
+The second is load-bearing: this removes a CHECKOUT, never a commit, and refuses
+to remove a checkout whose commits nobody else has.
+
+Keep the watermark reaper as the backstop it should always have been - for what
+this cannot take, and for the case where something upstream breaks and pressure
+is the only signal left. First run: 87% -> 28%.
+
+Two habits that came with it. **Return every exclusion with its reason** - a tool
+that quietly skips things reads as a tool that found nothing to do. And **refuse
+entirely when the board cannot be read**: "nobody is running" and "I could not
+ask" are the same empty list, and here they lead to opposite acts.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
