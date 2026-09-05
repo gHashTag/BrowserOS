@@ -1,0 +1,430 @@
+/**
+ * @license
+ * Copyright 2025 BrowserOS
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ *
+ * Styles for the Queen review dashboard page (src/pages/Queen.tsx).
+ *
+ * SCOPE RULE. Every selector in this file is rooted at `.queen-page`, so this
+ * stylesheet cannot reach any other surface of the production site - the RU/EN
+ * chrome, Kanban, Mission Map, Factory, Technology Tree, the original TRINITY
+ * logo and Copy to Agent keep their own rules untouched (#1318 FR-003). The
+ * QA contract parses this file and fails if any top-level selector escapes
+ * that scope, so the promise is checked rather than remembered.
+ *
+ * MOTION RULE (#1318, acceptance scenario 3). The only motion on this page is
+ * one decorative fade as queue sections enter; `prefers-reduced-motion`
+ * removes even that. No information is ever carried by motion alone.
+ *
+ * HIERARCHY RULE. One accent colour per queue - pending gold, changes amber,
+ * human red, anomaly violet - used identically on the counter, the queue
+ * heading and the card badge, so a reader tracks one queue across the page by
+ * colour without the colour ever being the only signal (the label is).
+ */
+
+.queen-page {
+  /* The palette the server-side board shell already speaks: near-black
+     panels, the phi-derived spacing scale, Outfit. Declared as page-scoped
+     custom properties so this file never leans on - or fights - variables
+     the surrounding site may or may not define. */
+  --queen-bg: transparent;
+  --queen-panel: #0a0a0f;
+  --queen-panel-2: #07070c;
+  --queen-border: rgba(255, 255, 255, 0.08);
+  --queen-border-strong: rgba(255, 255, 255, 0.16);
+  --queen-text: #ffffff;
+  --queen-muted: #9a9aa2;
+  --queen-dim: #6d6d75;
+  --queen-accent: #00ff88;
+  --queen-font: 'Outfit', system-ui, -apple-system, sans-serif;
+  --queen-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, monospace;
+
+  /* One hue per queue, identical at counter, heading and badge. */
+  --queen-pending: #ffd700; /* the Queen's own review colour on the board */
+  --queen-changes: #ffb347; /* action due: one bounded retry */
+  --queen-human: #ff5f56;   /* a person must look at this */
+  --queen-anomaly: #b98cff; /* unproven owner: reconcile before trusting */
+
+  --queen-f-3: 0.7rem;
+  --queen-f-2: 0.8125rem;
+  --queen-f-1: 0.875rem;
+  --queen-f0: 1rem;
+  --queen-f1: 1.272rem;
+  --queen-f2: 1.618rem;
+  --queen-f3: 2.058rem;
+
+  --queen-sp-1: 0.382rem;
+  --queen-sp0: 0.618rem;
+  --queen-sp1: 1rem;
+  --queen-sp2: 1.618rem;
+  --queen-sp3: 2.618rem;
+
+  background: var(--queen-bg);
+  color: var(--queen-text);
+  font-family: var(--queen-font);
+  font-weight: 300;
+  line-height: 1.618;
+  -webkit-font-smoothing: antialiased;
+  max-width: 78rem;
+  margin: 0 auto;
+}
+
+/* ---- header -------------------------------------------------------- */
+
+.queen-page .queen-page__kicker {
+  font-size: var(--queen-f-3);
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--queen-muted);
+  font-weight: 500;
+  margin: 0 0 var(--queen-sp0);
+}
+
+.queen-page .queen-page__heading {
+  font-size: clamp(2.1rem, 5.4vw, 3.4rem);
+  font-weight: 600;
+  letter-spacing: -0.045em;
+  line-height: 0.98;
+  margin: 0 0 var(--queen-sp-1);
+  text-wrap: balance;
+}
+
+.queen-page .queen-page__lede {
+  font-size: var(--queen-f1);
+  line-height: 1.5;
+  color: var(--queen-muted);
+  max-width: 56ch;
+  font-weight: 300;
+  margin: var(--queen-sp1) 0 var(--queen-sp2);
+}
+
+/* ---- notices (loading, unavailable) -------------------------------- */
+
+.queen-page .queen-notice {
+  border: 1px solid var(--queen-border);
+  border-left: 3px solid var(--queen-muted);
+  border-radius: var(--queen-sp0);
+  background: var(--queen-panel);
+  color: var(--queen-muted);
+  font-size: var(--queen-f-1);
+  padding: var(--queen-sp1) var(--queen-sp2);
+  margin: 0 0 var(--queen-sp2);
+  max-width: 62ch;
+}
+
+.queen-page .queen-notice--warn {
+  border-left-color: var(--queen-human);
+}
+
+.queen-page .queen-notice__title {
+  margin: 0 0 var(--queen-sp-1);
+  font-weight: 500;
+  color: var(--queen-text);
+}
+
+.queen-page .queen-notice__why {
+  margin: 0;
+  color: var(--queen-muted);
+}
+
+/* ---- counters ------------------------------------------------------ */
+
+.queen-page .queen-counters {
+  display: grid;
+  gap: var(--queen-sp1);
+  grid-template-columns: repeat(auto-fit, minmax(12.5rem, 1fr));
+  margin: 0 0 var(--queen-sp2);
+}
+
+.queen-page .queen-counter {
+  background: var(--queen-panel);
+  border: 1px solid var(--queen-border);
+  border-radius: var(--queen-sp0);
+  padding: var(--queen-sp1) var(--queen-sp2);
+  border-top: 2px solid var(--queue-colour, var(--queen-border-strong));
+}
+
+/* Each counter carries its queue's hue on the top edge. The colour is a
+   finding aid, never the only signal: the label sits right under it. */
+.queen-page .queen-counter[data-review-counter='queenReviewPending'] {
+  --queue-colour: var(--queen-pending);
+}
+
+.queen-page .queen-counter[data-review-counter='changesRequested'] {
+  --queue-colour: var(--queen-changes);
+}
+
+.queen-page .queen-counter[data-review-counter='humanEscalation'] {
+  --queue-colour: var(--queen-human);
+}
+
+.queen-page .queen-counter[data-review-counter='reconciliationAnomaly'] {
+  --queue-colour: var(--queen-anomaly);
+}
+
+.queen-page .queen-counter__n {
+  display: block;
+  font-size: 2.4rem;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  margin-bottom: var(--queen-sp-1);
+  color: var(--queue-colour, var(--queen-text));
+  font-variant-numeric: tabular-nums;
+}
+
+.queen-page .queen-counter__label {
+  display: block;
+  font-size: var(--queen-f-3);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--queen-text);
+  font-weight: 500;
+}
+
+.queen-page .queen-counter__hint {
+  display: block;
+  font-size: var(--queen-f-3);
+  color: var(--queen-dim);
+  margin-top: var(--queen-sp-1);
+  line-height: 1.45;
+}
+
+/* ---- queues -------------------------------------------------------- */
+
+.queen-page .queen-queues {
+  display: grid;
+  gap: var(--queen-sp1);
+  grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr));
+  align-items: start;
+  margin: 0 0 var(--queen-sp2);
+}
+
+/* The one decorative motion on the page: queues settle in with a short fade.
+   Removed entirely under prefers-reduced-motion (see the end of this file). */
+.queen-page .queen-queue {
+  background: var(--queen-panel-2);
+  border: 1px solid var(--queen-border);
+  border-radius: var(--queen-sp0);
+  padding: var(--queen-sp1);
+  transition: opacity 0.28s ease-out;
+  animation: queen-queue-fade 0.28s ease-out;
+}
+
+@keyframes queen-queue-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.queen-page .queen-queue__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--queen-sp0);
+  border-bottom: 1px solid var(--queen-border);
+  padding-bottom: var(--queen-sp0);
+  margin-bottom: var(--queen-sp1);
+}
+
+.queen-page .queen-queue__title {
+  font-size: var(--queen-f-2);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 500;
+  margin: 0;
+  color: var(--queue-colour, var(--queen-text));
+}
+
+.queen-page .queen-queue[data-review-queue='queenReviewPending'] {
+  --queue-colour: var(--queen-pending);
+}
+
+.queen-page .queen-queue[data-review-queue='changesRequested'] {
+  --queue-colour: var(--queen-changes);
+}
+
+.queen-page .queen-queue[data-review-queue='humanEscalation'] {
+  --queue-colour: var(--queen-human);
+}
+
+.queen-page .queen-queue[data-review-queue='reconciliationAnomaly'] {
+  --queue-colour: var(--queen-anomaly);
+}
+
+.queen-page .queen-queue__count {
+  font-family: var(--queen-mono);
+  font-size: var(--queen-f0);
+  color: var(--queue-colour, var(--queen-muted));
+  font-variant-numeric: tabular-nums;
+}
+
+.queen-page .queen-queue__empty {
+  margin: 0;
+  padding: var(--queen-sp0) 0;
+  color: var(--queen-dim);
+  font-size: var(--queen-f-3);
+}
+
+.queen-page .queen-queue__cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--queen-sp0);
+}
+
+/* ---- cards --------------------------------------------------------- */
+
+.queen-page .queen-card {
+  background: var(--queen-panel);
+  border: 1px solid var(--queen-border);
+  border-left: 2px solid var(--queue-colour, var(--queen-muted));
+  border-radius: var(--queen-sp0);
+  padding: var(--queen-sp0) var(--queen-sp1);
+}
+
+.queen-page .queen-card__head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--queen-sp0);
+  flex-wrap: wrap;
+}
+
+.queen-page .queen-card__number {
+  font-family: var(--queen-mono);
+  font-size: var(--queen-f-2);
+  color: var(--queen-accent);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.queen-page .queen-card__number:hover,
+.queen-page .queen-card__number:focus-visible {
+  text-decoration: underline;
+}
+
+.queen-page .queen-card__title {
+  font-size: var(--queen-f-1);
+  font-weight: 400;
+  margin: 0;
+  line-height: 1.4;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* ---- the badge: owner + action -------------------------------------- */
+
+.queen-page .queen-badge {
+  display: flex;
+  align-items: center;
+  gap: var(--queen-sp-1);
+  flex-wrap: wrap;
+  margin: var(--queen-sp-1) 0 0;
+  font-size: var(--queen-f-3);
+  line-height: 1.5;
+}
+
+.queen-page .queen-badge__owner {
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--queue-colour, var(--queen-text));
+}
+
+.queen-page .queen-badge__dot {
+  width: 0.22rem;
+  height: 0.22rem;
+  border-radius: 50%;
+  background: var(--queen-dim);
+  flex: none;
+}
+
+.queen-page .queen-badge__action {
+  color: var(--queen-muted);
+}
+
+/* ---- footer -------------------------------------------------------- */
+
+.queen-page .queen-page__footer {
+  display: flex;
+  gap: var(--queen-sp2);
+  flex-wrap: wrap;
+  border-top: 1px solid var(--queen-border);
+  padding-top: var(--queen-sp1);
+  color: var(--queen-dim);
+  font-size: var(--queen-f-3);
+}
+
+.queen-page .queen-page__stamp {
+  font-family: var(--queen-mono);
+}
+
+.queen-page .queen-page__stamp time {
+  color: var(--queen-muted);
+}
+
+/* ---- focus ---------------------------------------------------------- */
+
+.queen-page a:focus-visible {
+  outline: 2px solid var(--queen-accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ---- small screens ---------------------------------------------------
+   The queue remains one readable column: counters pair up two-by-two, cards
+   stack, the badge never truncates the title. Nothing is hidden on mobile
+   that the desktop view shows (#1318, acceptance scenario 3). */
+
+@media (max-width: 640px) {
+  .queen-page .queen-counters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--queen-sp0);
+  }
+
+  .queen-page .queen-counter {
+    padding: var(--queen-sp0) var(--queen-sp1);
+  }
+
+  .queen-page .queen-counter__n {
+    font-size: 1.9rem;
+  }
+
+  .queen-page .queen-queues {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .queen-page .queen-page__heading {
+    font-size: clamp(1.9rem, 9vw, 2.4rem);
+  }
+
+  .queen-page .queen-page__lede {
+    font-size: var(--queen-f0);
+  }
+
+  .queen-page .queen-page__footer {
+    flex-direction: column;
+    gap: var(--queen-sp-1);
+  }
+}
+
+/* ---- reduced motion ---------------------------------------------------
+   The fade above is decoration and nothing more; a reader who asked for less
+   motion loses exactly that and keeps every fact (#1318 FR-003). */
+
+@media (prefers-reduced-motion: reduce) {
+  .queen-page .queen-queue,
+  .queen-page .queen-queue::before,
+  .queen-page .queen-queue::after,
+  .queen-page .queen-counter,
+  .queen-page .queen-card,
+  .queen-page .queen-badge {
+    animation: none;
+    transition: none;
+  }
+}
