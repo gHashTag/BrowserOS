@@ -2390,6 +2390,24 @@ check('an unmeasured value has no delta and is not the word null', async () => {
   if (!/if \(!isMeasured\(now\)\) return/.test(code)) throw new Error('no delta may be computed from a value that was never taken')
 })
 
+check('a submodule pointer is reported, never committed', async () => {
+  const { submodulePaths } = await import('./rescue.mjs')
+  // The first pass after rescue shipped found exactly one stranded path:
+  // trios/rings/RUST-13/trios-mesh, modified. It is a declared submodule, and
+  // its M means the checked-out commit differs from the one the superproject
+  // records. Committing that moves the repository's dependency, blind.
+  const out = submodulePaths([
+    'submodule..internal-docs.path .internal-docs',
+    'submodule.trios-mesh.path trios/rings/RUST-13/trios-mesh',
+  ].join('\n'))
+  if (out.length !== 2) throw new Error(`both submodules must be read - got ${out.join(', ')}`)
+  if (!out.includes('trios/rings/RUST-13/trios-mesh')) throw new Error('the path is the value, not the name')
+  if (submodulePaths('').length) throw new Error('no .gitmodules means no exclusions, not a crash')
+  const code = codeOf('rescue.mjs')
+  if (!/REPORTED and never committed/.test(code)) throw new Error('a submodule difference is worth saying and never worth committing')
+  if (/RUST-13/.test(code)) throw new Error('the list comes from .gitmodules; a hard-coded path is a second copy of a fact the repo states')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.

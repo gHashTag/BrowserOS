@@ -50,6 +50,28 @@ const G = 'git -c safe.directory=*'
  */
 export const NOT_WORK = [/^\.worktrees\//, /^node_modules\//, /(^|\/)dist\//, /(^|\/)\.turbo\//, /\.log$/]
 
+/**
+ * A SUBMODULE IS NOT A FILE A BEE WROTE.
+ *
+ * The first pass after this tool shipped found exactly one stranded path:
+ * `trios/rings/RUST-13/trios-mesh`, modified. It is a declared submodule, and
+ * its `M` means the checked-out commit differs from the one the superproject
+ * records. Committing that moves the repository's dependency - a real and
+ * possibly wrong change, made blind, by a tool whose entire remit is to preserve
+ * a file somebody wrote.
+ *
+ * The list is read from `.gitmodules` rather than written here, because a
+ * hard-coded path is a second copy of a fact the repository already states.
+ */
+export function submodulePaths(gitmodulesOutput) {
+  return String(gitmodulesOutput || '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => /^submodule\..*\.path\s/.test(l))
+    .map((l) => l.replace(/^\S+\s+/, '').trim())
+    .filter(Boolean)
+}
+
 export function isWork(p) {
   const s = String(p || '').trim()
   if (!s) return false
@@ -72,10 +94,18 @@ export function workPaths(porcelain) {
  * Reporting and acting are the same walk with one flag, so the report cannot
  * describe a different set from the one the action touches.
  */
-export function script(act, running = []) {
+export function script(act, running = [], submodules = []) {
   const skip = running.length ? running.map((n) => `"${n}"`).join(' ') : ''
+  // Read from .gitmodules, so the exclusion cannot drift from what the
+  // repository actually declares.
+  const subre = submodules.length ? submodules.map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') : '$^'
+  const subfilter = submodules.length
+    ? submodules.map((s) => `| grep -v ${JSON.stringify('^' + s + '$')}`).join(' ')
+    : ''
   return `
 set -u
+subre='${subre}'
+subfilter_note=''
 skiplist="${skip}"
 total=0; trees=0; committed=0
 for d in ${WT}/*/; do
@@ -84,7 +114,9 @@ for d in ${WT}/*/; do
   case " $skiplist " in *" \\"$n\\" "*) echo "$n SKIPPED - its bee is still running"; continue;; esac
   st=$(${G} -C "$d" status --porcelain 2>/dev/null | grep -v '^!!' || true)
   [ -n "$st" ] || continue
-  paths=$(echo "$st" | sed 's/^...//' | grep -v '^\\.worktrees/' | grep -v '^node_modules/' || true)
+  paths=$(echo "$st" | sed 's/^...//' | grep -v '^\\.worktrees/' | grep -v '^node_modules/' ${subfilter} || true)
+  subs=$(echo "$st" | sed 's/^...//' | grep -E "^(${subre})$" || true)
+  [ -z "$subs" ] || { echo "$n submodule pointer differs, REPORTED and never committed:"; echo "$subs" | sed 's/^/    /'; }
   [ -n "$paths" ] || continue
   trees=$((trees+1))
   cnt=$(echo "$paths" | wc -l | tr -d ' ')
@@ -149,7 +181,15 @@ if (isMain) {
   }
   if (ACT) console.log(`board read: ${running.length} bee(s) running, their trees will be left alone\n`)
 
-  const out = CH.remote(script(ACT, running), { attempts: 2, timeout: 280000 })
+  // Ask the repository which paths are submodules rather than knowing it here.
+  let submodules = []
+  try {
+    const raw = CH.remote('git -c safe.directory=* -C /workspace/BrowserOS config --file .gitmodules --get-regexp path 2>/dev/null || true', { attempts: 2 })
+    submodules = submodulePaths(raw)
+  } catch { /* none read: the filter is empty and submodules are reported, not committed */ }
+  if (submodules.length) console.log(`${submodules.length} submodule path(s) will be reported and never committed\n`)
+
+  const out = CH.remote(script(ACT, running, submodules), { attempts: 2, timeout: 280000 })
   console.log(out)
   const t = parse(out)
   if (t) {
