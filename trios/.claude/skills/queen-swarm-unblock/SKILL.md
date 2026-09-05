@@ -2865,6 +2865,48 @@ while it did not.** The previous round's own design note predicted this in as
 many words - "expect the first working runs to hit a deadline for an entirely new
 reason" - which is worth more than the fix it accompanied.
 
+## A crash is the end of a process nobody was watching
+
+The service returned 502 and `railway status` said `Crashed`. The deployment log
+had been saying why since forty minutes earlier:
+
+    Filesystem tool execution failed  tool="filesystem_bash"
+    error="EAGAIN: resource temporarily unavailable"
+
+EAGAIN on `posix_spawn` means the container could not FORK. A fresh container
+sits at 65 of 1000 process slots with zero zombies, so the exhaustion
+accumulates: unreaped children fill the pid table, the app stops being able to
+run a command, and then it dies.
+
+Nothing about that is sudden. It was a rising number for forty minutes and
+nobody had an instrument pointed at it.
+
+```bash
+cat /sys/fs/cgroup/pids.current /sys/fs/cgroup/pids.max
+ps -eo stat | grep -c '^Z'
+```
+
+The paired probe already attaches every chain run, so it asks these two questions
+while it is there and the dashboard carries the percentage. **When you find a
+resource that a crash consumed, add its meter before you add its fix** - the
+meter works without a deploy and tells you whether the fix worked.
+
+## Fixing the instrument reveals the vocabulary you never had
+
+Every failure this loop had ever recorded was wrapped in "Expected welcome
+message" - a string that exists only in the client that could not attach. With a
+working client, the container's real failures arrived at once:
+
+    Connection to ssh.railway.com closed by remote host
+
+classified `unknown`, therefore never retried.
+
+That is not a new bug. It is the shape of a classifier built entirely from the
+output of a broken instrument: it knew one string perfectly and the real world
+not at all. **After repairing an instrument, expect its whole vocabulary to be
+new, and re-derive the classifier from the first days of real output rather than
+from the years of artefact.**
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
