@@ -2738,6 +2738,42 @@ check('nothing in the loop types the swarm capacity as prose', () => {
   if (offenders.length) throw new Error(`${offenders.join(', ')} still write the ring's constant into a string`)
 })
 
+// A DOCUMENTED PATH THAT HAS NEVER EXISTED, AND A BUILD INTO A FORBIDDEN TREE.
+//
+// The t27-backend skill's toolchain block told a reader to `cargo build` inside
+// `~/t27` - the tree L0b says another agent owns - and to run a bare `t27c` at
+// `~/t27/target/release/t27c`. `which t27c` finds nothing, and a search of the
+// whole filesystem on 2026-09-06 returned exactly one binary: the one built
+// into `.trinity/t27c-build`. The documented path has never existed.
+//
+// The Makefile had already learned this and wrote it down at Makefile:913 - the
+// ring gate looked for that path, printed [SKIP], exited 0, and `make check`
+// counted it as passed while both rings went unchecked. The instruction lived in
+// two places, one right, and the wrong one was the one a reader meets first.
+check('the t27 skill does not send a reader to build inside the tree L0b forbids', () => {
+  const file = path.join(DIR, '../../.claude/skills/t27-backend/SKILL.md')
+  let src
+  try { src = fs.readFileSync(file, 'utf8') } catch { throw new Error(`the skill is unreadable at ${file} - this guard is checking nothing`) }
+  // FENCED BLOCKS ONLY, and this guard failed on its own explanation before the
+  // rule was narrowed - the fourth time in this suite. A reader copies what is
+  // in a code fence; the paragraph that QUOTES the old wrong command in order to
+  // explain why it was wrong must not be read as an instruction to run it. Same
+  // lesson as `codeOf`, in a file format that has no comments.
+  const fenced = []
+  let inside = false
+  for (const line of src.split('\n')) {
+    if (/^```/.test(line)) { inside = !inside; continue }
+    if (inside) fenced.push(line)
+  }
+  if (!fenced.length) throw new Error('the skill has no code fences - this guard is checking nothing')
+  const bad = fenced.filter((l) => /cargo build/.test(l) && !/CARGO_TARGET_DIR/.test(l))
+  if (bad.length) throw new Error(`a runnable build command with no CARGO_TARGET_DIR would write into ~/t27: ${bad[0].trim().slice(0, 80)}`)
+  // And the binary it names must be the one that exists.
+  const t27c = path.join(DIR, '../t27c-build/release/t27c')
+  if (!src.includes('.trinity/t27c-build/release/t27c')) throw new Error('the skill does not name the only t27c on this machine')
+  if (!fs.existsSync(t27c)) throw new Error(`the skill names ${path.relative(DIR, t27c)} and it is not there - build it with tri t27-gen`)
+})
+
 check('a parity grid is exhaustive over the space it claims, and says which space', async () => {
   const P = await import('./t27-parity.mjs')
   // 1 + 3 + 9 + 27 sequences over three failure kinds up to depth 3.
