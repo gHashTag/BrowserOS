@@ -8,7 +8,7 @@ import { track } from '@/lib/metrics/track'
 import { JTBD_POPUP_CONSTANTS } from './constants'
 import { type JtbdPopupState, jtbdPopupStorage } from './storage'
 
-// Round 2 directions for random assignment (churn excluded — manual links only)
+// Round 2 directions for random assignment (churn excluded - manual links only)
 const R2_DIRECTIONS = [
   'competitor',
   'switching',
