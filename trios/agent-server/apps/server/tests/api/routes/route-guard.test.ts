@@ -76,11 +76,18 @@ describe('route-guard audit over src/api/server.ts', () => {
     )
   })
 
-  it('splits the sixteen /queen mounts into 5 public-read, 6 wrapper-guarded and 5 allowlisted shells', () => {
+  it('splits the eighteen /queen mounts into 6 public-read, 7 wrapper-guarded and 5 allowlisted shells', () => {
     const queenMounts = classifyMounts(source).filter(
       (mount) => mount.path === '/queen' || mount.path.startsWith('/queen/'),
     )
-    expect(queenMounts.length).toBe(16)
+    // RE-MEASURED 2026-09-06 with the counts above. Sixteen became eighteen,
+    // and the split is the interesting part: the sixth public-read is
+    // /queen/public-agents, deliberate and named; the seventh wrapper is
+    // /queen/needs-you, which had been sitting in `unguarded` while its own
+    // mount comment claimed it was behind the trusted-origin catch-all.
+    // The five allowlisted shells are unchanged - a shell serves no data, which
+    // is the only reason any of them is allowed to answer a stranger.
+    expect(queenMounts.length).toBe(18)
 
     const counts: Record<string, number> = {
       'public-read': 0,
@@ -94,9 +101,9 @@ describe('route-guard audit over src/api/server.ts', () => {
     // The four buckets must account for all sixteen mounts with the exact
     // expected split; anything unaccounted for breaks one of these numbers.
     expect(counts).toEqual({
-      'public-read': 5,
+      'public-read': 6,
       'prefix-guard': 0,
-      wrapper: 6,
+      wrapper: 7,
       unguarded: 5,
     })
 
