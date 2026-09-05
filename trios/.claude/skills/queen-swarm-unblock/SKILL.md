@@ -2161,6 +2161,71 @@ measure. Say what was measured and what was not: *no missing vocabulary is not
 the same as nothing left to do; a cleanup, a rename or a behaviour fix adds no
 name at all.* The tool measures; the person concludes.
 
+## Ask the record, not the run: a step failing 71% of the time reported itself fine
+
+Every chain run reports its own steps and moves on. Nobody had ever read the
+ledger backwards. Asked for the first time, over 23 hours:
+
+    reap        45 of 63 runs failed   71%
+    lease       43 of 63               68%
+    push-work   46 of 70               66%
+    close-done  32 of 70               46%
+
+Those are exactly the four steps that FREE the swarm. They had been failing about
+two thirds of the time for as long as the record goes back.
+
+It was invisible because **a single failure looks like bad luck and only the
+record shows it is the system.** Each run said "push-work=FAILED" once, in a
+terminal, at three in the morning, and the next run started clean.
+
+```bash
+tri failures            # every step, worst first, over the whole ledger
+tri failures --since 1  # the last day
+tri failures push-work  # the evidence for one step
+```
+
+Corollary that cost a round: **"it worked when I tried again" is not a
+diagnosis.** Two rounds before this, the chain printed `push-work=FAILED`, I
+re-ran it by hand, it worked, and I wrote it off as transient without changing
+anything. Three accepted pieces of work - 9 to 15 minutes of a bee each, reviewed
+and ACCEPTED - then sat invisible on the far side of a dropped connection for a
+whole round. A retry that only exists in your fingers is not a retry.
+
+## One channel, one retry, and never retry an answer
+
+The four steps above all reach the container through `railway ssh`, and each
+carried its own six-line copy of the call. Copying one fix into four files is L2
+all over again - a rule transcribed four times is four rules that agree until
+somebody edits one - so the call lives once, in `channel.mjs`.
+
+**Retry a CHANNEL failure. Never retry an ANSWER.**
+
+    retry     Operation timed out, os error 60, Connection reset, SendRequest,
+              ETIMEDOUT, 502, broken pipe - the transport could not deliver the
+              question, so nothing was learned about it
+    do not    `! [rejected] ... (non-fast-forward)`, `error: failed to push some
+              refs` - the command answered, and a partly-rejected push is a
+              normal outcome the caller already knows how to describe
+
+Retrying an answer is as wrong as crashing on a dropped connection, and both
+directions belong in the tests.
+
+And mark the failure. A caller must be able to tell **"I looked and found
+nothing" from "I never looked"** - the same silence, completely different facts.
+A step that could not reach the container has not found nothing to push; it has
+not looked, and the words it prints have to differ because the chain reads them.
+
+## A failure whose reason is only printed is a failure nobody can diagnose
+
+The ledger recorded `status: FAILED` for 46 push-work runs and an EMPTY summary
+for every one of them, because the summary field is filled only when a
+recognised pattern matches and no pattern matches a failure. The console had the
+reason. The record did not, and those 46 can never now be diagnosed.
+
+Keep the last few lines of any step that fails. Printing is for whoever is
+watching; the record is for whoever asks later, and at three in the morning
+nobody is watching.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
