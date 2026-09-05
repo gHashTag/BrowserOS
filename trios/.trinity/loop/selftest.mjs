@@ -2160,6 +2160,51 @@ check('the delta is measured too, from the last recorded reading', async () => {
   if (fin.v !== 258 || fin.prev !== 255) throw new Error('previous comes from the record, not from memory')
 })
 
+check('the classifier is built from the record, not from one observation', async () => {
+  const CH = await import('./channel.mjs')
+  // I saw ONE failure by hand and wrote a classifier from it, while holding a
+  // ledger with 174 recorded failures I had not read. When the evidence field
+  // started recording reasons an hour later, NONE of the three that arrived
+  // matched. The retry never fired for any real failure in this system.
+  //
+  // These are those strings, verbatim.
+  const real = {
+    'Your application is not running or in a unexpected state': 'app-down',
+    'Expected welcome message, received: ServerMessage { type: "error" }': 'app-down',
+    'Failed to establish connection after 3 attempts: IO error: failed to load system trust settings: I/O error.': 'local',
+    'Operation timed out (os error 60)': 'transport',
+  }
+  for (const [text, kind] of Object.entries(real)) {
+    const got = CH.classifyFailure(text).kind
+    if (got !== kind) throw new Error(`"${text.slice(0, 40)}" is ${kind}, classified as ${got}`)
+  }
+})
+
+check('each kind gets the response it deserves', async () => {
+  const CH = await import('./channel.mjs')
+  // One retry policy cannot be right for three different problems.
+  const app = CH.classifyFailure('Your application is not running or in a unexpected state')
+  if (!app.retry || app.waitMultiplier <= 1) throw new Error('a restarting service needs a LONGER wait, not the same one')
+  const local = CH.classifyFailure('failed to load system trust settings: I/O error')
+  if (local.retry) throw new Error('retrying the same call cannot fix a trust store this machine cannot read')
+  if (!/THIS machine/.test(local.advice)) throw new Error('say it is local, or the container gets chased all night')
+  const unknown = CH.classifyFailure('something nobody has seen before')
+  if (unknown.retry) throw new Error('an unrecognised failure is printed verbatim, never retried on a guess')
+})
+
+check('a local failure is never reported as the container being down', async () => {
+  const CH = await import('./channel.mjs')
+  let waited = 0
+  const fail = () => { const e = new Error('IO error: failed to load system trust settings: I/O error.'); e.stderr = ''; throw e }
+  try {
+    CH.remote('x', { run: fail, sleep: () => { waited++ }, onRetry: () => {}, attempts: 3 })
+    throw new Error('it must still fail')
+  } catch (e) {
+    if (waited !== 0) throw new Error('a local trust-store failure must not be retried at all')
+    if (e.channelKind !== 'local') throw new Error('the kind travels with the error so the caller reports the right problem')
+  }
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
