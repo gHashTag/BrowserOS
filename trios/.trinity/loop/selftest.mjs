@@ -2776,6 +2776,25 @@ check('a transcript travels base64, because it is full of newlines', () => {
   if (!/right\(s, \$\{MAX_SAID \+ 1000\}\)/.test(code)) throw new Error('and for only the tail the packet prints')
 })
 
+check('the dashboard reads the proven record rather than recomputing it', async () => {
+  const { provenCounts } = await import('./dash.mjs')
+  // The dashboard ran proven.mjs with a 400-second cap, set when the swarm had
+  // about 200 pushed branches. At 311 the pass no longer finished, and two
+  // facts printed `-` for two consecutive rounds - honestly, and for no reason
+  // except that drawing a dashboard had become a five-minute computation.
+  const read = () => JSON.stringify({
+    recent: { proven: 36, checkable: 38, total: 40 },
+    baseline: { proven: 268, checkable: 273, total: 311 },
+  })
+  const r = provenCounts(read)
+  if (r.proven !== 304) throw new Error(`36 + 268 is 304 - got ${r.proven}`)
+  if (r.judged !== 311) throw new Error('the denominator is what could be judged')
+  if (r.unjudgeable !== 40) throw new Error('351 total minus 311 judged is 40 that carry nothing checkable')
+  if (provenCounts(() => '') !== null) throw new Error('no record is null, never zero')
+  const code = codeOf('dash.mjs')
+  if (/proven\.mjs'\)}`, 400000/.test(code)) throw new Error('a measurement that grows with the system must not sit on the drawing path')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
