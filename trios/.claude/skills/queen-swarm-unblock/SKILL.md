@@ -3567,3 +3567,59 @@ not reproduce" as if it were evidence.
 inside a worktree whose `node_modules` is a symlink writes them into the shared
 checkout, pointing at a directory about to be deleted. Build the farm as a real
 directory of links instead — and check what you left behind.
+
+## `mock.module` is process-global, and a mocked dependency looks like a broken one
+
+The live migration gate failed for days at
+`typeOf('queen_dispatch_history','id')` returning `undefined` — which reads as
+*"MIGRATION_SQL does not create what it promises."* It does.
+
+`mock.module` in bun is **process-global**, and bun evaluates **every test
+file's module scope** in one run. Two files install
+`mock.module('pg', () => ({ Pool: FakePool }))` at module scope, so the gate's
+`import { Pool } from 'pg'` binds to that fake: the migration goes nowhere and
+the catalog query returns nothing.
+
+| run | result |
+|---|---|
+| the gate alone | 3 pass, `PG LIVE GATE: RAN against a real PostgreSQL` |
+| gate + either mocker | fails, `Received: undefined` |
+| gate **first**, mocker second | fails **identically** |
+
+**The symmetry is the whole diagnosis.** Failing the same way in both orders is
+what says the cause is module scope rather than execution order. Both files
+re-mock with the real namespace in `afterAll`; it does not help, because a
+binding already made is not revisited. Both files' own comments already
+suspected it and neither could act on it from inside itself.
+
+**Transferable rules:**
+
+- **A mocked dependency and a broken one produce the same symptom.** When a
+  gate reports "the thing you were testing does nothing", ask whether the thing
+  is real in that process before believing it.
+- **Run the file alone.** Passes alone + fails in the suite = cross-file state.
+  Then bisect: 57 files, six runs, two culprits.
+- **Name the cause in the gate.** A gate that dies on `undefined` sends its
+  reader to the migration; one that says "`pg` is probably mocked here" sends
+  them to the leak. **Naming it is not silencing it** — the suite stays red.
+- **Do not smuggle the layout fix in at the end of a night.** The real repair is
+  running that file in its own process, which is somebody's decision about test
+  groups.
+
+## Reproducing a server test on a machine that cannot install the server
+
+This checkout has 14 packages and no `pino`, so the suite cannot run — but the
+one file needed to. What worked:
+
+1. a worktree of the **shipping ref** (never the 375-behind checkout);
+2. a `node_modules` built as a **real directory of symlinks** to the installed
+   packages, plus `@browseros/*` pointing at `packages/*` — never a symlink to
+   the shared `node_modules`, which **is** the real tree and will silently
+   receive whatever you create inside it;
+3. a `--preload` that replaces the unavailable module wholesale with
+   `mock.module`;
+4. a scratch PostgreSQL on a spare port (`initdb --locale=C`, or macOS locale
+   settings reject it).
+
+Five minutes of setup turned "cannot reproduce, see CI" into a root cause. The
+same trick is what makes the *next* server test debuggable here.
