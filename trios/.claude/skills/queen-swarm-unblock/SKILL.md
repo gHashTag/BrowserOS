@@ -3175,6 +3175,45 @@ read. **An optimisation may decline to run; it may not decline to say so** - the
 whole cost of silence is that the next person measuring cannot tell the two
 apart, and the number they compute will be confident and wrong.
 
+## The extractor has a ceiling, and it has been reached
+
+Five rounds of widening the criterion extractor took audit coverage from 36% to
+89%. The obvious next move is a sixth form. The measurement says no.
+
+Of 12 unauditable briefs sampled: ONE carried a tree-search criterion and it was
+a BASELINE rather than a target. **ELEVEN state no command at all.** They are
+prose - hand-written epics whose success criteria are sentences, not runs.
+
+Widening the parser cannot reach them. They need a judge, or a rewrite with
+criteria. The selftest now fails if someone adds a sixth form, with that
+measurement as the reason, because the tempting move and the useful move have
+diverged and only a number says so.
+
+**Know when a line of attack is exhausted.** Five rounds of gain then a flat
+one is not a reason to try harder at the same thing; it is the signal to measure
+whether the remaining cases are even the same KIND of case. Here they are not.
+
+## Two guards every text-extracted criterion needs
+
+The tree-wide search form - `grep -rn 'X' <dir>` prints nothing - is real and
+worth reading. Its first version produced a false accusation immediately.
+
+    the pattern it extracted from #1397:  gh
+
+The match had walked past the backtick that closed one command and taken the
+assertion belonging to a later sentence. `gh` appears in most files in this
+repository, and the bee would have been convicted of every one of them.
+
+- **Bound the distance** between a command and its assertion. Forty characters.
+  Unbounded, a regex crosses sentences and pairs the wrong things.
+- **Refuse an implausibly short pattern.** A brief asserting that a three-letter
+  string is absent from a whole tree is not making a claim any tree could
+  satisfy, so reading one is always a misparse rather than a strict criterion.
+
+And verify on the whole corpus before shipping: this change was checked against
+all 365 accepted verdicts and added zero accusations. The five that exist were
+each confirmed by hand.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
