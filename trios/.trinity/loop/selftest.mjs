@@ -2860,6 +2860,48 @@ check('the exposure probe never prints a body', () => {
   if (/%\{http_code\}/.test(src) === false) throw new Error('the probe is not reading the status code')
 })
 
+// I CALLED FOUR DETERMINISTIC FAILURES "THE FLAKY BROWSER-TOOL FAMILY" FOR
+// THREE ROUNDS, IN WRITING, WITHOUT MEASURING IT ONCE.
+//
+// Measured over twelve runs: `navigation tools` and `window tools` fail 12/12.
+// They are not weather; they are broken, and calling them flake is how a real
+// failure gets a permanent excuse. The genuinely intermittent ones appeared
+// once each in twelve.
+check('a failure seen in every readable run is deterministic, not weather', async () => {
+  const F = await import('./flaky.mjs')
+  const t = F.tally([
+    { id: '1', sha: 'a', failures: ['always', 'sometimes'] },
+    { id: '2', sha: 'b', failures: ['always'] },
+    { id: '3', sha: 'c', failures: ['always'] },
+  ])
+  const by = Object.fromEntries(t.rows.map((r) => [r.name, r]))
+  if (by.always.kind !== 'deterministic') throw new Error(`3/3 was called ${by.always.kind}`)
+  if (by.sometimes.kind !== 'unstable') throw new Error(`1/3 was called ${by.sometimes.kind}`)
+  if (by.always.commits !== 3) throw new Error('the commit count is what makes a window interpretable')
+})
+
+check('an unreadable run is excluded from the denominator, never counted as a pass', async () => {
+  const F = await import('./flaky.mjs')
+  // THE DEFECT THIS PREVENTS: counting a run whose log could not be fetched as
+  // "it passed there" manufactures intermittency out of network trouble, and a
+  // real failure then reads as flake.
+  const t = F.tally([
+    { id: '1', sha: 'a', failures: ['always'] },
+    { id: '2', sha: 'b', failures: null },
+    { id: '3', sha: 'c', failures: ['always'] },
+  ])
+  if (t.readable !== 2 || t.unreadable !== 1) throw new Error(`readable=${t.readable} unreadable=${t.unreadable}`)
+  if (t.rows[0].kind !== 'deterministic') throw new Error('an unreadable run turned a deterministic failure into an unstable one')
+  if (!F.render(t).includes('could not be read')) throw new Error('the report hides that a run was skipped')
+})
+
+check('no readable run at all is reported as nothing measured', async () => {
+  const F = await import('./flaky.mjs')
+  const t = F.tally([{ id: '1', sha: 'a', failures: null }])
+  if (t.readable !== 0) throw new Error('an unreadable run was counted')
+  if (!F.render(t).includes('NOTHING was measured')) throw new Error('an empty measurement was reported as a clean result')
+})
+
 check('a CI comparison names the new failures and never counts them', async () => {
   const C = await import('./ci-diff.mjs')
   const base = '(fail) a > one [1.20ms]\n(fail) b > two [3ms]\n'
