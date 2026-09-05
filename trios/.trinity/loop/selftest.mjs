@@ -2734,6 +2734,32 @@ check('a fetch that failed is never rendered as a bee that said nothing', async 
   if (typeof JP.transcriptOf !== 'function') throw new Error('transcriptOf must still be callable')
 })
 
+check('heal classifies a step it killed itself', () => {
+  const heal = codeOf('heal.mjs')
+  const feed = codeOf('feed.mjs')
+  // feed has had this arm since a step was first cut off mid-run; heal never
+  // got one, so a step SIGTERMed at heal's own `timeout:` produced no output,
+  // matched no pattern, and fell through to `ok`. heal.timer.log holds 62
+  // `(no output)` lines, every one recorded ok - 25 of land's 36 ok records.
+  // feed.timer.log holds zero.
+  if (!/e\.killed \|\| e\.signal === 'SIGTERM' \|\| e\.code === 'ETIMEDOUT'/.test(heal)) {
+    throw new Error('a step the chain killed is not a step that succeeded')
+  }
+  if (!/'timed out'/.test(heal)) throw new Error('and it needs a status of its own, not FAILED and not ok')
+  if (!/timed out/.test(feed)) throw new Error('feed had this first; the two chains must agree')
+})
+
+check('a finding prints the field it actually carries', () => {
+  const code = codeOf('heal.mjs')
+  // `summary` is set only on skipped records; a FINDING carries `line`. The
+  // announcement printed `undefined` for every finding it ever made - the one
+  // word the operator was meant to read.
+  if (/FINDING  \$\{f\.step\}: \$\{f\.summary\}/.test(code)) {
+    throw new Error('summary is undefined on a FINDING record')
+  }
+  if (!/f\.line \|\| f\.evidence/.test(code)) throw new Error('print the field the record has')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
