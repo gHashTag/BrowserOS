@@ -213,7 +213,19 @@ for (let i = 0; i < missing.length; i += BATCH) {
 // keeps working if the image ever changes user.
 const owner = remote(`stat -c '%u:%g' /workspace/BrowserOS/.git 2>/dev/null || echo ''`)
 if (owner && owner !== '0:0') {
-  remote(`chown -R ${owner} /workspace/BrowserOS/.git/logs /workspace/BrowserOS/.git/refs 2>&1 | head -2`)
+  // THE WHOLE .git, NOT TWO SUBDIRECTORIES.
+  //
+  // This chowned `logs` and `refs` because those were what the first outage
+  // showed: 112 root-owned reflogs killing every bee at `git fetch` with
+  // Permission denied. But `git push` running as root also writes OBJECTS, and
+  // it creates the fan-out directories that hold them.
+  //
+  // Measured 2026-09-05: 131 root-owned entries under .git, 53 of them
+  // DIRECTORIES in `objects/`, mode 755 root:root inside a tree owned by `bee`.
+  // A bee cannot create a file in a directory it does not own, so every one of
+  // those was a hole the next fetch or commit could fall into - the same outage,
+  // waiting, in the part of the fix nobody had looked at.
+  remote(`chown -R ${owner} /workspace/BrowserOS/.git 2>&1 | head -2`)
   const left = remote(`find /workspace/BrowserOS/.git -user root 2>/dev/null | wc -l`)
   console.log(`gave the refs back to ${owner}; root-owned files left: ${String(left).trim()}`)
 }

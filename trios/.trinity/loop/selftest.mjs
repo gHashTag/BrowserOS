@@ -2408,6 +2408,23 @@ check('a submodule pointer is reported, never committed', async () => {
   if (/RUST-13/.test(code)) throw new Error('the list comes from .gitmodules; a hard-coded path is a second copy of a fact the repo states')
 })
 
+check('the whole .git is given back, not two subdirectories', () => {
+  const code = codeOf('push-work.mjs')
+  // The first outage showed 112 root-owned REFLOGS killing every bee at
+  // `git fetch`, so the fix chowned logs and refs. But a push running as root
+  // also writes OBJECTS and creates the fan-out directories holding them: 131
+  // root-owned entries, 53 of them directories at mode 755 root:root inside a
+  // tree owned by `bee`. A bee cannot create a file in a directory it does not
+  // own - the same outage, waiting, in the part of the fix nobody looked at.
+  if (/chown -R \$\{owner\} \S*\.git\/logs/.test(code)) {
+    throw new Error('chowning logs and refs leaves the object store root-owned')
+  }
+  if (!/chown -R \$\{owner\} \/workspace\/BrowserOS\/\.git /.test(code)) {
+    throw new Error('the whole .git must be given back after a root push')
+  }
+  if (!/root-owned files left/.test(code)) throw new Error('and it must report what it could not give back')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
