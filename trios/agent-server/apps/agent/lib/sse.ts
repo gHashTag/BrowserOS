@@ -61,7 +61,7 @@ export function parseSSELines<T>(buffer: string): {
       currentData = line.slice(6)
     }
   }
-  // Catch a complete trailing event with no terminating blank line —
+  // Catch a complete trailing event with no terminating blank line -
   // shouldn't happen in well-formed SSE, but be tolerant.
   flush()
 
