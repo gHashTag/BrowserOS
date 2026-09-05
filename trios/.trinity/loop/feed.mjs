@@ -43,11 +43,29 @@ export const STEPS = [
   // pushed, so without this nothing would ever close again.
   { name: 'land', file: 'land.mjs', act: '--land', why: 'put accepted work into the branch' },
   { name: 'close-done', file: 'close-done.mjs', act: '--close', why: 'an open accepted issue holds its boundary' },
+  // THE ONLY THING LEFT STANDING AFTER THREE REFUTATIONS.
+  //
+  // Every dispatch runs `bun install` and writes ~2.5 GB of node_modules into
+  // its worktree, and three attempts to stop that at the source were each
+  // measured and each failed: moving the package cache onto the volume (bun
+  // copies whatever device it is on), pre-building a link farm before the
+  // install (bun wipes it - 159M becomes 2562M), and `--backend=symlink`, which
+  // gives 41M on a single-package project and 2561M on this workspace.
+  //
+  // What works is sharing AFTERWARDS, and the only variable left is how long the
+  // duplicates sit there. On the chain alone that is 10 to 25 minutes and the
+  // volume climbed at 133 points per hour; on this timer it is five, which
+  // bounds the accumulation to roughly what two bees produce.
+  //
+  // It is a mop, not a tap, and it is named as one.
+  { name: 'share-modules', file: 'share-modules.mjs', act: '--share', why: 'bound how long duplicate installs sit on the volume' },
   { name: 'author', file: 'author.mjs', act: '--file', why: 'refill to the queue depth' },
 ]
 
 /** One line per step, read from the step's own output rather than invented. */
 export const SUMMARY = [
+  [/(\d+) tree\(s\) rebuilt against one store, about (\d+) MB returned/, (m) => `${m[1]} tree(s) share one store, ${m[2]} MB returned`],
+  [/could not read which bees are running/, () => 'stood down: the board could not be read, and rebuilding under a live install kills a dispatch'],
   [/pushed (\d+)/, (m) => `pushed ${m[1]}`],
   [/not pushed: 0/, () => 'every branch with work is already on the remote'],
   [/landed (\d+) of (\d+) clean/, (m) => `${m[1]} accepted branch(es) landed`],

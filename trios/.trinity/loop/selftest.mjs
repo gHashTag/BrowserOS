@@ -2485,6 +2485,23 @@ check('the store is keyed by the lockfile, and workspace packages link home', as
   if (parseShared('SHARED trees=6 saved=14362').savedMb !== 14362) throw new Error('the saving is read back from the tool, not estimated')
 })
 
+check('sharing runs on the fast timer, because three taps were refuted', () => {
+  const code = codeOf('feed.mjs')
+  // Moving the cache onto the volume: bun copies whatever device it is on.
+  // Pre-building the farm: bun wipes it, 159M becomes 2562M. --backend=symlink:
+  // 41M on a single-package project, 2561M on this workspace. All measured.
+  if (!/share-modules/.test(code)) throw new Error('the only remedy left standing must run on the fast cycle')
+  // codeOf strips comments - which is why this asserts on the step's own `why`
+  // string rather than on the paragraph above it. The helper exists precisely so
+  // a test cannot pass by matching the comment that describes the code.
+  if (!/bound how long duplicate installs sit/.test(code)) {
+    throw new Error('the step must describe itself as bounding the accumulation, not removing it')
+  }
+  const i = code.indexOf('share-modules')
+  const j = code.indexOf("name: 'author'")
+  if (!(i > -1 && j > i)) throw new Error('share before author: the refill starts bees that install again')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
