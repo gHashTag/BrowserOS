@@ -71,8 +71,8 @@ const representativeSkipped = [
   '#1204: not yet a spec - missing boundary, scenarios, requirements, success criteria',
   '#1205: no issue body was supplied, so its boundary is unknown',
   '#1206: declares no boundary',
-  '#1210: a worker has it or is expected back (running)',
-  '#1211: a worker has it or is expected back (rejected)',
+  '#1210: a worker already has it (running)',
+  '#1211: it is rejected - claimed, but no worker is attached yet',
   '#1215: the work already landed (accepted) - the issue is open and nobody closed it',
   '#1220: apps/server/src/api/routes/queen-status.ts held by gHashTag/trios#1188',
   '#1221: docs/board.md, apps/server/src/lib/board.ts held by gHashTag/trios#1189, gHashTag/trios#1190',
@@ -107,7 +107,7 @@ const expectedSummary = {
 const incidentSkipped = [
   ...Array.from(
     { length: 13 },
-    (_, i) => `#${1010 + i}: a worker has it or is expected back (running)`,
+    (_, i) => `#${1010 + i}: a worker already has it (running)`,
   ),
   ...Array.from(
     { length: 34 },
@@ -381,7 +381,7 @@ describe('GET /queen/status', () => {
               refusal: 'nothing to choose',
               skipped: [
                 `${leakIssue}: ${leakPath} held by ${leakSecret}`,
-                `#1292: ${leakBranch}: a worker has it or is expected back (running)`,
+                `#1292: ${leakBranch}: a worker already has it (running)`,
                 `#1293: ${leakTitle} not first`,
               ],
               note: leakBranch,
@@ -754,7 +754,7 @@ describe('GET /queen/status', () => {
               allowed: false,
               refusal: 'nothing to choose',
               skipped: [
-                '#1298: a worker has it or is expected back (running)',
+                '#1298: a worker already has it (running)',
                 '#1299: not first',
               ],
             },
