@@ -657,6 +657,89 @@ export async function reapWorktrees(opts: {
   return result
 }
 
+
+/**
+ * Link this worktree's node_modules into a shared store instead of installing.
+ *
+ * WHY AT CREATION AND NOT AFTER. Every dispatch ran `bun install` and wrote
+ * about 2.5 GB of its own node_modules; the loop's `share-modules` reclaimed it
+ * afterwards, which bounded the damage and never stopped it. Six worktrees were
+ * carrying 15.4 GB of the same packages when this was written.
+ *
+ * PROVEN BY INTERVENTION before a line of this existed, on a scratch worktree
+ * cut from the same HEAD:
+ *
+ *   bare checkout                                     159 MB
+ *   with the farm built, before any install           159 MB
+ *   after `bun install --frozen-lockfile`             159 MB
+ *     "Checked 2250 installs across 2424 packages (no changes) [580.00ms]"
+ *   and its test suite: 8 tests, 0 fail, through the farm
+ *
+ * The earlier attempt at this was recorded in the loop's own notes as REFUTED -
+ * "a pre-built farm cannot survive bun install", 159M becoming 2562M. That was a
+ * bug in the farm builder: a POSIX glob that does not match dotfiles left out
+ * `.bun`, which is bun's entire isolated store. With it linked, bun sees the
+ * tree as satisfied and writes nothing.
+ *
+ * WHAT IT WILL NOT DO. It does nothing at all unless a store already exists for
+ * this exact lockfile hash, so a worktree whose dependencies differ installs
+ * normally and the first tree of any new lockfile donates its install. And it
+ * never fails a dispatch: this is an optimisation, and a bee that installs its
+ * own copy is slower and correct.
+ */
+export async function farmNodeModules(
+  worktree: string,
+  root: string,
+): Promise<string> {
+  const store = process.env.TRIOS_MODULE_STORE || `${root}/.node_modules_store`
+  // One shell, because this is filesystem work and splitting it into a dozen
+  // spawns would be slower and no clearer.
+  const script = [
+    'set -e',
+    `W=${JSON.stringify(worktree)}`,
+    `STORE=${JSON.stringify(store)}`,
+    'L="$W/trios/agent-server/bun.lock"',
+    '[ -f "$L" ] || L="$W/trios/agent-server/bun.lockb"',
+    '[ -f "$L" ] || { echo "NOFARM no lockfile"; exit 0; }',
+    'H=$(md5sum "$L" 2>/dev/null | cut -c1-12)',
+    'S="$STORE/$H"',
+    '[ -d "$S" ] || { echo "NOFARM no store for $H"; exit 0; }',
+    'n=0',
+    'for rel in $(cd "$S" && find . -maxdepth 6 -name node_modules -type d -prune 2>/dev/null | sed "s|^\\./||"); do',
+    '  src="$S/$rel"',
+    '  rm -rf "$W/$rel"; mkdir -p "$W/$rel"',
+    // Dotfiles included. `.bun` is 2242 entries and 2.37 GB of it, and leaving
+    // it out is what made this look impossible the first time.
+    '  for e in "$src"/* "$src"/.[!.]*; do [ -e "$e" ] || continue; ln -s "$e" "$W/$rel/$(basename "$e")" 2>/dev/null || true; done',
+    // A workspace links its OWN packages by relative path inside node_modules.
+    // Shared away they resolve against the store and find nothing, so they are
+    // pointed back at this worktree's sources.
+    '  if [ -d "$src/@browseros" ]; then',
+    '    rm -f "$W/$rel/@browseros"; mkdir -p "$W/$rel/@browseros"',
+    '    for w in "$src/@browseros"/*; do',
+    '      real=$(readlink -f "$w" 2>/dev/null || echo "")',
+    '      mapped=$(echo "$real" | sed "s|$S|$W|")',
+    '      if [ -d "$mapped" ]; then ln -s "$mapped" "$W/$rel/@browseros/$(basename "$w")"',
+    '      else ln -s "$w" "$W/$rel/@browseros/$(basename "$w")"; fi',
+    '    done',
+    '  fi',
+    '  n=$((n+1))',
+    'done',
+    'echo "FARMED $n directories against $H"',
+  ].join('\n')
+
+  try {
+    const r = await run('sh', ['-c', script], root, 120_000)
+    const m = r.out.match(/FARMED (\d+) directories against (\S+)/)
+    if (m) return `; linked ${m[1]} node_modules into the store for ${m[2]}`
+    const no = r.out.match(/NOFARM (.+)/)
+    return no ? `; installed its own modules (${no[1].trim()})` : ''
+  } catch {
+    // An optimisation that throws is worse than one that does not run.
+    return ''
+  }
+}
+
 export async function prepareWorktree(
   issue: number,
   deps: {
@@ -774,7 +857,8 @@ export async function prepareWorktree(
       detail: `git worktree add failed: ${added.out.slice(0, 300)}`,
     }
   }
-  return { ok: true, path, detail: `cut from ${base}` }
+  const farmed = await farmNodeModules(path, root)
+  return { ok: true, path, detail: `cut from ${base}${farmed}` }
 }
 
 /**
