@@ -99,6 +99,12 @@ const STEPS = [
   // is what turns the next outage into evidence instead of an anecdote.
   { name: 'two-views', file: 'two-views.mjs', act: '--record', dryArgs: '', why: 'both views of the service, at the same moment' },
   { name: 'reap-local', file: 'reap-local.mjs', act: '--reap', dryArgs: '', why: 'free the disk this loop runs on' },
+  // BEFORE the reaper, because the reaper cannot take a tree that holds work and
+  // the work is the only copy of itself. On 2026-09-05 nineteen trees refused
+  // removal while the volume sat at 95% and every bee died at `git worktree
+  // add`; they held 52 uncommitted paths, nine of them test files a bee had
+  // written and never committed. Rescued first, the same reaper freed 28.6 G.
+  { name: 'rescue', file: 'rescue.mjs', act: '--rescue', dryArgs: '', why: 'save work a bee never committed, before anything reclaims it' },
   { name: 'reap', file: 'reap.mjs', act: '--reap', why: 'free the volume before anything else' },
   { name: 'lease', file: 'lease.mjs', act: '--release', why: 'release idle path fences' },
   { name: 'push-work', file: 'push-work.mjs', act: '--push', why: 'make finished work visible' },
@@ -162,6 +168,8 @@ const STEPS = [
 // One line per step, taken from the step's own output rather than invented, so
 // the summary cannot claim more than the step reported.
 const SUMMARY = [
+  [/(\d+) uncommitted path\(s\) across (\d+) tree\(s\), (\d+) tree\(s\) committed/, (m) => `rescued ${m[1]} stranded path(s) from ${m[3]} tree(s)`],
+  [/STRANDED total=0/, () => 'nothing stranded in any worktree'],
   [/THEY DISAGREE/, () => 'the two views of the service DISAGREE - a green health check is not evidence the channel will connect'],
   [/http ok   ssh attached   they agree/, () => 'both views agree the service is up'],
   [/ACT NOW: the recent window proves LESS/, () => 'the recent window proves measurably less than the baseline - read the newest verdicts'],
