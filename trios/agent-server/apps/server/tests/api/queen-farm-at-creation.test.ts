@@ -32,6 +32,33 @@ describe('farmNodeModules', () => {
     expect(existsSync(join(wt, 'trios/agent-server/node_modules'))).toBe(false)
   })
 
+  it('replaces a real node_modules with the farm, which is what a reused tree has', async () => {
+    // The farm was added after `git worktree add`, and the reuse path returns
+    // before reaching it - so every reused worktree kept its own packages.
+    // Found the same day: #1627, cut after the change went live, lockfile hash
+    // matching an existing store, still carrying 2,562 MB. One tree of fifteen,
+    // which is exactly how a gap like this hides: the aggregate looked fixed.
+    const root = mkdtempSync(join(tmpdir(), 'farm-'))
+    const wt = join(root, 'wt')
+    mkdirSync(join(wt, 'trios/agent-server'), { recursive: true })
+    writeFileSync(join(wt, 'trios/agent-server/bun.lock'), 'lock-reuse')
+    // A real directory, as a reused tree carries.
+    mkdirSync(join(wt, 'trios/agent-server/node_modules/leftover'), { recursive: true })
+
+    const proc = Bun.spawnSync(['md5sum', join(wt, 'trios/agent-server/bun.lock')])
+    const hash = new TextDecoder().decode(proc.stdout).slice(0, 12)
+    const store = join(root, 'store')
+    mkdirSync(join(store, hash, 'trios/agent-server/node_modules/clsx'), { recursive: true })
+    process.env.TRIOS_MODULE_STORE = store
+
+    const said = await farmNodeModules(wt, root)
+
+    expect(said).toContain('linked 1 node_modules')
+    const linked = join(wt, 'trios/agent-server/node_modules')
+    expect(readdirSync(linked)).toEqual(['clsx'])
+    expect(lstatSync(join(linked, 'clsx')).isSymbolicLink()).toBe(true)
+  })
+
   it('links every node_modules in the store, dotfiles included', async () => {
     const root = mkdtempSync(join(tmpdir(), 'farm-'))
     const wt = join(root, 'wt')
