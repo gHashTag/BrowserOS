@@ -2630,6 +2630,46 @@ right. A true fact that explains the observation is not the same as the cause,
 and the only thing that tells them apart is making the change and watching for
 the effect.
 
+## The store holds what is shared; the workspace links stay home
+
+Eight of eleven worktrees carried their own `node_modules` at 2.5 GB - about 19
+GB of identical packages on a 46 GB volume. Every lockfile hashed the same, so
+the dependency set is genuinely one set and sharing is sound rather than
+convenient.
+
+**The obvious version breaks on the first test.** Move `node_modules` somewhere
+shared, point at it, and:
+
+    error: Cannot find module '@browseros/shared/constants/limits'
+
+A bun (or npm, or yarn) workspace links its OWN packages by relative path inside
+`node_modules`. Shared away, those links resolve against the store instead of the
+worktree and find nothing. This is precisely the wall pnpm's virtual store was
+designed for, and it is cheaper to recognise than to rediscover.
+
+The arrangement that works:
+
+    store/<lockhash>/.../node_modules   the external packages, once
+    worktree/.../node_modules/          a REAL directory of links into the store
+    worktree/.../node_modules/@scope/*  linked back to THIS worktree's packages
+
+Key the store by the lockfile hash, so a worktree whose dependencies differ gets
+its own store rather than the wrong packages.
+
+Measured: 2536M -> 159M and 2561M -> 159M with tests passing through the farm,
+then six more trees and 14.3 GB returned in one pass.
+
+**Refuse three things.** A tree whose bee is running - rebuilding node_modules
+under a live install kills the dispatch for a reason nobody can reconstruct. A
+bare checkout with no private install, which has nothing to share and must not be
+emptied. And everything, when the board cannot be read.
+
+**And the shape of the whole series:** three measurements went into this volume.
+A watermark, then removal on completion, then this. The first two were correct
+and could not win, because they addressed collection while the problem was
+production. When a resource keeps filling despite correct collection, the next
+measurement is of the creation rate - not a better collector.
+
 ## The rule that comes out of all of them
 
 Do not add fuel to a stopped swarm until `tri swarm` and `tri fence` say fuel is
