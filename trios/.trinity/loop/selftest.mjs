@@ -2132,6 +2132,34 @@ check('failures.mjs counts runs beside failures', async () => {
   if (t.find((r) => r.step === 'b').failed !== 0) throw new Error('an ok step has no failures')
 })
 
+check('an unmeasurable fact is null, never a remembered number', async () => {
+  const { measure, rows } = await import('./dash.mjs')
+  // I wrote "dispatches finished 258" into iteration #46. The last measurement
+  // had said 255. Nothing was wrong with the swarm; the number was invented, in
+  // the one artifact whose whole job is to say what is true.
+  if (measure(() => { throw new Error('down') }) !== null) throw new Error('a measurement that could not be taken is null')
+  if (measure(() => undefined) !== null) throw new Error('and so is one that returned nothing')
+  if (measure(() => 0) !== 0) throw new Error('but zero is a real answer and must survive')
+  const r = rows({ swarm: null, proven: null, worstStep: null, selftest: null, disk: null }, null)
+  if (r.some((x) => x.v !== null)) throw new Error('no fact may be filled in when nothing was measured')
+})
+
+check('a non-zero exit is read as an answer, not as a failed measurement', () => {
+  const code = codeOf('dash.mjs')
+  // failures.mjs exits 2 when a step is failing more than a quarter of the
+  // time - that is the tool working - and reap-local exits 1 to mean "would
+  // act". Reading either as an error printed `-` for facts already measured.
+  if (!/e\.killed \|\| e\.signal/.test(code)) throw new Error('only a signal or a timeout means the measurement was not taken')
+  if (!/e\.stdout/.test(code)) throw new Error('the output of a non-zero exit is still the answer')
+})
+
+check('the delta is measured too, from the last recorded reading', async () => {
+  const { rows } = await import('./dash.mjs')
+  const r = rows({ swarm: { running: 4, finished: 258 } }, { swarm: { running: 4, finished: 255 } })
+  const fin = r.find((x) => x.k === 'dispatches finished')
+  if (fin.v !== 258 || fin.prev !== 255) throw new Error('previous comes from the record, not from memory')
+})
+
 check('the harness can fail an async check', async () => {
   // Guarding the fix above: before it, this file reported 0 failures while an
   // async case was rejecting into the void.
