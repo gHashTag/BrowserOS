@@ -143,10 +143,26 @@ export function remote(script, opts = {}) {
     service = SERVICE,
     timeout = 280000,
     attempts = 3,
+    // A RETRY POLICY WITHOUT A TOTAL BUDGET ALWAYS OVERRUNS ITS CALLER.
+    //
+    // The app-down backoff waits 15s, then 30s, multiplied by four - so a full
+    // three-attempt sequence sleeps 180 seconds before counting the attempts
+    // themselves. `feed` fires every 300 seconds and caps a step at 300; on
+    // 2026-09-05 its first two real runs both recorded
+    // `share-modules: timed out`, which is the retry being patient inside a
+    // caller that could not afford it.
+    //
+    // Attempts bound how many times to ask. Only a deadline bounds how long
+    // that takes, and a caller on a clock needs the second one.
+    deadlineMs = Number(process.env.CHANNEL_DEADLINE_MS || 0),
+    now = () => Date.now(),
     onRetry = (msg) => console.error(`  ${msg}`),
     sleep = (s) => execSync(`sleep ${s}`),
     run = (cmd, o) => execSync(cmd, o),
   } = opts
+  const startedAt = now()
+  const outOfTime = (nextWaitS) => Boolean(deadlineMs) &&
+    (now() - startedAt) + nextWaitS * 1000 >= deadlineMs
 
   // The door was already found shut in this process. Do not knock again.
   if (DOWN && !opts.ignoreBreaker) {
@@ -177,6 +193,13 @@ export function remote(script, opts = {}) {
       }
       if (i < attempts - 1) {
         const wait = (i + 1) * 15 * (kind.waitMultiplier || 1)
+        if (outOfTime(wait)) {
+          // Stopping here is not giving up: it is refusing to spend a caller's
+          // whole budget on waiting, so the caller can report what happened
+          // instead of being killed mid-sleep with nothing to say.
+          onRetry(`${kind.kind}: out of time - a ${wait}s wait would pass the ${Math.round(deadlineMs / 1000)}s budget, stopping after ${i + 1} attempt(s)`)
+          break
+        }
         onRetry(`${kind.kind}: ${kind.advice} - retrying in ${wait}s`)
         sleep(wait)
       }
