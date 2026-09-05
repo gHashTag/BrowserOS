@@ -214,6 +214,42 @@ describe('the migration block, applied to a real PostgreSQL', () => {
         (row) => row.table_name === table && row.column_name === column,
       )?.data_type
 
+    // A MOCKED `pg` LOOKS EXACTLY LIKE A BROKEN MIGRATION, AND SAID SO FOR DAYS.
+    //
+    // `mock.module` is process-global and bun evaluates every test file's module
+    // scope in one run. `queen-roadmap.test.ts` and `task-queue-service.test.ts`
+    // both install `mock.module('pg', ...)` with a FakePool, so THIS file's
+    // `import { Pool } from 'pg'` can bind to that fake - the migration then
+    // goes nowhere, the catalog query returns nothing, and the first assertion
+    // below reads `Received: undefined`, which is indistinguishable from
+    // MIGRATION_SQL being wrong.
+    //
+    // Measured 2026-09-06: this file passes alone (3 pass) and fails beside
+    // either of those two, IDENTICALLY whether it runs before or after them -
+    // which is what says the cause is module scope rather than order. Their
+    // `afterAll` re-mocks with the real namespace and it does not help; a
+    // binding already made is not revisited. Two of the nine red assertions on
+    // the branch were this.
+    //
+    // So the empty catalog is named for what it is. A gate that dies on
+    // `undefined` sends its reader to the migration; this one sends them here.
+    if (columns.length === 0) {
+      throw new Error(
+        [
+          'The catalog is EMPTY after two migration runs against a database this',
+          'test reached successfully, which almost always means `pg` is mocked in',
+          'this process rather than that MIGRATION_SQL is wrong.',
+          '',
+          '  `mock.module` is process-global in bun and is not undone by a later',
+          '  re-mock; `queen-roadmap.test.ts` and `task-queue-service.test.ts`',
+          '  both install a FakePool at module scope.',
+          '',
+          '  This file passes when run on its own. Run it in its own bun process',
+          '  to check the migration; do not read this as a broken migration.',
+        ].join('\n'),
+      )
+    }
+
     expect(typeOf('queen_dispatch_history', 'id')).toBe('bigint')
     expect(typeOf('queen_dispatch_history', 'issue')).toBe('integer')
     expect(typeOf('queen_dispatch_history', 'archived_at')).toBe(
